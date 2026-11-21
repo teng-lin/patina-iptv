@@ -14,7 +14,10 @@
 //! (`EpgSchedule::held_only`, `held_channels`); then the whole window
 //! (`stored::load_guide`), which replaces it. On a TV box the
 //! window read takes over a second; the first screen's a fraction of it
-//! (measured on a 32-bit Android TV box).
+//! (measured on a 32-bit Android TV box). The window read waits until the
+//! first screen is shown ([`Shown`]): showing it reads the store too
+//! (the library, the organization, the favorites), on the same reader
+//! lane, and those reads would otherwise queue behind the window's.
 
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender as Sender;
@@ -40,6 +43,10 @@ pub struct Held {
     pub to: UnixTime,
     pub keys: Vec<ChannelKey>,
 }
+
+/// Dropped once the first screen was shown, or will not be: the window
+/// read waits for it.
+pub struct Shown(#[allow(dead_code)] futures_channel::oneshot::Sender<()>);
 
 /// The times the first screen's read holds: from the hour before now's to
 /// [`FIRST_SCREEN_HOURS`] after now's hour.
@@ -168,7 +175,12 @@ async fn send_stored_after(
         );
         let first = imported(groups.clone(), channels.clone(), guide);
         let held = Held { from, to, keys };
-        let _ = tx.send(Msg::FirstScreen(first, held));
+        let (shown, on_screen) = futures_channel::oneshot::channel();
+        if tx.send(Msg::FirstScreen(first, held, Shown(shown))).is_ok() {
+            // Ok when shown, Canceled when dropped unshown: either way the
+            // first screen no longer needs the reader.
+            let _ = on_screen.await;
+        }
     }
     let started = Instant::now();
     let window = super::paging::window(now, stored::keep_past_days(&services.settings()));

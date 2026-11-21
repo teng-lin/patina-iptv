@@ -32,16 +32,29 @@ the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
   changed"). A surface that changes and comes back before the decision
   counts as unchanged, and the press acts there.
   A dropped Back also takes Android's own Back on its release with it.
+  A waiting press that another key's press replaces (Menu pressed while
+  OK is held on the play bar) stays replaced until it is released or
+  pressed afresh: its later repeats start no new press where it did not
+  go down.
 - A PIN prompt or the remote editor takes the keys it gets: a press pending
   from before is cut short and stays so until that key is released or
   pressed afresh (its repeats, release or timer do nothing, even after the
   prompt closes), and a key the prompt took does nothing more while held
-  (the OK that submitted a PIN starts no hold on the video). A Back held
-  from before the prompt does not dismiss it on release. A fresh Back on a
-  PIN prompt closes it once, through Android's Back.
+  (the OK that submitted a PIN starts no hold on the video). This holds
+  however the prompt opens and closes, by touch too, with no key reaching
+  it. A Back held from before the prompt does not dismiss it on release,
+  whatever other key is pressed meanwhile. A fresh Back on a PIN prompt
+  closes it once, through Android's Back; if touch closes that prompt
+  while Back is down, Back's repeats do nothing and its release takes no
+  step back from what the prompt covered.
+- On a desktop keyboard, a key a PIN prompt took (the Enter that closed
+  it) does not repeat until it is pressed afresh, so holding it does not
+  act on what the prompt covered; a held arrow or digit in the prompt
+  acts once.
 - A key going down keeps the info card and the play bar on screen until
   the press is decided, even when their own timeout is shorter than the
-  hold, so a press never finds them gone on release.
+  hold, so a press never finds them gone on release; input meanwhile
+  (a zap's banner) restarts their own timeout without shortening that.
 - In a replay the seek arrows have no hold: held, they repeat the seek.
 - Long Back's release takes no step back.
 
@@ -203,7 +216,8 @@ also after the list was refreshed or reordered.
 Deterministic, run by CI:
 
 - `iptv-nav`: `hold` (a waiting press dropped when its surface changes;
-  long OK once through repeats; rapid taps), `press` and `keymap`
+  long OK once through repeats; rapid taps; a press another key replaced
+  does not restart from its repeats), `press` and `keymap`
   (`long_ok_opens_controls_once_even_after_the_context_changes`).
 - App scenarios with an Android remote's raw Down/Repeat/Up phases
   (`use_remote_key_phases`): `tv_remote_journey` (long OK by repeats and by
@@ -212,7 +226,11 @@ Deterministic, run by CI:
   PIN prompts that take or swallow keys, Back dropped mid-hold, a card
   timeout shorter than the hold, a hold decided by a repeat on the play
   bar, a held Menu, the full journey with stream-open counts and one
-  persistent player, extra large text on the play bar).
+  persistent player, extra large text on the play bar; a PIN prompt opened
+  and closed by touch around a held OK or Back, a Back pressed in a prompt
+  that touch closes, another key tapped while Back is held, a zap committing
+  mid-hold over the card, Menu replacing a held OK on the play bar), and a
+  desktop keyboard's Enter that closed a PIN prompt holding its repeats.
 - App scenarios with the TV idiom: `tv_shared_controls`, `tv_player`,
   `tv_replay` (replay seek and track choice by remote on one player),
   `accessibility_visibility` (covered and inactive controls out of reach,

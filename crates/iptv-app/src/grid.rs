@@ -148,94 +148,92 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
             scroll_to_focused_row(ui, rows);
         }
     });
+    let list_body = pan::panning(view(), pan)
+        .flex_1()
+        .overflow_hidden()
+        .child(
+            virtual_list(
+                move || count.get(),
+                move |at| {
+                    let channel = computed(move || {
+                        order.with(|order| match order {
+                            Some(channels) => channels.get(at.index()).copied(),
+                            None => ui.list.with(|l| l.channel(at.index())),
+                        })
+                    });
+                    let editing = computed(move || {
+                        order_focus
+                            .get()
+                            .and_then(|(row, selected)| (row == at.index()).then_some(selected))
+                    });
+                    row(
+                        ui,
+                        at,
+                        (column, pan, size),
+                        focused,
+                        number_w,
+                        (channel, editing),
+                    )
+                },
+            )
+            .estimated_item_size(move || px(size.whole(ROW_H)))
+            .element_ref(&rows)
+            // Scrolling the channels never tunes: a preview
+            // waiting to start stops (`browse_playback`).
+            .on_scroll_drag_start(move |_: &Point<Points>| crate::browse_playback::dragged(ui))
+            .on_viewable_items_change(move |v: &ViewableItems| {
+                if !organization_view::guide_order_open(ui) {
+                    ui.visible_rows.set(v.viewable);
+                }
+            })
+            .flex_1(),
+        )
+        .child(
+            // Now, over the programs only, sliding with them.
+            view()
+                .absolute()
+                .top(px(0.0))
+                .bottom(px(0.0))
+                .left(move || px(column()))
+                .right(px(0.0))
+                .overflow_hidden()
+                .pointer_events(PointerEvents::None)
+                .child(
+                    view()
+                        .absolute()
+                        .top(px(0.0))
+                        .h_full()
+                        .w(px(NOW_W))
+                        .test_id("guide-now-line")
+                        .opacity(move || if now_x.get().is_some() { 1.0_f32 } else { 0.0 })
+                        .left(move || px(now_x.get().unwrap_or(0.0) - NOW_W / 2.0))
+                        .bind_translate_x(&pan.offset())
+                        .bg(move || rgb(ui.app.theme.with(|t| t.guide().now_line)))
+                        .child(
+                            view()
+                                .absolute()
+                                .left(px(0.0))
+                                .top(px(0.0))
+                                .w(px(NOW_W / 2.0))
+                                .h_full()
+                                .bg(rgb(crate::theme::FOCUSED_TEXT)),
+                        ),
+                ),
+        )
+        .child(empty_state(ui))
+        .child(hint_card(ui));
     view()
         .flex_1()
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(ruler::ruler(ui, size, column, pan, now_x, width))
-        .child(
-            wheel::trackball(
-                pan,
-                pan::panning(view(), pan)
-                    .flex_1()
-                    .overflow_hidden()
-                    .child(
-                        virtual_list(
-                            move || count.get(),
-                            move |at| {
-                                let channel = computed(move || {
-                                    order.with(|order| match order {
-                                        Some(channels) => channels.get(at.index()).copied(),
-                                        None => ui.list.with(|l| l.channel(at.index())),
-                                    })
-                                });
-                                let editing = computed(move || {
-                                    order_focus.get().and_then(|(row, selected)| {
-                                        (row == at.index()).then_some(selected)
-                                    })
-                                });
-                                row(
-                                    ui,
-                                    at,
-                                    (column, pan, size),
-                                    focused,
-                                    number_w,
-                                    (channel, editing),
-                                )
-                            },
-                        )
-                        .estimated_item_size(move || px(size.whole(ROW_H)))
-                        .element_ref(&rows)
-                        // Scrolling the channels never tunes: a preview
-                        // waiting to start stops (`browse_playback`).
-                        .on_scroll_drag_start(move |_: &Point<Points>| {
-                            crate::browse_playback::dragged(ui)
-                        })
-                        .on_viewable_items_change(move |v: &ViewableItems| {
-                            if !organization_view::guide_order_open(ui) {
-                                ui.visible_rows.set(v.viewable);
-                            }
-                        })
-                        .flex_1(),
-                    )
-                    .child(
-                        // Now, over the programs only, sliding with them.
-                        view()
-                            .absolute()
-                            .top(px(0.0))
-                            .bottom(px(0.0))
-                            .left(move || px(column()))
-                            .right(px(0.0))
-                            .overflow_hidden()
-                            .pointer_events(PointerEvents::None)
-                            .child(
-                                view()
-                                    .absolute()
-                                    .top(px(0.0))
-                                    .h_full()
-                                    .w(px(NOW_W))
-                                    .test_id("guide-now-line")
-                                    .opacity(
-                                        move || if now_x.get().is_some() { 1.0_f32 } else { 0.0 },
-                                    )
-                                    .left(move || px(now_x.get().unwrap_or(0.0) - NOW_W / 2.0))
-                                    .bind_translate_x(&pan.offset())
-                                    .bg(move || rgb(ui.app.theme.with(|t| t.guide().now_line)))
-                                    .child(
-                                        view()
-                                            .absolute()
-                                            .left(px(0.0))
-                                            .top(px(0.0))
-                                            .w(px(NOW_W / 2.0))
-                                            .h_full()
-                                            .bg(rgb(crate::theme::FOCUSED_TEXT)),
-                                    ),
-                            ),
-                    )
-                    .child(empty_state(ui))
-                    .child(hint_card(ui)),
-            )
-            .flex_1(),
-        )
+        .child(if crate::is_tui_mode() {
+            // `nsh-platform-tui` does not implement `StickyCells`, which
+            // `wheel::trackball` relies on to pin the grid inside its
+            // 20,000 pt horizontal scroll buffer.
+            list_body.into_element()
+        } else {
+            wheel::trackball(pan, list_body).flex_1().into_element()
+        })
 }
 
 /// Over an empty list: what it would hold and how to fill it.

@@ -137,7 +137,7 @@ fn failure(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Msg>) -> FailureKind {
     while let Ok(message) = rx.try_recv() {
         match message {
             Msg::Playlist(Err(error)) => failures.push(error.kind),
-            Msg::Playlist(Ok(_)) | Msg::Guide(_) | Msg::FirstScreen(_, _) => {
+            Msg::Playlist(Ok(_)) | Msg::Guide(_) | Msg::FirstScreen(..) => {
                 panic!("stale work published a success")
             }
             _ => {}

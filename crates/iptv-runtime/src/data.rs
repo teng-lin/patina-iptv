@@ -299,7 +299,11 @@ fn start_import_with(
                                 show(imported, None).await;
                             }
                         }
-                        Ok(Msg::FirstScreen(imported, held)) => show(imported, Some(held)).await,
+                        Ok(Msg::FirstScreen(imported, held, shown)) => {
+                            show(imported, Some(held)).await;
+                            // Only now may the opening read the whole window.
+                            drop(shown);
+                        }
                         Ok(Msg::NextCheck { source, at })
                             if (shows || combined::includes(&owner, source))
                                 && library::import_is_current(&owner, source, &completion) =>
@@ -451,6 +455,7 @@ async fn show_part(
     if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
         return;
     }
+    let first_screen = held.is_some();
     if combined::active(owner) {
         combined::show(owner, imported, held).await;
         if resume {
@@ -551,6 +556,11 @@ async fn show_part(
         ("favorites", favorites),
         ("swapped", started.elapsed()),
     ]));
+    if first_screen {
+        owner
+            .services()
+            .mark("first screen shown", format_args!("{channels} channels"));
+    }
     owner.emit(crate::RuntimeEvent::SourceReady(resume && resumes));
 }
 

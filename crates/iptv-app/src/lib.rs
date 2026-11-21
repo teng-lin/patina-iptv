@@ -6,6 +6,18 @@
 
 use crate::i18n::tr;
 
+static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Enables TUI-host layout adjustments (such as bypassing desktop horizontal
+/// `StickyCells` wrappers that `nsh-platform-tui` does not implement).
+pub fn set_tui_mode(enabled: bool) {
+    TUI_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub(crate) fn is_tui_mode() -> bool {
+    TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub use iptv_core::guide;
 #[cfg(all(
     feature = "test-support",
@@ -39,6 +51,9 @@ mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
 mod input;
+/// Whether a keyboard binding fires on auto-repeats now (headless tests).
+#[cfg(feature = "test-support")]
+pub use input::keyboard_repeats;
 /// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
 #[cfg(feature = "test-support")]
 pub use input::use_remote_key_phases;

@@ -154,6 +154,10 @@ pub struct Panels {
     /// The mouse showed (or last kept) them.
     by_pointer: bool,
     hide_at_ms: Option<u64>,
+    /// A held remote key decides tap or hold at this time, over the
+    /// panels shown when it went down: apart from the idle deadline, so
+    /// input meanwhile (a zap's banner) does not pull it in.
+    hold: Option<(Shown, u64)>,
 }
 
 impl Default for Panels {
@@ -165,6 +169,7 @@ impl Default for Panels {
             timeouts: Timeouts::default(),
             by_pointer: false,
             hide_at_ms: None,
+            hold: None,
         }
     }
 }
@@ -234,6 +239,7 @@ impl Panels {
         self.focus = 0;
         self.by_pointer = false;
         self.hide_at_ms = None;
+        self.hold = None;
     }
 
     /// Whether a row of buttons owns Left/Right/OK.
@@ -297,12 +303,24 @@ impl Panels {
         pick
     }
 
-    /// A remote key is held and decides tap or hold at `at_ms`: shown
-    /// panels stay at least until then, so the press finds them on release.
+    /// A remote key is held and decides tap or hold at `at_ms`: the
+    /// panels shown now stay at least until then, so the press finds them
+    /// on release, whatever restarts their own timer meanwhile.
     pub fn keep_until(&mut self, at_ms: u64) {
         if self.shown != Shown::Hidden {
-            self.hide_at_ms = Some(self.hide_at_ms.map_or(at_ms, |t| t.max(at_ms)));
+            self.hold = Some((self.shown, at_ms));
         }
+    }
+
+    /// The held key's press was decided or dropped: only the idle
+    /// deadline counts again.
+    pub fn release_hold(&mut self) {
+        self.hold = None;
+    }
+
+    /// Whether a held key keeps the panels ([`Self::keep_until`]).
+    pub fn holding(&self) -> bool {
+        self.hold.is_some()
     }
 
     /// Any input while shown: restart the auto-hide timer.
@@ -317,14 +335,24 @@ impl Panels {
         };
     }
 
-    /// When the panels hide unless something happens (for scheduling).
+    /// When the panels hide unless something happens (for scheduling):
+    /// their idle deadline, or a held key's if later and still over the
+    /// panels it was held on.
     pub fn hide_at_ms(&self) -> Option<u64> {
-        self.hide_at_ms
+        let hold = self
+            .hold
+            .filter(|(shown, _)| *shown == self.shown)
+            .map(|(_, at)| at);
+        match (self.hide_at_ms, hold) {
+            (Some(idle), Some(hold)) => Some(idle.max(hold)),
+            (idle, None) => idle,
+            (None, hold) => hold.filter(|_| self.shown != Shown::Hidden),
+        }
     }
 
     /// Hides once the deadline has passed. Returns whether it hid.
     pub fn tick(&mut self, now_ms: u64) -> bool {
-        match self.hide_at_ms {
+        match self.hide_at_ms() {
             Some(at) if now_ms >= at => {
                 self.hide();
                 true

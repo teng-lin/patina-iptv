@@ -3,7 +3,8 @@
 //! stream reaches the player with the segment's first packets, before the
 //! guide window is read, instead of after the whole segment (#153). The
 //! guide then arrives with the resumed channel in it and the stream is
-//! not opened again.
+//! not opened again. Its first screen is on screen before the window is
+//! read (#160).
 //!
 //! Synthetic data only: generated channels and programs, and a local
 //! server standing in for the provider.
@@ -249,6 +250,12 @@ fn a_slow_live_edge_does_not_hold_the_resumed_stream_behind_the_guide() {
         marked("live input ready").expect("the shared input became ready"),
         marked("player opened").expect("the player opened"),
         marked("guide window read").unwrap(),
+    );
+    let (read, shown) = (marked("first screen read"), marked("first screen shown"));
+    assert!(
+        read.is_some_and(|read| shown.is_some_and(|shown| read < shown && shown < window)),
+        "the first screen shows before the guide window is read: {:?}",
+        MARKS.0.lock().unwrap()
     );
     assert!(
         ready < opened && opened < window,
