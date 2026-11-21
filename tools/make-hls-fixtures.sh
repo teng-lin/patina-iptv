@@ -3,6 +3,9 @@
 # into fixtures/hls/ch<N>/index.m3u8 and serves them on :8089.
 # The Android emulator reaches the host at http://10.0.2.2:8089/ch<N>/index.m3u8.
 # Usage: tools/make-hls-fixtures.sh [--serve | --android-smoke]
+# Each channel is a VOD playlist that ends. For runs longer than its media,
+# serve them as endless live streams: tools/mock-server.py --loop (see
+# docs/android-validation.md, "Fixture streams").
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 dir="$root/fixtures/hls"

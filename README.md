@@ -281,7 +281,10 @@ tools/make-hls-fixtures.sh --serve &      # playlist, EPG and HLS on :8089
 IPTV_RS_DEV_PLAYLIST=http://127.0.0.1:8089/iptv/playlist.m3u cargo run -p iptv-app
 ```
 
-Use `10.0.2.2` instead of `127.0.0.1` from an Android emulator. Other
+Use `10.0.2.2` instead of `127.0.0.1` from an Android emulator. The
+fixture channels end; `tools/mock-server.py --loop` serves them as endless
+live streams for long runs (see
+[fixture streams](docs/android-validation.md#fixture-streams-ending-or-looping-live)). Other
 mocks: `tools/mock-xtream.py` (Xtream API), `tools/mock-live-cuts.py`
 (live streams the server keeps cutting), `tools/make-track-fixtures.sh`
 (multiple audio and subtitle tracks).

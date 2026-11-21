@@ -69,6 +69,12 @@ python3 -I tools/make-iptv-fixtures.py --channels 200 --host 127.0.0.1:8089
 tools/mock-server.py 8089 fixtures/hls &
 ```
 
+That serves the channels as they were generated: each ends, and the app
+reconnects. For a run longer than a channel's media (300 s with
+`tools/make-hls-fixtures.sh --android-smoke`), start the server with `--loop`
+so the channels are endless live streams without a reconnect. See
+[fixture streams](android-validation.md#fixture-streams-ending-or-looping-live).
+
 `nsh package` builds the release profile, which refuses playlists whose
 streams are on a private host such as the mock server ("content stream URL
 must name a public HTTP(S) host"). For a fixture run, package with the

@@ -63,6 +63,7 @@ python3 tools/ci/test-disposable-avd.py
 python3 tools/ci/test-isolated-credentials.py
 python3 tools/ci/test-release-contract.py
 python3 tools/ci/test-repeat-hls-fixtures.py
+python3 tools/ci/test-mock-server.py
 python3 tools/ci/test-validation-workflow.py
 python3 tools/ci/test-dependency-candidate.py
 fi
