@@ -3,16 +3,20 @@
 //! ([`crate::CatalogReplacement`], [`crate::EpgReplacement`]).
 //!
 //! A publish is one transaction, held open between steps, so readers of
-//! another connection, or of the database while a browser publish runs on
-//! its copy (`Store::begin_publish`), see the old data or
-//! the new, never a mix. The browser drives a job in slices of a few
-//! hundred rows (about 50 ms each on a 2020 TV) between other work on its
-//! one thread; native callers run it to completion in one call
-//! (`finish`), which executes exactly the statements the one-shot methods
-//! always executed: an unlimited budget never splits a statement.
+//! another connection see the old data or the new, never a mix. A browser
+//! publish runs on a copy of the database (`Store::begin_publish`) whose
+//! readers are none: there each step commits (`pause`), and the swap of the
+//! copy is what readers of the database see at once.
+//!
+//! The browser drives a job in slices of a few hundred rows (about 50 ms
+//! each on a 2020 TV) between other work on its one thread; native callers
+//! run it to completion in one call (`finish`), which executes exactly the
+//! statements the one-shot methods always executed: an unlimited budget
+//! never splits a statement.
 //!
 //! Dropping an unfinished job rolls its transaction back: the stored data
-//! is unchanged.
+//! is unchanged. A publish copy that committed some steps is marked partial
+//! instead, and `finish_publish` refuses it.
 
 use rusqlite::{Connection, ToSql};
 
@@ -87,6 +91,38 @@ pub(crate) enum Progress {
 pub(crate) fn begin(conn: &Connection) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE")?;
     Ok(())
+}
+
+/// Before a step that continues a job: reopens the transaction a browser
+/// publish copy committed at the end of the last step ([`pause`]).
+pub(crate) fn resume(store: &crate::Store) -> Result<()> {
+    if store.conn.is_autocommit() {
+        begin(&store.conn)?;
+    }
+    Ok(())
+}
+
+/// After a step that did not finish. On a browser publish copy the step's
+/// work is committed: rolling back the copy is dropping it, and its swap
+/// is what makes the publish atomic, so one transaction across all slices
+/// would only keep a third copy of every page it touched in the memory
+/// journal. The copy is marked partial until the job's last commit.
+/// Elsewhere the transaction stays open.
+pub(crate) fn pause(store: &mut crate::Store) -> Result<()> {
+    #[cfg(target_family = "wasm")]
+    if store.is_publish_copy() && !store.conn.is_autocommit() {
+        store.set_partial(true);
+        store.conn.execute_batch("COMMIT")?;
+    }
+    let _ = store;
+    Ok(())
+}
+
+/// After a job's last commit: the copy holds the whole replacement.
+pub(crate) fn completed(store: &mut crate::Store) {
+    #[cfg(target_family = "wasm")]
+    store.set_partial(false);
+    let _ = store;
 }
 
 /// Rolls back the job's transaction if it is open.

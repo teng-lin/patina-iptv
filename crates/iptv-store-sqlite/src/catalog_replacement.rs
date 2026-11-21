@@ -137,6 +137,9 @@ pub struct CatalogReplacement<'a, S: BorrowMut<Store>> {
     /// Rows inserted per kind (rows input).
     inserted: [usize; 4],
     guides: Option<Vec<GuideSource>>,
+    /// Tests: an error the cleanup after the commit reports.
+    #[cfg(test)]
+    pub(crate) fail_cleanup: Option<StoreError>,
 }
 
 impl<S: BorrowMut<Store>> std::fmt::Debug for CatalogReplacement<'_, S> {
@@ -211,6 +214,8 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             fts: false,
             inserted: [0; 4],
             guides: None,
+            #[cfg(test)]
+            fail_cleanup: None,
         }
     }
 
@@ -226,6 +231,12 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
             Step::Done(published) => Ok(published),
             Step::Pending => Err(StoreError::Unavailable("an unlimited step stopped early")),
         }
+    }
+
+    /// Tests: the phase the next step continues in.
+    #[cfg(test)]
+    pub(crate) fn phase(&self) -> String {
+        format!("{:?}", self.phase)
     }
 
     /// Whether the replacement committed.
@@ -253,14 +264,39 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         if self.progress != Progress::Running {
             return Err(replacement::finished_error());
         }
-        match self.advance(&mut meter) {
-            Ok(step) => Ok(step),
+        let stepped = self.resume().and_then(|()| self.advance(&mut meter));
+        let stepped = match stepped {
+            Ok(Step::Pending) => replacement::pause(self.store()).map(|()| Step::Pending),
+            other => other,
+        };
+        match stepped {
+            Ok(Step::Done(published)) => {
+                // The catalog is published. Natively a failed detach is still
+                // reported, as it always was, but the job stays committed; in
+                // the browser the publish copy must not be abandoned over it
+                // (`replacement::after_commit`).
+                let cleanup = self.detach();
+                #[cfg(test)]
+                let cleanup = cleanup.and(self.fail_cleanup.take().map_or(Ok(()), Err));
+                replacement::after_commit(cleanup)?;
+                Ok(Step::Done(published))
+            }
+            Ok(Step::Pending) => Ok(Step::Pending),
             Err(e) => {
                 self.abort();
                 self.progress = Progress::Failed;
                 Err(e)
             }
         }
+    }
+
+    /// Reopens the transaction a browser publish copy committed between
+    /// steps (`replacement::pause`).
+    fn resume(&mut self) -> Result<()> {
+        if matches!(self.phase, Phase::Begin) {
+            return Ok(());
+        }
+        replacement::resume(self.store())
     }
 
     /// Rolls back an open transaction and detaches the stage.
@@ -608,10 +644,7 @@ impl<'a, S: BorrowMut<Store>> CatalogReplacement<'a, S> {
         if rows {
             crate::catalog::crash_boundary("committed");
         }
-        // The catalog is published. Natively a failed detach is still
-        // reported, as it always was; in the browser the publish copy must
-        // not be abandoned over it (`replacement::after_commit`).
-        replacement::after_commit(self.detach())?;
+        replacement::completed(self.store());
         Ok(CatalogPublished {
             counts,
             guides: self.guides.take(),

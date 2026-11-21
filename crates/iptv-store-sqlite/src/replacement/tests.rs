@@ -755,3 +755,179 @@ fn an_abandoned_guide_replacement_leaves_the_store_unchanged() {
         .replace_epg(source, &mut stage, &import, &feeds(), 2)
         .unwrap();
 }
+
+/// Steps `job` 7 rows at a time until `reached(phase)` holds; whether it
+/// did before the job finished.
+macro_rules! step_until {
+    ($job:expr, $reached:expr) => {{
+        let mut hit = false;
+        for _ in 0..100_000 {
+            if $reached(&$job.phase()) {
+                hit = true;
+                break;
+            }
+            if let Step::Done(_) = $job.step(7).unwrap() {
+                break;
+            }
+        }
+        hit
+    }};
+}
+
+const MIN: &str = "-9223372036854775808";
+
+/// A phase to finish from: its name and how to recognize it.
+type Phase = (&'static str, fn(&str) -> bool);
+
+/// `finish` after steps continues correctly from inside every phase that
+/// keeps a cursor: the search index (rows and stage), an item's
+/// memberships, a feed's listed channels, a binding's schedule copy.
+#[test]
+fn finish_resumes_from_inside_every_phase() {
+    let new = full_catalog(300, "New");
+    let rows_phases: [Phase; 3] = [
+        ("memberships", |p| p.contains("member: Some")),
+        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
+        ("forget", |p| p.starts_with("Forget") && !p.contains(MIN)),
+    ];
+    let (mut expected, source) = prepared(true);
+    expected
+        .reference_replace_catalog(source, &new.groups, &new.channels, &new.vod, &new.series)
+        .unwrap();
+    let expected_rows = dump(&expected);
+    for (name, reached) in rows_phases {
+        let (mut store, source) = prepared(true);
+        let mut job = CatalogReplacement::new(
+            &mut store,
+            source,
+            &new.groups[..],
+            &new.channels[..],
+            &new.vod[..],
+            &new.series[..],
+        );
+        let hit = step_until!(job, reached);
+        assert!(hit, "rows never reached {name}");
+        job.finish().unwrap();
+        assert_same(
+            &dump(&store),
+            &expected_rows,
+            &format!("rows, finish from {name}"),
+        );
+    }
+
+    let (mut expected, source) = prepared(true);
+    let stage = stage_of(&expected, &new);
+    expected
+        .reference_publish_stage(source, stage, None, None, None)
+        .unwrap();
+    let expected_stage = dump(&expected);
+    let stage_phases: [Phase; 2] = [
+        ("table copy", |p| {
+            p.starts_with("Insert") && p.contains("after: Some")
+        }),
+        ("index", |p| p.starts_with("Index") && !p.contains(MIN)),
+    ];
+    for (name, reached) in stage_phases {
+        let (mut store, source) = prepared(true);
+        let stage = stage_of(&store, &new);
+        let mut job =
+            CatalogReplacement::from_stage(&mut store, source, stage, StagePublication::new())
+                .unwrap();
+        let hit = step_until!(job, reached);
+        assert!(hit, "stage never reached {name}");
+        job.finish().unwrap();
+        assert_same(
+            &dump(&store),
+            &expected_stage,
+            &format!("stage, finish from {name}"),
+        );
+    }
+
+    let prepare = || {
+        let (mut store, source) = store();
+        store.set_guide_sources(source, &guide_sources()).unwrap();
+        let (mut stage, import) = guide(&store, 30, 20, "Old");
+        store
+            .reference_replace_epg(source, &mut stage, &import, &feeds(), 1)
+            .unwrap();
+        (store, source)
+    };
+    let (mut expected, source) = prepare();
+    let (mut stage, import) = guide(&expected, 40, 25, "New");
+    expected
+        .reference_replace_epg(source, &mut stage, &import, &feeds(), 2)
+        .unwrap();
+    drop(stage);
+    let expected_guide = dump(&expected);
+    let guide_phases: [Phase; 3] = [
+        ("schedule delete", |p| p.contains("current: Some")),
+        ("listed channels", |p| {
+            p.contains("listed: Some(") && !p.contains("listed: Some(0)")
+        }),
+        ("schedule copy", |p| p.contains("copy: Some")),
+    ];
+    for (name, reached) in guide_phases {
+        let (mut store, source) = prepare();
+        let (mut stage, import) = guide(&store, 40, 25, "New");
+        let mut job = EpgReplacement::new(
+            &mut store,
+            source,
+            &mut stage,
+            Cow::Borrowed(&import),
+            feeds(),
+            2,
+        )
+        .unwrap();
+        let hit = step_until!(job, reached);
+        assert!(hit, "guide never reached {name}");
+        job.finish().unwrap();
+        drop(stage);
+        assert_same(
+            &dump(&store),
+            &expected_guide,
+            &format!("guide, finish from {name}"),
+        );
+    }
+}
+
+/// A cleanup failure after the commit (detaching the stage, restoring the
+/// connection) is returned natively, as master returned it, and logged in
+/// the browser, where an error would make the caller abandon the copy.
+/// Either way the job stays committed.
+#[test]
+fn a_cleanup_failure_after_the_commit_keeps_the_commit() {
+    let new = full_catalog(50, "New");
+    let (mut catalog_store, source) = prepared(true);
+    let stage = stage_of(&catalog_store, &new);
+    let mut job =
+        CatalogReplacement::from_stage(&mut catalog_store, source, stage, StagePublication::new())
+            .unwrap();
+    job.fail_cleanup = Some(crate::StoreError::Unavailable("synthetic cleanup failure"));
+    let finished = job.step(u32::MAX);
+    #[cfg(target_family = "wasm")]
+    assert!(matches!(finished, Ok(Step::Done(_))));
+    #[cfg(not(target_family = "wasm"))]
+    assert!(matches!(finished, Err(crate::StoreError::Unavailable(_))));
+    assert!(job.is_done(), "the catalog committed");
+    drop(job);
+
+    let (mut store, source) = store();
+    store.set_guide_sources(source, &guide_sources()).unwrap();
+    let (mut stage, import) = guide(&store, 5, 5, "New");
+    let mut job = EpgReplacement::new(
+        &mut store,
+        source,
+        &mut stage,
+        Cow::Borrowed(&import),
+        feeds(),
+        2,
+    )
+    .unwrap();
+    job.fail_cleanup = Some(crate::StoreError::Unavailable("synthetic cleanup failure"));
+    let finished = job.step(u32::MAX);
+    #[cfg(target_family = "wasm")]
+    assert!(matches!(finished, Ok(Step::Done(_))));
+    #[cfg(not(target_family = "wasm"))]
+    assert!(matches!(finished, Err(crate::StoreError::Unavailable(_))));
+    assert!(job.is_done(), "the guide committed");
+}

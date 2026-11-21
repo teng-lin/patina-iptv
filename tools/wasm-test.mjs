@@ -4,6 +4,7 @@
 //
 //   node tools/wasm-test.mjs TEST.wasm ...
 //   node tools/wasm-test.mjs --cargo --locked -p iptv-store-sqlite --lib --test it
+//   node tools/wasm-test.mjs --call bench_guide_publish:400:1 LIB.wasm   (a measurement)
 //
 // With `--cargo`, the remaining arguments go to
 // `cargo test --target wasm32-unknown-unknown --no-run`, and every
@@ -40,7 +41,7 @@ function executables(args) {
     .map((m) => m.executable);
 }
 
-function run(path) {
+function run(path, call) {
   let memory;
   const text = (ptr, len) => new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
   const env = {
@@ -56,6 +57,12 @@ function run(path) {
   const instance = new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(path)), { env });
   memory = instance.exports.memory;
   instance.exports.test_install_panic_hook();
+  if (call) {
+    // A measurement entry point: `name:arg:arg...` (u32 arguments).
+    const [name, ...numbers] = call.split(':');
+    instance.exports[name](...numbers.map(Number));
+    return true;
+  }
   const started = performance.now();
   let status;
   try {
@@ -72,7 +79,12 @@ function run(path) {
   return true;
 }
 
-const args = process.argv.slice(2);
+let args = process.argv.slice(2);
+let call;
+if (args[0] === '--call') {
+  call = args[1];
+  args = args.slice(2);
+}
 const paths = args[0] === '--cargo' ? executables(args.slice(1)) : args;
 if (paths.length === 0) {
   console.error('usage: node tools/wasm-test.mjs (TEST.wasm ... | --cargo CARGO-TEST-ARGS ...)');
@@ -80,7 +92,7 @@ if (paths.length === 0) {
 }
 let passed = true;
 for (const path of paths) {
-  passed = run(path) && passed;
+  passed = run(path, call) && passed;
 }
 console.log(`${paths.length} test executables, ${passed ? 'all passed' : 'some failed'}`);
 process.exit(passed ? 0 : 1);

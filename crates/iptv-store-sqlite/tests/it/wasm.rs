@@ -17,9 +17,18 @@ unsafe extern "C" {
     fn test_random(buf: *mut u8, len: usize);
 }
 
-fn report(text: &str) {
+/// Prints `text` through the runner (the target has no stdout).
+#[allow(dead_code)]
+pub fn report(text: &str) {
     // SAFETY: the runner reads `len` bytes at `text`, which stay borrowed.
     unsafe { test_report(text.as_ptr(), text.len()) }
+}
+
+/// Milliseconds of the runner's clock, for measurements.
+#[allow(dead_code)]
+pub fn now_ms() -> f64 {
+    // SAFETY: no arguments.
+    unsafe { test_now_ms() }
 }
 
 /// Called by the runner before `main`: panics abort the run, so their

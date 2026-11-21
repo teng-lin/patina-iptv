@@ -1201,6 +1201,10 @@ fn differing_chunks(old: &Data, new: &Data) -> Vec<u32> {
 }
 
 #[cfg(test)]
+#[path = "browser/bench.rs"]
+mod bench;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

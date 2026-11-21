@@ -53,8 +53,8 @@ enum Phase {
 struct Transfer {
     channel: i64,
     staged: StagedChannel,
-    /// The last start copied.
-    after: i64,
+    /// The last start copied; `None` before the first slice.
+    after: Option<i64>,
     /// Copying descriptions (programs are done).
     descriptions: bool,
     finished: bool,
@@ -86,8 +86,11 @@ pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     import: Cow<'a, EpgImport>,
     feeds: Cow<'a, [EpgFeedMeta]>,
     match_fingerprint: u64,
-    /// The staged schedule of each binding's EPG channel.
-    staged: Vec<Option<StagedChannel>>,
+    /// Per binding, the first binding of the same EPG channel: where its
+    /// row id is kept in `ids` (no key strings are copied).
+    first: Vec<usize>,
+    /// The EPG channel row id written for a binding (at its `first`).
+    ids: Vec<Option<i64>>,
     /// Held until the job ends: nothing else can write it, or drop it,
     /// while it is attached.
     stage: StageHold<'a>,
@@ -99,11 +102,12 @@ pub struct EpgReplacement<'a, S: BorrowMut<Store>> {
     now: i64,
     counts: EpgCounts,
     known: HashSet<u32>,
-    /// Feed -> EPG channel -> row id.
-    channels: HashMap<u32, HashMap<String, i64>>,
     /// Per feed: channels and programs written.
     per_feed: HashMap<u32, (u64, u64)>,
     ends_at: Option<i64>,
+    /// Tests: an error the cleanup after the commit reports.
+    #[cfg(test)]
+    pub(crate) fail_cleanup: Option<StoreError>,
 }
 
 impl<S: BorrowMut<Store>> std::fmt::Debug for EpgReplacement<'_, S> {
@@ -166,11 +170,16 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         match_fingerprint: u64,
     ) -> Result<Self> {
         stage.get_mut().flush()?;
-        let staged = import
-            .bindings
-            .iter()
-            .map(|(_, epg)| stage.get().channel(epg.source, &epg.epg_id))
-            .collect();
+        let first = {
+            let mut seen: HashMap<(u32, &str), usize> = HashMap::new();
+            import
+                .bindings
+                .iter()
+                .enumerate()
+                .map(|(i, (_, epg))| *seen.entry((epg.source.0, epg.epg_id.as_str())).or_insert(i))
+                .collect()
+        };
+        let ids = vec![None; import.bindings.len()];
         let known = feeds.iter().map(|f| f.config.id.0).collect();
         Ok(Self {
             store: Some(store),
@@ -178,7 +187,8 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
             import,
             feeds,
             match_fingerprint,
-            staged,
+            first,
+            ids,
             stage,
             attached: false,
             tuned: false,
@@ -187,9 +197,10 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
             now: 0,
             counts: EpgCounts::default(),
             known,
-            channels: HashMap::new(),
             per_feed: HashMap::new(),
             ends_at: None,
+            #[cfg(test)]
+            fail_cleanup: None,
         })
     }
 
@@ -207,6 +218,12 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         }
     }
 
+    /// Tests: the phase the next step continues in.
+    #[cfg(test)]
+    pub(crate) fn phase(&self) -> String {
+        format!("{:?}", self.phase)
+    }
+
     /// Whether the replacement committed.
     pub fn is_done(&self) -> bool {
         self.progress == Progress::Committed
@@ -221,7 +238,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
             .expect("the store stays until the job is dropped")
     }
 
-    fn store(&mut self) -> &mut Store {
+    pub(crate) fn store(&mut self) -> &mut Store {
         self.store
             .as_mut()
             .expect("the store stays until the job is dropped")
@@ -232,9 +249,17 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         if self.progress != Progress::Running {
             return Err(replacement::finished_error());
         }
-        match self.advance(&mut meter) {
+        let stepped = self.resume().and_then(|()| self.advance(&mut meter));
+        let stepped = match stepped {
+            Ok(Step::Pending) => replacement::pause(self.store()).map(|()| Step::Pending),
+            other => other,
+        };
+        match stepped {
             Ok(Step::Done(counts)) => {
-                replacement::after_commit(self.end())?;
+                let cleanup = self.end();
+                #[cfg(test)]
+                let cleanup = cleanup.and(self.fail_cleanup.take().map_or(Ok(()), Err));
+                replacement::after_commit(cleanup)?;
                 Ok(Step::Done(counts))
             }
             Ok(Step::Pending) => Ok(Step::Pending),
@@ -244,6 +269,15 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                 Err(e)
             }
         }
+    }
+
+    /// Reopens the transaction a browser publish copy committed between
+    /// steps (`replacement::pause`).
+    fn resume(&mut self) -> Result<()> {
+        if matches!(self.phase, Phase::Begin) {
+            return Ok(());
+        }
+        replacement::resume(self.store())
     }
 
     /// Rolls back an open transaction, restores the connection's settings
@@ -556,10 +590,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                         staged.last_stop,
                     ),
                 );
-                self.channels
-                    .entry(feed)
-                    .or_default()
-                    .insert(epg.epg_id.clone(), copy.channel);
+                self.ids[self.first[index]] = Some(copy.channel);
                 copy.channel
             }
             None => {
@@ -568,12 +599,8 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                     self.phase = next;
                     return Ok(());
                 }
-                match self
-                    .channels
-                    .get(&feed)
-                    .and_then(|ids| ids.get(epg.epg_id.as_str()))
-                {
-                    Some(&id) => id,
+                match self.ids[self.first[index]] {
+                    Some(id) => id,
                     None => {
                         conn.prepare_cached(
                             "INSERT INTO epg_channels (source_id, feed_id, epg_channel)
@@ -582,14 +609,15 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                         .execute(params![source.0, feed, epg.epg_id])?;
                         let id = conn.last_insert_rowid();
                         meter.spend(1);
-                        match self.staged[index] {
+                        // The stage is held by the job: look its schedule up now.
+                        match self.stage.get().channel(epg.source, &epg.epg_id) {
                             Some(staged) if !meter.unlimited() => {
                                 self.phase = Phase::Binding {
                                     index,
                                     copy: Some(Transfer {
                                         channel: id,
                                         staged,
-                                        after: i64::MIN,
+                                        after: None,
                                         descriptions: false,
                                         finished: false,
                                         programs_copied: 0,
@@ -613,10 +641,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
                                     feed,
                                     (n, d, last),
                                 );
-                                self.channels
-                                    .entry(feed)
-                                    .or_default()
-                                    .insert(epg.epg_id.clone(), id);
+                                self.ids[self.first[index]] = Some(id);
                                 id
                             }
                         }
@@ -672,6 +697,7 @@ impl<'a, S: BorrowMut<Store>> EpgReplacement<'a, S> {
         )?;
         conn.execute_batch("COMMIT")?;
         self.progress = Progress::Committed;
+        replacement::completed(self.store());
         Ok(counts)
     }
 }
@@ -694,20 +720,25 @@ fn copy_slice(
     } else {
         ""
     };
+    // The first slice has no lower bound (a start can be any i64).
+    let after = copy.after.unwrap_or(i64::MIN);
+    let from = if copy.after.is_some() {
+        "start > ?2"
+    } else {
+        "?2 IS NOT NULL"
+    };
     let last: Option<i64> = conn
         .prepare_cached(&format!(
             "SELECT max(start) FROM (SELECT start FROM epg_stage.programs
-             WHERE ch = ?1 AND start > ?2{description} ORDER BY start LIMIT ?3)"
+             WHERE ch = ?1 AND {from}{description} ORDER BY start LIMIT ?3)"
         ))?
-        .query_row(params![copy.staged.id, copy.after, meter.limit()], |r| {
-            r.get(0)
-        })?;
+        .query_row(params![copy.staged.id, after, meter.limit()], |r| r.get(0))?;
     let Some(last) = last else {
         if copy.descriptions {
             copy.finished = true;
         } else {
             copy.descriptions = true;
-            copy.after = i64::MIN;
+            copy.after = None;
         }
         return Ok(copy);
     };
@@ -716,7 +747,8 @@ fn copy_slice(
         conn.prepare_cached(
             "INSERT OR FAIL INTO main.epg_descriptions (channel_id, start, description)
              SELECT ?1, start, description FROM epg_stage.programs
-             WHERE ch = ?2 AND start > ?3 AND start <= ?4 AND description IS NOT NULL
+             WHERE ch = ?2 AND (?3 IS NULL OR start > ?3) AND start <= ?4
+                 AND description IS NOT NULL
              ORDER BY start",
         )?
         .execute(params![copy.channel, copy.staged.id, copy.after, last])?
@@ -726,7 +758,8 @@ fn copy_slice(
                  category, icon, rating, catchup_id, season, episode)
              SELECT ?1, start, stop, title, sub_title, category, icon, rating, catchup_id,
                  season, episode
-             FROM epg_stage.programs WHERE ch = ?2 AND start > ?3 AND start <= ?4
+             FROM epg_stage.programs WHERE ch = ?2 AND (?3 IS NULL OR start > ?3)
+                 AND start <= ?4
              ORDER BY start",
         )?
         .execute(params![copy.channel, copy.staged.id, copy.after, last])?
@@ -737,7 +770,7 @@ fn copy_slice(
         copy.programs_copied += n as u64;
     }
     meter.spend(n.max(1));
-    copy.after = last;
+    copy.after = Some(last);
     Ok(copy)
 }
 

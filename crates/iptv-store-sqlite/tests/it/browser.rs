@@ -617,3 +617,26 @@ fn file_operations_are_unavailable_in_the_browser() {
     assert!(unavailable(store.snapshot_to(path).unwrap_err()));
     assert!(unavailable(Store::validate_snapshot(path).unwrap_err()));
 }
+
+/// A replacement that committed some steps on a publish copy and was then
+/// dropped leaves half a publish: swapping it in is refused.
+#[test]
+fn a_partly_published_copy_is_not_swapped_in() {
+    use iptv_store_sqlite::{CatalogReplacement, Step};
+    let files = BrowserFiles::new().unwrap();
+    let mut store = Store::open_browser(&files).unwrap();
+    let source = store.add_source(&m3u_source("Synthetic")).unwrap();
+    catalog(&mut store, source, 300, "first");
+    let mut copy = store.begin_publish().unwrap();
+    let groups: Vec<_> = (0..4).map(group).collect();
+    let channels: Vec<_> = (0..500).map(|i| m3u_channel(i, 4, "second")).collect();
+    let mut job =
+        CatalogReplacement::new(&mut copy, source, groups, channels, Vec::new(), Vec::new());
+    for _ in 0..3 {
+        assert_eq!(job.step(100).unwrap(), Step::Pending);
+    }
+    drop(job);
+    assert!(store.finish_publish(copy).is_err());
+    assert!(!store.is_publishing());
+    assert_eq!(channel_count(&store, source), 300);
+}
