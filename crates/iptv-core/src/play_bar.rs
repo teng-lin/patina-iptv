@@ -32,11 +32,12 @@ pub enum Control {
     Multiview,
     Pip,
     Guide,
+    Search,
     Fullscreen,
     Timeline,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlayBar {
     pub shown: bool,
     pub focus: Option<Control>,
@@ -46,13 +47,34 @@ pub struct PlayBar {
     pub held: bool,
     /// A screen reader runs (TalkBack, VoiceOver): it stays until hidden.
     pub reader: bool,
+    idle_ms: u64,
     hide_at_ms: Option<u64>,
     /// A held remote key decides tap or hold at this time: apart from the
     /// idle deadline, so the bar's use meanwhile does not pull it in.
     hold_until_ms: Option<u64>,
 }
 
+impl Default for PlayBar {
+    fn default() -> Self {
+        Self::with_idle_ms(HIDE_AFTER_MS)
+    }
+}
+
 impl PlayBar {
+    /// Creates a hidden bar with a host-selected idle delay.
+    pub const fn with_idle_ms(idle_ms: u64) -> Self {
+        Self {
+            shown: false,
+            focus: None,
+            hovered: false,
+            held: false,
+            reader: false,
+            idle_ms,
+            hide_at_ms: None,
+            hold_until_ms: None,
+        }
+    }
+
     /// The mouse moved over the video.
     pub fn pointer_moved(&mut self, now_ms: u64) {
         self.shown = true;
@@ -74,9 +96,14 @@ impl PlayBar {
 
     /// Explicit remote activation opens the same bar with transport focus.
     pub fn remote(&mut self, now_ms: u64) {
+        self.open_on(Control::PlayPause, now_ms);
+    }
+
+    /// Opens the bar with the given control focused.
+    pub fn open_on(&mut self, control: Control, now_ms: u64) {
         self.shown = true;
         self.hovered = false;
-        self.focus = Some(Control::PlayPause);
+        self.focus = Some(control);
         self.restart(now_ms);
     }
 
@@ -188,7 +215,7 @@ impl PlayBar {
     }
 
     fn restart(&mut self, now_ms: u64) {
-        self.hide_at_ms = Some(now_ms + HIDE_AFTER_MS);
+        self.hide_at_ms = Some(now_ms.saturating_add(self.idle_ms));
     }
 }
 

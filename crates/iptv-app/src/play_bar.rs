@@ -459,6 +459,7 @@ fn control_label(control: Control) -> &'static str {
         Control::Multiview => crate::i18n::key("Multiview"),
         Control::Pip => crate::i18n::key("Picture in picture"),
         Control::Guide => crate::i18n::key("TV guide"),
+        Control::Search => crate::i18n::key("Search"),
         Control::Fullscreen => crate::i18n::key("Full screen"),
         Control::Timeline => crate::i18n::key("Playback position"),
     }
@@ -478,6 +479,7 @@ fn control_id(control: Control) -> &'static str {
         Control::Multiview => "play-bar-multiview",
         Control::Pip => "play-bar-pip",
         Control::Guide => "play-bar-guide",
+        Control::Search => "play-bar-search",
         Control::Fullscreen => "play-bar-fullscreen",
         Control::Timeline => "play-bar-seek",
     }
@@ -558,6 +560,7 @@ fn activate(
             crate::pip::enter(ui);
         }
         Control::Guide => crate::player_keys::press_quick(ui, QuickAction::Guide),
+        Control::Search => crate::search_view::open(ui),
         Control::Fullscreen => {
             let Some(window) = target_window else {
                 return;

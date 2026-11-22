@@ -46,6 +46,8 @@ mod grid;
 mod host;
 mod package;
 #[cfg(feature = "bridge")]
+mod presentation;
+#[cfg(feature = "bridge")]
 mod search;
 #[cfg(feature = "bridge")]
 mod store;

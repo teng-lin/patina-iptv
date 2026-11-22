@@ -213,7 +213,8 @@ var imports = {
             postMessage(text(ptr, len));
         },
         monotonic_ms: function () { return performance.now(); },
-        wall_ms: function () { return Date.now(); }
+        wall_ms: function () { return Date.now(); },
+        utc_offset_minutes: function (ms) { return -new Date(ms).getTimezoneOffset(); }
     }
 };
 

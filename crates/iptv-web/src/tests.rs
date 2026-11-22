@@ -66,6 +66,9 @@ impl Host for Fake {
     fn wall_ms(&self) -> f64 {
         NOW_MS + self.wall_offset_ms.get()
     }
+    fn utc_offset_minutes(&self, _unix_ms: f64) -> f64 {
+        0.0
+    }
 }
 
 fn xmltv_time(unix: i64) -> String {
@@ -475,8 +478,8 @@ fn failures_are_reported_instead_of_an_empty_list() {
             .all(|e| e["type"] == "notice" || e["type"] == "sourceRejected")
     );
     // Keys before any playlist do nothing, Back included.
-    send(serde_json::json!({ "cmd": "key", "key": "down" }));
-    send(serde_json::json!({ "cmd": "key", "key": "back" }));
+    key("down");
+    key("back");
     assert!(fake.events.borrow().iter().all(|e| e["type"] != "exit"));
 
     send(
@@ -523,11 +526,11 @@ fn the_stored_guide_and_lists_are_used_at_the_next_launch() {
     assert_eq!(guide_downloads(&fake), 1);
     // Down, OK: the second channel plays (recently watched); back on the
     // guide, Yellow on the third makes it a favorite.
-    send(serde_json::json!({ "cmd": "key", "key": "down" }));
-    send(serde_json::json!({ "cmd": "key", "key": "ok" }));
-    send(serde_json::json!({ "cmd": "key", "key": "back" }));
-    send(serde_json::json!({ "cmd": "key", "key": "down" }));
-    send(serde_json::json!({ "cmd": "key", "key": "favorite" }));
+    key("down");
+    key("ok");
+    key("back");
+    key("down");
+    key("favorite");
     let notice = fake
         .events
         .borrow()
@@ -545,13 +548,13 @@ fn the_stored_guide_and_lists_are_used_at_the_next_launch() {
     let view = last_view(&fake);
     assert_eq!(view["guide"], true, "{view}");
     assert_eq!(view["grid"]["focused"]["title"], "one Morning");
-    send(serde_json::json!({ "cmd": "key", "key": "back" }));
-    send(serde_json::json!({ "cmd": "key", "key": "up" }));
-    send(serde_json::json!({ "cmd": "key", "key": "up" }));
+    key("back");
+    key("up");
+    key("up");
     let view = last_view(&fake);
     assert_eq!(view["title"], "Favorites", "{view}");
     assert_eq!(view["grid"]["rows"]["items"][0]["name"], "Example Three");
-    send(serde_json::json!({ "cmd": "key", "key": "down" }));
+    key("down");
     let view = last_view(&fake);
     assert_eq!(view["title"], "Recently watched");
     assert_eq!(view["grid"]["rows"]["items"][0]["name"], "Example Two");
@@ -878,7 +881,16 @@ fn a_delivery_asks_for_no_extra_poll() {
 }
 
 fn key(k: &str) {
-    send(serde_json::json!({ "cmd": "key", "key": k }));
+    match k {
+        "done" | "cancel" => {
+            send(serde_json::json!({ "cmd": "keyboard", "complete": k == "done" }))
+        }
+        "barTimeout" => poll_keys(10_000),
+        _ => {
+            key_phase(k, "down", 0);
+            key_phase(k, "up", 1);
+        }
+    }
 }
 
 fn last_of(fake: &Fake, kind: &str) -> Value {
@@ -1556,8 +1568,16 @@ fn a_row_signature_includes_the_row_number() {
     let a = open((0..20).collect());
     // Channel 0 on row 8, shown in the first slot after a page down.
     let mut b = open((100..108).chain(0..20).collect());
-    b.key("chdown", 0, 10, false);
-    let first = |g: &Grid| g.json(None, &|_| None, &|_| false)["rows"]["items"][0].clone();
+    b.key(iptv_nav::Action::PageDown, 0, 10, false);
+    let first = |g: &Grid| {
+        g.json(
+            None,
+            &|_| None,
+            &|_| false,
+            &crate::presentation::Presentation::utc(iptv_core::guide::SYNTHETIC_EPOCH_UNIX),
+        )["rows"]["items"][0]
+            .clone()
+    };
     let (a, b) = (first(&a), first(&b));
     assert_eq!(
         (a["name"].clone(), b["name"].clone()),
@@ -1578,7 +1598,7 @@ fn search_keeps_its_history_and_drops_stale_program_results() {
     // Back hides the keyboard first, then leaves.
     key("search");
     assert_eq!(last_view(&fake)["search"]["keyboard"], true);
-    key("back");
+    key("cancel"); // The page owns Back while the keyboard is up.
     let view = last_view(&fake);
     assert_eq!(view["mode"], "search");
     assert_eq!(view["search"]["keyboard"], false);
@@ -1633,30 +1653,50 @@ fn held_keys_in_the_groups_column_build_the_list_once_settled() {
     key("back");
     key("back");
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
+    key_phase("down", "down", 0);
     repeat("down");
     let view = last_view(&fake);
-    assert_eq!(view["title"], "News");
+    assert_eq!(view["title"], "Sport");
     assert_eq!(view["pending"], true);
     assert_eq!(view["grid"]["rows"]["total"], 0);
-    repeat("down");
-    assert_eq!(last_view(&fake)["title"], "Sport");
-    send(serde_json::json!({ "cmd": "settle" }));
+    key_phase("down", "up", 401);
     let view = last_view(&fake);
     assert_eq!(view["pending"], false);
     assert_eq!(view["grid"]["rows"]["total"], 1);
     assert_eq!(view["playing"]["number"], 1, "three's row in Sport");
     // A key that is not a repeat builds at once.
+    key_phase("up", "down", 0);
     repeat("up");
     key("right");
     let view = last_view(&fake);
-    assert_eq!(view["title"], "News");
-    assert_eq!(view["grid"]["rows"]["total"], 2);
+    assert_eq!(view["title"], "All channels");
+    assert_eq!(view["grid"]["rows"]["total"], 3);
     assert_eq!(view["grid"]["pane"], "guide");
-    assert_eq!(view["playing"]["number"], 3, "not in News: its own number");
+    assert_eq!(view["playing"]["number"], 3);
+}
+
+fn key_name(k: &str) -> &str {
+    match k {
+        "chup" => "channel_up",
+        "chdown" => "channel_down",
+        "pageup" => "page_up",
+        "pagedown" => "page_down",
+        "favorite" => "yellow",
+        _ => k,
+    }
+}
+
+fn key_phase(k: &str, phase: &str, at: u64) {
+    send(serde_json::json!({ "cmd": "key", "key": key_name(k), "phase": phase, "atMs": at }));
+}
+
+fn poll_keys(at: u64) {
+    send(serde_json::json!({ "cmd": "keyPoll", "atMs": at }));
 }
 
 fn key_with(k: &str, extra: Value) {
-    let mut cmd = serde_json::json!({ "cmd": "key", "key": k });
+    let mut cmd =
+        serde_json::json!({ "cmd": "key", "key": key_name(k), "phase": "down", "atMs": 0 });
     for (name, value) in extra.as_object().unwrap() {
         cmd[name] = value.clone();
     }
@@ -1664,7 +1704,7 @@ fn key_with(k: &str, extra: Value) {
 }
 
 fn repeat(k: &str) {
-    key_with(k, serde_json::json!({ "repeat": true }));
+    key_phase(k, "repeat", 400);
 }
 
 #[test]
@@ -1702,7 +1742,7 @@ fn every_key_and_settle_is_answered_with_its_sequence_number() {
     // A swallowed repeat is answered as well.
     key("ok");
     key("left");
-    key_with("left", serde_json::json!({ "seq": 8, "repeat": true }));
+    key_with("left", serde_json::json!({ "seq": 8, "phase": "repeat" }));
     assert_eq!(last_view(&fake)["seq"], 8);
     // Views for other reasons carry none.
     send(serde_json::json!({ "cmd": "view" }));
@@ -1716,18 +1756,22 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
     let fake = Rc::new(Fake::default());
     install(fake.clone());
     m3u_launch(&fake);
-    // In the grid: the press moves a program back, its first repeat opens
-    // the groups, later ones do nothing (they do not go on to the rail).
+    // Left waits to distinguish a tap from a hold. The timer opens the
+    // groups without walking back through the programs first.
     key("right");
-    key("left");
+    let program = focused_title(&fake);
+    key_phase("left", "down", 0);
+    assert_eq!(focused_title(&fake), program);
+    assert_eq!(last_view(&fake)["keyDeadlineMs"], 400);
+    poll_keys(399);
     assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
-    repeat("left");
+    poll_keys(400);
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
     repeat("left");
-    repeat("left");
+    key_phase("left", "up", 500);
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
     // A press in the groups column is a Left like any other, held or not.
-    key("left");
+    key_phase("left", "down", 0);
     assert_eq!(last_view(&fake)["grid"]["pane"], "rail");
     repeat("left");
     assert_eq!(last_view(&fake)["grid"]["pane"], "rail");
@@ -1735,13 +1779,17 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
     key("right");
     assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
+    assert_eq!(focused_title(&fake), program);
+
+    // Tap Left to return to the live program.
+    key("left");
     assert_eq!(focused_title(&fake), "one Morning");
 
     // From full screen the press opens the guide; holding it goes no
     // further, whatever the page knew when it sent the repeats.
     key("ok");
     assert_eq!(last_view(&fake)["mode"], "full");
-    key("left");
+    key_phase("left", "down", 0);
     let view = last_view(&fake);
     assert_eq!(view["mode"], "guide");
     let focused = view["grid"]["focused"].clone();
@@ -1753,10 +1801,9 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
     // The Guide key, then Left pressed and held on the guide it opened.
     key("ok");
     key("guide");
-    key("left");
+    key_phase("left", "down", 0);
     repeat("left");
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
-    key("right");
     key("right");
     assert_eq!(focused_title(&fake), "one Morning");
 
@@ -1766,7 +1813,7 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
     key("right");
     key("right");
     assert_eq!(last_view(&fake)["bar"]["focus"], "search");
-    key("left");
+    key_phase("left", "down", 0);
     assert_eq!(last_view(&fake)["bar"]["focus"], "guide");
     repeat("left");
     assert_eq!(last_view(&fake)["bar"]["focus"], "favorite");
@@ -1781,7 +1828,7 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
     deliver(&fake);
     key("done");
     assert_eq!(last_view(&fake)["search"]["tab"], "channels");
-    key("left");
+    key_phase("left", "down", 0);
     assert_eq!(last_view(&fake)["search"]["tab"], "programs");
     repeat("left");
     assert_eq!(last_view(&fake)["search"]["tab"], "channels");
@@ -1799,6 +1846,7 @@ fn a_held_up_in_the_groups_column_stops_before_the_preview() {
     assert_eq!(view["grid"]["pane"], "groups");
     assert!(!view["playing"].is_null());
     // Held Up runs to the first group (Favorites) and stays there.
+    key_phase("up", "down", 0);
     for _ in 0..4 {
         repeat("up");
     }
@@ -2102,4 +2150,87 @@ fn plays_carry_their_source_and_only_a_current_failure_is_noticed() {
     assert_eq!(last_of(&fake, "sourceRejected")["type"], "sourceRejected");
     key("ok");
     assert_eq!(last_of(&fake, "play")["session"], 8);
+}
+
+#[path = "../../iptv-nav/tests/support/remote_trace.rs"]
+mod remote_trace;
+
+#[test]
+fn a_late_release_cannot_apply_the_displaced_guide_press() {
+    use iptv_nav::Phase;
+
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    for (at, key, phase) in remote_trace::LATE_RELEASE {
+        let phase = match phase {
+            Phase::Down => "down",
+            Phase::Up => "up",
+            Phase::Repeat => "repeat",
+        };
+        key_phase(&key.name(), phase, at);
+    }
+    poll_keys(1_000);
+
+    assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
+    assert_eq!(focused_title(&fake), "one Noon");
+    assert_eq!(plays(&fake), 0);
+}
+
+#[test]
+fn a_hold_is_dropped_when_its_surface_changes_or_the_page_cancels_it() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+
+    key_phase("left", "down", 0);
+    key_phase("search", "down", 100);
+    send(serde_json::json!({ "cmd": "cancelKeys" }));
+    key_phase("left", "up", 501);
+    poll_keys(550);
+    assert_eq!(last_view(&fake)["mode"], "search");
+    key("cancel");
+    key("back");
+
+    key_phase("left", "down", 600);
+    assert_eq!(last_view(&fake)["keyDeadlineMs"], 1_000);
+    send(serde_json::json!({ "cmd": "cancelKeys" }));
+    assert!(last_view(&fake)["keyDeadlineMs"].is_null());
+    key_phase("left", "repeat", 1_000);
+    poll_keys(1_100);
+    assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
+}
+
+#[test]
+fn held_back_hides_the_bar_once_and_never_leaves_the_player() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    key("ok");
+    key("ok");
+    assert_eq!(last_view(&fake)["bar"]["focus"], "favorite");
+    key_phase("back", "down", 50);
+    key_phase("back", "repeat", 500);
+    key_phase("back", "repeat", 800);
+    key_phase("back", "up", 850);
+    assert!(last_view(&fake)["bar"].is_null());
+    assert_eq!(last_view(&fake)["mode"], "full");
+    assert_eq!(plays(&fake), 1);
+}
+
+#[test]
+fn a_play_bar_expiry_queued_before_new_input_cannot_hide_it() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    key("ok");
+    key("ok");
+    assert_eq!(last_view(&fake)["keyDeadlineMs"], 7_000);
+
+    key_phase("right", "down", 6_950);
+    poll_keys(7_000);
+    assert_eq!(last_view(&fake)["bar"]["focus"], "guide");
+    assert_eq!(last_view(&fake)["keyDeadlineMs"], 13_950);
+    poll_keys(13_950);
+    assert!(last_view(&fake)["bar"].is_null());
 }

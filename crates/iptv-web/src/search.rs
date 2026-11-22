@@ -10,6 +10,8 @@
 //! it is ready only channels are found. Both are dropped when the guide
 //! changes and made again at the next search.
 
+use crate::presentation::Presentation;
+
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::time::Duration;
@@ -236,6 +238,7 @@ pub(crate) fn json(
     s: &dyn Schedule,
     preparing: bool,
     logo: &dyn Fn(usize) -> Option<String>,
+    presentation: &Presentation,
 ) -> Value {
     let focus = match state.focus() {
         Focus::Input => "input",
@@ -305,6 +308,7 @@ pub(crate) fn json(
                         v["title"] = h.title.clone().into();
                         v["start"] = h.start.into();
                         v["end"] = h.end.into();
+                        v["timeLabel"] = presentation.span(h.start, h.end, "–").into();
                         v["live"] = (h.airing == Airing::Live).into();
                         v
                     }),

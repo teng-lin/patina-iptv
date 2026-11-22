@@ -72,6 +72,7 @@ impl Action {
             Self::ToggleEnlarge => "toggle_enlarge",
             Self::Record => "record",
             Self::ToggleFavorite => "toggle_favorite",
+            Self::ShowFavorites => "show_favorites",
             Self::Ignore => "ignore",
             Self::Digit(_) => "digit",
         }
@@ -118,6 +119,7 @@ impl Action {
             "toggle_enlarge" => Self::ToggleEnlarge,
             "record" => Self::Record,
             "toggle_favorite" => Self::ToggleFavorite,
+            "show_favorites" => Self::ShowFavorites,
             "ignore" => Self::Ignore,
             _ => return None,
         })

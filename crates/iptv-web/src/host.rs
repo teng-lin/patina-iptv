@@ -37,6 +37,9 @@ pub(crate) trait Host {
     fn monotonic_ms(&self) -> f64;
     /// Wall clock, Unix milliseconds.
     fn wall_ms(&self) -> f64;
+    /// The local UTC offset in minutes at a particular Unix instant.
+    #[cfg(feature = "bridge")]
+    fn utc_offset_minutes(&self, unix_ms: f64) -> f64;
 }
 
 thread_local! {
@@ -102,6 +105,8 @@ mod wasm {
         fn emit(ptr: *const u8, len: usize);
         fn monotonic_ms() -> f64;
         fn wall_ms() -> f64;
+        #[cfg(feature = "bridge")]
+        fn utc_offset_minutes(unix_ms: f64) -> f64;
     }
 
     pub(crate) struct WasmHost;
@@ -143,6 +148,11 @@ mod wasm {
         fn wall_ms(&self) -> f64 {
             // SAFETY: no arguments; returns a number.
             unsafe { wall_ms() }
+        }
+        #[cfg(feature = "bridge")]
+        fn utc_offset_minutes(&self, unix_ms: f64) -> f64 {
+            // SAFETY: a plain value argument, returning a number.
+            unsafe { utc_offset_minutes(unix_ms) }
         }
     }
 }

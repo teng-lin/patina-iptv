@@ -17,9 +17,12 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use iptv_core::browse::{self, Columns, RailItem};
-use iptv_core::guide::{Airing, Focus, Move, Pane, Program, Schedule};
+use iptv_core::guide::{Airing, Focus, Move, Pane, Program, Schedule, page_row};
 use iptv_core::lists::{ChannelList as Rows, ListView};
+use iptv_nav::Action;
 use serde_json::{Value, json};
+
+use crate::presentation::{Presentation, timing_label};
 
 /// Channel rows the grid shows at once.
 pub(crate) const GRID_ROWS: usize = 8;
@@ -35,15 +38,11 @@ pub(crate) enum GridOutcome {
     /// The groups column selected another entry ([`Grid::entry`]): show its
     /// list.
     Preview,
-    /// Watch catalog `channel`: live, or `archive` from its start.
+    /// Select a program on the focused catalog channel.
     Watch {
         channel: usize,
-        archive: Option<Program>,
+        program: Program,
     },
-    /// OK on a program that has not started (its start, Unix time).
-    Upcoming(i64),
-    /// OK on an ended program the archive no longer has.
-    Unavailable,
     /// OK on the preview: the playing video full screen again.
     Full,
     /// The rail's Search.
@@ -112,9 +111,8 @@ impl Grid {
     /// schedule made in a later hour counts minutes from that hour: the
     /// focus's minutes are converted through Unix time first.
     pub(crate) fn rebase(&mut self, catalog: Rc<dyn Schedule>, rows: Rc<Rows>, now: i32) {
-        let channel = self.focused_channel();
+        let channel = self.view.channel_key(self.focus.channel);
         let offset = self.focus.channel.saturating_sub(self.first);
-        let row = channel.and_then(|c| rows.row_of(c));
         let shift = (self.view.epoch_unix() - catalog.epoch_unix()).div_euclid(60);
         let shift = i32::try_from(shift).unwrap_or(0);
         let f = &mut self.focus;
@@ -122,6 +120,9 @@ impl Grid {
         f.window = f.window.saturating_add(shift);
         f.now = f.now.saturating_add(shift);
         self.view = ListView::new(catalog, rows);
+        let row = channel
+            .as_deref()
+            .and_then(|key| self.view.find_channel(key));
         self.focus.restore(Some(row.unwrap_or(0)), &self.view);
         self.first = self.focus.channel.saturating_sub(offset);
         self.clamp_first();
@@ -211,7 +212,7 @@ impl Grid {
     /// key is not a repeat moving through the groups column).
     pub(crate) fn key(
         &mut self,
-        key: &str,
+        action: Action,
         now: i32,
         entries: usize,
         preview: bool,
@@ -220,22 +221,22 @@ impl Grid {
         let cols = columns(entries);
         let pane = self.focus.pane;
         let empty = self.view.channel_count() == 0;
-        let outcome = match key {
-            "up" if self.focus.focus_preview(preview) => browse::Outcome::Moved,
-            "up" => self.focus.navigate(Move::Up, &cols, &self.view),
-            "down" => self.focus.navigate(Move::Down, &cols, &self.view),
-            "left" => self.focus.navigate(Move::Left, &cols, &self.view),
-            "right" => self.focus.navigate(Move::Right, &cols, &self.view),
-            "chup" | "pageup" if pane == Pane::Guide => {
+        let outcome = match action {
+            Action::MoveUp if self.focus.focus_preview(preview) => browse::Outcome::Moved,
+            Action::MoveUp => self.focus.navigate(Move::Up, &cols, &self.view),
+            Action::MoveDown => self.focus.navigate(Move::Down, &cols, &self.view),
+            Action::MoveLeft => self.focus.navigate(Move::Left, &cols, &self.view),
+            Action::MoveRight => self.focus.navigate(Move::Right, &cols, &self.view),
+            Action::PageUp if pane == Pane::Guide => {
                 self.page(false);
                 browse::Outcome::Moved
             }
-            "chdown" | "pagedown" if pane == Pane::Guide => {
+            Action::PageDown if pane == Pane::Guide => {
                 self.page(true);
                 browse::Outcome::Moved
             }
-            "ok" => self.focus.ok(&cols, &self.view),
-            "back" => self.focus.back(&cols, &self.view),
+            Action::Select => self.focus.ok(&cols, &self.view),
+            Action::Back => self.focus.back(&cols, &self.view),
             _ => browse::Outcome::None,
         };
         // No hint card here: Back would first dismiss what is not shown.
@@ -243,11 +244,19 @@ impl Grid {
         self.follow_focus();
         match outcome {
             browse::Outcome::Preview => GridOutcome::Preview,
-            browse::Outcome::Watch => self.watch(),
+            browse::Outcome::Watch => {
+                self.focused_channel()
+                    .map_or(GridOutcome::Stay, |channel| GridOutcome::Watch {
+                        channel,
+                        program: self.focus.program(&self.view),
+                    })
+            }
             browse::Outcome::ReturnToPlayer => GridOutcome::Full,
             browse::Outcome::Open(RailItem::Search) => GridOutcome::Search,
             browse::Outcome::None
-                if pane == Pane::Groups && empty && matches!(key, "ok" | "right") =>
+                if pane == Pane::Groups
+                    && empty
+                    && matches!(action, Action::Select | Action::MoveRight) =>
             {
                 GridOutcome::Empty
             }
@@ -264,12 +273,12 @@ impl Grid {
         if len == 0 {
             return;
         }
-        let row = self.focus.channel;
-        let to = if down {
-            (row + GRID_ROWS).min(len - 1)
+        let step = if down {
+            GRID_ROWS as isize
         } else {
-            row.saturating_sub(GRID_ROWS)
+            -(GRID_ROWS as isize)
         };
+        let to = page_row(self.focus.channel, len, step);
         // As a tap there: the time clamped to that row's floor and the
         // guide's bounds; then the window follows the focused program.
         let cursor = self.focus.cursor;
@@ -304,32 +313,6 @@ impl Grid {
         }
     }
 
-    /// OK on a program: a live one plays live, an ended one its archive
-    /// still holds plays from its start; the others cannot play.
-    fn watch(&self) -> GridOutcome {
-        let Some(channel) = self.focused_channel() else {
-            return GridOutcome::Stay;
-        };
-        let p = self.focus.program(&self.view);
-        let now = self.focus.now;
-        match p.airing(now) {
-            Airing::Live => GridOutcome::Watch {
-                channel,
-                archive: None,
-            },
-            Airing::Ended if p.can_replay(now, self.view.catchup_days(self.focus.channel)) => {
-                GridOutcome::Watch {
-                    channel,
-                    archive: Some(p),
-                }
-            }
-            Airing::Ended => GridOutcome::Unavailable,
-            Airing::Upcoming => {
-                GridOutcome::Upcoming(self.view.epoch_unix() + i64::from(p.start) * 60)
-            }
-        }
-    }
-
     /// The screen: the panes, the window, the rows on it with their cells,
     /// and the focused program. `logo` filters a catalog channel's artwork;
     /// `favorite` says whether a catalog channel is a favorite.
@@ -338,6 +321,7 @@ impl Grid {
         playing: Option<usize>,
         logo: &dyn Fn(usize) -> Option<String>,
         favorite: &dyn Fn(usize) -> bool,
+        presentation: &Presentation,
     ) -> Value {
         let s = &self.view;
         let f = &self.focus;
@@ -394,20 +378,38 @@ impl Grid {
             .collect();
         let detail = s.channel(f.channel).map(|channel| {
             let title = s.title(f.channel, focused);
+            let (start, end) = (unix(focused.start), unix(focused.end));
+            let timing = presentation.timing(start, end);
             let airing = focused.airing(f.now);
             json!({
                 "number": Rows::number(f.channel),
                 "name": s.channel_name(f.channel),
                 "title": if is_placeholder(&title) { None } else { Some(title) },
-                "start": unix(focused.start),
-                "end": unix(focused.end),
+                "start": start,
+                "end": end,
+                "timeLabel": presentation.span(start, end, " – "),
+                "timingLabel": timing_label(timing),
+                "progress": timing.progress,
                 "airing": airing_name(airing),
                 "catchup": airing == Airing::Ended
                     && focused.can_replay(f.now, s.catchup_days(f.channel)),
                 "favorite": favorite(channel),
             })
         });
+        let start = unix(from);
+        let first_mark = start + (-start).rem_euclid(1800);
+        let marks: Vec<_> = (first_mark..unix(to))
+            .step_by(1800)
+            .map(|at| {
+                json!({
+                    "at": at,
+                    "time": presentation.time(at),
+                })
+            })
+            .collect();
         json!({
+            "clock": presentation.clock(),
+            "marks": marks,
             "pane": pane_name(f.pane),
             // The rail and the groups column show while one has the focus
             // (or the preview, entered from one of them).
@@ -438,7 +440,12 @@ mod tests {
     }
 
     fn json(g: &Grid) -> Value {
-        g.json(None, &|_| None, &|_| false)
+        g.json(
+            None,
+            &|_| None,
+            &|_| false,
+            &Presentation::utc(iptv_core::guide::SYNTHETIC_EPOCH_UNIX),
+        )
     }
 
     #[test]
@@ -469,23 +476,23 @@ mod tests {
         let mut g = grid(100, 0);
         assert_eq!(g.first, 0);
         for _ in 0..GRID_ROWS - 1 {
-            g.key("down", 0, ENTRIES, false);
+            g.key(Action::MoveDown, 0, ENTRIES, false);
         }
         assert_eq!(g.first, 0, "still on the first screen");
-        g.key("down", 0, ENTRIES, false);
+        g.key(Action::MoveDown, 0, ENTRIES, false);
         assert_eq!((g.focus.channel, g.first), (GRID_ROWS, 1));
         // A page turns the whole screen and keeps the time column.
         let cursor = g.focus.cursor;
-        g.key("chdown", 0, ENTRIES, false);
+        g.key(Action::PageDown, 0, ENTRIES, false);
         assert_eq!(g.focus.channel, 2 * GRID_ROWS);
         assert_eq!(g.first, 1 + GRID_ROWS);
         assert_eq!(g.focus.cursor, cursor);
-        g.key("chup", 0, ENTRIES, false);
-        g.key("chup", 0, ENTRIES, false);
+        g.key(Action::PageUp, 0, ENTRIES, false);
+        g.key(Action::PageUp, 0, ENTRIES, false);
         assert_eq!((g.focus.channel, g.first), (0, 0));
         // The end of the list clamps.
         for _ in 0..20 {
-            g.key("pagedown", 0, ENTRIES, false);
+            g.key(Action::PageDown, 0, ENTRIES, false);
         }
         assert_eq!(g.focus.channel, 99);
         assert_eq!(g.first, 100 - GRID_ROWS);
@@ -495,7 +502,7 @@ mod tests {
     fn a_row_signature_changes_only_with_what_the_row_shows() {
         let mut g = grid(100, 2);
         let before = json(&g);
-        g.key("down", 0, ENTRIES, false);
+        g.key(Action::MoveDown, 0, ENTRIES, false);
         let after = json(&g);
         let sig = |v: &Value, i: usize| v["rows"]["items"][i]["sig"].clone();
         assert_eq!(after["rows"]["start"], before["rows"]["start"]);
@@ -505,64 +512,57 @@ mod tests {
         assert_eq!(after["rows"]["focus"], 3);
         // Moving through time scrolls the window: the rows change.
         for _ in 0..10 {
-            g.key("right", 0, ENTRIES, false);
+            g.key(Action::MoveRight, 0, ENTRIES, false);
         }
         let later = json(&g);
         assert_ne!(later["start"], after["start"]);
         assert_ne!(sig(&later, 0), sig(&after, 0));
         // Back returns to now, then shows the groups, then the rail; on the
         // rail it stays.
-        assert_eq!(g.key("back", 0, ENTRIES, false), GridOutcome::Stay);
+        assert_eq!(g.key(Action::Back, 0, ENTRIES, false), GridOutcome::Stay);
         assert_eq!(g.focus.cursor, 0);
-        g.key("back", 0, ENTRIES, false);
+        g.key(Action::Back, 0, ENTRIES, false);
         assert_eq!(g.pane(), Pane::Groups);
         assert_eq!(json(&g)["columns"], true);
-        g.key("back", 0, ENTRIES, false);
+        g.key(Action::Back, 0, ENTRIES, false);
         assert_eq!(g.pane(), Pane::Rail);
-        assert_eq!(g.key("back", 0, ENTRIES, false), GridOutcome::Stay);
+        assert_eq!(g.key(Action::Back, 0, ENTRIES, false), GridOutcome::Stay);
         assert_eq!(g.pane(), Pane::Rail);
     }
 
     #[test]
-    fn ok_watches_live_programs_and_refuses_future_ones() {
-        // Archived programs are covered end to end (`tests.rs`): the
-        // synthetic schedule has no listing start, so its past is not
-        // browsable.
-        let mut g = grid(100, 0);
-        g.key("down", 0, ENTRIES, false);
-        assert_eq!(
-            g.key("ok", 0, ENTRIES, false),
-            GridOutcome::Watch {
-                channel: 1,
-                archive: None
-            }
-        );
-        g.key("right", 0, ENTRIES, false);
-        let start = json(&g)["focused"]["start"].as_i64().unwrap();
-        assert_eq!(g.key("ok", 0, ENTRIES, false), GridOutcome::Upcoming(start));
-        // An empty list plays nothing and cannot be entered.
-        let mut empty = grid(0, 0);
-        assert_eq!(empty.pane(), Pane::Groups);
-        assert_eq!(empty.key("ok", 0, ENTRIES, false), GridOutcome::Empty);
-        assert!(json(&empty)["focused"].is_null());
+    fn ok_selects_the_focused_channel_and_program() {
+        let mut g = grid(20, 0);
+        let now = g.focus.now;
+        for at in [now, now + 60] {
+            g.focus.tap(0, at, &g.view);
+            let program = g.focus.program(&g.view);
+            assert_eq!(
+                g.key(Action::Select, now, ENTRIES, false),
+                GridOutcome::Watch {
+                    channel: 0,
+                    program
+                },
+            );
+        }
     }
 
     #[test]
     fn up_from_the_first_row_reaches_the_preview_only_while_playing() {
         let mut g = grid(100, 0);
-        g.key("up", 0, ENTRIES, false);
+        g.key(Action::MoveUp, 0, ENTRIES, false);
         assert_eq!(g.pane(), Pane::Guide);
-        g.key("up", 0, ENTRIES, true);
+        g.key(Action::MoveUp, 0, ENTRIES, true);
         assert_eq!(g.pane(), Pane::Preview);
-        assert_eq!(g.key("ok", 0, ENTRIES, true), GridOutcome::Full);
-        g.key("down", 0, ENTRIES, true);
+        assert_eq!(g.key(Action::Select, 0, ENTRIES, true), GridOutcome::Full);
+        g.key(Action::MoveDown, 0, ENTRIES, true);
         assert_eq!((g.pane(), g.row()), (Pane::Guide, 0));
         // Back on a live program shows the groups; Left there is the
         // rail's Search, which opens the search screen.
-        g.key("back", 0, ENTRIES, true);
+        g.key(Action::Back, 0, ENTRIES, true);
         assert_eq!(g.pane(), Pane::Groups);
-        g.key("left", 0, ENTRIES, true);
+        g.key(Action::MoveLeft, 0, ENTRIES, true);
         assert_eq!(json(&g)["rail"], "search");
-        assert_eq!(g.key("ok", 0, ENTRIES, true), GridOutcome::Search);
+        assert_eq!(g.key(Action::Select, 0, ENTRIES, true), GridOutcome::Search);
     }
 }

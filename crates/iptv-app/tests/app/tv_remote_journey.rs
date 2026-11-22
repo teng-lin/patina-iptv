@@ -1029,3 +1029,36 @@ fn a_remote_changes_the_sound_follows_the_selected_tile_row() {
     saved_follows(app, &path, false);
     assert!(!follows_on(app));
 }
+
+#[path = "../../../iptv-nav/tests/support/remote_trace.rs"]
+mod remote_trace;
+
+#[test]
+fn a_late_release_cannot_apply_the_displaced_guide_press() {
+    use iptv_nav::{Phase, RemoteKey as NavKey};
+
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    let mut last = 0;
+    let right_before = logged("action=Some(MoveRight)");
+    for (at, key, phase) in remote_trace::LATE_RELEASE {
+        step(app.run_for(Duration::from_millis(at - last)));
+        last = at;
+        let key = match key {
+            NavKey::Left => RemoteKey::Left,
+            NavKey::Right => RemoteKey::Right,
+            _ => unreachable!("the trace uses guide arrows"),
+        };
+        let phase = match phase {
+            Phase::Down => KeyPhase::Down,
+            Phase::Up => KeyPhase::Up,
+            Phase::Repeat => KeyPhase::Repeat,
+        };
+        step(app.remote_phase(key, phase));
+    }
+    assert_eq!(logged("action=Some(MoveRight)") - right_before, 1);
+    assert_eq!(logged("action=Some(MoveLeft)"), 0);
+    assert!(!iptv_app::player_has_source(0));
+    persistent(app, &lifetime, player);
+}
