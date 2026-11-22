@@ -212,3 +212,180 @@ body.full #list { display: none; }
 }
 #setup .button { text-align: center; background: #285575; }
 #setup .hint { margin-top: 28px; font-size: 22px; }
+
+/* The groups column's Search row, above Favorites. */
+#group-search {
+    height: 76px;
+    line-height: 76px;
+    padding: 0 32px;
+    color: #9AA5AD;
+    border-bottom: 1px solid #262E33;
+}
+.column.active #group-search.focus { background: #9CCBEB; color: #101418; }
+/* A favorite being moved. */
+.column.active li.focus.moving { background: #285575; color: #E3E8EC; outline: 4px solid #9CCBEB; outline-offset: -4px; }
+.column.active li.focus.moving .num, .column.active li.focus.moving .prog { color: #C9D6DF; }
+
+/* ---------- guide grid: 1920x1080, rows of 88px under a 318px head;
+ * channels in the first 400px, then 1496px of time (main.js GRID) ---------- */
+#guide, #search { display: none; }
+body.guide #guide { display: block; }
+body.guide #list { display: none; }
+#guide-head {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1392px;
+    height: 318px;
+    box-sizing: border-box;
+    padding: 40px 48px 0 48px;
+    background: #141C21;
+}
+#guide-list { font-size: 24px; margin-bottom: 18px; }
+#guide-channel { font-size: 26px; color: #9CCBEB; margin-bottom: 8px; }
+#guide-title {
+    font-size: 40px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#guide-time { font-size: 26px; margin-bottom: 18px; }
+#guide-hint { font-size: 22px; }
+/* The video shows through the frame; the rest of the corner is painted. */
+#guide-side {
+    position: absolute;
+    left: 1392px;
+    top: 0;
+    width: 528px;
+    height: 318px;
+    overflow: hidden;
+}
+#guide-frame {
+    position: absolute;
+    left: 24px;
+    top: 24px;
+    width: 480px;
+    height: 270px;
+    outline: 2px solid #262E33;
+    box-shadow: 0 0 0 600px #141C21;
+}
+#guide-pane {
+    position: absolute;
+    left: 0;
+    top: 318px;
+    width: 1920px;
+    height: 762px;
+    background: #141C21;
+    overflow: hidden;
+}
+#guide-ruler {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 50px;
+    border-bottom: 1px solid #262E33;
+}
+#guide-ruler span {
+    position: absolute;
+    top: 10px;
+    padding-left: 8px;
+    border-left: 2px solid #262E33;
+    font-size: 22px;
+    color: #9AA5AD;
+}
+#guide-now {
+    position: absolute;
+    top: 50px;
+    width: 3px;
+    height: 704px;
+    background: #9CCBEB;
+}
+.grow {
+    position: absolute;
+    left: 0;
+    width: 1920px;
+    height: 88px;
+}
+.grow .gch {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 400px;
+    height: 84px;
+    box-sizing: border-box;
+    padding: 0 16px 0 132px;
+    line-height: 84px;
+    background: #1C2429;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.grow .num { position: absolute; left: 12px; width: 44px; text-align: right; color: #9AA5AD; font-size: 24px; }
+.grow img { position: absolute; left: 66px; top: 18px; width: 56px; height: 48px; object-fit: contain; }
+.grow.playing .gch { color: #9CCBEB; }
+.gcells { position: absolute; left: 400px; top: 0; width: 1496px; height: 84px; overflow: hidden; }
+.gc {
+    position: absolute;
+    top: 0;
+    height: 84px;
+    line-height: 84px;
+    margin-left: 4px;
+    padding: 0 14px;
+    box-sizing: border-box;
+    background: #1C2429;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.gc.live { background: #262E33; }
+.gc.ended { color: #9AA5AD; }
+.gc.focus { background: #9CCBEB; color: #101418; }
+
+/* ---------- search: the left 1120px, the preview stays beside it ---------- */
+body.search #search { display: block; }
+body.search #groups, body.search #channels { display: none; }
+#search {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1120px;
+    height: 1080px;
+    box-sizing: border-box;
+    padding: 48px 0 0 0;
+    background: #141C21;
+}
+#search h2 { margin: 0 0 20px 0; padding: 0 48px; font-size: 26px; font-weight: 600; color: #9CCBEB; }
+#search-field { margin: 0 48px; padding: 12px 16px; background: #1C2429; }
+#search-field.focus { outline: 4px solid #9CCBEB; }
+#search-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 32px;
+    padding: 8px 10px;
+    border: 0;
+    background: #262E33;
+    color: #E3E8EC;
+}
+#search-tabs { margin: 24px 48px 12px 48px; height: 48px; }
+#search-tabs span { display: inline-block; margin-right: 24px; padding: 6px 18px; color: #9AA5AD; }
+#search-tabs span.shown { color: #9CCBEB; border-bottom: 3px solid #9CCBEB; }
+#search-tabs span.focus { background: #9CCBEB; color: #101418; }
+#search-rows { list-style: none; margin: 0; padding: 0; }
+#search-rows li {
+    position: relative;
+    height: 92px;
+    padding: 8px 48px 8px 156px;
+    box-sizing: border-box;
+    border-bottom: 1px solid #1C2429;
+}
+#search-rows li.history { padding-left: 48px; line-height: 76px; }
+#search-rows li .num { position: absolute; left: 40px; top: 0; width: 40px; line-height: 92px; text-align: right; color: #9AA5AD; font-size: 24px; }
+#search-rows li img { position: absolute; left: 90px; top: 22px; width: 56px; height: 48px; object-fit: contain; }
+#search-rows li .name, #search-rows li .prog { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#search-rows li .prog { color: #9AA5AD; font-size: 24px; margin-top: 4px; }
+#search-rows li.focus { background: #9CCBEB; color: #101418; }
+#search-rows li.focus .num, #search-rows li.focus .prog { color: #23303A; }
+#search-status { position: absolute; left: 48px; bottom: 32px; width: 1024px; font-size: 22px; }

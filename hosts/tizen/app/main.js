@@ -8,15 +8,19 @@
 
 var STORAGE_KEY = 'patina.source';
 var PREVIEW = [1144, 48, 752, 423]; /* #side + #preview-frame, in 1920x1080 */
+var GUIDE_PREVIEW = [1416, 24, 480, 270]; /* #guide-side + #guide-frame */
 var FULL = [0, 0, 1920, 1080];
 var ROWS = 9;
 var ENTRIES = 11;
+/* The guide grid (style.css): rows, the channel column, the time area. */
+var GRID = { rows: 8, left: 400, width: 1496, top: 50, rowHeight: 88 };
+var SEARCH_ROWS = 8;
 
 /*
  * Timings of this launch, kept in local storage (last 5 launches) so they
  * can be read after a normal launch, without a debugger attached.
  */
-var metrics = { at: Date.now(), keys: [], zaps: [] };
+var metrics = { at: Date.now(), keys: [], guideKeys: [], searchKeys: [], search: [], zaps: [] };
 var METRIC_SAMPLES = 200;
 function mark(name) {
     if (metrics[name] !== undefined) return;
@@ -43,6 +47,9 @@ function saveMetrics() {
 var keyTimes = [];
 
 var worker = new Worker('worker.js');
+/* The query typed but not yet answered: one search is asked at a time and
+ * only the newest text waits, so typing never queues work in the worker. */
+var searching = { busy: false, text: '', pending: null, sentAt: 0, answeredAt: 0 };
 var view = null;
 var drawn = false;
 var bannerTimer = null;
@@ -62,6 +69,18 @@ function progress(p) {
     return Math.max(0, Math.min(1, (now - p.start) / Math.max(1, p.end - p.start)));
 }
 function programLine(p) { return p ? clock(p.start) + '  ' + p.title : 'No information'; }
+var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function day(unix) {
+    var d = new Date(unix * 1000), today = new Date();
+    return d.toDateString() === today.toDateString() ? '' : DAYS[d.getDay()] + ' ';
+}
+function setLogo(img, logo) {
+    logo = logo || '';
+    if (img.getAttribute('data-src') === logo) return;
+    img.setAttribute('data-src', logo);
+    img.style.visibility = logo ? 'visible' : 'hidden';
+    if (logo) img.src = logo; else img.removeAttribute('src');
+}
 
 /* ---------- player ---------- */
 var player = {
@@ -223,8 +242,6 @@ function render() {
     drawn = false;
     var v = view;
     if (!v) return;
-    var drawnAt = performance.now();
-    while (keyTimes.length) sample(metrics.keys, Math.round(drawnAt - keyTimes.shift()));
     if (v.ready) mark('channelsShown');
     if (v.guide) mark('guideShown');
     if (!v.ready) {
@@ -232,24 +249,46 @@ function render() {
         return;
     }
     if (!$('loading').classList.contains('hidden') && $('loading').style.background !== 'transparent') loading(false);
-    var full = v.mode === 'full';
+    var mode = v.mode;
+    var full = mode === 'full';
     document.body.classList.toggle('full', full);
-    player.setRect(full ? FULL : PREVIEW);
+    document.body.classList.toggle('guide', mode === 'guide');
+    document.body.classList.toggle('search', mode === 'search');
+    player.setRect(full ? FULL : mode === 'guide' ? GUIDE_PREVIEW : PREVIEW);
     $('status').textContent = statusText(v.status);
+    if (mode === 'guide') renderGuide(v);
+    else if (mode === 'search') { renderSearch(v.search); renderInfo(v.playing); }
+    else { renderList(v); renderInfo(v.playing); }
+    if (!full) $('banner').classList.add('hidden');
+    /* Key to rendered page: the core's answer and the DOM updates. */
+    var drawnAt = performance.now();
+    var samples = mode === 'guide' ? metrics.guideKeys : mode === 'search' ? metrics.searchKeys : metrics.keys;
+    while (keyTimes.length) sample(samples, Math.round(drawnAt - keyTimes.shift()));
+    if (searching.answeredAt) {
+        sample(metrics.search, Math.round(drawnAt - searching.answeredAt));
+        searching.answeredAt = 0;
+    }
+}
 
+function renderList(v) {
     var groups = $('group-rows').children;
     for (var g = 0; g < groups.length; g++) {
         var item = v.groups.items[g];
         groups[g].style.visibility = item ? 'visible' : 'hidden';
         if (!item) continue;
         groups[g].textContent = item.name;
-        groups[g].classList.toggle('focus', v.groups.start + g === v.groups.focus);
+        groups[g].classList.toggle('focus', !v.searchRow && v.groups.start + g === v.groups.focus);
         groups[g].classList.toggle('shown', item.shown);
     }
+    $('group-search').classList.toggle('focus', !!v.searchRow);
     $('groups').classList.toggle('active', v.pane === 'groups');
     $('channels').classList.toggle('active', v.pane === 'channels');
     $('list-title').textContent = v.title;
-    $('list-count').textContent = v.rows.total ? (v.rows.focus + 1) + ' / ' + v.rows.total : 'No channels';
+    var count = v.rows.total ? (v.rows.focus + 1) + ' / ' + v.rows.total : 'No channels';
+    if (v.reorder) count += ' · Moving: Up/Down one place, Left/Right to the top/end, OK when done';
+    else if (v.title === 'Favorites' && v.rows.total > 1 && v.pane === 'channels') count += ' · Blue: move';
+    else if (v.pane === 'channels') count += ' · Right: TV guide';
+    $('list-count').textContent = count;
 
     var rows = $('channel-rows').children;
     for (var r = 0; r < rows.length; r++) {
@@ -258,20 +297,17 @@ function render() {
         if (!c) continue;
         var li = rows[r];
         li.children[0].textContent = c.number;
-        var img = li.children[1];
-        var logo = c.logo || '';
-        if (img.getAttribute('data-src') !== logo) {
-            img.setAttribute('data-src', logo);
-            img.style.visibility = logo ? 'visible' : 'hidden';
-            if (logo) img.src = logo; else img.removeAttribute('src');
-        }
+        setLogo(li.children[1], c.logo);
         li.children[2].textContent = c.name;
         li.children[3].textContent = c.now ? clock(c.now.start) + '  ' + c.now.title : '';
-        li.classList.toggle('focus', v.rows.start + r === v.rows.focus);
+        var focused = v.rows.start + r === v.rows.focus;
+        li.classList.toggle('focus', focused);
+        li.classList.toggle('moving', focused && !!v.reorder);
         li.classList.toggle('playing', c.playing);
     }
+}
 
-    var p = v.playing;
+function renderInfo(p) {
     $('info').style.visibility = p ? 'visible' : 'hidden';
     if (p) {
         $('info-channel').textContent = p.number + '  ' + p.name;
@@ -279,8 +315,166 @@ function render() {
         $('info-progress').firstChild.style.width = Math.round(progress(p.now) * 100) + '%';
         $('info-next').textContent = p.next ? 'Next  ' + programLine(p.next) : '';
     }
-    if (!full) $('banner').classList.add('hidden');
 }
+
+/* ---------- guide grid ---------- */
+var guideRulerStart = null;
+function makeGuideRows() {
+    var box = $('guide-rows');
+    for (var i = 0; i < GRID.rows; i++) {
+        var row = document.createElement('div');
+        row.className = 'grow';
+        row.style.top = (GRID.top + i * GRID.rowHeight) + 'px';
+        row.innerHTML = '<div class="gch"><span class="num"></span><img alt=""><span class="name"></span></div><div class="gcells"></div>';
+        row.sig = null;
+        row.cellEls = [];
+        row.focused = -1;
+        box.appendChild(row);
+    }
+}
+function renderGuide(v) {
+    var g = v.grid;
+    var perMinute = GRID.width / g.minutes;
+    var f = g.focused;
+    $('guide-list').textContent = v.title + '  ·  ' + (g.rows.total ? (g.rows.focus + 1) + ' / ' + g.rows.total : 'No channels');
+    $('guide-channel').textContent = f ? f.number + '  ' + f.name : '';
+    $('guide-title').textContent = f ? (f.title || 'No information') : '';
+    $('guide-time').textContent = f ? day(f.start) + clock(f.start) + ' – ' + clock(f.end) + (f.airing === 'live' ? '  ·  On now' : '') : '';
+    $('guide-hint').textContent = f && f.catchup ? 'OK: watch from the start · Back: list' : 'OK: watch · Channel Up/Down: page · Back: list';
+    if (guideRulerStart !== g.start) {
+        guideRulerStart = g.start;
+        var ruler = $('guide-ruler');
+        ruler.textContent = '';
+        var end = g.start + g.minutes * 60;
+        for (var t = Math.ceil(g.start / 1800) * 1800; t < end; t += 1800) {
+            var mark = document.createElement('span');
+            mark.style.left = Math.round(GRID.left + (t - g.start) / 60 * perMinute) + 'px';
+            mark.textContent = clock(t);
+            ruler.appendChild(mark);
+        }
+    }
+    var nowX = (g.now - g.start) / 60 * perMinute;
+    var line = $('guide-now');
+    line.style.visibility = nowX >= 0 && nowX <= GRID.width ? 'visible' : 'hidden';
+    line.style.left = Math.round(GRID.left + nowX) + 'px';
+
+    var rows = $('guide-rows').children;
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var item = g.rows.items[i];
+        if (!item) {
+            row.style.visibility = 'hidden';
+            continue;
+        }
+        row.style.visibility = 'visible';
+        /* The core says what changed: a row's cells are rebuilt only when
+         * its signature did; otherwise only the focus mark moves. */
+        if (row.sig !== item.sig) {
+            row.sig = item.sig;
+            var head = row.firstChild;
+            head.children[0].textContent = item.number;
+            setLogo(head.children[1], item.logo);
+            head.children[2].textContent = item.name;
+            row.classList.toggle('playing', item.playing);
+            var box = row.lastChild;
+            var frag = document.createDocumentFragment();
+            row.cellEls = [];
+            for (var c = 0; c < item.cells.length; c++) {
+                var cell = item.cells[c];
+                var el = document.createElement('div');
+                el.className = 'gc ' + cell.airing;
+                el.style.left = Math.round(cell.x * perMinute) + 'px';
+                el.style.width = Math.max(0, Math.round(cell.w * perMinute) - 4) + 'px';
+                el.textContent = cell.title;
+                frag.appendChild(el);
+                row.cellEls.push(el);
+            }
+            box.textContent = '';
+            box.appendChild(frag);
+            row.focused = -1;
+        }
+        if (row.focused !== item.focus) {
+            if (row.focused >= 0 && row.cellEls[row.focused]) row.cellEls[row.focused].classList.remove('focus');
+            if (item.focus >= 0 && row.cellEls[item.focus]) row.cellEls[item.focus].classList.add('focus');
+            row.focused = item.focus;
+        }
+    }
+}
+
+/* ---------- search ---------- */
+function askSearch(text) {
+    if (searching.busy) { searching.pending = text; return; }
+    searching.busy = true;
+    searching.text = text;
+    searching.pending = null;
+    searching.sentAt = performance.now();
+    send({ cmd: 'searchText', text: text });
+}
+/* The newest text goes now (before Done, so Done applies to it). */
+function flushSearch() {
+    var input = $('search-input');
+    if (input.value !== searching.text || searching.pending !== null) {
+        searching.busy = false;
+        askSearch(input.value);
+    }
+}
+function searchAnswered(s) {
+    if (!searching.busy || s.query !== searching.text) return;
+    searching.busy = false;
+    searching.answeredAt = searching.sentAt;
+    if (searching.pending !== null && searching.pending !== searching.text) askSearch(searching.pending);
+    searching.pending = null;
+}
+function renderSearch(s) {
+    var input = $('search-input');
+    var typing = s.focus === 'input' && s.keyboard;
+    /* DOM focus follows the core's focus: the field (and the TV's
+     * keyboard) only while the core says the keyboard is up. */
+    if (!typing && document.activeElement === input) input.blur();
+    if (document.activeElement !== input && input.value !== s.query) input.value = s.query;
+    if (typing && document.activeElement !== input) input.focus();
+    $('search-field').classList.toggle('focus', s.focus === 'input');
+
+    var idle = s.phase === 'idle';
+    $('search-tabs').style.visibility = idle ? 'hidden' : 'visible';
+    var tabs = [['channels', 'Channels'], ['programs', 'Programs']];
+    for (var t = 0; t < tabs.length; t++) {
+        var tab = $('tab-' + tabs[t][0]);
+        var shown = s.tab === tabs[t][0];
+        tab.textContent = tabs[t][1] + '  ' + s.counts[tabs[t][0]];
+        tab.classList.toggle('shown', shown);
+        tab.classList.toggle('focus', shown && s.focus === 'tabs');
+    }
+
+    var rows = $('search-rows').children;
+    var onRows = s.focus === 'result' || s.focus === 'history';
+    for (var r = 0; r < rows.length; r++) {
+        var item = s.rows.items[r];
+        var li = rows[r];
+        li.style.visibility = item ? 'visible' : 'hidden';
+        if (!item) continue;
+        var history = item.kind === 'history';
+        li.classList.toggle('history', history);
+        li.children[0].textContent = history ? '' : item.number;
+        setLogo(li.children[1], history ? '' : item.logo);
+        if (item.kind === 'program') {
+            li.children[2].textContent = item.title;
+            li.children[3].textContent = day(item.start) + clock(item.start) + '–' + clock(item.end) + '  ' + item.name + (item.live ? '  ·  On now' : '');
+        } else {
+            li.children[2].textContent = history ? item.text : item.name;
+            li.children[3].textContent = '';
+        }
+        li.classList.toggle('focus', onRows && s.rows.start + r === s.rows.focus);
+    }
+
+    var status = '';
+    if (idle) status = s.rows.total ? 'Recent searches' : 'Type a channel or a program name.';
+    else if (s.phase === 'none') status = 'Nothing found.' + (s.preparing ? ' Programs are still being prepared…' : '');
+    else if (s.preparing) status = 'Preparing program search…';
+    else status = 'OK: watch · Left/Right: Channels or Programs · Back: the field';
+    $('search-status').textContent = status;
+}
+
 function scheduleRender() {
     if (drawn) return;
     drawn = true;
@@ -305,6 +499,7 @@ worker.onmessage = function (e) {
     case 'view':
         var wasFull = view && view.mode === 'full';
         view = m;
+        if (m.ready && m.mode === 'search') searchAnswered(m.search);
         scheduleRender();
         if (m.ready && m.mode === 'full' && m.playing && !wasFull) {
             setTimeout(function () { showBanner(m.playing); }, 0);
@@ -321,6 +516,7 @@ worker.onmessage = function (e) {
     case 'sourceRejected': loading(false); openSetup(); notice(m.text); break;
     case 'exit': $('confirm').classList.remove('hidden'); break;
     case 'fatal': loading(true, m.text); break;
+    case 'metric': metrics[m.name] = m; saveMetrics(); break;
     }
 };
 
@@ -417,7 +613,10 @@ function setupKey(code) {
 
 /* ---------- keys ---------- */
 var KEYS = { 37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'ok', 10009: 'back',
-    427: 'chup', 428: 'chdown', 33: 'pageup', 34: 'pagedown' };
+    427: 'chup', 428: 'chdown', 33: 'pageup', 34: 'pagedown',
+    406: 'blue', 458: 'guide', 10225: 'search' };
+/* The TV keyboard's Done and Cancel. */
+var IME_DONE = 65376, IME_CANCEL = 65385;
 
 function exit() {
     player.stop();
@@ -438,6 +637,18 @@ document.addEventListener('keydown', function (e) {
     if (code === 403) { openSetup(); return; } /* red */
     if (code === 404) { send({ cmd: 'refreshGuide' }); notice('Updating the TV guide…', true); return; } /* green */
     if (code === 405) { send({ cmd: 'key', key: 'favorite' }); return; } /* yellow */
+    /* While the search field has the focus, the TV keyboard owns the keys;
+     * Done, Cancel and Back leave it. */
+    if (document.activeElement === $('search-input')) {
+        var ime = code === IME_DONE || code === 13 ? 'done' : code === IME_CANCEL ? 'cancel' : code === 10009 ? 'back' : null;
+        if (ime) {
+            e.preventDefault();
+            if (ime === 'done') flushSearch();
+            keyTimes.push(performance.now());
+            send({ cmd: 'key', key: ime });
+        }
+        return;
+    }
     var key = KEYS[code];
     if (!key) return;
     e.preventDefault();
@@ -466,12 +677,15 @@ document.addEventListener('visibilitychange', function () {
 (function start() {
     mark('scriptStart');
     if (hasTizen()) {
-        ['ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow'].forEach(function (k) {
+        ['ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'Guide', 'Search'].forEach(function (k) {
             try { tizen.tvinputdevice.registerKey(k); } catch (e) { /* the remote may lack it */ }
         });
     }
     makeRows($('group-rows'), ENTRIES, false);
     makeRows($('channel-rows'), ROWS, true);
+    makeRows($('search-rows'), SEARCH_ROWS, true);
+    makeGuideRows();
+    $('search-input').addEventListener('input', function () { askSearch(this.value); });
     var source = savedSource();
     if (source) { loading(true, 'Connecting to your provider…'); load(source); } else openSetup();
     /* Program progress and "now" move on with the clock. */

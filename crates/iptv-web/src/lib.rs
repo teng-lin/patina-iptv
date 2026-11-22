@@ -12,8 +12,12 @@
 //! - `store`: what is kept between launches: the stored guide (an
 //!   `iptv_epg` snapshot) with its refresh state, and the user's lists.
 //! - `app`: Live TV: import a source (Xtream or M3U), its guide, the
-//!   channel list beside the preview, full screen and zapping, on
-//!   `iptv_core`'s list and focus models.
+//!   channel list beside the preview, full screen and zapping, moving
+//!   favorites, on `iptv_core`'s list, focus and reorder models.
+//! - `grid`: the guide grid, on `iptv_core`'s guide focus, emitting only
+//!   the rows and time on screen.
+//! - `search`: channel and program search with `iptv_search`'s indexes and
+//!   search screen state.
 //!
 //! Live channels only: movies and series are not imported here.
 //!
@@ -31,7 +35,11 @@
 #[cfg(feature = "bridge")]
 mod app;
 mod exec;
+#[cfg(feature = "bridge")]
+mod grid;
 mod host;
+#[cfg(feature = "bridge")]
+mod search;
 #[cfg(feature = "bridge")]
 mod store;
 

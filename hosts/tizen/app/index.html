@@ -12,7 +12,7 @@
 <video id="fallback" playsinline></video>
 
 <div id="list">
-  <section id="groups" class="column"><h2>Groups</h2><ol id="group-rows"></ol></section>
+  <section id="groups" class="column"><h2>Groups</h2><div id="group-search">Search</div><ol id="group-rows"></ol></section>
   <section id="channels" class="column"><h2 id="list-title">Channels</h2><ol id="channel-rows"></ol>
     <div id="list-count" class="muted"></div></section>
   <section id="side">
@@ -25,6 +25,30 @@
     </div>
     <div id="status" class="muted"></div>
   </section>
+</div>
+
+<div id="guide">
+  <div id="guide-head">
+    <div id="guide-list" class="muted"></div>
+    <div id="guide-channel"></div>
+    <div id="guide-title"></div>
+    <div id="guide-time" class="muted"></div>
+    <div id="guide-hint" class="muted"></div>
+  </div>
+  <div id="guide-side"><div id="guide-frame"></div></div>
+  <div id="guide-pane">
+    <div id="guide-ruler"></div>
+    <div id="guide-rows"></div>
+    <div id="guide-now"></div>
+  </div>
+</div>
+
+<div id="search">
+  <h2>Search</h2>
+  <div id="search-field"><input id="search-input" type="text" autocomplete="off" placeholder="A channel or a program"></div>
+  <div id="search-tabs"><span id="tab-channels"></span><span id="tab-programs"></span></div>
+  <ol id="search-rows"></ol>
+  <div id="search-status" class="muted"></div>
 </div>
 
 <div id="banner" class="hidden">
@@ -47,7 +71,7 @@
   <div class="field" data-for="xtream"><label>Password</label><input id="password" type="password" autocomplete="off"></div>
   <div class="field" data-for="m3u"><label>Playlist URL</label><input id="m3u" type="url" autocomplete="off"></div>
   <div class="field button" data-save>Save and load</div>
-  <p class="muted hint">Later: red changes the playlist, green updates the TV guide, yellow adds or removes a favorite.</p>
+  <p class="muted hint">Later: red changes the playlist, green updates the TV guide, yellow adds or removes a favorite, blue shows Favorites.</p>
 </div>
 
 <script src="main.js"></script>

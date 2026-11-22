@@ -100,8 +100,9 @@ fn guide() -> String {
     let mut xml = String::from("<tv>");
     for id in ["one", "two", "three"] {
         xml += &format!("<channel id=\"{id}.ex\"><display-name>Example</display-name></channel>");
-        for (i, name) in ["Morning", "Noon"].iter().enumerate() {
-            let start = hour + i as i64 * 3600;
+        // An hour that has ended, then the one on now and the next.
+        for (i, name) in ["Dawn", "Morning", "Noon"].iter().enumerate() {
+            let start = hour + (i as i64 - 1) * 3600;
             xml += &format!(
                 "<programme start=\"{}\" stop=\"{}\" channel=\"{id}.ex\"><title>{id} {name}</title></programme>",
                 xmltv_time(start),
@@ -300,7 +301,7 @@ fn xtream(url: &str) -> Result<(u16, String), u32> {
     let body = if url.contains("action=get_live_categories") {
         r#"[{"category_id":"1","category_name":"Demo News"},{"category_id":"2","category_name":"Demo Sport"}]"#.to_owned()
     } else if url.contains("action=get_live_streams") {
-        r#"[{"num":1,"name":"Demo One","stream_type":"live","stream_id":101,"category_id":"1","epg_channel_id":"one.ex","stream_icon":""},
+        r#"[{"num":1,"name":"Demo One","stream_type":"live","stream_id":101,"category_id":"1","epg_channel_id":"one.ex","stream_icon":"","tv_archive":1,"tv_archive_duration":3},
             {"num":2,"name":"Demo Two","stream_type":"live","stream_id":102,"category_id":"1","epg_channel_id":"two.ex","stream_icon":""},
             {"num":3,"name":"Demo Three","stream_type":"live","stream_id":103,"category_id":"2","epg_channel_id":"three.ex","stream_icon":""}]"#
             .to_owned()
@@ -329,11 +330,17 @@ fn an_xtream_account_plays_raw_ts_from_its_live_path() {
     assert_eq!(view["guide"], true, "{view}");
     assert_eq!(view["rows"]["items"][1]["now"]["title"], "two Morning");
 
-    // Page Down clamps to the last row; Channel Up from nothing playing zaps
-    // from the focused row; Right does nothing in the channel column.
+    // Page Down clamps to the last row; Right opens the guide grid there
+    // and Back returns to the same row; Channel Up from nothing playing
+    // zaps from the focused row.
     send(serde_json::json!({ "cmd": "key", "key": "pagedown" }));
     assert_eq!(last_view(&fake)["rows"]["focus"], 2);
     send(serde_json::json!({ "cmd": "key", "key": "right" }));
+    assert_eq!(last_view(&fake)["mode"], "guide");
+    send(serde_json::json!({ "cmd": "key", "key": "back" }));
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "list");
+    assert_eq!(view["rows"]["focus"], 2);
     send(serde_json::json!({ "cmd": "key", "key": "chup" }));
     let play = fake
         .events
@@ -788,4 +795,351 @@ fn a_delivery_asks_for_no_extra_poll() {
         "the export's own poll suffices"
     );
     assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+fn key(k: &str) {
+    send(serde_json::json!({ "cmd": "key", "key": k }));
+}
+
+fn last_of(fake: &Fake, kind: &str) -> Value {
+    fake.events
+        .borrow()
+        .iter()
+        .rev()
+        .find(|e| e["type"] == kind)
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn m3u_launch(fake: &Rc<Fake>) {
+    send(
+        serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "http://lists.example.com/list.m3u" } }),
+    );
+    deliver(fake);
+}
+
+#[test]
+fn the_guide_grid_moves_through_channels_and_time_and_plays() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+
+    // The Guide key opens the grid of the list shown, on its first row.
+    key("guide");
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "guide", "{view}");
+    let grid = &view["grid"];
+    assert_eq!(grid["rows"]["total"], 3);
+    assert_eq!(grid["minutes"], crate::grid::GRID_MINUTES);
+    assert_eq!(grid["focused"]["title"], "one Morning");
+    assert_eq!(grid["focused"]["airing"], "live");
+    let row = &grid["rows"]["items"][0];
+    assert_eq!(row["name"], "Example One");
+    let titles: Vec<&str> = row["cells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["title"].as_str().unwrap())
+        .collect();
+    assert!(titles.contains(&"one Morning"), "{titles:?}");
+    let start = grid["start"].as_i64().unwrap();
+    let now = (NOW_MS / 1000.0) as i64;
+    assert!(start <= now && now < start + 120 * 60, "now is on screen");
+
+    // Down, Right: the next channel's next program; Left back; Left again
+    // into the hour that ended.
+    key("down");
+    key("right");
+    let focused = last_view(&fake)["grid"]["focused"].clone();
+    assert_eq!(focused["title"], "two Noon");
+    assert_eq!(focused["airing"], "upcoming");
+    key("left");
+    key("left");
+    let focused = last_view(&fake)["grid"]["focused"].clone();
+    assert_eq!(focused["title"], "two Dawn", "{focused}");
+    assert_eq!(focused["airing"], "ended");
+    assert_eq!(focused["catchup"], false, "an M3U without catch-up");
+
+    // OK plays the channel live and goes full screen; Back returns to the
+    // grid where it was.
+    key("ok");
+    let play = last_of(&fake, "play");
+    assert_eq!(play["url"], "http://media.example.com/two.ts");
+    assert!(play["archive"].is_null());
+    assert_eq!(last_view(&fake)["mode"], "full");
+    key("back");
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "guide");
+    assert_eq!(view["grid"]["focused"]["title"], "two Dawn");
+    let playing_row = &view["grid"]["rows"]["items"][1];
+    assert_eq!(playing_row["playing"], true);
+
+    // Back returns to now first, then to the list on the grid's channel.
+    key("back");
+    assert_eq!(last_view(&fake)["grid"]["focused"]["title"], "two Morning");
+    key("chdown");
+    assert_eq!(
+        last_view(&fake)["grid"]["rows"]["focus"],
+        2,
+        "a page down clamps"
+    );
+    key("back");
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "list");
+    assert_eq!(view["rows"]["focus"], 2);
+}
+
+#[test]
+fn the_grid_plays_an_archived_program_from_its_start() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    send(serde_json::json!({
+        "cmd": "source",
+        "source": { "kind": "xtream", "server": "http://tv.example.com", "username": "demo", "password": "secret" },
+    }));
+    deliver_with(&fake, &xtream);
+    key("right");
+    key("left");
+    let focused = last_view(&fake)["grid"]["focused"].clone();
+    assert_eq!(focused["title"], "one Dawn", "{focused}");
+    assert_eq!(focused["catchup"], true);
+    key("ok");
+    let play = last_of(&fake, "play");
+    let now = (NOW_MS / 1000.0) as i64;
+    let dawn = now - now.rem_euclid(3600) - 3600;
+    assert_eq!(play["archive"], dawn);
+    let url = play["url"].as_str().unwrap();
+    assert!(url.contains("timeshift"), "{url}");
+}
+
+#[test]
+fn search_finds_channels_at_once_and_programs_once_indexed() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+
+    // Search opens with the keyboard on the query field.
+    key("search");
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "search");
+    let search = &view["search"];
+    assert_eq!(search["focus"], "input");
+    assert_eq!(search["keyboard"], true);
+    assert_eq!(search["preparing"], true);
+
+    // Channels are found before the program index is built.
+    send(serde_json::json!({ "cmd": "searchText", "text": "two" }));
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["phase"], "results");
+    assert_eq!(search["counts"]["channels"], 1);
+    assert_eq!(search["counts"]["programs"], 0);
+    // The index builds in steps between deliveries, then the query runs
+    // again with programs.
+    deliver(&fake);
+    let metric = last_of(&fake, "metric");
+    assert_eq!(metric["name"], "searchIndex");
+    assert_eq!(metric["programs"], 9);
+    assert!(metric["bytes"].as_u64().unwrap() > 0);
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["preparing"], false);
+    // Two Morning (on now) and Two Noon; Dawn has ended.
+    assert_eq!(search["counts"]["programs"], 2, "{search}");
+
+    // Done closes the keyboard and focuses the first result; OK plays it.
+    key("done");
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(
+        (search["keyboard"].clone(), search["focus"].clone()),
+        (false.into(), "result".into())
+    );
+    assert_eq!(search["rows"]["items"][0]["name"], "Example Two");
+    key("ok");
+    assert_eq!(
+        last_of(&fake, "play")["url"],
+        "http://media.example.com/two.ts"
+    );
+    assert_eq!(last_view(&fake)["mode"], "full");
+    // Back: the same results, the keyboard still closed.
+    key("back");
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["query"], "two");
+    assert_eq!(search["focus"], "result");
+
+    // Programs: Right shows their tab; a program plays its channel.
+    key("right");
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["tab"], "programs");
+    let first = &search["rows"]["items"][0];
+    assert_eq!(first["title"], "two Morning");
+    assert_eq!(first["live"], true);
+    key("down");
+    key("ok");
+    assert_eq!(
+        last_of(&fake, "play")["url"],
+        "http://media.example.com/two.ts"
+    );
+    key("back");
+
+    // A query only programs match shows their tab.
+    key("up");
+    key("up");
+    key("up");
+    assert_eq!(last_view(&fake)["search"]["focus"], "input");
+    key("ok");
+    assert_eq!(last_view(&fake)["search"]["keyboard"], true);
+    send(serde_json::json!({ "cmd": "searchText", "text": "noon" }));
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["tab"], "programs", "{search}");
+    assert_eq!(search["counts"]["programs"], 3);
+    assert_eq!(search["counts"]["channels"], 0);
+
+    // Cancel hides the keyboard; Back then leaves to the list. What was
+    // searched is kept.
+    key("cancel");
+    assert_eq!(last_view(&fake)["search"]["keyboard"], false);
+    key("back");
+    assert_eq!(last_view(&fake)["mode"], "list");
+    let lists: Value = fake
+        .kv
+        .borrow()
+        .iter()
+        .find(|(k, _)| k.starts_with("lists:"))
+        .map(|(_, v)| serde_json::from_slice(v).unwrap())
+        .unwrap();
+    assert_eq!(lists["searches"], serde_json::json!(["two"]));
+
+    // From the groups column: Up above Favorites is the Search row, and
+    // the history shows before a query.
+    key("left");
+    for _ in 0..3 {
+        key("up");
+    }
+    assert_eq!(last_view(&fake)["searchRow"], true);
+    key("ok");
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["phase"], "idle");
+    assert_eq!(search["rows"]["items"][0]["text"], "two");
+    assert_eq!(search["preparing"], false, "the index is kept");
+}
+
+fn favorite_names(fake: &Fake) -> Vec<String> {
+    last_view(fake)["rows"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn favorites_are_reordered_in_move_mode_and_keep_their_order() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    // Blue with no favorites: the empty Favorites group, with a hint.
+    key("blue");
+    assert_eq!(last_view(&fake)["title"], "Favorites");
+    assert_eq!(last_view(&fake)["pane"], "groups");
+    key("right");
+    // Back to All channels; Yellow on every row.
+    key("down");
+    key("down");
+    key("right");
+    for _ in 0..3 {
+        key("favorite");
+        key("down");
+    }
+    // Blue: the Favorites list, in the order added.
+    key("blue");
+    let view = last_view(&fake);
+    assert_eq!(view["title"], "Favorites");
+    assert_eq!(view["pane"], "channels");
+    assert_eq!(
+        favorite_names(&fake),
+        ["Example One", "Example Two", "Example Three"]
+    );
+
+    // Blue again: move mode. Down twice moves the first to the end; the
+    // focus follows it. Other keys do nothing meanwhile.
+    key("blue");
+    assert_eq!(last_view(&fake)["reorder"], true);
+    key("down");
+    key("favorite");
+    key("down");
+    let view = last_view(&fake);
+    assert_eq!(view["rows"]["focus"], 2);
+    assert_eq!(
+        favorite_names(&fake),
+        ["Example Two", "Example Three", "Example One"]
+    );
+    // Not stored until the mode ends.
+    let stored = |fake: &Fake| -> Value {
+        fake.kv
+            .borrow()
+            .iter()
+            .find(|(k, _)| k.starts_with("lists:"))
+            .map(|(_, v)| serde_json::from_slice(v).unwrap())
+            .unwrap()
+    };
+    let before = stored(&fake);
+    key("ok");
+    assert_eq!(last_view(&fake)["reorder"], false);
+    let after = stored(&fake);
+    assert_ne!(before["favorites"], after["favorites"]);
+    assert_eq!(after["favorites"].as_array().unwrap().len(), 3);
+
+    // Left in move mode: to the top; Back ends it too.
+    key("blue");
+    key("left");
+    key("back");
+    assert_eq!(
+        favorite_names(&fake),
+        ["Example One", "Example Two", "Example Three"]
+    );
+    key("down");
+    key("blue");
+    key("right");
+    key("blue");
+    assert_eq!(
+        favorite_names(&fake),
+        ["Example One", "Example Three", "Example Two"]
+    );
+    assert_eq!(last_view(&fake)["rows"]["focus"], 2);
+
+    // The next launch keeps the order.
+    m3u_launch(&fake);
+    key("blue");
+    assert_eq!(
+        favorite_names(&fake),
+        ["Example One", "Example Three", "Example Two"]
+    );
+}
+
+#[test]
+fn lists_stored_before_search_and_reordering_still_load() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    key("down");
+    key("favorite");
+    // The record as the previous version wrote it: no searches.
+    let (k, mut v): (String, Value) = fake
+        .kv
+        .borrow()
+        .iter()
+        .find(|(k, _)| k.starts_with("lists:"))
+        .map(|(k, v)| (k.clone(), serde_json::from_slice(v).unwrap()))
+        .unwrap();
+    v.as_object_mut().unwrap().remove("searches");
+    fake.kv.borrow_mut().insert(k, v.to_string().into_bytes());
+    m3u_launch(&fake);
+    key("blue");
+    assert_eq!(favorite_names(&fake), ["Example Two"]);
+    key("search");
+    assert!(
+        last_view(&fake)["search"]["rows"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }

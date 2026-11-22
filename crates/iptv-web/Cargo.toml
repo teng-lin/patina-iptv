@@ -24,6 +24,7 @@ iptv-epg.workspace = true
 iptv-guide.workspace = true
 iptv-import.workspace = true
 iptv-providers.workspace = true
+iptv-search.workspace = true
 serde_json.workspace = true
 url.workspace = true
 
