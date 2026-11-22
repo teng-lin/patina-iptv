@@ -18,6 +18,92 @@ fn preview(app: &crate::headless::Headless) -> bool {
         .0
         < 1900.0
 }
+
+#[test]
+fn guide_activates_a_live_channel_twice_and_wraps_rows_and_groups() {
+    use crate::tv_shared_controls::{persistent, record_players};
+
+    let Some(home) = isolated!() else { return };
+    let mut observed = None;
+    let mut f = start_with_setup(home, Settings::new(), true, |app| {
+        observed = Some(record_players(app));
+    });
+    let lifetime = observed.unwrap();
+    let app = &mut f.app;
+    step(app.set_environment("desktop keyboard and pointer", |env| {
+        env.idiom = nsh_core::platform::Idiom::Desktop;
+        env.os = nsh_core::platform::Os::Linux;
+    }));
+    let player = lifetime.lock().unwrap().players[0];
+    let row = |channel: &str| format!("id:guide-ui >> label:{channel}");
+    let selected = |app: &crate::Headless, selector: &str| {
+        app.screen().accessibility_state(selector).unwrap().selected
+    };
+
+    step(app.press_key("enter"));
+    step(app.run_for(Duration::from_millis(500)));
+    step(app.wait_until(
+        "Local A plays in the preview",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+    assert!(preview(app));
+    assert!(selected(app, &row("Local A")));
+    let opens = iptv_app::player_opens(0);
+
+    step(app.press_key("up"));
+    assert!(
+        selected(app, &row("Local C")),
+        "Up wraps with a playing preview"
+    );
+    step(app.press_key("down"));
+    assert!(
+        selected(app, &row("Local A")),
+        "Down wraps to the first row"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("id:player-banner >> text:/Local A$/"));
+    assert!(!preview(app));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    persistent(app, &lifetime, player);
+
+    step(app.back());
+    step(app.back());
+    step(app.press_key("tab"));
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.wait_for("text:☰  Favorites"));
+    step(app.press_key("up"));
+    step(app.wait_for("text:☰  Sport"));
+    step(app.press_key("down"));
+    step(app.wait_for("text:☰  Favorites"));
+    step(app.press_key("down"));
+    step(app.press_key("down"));
+    step(app.press_key("right"));
+    assert!(selected(app, &row("Local A")));
+
+    step(app.press(&row("Local B")));
+    step(app.run_for(Duration::from_millis(500)));
+    step(app.wait_until(
+        "Local B plays in the preview",
+        Duration::from_secs(5),
+        |_| {
+            lifetime
+                .lock()
+                .unwrap()
+                .sources
+                .last()
+                .is_some_and(|url| url == "http://example.test/b")
+        },
+    ));
+    assert!(preview(app));
+    assert!(selected(app, &row("Local B")));
+    step(app.press(&row("Local B")));
+    step(app.wait_for("id:player-banner >> text:/Local B$/"));
+    assert!(!preview(app));
+    assert_eq!(iptv_app::player_opens(0), opens + 1);
+    persistent(app, &lifetime, player);
+}
 #[test]
 fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullscreen_timeout() {
     let Some(home) = isolated!() else { return };

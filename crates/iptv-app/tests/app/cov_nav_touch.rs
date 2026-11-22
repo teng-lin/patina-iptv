@@ -252,8 +252,7 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
     step(app.set_viewport(Size::new(px(1280.0), px(720.0))));
     // Out of full screen (Exit multiview left it there).
     step(app.press_key("f"));
-    step(app.wait_for("text:+ Add playlist"));
-    step(app.press("text:+ Add playlist"));
+    crate::browse_fixture::open_add_playlist(app);
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Xtream Codes login"));
     step(app.press("text:Xtream Codes login"));

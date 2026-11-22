@@ -178,7 +178,6 @@ fn restored_list(
     let mut focus = Focus::at(now);
     focus.visible = kept.focus.visible;
     focus.pane = kept.focus.pane;
-    focus.preview_origin = kept.focus.preview_origin;
     focus.rail = kept.focus.rail;
     focus.group = kept.list.find(&*catalog);
     let list = Rc::new(ChannelList::build(
@@ -586,30 +585,27 @@ mod identity_tests {
     }
 
     #[test]
-    fn preview_bookmarks_restore_sidebar_origin_and_channel_by_identity() {
-        for pane in [Pane::Guide, Pane::Groups, Pane::Rail] {
-            let before: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b"])]));
-            let mut focus = Focus::at(0);
-            focus.pane = pane;
-            focus.rail = RailItem::Search;
-            focus.group = if pane == Pane::Groups { FAVORITES } else { ALL };
-            focus.channel = usize::from(pane != Pane::Guide);
-            let list = Rc::new(ChannelList::build(focus.group, &*before, &[0, 1], &[]));
-            let key = ListView::new(before.clone(), list.clone()).channel_key(focus.channel);
-            assert!(focus.focus_preview(true));
-            let kept = keep_list(focus, list, before);
-            let after: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["b", "a"])]));
-            let (mut restored, list) = restored_list(kept, after.clone(), &[0, 1], &[], 60);
-            assert_eq!(restored.pane, Pane::Preview);
-            assert_eq!(restored.layout_pane(), pane);
-            assert_eq!(
-                ListView::new(after, list).channel_key(restored.channel),
-                key
-            );
-            restored.retain_preview(false);
-            assert_eq!(restored.pane, pane, "Stop after a catalog refresh");
-            assert_eq!(restored.rail, RailItem::Search);
-        }
+    fn preview_bookmark_restores_search_and_channel_by_identity() {
+        let before: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["a", "b"])]));
+        let mut focus = Focus::at(0);
+        focus.pane = Pane::Rail;
+        focus.rail = RailItem::Search;
+        focus.channel = 1;
+        let list = Rc::new(ChannelList::build(focus.group, &*before, &[0, 1], &[]));
+        let key = ListView::new(before.clone(), list.clone()).channel_key(focus.channel);
+        assert!(focus.focus_preview(true));
+        let kept = keep_list(focus, list, before);
+        let after: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["b", "a"])]));
+        let (mut restored, list) = restored_list(kept, after.clone(), &[0, 1], &[], 60);
+        assert_eq!(restored.pane, Pane::Preview);
+        assert_eq!(restored.layout_pane(), Pane::Rail);
+        assert_eq!(
+            ListView::new(after, list).channel_key(restored.channel),
+            key
+        );
+        restored.retain_preview(false);
+        assert_eq!(restored.pane, Pane::Rail, "Stop after a catalog refresh");
+        assert_eq!(restored.rail, RailItem::Search);
     }
 
     #[test]

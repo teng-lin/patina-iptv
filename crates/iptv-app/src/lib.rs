@@ -26,8 +26,7 @@ pub mod guide {
         group_start, now_minute, program_at, secs_to_next_minute, unix_of,
     };
     pub use iptv_presentation::guide::{
-        Focus, Move, PAST, Pane, PreviewOrigin, ProgramSelection, STEP, home_window, moves,
-        page_row, view_range,
+        Focus, Move, PAST, Pane, ProgramSelection, STEP, home_window, moves, page_row, view_range,
     };
 }
 #[cfg(all(

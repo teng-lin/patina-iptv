@@ -330,7 +330,7 @@ fn stored_playlists_switch_refresh_and_go() {
     // explicit single-source browsing still stops the previous playback.
     rail(&mut app, "Playlists");
     step(app.wait_for("text:first"));
-    step(app.press("text:+ Add playlist >> nth=1"));
+    step(app.press("id:playlists-screen >> text:+ Add playlist"));
     add(&mut app, "second.m3u");
     step(app.wait_for_within("text:Beta One · second", IMPORT));
     step(app.wait_for("text:★ Alpha Two · first"));
@@ -630,7 +630,7 @@ fn stored_playlists_switch_refresh_and_go() {
     // Its guide typed in the form must load: first a link that does not,
     // then one that does.
     rail(&mut app, "Playlists");
-    step(app.press("text:+ Add playlist >> nth=1"));
+    step(app.press("id:playlists-screen >> text:+ Add playlist"));
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));

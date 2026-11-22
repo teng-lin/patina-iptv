@@ -12,3 +12,54 @@ pub fn two_step_preview(home: &std::path::Path) {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), s.to_json_string()).unwrap();
 }
+
+/// From the guide, open the rail beside the groups and tap one of its items.
+#[track_caller]
+pub fn open_rail_item(app: &mut crate::Headless, label: &str) {
+    use crate::personalization::step;
+
+    step(app.press("text:/^☰  /"));
+    let item = format!("id:navigation-rail >> label:{label}");
+    step(app.wait_for(&item));
+    step(app.press(&item));
+}
+
+/// Open the playlist form from the guide's navigation rail.
+#[track_caller]
+pub fn open_add_playlist(app: &mut crate::Headless) {
+    use crate::personalization::step;
+
+    open_rail_item(app, "Playlists");
+    let add = "id:playlists-screen >> text:+ Add playlist";
+    step(app.wait_for(add));
+    step(app.press(add));
+}
+
+/// Start the focused live channel in the guide, then expand its preview.
+#[track_caller]
+pub fn choose_fullscreen(app: &mut crate::Headless) {
+    activate_twice(app, |app| app.press_key("enter"));
+}
+
+/// Start a live channel by tapping its guide row, then expand its preview.
+#[track_caller]
+pub fn tap_fullscreen(app: &mut crate::Headless, row: &str) {
+    activate_twice(app, |app| app.press(row));
+}
+
+#[track_caller]
+fn activate_twice(
+    app: &mut crate::Headless,
+    activate: impl Fn(&mut crate::Headless) -> Result<(), String>,
+) {
+    use crate::personalization::step;
+    use std::time::Duration;
+
+    step(activate(app));
+    step(app.wait_until(
+        "the live channel opens in the preview",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+    step(activate(app));
+}

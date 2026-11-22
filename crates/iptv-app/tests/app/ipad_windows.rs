@@ -199,8 +199,7 @@ pub(crate) fn header_fits_as(
         want.shortcuts
     );
     if want.shortcuts == Shortcuts::Below {
-        // The row scrolls sideways where the window is narrower than it:
-        // the row lies inside the window, its first shortcuts start in it.
+        // The row under the preview keeps the group switcher inside the window.
         let row = bounds(app, "guide-header-shortcuts", &what);
         assert!(row[1] >= preview[1] + preview[3], "row {row:?}: {what}");
         assert!(
@@ -213,22 +212,12 @@ pub(crate) fn header_fits_as(
             list[0] >= -0.5 && list[0] < w,
             "the list {list:?} starts in the window: {what}"
         );
-        // Movies and Shows on the same row, by scrolling it where needed.
-        for shortcut in ["open-movies", "open-shows"] {
-            let b = bounds(app, shortcut, &what);
-            assert!(
-                b[1] >= row[1] - 0.5 && b[1] + b[3] <= row[1] + row[3] + 0.5,
-                "{shortcut} {b:?} in the row {row:?}: {what}"
-            );
-        }
     } else {
-        for shortcut in ["open-movies", "open-shows"] {
-            inside(
-                bounds(app, shortcut, &what),
-                size,
-                &format!("{shortcut}, {what}"),
-            );
-        }
+        inside(
+            bounds_of(app, "id:guide-header >> text:/^☰  /", &what),
+            size,
+            &format!("the group switcher, {what}"),
+        );
     }
     let left = find(app, |n| {
         n.text
@@ -426,7 +415,7 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     let surface = player(&app);
 
     // A movie by touch, at 37 s of 2 min.
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play"));
@@ -557,7 +546,7 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     assert_eq!(sources(&seen), movie);
 
     // A show's details with its second episode selected by touch.
-    step(app.press("id:open-shows"));
+    crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
@@ -619,7 +608,7 @@ fn ipad_empty_movies_and_search_fit_split_view_at_large_text() {
         |_| {},
     );
     let app = &mut fixture.app;
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(app, "Movies");
     step(app.wait_for(&format!("text:{M3U_ONLY}")));
     for text in TEXT {
         for size in WINDOWS {

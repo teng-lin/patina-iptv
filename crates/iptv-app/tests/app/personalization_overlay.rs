@@ -30,8 +30,7 @@ fn overlay_choosing_a_channel_watches_it_full_screen_by_default() {
     let Some(home) = isolated!() else { return };
     let mut f = start(home, overlay(None), true);
     let app = &mut f.app;
-    // OK tunes after the switch delay and closes the guide, as in the
-    // preview layout: one rule for both layouts.
+    // In the overlay layout, OK tunes after the switch delay and closes the guide.
     step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
     step(app.wait_for("id:player-banner"));

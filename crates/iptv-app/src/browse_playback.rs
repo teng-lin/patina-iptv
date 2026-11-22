@@ -70,12 +70,6 @@ fn current(ui: Ui) -> Option<Target> {
 fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     let s = crate::settings::read(ui);
     let at = &iptv_settings::Target::Global;
-    let stay = match surface {
-        // One choice for both guide layouts: choosing a channel watches it
-        // full screen unless the viewer keeps the guide open.
-        Some(Surface::Guide | Surface::Overlay) => keys::GUIDE_STAY_ON_GUIDE,
-        _ => keys::GUIDE_STAY_ON_LIST,
-    };
     Policy {
         autoplay: !crate::desktop::recorder_only_startup()
             && surface != Some(Surface::Player)
@@ -86,7 +80,11 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         } else {
             s.duration_ms(keys::FULLSCREEN_TIMEOUT, at).max(0) as u64
         },
-        stay: surface == Some(Surface::Player) || s.bool(stay, at),
+        stay: match surface {
+            Some(Surface::Guide | Surface::Player) => true,
+            Some(Surface::Overlay) => s.bool(keys::GUIDE_STAY_ON_GUIDE, at),
+            _ => s.bool(keys::GUIDE_STAY_ON_LIST, at),
+        },
     }
 }
 /// Holds guide autoplay on the focused channel until the viewer moves to

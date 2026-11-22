@@ -127,13 +127,8 @@ fn native_pip_reports_revoke_and_restore_controls_without_reopening_playback() {
     step(app.wait_for("text:Test Channel One"));
     step(app.set_environment("TV input", |environment| environment.idiom = Idiom::Tv));
     let app = &mut app;
-    step(app.press_key("enter"));
+    crate::browse_fixture::choose_fullscreen(app);
     step(app.wait_for("id:player-banner"));
-    step(
-        app.wait_until("initial player source", Duration::from_secs(5), |_| {
-            iptv_app::player_opens(0) > 0 && iptv_app::player_has_source(0)
-        }),
-    );
     step(app.press_key("m"));
     step(app.wait_for(STRIP));
     step(app.wait_for(PIP));
@@ -212,18 +207,9 @@ fn picture_in_picture_opens_a_window_of_its_own_on_the_same_player() {
     step(app.wait_for("text:Test Channel One"));
     step(app.set_environment("a TV", |e| e.idiom = Idiom::Tv));
 
-    // Full screen.
-    // OK on a channel tunes it after the switch delay and goes full
-    // screen (`guide.stay_on_guide` off by default).
-    step(app.press_key("enter"));
+    // Tune the channel in the preview, then go full screen.
+    crate::browse_fixture::choose_fullscreen(&mut app);
     step(app.wait_for("id:player-banner"));
-    // The banner renders before asynchronous tuning reaches the native player.
-    // Count PiP's opens only after the initial stream has actually opened.
-    step(app.wait_until(
-        "initial native stream opens",
-        Duration::from_secs(5),
-        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) > 0,
-    ));
     let before = main_size(&mut app);
     let opens = iptv_app::player_opens(0);
 
@@ -308,9 +294,7 @@ fn picture_in_picture_opens_a_window_of_its_own_on_the_same_player() {
     assert!(!iptv_app::player_has_source(0), "playback stopped");
 
     // The system closing it (Super+W) does the same.
-    // OK on a channel tunes it after the switch delay and goes full
-    // screen (`guide.stay_on_guide` off by default).
-    step(app.press_key("enter"));
+    crate::browse_fixture::choose_fullscreen(&mut app);
     step(app.wait_for("id:player-banner"));
     enter(&mut app);
     step(app.press_window_close("pip"));

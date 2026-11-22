@@ -68,10 +68,10 @@ back to live.
 
 | Key | Tap | Hold |
 |---|---|---|
-| Up / Down | Move between channels; Up from the first row focuses the mini-player when something plays | Repeats |
+| Up / Down | Move between channels, wrapping at the first and last rows. The groups column wraps between its first and last entries. | Repeats |
 | Left | Earlier programs, then the groups column, then the rail | The groups column |
 | Right | Later programs | Repeats |
-| OK | Choose: plays full screen (or keeps the guide with **Keep the guide after choosing**); the playing channel returns to full screen; a past program with replay replays; any other program opens its details | The program and channel menu |
+| OK | Choose: tunes a live channel in the TV Guide preview; the playing channel returns to full screen; a past program with replay replays; any other program opens its details | The program and channel menu |
 | Menu | The program and channel menu; on the groups column, the group's options | – |
 | Back | Hint card, then back to the programs on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
 | Ch+ / Ch− and Page Up / Down | A page of channels | Repeats |
@@ -85,14 +85,16 @@ moving on before then cancels it.
 
 ### Mini-player in the guide
 
+Press Up from Search in the navigation rail to focus the playing video.
+
 | Key | Tap | Hold |
 |---|---|---|
-| Down | Back to the channel row it was reached from | Repeats |
+| Down | Back to Search in the rail | Repeats |
 | Left | The groups column (on release: Left has a hold in the guide) | – (the guide's hold, the groups, does nothing here) |
 | Right | The channel rows | Repeats |
 | OK | The playing stream full screen, as it plays (no new stream), even if the guide focuses another channel | Opens the play bar full screen |
 | Menu | The play bar, full screen | – |
-| Back | Back to the channel row it was reached from | The playing stream full screen, as it plays |
+| Back | Back to Search in the rail | The playing stream full screen, as it plays |
 
 ## Full-screen live video
 

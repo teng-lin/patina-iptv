@@ -58,23 +58,25 @@ pub enum Pane {
     Preview,
 }
 
-/// The content beneath a focused preview, restored by Down, Back or Stop.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PreviewOrigin {
-    /// The first row of the current guide list.
-    Guide,
-    /// The built-in Favorites group, including when it is empty.
-    Favorites,
-    /// The navigation rail's Search action.
-    Search,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Move {
     Up,
     Down,
     Left,
     Right,
+}
+
+impl Move {
+    pub(crate) fn wrap_vertical(self, current: usize, count: usize) -> usize {
+        let last = count.saturating_sub(1);
+        let current = current.min(last);
+        match self {
+            Self::Up => current.checked_sub(1).unwrap_or(last),
+            Self::Down if current < last => current + 1,
+            Self::Down => 0,
+            Self::Left | Self::Right => current,
+        }
+    }
 }
 
 /// The remote's focus: the pane, the selected list and the focused row in
@@ -87,8 +89,6 @@ pub enum Move {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Focus {
     pub pane: Pane,
-    /// The originating content while the existing video preview owns focus.
-    pub preview_origin: PreviewOrigin,
     /// The selected entry of the groups column ([`iptv_core::lists`]): the
     /// list the guide shows.
     pub group: usize,
@@ -127,7 +127,6 @@ impl Focus {
     pub fn at(now: i32) -> Self {
         Focus {
             pane: Pane::Guide,
-            preview_origin: PreviewOrigin::Guide,
             group: crate::lists::ALL,
             channel: 0,
             rail: crate::browse::RailItem::Tv,
@@ -194,12 +193,8 @@ impl Focus {
         match (self.pane, m) {
             (Pane::Rail | Pane::Groups | Pane::Preview, _) => return,
             // Rows keep the time column within retained guide coverage.
-            (Pane::Guide, Move::Up) => {
-                self.channel = self.channel.saturating_sub(1);
-                self.lift_to_floor(s);
-            }
-            (Pane::Guide, Move::Down) => {
-                self.channel = (self.channel + 1).min(s.channel_count().saturating_sub(1));
+            (Pane::Guide, Move::Up | Move::Down) => {
+                self.channel = m.wrap_vertical(self.channel, s.channel_count());
                 self.lift_to_floor(s);
             }
             // Left shows the groups after the earliest retained listing.
@@ -636,8 +631,6 @@ mod tests {
         };
         f.clamp_to(&small);
         assert_eq!(f.channel, 2);
-        f.apply(Move::Down, &small);
-        assert_eq!(f.channel, 2);
         let empty = Small {
             channels: 0,
             groups: 0,
@@ -650,12 +643,21 @@ mod tests {
     }
 
     #[test]
-    fn edges_clamp() {
-        let mut f = Focus::default();
+    fn rows_wrap_without_losing_the_time_column() {
+        let mut f = Focus::at(40);
+        f.apply(Move::Right, &S);
+        let cursor = f.cursor;
         f.apply(Move::Up, &S);
-        assert_eq!(f.channel, 0);
-        f.channel = CHANNELS - 1;
+        assert_eq!((f.channel, f.cursor), (CHANNELS - 1, cursor));
         f.apply(Move::Down, &S);
-        assert_eq!(f.channel, CHANNELS - 1);
+        assert_eq!((f.channel, f.cursor), (0, cursor));
+
+        let single = Small {
+            channels: 1,
+            groups: 1,
+        };
+        f.apply(Move::Up, &single);
+        f.apply(Move::Down, &single);
+        assert_eq!(f.channel, 0);
     }
 }

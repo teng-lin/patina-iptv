@@ -1156,8 +1156,7 @@ fn exercise_admission(
     });
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
     step(app.wait_for("id:vod-title >> nth=1"));
     assert!(
@@ -1244,8 +1243,7 @@ fn exercise_admission(
     step(app.wait_for("text:/^Generated Aurora/"));
     assert_eq!(app.screen().count("id:vod-title").unwrap(), 1);
     step(app.press("id:vod-screen >> label:Close"));
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-shows"));
+    crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
@@ -1675,24 +1673,13 @@ fn movies_and_shows_stay_visible_with_an_empty_catalog_on_desktop_and_tv() {
             nsh_core::prelude::px(w),
             nsh_core::prelude::px(h),
         )));
-        for id in ["open-movies", "open-shows"] {
-            step(app.wait_for(&format!("id:{id}")));
-            step(app.press(&format!("id:{id}")));
+        for label in ["Movies", "Shows"] {
+            crate::browse_fixture::open_rail_item(app, label);
             step(app.wait_for(M3U_ONLY));
             step(app.wait_for("id:vod-empty >> label:Add playlist"));
             step(app.press("id:vod-screen >> label:Close"));
             step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
             assert_eq!(player(app), surface);
-        }
-        step(app.press("text:/^☰  /"));
-        step(app.press_key("left"));
-        for label in ["Movies", "Shows"] {
-            step(app.wait_for(&format!("id:navigation-rail >> label:{label}")));
-            step(app.press(&format!("id:navigation-rail >> label:{label}")));
-            step(app.wait_for(M3U_ONLY));
-            step(app.wait_for("id:vod-empty >> label:Add playlist"));
-            step(app.press("id:vod-screen >> label:Close"));
-            step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
         }
         assert_eq!(
             iptv_app::player_opens(0),
@@ -1701,8 +1688,7 @@ fn movies_and_shows_stay_visible_with_an_empty_catalog_on_desktop_and_tv() {
         );
     }
     // On the remote, OK where the titles would be adds a playlist.
-    step(app.wait_for("id:open-movies"));
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(app, "Movies");
     step(app.wait_for(M3U_ONLY));
     step(app.press_key("right"));
     step(app.press_key("enter"));
@@ -1858,8 +1844,7 @@ fn provider_playlist(
 }
 
 fn open_movies(app: &mut Headless) {
-    step(app.wait_for("id:open-movies"));
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(app, "Movies");
     step(app.wait_for("id:vod-screen"));
 }
 

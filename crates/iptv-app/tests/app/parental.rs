@@ -138,13 +138,15 @@ fn setup_block_remote_unlock_change_and_recovery() {
     step(app.wait_for("id:settings-screen"));
     assert!(!app.shows("Enter parental PIN"));
     step(app.back());
-    // Adding another provider is administrative even with generic settings open.
-    step(app.press("text:+ Add playlist"));
+    // Adding another provider from Playlists still requires the administrative PIN.
+    crate::browse_fixture::open_add_playlist(&mut app);
     wait(&mut app, "Enter parental PIN");
     digits(&mut app, "2468");
     continue_entry(&mut app);
     step(app.wait_for("id:wizard-form"));
     step(app.back());
+    step(app.back());
+    step(app.press_key("tab"));
     step(app.press_key("enter"));
     wait(&mut app, "Enter parental PIN");
     digits(&mut app, "1357");

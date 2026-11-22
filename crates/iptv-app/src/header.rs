@@ -3,7 +3,7 @@
 //! the focused program: its title (Roboto Medium) with the favorite star
 //! at the right, its times with a progress bar and the minutes left (the
 //! group's name at the right), and its description in gray. At the right
-//! the list on screen (a tap opens the groups) and Add playlist.
+//! the list on screen (a tap opens the groups).
 
 use crate::i18n::{tr, trf};
 
@@ -365,48 +365,6 @@ fn more_reserved() -> bool {
     )
 }
 
-fn library_shortcuts(ui: Ui) -> View {
-    let size = Scale::new();
-    view().flex_row().gap(px(8.0)).children(
-        [
-            (
-                iptv_presentation::browse::RailItem::Movies,
-                iptv_core::vod::Kind::Movie,
-                (|| tr("Movies")) as fn() -> &'static str,
-            ),
-            (
-                iptv_presentation::browse::RailItem::Shows,
-                iptv_core::vod::Kind::Series,
-                || tr("Shows"),
-            ),
-        ]
-        .into_iter()
-        .map(move |(item, kind, label)| {
-            // The label follows a live change of language.
-            crate::ui_kit::button(
-                ui,
-                size,
-                label,
-                || false,
-                move || crate::vod_view::open(ui, kind),
-            )
-            .test_id(if kind == iptv_core::vod::Kind::Movie {
-                "open-movies"
-            } else {
-                "open-shows"
-            })
-            .flex_row()
-            .items_center()
-            .gap(px(8.0))
-            .child(
-                svg(crate::rail::icon(item))
-                    .size(px(22.0))
-                    .text_color(rgb(WHITE)),
-            )
-        }),
-    )
-}
-
 /// The list on screen; a tap opens the groups.
 fn list_button(ui: Ui) -> impl IntoElement {
     text(move || format!("☰  {}", crate::lists::list_name(ui)))
@@ -433,16 +391,13 @@ fn shortcuts_opacity(ui: Ui) -> f32 {
     }
 }
 
-/// The list on screen (a tap opens the groups), Add playlist, and in
-/// development the key stats ([`debug_overlay`]).
+/// The list on screen (a tap opens the groups) and the development key stats ([`debug_overlay`]).
 fn side(ui: Ui) -> impl IntoElement {
     view()
         .items_end()
         .opacity(move || shortcuts_opacity(ui))
         .gap(px(8.0))
         .child(list_button(ui))
-        .child(library_shortcuts(ui))
-        .child(crate::wizard_view::add_button(ui))
         .child(view().flex_1())
         .children(key_stats(ui))
 }
@@ -477,8 +432,6 @@ fn shortcuts_row(ui: Ui) -> impl IntoElement {
                 .items_center()
                 .gap(px(8.0))
                 .child(list_button(ui))
-                .child(library_shortcuts(ui))
-                .child(crate::wizard_view::add_button(ui))
                 .children(key_stats(ui)),
         )
 }
@@ -520,6 +473,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
     // is resized with it, as for any other arrangement.
     let stacked = computed(move || crate::panels::guide_header_now().stacked());
     view()
+        .test_id("guide-header")
         .pt_safe_area()
         .accessibility_elements_hidden(move || crate::organization_view::guide_order_open(ui))
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))

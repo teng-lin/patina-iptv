@@ -290,9 +290,6 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
     let Some(home) = isolated!() else { return };
     let mut settings = Settings::new();
     settings
-        .set("guide.stay_on_guide", iptv_settings::Value::Bool(false))
-        .unwrap();
-    settings
         .set("guide.stay_on_list", iptv_settings::Value::Bool(true))
         .unwrap();
     let visibility = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -318,12 +315,7 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
             .and_then(|node| visibility.lock().unwrap().get(&node.id).copied())
     };
     group(app, "News");
-    step(app.press_key("enter"));
-    step(
-        app.wait_until("Local A is playing", Duration::from_secs(5), |_| {
-            iptv_app::player_has_source(0)
-        }),
-    );
+    crate::browse_fixture::choose_fullscreen(app);
     step(app.press_key("left"));
     step(
         app.wait_until("the channel list opens", Duration::from_secs(5), |screen| {

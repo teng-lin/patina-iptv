@@ -78,8 +78,7 @@ fn the_back_button_answers_on_its_center_after_a_movie_ends_under_the_bar() {
     let props = observe_props(&mut app);
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play from beginning"));

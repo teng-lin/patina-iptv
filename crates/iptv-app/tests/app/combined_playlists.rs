@@ -429,7 +429,7 @@ fn persisted_combined_mode_recovers_disabled_and_failed_sources_and_deletion() {
             .unwrap()
     );
     playlists(&mut app);
-    step(app.wait_for("text:+ Add playlist"));
+    step(app.wait_for("id:playlists-screen >> text:+ Add playlist"));
 }
 
 #[test]
@@ -929,7 +929,7 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     })
     .unwrap();
     step(app.wait_for_within("text:Alpha bulletin", Duration::from_secs(20)));
-    step(app.press("text:+ Add playlist"));
+    crate::browse_fixture::open_add_playlist(&mut app);
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Xtream Codes login"));
     step(app.press("text:Xtream Codes login"));
@@ -1081,7 +1081,7 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
         &accounts,
         1,
     );
-    step(app.press("text:+ Add playlist"));
+    crate::browse_fixture::open_add_playlist(&mut app);
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
@@ -1278,7 +1278,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.wait_for("text:Close"));
         step(app.press("text:Close"));
     }
-    step(app.press("text:+ Add playlist"));
+    crate::browse_fixture::open_add_playlist(&mut app);
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));

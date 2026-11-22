@@ -95,7 +95,7 @@ fn secondary_screens_use_the_shared_type() {
     // button's own focus, independently of the adjacent field.
     step(app.press("text:Close"));
     step(app.wait_for_gone("id:settings-screen", Duration::from_secs(2)));
-    step(app.press("text:+ Add playlist"));
+    crate::browse_fixture::open_add_playlist(&mut app);
     step(app.wait_for("id:wizard-paste"));
     let paste = |app: &mut Headless| app.screen().span_style("text:Paste").unwrap().color;
     let dark = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);

@@ -117,12 +117,7 @@ fn multiview_focus_never_moves_the_sound_and_listen_to_this_does() {
 
     // Desk 03 full screen, then multiview: it is the first tile, Desk 05
     // and Desk 07 are added; the sound stays on Desk 03.
-    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
-    step(
-        app.wait_until("Desk 03 plays", Duration::from_secs(5), |_| {
-            iptv_app::player_has_source(0)
-        }),
-    );
+    crate::browse_fixture::tap_fullscreen(app, &format!("id:guide-ui >> text:{}", channel(3)));
     show_controls(app, "id:app-ui >> label:Multiview");
     step(app.press("id:app-ui >> label:Multiview"));
     pick(app, 5);

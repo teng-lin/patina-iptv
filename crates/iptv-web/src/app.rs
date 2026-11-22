@@ -19,6 +19,7 @@ use iptv_import::{
     Progress, RefreshPolicy, SourceMeta, Trigger, decide, matching_fingerprint, plan_startup,
 };
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
+use iptv_presentation::browse::RailItem;
 use iptv_presentation::guide::{Pane, ProgramSelection};
 use iptv_presentation::lists::{self, ChannelList as Rows, FAVORITES};
 use iptv_presentation::play_bar::{Control, PlayBar};
@@ -459,9 +460,7 @@ impl App {
     fn guide_key(&mut self, action: Action, scrolling: bool) {
         let now = self.now();
         let entries = self.schedule().map_or(0, lists::entry_count);
-        // A key held in the groups column only moves through the groups: it
-        // stops at the first one, and a new press goes on to the preview.
-        let preview = self.playing.is_some() && !scrolling;
+        let preview = self.playing.is_some();
         let Some(grid) = self.grid.as_mut() else {
             return;
         };
@@ -490,13 +489,14 @@ impl App {
         }
     }
 
-    /// OK on a program: plays immediately or shows an availability notice.
+    /// OK on a live program tunes the preview or opens the active channel
+    /// full screen. Replay opens full screen once playback is requested.
     fn watch(&mut self, channel: usize, program: Program, now: i32) {
         let Some(schedule) = self.schedule() else {
             return;
         };
         let live = self.playing.filter(|_| self.playing_live);
-        let tuned = match ProgramSelection::for_program(
+        let full = match ProgramSelection::for_program(
             &program,
             now,
             schedule.catchup_days(channel),
@@ -504,7 +504,12 @@ impl App {
             live,
         ) {
             ProgramSelection::AlreadyLive => true,
-            ProgramSelection::Live => self.play_from(channel, None),
+            ProgramSelection::Live => {
+                if self.play_from(channel, None) {
+                    self.back_to_search = false;
+                }
+                false
+            }
             ProgramSelection::Replay => self.play_from(channel, Some(program)),
             ProgramSelection::Upcoming => {
                 info(&format!(
@@ -518,7 +523,7 @@ impl App {
                 false
             }
         };
-        if tuned {
+        if full {
             self.back_to_search = false;
             self.mode = Mode::Full;
         }
@@ -1104,8 +1109,11 @@ impl App {
                 .into();
         }
         match grid.pane() {
-            Pane::Preview => "OK: full screen · Down: guide".into(),
+            Pane::Preview => "OK: full screen · Down: the rail".into(),
             Pane::Groups => "Up/Down: lists · OK: open · Left: the rail".into(),
+            Pane::Rail if self.playing.is_some() && grid.rail() == RailItem::Search => {
+                "OK: open · Right: groups · Up: preview".into()
+            }
             Pane::Rail => "OK: open · Right: groups".into(),
             Pane::Guide => {
                 let ok = if can_watch {

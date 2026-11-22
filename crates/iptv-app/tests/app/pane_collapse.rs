@@ -187,7 +187,14 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
             below(size),
             "shortcuts below the preview by the policy, {size:?}"
         );
-        assert!(app.screen().matches("id:open-movies").unwrap());
+        for shortcut in ["Favorites", "Movies", "Shows", "+ Add playlist"] {
+            assert!(
+                !app.screen()
+                    .matches(&format!("id:guide-header >> text:{shortcut}"))
+                    .unwrap(),
+                "{shortcut} is absent from the header at {size:?}"
+            );
+        }
         video_follows_the_preview(app, player, size);
         header_fits(app, size);
         persistent(app, &lifetime, player);
@@ -203,14 +210,19 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("up"));
-    assert!(selected(app, "guide-preview"), "Up from the top row");
+    assert!(channel_selected(app, "Local C"), "Up wraps to the last row");
+    step(app.press_key("tab"));
+    step(app.press_key("left"));
+    step(app.press_key("up"));
+    assert!(selected(app, "guide-preview"), "Up from Search");
     for size in guide_sizes() {
         resize(app, size);
         assert!(selected(app, "guide-preview"), "preview focus at {size:?}");
     }
     step(app.press_key("down"));
     assert!(!selected(app, "guide-preview"));
-    assert!(channel_selected(app, "Local A"), "back to the first row");
+    step(app.press_key("tab"));
+    assert!(channel_selected(app, "Local C"), "back to the same row");
     // A tap on a compact header's shortcut still works.
     step(app.press("id:guide-header-shortcuts >> text:/^☰  /"));
     step(app.wait_for("id:guide-groups >> text:Favorites"));
@@ -314,8 +326,7 @@ fn resizing_movies_and_shows_keeps_the_title_and_the_episode() {
     let opens = iptv_app::player_opens(0);
 
     // The poster browser: the second title focused by keys.
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-title >> nth=1"));
     step(app.press_key("right"));
     step(app.press_key("right"));
@@ -348,8 +359,7 @@ fn resizing_movies_and_shows_keeps_the_title_and_the_episode() {
 
     // A show's details: the second episode selected by keys.
     resize(&mut app, EXPANDED);
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-shows"));
+    crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));

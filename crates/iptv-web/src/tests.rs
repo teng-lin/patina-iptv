@@ -265,19 +265,28 @@ fn imports_a_playlist_and_its_guide_then_plays_and_zaps() {
     assert_eq!(grid["focused"]["title"], "one Morning");
     assert_eq!(grid["focused"]["favorite"], false);
 
-    // Nothing plays: Up from the first row has no preview to reach. Moving
-    // tunes nothing.
+    // Navigation wraps at both ends without tuning.
     key("up");
-    assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
+    assert_eq!(last_view(&fake)["grid"]["rows"]["focus"], 2);
+    key("down");
+    assert_eq!(last_view(&fake)["grid"]["rows"]["focus"], 0);
     assert_eq!(plays(&fake), 0);
 
-    // OK on a live program plays it full screen; Down zaps to the next.
+    // One OK tunes in the guide. The next opens the existing stream full
+    // screen, after which Down zaps to the next channel.
     key("ok");
     assert_eq!(
         last_of(&fake, "play")["url"],
         "http://media.example.com/one.ts"
     );
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "guide");
+    assert_eq!(view["playing"]["name"], "Example One");
+    assert_eq!(view["grid"]["rows"]["items"][0]["playing"], true);
+    assert_eq!(plays(&fake), 1);
+    key("ok");
     assert_eq!(last_view(&fake)["mode"], "full");
+    assert_eq!(plays(&fake), 1);
     key("down");
     assert_eq!(
         last_of(&fake, "play")["url"],
@@ -301,13 +310,20 @@ fn imports_a_playlist_and_its_guide_then_plays_and_zaps() {
     key("left");
     assert_eq!(last_view(&fake)["mode"], "guide", "Left returns too");
 
-    // Up from the first row reaches the preview while a channel plays; OK
-    // there is full screen, Down returns to the first row.
+    // Rows still wrap while a video plays. The preview is reachable from
+    // Search in the rail, where Down restores that rail position.
     key("up");
+    key("up");
+    assert_eq!(last_view(&fake)["grid"]["rows"]["focus"], 2);
+    key("down");
+    assert_eq!(last_view(&fake)["grid"]["rows"]["focus"], 0);
+    key("back");
+    key("left");
     key("up");
     assert_eq!(last_view(&fake)["grid"]["pane"], "preview");
     key("down");
-    assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
+    assert_eq!(last_view(&fake)["grid"]["pane"], "rail");
+    assert_eq!(last_view(&fake)["grid"]["rail"], "search");
     key("up");
     key("ok");
     assert_eq!(last_view(&fake)["mode"], "full");
@@ -427,6 +443,7 @@ fn an_xtream_account_plays_raw_ts_from_its_live_path() {
         last_of(&fake, "play")["url"],
         "http://tv.example.com/live/demo/secret/103.ts"
     );
+    key("ok");
     key("chup");
     assert_eq!(
         last_of(&fake, "play")["url"],
@@ -437,15 +454,17 @@ fn an_xtream_account_plays_raw_ts_from_its_live_path() {
     key("pageup");
     assert_eq!(last_view(&fake)["grid"]["rows"]["focus"], 0);
 
-    // A failed stream clears the playing channel: Up from the first row no
-    // longer reaches the preview.
+    // A failed stream clears the playing channel and removes access to
+    // the preview from Search.
     play_failed(&fake);
     assert!(last_view(&fake)["playing"].is_null());
+    key("back");
+    key("left");
     key("up");
-    assert_eq!(last_view(&fake)["grid"]["pane"], "guide");
+    assert_eq!(last_view(&fake)["grid"]["pane"], "rail");
 
     // Recently watched lists what played, newest first.
-    key("back");
+    key("right");
     key("up");
     let view = last_view(&fake);
     assert_eq!(view["title"], "Recently watched", "{view}");
@@ -524,11 +543,10 @@ fn the_stored_guide_and_lists_are_used_at_the_next_launch() {
     send(m3u.clone());
     deliver(&fake);
     assert_eq!(guide_downloads(&fake), 1);
-    // Down, OK: the second channel plays (recently watched); back on the
-    // guide, Yellow on the third makes it a favorite.
+    // Down, OK: the second channel plays in the preview. Down from there
+    // focuses the third channel, and Yellow adds it to Favorites.
     key("down");
     key("ok");
-    key("back");
     key("down");
     key("favorite");
     let notice = fake
@@ -893,6 +911,12 @@ fn key(k: &str) {
     }
 }
 
+/// Tunes a live channel in the guide, then expands its preview.
+fn open_live_full_screen() {
+    key("ok");
+    key("ok");
+}
+
 fn last_of(fake: &Fake, kind: &str) -> Value {
     fake.events
         .borrow()
@@ -987,6 +1011,8 @@ fn the_guide_grid_moves_through_channels_and_time_and_plays() {
     let play = last_of(&fake, "play");
     assert_eq!(play["url"], "http://media.example.com/two.ts");
     assert!(play["archive"].is_null());
+    assert_eq!(last_view(&fake)["mode"], "guide");
+    key("ok");
     assert_eq!(last_view(&fake)["mode"], "full");
     key("back");
     let view = last_view(&fake);
@@ -1300,9 +1326,9 @@ fn the_play_bar_favorites_the_playing_channel_and_back_never_leaves() {
         "source": { "kind": "xtream", "server": "http://tv.example.com", "username": "demo", "password": "secret" },
     }));
     deliver_with(&fake, &xtream);
-    // OK plays full screen; OK there shows the play bar with Favorite
-    // focused.
-    key("ok");
+    // Tune and open the channel full screen. OK there shows the play bar
+    // with Favorite focused.
+    open_live_full_screen();
     assert_eq!(last_view(&fake)["mode"], "full");
     assert!(last_view(&fake)["bar"].is_null());
     key("ok");
@@ -1404,7 +1430,7 @@ fn a_stream_that_fails_in_full_screen_returns_to_where_it_was_played_from() {
     m3u_launch(&fake);
     // Full screen with the play bar; the stream fails: the guide, without
     // the bar (it would take keys over a black screen).
-    key("ok");
+    open_live_full_screen();
     key("ok");
     assert!(!last_view(&fake)["bar"].is_null());
     play_failed(&fake);
@@ -1651,7 +1677,6 @@ fn held_keys_in_the_groups_column_build_the_list_once_settled() {
     key("ok");
     assert_eq!(last_view(&fake)["playing"]["number"], 3);
     key("back");
-    key("back");
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
     key_phase("down", "down", 0);
     repeat("down");
@@ -1787,7 +1812,7 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
 
     // From full screen the press opens the guide; holding it goes no
     // further, whatever the page knew when it sent the repeats.
-    key("ok");
+    open_live_full_screen();
     assert_eq!(last_view(&fake)["mode"], "full");
     key_phase("left", "down", 0);
     let view = last_view(&fake);
@@ -1835,29 +1860,40 @@ fn a_held_left_opens_the_groups_only_when_pressed_in_the_grid() {
 }
 
 #[test]
-fn a_held_up_in_the_groups_column_stops_before_the_preview() {
+fn held_up_and_tapped_down_wrap_the_groups_while_video_plays() {
     let fake = Rc::new(Fake::default());
     install(fake.clone());
     m3u_launch(&fake);
     key("ok");
     key("back");
-    key("back");
     let view = last_view(&fake);
     assert_eq!(view["grid"]["pane"], "groups");
     assert!(!view["playing"].is_null());
-    // Held Up runs to the first group (Favorites) and stays there.
+
+    // Held Up crosses Favorites and wraps to Sport without leaving groups
+    // or building the selected list until the key settles.
     key_phase("up", "down", 0);
-    for _ in 0..4 {
-        repeat("up");
-    }
+    assert_eq!(last_view(&fake)["title"], "Recently watched");
+    repeat("up");
+    assert_eq!(last_view(&fake)["title"], "Favorites");
+    repeat("up");
+    let view = last_view(&fake);
+    assert_eq!(view["grid"]["pane"], "groups");
+    assert_eq!(view["title"], "Sport");
+    assert_eq!(view["pending"], true);
+    key_phase("up", "up", 401);
+    let view = last_view(&fake);
+    assert_eq!(view["pending"], false);
+    assert_eq!(view["grid"]["rows"]["items"][0]["name"], "Example Three");
+
+    // Down wraps back to Favorites even while the preview is playing.
+    key("down");
     let view = last_view(&fake);
     assert_eq!(view["grid"]["pane"], "groups");
     assert_eq!(view["title"], "Favorites");
-    send(serde_json::json!({ "cmd": "settle" }));
-    assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
-    // A new press goes on to the preview.
-    key("up");
-    assert_eq!(last_view(&fake)["grid"]["pane"], "preview");
+    assert_eq!(view["grid"]["rows"]["total"], 0);
+    assert_eq!(view["playing"]["name"], "Example One");
+    assert_eq!(plays(&fake), 1);
 }
 
 #[test]
@@ -1963,7 +1999,7 @@ fn a_failure_of_a_stream_since_replaced_is_ignored() {
     let fake = Rc::new(Fake::default());
     install(fake.clone());
     m3u_launch(&fake);
-    key("ok");
+    open_live_full_screen();
     let first = last_of(&fake, "play")["id"].as_u64().unwrap();
     // The viewer zaps on; then the first stream reports its failure.
     key("down");
@@ -1980,9 +2016,9 @@ fn a_failure_of_a_stream_since_replaced_is_ignored() {
     let view = last_view(&fake);
     assert_eq!(view["mode"], "guide");
     assert!(view["playing"].is_null());
-    // Reported twice: the second report finds nothing playing.
+    // A new tune after the failure starts in the preview.
     key("ok");
-    assert_eq!(last_view(&fake)["mode"], "full");
+    assert_eq!(last_view(&fake)["mode"], "guide");
     let third = last_of(&fake, "play")["id"].as_u64().unwrap();
     assert!(third > second);
     // Another playlist does not reuse the numbers.
@@ -2121,7 +2157,7 @@ fn plays_carry_their_source_and_only_a_current_failure_is_noticed() {
         serde_json::json!({ "cmd": "source", "session": 7, "source": { "kind": "m3u", "url": "http://lists.example.com/list.m3u" } }),
     );
     deliver(&fake);
-    key("ok");
+    open_live_full_screen();
     let first = last_of(&fake, "play");
     assert_eq!(first["session"], 7);
     key("down");
@@ -2206,7 +2242,7 @@ fn held_back_hides_the_bar_once_and_never_leaves_the_player() {
     let fake = Rc::new(Fake::default());
     install(fake.clone());
     m3u_launch(&fake);
-    key("ok");
+    open_live_full_screen();
     key("ok");
     assert_eq!(last_view(&fake)["bar"]["focus"], "favorite");
     key_phase("back", "down", 50);
@@ -2223,7 +2259,7 @@ fn a_play_bar_expiry_queued_before_new_input_cannot_hide_it() {
     let fake = Rc::new(Fake::default());
     install(fake.clone());
     m3u_launch(&fake);
-    key("ok");
+    open_live_full_screen();
     key("ok");
     assert_eq!(last_view(&fake)["keyDeadlineMs"], 7_000);
 
@@ -2250,7 +2286,7 @@ fn stored_placeholder_words_are_program_titles_on_the_grid_and_player() {
     assert!(cells.iter().any(|cell| cell["title"] == "Loading…"));
     assert!(cells.iter().any(|cell| cell["title"] == "No information"));
 
-    key("ok");
+    open_live_full_screen();
     let view = last_view(&fake);
     assert_eq!(view["mode"], "full");
     assert_eq!(view["playing"]["now"]["title"], "Loading…");

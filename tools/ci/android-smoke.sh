@@ -299,7 +299,7 @@ pause 2
 step "play a channel in the guide"
 mark
 keys KEYCODE_DPAD_CENTER
-expect 'key=ok .*ctx=Guide' 10
+expect 'key=ok .*ctx=Guide action=Some\(Select\).*mode=Guide' 10
 expect 'iptv player 0 state: ready' 60
 # Confirm the actual first-import identity before spending its fixture allowance.
 resume_file=
@@ -316,7 +316,11 @@ shot 04-guide-preview
 step "full screen"
 mark
 keys KEYCODE_DPAD_CENTER
+expect 'key=ok .*ctx=Guide action=Some\(Select\).*mode=Fullscreen' 10
 pause 3
+if applog | grep -F 'iptv player 0 open:' >/dev/null; then
+  fail "opening the active channel full screen reopened the stream"
+fi
 shot 05-fullscreen
 
 if [ "$is_tv" = true ]; then

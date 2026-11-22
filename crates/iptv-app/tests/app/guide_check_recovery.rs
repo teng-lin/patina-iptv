@@ -292,7 +292,7 @@ impl Scenario {
     /// From the guide: the wizard's "Add playlist" with `link`, submitted.
     fn add_playlist(&mut self, link: &str) {
         rail(&mut self.app, "Playlists");
-        step(self.app.press("text:+ Add playlist >> nth=1"));
+        step(self.app.press("id:playlists-screen >> text:+ Add playlist"));
         let placeholder = "text:http://…/playlist.m3u";
         step(self.app.wait_for("text:Playlist link"));
         step(self.app.wait_for(placeholder));
@@ -484,7 +484,7 @@ fn a_failed_add_keeps_the_guide_timer_of_the_playlist_on_screen() {
     let second = Server::start("second.m3u", "audio/x-mpegurl", String::new());
     second.hold();
     rail(&mut s.app, "Playlists");
-    step(s.app.press("text:+ Add playlist >> nth=1"));
+    step(s.app.press("id:playlists-screen >> text:+ Add playlist"));
     let placeholder = "text:http://…/playlist.m3u";
     step(s.app.wait_for("text:Playlist link"));
     step(s.app.wait_for(placeholder));

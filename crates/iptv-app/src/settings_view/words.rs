@@ -209,7 +209,7 @@ pub fn label(key: &str) -> &'static str {
         "guide.switch_delay" => tr("Wait before tuning"),
         "guide.fullscreen_timeout" => tr("Go full screen after"),
         "guide.stay_on_list" => tr("Keep the channel list after choosing"),
-        "guide.stay_on_guide" => tr("Keep the guide after choosing"),
+        "guide.stay_on_guide" => tr("Keep the guide overlay after choosing"),
         "guide.back_returns_to_now" => tr("Back returns to the programs on air"),
         "logos.source" => tr("Preferred logos"),
         "logos.folder" => tr("Logo folder"),

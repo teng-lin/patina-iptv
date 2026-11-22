@@ -326,10 +326,10 @@ pub fn context(ui: &Ui) -> Context {
 }
 
 /// A named keyboard binding fires again on auto-repeat (a held arrow
-/// keeps moving), except Menu (`M`): held, it opens its menu once.
+/// keeps moving). OK and Menu act once per physical press.
 fn named_key_options(key: RemoteKey) -> KeyOptions {
     KeyOptions {
-        repeat: key != RemoteKey::Menu,
+        repeat: !matches!(key, RemoteKey::Menu | RemoteKey::Ok),
         ..Default::default()
     }
 }
@@ -703,8 +703,12 @@ fn keep_controls_until(ui: Ui, at: u64) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
-    // A held Menu opens a menu once; its repeats would close and reopen it.
-    if repeat && action == Action::ShowMenu {
+    // A held key must not reopen a menu or turn a guide preview into
+    // fullscreen. A remapped remote button can repeat Select.
+    if repeat
+        && (action == Action::ShowMenu
+            || (action == Action::Select && ui.mode.get_untracked() == ViewMode::Guide))
+    {
         return;
     }
     if ui.player_surface != 0 {
@@ -977,14 +981,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keyboard_menu_fires_once_while_held_and_moves_repeat() {
+    fn keyboard_menu_and_ok_fire_once_while_held_and_moves_repeat() {
         assert!(!named_key_options(RemoteKey::Menu).repeat, "M: once");
-        for key in [
-            RemoteKey::Down,
-            RemoteKey::Right,
-            RemoteKey::Ok,
-            RemoteKey::ChannelUp,
-        ] {
+        assert!(!named_key_options(RemoteKey::Ok).repeat, "Enter: once");
+        for key in [RemoteKey::Down, RemoteKey::Right, RemoteKey::ChannelUp] {
             assert!(named_key_options(key).repeat, "{key:?}");
         }
     }

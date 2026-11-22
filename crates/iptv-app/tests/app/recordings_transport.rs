@@ -329,7 +329,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
     step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
     step(app.wait_for("id:guide-preview"));
     // A recording also owns the preview when no live channel is playing.
-    // Search and the empty Favorites group remain valid origins on TV/desktop.
+    // Search remains a route to preview focus on TV and desktop.
     for idiom in [Idiom::Desktop, Idiom::Tv] {
         step(app.set_environment("saved preview navigation", |env| {
             env.idiom = idiom;
@@ -363,17 +363,19 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
         step(app.press("id:guide-groups >> text:Favorites"));
         step(app.press_key("up"));
         assert!(
-            app.screen()
+            !app.screen()
                 .accessibility_state("id:guide-preview")
                 .unwrap()
-                .selected
+                .selected,
+            "Up wraps even with a recording playing in the preview"
         );
-        step(app.back());
         step(app.press("id:guide-groups >> text:All channels"));
         step(app.press_key("right"));
         assert_eq!(iptv_app::player_opens(0), opens);
         assert_eq!(props.lock().unwrap()["source"], source);
     }
+    step(app.press_key("tab"));
+    step(app.press_key("left"));
     step(app.press_key("up"));
     assert!(
         app.screen()

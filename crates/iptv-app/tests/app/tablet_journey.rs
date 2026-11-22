@@ -314,9 +314,9 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     step(app.wait_for_within("text:Morning Talk", IMPORT));
     let surface = player(&app);
 
-    // A channel: a tap on its name plays it full screen; the visible ‹
-    // returns to the guide on it, still playing in the preview.
-    step(app.press("text:Test Channel Two"));
+    // Tapping a channel previews it, then expands it. The visible ‹
+    // returns to the guide on the same channel.
+    crate::browse_fixture::tap_fullscreen(&mut app, "text:Test Channel Two");
     full_screen(&mut app, LANDSCAPE.0);
     assert_eq!(sources(&seen), ["http://stream.example.test/two.m3u8"]);
     assert_eq!(video_width(&app), LANDSCAPE.0, "full screen");
@@ -374,8 +374,8 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.wait_for_within("text:Generated group", IMPORT));
     let surface = player(&app);
 
-    // A movie: the shortcut, its poster, Play.
-    step(app.press("id:open-movies"));
+    // A movie: the rail item, its poster, Play.
+    crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play"));
@@ -461,8 +461,8 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     );
     persistent(&app, &seen, surface);
 
-    // An episode: the shortcut, the show, the episode.
-    step(app.press("id:open-shows"));
+    // An episode: the rail item, the show, the episode.
+    crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
@@ -596,13 +596,8 @@ fn a_keyboard_over_search_edits_text_without_reaching_the_player() {
     let surface = player(app);
 
     // Play a channel full screen by touch.
-    step(app.press("id:guide-ui >> text:/Local A$/"));
+    crate::browse_fixture::tap_fullscreen(app, "id:guide-ui >> text:/Local A$/");
     full_screen(app, LANDSCAPE.0);
-    // The video can fill the screen a frame before its source is set.
-    let opened = seen.clone();
-    step(app.wait_until("the channel plays", WAIT, move |_| {
-        !opened.lock().unwrap().sources.is_empty()
-    }));
     let playing = sources(&seen);
     assert_eq!(playing.len(), 1, "{playing:?}");
     let paused = seen.lock().unwrap().props.get("paused").cloned();
@@ -701,13 +696,8 @@ fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
     step(app.set_viewport(Size::new(px(LANDSCAPE.0), px(LANDSCAPE.1))));
     let seen = observe(app);
     let surface = player(app);
-    step(app.press("id:guide-ui >> text:/Local A$/"));
+    crate::browse_fixture::tap_fullscreen(app, "id:guide-ui >> text:/Local A$/");
     full_screen(app, LANDSCAPE.0);
-    // The video can fill the screen a frame before its source is set.
-    let opened = seen.clone();
-    step(app.wait_until("the channel plays", WAIT, move |_| {
-        !opened.lock().unwrap().sources.is_empty()
-    }));
     let playing = sources(&seen);
     assert_eq!(playing.len(), 1);
     assert!(!paused(&seen));
@@ -816,7 +806,7 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
     }));
     step(app.set_viewport(Size::new(px(LANDSCAPE.0), px(LANDSCAPE.1))));
     let surface = player(app);
-    step(app.press("id:guide-ui >> text:/Local A$/"));
+    crate::browse_fixture::tap_fullscreen(app, "id:guide-ui >> text:/Local A$/");
     full_screen(app, LANDSCAPE.0);
     let seen = observe(app);
     step(app.press("label:Multiview"));
@@ -927,7 +917,7 @@ fn a_split_screen_tablet_keeps_every_play_bar_button_inside_the_window() {
     let seen = observe(&mut app);
     step(app.wait_for_within("text:Generated group", IMPORT));
     let surface = player(&app);
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
     step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play"));

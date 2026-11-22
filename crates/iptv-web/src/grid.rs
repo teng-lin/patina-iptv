@@ -159,6 +159,11 @@ impl Grid {
         self.focus.pane
     }
 
+    /// The focused rail item.
+    pub(crate) fn rail(&self) -> RailItem {
+        self.focus.rail
+    }
+
     /// The focused row.
     pub(crate) fn row(&self) -> usize {
         self.focus.channel
@@ -213,8 +218,7 @@ impl Grid {
     }
 
     /// A key on the guide screen. `entries` is the groups column's length;
-    /// `preview` whether Up may reach the preview (a video plays, and the
-    /// key is not a repeat moving through the groups column).
+    /// `preview` whether video is playing and Up from Search may focus it.
     pub(crate) fn key(
         &mut self,
         action: Action,
@@ -553,13 +557,10 @@ mod tests {
     }
 
     #[test]
-    fn up_from_the_first_row_reaches_the_preview_only_while_playing() {
+    fn rows_wrap_while_playing_and_search_can_focus_the_preview() {
         let mut g = grid(100, 0);
-        g.key(Action::MoveUp, 0, ENTRIES, false);
-        assert_eq!(g.pane(), Pane::Guide);
         g.key(Action::MoveUp, 0, ENTRIES, true);
-        assert_eq!(g.pane(), Pane::Preview);
-        assert_eq!(g.key(Action::Select, 0, ENTRIES, true), GridOutcome::Full);
+        assert_eq!((g.pane(), g.row()), (Pane::Guide, 99));
         g.key(Action::MoveDown, 0, ENTRIES, true);
         assert_eq!((g.pane(), g.row()), (Pane::Guide, 0));
         // Back on a live program shows the groups; Left there is the
@@ -568,6 +569,13 @@ mod tests {
         assert_eq!(g.pane(), Pane::Groups);
         g.key(Action::MoveLeft, 0, ENTRIES, true);
         assert_eq!(json(&g)["rail"], "search");
+        g.key(Action::MoveUp, 0, ENTRIES, false);
+        assert_eq!(g.pane(), Pane::Rail);
+        g.key(Action::MoveUp, 0, ENTRIES, true);
+        assert_eq!(g.pane(), Pane::Preview);
+        assert_eq!(g.key(Action::Select, 0, ENTRIES, true), GridOutcome::Full);
+        g.key(Action::MoveDown, 0, ENTRIES, true);
+        assert_eq!(g.pane(), Pane::Rail);
         assert_eq!(g.key(Action::Select, 0, ENTRIES, true), GridOutcome::Search);
     }
 }
