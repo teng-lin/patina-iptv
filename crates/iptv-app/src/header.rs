@@ -189,7 +189,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         program.with(|p| {
             let (_, _, _, ch, _) = (*p)?;
             let catalog = crate::schedule();
-            group_of(&*catalog, ch).map(|g| catalog.group_name_in(g, crate::i18n::language()))
+            group_of(&*catalog, ch).map(|g| crate::listing_labels::group(catalog.group_label(g)))
         })
     };
     view()
@@ -208,7 +208,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     text(move || {
                         program.with(|p| {
                             p.map_or_else(String::new, |(_, _, _, ch, p)| {
-                                crate::schedule().title_in(ch, p, crate::i18n::language())
+                                crate::listing_labels::listing(crate::schedule().listing(ch, p))
                             })
                         })
                     })

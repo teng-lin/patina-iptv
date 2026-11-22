@@ -164,7 +164,7 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
                 "{}  {}{marker} · {}",
                 crate::lists::number(ui, ch),
                 s.channel_name(ch),
-                s.title_in(ch, p, crate::i18n::language())
+                crate::listing_labels::listing(s.listing(ch, p))
             )
         })
         .collect();

@@ -15,7 +15,7 @@
 //! A stored guide can be held in part: the store passed in covers a recent
 //! window, and older days are paged in on demand ([`pages`],
 //! [`EpgSchedule::with_pages`]). Until a day arrives its cells are
-//! hour slots titled [`LOADING`]. A cold start's first schedule may hold
+//! hour slots titled [`Listing::Loading`]. A cold start's first schedule may hold
 //! even less, only the hours of its first screen
 //! ([`EpgSchedule::held_only`]): the rest shows as loading until a schedule
 //! with the whole window replaces it.
@@ -27,7 +27,7 @@ pub mod playback;
 
 use pages::{PageLoader, PageRequest, PagedWindow, Pages};
 
-use iptv_core::guide::{Program, Schedule};
+use iptv_core::guide::{GroupName, Listing, Program, Schedule};
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
 use iptv_providers::model::{Channel, Group};
 
@@ -35,10 +35,6 @@ use iptv_providers::model::{Channel, Group};
 const SLOT: i64 = 3600;
 /// Minutes the guide can be browsed past its last program.
 pub const PAST_END: i32 = 60;
-/// Title of a gap slot.
-pub const NO_INFORMATION: &str = iptv_core::message::key("No information");
-/// Title of a slot whose day is still being read from the store.
-pub const LOADING: &str = iptv_core::message::key("Loading…");
 /// A channel in no group (`EpgSchedule::group_index`).
 const NO_GROUP: u32 = u32::MAX;
 
@@ -662,10 +658,7 @@ impl Catalog {
         let labels = groups
             .iter()
             .map(|g| (g.id.as_str().to_owned(), g.name.clone()))
-            .chain([(
-                "__other__".to_owned(),
-                iptv_core::message::key("Other").to_owned(),
-            )]);
+            .chain([("__other__".to_owned(), OTHER_NAME.to_owned())]);
         // Where each playlist position lands once grouped.
         let mut stored_at = vec![0; channels.len()];
         for (at, &(position, _)) in buckets.iter().flatten().enumerate() {
@@ -815,6 +808,28 @@ impl Shape<'_> {
                 (key, name, members)
             })
             .collect()
+    }
+}
+
+const OTHER_NAME: &str = "Other";
+
+impl EpgSchedule {
+    fn stored_group_name(&self, group: usize) -> String {
+        if let Some(lists) = self
+            .organization
+            .borrow()
+            .as_ref()
+            .and_then(|s| s.lists.as_ref())
+        {
+            return lists.get(group).map_or_else(String::new, |l| l.1.clone());
+        }
+        if let Some(state) = self.organization.borrow().as_ref() {
+            return state
+                .groups
+                .get(group)
+                .map_or_else(String::new, |(_, name)| name.clone());
+        }
+        self.group_names.get(group).cloned().unwrap_or_default()
     }
 }
 
@@ -991,23 +1006,16 @@ impl Schedule for EpgSchedule {
             .cloned()
             .unwrap_or_default()
     }
-    fn group_name(&self, group: usize) -> String {
-        if let Some(lists) = self
-            .organization
-            .borrow()
-            .as_ref()
-            .and_then(|s| s.lists.as_ref())
-        {
-            return lists.get(group).map_or_else(String::new, |l| l.1.clone());
+    fn group_label(&self, group: usize) -> GroupName {
+        let name = self.stored_group_name(group);
+        // A provider may supply the reserved key or the same text.
+        if self.generated_other && self.group_key(group) == "__other__" && name == OTHER_NAME {
+            GroupName::Ungrouped
+        } else {
+            GroupName::Named(name)
         }
-        if let Some(state) = self.organization.borrow().as_ref() {
-            return state
-                .groups
-                .get(group)
-                .map_or_else(String::new, |(_, name)| name.clone());
-        }
-        self.group_names.get(group).cloned().unwrap_or_default()
     }
+
     fn group_channels(&self, group: usize) -> Vec<usize> {
         if let Some(lists) = self
             .organization
@@ -1095,33 +1103,8 @@ impl Schedule for EpgSchedule {
         Some(self)
     }
 
-    fn group_name_in(&self, group: usize, language: &iptv_core::i18n::Language) -> String {
-        let name = self.group_name(group);
-        // This reserved bucket is synthesized for channels with no provider
-        // group. Provider/custom groups, including ones named Other, stay opaque.
-        if self.generated_other
-            && self.group_key(group) == "__other__"
-            && name == iptv_core::message::key("Other")
-        {
-            iptv_core::i18n::translate(language, "Other").to_owned()
-        } else {
-            name
-        }
-    }
-
-    fn title(&self, channel: usize, program: Program) -> String {
-        self.title_in(channel, program, &iptv_core::i18n::LANGUAGES[0])
-    }
-
-    fn title_in(
-        &self,
-        channel: usize,
-        program: Program,
-        language: &iptv_core::i18n::Language,
-    ) -> String {
-        let Some(key) = self.key(channel) else {
-            return iptv_core::i18n::translate(language, "No information").to_owned();
-        };
+    fn listing(&self, channel: usize, program: Program) -> Option<Listing> {
+        let key = self.key(channel)?;
         let t = self.probe(program);
         let found = self.channel_store(Some(key), t, |s| {
             s.program_at(key, t)
@@ -1129,12 +1112,11 @@ impl Schedule for EpgSchedule {
                 // A guide stored before badges were folded at import.
                 .map(|p| iptv_epg::fold_superscripts(p.title()).into_owned())
         });
-        match found {
-            None => iptv_core::i18n::translate(language, "Loading…").to_owned(),
-            Some(title) => title.unwrap_or_else(|| {
-                iptv_core::i18n::translate(language, "No information").to_owned()
-            }),
-        }
+        Some(match found {
+            None => Listing::Loading,
+            Some(None) => Listing::Gap,
+            Some(Some(title)) => Listing::Title(title),
+        })
     }
 }
 

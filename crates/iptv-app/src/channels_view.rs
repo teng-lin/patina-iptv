@@ -506,7 +506,7 @@ fn channel_row(
             format!(
                 "{}  {}",
                 clock(p.start),
-                s.title_in(ch, p, crate::i18n::language())
+                crate::listing_labels::listing(s.listing(ch, p))
             ),
         ))
     };
@@ -616,7 +616,7 @@ fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
         let p = s.program_at(ch, now);
         Some((
             format!("{}  {}", Rows::number(row), s.channel_name(ch)),
-            s.title_in(ch, p, crate::i18n::language()),
+            crate::listing_labels::listing(s.listing(ch, p)),
             format!("{}–{}", clock(p.start), clock(p.end)),
         ))
     };

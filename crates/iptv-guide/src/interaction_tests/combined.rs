@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::combined::tests::{NOW, part};
 use crate::combined::{CombinedSchedule, SourceSchedule};
 use crate::{EpgSchedule, GuideChannel};
-use iptv_core::guide::Schedule;
+use iptv_core::guide::{GroupName, Schedule};
 use iptv_epg::{ChannelKey, GuideStore};
 
 #[test]
@@ -12,7 +12,7 @@ fn collapsing_one_playlist_preserves_parent_channels_and_other_group_identity() 
     let all = CombinedSchedule::new(vec![part(1, "Alpha", NOW), part(2, "Beta", NOW)], NOW);
     let beta_group = ListId::of(Entry::Group(3).index(), &all);
     let beta_channel = all.channel_key(1).unwrap();
-    assert_eq!(all.all_channels_name(), "All playlists");
+    assert_eq!(all.all_channels_label(), GroupName::AllPlaylists);
     assert_eq!(group_of(&all, 0), Some(1));
     assert!(all.toggle_playlist(1).is_none());
     let collapsed = all.toggle_playlist(0).unwrap();
@@ -21,7 +21,7 @@ fn collapsing_one_playlist_preserves_parent_channels_and_other_group_identity() 
     assert_eq!(folded.group_count(), 3);
     assert_eq!(folded.group_key(0), "playlist:1");
     assert!(folded.group_is_collapsed(0));
-    assert_eq!(folded.group_name(0), "Renamed");
+    assert_eq!(folded.group_label(0), GroupName::Named("Renamed".into()));
     assert_eq!(group_of(&folded, 0), Some(0));
     assert_eq!(beta_group.find(&folded), Entry::Group(2).index());
     assert_eq!(folded.find_channel(&beta_channel), Some(1));

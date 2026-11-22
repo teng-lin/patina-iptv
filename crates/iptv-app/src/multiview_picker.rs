@@ -436,7 +436,7 @@ fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> i
                     format!(
                         "{}  {}",
                         clock(program.start),
-                        catalog.title_in(channel.index, program, crate::i18n::language())
+                        crate::listing_labels::listing(catalog.listing(channel.index, program))
                     )
                 },
                 CONDENSED,

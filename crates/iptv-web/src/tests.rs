@@ -2234,3 +2234,25 @@ fn a_play_bar_expiry_queued_before_new_input_cannot_hide_it() {
     poll_keys(13_950);
     assert!(last_view(&fake)["bar"].is_null());
 }
+
+#[test]
+fn stored_placeholder_words_are_program_titles_on_the_grid_and_player() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let guide = guide_from(&[("one", &["Loading…", "No information"])], 0)
+        .replace(">one Loading…<", ">Loading…<")
+        .replace(">one No information<", ">No information<");
+    launch_with(&fake, &serve(playlist(), guide));
+    let view = last_view(&fake);
+    let grid = &view["grid"];
+    assert_eq!(grid["focused"]["title"], "Loading…");
+    let cells = grid["rows"]["items"][0]["cells"].as_array().unwrap();
+    assert!(cells.iter().any(|cell| cell["title"] == "Loading…"));
+    assert!(cells.iter().any(|cell| cell["title"] == "No information"));
+
+    key("ok");
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "full");
+    assert_eq!(view["playing"]["now"]["title"], "Loading…");
+    assert_eq!(view["playing"]["next"]["title"], "No information");
+}

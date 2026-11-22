@@ -1,7 +1,7 @@
 use super::super::moves::{DAY, HOUR};
 use super::super::{Move, Pane, home_window};
 use super::*;
-use crate::guide::{HORIZON, SyntheticSchedule};
+use crate::guide::{GroupName, HORIZON, Listing, SyntheticSchedule};
 
 const S: SyntheticSchedule = SyntheticSchedule;
 
@@ -37,11 +37,11 @@ impl Schedule for Archive {
     fn channel_name(&self, channel: usize) -> String {
         format!("Archive {channel}")
     }
-    fn group_name(&self, _group: usize) -> String {
-        "All".to_owned()
+    fn group_label(&self, _group: usize) -> GroupName {
+        GroupName::Named("All".to_owned())
     }
-    fn title(&self, _channel: usize, _program: Program) -> String {
-        String::new()
+    fn listing(&self, _channel: usize, _program: Program) -> Option<Listing> {
+        Some(Listing::Gap)
     }
 }
 

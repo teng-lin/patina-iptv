@@ -1,7 +1,7 @@
 //! A live guide spanning independent sources. Provider identities and clocks
 //! remain local; UI identities are qualified by the owning source.
 use crate::EpgSchedule;
-use iptv_core::guide::{Program, Schedule};
+use iptv_core::guide::{GroupName, Listing, Program, Schedule};
 use std::{
     collections::{BTreeSet, HashMap},
     rc::Rc,
@@ -220,16 +220,14 @@ impl Schedule for CombinedSchedule {
             .map(|c| c + offset)
             .collect()
     }
-    fn group_name(&self, g: usize) -> String {
-        self.groups
-            .get(g)
-            .map(|&(s, g)| {
-                g.map_or_else(
-                    || self.sources[s].name.clone(),
-                    |g| self.sources[s].schedule.group_name(g),
-                )
-            })
-            .unwrap_or_default()
+    fn group_label(&self, group: usize) -> GroupName {
+        let Some(&(source, group)) = self.groups.get(group) else {
+            return GroupName::Named(String::new());
+        };
+        group.map_or_else(
+            || GroupName::Named(self.sources[source].name.clone()),
+            |group| self.sources[source].schedule.group_label(group),
+        )
     }
     fn group_is_playlist(&self, group: usize) -> bool {
         self.groups.get(group).is_some_and(|(_, g)| g.is_none())
@@ -242,8 +240,8 @@ impl Schedule for CombinedSchedule {
     fn group_depth(&self, group: usize) -> usize {
         usize::from(self.groups.get(group).is_some_and(|(_, g)| g.is_some()))
     }
-    fn all_channels_name(&self) -> String {
-        "All playlists".into()
+    fn all_channels_label(&self) -> GroupName {
+        GroupName::AllPlaylists
     }
     fn program_at(&self, c: usize, m: i32) -> Program {
         let Some((s, c)) = self.channel_source(c) else {
@@ -321,26 +319,11 @@ impl Schedule for CombinedSchedule {
             .or_else(|| self.group_rows.get(&(source, None)))
             .copied()
     }
-    fn title(&self, c: usize, p: Program) -> String {
-        self.channel_source(c)
-            .map(|(s, c)| s.schedule.title(c, self.local(&s.schedule, p)))
-            .unwrap_or_default()
-    }
-    fn title_in(&self, c: usize, p: Program, language: &iptv_core::i18n::Language) -> String {
-        self.channel_source(c)
-            .map(|(s, c)| s.schedule.title_in(c, self.local(&s.schedule, p), language))
-            .unwrap_or_default()
-    }
-    fn group_name_in(&self, g: usize, language: &iptv_core::i18n::Language) -> String {
-        self.groups
-            .get(g)
-            .map(|&(s, g)| {
-                g.map_or_else(
-                    || self.sources[s].name.clone(),
-                    |g| self.sources[s].schedule.group_name_in(g, language),
-                )
-            })
-            .unwrap_or_default()
+    fn listing(&self, channel: usize, program: Program) -> Option<Listing> {
+        let (source, local) = self.channel_source(channel)?;
+        source
+            .schedule
+            .listing(local, self.local(&source.schedule, program))
     }
     fn stream_url(&self, c: usize) -> Option<String> {
         let (s, c) = self.channel_source(c)?;
@@ -470,8 +453,8 @@ pub(crate) mod tests {
         assert_eq!(all.group_count(), 4);
         assert_ne!(all.channel_key(0), all.channel_key(1));
         assert_ne!(all.group_key(1), all.group_key(3));
-        assert_eq!(all.group_name(2), "Beta");
-        assert_eq!(all.group_name(3), "News");
+        assert_eq!(all.group_label(2), GroupName::Named("Beta".into()));
+        assert_eq!(all.group_label(3), GroupName::Named("News".into()));
         assert_eq!(all.group_channels(2), vec![1]);
         let beta = all.channel_key(1).unwrap();
         let (source, key) = split_key(&beta).unwrap();
@@ -507,8 +490,14 @@ pub(crate) mod tests {
         let a = all.program_at(0, minute);
         let b = all.program_at(1, minute);
         assert_eq!(a, b);
-        assert_eq!(all.title(0, a), "Alpha program");
-        assert_eq!(all.title(1, b), "Beta program");
+        assert_eq!(
+            all.listing(0, a),
+            Some(Listing::Title("Alpha program".into()))
+        );
+        assert_eq!(
+            all.listing(1, b),
+            Some(Listing::Title("Beta program".into()))
+        );
         assert_eq!(all.description(1, b).as_deref(), Some("Beta description"));
         let clock = crate::playback::Clock {
             now: t + 7200,
@@ -527,5 +516,36 @@ pub(crate) mod tests {
                 .unwrap();
             assert!(archive.url.contains(&format!("utc={t}")));
         }
+    }
+}
+
+#[cfg(test)]
+mod group_name_tests {
+    use super::*;
+    use iptv_epg::GuideStore;
+    use iptv_providers::m3u::parse_m3u;
+
+    #[test]
+    fn combined_groups_preserve_the_generated_bucket_and_the_stored_playlist_name() {
+        let now = 1_800_000_000;
+        let parsed =
+            parse_m3u("#EXTM3U\n#EXTINF:-1,Synthetic channel\nhttps://stream.example.test/live\n");
+        let child = EpgSchedule::from_catalog(
+            &parsed.groups,
+            &parsed.channels.items,
+            GuideStore::default(),
+            now,
+        );
+        let combined = CombinedSchedule::new(
+            vec![SourceSchedule {
+                id: 1,
+                name: "Other".into(),
+                schedule: Rc::new(child),
+            }],
+            now,
+        );
+        assert_eq!(combined.all_channels_label(), GroupName::AllPlaylists);
+        assert_eq!(combined.group_label(0), GroupName::Named("Other".into()));
+        assert_eq!(combined.group_label(1), GroupName::Ungrouped);
     }
 }

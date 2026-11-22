@@ -154,15 +154,6 @@ const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
     ("iptv-runtime/src/settings.rs", &["write_str"]),
 ];
 
-/// The names of the built-in lists, made where the lists are and
-/// translated by the shell's `lists::entry_name`.
-const LIST_NAMES: &[(&str, &str)] = &[
-    ("iptv-core/src/guide.rs", "All channels"),
-    ("iptv-core/src/lists_state.rs", "Favorites"),
-    ("iptv-core/src/lists_state.rs", "Recently watched"),
-    ("iptv-guide/src/combined.rs", "All playlists"),
-];
-
 /// Where a message call, a message type or a translating helper is given
 /// something other than a literal: file, and the name it starts with (by
 /// its path: `words::title` of `tr(words::title(kind))`). Each is a
@@ -201,8 +192,6 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/lib.rs", "message"),
     // `RuntimeEvent::Notify` (MESSAGE_TYPES).
     ("iptv-app/src/runtime_events.rs", "message"),
-    // The built-in lists (LIST_NAMES).
-    ("iptv-app/src/lists.rs", "name"),
     // The labels of TRANSLATING_HELPERS.
     ("iptv-app/src/fav_editor.rs", "label"),
     ("iptv-app/src/multiview_view/chrome.rs", "name"),
@@ -1233,7 +1222,6 @@ fn verdict(file: &str, literal: &Literal) -> Verdict {
         || (is(MESSAGE_CALLS) && literal.argument <= 1 && message_argument(call, literal))
         || is(MESSAGE_TYPES)
         || helper
-        || LIST_NAMES.contains(&(file, literal.text.as_str()))
     {
         return Verdict::Message;
     }

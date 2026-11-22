@@ -1,6 +1,5 @@
 shipped iptv-core/src/capabilities.rs re-exports capabilities_state
 shipped iptv-core/src/favorites.rs re-exports favorites_state
-shipped iptv-core/src/guide.rs iptv_core::i18n::Language
 shipped iptv-core/src/guide.rs re-exports guide_state
 shipped iptv-core/src/guide/floor.rs re-exports guide_state
 shipped iptv-core/src/interruption.rs re-exports interruption_state
@@ -17,8 +16,6 @@ shipped iptv-core/src/recording.rs re-exports recording_state
 shipped iptv-core/src/reorder.rs re-exports reorder_state
 shipped iptv-core/src/tracks.rs re-exports track_labels
 shipped iptv-core/src/vod.rs re-exports vod_state
-shipped iptv-guide/src/combined.rs iptv_core::i18n
-shipped iptv-guide/src/lib.rs iptv_core::i18n
 shipped iptv-library/src/details.rs iptv_core::wizard
 shipped iptv-library/src/details.rs iptv_library::playlists
 shipped iptv-library/src/epg_sources.rs iptv_core::wizard
@@ -48,14 +45,12 @@ test iptv-guide/src/interaction_tests/pages.rs iptv_core::lists::FIRST_GROUP
 test iptv-guide/src/interaction_tests/pages.rs iptv_core::lists::ListView
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::guide::Focus
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::guide::Move
-test iptv-guide/src/interaction_tests/schedule.rs iptv_core::i18n
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::lists::ALL
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::lists::ChannelList
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::lists::FIRST_GROUP
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::lists::ListId
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::lists::ListView
 test iptv-guide/src/interaction_tests/schedule.rs iptv_core::playback::zap_target
-test iptv-guide/src/tests.rs iptv_core::i18n
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::ALL
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::ChannelList
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::FIRST_GROUP

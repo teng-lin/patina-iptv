@@ -1,3 +1,5 @@
+use iptv_core::guide::GroupName;
+use iptv_core::guide::Listing;
 use iptv_core::guide::{Airing, Program, Schedule, now_minute};
 use iptv_epg::{
     ChannelKey, FeedId, GuideStore, MatchIndex, Overrides, ParseOptions, PlaylistChannel,
@@ -5,7 +7,7 @@ use iptv_epg::{
 };
 use iptv_providers::m3u::parse_m3u;
 
-use super::{EpgSchedule, GuideChannel, NO_INFORMATION};
+use super::{EpgSchedule, GuideChannel};
 
 /// Hour-aligned "now" for readable minutes.
 pub(crate) const NOW: i64 = 1_800_000_000;
@@ -122,10 +124,14 @@ pub(crate) fn mid_minute_schedule() -> EpgSchedule {
 fn a_program_starting_mid_minute_owns_that_minute() {
     let s = mid_minute_schedule();
     let second = s.program_at(0, 30);
-    assert_eq!(s.title(0, second), "Second", "the minute it starts in");
+    assert_eq!(
+        s.listing(0, second),
+        Some(Listing::Title("Second".into())),
+        "the minute it starts in"
+    );
     assert_eq!(second, Program { start: 30, end: 60 });
     let first = s.program_at(0, 29);
-    assert_eq!(s.title(0, first), "First");
+    assert_eq!(s.listing(0, first), Some(Listing::Title("First".into())));
     assert_eq!(first.end, 30, "cells meet without overlapping");
     let cells = s.programs_between(0, 0, 60);
     assert_eq!(cells, vec![first, second]);
@@ -142,7 +148,7 @@ fn real_programs_map_to_guide_minutes_with_titles_and_descriptions() {
             end: 30
         }
     );
-    assert_eq!(s.title(0, p), "Alpha News");
+    assert_eq!(s.listing(0, p), Some(Listing::Title("Alpha News".into())));
     assert_eq!(s.description(0, p).as_deref(), Some("About Alpha News."));
     assert_eq!(s.catchup_days(0), 3);
 }
@@ -177,7 +183,7 @@ fn gaps_are_filled_with_slots_clipped_to_neighbors() {
         Program { start: 60, end: 90 },
         "between Alpha Talk and Alpha Late"
     );
-    assert_eq!(s.title(0, gap), NO_INFORMATION);
+    assert_eq!(s.listing(0, gap), Some(Listing::Gap));
     assert_eq!(
         s.program_at(1, 10),
         Program { start: 0, end: 60 },
@@ -230,8 +236,15 @@ fn a_catalog_becomes_grouped_channels() {
          http://live.example.com/l.m3u8\n",
     );
     let s = EpgSchedule::from_catalog(&m3u.groups, &m3u.channels.items, GuideStore::new(), NOW);
-    let names: Vec<String> = (0..s.group_count()).map(|g| s.group_name(g)).collect();
-    assert_eq!(names, ["News", "Kids", "Other"]);
+    let names: Vec<_> = (0..s.group_count()).map(|g| s.group_label(g)).collect();
+    assert_eq!(
+        names,
+        [
+            GroupName::Named("News".into()),
+            GroupName::Named("Kids".into()),
+            GroupName::Ungrouped,
+        ]
+    );
     assert_eq!(s.group_start(1), 2);
     let channels: Vec<String> = (0..s.channel_count()).map(|c| s.channel_name(c)).collect();
     assert_eq!(channels, ["Alpha", "Beta", "Kappa", "Loose"]);
@@ -306,7 +319,7 @@ fn catchup_urls_carry_epoch_times_and_numbers_come_from_the_playlist() {
         GuideStore::new(),
         NOW + 600,
     );
-    let names: Vec<String> = (0..s.channel_count()).map(|c| s.channel_name(c)).collect();
+    let names: Vec<_> = (0..s.channel_count()).map(|c| s.channel_name(c)).collect();
     assert_eq!(names, ["Kappa", "Alpha", "Beta"]);
     let numbers: Vec<u32> = (0..s.channel_count())
         .map(|c| s.channel_number(c))
@@ -380,8 +393,14 @@ fn titles_stored_with_superscript_badges_show_them_as_words() {
         catchup_days: 0,
     };
     let s = EpgSchedule::new(vec![("News".to_owned(), vec![channel])], store, NOW);
-    assert_eq!(s.title(0, s.program_at(0, 0)), "Alpha News Live");
-    assert_eq!(s.title(0, s.program_at(0, 45)), "Alpha Talk");
+    assert_eq!(
+        s.listing(0, s.program_at(0, 0)),
+        Some(Listing::Title("Alpha News Live".into()))
+    );
+    assert_eq!(
+        s.listing(0, s.program_at(0, 45)),
+        Some(Listing::Title("Alpha Talk".into()))
+    );
 }
 
 /// A store cannot hold a group id twice, but the constructor must not
@@ -405,15 +424,23 @@ fn a_repeated_group_id_keeps_keys_names_and_starts_together() {
 
     let groups = |s: &EpgSchedule| {
         (0..s.group_count())
-            .map(|g| (s.group_key(g), s.group_name(g), s.group_channels(g)))
+            .map(|g| (s.group_key(g), s.group_label(g), s.group_channels(g)))
             .collect::<Vec<_>>()
     };
     assert_eq!(
         groups(&s),
         [
-            (news.id.as_str().to_owned(), "News".to_owned(), vec![0, 1]),
-            (sport.id.as_str().to_owned(), "Sport".to_owned(), vec![2]),
-            ("__other__".to_owned(), "Other".to_owned(), vec![3]),
+            (
+                news.id.as_str().to_owned(),
+                GroupName::Named("News".into()),
+                vec![0, 1]
+            ),
+            (
+                sport.id.as_str().to_owned(),
+                GroupName::Named("Sport".into()),
+                vec![2]
+            ),
+            ("__other__".to_owned(), GroupName::Ungrouped, vec![3]),
         ]
     );
     assert_eq!(groups(&s), groups(&plain), "the repeats add nothing");
@@ -439,9 +466,13 @@ fn a_repeated_group_id_keeps_keys_names_and_starts_together() {
     });
     assert_eq!(
         (0..s.group_count())
-            .map(|g| s.group_name(g))
+            .map(|g| s.group_label(g))
             .collect::<Vec<_>>(),
-        ["Sport first", "News", "Other"]
+        [
+            GroupName::Named("Sport first".into()),
+            GroupName::Named("News".into()),
+            GroupName::Ungrouped
+        ]
     );
 }
 
@@ -491,7 +522,7 @@ fn a_prepared_schedule_crosses_threads_and_matches_one_organized_in_place() {
                 .map(|c| (s.channel_name(c), s.channel_hidden(c), s.channel_key(c)))
                 .collect::<Vec<_>>(),
             (0..s.group_count())
-                .map(|g| (s.group_key(g), s.group_name(g), s.group_channels(g)))
+                .map(|g| (s.group_key(g), s.group_label(g), s.group_channels(g)))
                 .collect::<Vec<_>>(),
             s.playlist_order(),
         )
@@ -508,86 +539,82 @@ fn a_prepared_schedule_crosses_threads_and_matches_one_organized_in_place() {
 }
 
 #[test]
-fn generated_guide_placeholders_localize_but_provider_titles_do_not() {
-    let ja = iptv_core::i18n::resolve("ja", None);
-    let s = schedule();
-    assert_eq!(s.title_in(1, s.program_at(1, 0), ja), "情報なし");
-    assert_eq!(s.title_in(0, s.program_at(0, 0), ja), "Alpha News");
-    // The same bytes can be a genuine provider title or an app placeholder.
-    let a = ChannelKey::new("a");
-    let xml = xmltv().replace("Alpha News", "No information");
-    let store = store_from(&xml, &[(&a, Some("a.test"), "Alpha")], true);
-    let s = EpgSchedule::new(
-        vec![(
-            "Other".into(),
-            vec![GuideChannel {
-                key: a,
-                name: "Alpha".into(),
-                number: 1,
-                catchup_days: 0,
-            }],
-        )],
-        store,
-        NOW,
-    );
-    assert_eq!(s.title_in(0, s.program_at(0, 0), ja), "No information");
+fn a_listing_distinguishes_a_title_from_a_gap_and_a_missing_row() {
+    let schedule = schedule();
     assert_eq!(
-        s.group_name_in(0, ja),
-        "Other",
-        "provider group name stays opaque"
+        schedule.listing(1, schedule.program_at(1, 0)),
+        Some(Listing::Gap)
     );
+    assert_eq!(schedule.listing(2, Program { start: 0, end: 60 }), None);
+    for title in ["No information", "Loading…"] {
+        let key = ChannelKey::new("a");
+        let xml = xmltv().replace("Alpha News", title);
+        let store = store_from(&xml, &[(&key, Some("a.test"), "Alpha")], true);
+        let schedule = EpgSchedule::new(
+            vec![(
+                "Other".into(),
+                vec![GuideChannel {
+                    key,
+                    name: "Alpha".into(),
+                    number: 1,
+                    catchup_days: 0,
+                }],
+            )],
+            store,
+            NOW,
+        );
+        assert_eq!(
+            schedule.listing(0, schedule.program_at(0, 0)),
+            Some(Listing::Title(title.into()))
+        );
+        assert_eq!(schedule.group_label(0), GroupName::Named("Other".into()));
+    }
 }
 
 #[test]
-fn a_provider_group_using_the_reserved_bucket_key_still_keeps_its_name() {
-    let mut parsed = parse_m3u(
-        "#EXTM3U\n#EXTINF:-1 group-title=\"Other\",Synthetic Channel\nhttps://synthetic.example.test/live\n",
-    );
-    parsed.groups[0].id = iptv_providers::id::GroupId::from_stored("__other__");
-    parsed.channels.items[0].groups = vec![parsed.groups[0].id.clone()];
-    let s = EpgSchedule::from_catalog(
-        &parsed.groups,
-        &parsed.channels.items,
-        GuideStore::new(),
-        NOW,
-    );
-    assert_eq!(
-        s.group_name_in(0, iptv_core::i18n::resolve("ja", None)),
-        "Other"
-    );
+fn imported_group_names_stay_opaque_even_under_the_reserved_key() {
+    for name in ["Other", "Category 1"] {
+        let mut parsed = parse_m3u(&format!(
+            "#EXTM3U\n#EXTINF:-1 group-title=\"{name}\",Synthetic Channel\nhttps://synthetic.example.test/live\n",
+        ));
+        parsed.groups[0].id = iptv_providers::id::GroupId::from_stored("__other__");
+        parsed.channels.items[0].groups = vec![parsed.groups[0].id.clone()];
+        let schedule = EpgSchedule::from_catalog(
+            &parsed.groups,
+            &parsed.channels.items,
+            GuideStore::new(),
+            NOW,
+        );
+        assert_eq!(schedule.group_label(0), GroupName::Named(name.into()));
+    }
 }
 
 #[test]
-fn the_generated_ungrouped_bucket_localizes_after_prepare_and_organization() {
+fn the_generated_ungrouped_bucket_retains_its_identity_through_preparation() {
     let parsed = parse_m3u(
         "#EXTM3U\n#EXTINF:-1,Synthetic Ungrouped Channel\nhttps://synthetic.example.test/live\n",
     );
-    let s = EpgSchedule::from_catalog(
+    let schedule = EpgSchedule::from_catalog(
         &parsed.groups,
         &parsed.channels.items,
         GuideStore::new(),
         NOW,
     );
-    let ja = iptv_core::i18n::resolve("ja", None);
-    assert_eq!(s.group_name(0), "Other");
-    assert_eq!(
-        s.group_name_in(0, ja),
-        iptv_core::i18n::translate(ja, "Other")
-    );
-    s.set_organization(super::Organization::default());
-    assert_eq!(
-        s.group_name_in(0, ja),
-        iptv_core::i18n::translate(ja, "Other")
-    );
-    let s = EpgSchedule::from_prepared(EpgSchedule::prepare(
+    assert_eq!(schedule.group_label(0), GroupName::Ungrouped);
+    schedule.set_organization(super::Organization::default());
+    assert_eq!(schedule.group_label(0), GroupName::Ungrouped);
+
+    let schedule = EpgSchedule::from_prepared(EpgSchedule::prepare(
         &parsed.groups,
         &parsed.channels.items,
         GuideStore::new(),
         NOW,
         None,
     ));
-    assert_eq!(
-        s.group_name_in(0, ja),
-        iptv_core::i18n::translate(ja, "Other")
-    );
+    assert_eq!(schedule.group_label(0), GroupName::Ungrouped);
+    schedule.set_organization(super::Organization {
+        groups: vec![("__other__".into(), "Renamed".into(), false)],
+        ..Default::default()
+    });
+    assert_eq!(schedule.group_label(0), GroupName::Named("Renamed".into()));
 }
