@@ -585,6 +585,39 @@ impl Drop for HostBody {
     }
 }
 
+/// The host answered chunk save `id` (`on_chunks_saved`).
+pub(crate) fn deliver_saved(id: u32, ok: bool) {
+    deliver(id, |s| s.status = Some((u16::from(ok), None)));
+}
+
+/// A chunk save the host was handed and has not answered yet.
+pub(crate) struct Saving(Pending);
+
+impl Saving {
+    pub(crate) fn new() -> Self {
+        Self(Pending::new(next_id(), false))
+    }
+
+    pub(crate) fn id(&self) -> u32 {
+        self.0.id
+    }
+
+    /// True once the host's transaction committed; false when it failed.
+    pub(crate) async fn answer(self) -> bool {
+        let id = self.0.id;
+        let _pending = self.0;
+        std::future::poll_fn(|cx| {
+            register(id, cx);
+            match with_slot(id, |s| s.status.take()) {
+                Some(Some((ok, _))) => Poll::Ready(ok == 1),
+                Some(None) => Poll::Pending,
+                None => Poll::Ready(false),
+            }
+        })
+        .await
+    }
+}
+
 #[cfg(test)]
 mod request_tests {
     use super::*;
