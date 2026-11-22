@@ -87,7 +87,7 @@ Patina (4); 10 s inactive beside Settings (4).
    window at large text (700×560 at AX3: 64 points for the title and two
    lines of times). The header now budgets the title and the times, wrapped
    as the column's width makes them, before the description
-   (`iptv_core::layout::details_height`), growing up to 55% of the window as
+   (`iptv_app::layout::details_height`), growing up to 55% of the window as
    before, or 70% at the accessibility text sizes.
 7. **iPadOS 26 window controls covered the guide preview's ‹** in a window
    ([390-point guide](../screenshots/issue-138/ipad-window-390-guide.png),

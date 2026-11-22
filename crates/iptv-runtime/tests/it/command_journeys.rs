@@ -2,7 +2,7 @@
 use crate::common;
 use crate::support;
 
-use iptv_core::organization::{Action, Editor};
+use iptv_core::organization::Edit;
 use iptv_library::{OrganizationScope, SourceId};
 use iptv_providers::ContentId;
 use iptv_runtime::{Ports, Runtime, commands, model::DatabaseKey};
@@ -196,14 +196,14 @@ fn organization_edits_preserve_provider_identity_and_the_other_source() {
     let changed = items.iter().find(|i| i.id == keys[0].as_str()).unwrap();
     assert_eq!(changed.name, "Generated alias");
     assert!(changed.hidden);
-    let editor = Editor::new(items.clone(), Some(changed.id.clone()));
     block_on(commands::edit_organization(
         &runtime,
         first,
         OrganizationScope::Channels,
-        editor,
+        items.clone(),
         changed.clone(),
-        Action::Last,
+        Edit::Last,
+        Default::default(),
     ))
     .unwrap();
     assert_eq!(
@@ -263,9 +263,10 @@ fn organization_edits_preserve_provider_identity_and_the_other_source() {
         &runtime,
         first,
         OrganizationScope::Channels,
-        Editor::new(current, None),
+        current,
         edited,
-        Action::ResetName,
+        Edit::ResetName,
+        Default::default(),
     ))
     .unwrap();
     assert_ne!(

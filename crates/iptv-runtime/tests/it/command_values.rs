@@ -5,7 +5,7 @@ use crate::support;
 
 use iptv_core::{
     membership::Member,
-    organization::{Action, BlockKind, Blocks, Editor, Item, Sort},
+    organization::{BlockKind, Blocks, Edit, Item, Sort},
 };
 use iptv_library::{ChannelScope, CustomGroup, CustomGroupId, OrganizationScope, SourceId};
 use iptv_providers::ContentId;
@@ -19,6 +19,7 @@ fn every_public_command_returns_its_declared_application_value() {
     let owner = Runtime::new(Ports::new(std::path::PathBuf::new(), |_| {
         panic!("type checking command futures must not open storage")
     }));
+    let _: fn(&Runtime) -> Vec<usize> = Runtime::recent_channels;
     let source = SourceId(1);
     let group = CustomGroupId(1);
     let content = || ContentId::from_stored("generated-channel");
@@ -54,7 +55,7 @@ fn every_public_command_returns_its_declared_application_value() {
     check!(set_guide_block(source, BlockKind::Channel, "generated-channel".into(), true) => ());
     check!(set_organization_sort(source, scope(), Sort::Name) => ());
     check!(save_organization_order(source, scope(), Vec::new(), Vec::new(), iptv_core::organization::Sort::Manual, false) => ());
-    check!(edit_organization(source, scope(), Editor::new(Vec::new(), None), item(), Action::Later) => ());
+    check!(edit_organization(source, scope(), Vec::new(), item(), Edit::Later, BTreeSet::new()) => ());
     check!(favorite_provider_order(source, vec!["generated-channel".into()]) => Vec<String>);
     check!(rename_organization_item(source, scope(), "generated-channel".into(), "Generated".into()) => ());
     check!(load_search_history(std::path::PathBuf::new()) => Vec<String>);

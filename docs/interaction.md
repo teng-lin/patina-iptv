@@ -126,14 +126,14 @@ In the guide:
   system cancels (a notification shade, a call) stops where it is,
   without a fling. A drag that started on a channel or a program, past
   or upcoming, never chooses it: under the threshold a touch is still a
-  tap (`iptv_core::timeline`).
+  tap (`iptv_app::timeline`).
 - **Now:** crossing the drag threshold, in the guide or the channel list,
   cancels a preview `guide.autoplay` was waiting to start; it does not
   come back until the focus moves to another channel. The threshold is
   read from the first finger's own touches, so a drag at the list's end
   that scrolls nothing counts too, and so does a scroll view taking over a
   finger that moved; a still finger's cancel does not
-  (`iptv_core::timeline::Threshold`). A tap's
+  (`iptv_app::timeline::Threshold`). A tap's
   own choice still plays after its switch delay. Scrolling never tunes,
   records or opens a menu or details (`BrowsePlayback::dragged`;
   `tests/app/tablet_gestures.rs`).
@@ -241,7 +241,7 @@ what the content needs at the current text size, not from the device type.
 - Below the space a pane needs, the layout collapses rather than shrinking text
   or touch targets further.
 - Remote focus treatment does not change with window size.
-- **Now:** the class policy (`iptv_core::layout::Class`): Compact below 620
+- **Now:** the class policy (`iptv_app::layout::Class`): Compact below 620
   points and Expanded from 960, each divided by the text factor (the guide's
   scale times the text size: the app's own text size times the system's,
   Android's font scale or iOS Dynamic Type). Search's two-row header uses
@@ -256,7 +256,7 @@ what the content needs at the current text size, not from the device type.
   screen (smallest width under 600 dp, not a TV) asks for landscape on
   either side, as the rotation lock allows, until portrait has a design of
   its own. Tablets, an unfolded phone and TVs rotate freely.
-- **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
+- **Now:** the guide's header (`iptv_app::layout::GuideHeader`) puts its
   shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
   own under the preview and the focused program in Compact, and in Medium
   wherever the program would have less than its room beside them. The
@@ -282,7 +282,7 @@ what the content needs at the current text size, not from the device type.
   (400 × 600 is 1.5) and a phone on its side keep the preview beside the
   program.
 - **Now:** the player's channel list keeps its columns inside the window
-  (`iptv_core::layout::ListPanel`): the groups column first, then the list in
+  (`iptv_app::layout::ListPanel`): the groups column first, then the list in
   what is left. In the preview layout the video goes beside them only where
   it keeps 160 points of width. A narrower window, a phone held upright for
   one, leaves it full screen under the list, as the overlay layout does.

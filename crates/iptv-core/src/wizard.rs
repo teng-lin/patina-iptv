@@ -24,7 +24,13 @@
 //! often carry credentials in their path or query. Labels and the empty
 //! state's wording are the shell's own (i18n), not stored here.
 
+use crate::add_playlist::{UrlError, UrlScheme, url_origin, validate_url};
 use std::collections::BTreeMap;
+
+pub use crate::add_playlist::{
+    DraftSource, FailureKind, ImportCounts, ImportFailure, ImportId, ImportInput, ImportProgress,
+    ImportStage, PlaylistDraft, SecretText, UrlText, normalize_mac,
+};
 use std::fmt;
 
 /// What the user is adding.
@@ -125,64 +131,6 @@ impl Field {
     }
 }
 
-/// A credential. `Debug` prints `***`; read it with [`SecretText::expose`]
-/// only where it goes on the wire or into secure storage.
-#[derive(Clone, Default, PartialEq, Eq, Hash)]
-pub struct SecretText(String);
-
-impl SecretText {
-    pub fn new(value: impl Into<String>) -> Self {
-        SecretText(value.into())
-    }
-
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for SecretText {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("SecretText(***)")
-    }
-}
-
-/// A URL that may embed credentials. `Debug` prints only its origin.
-#[derive(Clone, Default, PartialEq, Eq, Hash)]
-pub struct UrlText(String);
-
-impl UrlText {
-    pub fn new(value: impl Into<String>) -> Self {
-        UrlText(value.into())
-    }
-
-    /// The URL as entered (trimmed). Callers must not log it.
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for UrlText {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UrlText({})", url_origin(&self.0))
-    }
-}
-
-/// `scheme://host[:port]` with any userinfo, path, query and fragment gone.
-fn url_origin(url: &str) -> String {
-    let (scheme, rest) = match url.find("://") {
-        Some(at) => (&url[..at + 3], &url[at + 3..]),
-        None => ("", url),
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = authority.rsplit('@').next().unwrap_or("");
-    let more = if authority.len() < rest.len() || host.len() < authority.len() {
-        "/…"
-    } else {
-        ""
-    };
-    format!("{scheme}{host}{more}")
-}
-
 /// Everything typed so far, for every field (kept when the type changes, so
 /// going back and forth loses nothing). `Debug` redacts as described in the
 /// module docs.
@@ -231,48 +179,6 @@ const FIELDS_BY_INDEX: [Field; Field::COUNT] = [
     Field::EpgUrl,
 ];
 
-/// The provider-neutral result of the form; the app maps it to its provider
-/// configuration. Values are trimmed (passwords excepted) and the MAC is
-/// normalized to `AA:BB:CC:DD:EE:FF`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PlaylistDraft {
-    pub source: DraftSource,
-    pub name: Option<String>,
-    pub epg_url: Option<UrlText>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DraftSource {
-    M3uUrl {
-        url: UrlText,
-    },
-    M3uFile {
-        path: String,
-    },
-    /// `server` as typed; a missing scheme means `http`.
-    Xtream {
-        server: UrlText,
-        username: SecretText,
-        password: SecretText,
-    },
-    /// `portal` as typed; a missing scheme means `http`.
-    Stalker {
-        portal: UrlText,
-        mac: SecretText,
-    },
-}
-
-impl PlaylistDraft {
-    pub fn kind(&self) -> PlaylistKind {
-        match self.source {
-            DraftSource::M3uUrl { .. } => PlaylistKind::M3uUrl,
-            DraftSource::M3uFile { .. } => PlaylistKind::M3uFile,
-            DraftSource::Xtream { .. } => PlaylistKind::Xtream,
-            DraftSource::Stalker { .. } => PlaylistKind::Stalker,
-        }
-    }
-}
-
 /// Why a field was refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldError {
@@ -287,86 +193,16 @@ pub enum FieldError {
     InvalidMac,
 }
 
-/// Checks the shape of an `http`/`https` URL: no whitespace, a known scheme
-/// (optional when `scheme_required` is false), a host made of letter/digit/
-/// hyphen labels or a bracketed IPv6 literal, and a port in 1..=65535.
-/// Userinfo, path, query and fragment are not inspected.
-pub fn validate_url(input: &str, scheme_required: bool) -> Result<(), FieldError> {
-    if input.chars().any(char::is_whitespace) {
-        return Err(FieldError::ContainsWhitespace);
-    }
-    let rest = match input.find("://") {
-        Some(at) => {
-            let scheme = input[..at].to_ascii_lowercase();
-            if scheme != "http" && scheme != "https" {
-                return Err(FieldError::UnsupportedScheme);
-            }
-            &input[at + 3..]
-        }
-        None if scheme_required => return Err(FieldError::MissingScheme),
-        None => input,
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host_port = authority.rsplit('@').next().unwrap_or("");
-    let (host_ok, port) = if let Some(v6) = host_port.strip_prefix('[') {
-        let Some((addr, after)) = v6.split_once(']') else {
-            return Err(FieldError::InvalidHost);
-        };
-        let ok = addr.contains(':')
-            && addr
-                .chars()
-                .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.');
-        let port = match after {
-            "" => None,
-            p => Some(p.strip_prefix(':').ok_or(FieldError::InvalidHost)?),
-        };
-        (ok, port)
-    } else {
-        let (host, port) = match host_port.split_once(':') {
-            Some((h, p)) => (h, Some(p)),
-            None => (host_port, None),
-        };
-        (valid_host_name(host), port)
-    };
-    if !host_ok {
-        return Err(FieldError::InvalidHost);
-    }
-    if let Some(port) = port {
-        let valid = !port.is_empty()
-            && port.bytes().all(|b| b.is_ascii_digit())
-            && port.parse::<u32>().is_ok_and(|p| (1..=65535).contains(&p));
-        if !valid {
-            return Err(FieldError::InvalidPort);
+impl From<UrlError> for FieldError {
+    fn from(error: UrlError) -> Self {
+        match error {
+            UrlError::ContainsWhitespace => Self::ContainsWhitespace,
+            UrlError::MissingScheme => Self::MissingScheme,
+            UrlError::UnsupportedScheme => Self::UnsupportedScheme,
+            UrlError::InvalidHost => Self::InvalidHost,
+            UrlError::InvalidPort => Self::InvalidPort,
         }
     }
-    Ok(())
-}
-
-fn valid_host_name(host: &str) -> bool {
-    !host.is_empty()
-        && host.len() <= 253
-        && host.split('.').all(|label| {
-            !label.is_empty()
-                && label.chars().count() <= 63
-                && !label.starts_with('-')
-                && !label.ends_with('-')
-                && label.chars().all(|c| c.is_alphanumeric() || c == '-')
-        })
-}
-
-/// `00:1a:79:12:34:56`, `00-1A-79-12-34-56`, `001A.7912.3456` or
-/// `001A79123456` → `00:1A:79:12:34:56`; `None` unless 12 hex digits.
-pub fn normalize_mac(input: &str) -> Option<String> {
-    let digits: String = input
-        .chars()
-        .filter(|c| !matches!(c, ':' | '-' | '.') && !c.is_whitespace())
-        .collect::<String>()
-        .to_ascii_uppercase();
-    if digits.len() != 12 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    let pairs: Vec<&str> = (0..6).map(|i| &digits[i * 2..i * 2 + 2]).collect();
-    Some(pairs.join(":"))
 }
 
 /// Validates one field's raw value (surrounding whitespace is ignored,
@@ -385,102 +221,16 @@ pub fn validate_field(field: Field, value: &str) -> Result<(), FieldError> {
         };
     }
     match field {
-        Field::PlaylistUrl | Field::EpgUrl => validate_url(value, true),
-        Field::Server | Field::PortalUrl => validate_url(value, false),
+        Field::PlaylistUrl | Field::EpgUrl => {
+            validate_url(value, UrlScheme::Required).map_err(FieldError::from)
+        }
+        Field::Server | Field::PortalUrl => {
+            validate_url(value, UrlScheme::Optional).map_err(FieldError::from)
+        }
         Field::Mac => normalize_mac(value)
             .map(|_| ())
             .ok_or(FieldError::InvalidMac),
         _ => Ok(()),
-    }
-}
-
-/// Correlates an import with its progress and result; results for any id
-/// but the running one are ignored.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ImportId(pub u64);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ImportStage {
-    Connecting,
-    Downloading,
-    Parsing,
-    Saving,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportProgress {
-    pub stage: ImportStage,
-    /// Bytes or items, as the importer counts them.
-    pub done: u64,
-    pub total: Option<u64>,
-}
-
-impl ImportProgress {
-    /// 0..=100 when the total is known.
-    pub fn percent(&self) -> Option<u8> {
-        let total = self.total.filter(|t| *t > 0)?;
-        Some((u128::from(self.done.min(total)) * 100 / u128::from(total)) as u8)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ImportCounts {
-    pub channels: u32,
-    pub groups: u32,
-    pub movies: u32,
-    pub series: u32,
-}
-
-impl ImportCounts {
-    /// Nothing playable arrived. Groups alone do not count.
-    pub fn is_empty(&self) -> bool {
-        self.channels == 0 && self.movies == 0 && self.series == 0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FailureKind {
-    /// The bounded import queue is full; retry after another import finishes.
-    Busy,
-    /// No connection, DNS, timeout, TLS, HTTP 5xx.
-    Network,
-    /// Local database, staging, or credential storage failed.
-    Storage,
-    /// The provider refused the account.
-    Auth,
-    /// The response or file is not a playlist.
-    Parse,
-    /// A valid playlist with nothing playable in it.
-    EmptyPlaylist,
-    /// A source this app cannot use (another portal type, a format we lack).
-    Unsupported,
-    /// The import was stopped before it finished.
-    Canceled,
-    /// This device cannot import playlists (a browser TV, whose host has no
-    /// workers for imports yet).
-    Unavailable,
-}
-
-impl FailureKind {
-    /// Recoverable failures return to the form; others end on the failure
-    /// screen, whose only way on is choosing another type.
-    pub fn is_recoverable(self) -> bool {
-        !matches!(self, FailureKind::Unsupported | FailureKind::Unavailable)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportFailure {
-    pub kind: FailureKind,
-    /// The importer's own pointer at the field at fault (an EPG URL that
-    /// failed, say). Used when it belongs to the form; otherwise the
-    /// wizard picks by [`FailureKind`].
-    pub field: Option<Field>,
-}
-
-impl ImportFailure {
-    pub fn new(kind: FailureKind) -> Self {
-        ImportFailure { kind, field: None }
     }
 }
 
@@ -1041,25 +791,27 @@ impl Wizard {
         let optional = |f: Field| Some(text(f)).filter(|t| !t.is_empty());
         let source = match self.kind {
             PlaylistKind::M3uUrl => DraftSource::M3uUrl {
-                url: UrlText(text(Field::PlaylistUrl)),
+                url: UrlText::new(text(Field::PlaylistUrl)),
             },
             PlaylistKind::M3uFile => DraftSource::M3uFile {
                 path: text(Field::PlaylistFile),
             },
             PlaylistKind::Xtream => DraftSource::Xtream {
-                server: UrlText(text(Field::Server)),
-                username: SecretText(text(Field::Username)),
-                password: SecretText(self.values.get(Field::Password).to_owned()),
+                server: UrlText::new(text(Field::Server)),
+                username: SecretText::new(text(Field::Username)),
+                password: SecretText::new(self.values.get(Field::Password)),
             },
             PlaylistKind::Stalker => DraftSource::Stalker {
-                portal: UrlText(text(Field::PortalUrl)),
-                mac: SecretText(normalize_mac(self.values.get(Field::Mac)).unwrap_or_default()),
+                portal: UrlText::new(text(Field::PortalUrl)),
+                mac: SecretText::new(
+                    normalize_mac(self.values.get(Field::Mac)).unwrap_or_default(),
+                ),
             },
         };
         PlaylistDraft {
             source,
             name: optional(Field::Name),
-            epg_url: optional(Field::EpgUrl).map(UrlText),
+            epg_url: optional(Field::EpgUrl).map(UrlText::new),
         }
     }
 
@@ -1095,11 +847,19 @@ impl Wizard {
 
     fn fail(&mut self, failure: ImportFailure) {
         self.failure = Some(failure);
-        if !failure.kind.is_recoverable() {
+        if matches!(
+            failure.kind,
+            FailureKind::Unsupported | FailureKind::Unavailable
+        ) {
             self.step = Step::Failed { failure };
             return;
         }
-        match (failure.field, failure.kind) {
+        let field = failure.input.map(|input| match input {
+            ImportInput::PlaylistAddress => self.kind.source_field(),
+            ImportInput::Credentials => self.kind.auth_field(),
+            ImportInput::GuideAddress => Field::EpgUrl,
+        });
+        match (field, failure.kind) {
             (Some(field), _) if self.kind.has_field(field) => self.focus_field(field),
             (_, FailureKind::Canceled) => self.form_focus = Target::Submit,
             (_, FailureKind::Auth) => self.focus_field(self.kind.auth_field()),
@@ -1471,46 +1231,6 @@ mod tests {
     }
 
     #[test]
-    fn url_rules() {
-        let ok = [
-            "http://example.test",
-            "HTTPS://Example.TEST:8443/path?q=1#f",
-            "http://user:pw@example.test/get.php?username=a&password=b",
-            "http://192.0.2.10:8080",
-            "http://[2001:db8::1]:8080/x",
-            "http://localhost/list.m3u",
-            "http://xn--bcher-kva.example/",
-            "http://bücher.example/",
-        ];
-        for url in ok {
-            assert_eq!(validate_url(url, true), Ok(()), "{url}");
-        }
-        let bad = [
-            ("example.test/list.m3u", FieldError::MissingScheme),
-            ("ftp://example.test", FieldError::UnsupportedScheme),
-            ("rtsp://example.test", FieldError::UnsupportedScheme),
-            ("://example.test", FieldError::UnsupportedScheme),
-            ("http://exa mple.test", FieldError::ContainsWhitespace),
-            ("http://", FieldError::InvalidHost),
-            ("http:///path", FieldError::InvalidHost),
-            ("http://a..b", FieldError::InvalidHost),
-            ("http://-a.test", FieldError::InvalidHost),
-            ("http://a_b.test", FieldError::InvalidHost),
-            ("http://a.test:", FieldError::InvalidPort),
-            ("http://a.test:0", FieldError::InvalidPort),
-            ("http://a.test:65536", FieldError::InvalidPort),
-            ("http://a.test:80a", FieldError::InvalidPort),
-            ("http://a.test:1:2", FieldError::InvalidPort),
-            ("http://[2001:db8::1", FieldError::InvalidHost),
-            ("http://[zz]", FieldError::InvalidHost),
-            ("http://[2001:db8::1]x", FieldError::InvalidHost),
-        ];
-        for (url, err) in bad {
-            assert_eq!(validate_url(url, true), Err(err), "{url}");
-        }
-    }
-
-    #[test]
     fn server_and_portal_may_omit_the_scheme_but_playlist_and_epg_urls_may_not() {
         assert_eq!(validate_field(Server, "panel.example.test:8080"), Ok(()));
         assert_eq!(validate_field(PortalUrl, "portal.example.test/c/"), Ok(()));
@@ -1617,7 +1337,6 @@ mod tests {
         set(&mut w, PortalUrl, "  portal.example.test/c/ ");
         set(&mut w, Name, "  Portal one ");
         let (_, draft) = submit(&mut w).unwrap();
-        assert_eq!(draft.kind(), PlaylistKind::Stalker);
         assert_eq!(
             draft,
             PlaylistDraft {
@@ -1652,7 +1371,7 @@ mod tests {
         assert_eq!(draft.name, None);
 
         let (_, draft) = submit(&mut filled(PlaylistKind::M3uUrl)).unwrap();
-        assert_eq!(draft.kind(), PlaylistKind::M3uUrl);
+        assert!(matches!(draft.source, DraftSource::M3uUrl { .. }));
         let (_, draft) = submit(&mut filled(PlaylistKind::M3uFile)).unwrap();
         assert_eq!(
             draft.source,
@@ -1850,7 +1569,7 @@ mod tests {
             id,
             failure: ImportFailure {
                 kind: Network,
-                field: Some(EpgUrl),
+                input: Some(ImportInput::GuideAddress),
             },
         });
         assert_eq!(w.focus(), Some(Target::Field(EpgUrl)));
@@ -1860,10 +1579,10 @@ mod tests {
             id,
             failure: ImportFailure {
                 kind: Auth,
-                field: Some(Mac),
+                input: Some(ImportInput::Credentials),
             },
         });
-        assert_eq!(w.focus(), Some(Target::Field(Username)), "Mac is not on it");
+        assert_eq!(w.focus(), Some(Target::Field(Username)));
     }
 
     #[test]

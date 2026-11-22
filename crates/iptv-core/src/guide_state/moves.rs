@@ -1,22 +1,19 @@
 //! The guide's moves along time beyond the program steps: a desktop
 //! keyboard's hour and day jumps and its key back to now, and the window a
-//! touch or wheel pan settled at ([`crate::timeline`]). None goes before
-//! the focused row's floor ([`super::floor`]).
+//! touch or wheel pan settled at. None goes before
+//! the focused row's floor ([`Focus::floor`]).
 
+use super::{Focus, Pane, home_window};
+use crate::guide::Schedule;
 #[cfg(test)]
-use super::VISIBLE;
-use super::{Focus, Pane, Schedule, home_window};
-
-/// Minutes in a day (Ctrl + Left/Right).
-pub const DAY: i32 = 24 * 60;
-/// Minutes Shift + Left/Right move the time column by.
-pub const HOUR: i32 = 60;
+use crate::guide::VISIBLE;
+pub use crate::guide::{DAY, HOUR};
 
 impl Focus {
     /// The time column and the window `minutes` later (earlier when
     /// negative): Shift + Left/Right (an hour) and Ctrl + Left/Right (a
     /// day). The cursor stays between the row's floor and the end of the
-    /// guide, as Left and Right do ([`super::floor`]), and lands on the
+    /// guide, as Left and Right do ([`Focus::floor`]), and lands on the
     /// program airing there; the window keeps its place relative to it (a
     /// long program does not pull it back to its start) and comes along
     /// when the floor held the cursor back.
@@ -56,8 +53,9 @@ impl Focus {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Airing, Move, STEP, SyntheticSchedule};
+    use super::super::{Move, STEP};
     use super::*;
+    use crate::guide::{Airing, SyntheticSchedule};
 
     const S: SyntheticSchedule = SyntheticSchedule;
 

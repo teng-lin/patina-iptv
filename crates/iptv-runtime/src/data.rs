@@ -34,7 +34,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::unbounded_channel;
 
-use iptv_core::wizard::{FailureKind, ImportFailure};
+use iptv_core::add_playlist::{FailureKind, ImportFailure};
 use iptv_epg::GuideStore;
 use iptv_guide::EpgSchedule;
 use iptv_import::CancelToken;
@@ -44,7 +44,7 @@ pub use library::{
     Activity, Playlist, delete, edit_guides, playlists, refresh, refresh_all, rename, set_policy,
     set_user_agent, source_details, switch_to, try_details,
 };
-pub use wizard_map::{source_from_draft, source_from_draft_in};
+pub use wizard_map::source_from_draft;
 
 /// A development playlist the wizard's M3U form starts with, set when the
 /// app is built (`IPTV_RS_DEV_PLAYLIST=http://10.0.2.2:8089/iptv/playlist.m3u`
@@ -91,7 +91,7 @@ fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
                         // backoffs. Prepare the reader before resuming library work.
                         services.read_at_startup(|_| Ok(())).await?;
                         owner.parental_refresh().await.map_err(|_| {
-                            crate::Error::unavailable(iptv_core::i18n::key(
+                            crate::Error::unavailable(iptv_core::message::key(
                                 "Parental settings are unavailable",
                             ))
                         })?;

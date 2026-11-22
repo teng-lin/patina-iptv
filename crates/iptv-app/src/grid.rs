@@ -25,7 +25,7 @@ mod pan;
 mod ruler;
 mod wheel;
 
-const BAND: i32 = 360 + 2 * iptv_core::timeline::MARGIN;
+const BAND: i32 = 360 + 2 * crate::timeline::MARGIN;
 use pan::Pan;
 
 use iptv_core::lists::{FAVORITES, RECENT};
@@ -416,7 +416,7 @@ fn row(
                         .bind_translate_x(&pan.offset())
                         .children((0..17).map(cell))
                         .child(when(
-                            move || pan.minutes() > iptv_core::timeline::BAND,
+                            move || pan.minutes() > crate::timeline::BAND,
                             move || {
                                 view()
                                     .absolute()

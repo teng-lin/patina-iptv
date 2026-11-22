@@ -1,6 +1,6 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use iptv_core::wizard::ImportId;
+use iptv_core::add_playlist::ImportId;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
@@ -97,7 +97,7 @@ impl Runtime {
                 && !crate::recordings::host::stop_background_host(&ports.directory)
             {
                 return Err(crate::backup::StartupError {
-                    error: iptv_core::i18n::key(
+                    error: iptv_core::message::key(
                         "Recording host did not close; restart Patina before restoring",
                     )
                     .into(),
@@ -235,10 +235,6 @@ impl Runtime {
 
     pub fn recent_channels(&self) -> Vec<usize> {
         crate::favorites::recent_channels(self)
-    }
-
-    pub fn favorites_history(&self, playing: Option<usize>) -> iptv_core::favorites::History {
-        crate::favorites::history(self, playing)
     }
 
     pub fn favorites_channel_of(&self, key: &str) -> Option<usize> {

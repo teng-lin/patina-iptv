@@ -147,7 +147,7 @@ recordings keep the app running, as it already did when quitting.
   Patina window
   whose title bar can no longer be grabbed moves onto the nearest remaining
   display, at its size or smaller
-  (`iptv_core::playback_windows::reachable`). A window the viewer can
+  (`iptv_app::desktop::display_bounds::reachable`). A window the viewer can
   still grab is never moved. Moving a window plays and stops nothing.
 
 | Host | Window positions | Compact window above others | After a display goes away | Fallback |
@@ -167,7 +167,7 @@ recordings keep the app running, as it already did when quitting.
   recordings), `guide_player_windows` (#60's player windows),
   `pip_control`, `pane_collapse`, `guide_nav` (the wheel through time) and
   `pointer`.
-- Core unit tests in `iptv_core::playback_windows` (display recovery,
+- App unit tests in `iptv_app::desktop::display_bounds` (display recovery,
   session and sound state) and `iptv_core::heard` (the heard player and
   its hand-back).
 - The real-window journey: [issue #89 desktop journey](validation/issue-89-desktop-journey.md).

@@ -182,7 +182,7 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
         .id(format!("player-window-{}", id.0))
         .title(move || {
             if compact() {
-                return iptv_core::pip_window::TITLE.to_owned();
+                return iptv_player_mpv::pip_window::TITLE.to_owned();
             }
             ui.guide_data();
             let channel = ui
@@ -281,7 +281,7 @@ fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::des
             window.set(window_attributes(compact));
             if compact {
                 saved.set(window.state().map(|s| s.placement));
-                let (w, h) = iptv_core::pip_window::size_for(local.player.main().size.get());
+                let (w, h) = super::pip_window::size_for(local.player.main().size.get());
                 window.set_mode(WindowMode::Normal);
                 window.set_bounds(WindowFrame {
                     width: Some(px(w)),

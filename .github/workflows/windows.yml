@@ -36,6 +36,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shared Rust validation parity checks failed.' }
           python tools/ci/test-check-plan.py
           if ($LASTEXITCODE -ne 0) { throw 'Shared Rust plan runner tests failed.' }
+          python tools/ci/test-layers.py
+          if ($LASTEXITCODE -ne 0) { throw 'Manifest layer checks failed.' }
           python tools/ci/test-ci-cache.py
           if ($LASTEXITCODE -ne 0) { throw 'CI tool cache identity checks failed.' }
           python tools/mpv-runtime/test_prepare.py

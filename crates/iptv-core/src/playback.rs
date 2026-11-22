@@ -1,24 +1,9 @@
-//! Playback state that does not depend on a player: the resolved stream
-//! (URL plus request headers), the player's health with retry/backoff and
-//! stall detection ([`Health`]), what a failure means ([`Cause`]), the
-//! previous-channel history and zapping within a group.
-//!
-//! Times are milliseconds on the caller's monotonic clock. Nothing here
-//! sleeps: [`Health`] says *when* something is due and the shell sets the
-//! timer, then calls back in.
-
-use std::ops::Range;
-
-use crate::favorites::Recent;
-use crate::guide::Schedule;
-use crate::lists::ChannelList;
+//! Stream sources, player observations and ownership of playback claims.
 
 mod error;
-mod health;
 mod states;
 
 pub use error::{Cause, ErrorKind, Failure};
-pub use health::Health;
 pub use states::{Phase, PlayerState, Retry, RetryPolicy, Waiting};
 
 /// What the player should open: a URL and the HTTP headers to send with it
@@ -106,105 +91,6 @@ impl PlaySource {
     }
 }
 
-/// How many channels the recent-channels list keeps.
-pub const RECENT_MAX: usize = crate::favorites::RECENT_LIMIT;
-
-/// The channels played live, newest first, by content identity (stable
-/// keys): "previous channel" and the player's History list.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ChannelHistory {
-    recent: Recent,
-}
-
-impl ChannelHistory {
-    /// `key` started playing: it moves to the front. Replaying the current
-    /// channel changes nothing.
-    pub fn played(&mut self, key: &str) {
-        self.recent.played(key);
-    }
-
-    pub fn current(&self) -> Option<&str> {
-        self.recent.keys().first().map(String::as_str)
-    }
-
-    /// The channel before the current one (pressing it again comes back).
-    pub fn previous(&self) -> Option<&str> {
-        self.recent.keys().get(1).map(String::as_str)
-    }
-
-    /// Every channel played, newest (the current one) first.
-    pub fn recent(&self) -> &[String] {
-        self.recent.keys()
-    }
-}
-
-/// The channels of the group containing `channel` (channels are stored
-/// grouped; the last group runs to the end).
-pub fn group_range(schedule: &dyn Schedule, channel: usize) -> Range<usize> {
-    let count = schedule.channel_count();
-    let members = schedule.channel_group_channels(channel);
-    members.iter().min().copied().unwrap_or(0)..members.iter().max().map_or(count, |c| c + 1)
-}
-
-/// Channel up/down from `channel` by `step`, wrapping within its group.
-pub fn zap_target(schedule: &dyn Schedule, channel: usize, step: isize) -> usize {
-    let mut channels = schedule.channel_group_channels(channel);
-    channels.retain(|&c| {
-        !schedule.channel_hidden(c) && schedule.channel_block(c) == crate::organization::Block::None
-    });
-    if channels.is_empty() {
-        return channel;
-    }
-    let at = channels.iter().position(|&c| c == channel);
-    let to = match at {
-        Some(at) => (at as isize + step).rem_euclid(channels.len() as isize) as usize,
-        None if step < 0 => channels.len() - 1,
-        None => 0,
-    };
-    channels[to]
-}
-
-/// The starting point for a channel change.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ZapOrigin {
-    Row(usize),
-    OtherGroup(usize),
-}
-
-impl ZapOrigin {
-    /// Finds the playing channel in the displayed list, or falls back to
-    /// the focused row when nothing is playing.
-    pub fn from_channel(
-        channel: Option<usize>,
-        row_of: impl FnOnce(usize) -> Option<usize>,
-        focused_row: impl FnOnce() -> usize,
-    ) -> Self {
-        match channel {
-            Some(channel) => row_of(channel).map_or(Self::OtherGroup(channel), Self::Row),
-            None => Self::Row(focused_row()),
-        }
-    }
-}
-
-/// Zaps within the displayed list or within the playing channel's group.
-pub fn zap_from_list(
-    schedule: &dyn Schedule,
-    list: &ChannelList,
-    from: ZapOrigin,
-    step: isize,
-    allowed: impl Fn(usize) -> bool,
-) -> Option<usize> {
-    match from {
-        ZapOrigin::Row(row) => (1..=list.len())
-            .filter_map(|offset| list.zap(row, (offset as isize).wrapping_mul(step)))
-            .filter_map(|row| list.channel(row))
-            .find(|&channel| allowed(channel)),
-        ZapOrigin::OtherGroup(channel) => {
-            Some(zap_target(schedule, channel, step)).filter(|&c| allowed(c))
-        }
-    }
-}
-
 /// Counts from native position samples while the viewer is watching live TV.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WatchTime {
@@ -233,8 +119,10 @@ impl WatchTime {
     }
 }
 
-#[cfg(test)]
-mod live_tests;
+pub use crate::playback_health::Health;
+pub use crate::playback_state::ChannelHistory;
+pub use crate::zap::{ZapOrigin, group_range, zap_from_list, zap_target};
+
 #[cfg(test)]
 mod tests;
 

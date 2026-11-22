@@ -1309,7 +1309,7 @@ mod source_tests {
             .unwrap();
         assert!(
             matches!(rx.try_recv(),Ok(imports::Msg::Playlist(Err(failure)))
-            if failure.kind==iptv_core::wizard::FailureKind::Auth)
+            if failure.kind==iptv_core::add_playlist::FailureKind::Auth)
         );
         assert_eq!(
             services

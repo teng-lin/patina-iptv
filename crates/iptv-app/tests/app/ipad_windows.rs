@@ -4,7 +4,7 @@
 //! another (about 320 to 700 points wide), at the default text size and at
 //! large Dynamic Type sizes: the guide keeps its focused channel and the
 //! channel playing in its preview, the header's shortcuts move under the
-//! preview by `iptv_core::layout::GuideHeader`'s policy and stay inside
+//! preview by `iptv_app::layout::GuideHeader`'s policy and stay inside
 //! the window; full-screen video keeps its progress and the play bar's
 //! primary controls; a show's details keep the selected episode; the
 //! compact empty Movies and Shows and Search's field stay inside the
@@ -25,7 +25,7 @@ use std::time::Duration;
 use crate::headless::Headless;
 use crate::personalization::step;
 use crate::tv_shared_controls::{Lifetime, persistent, preview_fixture_with};
-use iptv_core::layout::{Class, GuideHeader, Shortcuts};
+use iptv_app::layout::{Class, GuideHeader, Shortcuts};
 use iptv_settings::{Settings, Value};
 use nsh_core::platform::{Idiom, Lifecycle, Os};
 use nsh_core::{

@@ -128,7 +128,7 @@ pub fn dragged(ui: Ui) {
 /// list cannot scroll (at its top, dragging down), whose platform view may
 /// then report no scroll drag at all.
 pub fn watch_drags<E: Interactive>(list: E, ui: Ui) -> E {
-    let watch = stored(iptv_core::timeline::Threshold::default());
+    let watch = stored(crate::timeline::Threshold::default());
     list.on_touch(move |e: &nsh_core::TouchEvent| {
         // The first finger down is followed by its id; others are ignored.
         for p in e.points.iter().filter(|p| p.changed) {

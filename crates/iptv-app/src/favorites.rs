@@ -31,7 +31,7 @@ pub fn recent_channels() -> Vec<usize> {
 /// The player's History: the recently watched channels (newest first) and
 /// the row of `playing` among them.
 pub fn history(playing: Option<usize>) -> History {
-    crate::runtime().favorites_history(playing)
+    iptv_core::favorites::history(recent_channels(), playing)
 }
 /// The catalog channel with `key`.
 pub fn channel_of(key: &str) -> Option<usize> {

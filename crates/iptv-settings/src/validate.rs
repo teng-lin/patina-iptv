@@ -80,6 +80,20 @@ fn check_grid(
     Ok(())
 }
 
+/// `(min, max, step)` of an integer or duration.
+pub fn grid(ty: &ValueType) -> Option<(i64, i64, i64)> {
+    match *ty {
+        ValueType::Int { min, max, step, .. } => Some((min, max, step)),
+        ValueType::Duration {
+            min_ms,
+            max_ms,
+            step_ms,
+            ..
+        } => Some((min_ms, max_ms, step_ms)),
+        _ => None,
+    }
+}
+
 /// A numeric grid must have ordered bounds and a positive step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InvalidGrid;
@@ -104,12 +118,12 @@ pub fn clamp_to_grid(value: i64, min: i64, max: i64, step: i64) -> Result<i64, I
     clamp_wide_to_grid(i128::from(value), min, max, step)
 }
 
-pub(crate) fn clamp_wide_to_grid(
-    value: i128,
-    min: i64,
-    max: i64,
-    step: i64,
-) -> Result<i64, InvalidGrid> {
+/// Clamps an intermediate calculation onto the numeric grid before narrowing.
+///
+/// # Errors
+///
+/// Returns [`InvalidGrid`] for reversed bounds or a nonpositive step.
+pub fn clamp_wide_to_grid(value: i128, min: i64, max: i64, step: i64) -> Result<i64, InvalidGrid> {
     validate_grid(min, max, step)?;
     let v = value.clamp(i128::from(min), i128::from(max));
     let result = i128::from(min) + (v - i128::from(min)) / i128::from(step) * i128::from(step);

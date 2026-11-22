@@ -232,7 +232,7 @@ mod tests {
             (480.0, 300.0, 1.3),
             (960.0, 200.0, 1.0),
         ] {
-            let header = iptv_core::layout::GuideHeader::of(w, h, 0.8, font).height;
+            let header = crate::layout::GuideHeader::of(w, h, 0.8, font).height;
             let item = item_height_for((h - header - 16.0).max(0.0), 8);
             assert!(item > 0.0, "{w}x{h} at {font}: header {header}");
         }

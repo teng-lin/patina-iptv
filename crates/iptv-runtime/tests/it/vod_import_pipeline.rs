@@ -2,7 +2,7 @@
 //! catalog rows. Generated HTTP responses exercise download, stage and publish.
 #![cfg(feature = "test-support")]
 
-use iptv_core::wizard::ImportCounts;
+use iptv_core::add_playlist::ImportCounts;
 use iptv_providers::{
     Secret,
     model::{Source, SourceConfig, XtreamCredentials},

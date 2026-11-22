@@ -1,10 +1,9 @@
 use iptv_core::{
     favorites::Favorites,
     guide::{Focus, Move, Pane, SyntheticSchedule},
-    timeline::Timeline,
 };
 #[test]
-fn every_supported_time_span_keeps_keyboard_focus_in_view_and_pan_at_the_end() {
+fn every_supported_time_span_keeps_keyboard_focus_in_view() {
     for span in (60..=360).step_by(30) {
         let mut f = Focus::at(0);
         f.set_visible(span, &SyntheticSchedule);
@@ -20,13 +19,6 @@ fn every_supported_time_span_keeps_keyboard_focus_in_view_and_pan_at_the_end() {
         assert!(f.cursor >= f.window);
         f.pan_to(99999, &SyntheticSchedule);
         assert!(f.cursor < f.window + span);
-        let mut t = Timeline::new(0, (0, 1000));
-        t.set_span(span);
-        t.set_bounds((0, 1000));
-        t.follow(9999);
-        assert_eq!(t.window(), 1000 - span);
-        t.set_bounds((0, 20));
-        assert_eq!(t.window(), 0);
     }
 }
 #[test]

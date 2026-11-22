@@ -20,6 +20,8 @@
 //! a text editor (OK keeps a valid text, Back cancels), a command runs
 //! (after a confirmation when the catalog asks for one).
 
+pub use crate::validate::grid;
+
 use crate::catalog::{self, Command};
 use crate::schema::{Section, Setting, ValueType};
 use crate::scope::Target;
@@ -200,20 +202,6 @@ pub fn rows(page: &Page, ctx: &Ctx) -> Vec<Row> {
         }
     }
     rows
-}
-
-/// `(min, max, step)` of an integer or duration.
-pub fn grid(ty: &ValueType) -> Option<(i64, i64, i64)> {
-    match *ty {
-        ValueType::Int { min, max, step, .. } => Some((min, max, step)),
-        ValueType::Duration {
-            min_ms,
-            max_ms,
-            step_ms,
-            ..
-        } => Some((min_ms, max_ms, step_ms)),
-        _ => None,
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -588,7 +576,7 @@ impl Screen {
             edited,
             ..
         }) = &mut self.editor
-            && let Some((min, max, step)) = grid(&setting.ty)
+            && let Some((min, max, step)) = validate::grid(&setting.ty)
         {
             *edited |= steps != 0;
             let next = i128::from(*value) + i128::from(steps) * i128::from(step);

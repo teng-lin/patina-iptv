@@ -196,27 +196,6 @@ fn lists_are_found_again_by_content_in_a_new_catalog() {
 }
 
 #[test]
-fn group_of_finds_the_catalog_group() {
-    let c = Catalog::small();
-    let groups: Vec<Option<usize>> = (0..10).map(|ch| group_of(&c, ch)).collect();
-    assert_eq!(
-        groups,
-        [
-            Some(0),
-            Some(0),
-            Some(0),
-            Some(1),
-            Some(1),
-            Some(2),
-            Some(2),
-            Some(2),
-            Some(2),
-            None
-        ]
-    );
-}
-
-#[test]
 fn zapping_wraps_within_the_list() {
     let c = Catalog::small();
     let fav = ChannelList::build(FAVORITES, &c, &[7, 1, 4], &[]);

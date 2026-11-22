@@ -77,7 +77,7 @@ fn arrange_at(path: &std::path::Path, cache: &Mutex<Option<HashMap<String, usize
         .iter()
         .filter(|c| {
             c["pid"].as_u64() == Some(u64::from(std::process::id()))
-                && c["title"].as_str() == Some(iptv_core::pip_window::TITLE)
+                && c["title"].as_str() == Some(crate::pip_window::TITLE)
                 && c["floating"].as_bool() == Some(true)
         })
         .collect();
@@ -105,8 +105,7 @@ fn arrange_at(path: &std::path::Path, cache: &Mutex<Option<HashMap<String, usize
         let index = (0..iptv_core::multiview::MAX_SURFACES)
             .find(|slot| !placed.values().any(|used| used == slot))
             .unwrap_or(0);
-        let positions =
-            iptv_core::pip_window::popup_rects(area, iptv_core::multiview::MAX_SURFACES);
+        let positions = crate::pip_window::popup_rects(area, iptv_core::multiview::MAX_SURFACES);
         let Some(&slot) = positions.get(index) else {
             continue;
         };
@@ -196,7 +195,7 @@ mod tests {
     #[test]
     fn mixed_video_shapes_fit_separate_slots_without_stretching() {
         for area in [(0.0, 0.0, 1920.0, 1080.0), (-720.0, -200.0, 720.0, 1280.0)] {
-            let slots = iptv_core::pip_window::popup_rects(area, 4);
+            let slots = crate::pip_window::popup_rects(area, 4);
             let sizes = [
                 (600.0, 450.0),
                 (600.0, 338.0),
@@ -240,7 +239,7 @@ mod tests {
                 (1232.0, 648.0)
             };
             assert_eq!(area, (-1268.0, -216.0, expected.0, expected.1));
-            for (x, y, w, h) in iptv_core::pip_window::popup_rects(area, 4) {
+            for (x, y, w, h) in crate::pip_window::popup_rects(area, 4) {
                 assert!(x >= area.0 && y >= area.1);
                 assert!(x + w <= area.0 + area.2 + 0.01 && y + h <= area.1 + area.3 + 0.01);
             }
@@ -351,7 +350,7 @@ mod tests {
 
     fn client(address: &str) -> Value {
         json!({"address":address, "pid":std::process::id(),
-            "title":iptv_core::pip_window::TITLE, "floating":true,
+            "title":crate::pip_window::TITLE, "floating":true,
             "monitor":1, "size":[600,338]})
     }
     fn monitors() -> Vec<u8> {

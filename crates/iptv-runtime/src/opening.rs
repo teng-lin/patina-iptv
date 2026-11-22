@@ -106,7 +106,7 @@ async fn send_stored_after(
                 .ok_or(iptv_store_sqlite::StoreError::SourceNotFound(id))?;
             if stored.source.config != expected_config {
                 return Err(iptv_store_sqlite::StoreError::Unavailable(
-                    iptv_core::i18n::key("Playlist unavailable"),
+                    iptv_core::message::key("Playlist unavailable"),
                 ));
             }
             let (groups, channels) = stored::catalog_in(store, id)?;
@@ -282,7 +282,7 @@ async fn send_stored_after(
                         None => Msg::NoCheck { source: id },
                     },
                 );
-                let counts = iptv_core::wizard::ImportCounts {
+                let counts = iptv_core::add_playlist::ImportCounts {
                     channels: channels.len() as u32,
                     groups: groups.len() as u32,
                     movies: 0,
