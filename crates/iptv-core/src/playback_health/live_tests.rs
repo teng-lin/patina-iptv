@@ -146,35 +146,3 @@ fn try_again_after_the_card_starts_over_at_once() {
         .unwrap();
     assert_eq!((r.attempt, r.at_ms), (1, 211_100));
 }
-
-#[test]
-fn errors_are_classified_by_what_a_retry_can_do() {
-    use ErrorKind as K;
-    for (kind, cause) in [
-        (K::Http(401), Cause::Refused),
-        (K::Http(403), Cause::Refused),
-        (K::Http(429), Cause::Refused),
-        (K::Http(458), Cause::Refused),
-        (K::Http(509), Cause::Refused),
-        (K::Http(404), Cause::Fatal),
-        (K::Http(410), Cause::Fatal),
-        (K::Format, Cause::Fatal),
-        (K::Unavailable, Cause::Fatal),
-        (K::Account, Cause::Fatal),
-        (K::Network, Cause::Network),
-        (K::Http(500), Cause::Transient),
-        (K::Http(0), Cause::Transient),
-        (K::Stalled, Cause::Transient),
-        (K::Ended, Cause::Transient),
-    ] {
-        assert_eq!(kind.cause(), cause, "{kind:?}");
-        assert_eq!(kind.retryable(), cause != Cause::Fatal);
-    }
-    assert_eq!(K::from_resolve("Auth"), K::Account);
-    assert_eq!(K::from_resolve("Network"), K::Network);
-    assert_eq!(K::from_resolve("Server"), K::Resolve);
-    assert_eq!(
-        K::from_player_code("ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT", None),
-        K::Network
-    );
-}

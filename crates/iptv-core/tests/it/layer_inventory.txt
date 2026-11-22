@@ -1,3 +1,22 @@
+shipped iptv-core/src/capabilities.rs re-exports capabilities_state
+shipped iptv-core/src/favorites.rs re-exports favorites_state
+shipped iptv-core/src/guide.rs iptv_core::i18n::Language
+shipped iptv-core/src/guide.rs re-exports guide_state
+shipped iptv-core/src/guide/floor.rs re-exports guide_state
+shipped iptv-core/src/interruption.rs re-exports interruption_state
+shipped iptv-core/src/lists.rs re-exports lists_state
+shipped iptv-core/src/membership.rs re-exports membership_state
+shipped iptv-core/src/multiview.rs re-exports multiview_state
+shipped iptv-core/src/on_demand.rs re-exports on_demand_state
+shipped iptv-core/src/organization.rs re-exports organization_state
+shipped iptv-core/src/parental.rs re-exports parental_state
+shipped iptv-core/src/playback.rs re-exports playback_health
+shipped iptv-core/src/playback.rs re-exports playback_state
+shipped iptv-core/src/playback.rs re-exports zap
+shipped iptv-core/src/recording.rs re-exports recording_state
+shipped iptv-core/src/reorder.rs re-exports reorder_state
+shipped iptv-core/src/tracks.rs re-exports track_labels
+shipped iptv-core/src/vod.rs re-exports vod_state
 shipped iptv-guide/src/combined.rs iptv_core::i18n
 shipped iptv-guide/src/lib.rs iptv_core::i18n
 shipped iptv-library/src/details.rs iptv_core::wizard
@@ -13,6 +32,7 @@ shipped iptv-library/src/lib.rs iptv_library::playlists
 shipped iptv-search/src/lib.rs iptv_search::selection
 shipped iptv-search/src/lib.rs iptv_search::state
 shipped iptv-settings/src/lib.rs iptv_settings::screen
+test iptv-core/src/lists.rs re-exports lists_state
 test iptv-guide/src/combined.rs iptv_core::lists::ChannelList
 test iptv-guide/src/combined.rs iptv_core::lists::Entry
 test iptv-guide/src/combined.rs iptv_core::lists::ListId
@@ -22,7 +42,6 @@ test iptv-guide/src/pages_tests.rs iptv_core::guide::Focus
 test iptv-guide/src/pages_tests.rs iptv_core::guide::Move
 test iptv-guide/src/pages_tests.rs iptv_core::guide::Pane
 test iptv-guide/src/pages_tests.rs iptv_core::guide::home_window
-test iptv-guide/src/pages_tests.rs iptv_core::guide::moves
 test iptv-guide/src/pages_tests.rs iptv_core::guide::view_range
 test iptv-guide/src/pages_tests.rs iptv_core::lists::ChannelList
 test iptv-guide/src/pages_tests.rs iptv_core::lists::FIRST_GROUP

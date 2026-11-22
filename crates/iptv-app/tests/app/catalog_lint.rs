@@ -133,6 +133,7 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
 /// translated when the user is told (`backup::report`, `App`).
 const MESSAGE_FILES: &[&str] = &[
     "iptv-core/src/parental.rs",
+    "iptv-core/src/parental_state.rs",
     "iptv-runtime/src/parental.rs",
     "iptv-app/src/parental_view.rs",
     "iptv-runtime/src/backup.rs",
@@ -142,6 +143,7 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/recordings/host.rs",
     "iptv-runtime/src/recordings/rules.rs",
     "iptv-core/src/recording.rs",
+    "iptv-core/src/recording_state.rs",
     "iptv-app/src/recordings_view.rs",
 ];
 
@@ -156,8 +158,8 @@ const MESSAGE_CALLS_IN: &[(&str, &[&str])] = &[
 /// translated by the shell's `lists::entry_name`.
 const LIST_NAMES: &[(&str, &str)] = &[
     ("iptv-core/src/guide.rs", "All channels"),
-    ("iptv-core/src/lists.rs", "Favorites"),
-    ("iptv-core/src/lists.rs", "Recently watched"),
+    ("iptv-core/src/lists_state.rs", "Favorites"),
+    ("iptv-core/src/lists_state.rs", "Recently watched"),
     ("iptv-guide/src/combined.rs", "All playlists"),
 ];
 

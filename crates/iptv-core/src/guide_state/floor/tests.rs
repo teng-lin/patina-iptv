@@ -1,6 +1,7 @@
 use super::super::moves::{DAY, HOUR};
-use super::super::{Move, Pane, Program, SyntheticSchedule, home_window};
+use super::super::{Move, Pane, home_window};
 use super::*;
+use crate::guide::{HORIZON, SyntheticSchedule};
 use crate::timeline::Timeline;
 
 const S: SyntheticSchedule = SyntheticSchedule;
@@ -14,7 +15,7 @@ struct Archive {
 
 impl Schedule for Archive {
     fn browsable(&self, now: i32) -> (i32, i32) {
-        (now - self.first, now + super::super::HORIZON)
+        (now - self.first, now + HORIZON)
     }
     fn channel_count(&self) -> usize {
         self.days.len()
@@ -176,7 +177,7 @@ fn panning_reaches_retained_listings_on_lists_without_catch_up() {
         first: 2 * DAY,
     };
     let (first, end) = view_range(&s, 0);
-    assert_eq!((first, end), (-2 * DAY, super::super::HORIZON));
+    assert_eq!((first, end), (-2 * DAY, HORIZON));
     let mut timeline = Timeline::new(home_window(0), (first, end));
     timeline.press();
     timeline.drag(1.0e6, 0.0, 8.0);
