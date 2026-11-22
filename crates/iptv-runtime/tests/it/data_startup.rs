@@ -64,3 +64,126 @@ fn empty_library_startup_finishes_on_its_accepting_owner_without_a_ui() {
     assert!(first.data_dir().join("iptv.sqlite").exists());
     assert!(!second.data_dir().join("iptv.sqlite").exists());
 }
+
+#[test]
+fn a_retired_startup_does_not_report_to_a_restarted_owner() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = Rc::new(Runtime::new(Ports::new(
+        directory.path().to_owned(),
+        |_| {
+            Err(iptv_runtime::Error::unavailable(
+                "synthetic database key is unavailable",
+            ))
+        },
+    )));
+    let tasks = Rc::new(RefCell::new(Vec::<LocalTask>::new()));
+    let queue = tasks.clone();
+    owner.bind_tasks(
+        move |task| queue.borrow_mut().push(task),
+        |_| Box::pin(std::future::pending()),
+    );
+    owner.bind(|_| panic!("the retired startup published a result"));
+    owner.start_services();
+    iptv_runtime::data::start(&owner);
+    let mut startup = tasks.borrow_mut().pop().unwrap();
+    assert!(owner.drain_services());
+    owner.start_services();
+
+    // Draining the writer completed the old read before its UI task ran.
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(startup.as_mut().poll(&mut context).is_ready());
+    assert!(owner.drain_services());
+}
+
+#[test]
+fn newer_schema_and_unavailable_store_are_reported_at_startup_and_block_import() {
+    use iptv_core::wizard::{FailureKind, ImportFailure};
+    use iptv_runtime::data::{self, Job, Purpose, Update};
+    use iptv_store_sqlite::{DatabaseKey, SCHEMA_VERSION, Store};
+
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        for broker_available in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("iptv.sqlite");
+            let found = SCHEMA_VERSION + 1;
+            if broker_available {
+                Store::open_in_memory().unwrap().snapshot_to(&path).unwrap();
+                let connection = rusqlite::Connection::open(&path).unwrap();
+                connection
+                    .execute(
+                        "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, 'future', 0)",
+                        [found],
+                    )
+                    .unwrap();
+            }
+            let reason = "synthetic database key is unavailable";
+            let owner = Rc::new(Runtime::new(Ports::new(dir.path().to_owned(), move |_| {
+                if broker_available {
+                    Ok(DatabaseKey::from_bytes([0x63; 32]))
+                } else {
+                    Err(iptv_runtime::Error::unavailable(reason))
+                }
+            })));
+            owner.bind_tasks(
+                |task| drop(tokio::task::spawn_local(task)),
+                |duration| Box::pin(tokio::time::sleep(duration)),
+            );
+            let (sender, mut startup) = tokio::sync::mpsc::unbounded_channel();
+            owner.bind(move |event| match event {
+                RuntimeEvent::FirstRun => panic!("an unreadable store is not an empty library"),
+                RuntimeEvent::StoreStartupFailed { path, error } => {
+                    sender.send((path, error)).unwrap();
+                }
+                _ => {}
+            });
+            owner.start_services();
+            // The shell reads parental controls before loading the library.
+            assert!(owner.parental_refresh().await.is_err());
+            data::start(&owner);
+            let (reported_path, error) =
+                tokio::time::timeout(Duration::from_secs(10), startup.recv())
+                    .await
+                    .expect("startup did not report the storage failure")
+                    .unwrap();
+            assert_eq!(reported_path, Some(path));
+            if broker_available {
+                assert_eq!(error.newer_schema(), Some((found, SCHEMA_VERSION)));
+            } else {
+                assert_eq!(error.unavailable_reason(), Some(reason));
+            }
+
+            for expected in [FailureKind::Storage, FailureKind::Canceled] {
+                let (sender, mut import) = tokio::sync::mpsc::unbounded_channel();
+                let cancel = data::start_import(
+                    &owner,
+                    Job {
+                        source: crate::common::m3u_source("Generated playlist"),
+                        epg_url: None,
+                        stored: None,
+                        purpose: Purpose::Add,
+                        edit: false,
+                    },
+                    move |update| {
+                        if let Update::Done(result) = update {
+                            sender.send(result).unwrap();
+                        }
+                    },
+                );
+                if expected == FailureKind::Canceled {
+                    cancel.cancel();
+                }
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(10), import.recv())
+                        .await
+                        .expect("import did not report the outcome"),
+                    Some(Err(ImportFailure::new(expected)))
+                );
+            }
+            assert!(owner.drain_services());
+        }
+    });
+}

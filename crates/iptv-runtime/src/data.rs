@@ -70,11 +70,16 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     combined::reset_single(owner);
     library::reset_imports(owner);
     let started = crate::time::Instant::now();
-    let startup = crate::commands::startup_library(owner);
+    let services = owner.services();
+    let startup = crate::commands::startup_library(&services);
     owner.spawn({
         let owner = owner.clone();
         async move {
-            let startup = startup.await.map(|(source, combined, any, snapshot)| {
+            let startup = startup.await;
+            if !services.is_current() {
+                return;
+            }
+            let startup = startup.map(|(source, combined, any, snapshot)| {
                 let stored: Vec<_> = snapshot.playlists.iter().map(|p| p.id).collect();
                 library::install(&owner, snapshot);
                 // A deletion whose settings save was lost must not hand its
@@ -84,10 +89,12 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 }
                 (source, combined, any)
             });
-            owner.services().mark(
-                "store opened",
-                format_args!("{} ms", started.elapsed().as_millis()),
-            );
+            if startup.is_ok() {
+                services.mark(
+                    "store opened",
+                    format_args!("{} ms", started.elapsed().as_millis()),
+                );
+            }
             match startup {
                 Ok((_, true, _)) => combined::start(&owner),
                 Ok((Some(stored), false, _)) => {
@@ -100,11 +107,12 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 }
                 Ok((None, false, false)) => owner.emit(crate::RuntimeEvent::FirstRun),
                 Err(error) => {
-                    log::warn!("iptv data: store unavailable ({error}); opening the wizard");
-                    owner.emit(crate::RuntimeEvent::FirstRun);
-                    owner.emit(crate::RuntimeEvent::Notify(
-                    "The saved library could not be opened. Unlock the device and restart the app.",
-                ));
+                    log::warn!("iptv data: store unavailable ({error})");
+                    owner.emit(crate::RuntimeEvent::StoreStartupFailed {
+                        path: services.file_database_path(),
+                        error,
+                    });
+                    return;
                 }
             }
             crate::library::start_scheduler(&owner);
@@ -176,10 +184,10 @@ fn start_import_with(
                 purpose,
                 Purpose::Add | Purpose::Startup | Purpose::Switch | Purpose::Refresh
             );
+        let services = owner.services();
         owner.spawn({
             let owner = owner.clone();
             async move {
-                let services = owner.services();
                 let opens_stored = job.purpose.shows_stored_first() && job.stored.is_some();
                 if !services.can_import() && !opens_stored {
                     // A new import cannot run on this host; nothing is read
@@ -192,12 +200,22 @@ fn start_import_with(
                 let authorization = owner.parental_snapshot();
                 let admission = job.clone();
                 let auth = authorization.clone();
-                if services
-                    .read(move |store| crate::parental::require_import(store, &admission, &auth))
-                    .await
-                    .is_err()
-                {
-                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Auth))));
+                let admission = services
+                    .read(move |store| crate::parental::import_allowed(store, &admission, &auth))
+                    .await;
+                let failure = match admission {
+                    _ if cancel.is_canceled() || !services.is_current() => {
+                        Some(FailureKind::Canceled)
+                    }
+                    Ok(true) => None,
+                    Ok(false) => Some(FailureKind::Auth),
+                    Err(error) => {
+                        log::warn!("iptv data: import admission could not read the store: {error}");
+                        Some(FailureKind::Storage)
+                    }
+                };
+                if let Some(kind) = failure {
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(kind))));
                     return;
                 }
                 if job.purpose.shows_stored_first()

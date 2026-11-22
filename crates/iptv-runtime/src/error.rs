@@ -9,6 +9,16 @@ impl Error {
             _ => None,
         }
     }
+    /// The database and supported schema versions, if the file is too new.
+    pub fn newer_schema(&self) -> Option<(u32, u32)> {
+        match self.0 {
+            iptv_store_sqlite::StoreError::SchemaTooNew { found, supported } => {
+                Some((found, supported))
+            }
+            _ => None,
+        }
+    }
+
     pub fn unavailable(reason: &'static str) -> Self {
         Self(iptv_store_sqlite::StoreError::Unavailable(reason))
     }

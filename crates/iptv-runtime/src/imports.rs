@@ -35,6 +35,7 @@ pub(crate) struct Publication {
 #[derive(Debug)]
 pub(crate) enum PublicationError {
     Superseded,
+    Denied,
     Store(StoreError),
 }
 impl From<StoreError> for PublicationError {
@@ -46,15 +47,17 @@ impl std::fmt::Display for PublicationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Superseded => f.write_str("import superseded"),
+            Self::Denied => f.write_str("import blocked by parental controls"),
             Self::Store(error) => error.fmt(f),
         }
     }
 }
 impl PublicationError {
-    fn failure(&self, fallback: FailureKind) -> ImportFailure {
+    fn failure(&self) -> ImportFailure {
         ImportFailure::new(match self {
             Self::Superseded | Self::Store(StoreError::SourceNotFound(_)) => FailureKind::Canceled,
-            Self::Store(_) => fallback,
+            Self::Denied => FailureKind::Auth,
+            Self::Store(_) => FailureKind::Storage,
         })
     }
 }
@@ -72,7 +75,9 @@ impl Publication {
         let job = job.clone();
         let auth = authorization.clone();
         let source = services.blocking(move |store| {
-            crate::parental::require_import(store, &job, &auth)?;
+            if !crate::parental::import_allowed(store, &job, &auth)? {
+                return Ok(Err(PublicationError::Denied));
+            }
             let source = match job.stored {
                 Some(id) => {
                     let stored = store.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
@@ -413,11 +418,11 @@ pub(crate) async fn pipeline(
     let publication = match Publication::capture(services, &job, cancel, authorization) {
         Ok(publication) => publication,
         Err(error) => {
-            return fail(error.failure(if services.is_current() {
-                FailureKind::Auth
-            } else {
-                FailureKind::Canceled
-            }));
+            if !services.is_current() {
+                return fail(ImportFailure::new(FailureKind::Canceled));
+            }
+            log::warn!("iptv data: import could not start: {error}");
+            return fail(error.failure());
         }
     };
     let now = now_unix();
@@ -700,7 +705,7 @@ pub(crate) async fn pipeline(
                 if cancel.is_canceled() || !services.is_current() {
                     return fail(ImportFailure::new(FailureKind::Canceled));
                 }
-                return fail(e.failure(FailureKind::Storage));
+                return fail(e.failure());
             }
         };
     let matching = stored::Matching {
@@ -901,7 +906,9 @@ pub(crate) fn save(
         if !publication.current(store)? {
             return Ok(Err(PublicationError::Superseded));
         }
-        crate::parental::require_import(store, &job, &publication.authorization)?;
+        if !crate::parental::import_allowed(store, &job, &publication.authorization)? {
+            return Ok(Err(PublicationError::Denied));
+        }
         let mut stage = stage;
         stage.set_on_demand_errors(on_demand.0, on_demand.1);
         let (id, counts, sources) = save_in(store, &job, guide_urls, planned, stage)?;

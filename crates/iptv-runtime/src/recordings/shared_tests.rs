@@ -1365,11 +1365,17 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
                 while !request.ends_with(b"\r\n\r\n") {
                     request.push(socket.read_u8().await?);
                 }
+                // This fixture handles one request per socket. The manifest
+                // must tell the relay to open a new connection for the segment.
+                let head = |length| {
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n"
+                    )
+                };
                 if request.starts_with(b"GET /generated.m3u8") {
                     let body = b"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXT-X-MEDIA-SEQUENCE:0\n\
                                  #EXTINF:1,\nsegment.ts\n";
-                    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
-                    socket.write_all(head.as_bytes()).await?;
+                    socket.write_all(head(body.len()).as_bytes()).await?;
                     return socket.write_all(body).await;
                 }
                 requested.fetch_add(1, Ordering::SeqCst);
@@ -1377,8 +1383,7 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
                 packets[0][..4].copy_from_slice(&[0x47, 0x40, 0, 0x10]);
                 packets[3][0] = 0;
                 let body = packets.concat();
-                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", body.len());
-                socket.write_all(head.as_bytes()).await?;
+                socket.write_all(head(body.len()).as_bytes()).await?;
                 socket.write_all(&body[..2 * 188]).await?;
                 socket.flush().await?;
                 // The rest, with its lost sync, once the player has joined.
@@ -1413,13 +1418,18 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
                 .unwrap()
         }
     };
-    for _ in 0..2 {
+    for round in 1..=2 {
         let shared = resolve().await;
         assert!(
             !shared.url.contains("token"),
-            "the shared input's own address"
+            "attempt {round} must use the shared input's own address"
         );
         let mut playback = player(&shared).await;
+        assert_eq!(
+            segments.load(Ordering::SeqCst),
+            round,
+            "attempt {round} must open a fresh shared segment"
+        );
         joined.notify_one();
         let mut rest = Vec::new();
         let _ = playback.read_to_end(&mut rest).await;

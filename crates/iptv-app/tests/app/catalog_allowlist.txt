@@ -144,7 +144,7 @@ iptv-app/src/host/native/credential_key.rs	synthetic database key was not instal
 iptv-app/src/host/native/credential_key/android.rs	Android Keystore is unavailable
 iptv-app/src/host/native/credential_key/linux.rs	Patina catalog key
 iptv-app/src/host/web.rs	this device has no key store
-# Startup logs the cause and shows the localized generic storage notice.
+# Data directory initialization logs the cause and shows a generic storage notice.
 iptv-app/src/host/native/platform_data.rs	Android host has not initialized private storage
 iptv-app/src/host/native/platform_data.rs	App data base must be an absolute directory; refusing temporary storage
 iptv-runtime/src/storage.rs	App storage contains a reparse point
@@ -162,6 +162,7 @@ iptv-runtime/src/favorites.rs	the favorites list changed during editing
 iptv-runtime/src/favorites.rs	the favorites order was not saved
 iptv-runtime/src/imports.rs	cannot create document identity
 iptv-runtime/src/imports.rs	cannot create private document directory
+iptv-runtime/src/imports.rs	import blocked by parental controls
 iptv-runtime/src/imports.rs	import superseded
 iptv-runtime/src/imports.rs	private document cannot be saved
 # Probe errors become typed inspection failures before reaching the UI.

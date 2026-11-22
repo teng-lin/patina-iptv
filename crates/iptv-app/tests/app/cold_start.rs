@@ -273,3 +273,41 @@ fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
         "the guide's arrival opened it again"
     );
 }
+
+#[test]
+fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let supported = iptv_store_sqlite::SCHEMA_VERSION;
+    let found = supported + 1;
+    iptv_store_sqlite::Store::open_in_memory()
+        .unwrap()
+        .snapshot_to(&path)
+        .unwrap();
+    let database = rusqlite::Connection::open(&path).unwrap();
+    database
+        .execute(
+            "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, 'future', 0)",
+            [found],
+        )
+        .unwrap();
+    drop(database);
+
+    let mut app = app();
+    app.wait_for("id:store-startup-failure").unwrap();
+    app.wait_for(&format!(
+        "text:Database schema version {found} is newer than this build supports ({supported})."
+    ))
+    .unwrap();
+    assert!(app.screen().shows(&path.to_string_lossy()));
+    app.wait_for("text:Upgrade Patina to open this library. To start over, close Patina and move the database file to a safe location.")
+        .unwrap();
+    app.press_remote(nsh_tv::RemoteKey::Menu).unwrap();
+    app.wait(Duration::from_secs(3)).unwrap();
+    let screen = app.screen();
+    assert!(screen.matches("id:store-startup-failure").unwrap());
+    assert!(!screen.shows("No playlists yet"));
+    assert!(!screen.shows("Choose playlist type"));
+}

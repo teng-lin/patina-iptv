@@ -317,6 +317,10 @@ impl Service {
         &**self.tasks.get_or_init(|| self.ports.execution.tasks())
     }
 
+    fn database_path(&self) -> std::path::PathBuf {
+        self.directory().join("iptv.sqlite")
+    }
+
     fn open_store(&self) -> Result<Store, StoreError> {
         if let Some(host) = &self.ports.store_host {
             return host.open();
@@ -324,7 +328,7 @@ impl Service {
         let directory = self.directory();
         std::fs::create_dir_all(directory)
             .map_err(|_| StoreError::Unavailable("cannot create data directory"))?;
-        super::credential_store::open_database(&self.ports, &directory.join("iptv.sqlite"))
+        super::credential_store::open_database(&self.ports, &self.database_path())
     }
 
     fn assert_off_ui_thread(&self, what: &str) {
@@ -428,6 +432,11 @@ pub(crate) struct Services {
     closed: CancelToken,
 }
 
+enum OpenPolicy {
+    Backoff,
+    Retry,
+}
+
 fn stale() -> StoreError {
     StoreError::Unavailable("request belongs to a closed application")
 }
@@ -467,6 +476,12 @@ impl Services {
 
     pub(crate) fn directory(&self) -> &Path {
         self.service.directory()
+    }
+
+    pub(crate) fn file_database_path(&self) -> Option<std::path::PathBuf> {
+        self.ports()
+            .file_storage
+            .then(|| self.service.database_path())
     }
 
     pub(crate) fn ports(&self) -> &crate::Ports {
@@ -629,10 +644,38 @@ impl Services {
         R: Send + 'static,
         F: FnOnce(&mut Store) -> Result<R, StoreError> + Send + 'static,
     {
+        self.queue_write(OpenPolicy::Backoff, operation)
+    }
+
+    /// Read the startup library even if an earlier request failed to open
+    /// the store. Startup needs the underlying error to explain the failure.
+    pub(crate) fn call_at_startup<R, F>(
+        &self,
+        operation: F,
+    ) -> impl Future<Output = Result<R, StoreError>> + use<R, F>
+    where
+        R: Send + 'static,
+        F: FnOnce(&mut Store) -> Result<R, StoreError> + Send + 'static,
+    {
+        self.queue_write(OpenPolicy::Retry, operation)
+    }
+
+    fn queue_write<R, F>(
+        &self,
+        policy: OpenPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<R, StoreError>> + use<R, F>
+    where
+        R: Send + 'static,
+        F: FnOnce(&mut Store) -> Result<R, StoreError> + Send + 'static,
+    {
         let (sender, receiver) = oneshot::channel();
         let queued = self.affinity().and_then(|epoch| {
             let owner = self.service.clone();
             self.service.writer.queue(Box::new(move |connection| {
+                if matches!(policy, OpenPolicy::Retry) && owner.epochs.permits(epoch) {
+                    connection.retry_open_at = None;
+                }
                 let _ = sender.send(owner.write(epoch, connection, operation));
             }))
         });
