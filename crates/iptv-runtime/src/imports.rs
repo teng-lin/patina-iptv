@@ -947,7 +947,7 @@ pub(crate) async fn save_published(
             .find(|(k, _)| *k == kind)
             .map(|(_, e)| stored::error_kind(e))
     };
-    let superseded = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let outcome = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
     let published = services
         .publish(CatalogPublish {
             job: job.clone(),
@@ -956,19 +956,26 @@ pub(crate) async fn save_published(
             stage: Some(stage),
             on_demand: (failed(ContentKind::Movie), failed(ContentKind::Series)),
             publication: publication.clone(),
-            superseded: superseded.clone(),
+            outcome: outcome.clone(),
             source: None,
             running: crate::publish::Replacing::Idle,
         })
         .await;
-    match published {
-        Ok(saved) => saved,
-        Err(_) if superseded.load(std::sync::atomic::Ordering::Relaxed) => {
-            Err(PublicationError::Superseded)
-        }
-        Err(error) => Err(PublicationError::Store(error)),
+    match (
+        published,
+        outcome.load(std::sync::atomic::Ordering::Relaxed),
+    ) {
+        (Ok(saved), _) => saved,
+        (Err(_), SUPERSEDED) => Err(PublicationError::Superseded),
+        (Err(_), DENIED) => Err(PublicationError::Denied),
+        (Err(error), _) => Err(PublicationError::Store(error)),
     }
 }
+
+/// [`CatalogPublish::outcome`]: superseded before it was written.
+const SUPERSEDED: u8 = 1;
+/// [`CatalogPublish::outcome`]: parental controls refused it.
+const DENIED: u8 = 2;
 
 /// A catalog publish as a sliced job ([`save_published`]).
 struct CatalogPublish {
@@ -978,7 +985,8 @@ struct CatalogPublish {
     stage: Option<CatalogStage>,
     on_demand: (Option<ImportErrorKind>, Option<ImportErrorKind>),
     publication: Publication,
-    superseded: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Why `prepare` refused it, when it did ([`SUPERSEDED`], [`DENIED`]).
+    outcome: std::sync::Arc<std::sync::atomic::AtomicU8>,
     /// The source written and whether `prepare` added it.
     source: Option<(SourceId, bool)>,
     running: crate::publish::Replacing<iptv_store_sqlite::CatalogReplacement<'static, Store>>,
@@ -989,11 +997,17 @@ impl crate::publish::Publish for CatalogPublish {
 
     fn prepare(&mut self, live: &mut Store) -> Result<(), StoreError> {
         if !self.publication.current(live)? {
-            self.superseded
-                .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.outcome
+                .store(SUPERSEDED, std::sync::atomic::Ordering::Relaxed);
             return Err(StoreError::Unavailable("import superseded"));
         }
-        crate::parental::require_import(live, &self.job, &self.publication.authorization)?;
+        if !crate::parental::import_allowed(live, &self.job, &self.publication.authorization)? {
+            self.outcome
+                .store(DENIED, std::sync::atomic::Ordering::Relaxed);
+            return Err(StoreError::Unavailable(
+                "import blocked by parental controls",
+            ));
+        }
         let source = match self.job.stored {
             Some(id) => (id, false),
             None => (live.add_source(&self.job.source)?, true),
