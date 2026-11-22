@@ -96,9 +96,9 @@ where
             let _slot = slot;
             #[cfg(feature = "test-support")]
             {
-                store.inspection_read_observed(
+                store.inspection_read_until(
                     token,
-                    crate::time::store_deadline(deadline),
+                    crate::time::expiry(deadline),
                     move || {
                         if let Some(mut hook) = scan.take() {
                             hook();
@@ -109,7 +109,7 @@ where
             }
             #[cfg(not(feature = "test-support"))]
             {
-                store.inspection_read(token, crate::time::store_deadline(deadline), operation)
+                store.inspection_read_until(token, crate::time::expiry(deadline), || {}, operation)
             }
         })),
         None => Box::pin(async { Ok(Err(InspectionError::Busy)) }),

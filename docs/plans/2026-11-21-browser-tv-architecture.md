@@ -237,8 +237,11 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   there); a `Sliced` step's budget is rows, as the store's `step(rows)`.
   The runtime's clocks are `crate::time` (std's natively, the host's in a
   browser build); the store's inspection API still takes std's `Instant`,
-  so bounded inspections cannot run in the browser yet (until #193's
-  `*_until` API is on master). The store driver (open, chunk persistence,
+  so bounded inspections take #193's `*_until` form, the expiry read on the
+  runtime's clock. In the browser a request carrying an origin-bound
+  header (a portal's identity, a playlist's API key) refuses every
+  redirect, a same-origin one included: the page cannot tell them apart
+  before following, so such a source fails there where it redirects. The store driver (open, chunk persistence,
   a `Services` wrapper that pushes a publish on the writer lane as a
   `Sliced` job over the copy store, holding the lane's connection only per
   step) follows #193.

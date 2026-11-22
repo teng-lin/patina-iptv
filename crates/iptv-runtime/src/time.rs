@@ -44,20 +44,9 @@ pub fn since_epoch() -> Duration {
     (host::clock().wall)()
 }
 
-/// `deadline` as the store's inspection API takes it (a standard
-/// `Instant`). Natively that is the same value.
-#[cfg(feature = "native")]
-pub(crate) fn store_deadline(deadline: Instant) -> std::time::Instant {
-    deadline
-}
-
-/// `deadline` as the store's inspection API takes it. The store crate still
-/// bounds inspections with `std::time::Instant`, which cannot be read in a
-/// browser build: until it takes a portable deadline, a bounded inspection
-/// there is a bug, and says so.
-#[cfg(not(feature = "native"))]
-pub(crate) fn store_deadline(_deadline: Instant) -> std::time::Instant {
-    unimplemented!("the store's inspection deadlines need a portable clock")
+/// Whether `deadline` has passed, as the store's bounded reads ask it.
+pub(crate) fn expiry(deadline: Instant) -> impl Fn() -> bool + Send + Sync + 'static {
+    move || Instant::now() >= deadline
 }
 
 #[cfg(not(feature = "native"))]

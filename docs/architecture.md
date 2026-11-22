@@ -54,8 +54,8 @@ down: a crate may depend on crates in its own layer or below, never above.
 That build is what keeps platform code out of them. For the browser build of
 the application stack ([browser TV plan](plans/2026-11-21-browser-tv-architecture.md))
 it also runs the runtime's unit tests without its `native` feature and lints
-iptv-web's adapters for wasm32; the runtime's and the shell's own wasm32
-checks need the store crate's browser build.
+for wasm32 the runtime without it, the shell with its web host, and
+iptv-web's adapters.
 
 The shell's platform code lives in `iptv-app/src/host`: `host/native`
 (desktops, iPad, Android: key stores, private directories, OS recording

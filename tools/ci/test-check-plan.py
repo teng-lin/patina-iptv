@@ -167,6 +167,9 @@ class Plan(unittest.TestCase):
 
     def test_the_browser_build_is_linted_and_tested_without_native_services(self):
         wasm = ["--target", "wasm32-unknown-unknown", "--", "-D", "warnings"]
+        self.assertEqual(self.by_name["runtime-wasm"],
+                         ["cargo", "clippy", "--locked", "-p", "iptv-runtime", "--no-default-features", *wasm])
+        self.assertEqual(self.by_name["app-wasm"], ["cargo", "clippy", "--locked", "-p", "iptv-app", *wasm])
         self.assertEqual(self.by_name["web-adapters-wasm"],
                          ["cargo", "clippy", "--locked", "-p", "iptv-web", "--no-default-features", *wasm])
         self.assertEqual(self.by_name["runtime-portable-tests"],
@@ -174,7 +177,7 @@ class Plan(unittest.TestCase):
                           "--", "--format=pretty"])
         for host in ("macos", "windows"):
             names = {step["name"] for step in checks.plan(host=host)}
-            self.assertFalse({"web-adapters-wasm", "runtime-portable-tests"} & names)
+            self.assertFalse({"runtime-wasm", "app-wasm", "web-adapters-wasm", "runtime-portable-tests"} & names)
 
     def test_release_only_changes_the_normal_app_build(self):
         release = {step["name"]: step["argv"] for step in checks.plan(release=True)}

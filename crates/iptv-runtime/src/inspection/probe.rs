@@ -49,6 +49,31 @@ fn random<const N: usize>(entropy: crate::ports::Entropy) -> InspectionResult<[u
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// `operation` on a probe's stage, within `deadline` and `cancel`. Stages
+/// are files of the native store; a browser build has none (its staged
+/// probes are refused before they start).
+#[cfg(feature = "native")]
+fn bounded<T>(
+    stage: &mut InspectionStage,
+    cancel: CancelToken,
+    deadline: Instant,
+    operation: impl FnOnce(&InspectionStage) -> iptv_store_sqlite::Result<T>,
+) -> iptv_store_sqlite::Result<T> {
+    stage.bounded_until(cancel, crate::time::expiry(deadline), operation)
+}
+
+#[cfg(not(feature = "native"))]
+fn bounded<T>(
+    _: &mut InspectionStage,
+    _: CancelToken,
+    _: Instant,
+    _: impl FnOnce(&InspectionStage) -> iptv_store_sqlite::Result<T>,
+) -> iptv_store_sqlite::Result<T> {
+    Err(iptv_store_sqlite::StoreError::Unavailable(
+        "staged probes need a native store",
+    ))
+}
+
 fn storage<T>(result: iptv_store_sqlite::Result<T>) -> InspectionResult<T> {
     result.map_err(|_| InspectionError::Storage)
 }
@@ -429,33 +454,27 @@ impl ProbeLease {
         check(&self.0.services, cancel, deadline)?;
         self.check()?;
         let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
-        let result = stage.bounded(
-            cancel.clone(),
-            crate::time::store_deadline(deadline),
-            |stage| {
-                let mut channels = Vec::new();
-                let mut after = String::new();
-                loop {
-                    check(&self.0.services, cancel, deadline).map_err(|_| {
-                        iptv_store_sqlite::StoreError::Unavailable(
-                            "probe channel inspection stopped",
-                        )
-                    })?;
-                    let page = stage.channels(&after, "", MAX_PAGE)?;
-                    if page.is_empty() {
-                        break;
-                    }
-                    after = page.last().expect("nonempty page").id.clone();
-                    channels.extend(page);
-                    if channels.len() > 100_000 {
-                        return Err(iptv_store_sqlite::StoreError::Unavailable(
-                            "probe channel limit exceeded",
-                        ));
-                    }
+        let result = bounded(&mut stage, cancel.clone(), deadline, |stage| {
+            let mut channels = Vec::new();
+            let mut after = String::new();
+            loop {
+                check(&self.0.services, cancel, deadline).map_err(|_| {
+                    iptv_store_sqlite::StoreError::Unavailable("probe channel inspection stopped")
+                })?;
+                let page = stage.channels(&after, "", MAX_PAGE)?;
+                if page.is_empty() {
+                    break;
                 }
-                Ok(channels)
-            },
-        );
+                after = page.last().expect("nonempty page").id.clone();
+                channels.extend(page);
+                if channels.len() > 100_000 {
+                    return Err(iptv_store_sqlite::StoreError::Unavailable(
+                        "probe channel limit exceeded",
+                    ));
+                }
+            }
+            Ok(channels)
+        });
         check(&self.0.services, cancel, deadline)?;
         storage(result)
     }
@@ -501,9 +520,10 @@ impl ProbeLease {
         let incarnation = self.0.evidence.incarnation.clone();
         let query_cancel = cancel.clone();
         let current = self.0.services.analyze(move |store| {
-            store.inspection_read(
+            store.inspection_read_until(
                 query_cancel,
-                crate::time::store_deadline(deadline),
+                crate::time::expiry(deadline),
+                || {},
                 |store| {
                     store
                         .read_snapshot(|store| {
@@ -574,22 +594,18 @@ impl ProbeLease {
         }
         let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
         let mut failure = None;
-        let result = stage.bounded(
-            cancel.clone(),
-            crate::time::store_deadline(deadline),
-            |stage| {
-                self.integrity(stage, cancel, deadline).map_err(|error| {
-                    failure = Some(error);
-                    iptv_store_sqlite::StoreError::Unavailable("probe integrity failed")
-                })?;
-                for candidate in candidates {
-                    if !stage.has_channel(&candidate.epg_channel)? {
-                        return Ok(false);
-                    }
+        let result = bounded(&mut stage, cancel.clone(), deadline, |stage| {
+            self.integrity(stage, cancel, deadline).map_err(|error| {
+                failure = Some(error);
+                iptv_store_sqlite::StoreError::Unavailable("probe integrity failed")
+            })?;
+            for candidate in candidates {
+                if !stage.has_channel(&candidate.epg_channel)? {
+                    return Ok(false);
                 }
-                Ok(true)
-            },
-        );
+            }
+            Ok(true)
+        });
         check(&self.0.services, cancel, deadline)?;
         if !storage(result).map_err(|error| failure.unwrap_or(error))? {
             return Err(InspectionError::StaleEvidence);
@@ -1122,9 +1138,10 @@ impl Runtime {
                 return Err(InspectionError::StaleCursor);
             }
             let mut stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
-            let mut channels = storage(stage.bounded(
+            let mut channels = storage(bounded(
+                &mut stage,
                 worker_control.cancel.clone(),
-                crate::time::store_deadline(deadline),
+                deadline,
                 |stage| {
                     stage.channels(
                         after.as_ref().map(|c| c.after[0].as_str()).unwrap_or(""),

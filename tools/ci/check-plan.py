@@ -94,6 +94,12 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
                           "--target", "wasm32-unknown-unknown", "--lib", "--tests", "--", "-D", "warnings"))
         steps.append(step("store-wasm-tests", "node", "tools/wasm-test.mjs", "--cargo", "--locked",
                           "-p", "iptv-store-sqlite", "--lib", "--test", "it"))
+        # The application stack's browser build: the runtime without its
+        # native services, and the shell with its web host, over the store's
+        # browser build. Clippy, so what only that build compiles is linted.
+        steps.append(step("runtime-wasm", *WASM_CLIPPY[:3], "-p", "iptv-runtime", "--no-default-features",
+                          *WASM_CLIPPY[3:]))
+        steps.append(step("app-wasm", *WASM_CLIPPY[:3], "-p", "iptv-app", *WASM_CLIPPY[3:]))
         # The adapters the shell links, without the Live TV bridge.
         steps.append(step("web-adapters-wasm", *WASM_CLIPPY[:3], "-p", "iptv-web", "--no-default-features",
                           *WASM_CLIPPY[3:]))
