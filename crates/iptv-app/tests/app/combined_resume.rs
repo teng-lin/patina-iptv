@@ -389,6 +389,7 @@ fn adding_playlist_reauthenticates_a_cached_portal_after_startup_auth_failed() {
         )]
     });
     step(app.press("text:+ Add playlist"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));

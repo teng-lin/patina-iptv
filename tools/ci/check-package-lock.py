@@ -4,17 +4,22 @@ from pathlib import Path
 import tomllib
 import json
 import subprocess
+def resolve_reference(packages, dependency):
+    """The packages a lock's `dependencies` entry names: "name", "name version"
+    or "name version (source)"."""
+    fields = dependency.split(" ", 2)
+    return [p for p in packages if p["name"] == fields[0]
+            and (len(fields) < 2 or p["version"] == fields[1])
+            and (len(fields) < 3 or p.get("source") == fields[2].strip("()"))]
+
+
 def validate_references(packages):
     for package in packages:
         dependencies = package.get("dependencies", [])
         if dependencies != sorted(dependencies):
             raise SystemExit(f"Regenerate runner lock; unsorted dependencies in {package['name']}")
         for dependency in dependencies:
-            fields = dependency.split(" ", 2)
-            matches = [p for p in packages if p["name"] == fields[0]
-                       and (len(fields) < 2 or p["version"] == fields[1])
-                       and (len(fields) < 3 or p.get("source") == fields[2].strip("()"))]
-            if len(matches) != 1:
+            if len(resolve_reference(packages, dependency)) != 1:
                 raise SystemExit(f"Regenerate runner lock; ambiguous or missing dependency {dependency!r} in {package['name']}")
 
 def validate_source_identities(packaged, source):
@@ -24,6 +29,35 @@ def validate_source_identities(packaged, source):
                if (p["name"], p["version"], p.get("source"), p.get("checksum")) not in identities]
     if missing:
         raise SystemExit("Regenerate tools/ci/package.Cargo.lock; missing or mismatched source dependencies: " + ", ".join(missing))
+
+def validate_member_dependencies(packaged, members):
+    """Each packaged workspace member's dependency list must be what the
+    runner resolves for it. A runner builds the members as path
+    dependencies, whose dev-dependencies it does not resolve, so a
+    dependency that was already a member's dev-dependency (in the source
+    lock) becomes a new edge there alone.
+
+    `members` maps (name, version) to the identities, (name, version,
+    source), of the member's normal and build dependencies on any target.
+    `packaged` must already pass `validate_references`."""
+    stale = []
+    for package in packaged:
+        if "source" in package:
+            continue
+        expected = members.get((package["name"], package["version"]))
+        if expected is None:
+            continue
+        locked = set()
+        for dependency in package.get("dependencies", []):
+            [match] = resolve_reference(packaged, dependency)
+            locked.add((match["name"], match["version"], match.get("source")))
+        if locked != expected:
+            changes = [f"+{name} {version}" for name, version, _ in sorted(expected - locked, key=str)]
+            changes += [f"-{name} {version}" for name, version, _ in sorted(locked - expected, key=str)]
+            stale.append(f'{package["name"]} ({", ".join(changes)})')
+    if stale:
+        raise SystemExit("Regenerate tools/ci/package.Cargo.lock; stale dependency lists: " + "; ".join(stale))
+
 
 # Workspace binaries built in CI that are not packaged into NSH runners, and
 # transitive feature-unified deps only pulled in by those unpackaged members
@@ -61,7 +95,17 @@ def main():
     source = [p for p in tomllib.loads((root / "Cargo.lock").read_text())["package"]
               if (p["name"], p["version"], p.get("source")) in needed]
     validate_source_identities(packaged, source)
-    print("shared source and runner lock identities agree")
+    members = {}
+    for member in metadata["workspace_members"]:
+        package = packages_by_id[member]
+        members[(package["name"], package["version"])] = {
+            (packages_by_id[d["pkg"]]["name"], packages_by_id[d["pkg"]]["version"],
+             packages_by_id[d["pkg"]]["source"])
+            for d in nodes[member]["deps"]
+            if any(kind["kind"] != "dev" for kind in d["dep_kinds"])
+        }
+    validate_member_dependencies(packaged, members)
+    print("shared source and runner lock identities and member dependencies agree")
 
 if __name__ == "__main__":
     main()

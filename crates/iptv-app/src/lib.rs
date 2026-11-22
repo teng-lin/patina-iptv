@@ -94,6 +94,7 @@ mod search_view;
 mod seek;
 mod settings;
 mod settings_view;
+mod setup_view;
 pub mod startup;
 pub mod time;
 mod ui_kit;
@@ -274,6 +275,7 @@ pub struct Ui {
     pub search_history_revision: Signal<u64>,
     /// The add-playlist wizard, when open.
     pub wizard: Signal<Option<wizard_view::Open>>,
+    restore_review: Signal<Option<backup::RestoreReview>>,
     store_startup_failure: Signal<Option<startup::StoreFailure>>,
     store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
@@ -397,10 +399,11 @@ impl Ui {
             search: signal(None),
             search_history_revision: signal(0),
             wizard: signal(None),
-            store_startup_failure: nsh_core::element::signal_with(
+            restore_review: nsh_core::element::signal_with(
                 None,
                 nsh_core::element::SignalEquals::Never,
             ),
+            store_startup_failure: signal(None),
             store_failure_scroll: ui_kit::FocusScroll::new(),
             playlists: signal(None),
             guide_sources: signal(None),
@@ -1048,8 +1051,10 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_inspect_view::layer(ui))
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
+        .child(backup::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup::store_failure_layer(ui))
+        .child(settings_view::notice_layer())
 }
 
 /// A tap on full-screen video: the play bar on a device with a pointer,
@@ -1178,11 +1183,12 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
-            _ if top == Some(Overlay::StoreStartupFailure) => false,
+            _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
                 true
             }
+            _ if top == Some(Overlay::RestoreReview) => backup::back(ui),
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::Vod) => vod_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),

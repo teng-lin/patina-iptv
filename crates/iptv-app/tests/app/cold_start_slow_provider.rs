@@ -173,8 +173,9 @@ fn a_slow_live_edge_does_not_hold_the_resumed_stream_behind_the_guide() {
             ImageData::new(playlist.as_bytes().to_vec()),
         )]
     });
-    first.wait_for("text:No playlists yet").unwrap();
-    first.press("text:Add playlist").unwrap();
+    first.wait_for("id:wizard-welcome").unwrap();
+    first.press("id:wizard-welcome-add").unwrap();
+    first.press("id:wizard-source-type").unwrap();
     first.wait_for("text:Playlist file").unwrap();
     first.press("text:Playlist file").unwrap();
     first.wait_for("text:Choose a file…").unwrap();

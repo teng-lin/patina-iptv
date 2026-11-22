@@ -23,6 +23,7 @@ mod view;
 mod words;
 
 pub use view::layer;
+pub(crate) use view::notice_layer;
 
 use nsh_core::time::Instant;
 use std::cell::Cell;
@@ -309,11 +310,7 @@ fn run(ui: Ui, key: &'static str) {
             iptv_core::parental::Target::settings(),
             crate::backup::export_ui,
         ),
-        "general.restore" => {
-            crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
-                crate::backup::restore_ui(ui)
-            })
-        }
+        "general.restore" => crate::backup::request_restore(ui),
         "epg.update_now" => {
             if stored::update_now(&crate::runtime(), move || refresh(ui)) {
                 refresh(ui);

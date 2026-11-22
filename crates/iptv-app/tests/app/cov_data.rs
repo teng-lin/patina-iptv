@@ -186,6 +186,7 @@ pub(super) fn enter_text(app: &mut Headless, text: &str) {
 
 /// Adds the next picked file through the wizard (open), then watches it.
 fn add(app: &mut Headless, name: &str) {
+    step(app.press("id:wizard-source-type"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
     step(app.press("text:Choose a file…"));
@@ -300,8 +301,8 @@ fn stored_playlists_switch_refresh_and_go() {
     on_pick(&mut app);
 
     // The first playlist, with its guide; Alpha Two plays in the preview.
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
     add(&mut app, "first.m3u");
     step(app.wait_for_within("text:Alpha Now", IMPORT));
     step(app.press("text:/^(★ )?Alpha Two$/"));
@@ -630,12 +631,14 @@ fn stored_playlists_switch_refresh_and_go() {
     // then one that does.
     rail(&mut app, "Playlists");
     step(app.press("text:+ Add playlist >> nth=1"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
     step(app.press("text:Choose a file…"));
     step(app.wait_for("text:/^third.list\\.m3u$/"));
-    step(app.press("text:Guide link"));
+    step(app.press("id:wizard-options"));
+    step(app.press("id:wizard-field-EpgUrl"));
     enter_text(&mut app, &guide_c_link);
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:/^The guide link did not load/", IMPORT));
@@ -677,12 +680,28 @@ fn stored_playlists_switch_refresh_and_go() {
     }
     let path = data.join("iptv.sqlite");
     std::fs::create_dir_all(&path).unwrap();
+    let legacy_history = data.join("search-history.json");
+    std::fs::write(&legacy_history, r#"["synthetic recent search"]"#).unwrap();
     let mut app = start();
     step(app.wait_for_within("id:store-startup-failure", IMPORT));
-    step(app.wait_for("text:The saved library could not be opened"));
+    step(app.wait_for("text:Patina can’t open your library"));
+    step(app.wait_for("id:store-recovery-retry"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Patina still can’t open your library."));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
     step(app.wait_for("text:encrypted database filesystem operation failed"));
-    step(app.wait_for("text:Unlock the device, check file permissions, then reopen Patina."));
     let screen = app.screen();
     assert!(screen.shows(&path.to_string_lossy()));
-    assert!(!screen.shows("No playlists yet"));
+    assert!(!screen.shows("Set up your library"));
+    std::fs::remove_dir(&path).unwrap();
+    step(app.press_key("left"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:store-startup-failure", IMPORT));
+    step(app.wait_for("text:Set up your library"));
+    assert!(!legacy_history.exists());
+    assert_eq!(
+        store(&data).search_history().unwrap(),
+        ["synthetic recent search"]
+    );
 }

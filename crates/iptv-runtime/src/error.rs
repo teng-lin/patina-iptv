@@ -5,7 +5,8 @@ impl Error {
     /// A static application reason, without database diagnostics or provider data.
     pub fn unavailable_reason(&self) -> Option<&'static str> {
         match &self.0 {
-            iptv_store_sqlite::StoreError::Unavailable(reason) => Some(reason),
+            iptv_store_sqlite::StoreError::Unavailable(reason)
+            | iptv_store_sqlite::StoreError::RestartRequired(reason) => Some(reason),
             _ => None,
         }
     }
@@ -17,6 +18,24 @@ impl Error {
             }
             _ => None,
         }
+    }
+
+    /// Whether opening the store could succeed after a device or storage change.
+    pub fn retryable_open(&self) -> bool {
+        self.0.retryable_open()
+    }
+
+    /// The reason, if the host must initialize storage again on the next launch.
+    pub fn reopen_reason(&self) -> Option<&'static str> {
+        match self.0 {
+            iptv_store_sqlite::StoreError::RestartRequired(reason) => Some(reason),
+            _ => None,
+        }
+    }
+
+    /// A failure involving host state that is only initialized on launch.
+    pub fn restart_required(reason: &'static str) -> Self {
+        Self(iptv_store_sqlite::StoreError::RestartRequired(reason))
     }
 
     pub fn unavailable(reason: &'static str) -> Self {

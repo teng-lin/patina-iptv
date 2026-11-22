@@ -745,6 +745,10 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         crate::parental_view::key(ui, action);
         return;
     }
+    if top == Some(Overlay::RestoreReview) {
+        crate::backup::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::Recordings) {
         crate::recordings_view::key(ui, action);
         return;

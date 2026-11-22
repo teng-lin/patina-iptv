@@ -108,8 +108,9 @@ fn clicks_reach_the_guide_under_the_hidden_layers() {
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
 
     // First run: add the playlist from a file.
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
@@ -527,16 +528,12 @@ fn back_navigation(home: &crate::isolated::Home, device: Idiom) {
         )]
     });
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
-    if device == Idiom::Tv {
-        step(app.wait_for("text:Choose a file…"));
-        assert!(!app.shows("text:‹ Back"));
-    } else {
-        step(app.wait_for("text:‹ Back"));
-    }
+    step(app.wait_for("text:Back"));
     step(app.press("text:Choose a file…"));
     step(app.wait_for("text:synthetic.m3u"));
     step(app.press("text:Add playlist"));

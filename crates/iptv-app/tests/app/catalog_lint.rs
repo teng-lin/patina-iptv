@@ -125,8 +125,6 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
     ("iptv-app/src/settings_view/editors.rs", "button", 2),
     ("iptv-app/src/settings_view/words.rs", "with_unit", 0),
     ("iptv-app/src/wizard_view.rs", "button", 2),
-    ("iptv-app/src/wizard_view.rs", "hint", 2),
-    ("iptv-app/src/wizard_view.rs", "hint_or_back", 2),
     ("iptv-app/src/wizard_view/entry.rs", "button", 2),
 ];
 
@@ -193,7 +191,6 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     // `key(…)` constants.
     ("iptv-app/src/backup.rs", "EXPORT_NOTE"),
     ("iptv-app/src/backup.rs", "PENDING_NOTE"),
-    ("iptv-app/src/backup.rs", "RESTORE_NOTE"),
     ("iptv-app/src/backup.rs", "RESTART_NOTE"),
     ("iptv-app/src/custom_groups.rs", "CAPTION"),
     ("iptv-app/src/remote_editor.rs", "CAPTION"),
@@ -213,7 +210,6 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/search_view/view.rs", "label"),
     ("iptv-app/src/settings_view/editors.rs", "label"),
     ("iptv-app/src/settings_view/words.rs", "message"),
-    ("iptv-app/src/wizard_view.rs", "keys"),
     ("iptv-app/src/wizard_view.rs", "label"),
     ("iptv-app/src/wizard_view/entry.rs", "label"),
 ];
@@ -1951,7 +1947,6 @@ fn a_translating_helper_and_a_message_type_are_followed_like_tr() {
             &["name"],
             0,
         ),
-        (wizard, "hint_or_back(ui, size, keys)", &[], &["keys"], 0),
         (
             wizard,
             "button(ui, size, &format!(\"{a} {b}\"), act)",
@@ -1971,7 +1966,13 @@ fn a_translating_helper_and_a_message_type_are_followed_like_tr() {
             0,
         ),
         // From the modules around it.
-        (entry, "super::hint(ui, size, words)", &[], &["words"], 0),
+        (
+            entry,
+            "super::button(ui, size, words, scrolling, target)",
+            &[],
+            &["words"],
+            0,
+        ),
         (
             view,
             "wizard_view::button(ui, size, label, act)",

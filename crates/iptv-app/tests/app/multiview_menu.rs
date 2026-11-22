@@ -149,8 +149,9 @@ fn changing_picker_group_or_query_reveals_selection_after_touch_scrolling() {
         )]
     });
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
@@ -228,8 +229,9 @@ fn the_tile_menu_is_a_side_panel_with_pause_and_search_and_add() {
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
     let gone = |app: &mut Headless, s: &str| app.wait_for_gone(s, Duration::from_secs(2));
 
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));

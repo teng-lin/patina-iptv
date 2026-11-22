@@ -24,10 +24,10 @@ struct NativeProps {
 }
 
 #[derive(Clone, Default)]
-struct Exposure(Arc<Mutex<NativeProps>>);
+pub(super) struct Exposure(Arc<Mutex<NativeProps>>);
 
 impl Exposure {
-    fn record(&self, batch: &MountBatch) {
+    pub(super) fn record(&self, batch: &MountBatch) {
         let mut native = self.0.lock().unwrap();
         for item in &batch.items {
             match item {
@@ -62,7 +62,7 @@ impl Exposure {
     }
 
     #[track_caller]
-    fn shown(&self, app: &Headless, test_id: &str, expected: bool) {
+    pub(super) fn shown(&self, app: &Headless, test_id: &str, expected: bool) {
         let nodes = app.screen().layout_nodes();
         let mut node = nodes
             .iter()
@@ -389,9 +389,11 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
     config.environment.font_scale = 1.3;
     config.environment.screen_reader = true;
     let mut app = crate::headless::Headless::start(config).unwrap();
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("role:button[/^Add playlist$/]"));
-    step(app.wait_for("id:wizard-types-scroll"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("role:button[/^Add a playlist$/]"));
+    step(app.wait_for("id:wizard-form"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:wizard-source-picker"));
     assert!(
         app.screen()
             .matches("role:button[/Playlist link/]")
@@ -403,23 +405,24 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
     }
     step(app.press_key("enter"));
     step(app.wait_for("id:wizard-form"));
-    let card = app
+    let viewport = app
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.test_id.as_deref() == Some("wizard-form"))
+        .find(|n| n.test_id.as_deref() == Some("setup-scroll"))
         .unwrap()
         .bounds;
-    assert!(card.origin.x.0 >= 0.0 && card.origin.y.0 >= 0.0);
-    assert!(card.origin.x.0 + card.size.width.0 <= 960.0);
-    assert!(card.origin.y.0 + card.size.height.0 <= 540.0);
-    for _ in 0..3 {
-        step(app.press_key("down"));
+    assert!(viewport.origin.x.0 >= 0.0 && viewport.origin.y.0 >= 0.0);
+    assert!(viewport.origin.x.0 + viewport.size.width.0 <= 960.0);
+    assert!(viewport.origin.y.0 + viewport.size.height.0 <= 540.0);
+    assert!(!app.screen().matches("id:wizard-field-EpgUrl").unwrap());
+    for key in ["down", "down", "enter", "down", "down"] {
+        step(app.press_key(key));
     }
     step(app.wait_until(
         "last field scrolls into view",
         Duration::from_secs(3),
-        |screen| inside(screen, "wizard-field-EpgUrl", "wizard-fields-scroll"),
+        |screen| inside(screen, "wizard-field-EpgUrl", "setup-scroll"),
     ));
     let guidance = app
         .screen()
@@ -431,32 +434,33 @@ fn first_run_large_text_exposes_source_choices_and_scrolls_focused_fields() {
     assert_eq!(guidance.text.max_lines, 0, "the fallback can wrap");
     assert!(!guidance.text.no_wrap);
     step(app.press_key("down"));
-    assert!(inside(app.screen(), "wizard-submit", "wizard-form"));
+    step(app.wait_until(
+        "submit scrolls into view",
+        Duration::from_secs(3),
+        |screen| inside(screen, "wizard-submit", "setup-scroll"),
+    ));
     assert!(app.screen().matches("role:button[/Add playlist/]").unwrap());
-    step(app.press("id:wizard-submit"));
+    step(app.press_key("enter"));
     assert!(
         app.screen()
             .matches("role:button[/Portal.*Fill this in/]")
             .unwrap(),
         "the field's validation error remains in its accessible name"
     );
-    step(app.back());
-    step(app.wait_for("id:wizard-types-scroll"));
-    step(app.press("role:button[/Xtream Codes login/]"));
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:wizard-source-picker"));
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
     step(app.wait_for("id:wizard-form"));
     assert!(app.screen().matches("role:button[/^Username$/]").unwrap());
-    assert!(
-        app.screen()
-            .matches("role:button[/^Paste · Password$/]")
-            .unwrap()
-    );
+    assert!(!app.screen().matches("id:wizard-paste").unwrap());
     assert!(
         app.screen().matches("role:button[/^Password$/]").unwrap(),
         "empty credentials must not announce invented bullet values"
     );
     step(app.back());
-    step(app.back());
-    step(app.wait_for("text:No playlists yet"));
+    step(app.wait_for("id:wizard-welcome"));
 }
 
 #[test]

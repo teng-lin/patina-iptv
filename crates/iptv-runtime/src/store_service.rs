@@ -699,6 +699,30 @@ impl Services {
         R: Send + 'static,
         F: FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
     {
+        self.queue_read(OpenPolicy::Backoff, operation)
+    }
+
+    /// Open the reader promptly after a startup recovery attempt succeeds.
+    pub(crate) fn read_at_startup<R, F>(
+        &self,
+        operation: F,
+    ) -> impl Future<Output = Result<R, StoreError>> + use<R, F>
+    where
+        R: Send + 'static,
+        F: FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
+    {
+        self.queue_read(OpenPolicy::Retry, operation)
+    }
+
+    fn queue_read<R, F>(
+        &self,
+        policy: OpenPolicy,
+        operation: F,
+    ) -> impl Future<Output = Result<R, StoreError>> + use<R, F>
+    where
+        R: Send + 'static,
+        F: FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
+    {
         let (sender, receiver) = oneshot::channel();
         let queued = self.affinity().and_then(|epoch| {
             let owner = self.service.clone();
@@ -708,6 +732,9 @@ impl Services {
                 if sender.is_canceled() {
                     owner.reader.skipped_read();
                     return;
+                }
+                if matches!(policy, OpenPolicy::Retry) && owner.epochs.permits(epoch) {
+                    connection.retry_open_at = None;
                 }
                 let _ = sender.send(owner.read(epoch, connection, operation));
             }))?;

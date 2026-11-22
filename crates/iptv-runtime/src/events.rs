@@ -40,6 +40,7 @@ pub enum RuntimeEvent {
     OpenPlaylists,
     ClosePlaylists,
     FirstRun,
+    StoreStartupRecovered,
     StoreStartupFailed {
         path: Option<std::path::PathBuf>,
         error: super::Error,

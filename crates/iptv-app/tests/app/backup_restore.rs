@@ -2,7 +2,7 @@
 //! The backup keeps the guide's setup and local file, not its downloaded
 //! programs: the restored app downloads the guide again at its first start.
 use super::personalization::step;
-use crate::headless::Headless;
+use crate::{accessibility_visibility::Exposure, headless::Headless};
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -28,14 +28,21 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
         for language in ["en", "zh-Hant"] {
             let home = directory.path().join(language);
             std::fs::create_dir_all(&home).unwrap();
-            for phase in ["exercise", "verify"] {
+            for phase in ["exercise", "verify", "welcome"] {
+                let child_home = if phase == "welcome" {
+                    directory.path().join(format!("{language}-welcome"))
+                } else {
+                    home.clone()
+                };
+                std::fs::create_dir_all(&child_home).unwrap();
                 let output = std::process::Command::new(std::env::current_exe().unwrap())
                     .args([name, "--exact", "--nocapture", "--test-threads=1"])
                     .env("IPTV_BACKUP_PHASE", phase)
                     .env("IPTV_BACKUP_LANGUAGE", language)
                     .env("IPTV_RS_TEST_LOCALE", "en-US")
-                    .env("HOME", &home)
-                    .env("LOCALAPPDATA", &home)
+                    .env("IPTV_BACKUP_ARCHIVE", home.join("generated.patinabackup"))
+                    .env("HOME", &child_home)
+                    .env("LOCALAPPDATA", &child_home)
                     .output()
                     .unwrap();
                 assert!(
@@ -56,6 +63,10 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     } else {
         ".local/share/iptv-rs"
     });
+    if phase.as_deref() == Some("welcome") {
+        restore_from_welcome(&root);
+        return;
+    }
     if phase.as_deref() == Some("verify") {
         let mut app = start_app();
         step(app.wait_for_within("text:★ Channel Two", Duration::from_secs(20)));
@@ -182,10 +193,13 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     let bytes = std::fs::read(&archive).unwrap();
     assert!(!bytes.is_empty());
     step(app.on_pick_paths(vec![archive.clone()]));
-    app.on_dialog(|_| DialogAnswer::Press(word("Schedule restore")));
+    let pending = root.with_extension("restore-pending");
+    review(&mut app);
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:restore-review", Duration::from_secs(3)));
+    assert!(!pending.exists(), "Cancel is the initial restore focus");
     schedule(&mut app);
     step(app.wait_for(&message("Scheduled for next launch")));
-    let pending = root.with_extension("restore-pending");
     assert!(pending.exists());
     {
         let staged = crate::isolated::open_database(pending.join("iptv.sqlite")).unwrap();
@@ -210,7 +224,6 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
         Duration::from_secs(3),
     ));
     assert!(!pending.exists());
-    app.on_dialog(|_| DialogAnswer::Press(word("Schedule restore")));
     schedule(&mut app);
     assert_eq!(
         crate::isolated::open_database(&path)
@@ -242,6 +255,79 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     let mut changed = Settings::new();
     changed.set("general.language", Value::text("de")).unwrap();
     std::fs::write(root.join("settings.json"), changed.to_json_string()).unwrap();
+}
+
+fn restore_from_welcome(root: &std::path::Path) {
+    std::fs::create_dir_all(root).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("general.language", Value::text(&language_tag()))
+        .unwrap();
+    std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut app = start_app_at(Size::new(px(400.), px(700.)));
+    let exposure = Exposure::default();
+    let observed = exposure.clone();
+    app.observe(move |_, batch| observed.record(batch));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.on_pick_paths(vec![
+        std::env::var_os("IPTV_BACKUP_ARCHIVE").unwrap().into(),
+    ]));
+    step(app.press("id:wizard-welcome-restore"));
+    step(app.wait_for("id:restore-review"));
+    step(app.wait_for("text:generated.patinabackup"));
+    exposure.shown(&app, "wizard-layer", false);
+    exposure.shown(&app, "restore-review", true);
+
+    // A short viewport starts on the review explanation. The remote can
+    // reveal the whole replacement warning without leaving the safe focus.
+    step(app.set_viewport(Size::new(px(400.), px(340.))));
+    step(app.wait_for(&message(
+        "Review the selected backup before scheduling the restore.",
+    )));
+    for _ in 0..4 {
+        if warning_visible(app.screen()) {
+            break;
+        }
+        step(app.press_key("down"));
+    }
+    step(app.wait_until(
+        "the complete replacement warning remains reachable",
+        Duration::from_secs(3),
+        warning_visible,
+    ));
+    step(app.back());
+    step(app.wait_for_gone("id:restore-review", Duration::from_secs(3)));
+    exposure.shown(&app, "wizard-layer", true);
+    assert!(!root.with_extension("restore-pending").exists());
+
+    step(app.set_viewport(Size::new(px(400.), px(700.))));
+    step(app.press("id:wizard-welcome-restore"));
+    step(app.wait_for("id:restore-review"));
+    step(app.press(&message("Schedule restore")));
+    step(app.wait_for_within(
+        &message("Restore scheduled. Close and reopen Patina to apply it"),
+        Duration::from_secs(20),
+    ));
+    assert!(root.with_extension("restore-pending").exists());
+}
+
+fn warning_visible(screen: &nsh_testing::Screen) -> bool {
+    let Ok(scroll_id) = screen.id("id:restore-review >> id:setup-scroll") else {
+        return false;
+    };
+    let nodes = screen.layout_nodes();
+    let Some(warning) = nodes
+        .iter()
+        .find(|node| node.test_id.as_deref() == Some("restore-warning"))
+    else {
+        return false;
+    };
+    let Some(scroll) = nodes.iter().find(|node| node.id == scroll_id) else {
+        return false;
+    };
+    warning.bounds.origin.y.0 >= scroll.bounds.origin.y.0
+        && warning.bounds.origin.y.0 + warning.bounds.size.height.0
+            <= scroll.bounds.origin.y.0 + scroll.bounds.size.height.0
 }
 
 /// The source's stored programs within a day of now.
@@ -287,14 +373,6 @@ fn language_tag() -> String {
 }
 
 fn word(source: &str) -> String {
-    // The existing restore confirmation composes its heading with a question
-    // mark rather than storing a separate catalog key.
-    if !iptv_core::i18n::is_cataloged(source)
-        && let Some(base) = source.strip_suffix('?')
-        && iptv_core::i18n::is_cataloged(base)
-    {
-        return format!("{}?", word(base));
-    }
     iptv_core::i18n::translate(iptv_core::i18n::resolve(&language_tag(), None), source).to_owned()
 }
 
@@ -310,10 +388,19 @@ fn message(source: &str) -> String {
     }
 }
 
-fn schedule(app: &mut Headless) {
+fn review(app: &mut Headless) {
     step(app.press(&message("Restore a backup")));
-    step(app.wait_for(&message("Restore a backup?")));
+    step(app.wait_for("id:settings-editor"));
     step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:restore-review"));
+    step(app.wait_for("text:generated.patinabackup"));
+    step(app.wait_for(&message("When you reopen Patina, this backup replaces any current playlists, settings, favorites, groups, and watch history.")));
+}
+
+fn schedule(app: &mut Headless) {
+    review(app);
+    step(app.press_key("left"));
     step(app.press_key("enter"));
     step(app.wait_for_within(
         &message("Restore scheduled. Close and reopen Patina to apply it"),
@@ -322,8 +409,12 @@ fn schedule(app: &mut Headless) {
 }
 
 fn start_app() -> Headless {
+    start_app_at(Size::new(px(1920.), px(1080.)))
+}
+
+fn start_app_at(viewport: Size<Points>) -> Headless {
     Headless::start(EngineConfig {
-        viewport: Size::new(px(1920.), px(1080.)),
+        viewport,
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
     .unwrap()

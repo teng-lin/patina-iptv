@@ -65,8 +65,9 @@ fn playlists_and_their_guide_sources() {
     let mut t = T::new(config);
     let picked = playlist(&srv.url("/guide.xml"));
     t.app.on_pick(move |_| support::picked(picked.clone()));
-    t.wait("text:No playlists yet", 5);
-    t.press("text:Add playlist");
+    t.wait("id:wizard-welcome", 5);
+    t.press("id:wizard-welcome-add");
+    t.press("id:wizard-source-type");
     t.press("text:Playlist file");
     t.press("text:Choose a file…");
     // File selection completes asynchronously; submit only after the
@@ -111,10 +112,10 @@ fn first_playlist(t: &mut T) {
 /// named, is shown once added.
 fn add_by_link(t: &mut T, srv: &Server) {
     t.press("text:+ Add playlist >> nth=1");
-    t.press("text:Playlist link");
-    t.press("text:http://…/playlist.m3u");
+    t.press("id:wizard-field-PlaylistUrl");
     t.enter(&srv.url("/link.m3u"));
     t.wait(&format!("text:{}", srv.url("/link.m3u")), 5);
+    t.press("id:wizard-options");
     t.press("text:Optional: how the playlist is listed");
     t.enter("Linked");
     t.press("text:Add playlist");
@@ -513,6 +514,6 @@ fn deleting(t: &mut T) {
     t.press("text:Delete");
     t.wait("text:/No playlists will be left\\.$/", 2);
     t.press("text:Delete");
-    t.wait("text:No playlists yet", 10);
+    t.wait("id:wizard-welcome", 10);
     assert!(!t.shows("text:Tap a playlist for what you can do with it"));
 }
