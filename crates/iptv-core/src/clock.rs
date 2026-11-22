@@ -177,6 +177,36 @@ pub fn time(minute_of_day: i64, style: Style) -> String {
     )
 }
 
+/// Clock time at a Unix instant, using the host's offset for that instant.
+pub fn time_at(unix: i64, offset_minutes: i32, style: Style) -> String {
+    let (_, minute) = local(unix, offset_minutes);
+    time(minute, style)
+}
+
+/// The local day number, for comparing dates across UTC offsets.
+pub fn day_at(unix: i64, offset_minutes: i32) -> i64 {
+    local(unix, offset_minutes).0
+}
+
+/// The abbreviated weekday at a local day number.
+pub fn weekday_at(day: i64, style: Style) -> &'static str {
+    weekday(day, style.calendar())
+}
+
+/// Weekday, day of the month and time for a compact guide clock.
+pub fn day_and_time(unix: i64, offset_minutes: i32, style: Style) -> String {
+    let (day, minute) = local(unix, offset_minutes);
+    let calendar = style.calendar();
+    let date = style.fill(
+        calendar.day,
+        &[
+            ("weekday", weekday(day, calendar).into()),
+            ("day", (month_day(day).0 as u64).into()),
+        ],
+    );
+    format!("{date}  {}", time(minute, style))
+}
+
 /// The local date of `unix`: weekday, day and month (`Tue 10 Nov`,
 /// `11月10日(火)`).
 pub fn date(unix: i64, offset_minutes: i32, style: Style) -> String {

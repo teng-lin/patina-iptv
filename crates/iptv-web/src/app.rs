@@ -11,9 +11,10 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iptv_core::favorites::{Favorites, KeyIndex, Recent};
-use iptv_core::guide::{Pane, Program, Schedule, now_minute};
+use iptv_core::guide::{Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
 use iptv_core::lists::{self, ChannelList as Rows, Entry, FAVORITES};
-use iptv_core::playback::zap_target;
+use iptv_core::play_bar::{Control, PlayBar};
+use iptv_core::playback::{ZapOrigin, zap_from_list};
 use iptv_core::reorder::{self, Exit, Reorder};
 use iptv_epg::{GuideStore, Overrides, StoreOptions};
 use iptv_guide::EpgSchedule;
@@ -22,22 +23,28 @@ use iptv_import::{
     CancelToken, Catalog, Decision, EpgSourceConfig, GuideState, ImportOptions, MemoryGuide, Phase,
     Progress, RefreshPolicy, SourceMeta, Trigger, decide, matching_fingerprint, plan_startup,
 };
+use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};
-use iptv_search::{ResultId, SearchAction, SearchEffect, SearchHistory, SearchState, Tab};
+use iptv_search::{
+    ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchHistory,
+    SearchState, Tab, select_result,
+};
 use serde_json::{Value, json};
 
 use crate::exec::{HostFetch, spawn};
 use crate::grid::{Grid, GridOutcome};
 use crate::host::host;
+use crate::presentation::Presentation;
 use crate::search::{self, Indexes};
 use crate::store;
 
 /// Entries the groups column shows at once.
 pub(crate) const VISIBLE_ENTRIES: usize = 10;
 /// The play bar's buttons, left to right.
-const BAR: [&str; 3] = ["favorite", "guide", "search"];
+const BAR: [Control; 3] = [Control::Favorite, Control::Guide, Control::Search];
+const BAR_IDLE_MS: u64 = 7_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
@@ -49,19 +56,29 @@ enum Mode {
     Search,
 }
 
-/// What a held Left does, decided by where its press (the key before its
-/// repeats) acted. The core decides, as the page's view may be a key behind.
+/// The surface that owns a press. Guide panes share a keymap context in
+/// some cases, but a deferred Left belongs to the grid it went down on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LeftHold {
-    /// Pressed in the guide grid: the first repeat opens the groups column
-    /// (Android TV's Long Left).
-    Grid,
-    /// The groups were opened by this hold, or the press was in full screen
-    /// without the play bar (it opened the guide, and holding it must not
-    /// go on through the guide): later repeats do nothing.
-    Done,
-    /// Anywhere else a repeat is a Left like any other.
-    Plain,
+enum InputOwner {
+    Guide(Pane),
+    Player,
+    Bar,
+    Search,
+    Keyboard,
+    Reorder,
+}
+
+impl InputOwner {
+    fn context(self) -> Context {
+        match self {
+            Self::Guide(Pane::Guide) => Context::Guide,
+            Self::Guide(_) => Context::Groups,
+            Self::Player => Context::Player,
+            Self::Bar => Context::Controls,
+            Self::Search | Self::Keyboard => Context::Search,
+            Self::Reorder => Context::Editor,
+        }
+    }
 }
 
 pub(crate) struct App {
@@ -100,10 +117,10 @@ pub(crate) struct App {
     back_to_search: bool,
     /// Moving a favorite (Favorites list): the order being edited.
     reorder: Option<Reorder<String>>,
-    /// The play bar over full-screen video, shown with `BAR[i]` focused.
-    bar: Option<usize>,
-    /// What repeats of the Left being held do.
-    left_hold: LeftHold,
+    bar: PlayBar,
+    keymap: Keymap,
+    presses: HeldPresses<InputOwner>,
+    pressed_on: Option<InputOwner>,
     /// The `id` of the last `play` event: the host names it when that
     /// stream fails, so a failure of a stream since replaced is ignored.
     play_id: u64,
@@ -170,8 +187,10 @@ impl App {
             indexes: Indexes::default(),
             back_to_search: false,
             reorder: None,
-            bar: None,
-            left_hold: LeftHold::Plain,
+            bar: PlayBar::with_idle_ms(BAR_IDLE_MS),
+            keymap: Keymap::tizen_bridge(),
+            presses: HeldPresses::default(),
+            pressed_on: None,
             play_id: 0,
             session: 0,
             search_return: None,
@@ -373,7 +392,7 @@ impl App {
                         "url": source.url,
                         "userAgent": user_agent,
                         "archive": archive.map(|p| s.unix(p.start)),
-                        "channel": self.channel_json(&*s, channel, None),
+                        "channel": self.channel_json(&*s, channel, &Presentation::from_host()),
                     })
                     .to_string(),
                 );
@@ -398,14 +417,12 @@ impl App {
             return;
         };
         let from = self.playing;
-        let to = match (from, from.and_then(|c| self.row_of(c))) {
-            (_, Some(row)) => self.rows.zap(row, step).and_then(|r| self.rows.channel(r)),
-            (Some(channel), None) => Some(zap_target(&*s, channel, step)),
-            (None, None) => {
-                let row = self.grid.as_ref().map_or(0, Grid::row);
-                self.rows.zap(row, step).and_then(|r| self.rows.channel(r))
-            }
-        };
+        let origin = ZapOrigin::from_channel(
+            from,
+            |c| self.row_of(c),
+            || self.grid.as_ref().map_or(0, Grid::row),
+        );
+        let to = zap_from_list(&*s, &self.rows, origin, step, |_| true);
         let Some(to) = to.filter(|&to| Some(to) != from) else {
             return;
         };
@@ -417,12 +434,6 @@ impl App {
 
     fn now(&self) -> i32 {
         self.schedule().map_or(0, |s| now_minute(s, wall_secs(), 0))
-    }
-
-    /// The local time of day of `unix`, as the page shows times.
-    fn clock(&self, unix: i64) -> String {
-        let secs = (unix + i64::from(self.local_offset_secs)).rem_euclid(86_400);
-        format!("{:02}:{:02}", secs / 3600, secs % 3600 / 60)
     }
 
     /// The guide screen on the playing channel's row, at now (a list
@@ -444,7 +455,7 @@ impl App {
 
     /// A key on the guide screen. `scrolling`: a repeat of Up/Down in the
     /// groups column, whose list is built once the key settles.
-    fn guide_key(&mut self, key: &str, scrolling: bool) {
+    fn guide_key(&mut self, action: Action, scrolling: bool) {
         let now = self.now();
         let entries = self.schedule().map_or(0, lists::entry_count);
         // A key held in the groups column only moves through the groups: it
@@ -453,7 +464,7 @@ impl App {
         let Some(grid) = self.grid.as_mut() else {
             return;
         };
-        match grid.key(key, now, entries, preview) {
+        match grid.key(action, now, entries, preview) {
             GridOutcome::Stay => {}
             GridOutcome::Preview if scrolling => {
                 let entry = grid.entry();
@@ -464,9 +475,7 @@ impl App {
                 let entry = grid.entry();
                 self.show_entry(entry);
             }
-            GridOutcome::Watch { channel, archive } => self.watch(channel, archive),
-            GridOutcome::Upcoming(start) => info(&format!("Starts at {}", self.clock(start))),
-            GridOutcome::Unavailable => info("No longer available"),
+            GridOutcome::Watch { channel, program } => self.watch(channel, program, now),
             GridOutcome::Full => {
                 if self.playing.is_some() {
                     self.mode = Mode::Full;
@@ -480,11 +489,29 @@ impl App {
         }
     }
 
-    /// OK on a program: full screen, tuning it unless that channel already
-    /// plays live.
-    fn watch(&mut self, channel: usize, archive: Option<Program>) {
-        let tuned = archive.is_none() && self.playing == Some(channel) && self.playing_live;
-        if tuned || self.play_from(channel, archive) {
+    /// OK on a program: plays immediately or shows an availability notice.
+    fn watch(&mut self, channel: usize, program: Program, now: i32) {
+        let Some(schedule) = self.schedule() else {
+            return;
+        };
+        let live = self.playing.filter(|_| self.playing_live);
+        let tuned = match program.select(now, schedule.catchup_days(channel), channel, live) {
+            ProgramSelection::AlreadyLive => true,
+            ProgramSelection::Live => self.play_from(channel, None),
+            ProgramSelection::Replay => self.play_from(channel, Some(program)),
+            ProgramSelection::Upcoming => {
+                info(&format!(
+                    "Starts at {}",
+                    Presentation::from_host().time(unix_of(schedule, program.start))
+                ));
+                false
+            }
+            ProgramSelection::Unavailable => {
+                info("No longer available");
+                false
+            }
+        };
+        if tuned {
             self.back_to_search = false;
             self.mode = Mode::Full;
         }
@@ -618,7 +645,10 @@ impl App {
                 self.mode = Mode::Guide;
             }
             SearchEffect::Play(id) => {
-                let Some(channel) = search::channel_of(&id, &self.keys) else {
+                let channel = search::channel_of(&id, &self.keys);
+                let ResultSelection::Live(channel) =
+                    select_result(&id, None, channel, ResultPolicy::LiveChannel)
+                else {
                     return;
                 };
                 // What was searched for is history once a result plays.
@@ -636,29 +666,45 @@ impl App {
         }
     }
 
-    /// A remote key on the search screen; `done` and `cancel` are the
-    /// on-screen keyboard's.
-    fn search_key(&mut self, key: &str) {
-        let Some(state) = self.search.as_mut() else {
+    fn search_key(&mut self, action: Action) {
+        let Some(state) = self.search.as_ref() else {
             self.mode = Mode::Guide;
             return;
         };
-        let on_input = *state.focus() == iptv_search::Focus::Input;
-        let idle = state.phase() == iptv_search::Phase::Idle;
-        let action = match key {
-            "up" => SearchAction::Up,
-            "down" => SearchAction::Down,
-            "left" => SearchAction::Left,
-            "right" => SearchAction::Right,
-            "ok" if on_input && !state.keyboard_visible() => SearchAction::ShowKeyboard,
-            // Done on an empty query only closes the keyboard.
-            "done" if idle => SearchAction::KeyboardHidden,
-            "ok" | "done" => SearchAction::Ok,
-            // Back first hides the keyboard, as Cancel does.
-            "cancel" => SearchAction::KeyboardHidden,
-            "back" if state.keyboard_visible() => SearchAction::KeyboardHidden,
-            "back" => SearchAction::Back,
+        let action = match action {
+            Action::MoveUp => SearchAction::Up,
+            Action::MoveDown => SearchAction::Down,
+            Action::MoveLeft => SearchAction::Left,
+            Action::MoveRight => SearchAction::Right,
+            Action::Select
+                if *state.focus() == iptv_search::Focus::Input && !state.keyboard_visible() =>
+            {
+                SearchAction::ShowKeyboard
+            }
+            Action::Select => SearchAction::Ok,
+            Action::Back if state.keyboard_visible() => SearchAction::KeyboardHidden,
+            Action::Back => SearchAction::Back,
             _ => return,
+        };
+        self.apply_search(action);
+    }
+
+    fn search_keyboard(&mut self, complete: bool) {
+        if self.mode == Mode::Search
+            && let Some(state) = &self.search
+        {
+            let action = if complete && state.phase() != iptv_search::Phase::Idle {
+                SearchAction::Ok
+            } else {
+                SearchAction::KeyboardHidden
+            };
+            self.apply_search(action);
+        }
+    }
+
+    fn apply_search(&mut self, action: SearchAction) {
+        let Some(state) = self.search.as_mut() else {
+            return;
         };
         let before = (state.focus().clone(), state.tab(), state.query().to_owned());
         let effect = state.apply(action);
@@ -741,16 +787,16 @@ impl App {
 
     /// A key in move mode: Up/Down move the favorite a place, Left/Right
     /// to the top/bottom; OK, Back (or Blue again) end the mode.
-    fn reorder_key(&mut self, key: &str) {
+    fn reorder_key(&mut self, action: Action) {
         let Some(order) = self.reorder.as_mut() else {
             return;
         };
-        let k = match key {
-            "up" => reorder::Key::Up,
-            "down" => reorder::Key::Down,
-            "left" => reorder::Key::Left,
-            "right" => reorder::Key::Right,
-            "ok" | "back" | "blue" => {
+        let k = match action {
+            Action::MoveUp => reorder::Key::Up,
+            Action::MoveDown => reorder::Key::Down,
+            Action::MoveLeft => reorder::Key::Left,
+            Action::MoveRight => reorder::Key::Right,
+            Action::Select | Action::Back | Action::ShowFavorites => {
                 self.finish_reorder();
                 return;
             }
@@ -790,40 +836,23 @@ impl App {
         self.set_rows(rows, Some(row));
     }
 
-    /// A key while the play bar shows: Left/Right move between its buttons,
-    /// OK presses the focused one, Back hides the bar. Channel keys still
-    /// zap, under the bar.
-    fn bar_key(&mut self, focus: usize, key: &str) {
-        match key {
-            "left" => self.bar = Some(focus.saturating_sub(1)),
-            "right" => self.bar = Some((focus + 1).min(BAR.len() - 1)),
-            "ok" => match BAR[focus] {
-                "favorite" => self.toggle_favorite(),
-                "guide" => self.guide_on_playing(),
-                _ => self.open_search(),
+    fn full_key(&mut self, action: Action, now: u64) {
+        match action {
+            Action::MoveLeft if self.bar.shown => self.bar.move_focus(-1, &BAR, now),
+            Action::MoveRight if self.bar.shown => self.bar.move_focus(1, &BAR, now),
+            Action::Select if self.bar.shown => match self.bar.focus {
+                Some(Control::Favorite) => self.toggle_favorite(),
+                Some(Control::Guide) => self.guide_on_playing(),
+                Some(Control::Search) => self.open_search(),
+                _ => {}
             },
-            "back" | "barTimeout" => self.bar = None,
-            "up" | "chup" => self.zap(-1),
-            "down" | "chdown" => self.zap(1),
-            _ => {}
-        }
-    }
-
-    fn full_key(&mut self, key: &str) {
-        if let Some(focus) = self.bar {
-            return self.bar_key(focus, key);
-        }
-        match key {
-            "up" | "chup" => self.zap(-1),
-            "down" | "chdown" => self.zap(1),
-            // OK shows the play bar (the channel, its program and buttons)
-            // with Favorite focused, over what plays.
-            "ok" if self.playing.is_some() => self.bar = Some(0),
-            "left" => self.guide_on_playing(),
-            // Back returns to the search that played the channel, else to
-            // the guide on the playing channel. It never leaves the app
-            // (the Exit key does).
-            "back" => self.leave_full(),
+            Action::Back if self.bar.shown => self.bar.hide(),
+            Action::ChannelUp => self.zap(-1),
+            Action::ChannelDown => self.zap(1),
+            Action::ShowPanels if self.playing.is_some() => {
+                self.bar.open_on(Control::Favorite, now);
+            }
+            Action::Back => self.leave_full(),
             _ => {}
         }
     }
@@ -854,7 +883,7 @@ impl App {
         }
         self.playing = None;
         self.playing_live = false;
-        self.bar = None;
+        self.bar.hide();
         if self.mode == Mode::Full {
             self.leave_full();
         }
@@ -864,112 +893,186 @@ impl App {
         true
     }
 
-    /// Where a Left pressed now acts, for its repeats ([`LeftHold`]).
-    fn left_hold(&self) -> LeftHold {
-        let pane = self.grid.as_ref().map(Grid::pane);
+    fn input_owner(&self) -> InputOwner {
+        if self.reorder.is_some() {
+            return InputOwner::Reorder;
+        }
         match self.mode {
-            _ if self.schedule.is_none() => LeftHold::Plain,
-            Mode::Guide if self.reorder.is_none() && pane == Some(Pane::Guide) => LeftHold::Grid,
-            Mode::Full if self.bar.is_none() => LeftHold::Done,
-            _ => LeftHold::Plain,
-        }
-    }
-
-    /// A repeat of the held Left. Returns whether it is still to be
-    /// handled as a Left.
-    fn left_repeat(&mut self) -> bool {
-        match self.left_hold {
-            LeftHold::Grid => {
-                self.left_hold = LeftHold::Done;
-                // Still in the grid (the press may have left it already,
-                // from the earliest program).
-                if self.left_hold() == LeftHold::Grid
-                    && let Some(grid) = &mut self.grid
-                {
-                    grid.open_groups();
-                }
-                false
+            Mode::Guide => InputOwner::Guide(self.grid.as_ref().map_or(Pane::Guide, Grid::pane)),
+            Mode::Full if self.bar.shown => InputOwner::Bar,
+            Mode::Full => InputOwner::Player,
+            Mode::Search
+                if self
+                    .search
+                    .as_ref()
+                    .is_some_and(SearchState::keyboard_visible) =>
+            {
+                InputOwner::Keyboard
             }
-            LeftHold::Done => false,
-            // The play bar hid meanwhile: Left would open the guide.
-            LeftHold::Plain => !(self.mode == Mode::Full && self.bar.is_none()),
+            Mode::Search => InputOwner::Search,
         }
     }
 
-    /// One remote key; `repeat` when the page saw it repeat (held).
-    fn key(&mut self, key: &str, repeat: bool) {
-        if key == "left" {
-            if !repeat {
-                self.left_hold = self.left_hold();
-            } else if !self.left_repeat() {
-                return;
-            }
-        }
-        let scrolling = repeat
-            && matches!(key, "up" | "down")
-            && self.mode == Mode::Guide
-            && self.reorder.is_none()
-            && self.grid.as_ref().is_some_and(|g| g.pane() == Pane::Groups);
-        if !scrolling {
-            self.settle_rows();
-        }
-        self.dispatch_key(key, scrolling);
-        // The play bar belongs to full screen.
-        if self.mode != Mode::Full {
-            self.bar = None;
-        }
-    }
-
-    fn dispatch_key(&mut self, key: &str, scrolling: bool) {
+    fn key(&mut self, key: RemoteKey, phase: KeyPhase, at: u64) {
         if self.schedule.is_none() {
             return;
         }
-        if self.reorder.is_some() {
-            return self.reorder_key(key);
+        let owner = self.input_owner();
+        if owner == InputOwner::Keyboard {
+            return;
         }
-        match (key, self.mode) {
-            ("favorite", _) => self.toggle_favorite(),
-            ("guide", Mode::Guide) => {
-                if let Some(grid) = &mut self.grid {
-                    grid.focus_guide();
-                }
+        if phase == KeyPhase::Down {
+            self.pressed_on = Some(owner);
+        } else if self.presses.held_key() != Some(key) {
+            return;
+        }
+        if phase != KeyPhase::Up {
+            self.bar.used(at);
+        }
+        let decision = self.presses.feed(
+            owner,
+            key,
+            phase,
+            at,
+            self.keymap.has_long(owner.context(), key),
+        );
+        let began = self.pressed_on;
+        if phase == KeyPhase::Up {
+            self.pressed_on = None;
+        }
+        if let Some(iptv_nav::Decision::Act { press, .. }) = decision {
+            let repeat = phase == KeyPhase::Repeat && press == Press::Short;
+            // A press that opened the guide or moved a bar button cannot
+            // repeat as a different Left action on the surface it exposed.
+            if repeat && key == RemoteKey::Left && began != Some(owner) {
+                return;
             }
-            ("guide", Mode::Full) => self.guide_on_playing(),
-            ("guide", Mode::Search) => {
-                self.close_search();
-                self.mode = Mode::Guide;
-            }
-            ("search", _) => self.open_search(),
-            ("blue", _) => self.favorites_key(),
-            (_, Mode::Full) => self.full_key(key),
-            (_, Mode::Guide) => self.guide_key(key, scrolling),
-            (_, Mode::Search) => self.search_key(key),
+            self.key_action(owner, key, press, repeat, at);
+        }
+        if phase == KeyPhase::Up {
+            self.settle_rows();
         }
     }
 
-    fn program_json(s: &dyn Schedule, channel: usize, minute: i32) -> Option<Value> {
-        let p = s.program_at(channel, minute);
-        let title = s.title(channel, p);
+    fn poll_input(&mut self, at: u64) {
+        self.bar.tick(at);
+        let owner = self.input_owner();
+        if let Some(iptv_nav::Decision::Act { key, press, .. }) = self.presses.poll(owner, at) {
+            self.key_action(owner, key, press, false, at);
+        }
+    }
+
+    fn cancel_keys(&mut self) {
+        self.presses.cancel();
+        self.pressed_on = None;
+        self.settle_rows();
+    }
+
+    fn input_deadline(&self) -> Option<u64> {
+        self.presses
+            .long_deadline_ms()
+            .into_iter()
+            .chain(self.bar.hide_at_ms())
+            .min()
+    }
+
+    fn key_action(
+        &mut self,
+        owner: InputOwner,
+        key: RemoteKey,
+        press: Press,
+        repeat: bool,
+        at: u64,
+    ) {
+        let Some(action) = self.keymap.resolve(owner.context(), key, press) else {
+            return;
+        };
+        if repeat
+            && !matches!(
+                action,
+                Action::MoveUp
+                    | Action::MoveDown
+                    | Action::MoveLeft
+                    | Action::MoveRight
+                    | Action::ChannelUp
+                    | Action::ChannelDown
+                    | Action::PageUp
+                    | Action::PageDown
+            )
+        {
+            return;
+        }
+        let scrolling = repeat
+            && matches!(action, Action::MoveUp | Action::MoveDown)
+            && owner == InputOwner::Guide(Pane::Groups);
+        if !scrolling {
+            self.settle_rows();
+        }
+        if self.reorder.is_some() {
+            self.reorder_key(action);
+        } else {
+            match (action, self.mode) {
+                (Action::ToggleFavorite, _) => self.toggle_favorite(),
+                (Action::ShowGroups, Mode::Guide) => {
+                    if let Some(grid) = &mut self.grid {
+                        grid.open_groups();
+                    }
+                }
+                (Action::ShowGuide, Mode::Guide) => {
+                    if let Some(grid) = &mut self.grid {
+                        grid.focus_guide();
+                    }
+                }
+                (Action::ShowGuide, Mode::Full) => self.guide_on_playing(),
+                (Action::ShowGuide, Mode::Search) => {
+                    self.close_search();
+                    self.mode = Mode::Guide;
+                }
+                (Action::OpenSearch, _) => self.open_search(),
+                (Action::ShowFavorites, _) => self.favorites_key(),
+                (_, Mode::Full) => self.full_key(action, at),
+                (_, Mode::Guide) => self.guide_key(action, scrolling),
+                (_, Mode::Search) => self.search_key(action),
+            }
+        }
+        if self.mode != Mode::Full {
+            self.bar.hide();
+        }
+    }
+
+    fn program_json(
+        s: &dyn Schedule,
+        channel: usize,
+        program: Program,
+        presentation: &Presentation,
+    ) -> Option<Value> {
+        let title = s.title(channel, program);
         if title.is_empty() || title == iptv_guide::NO_INFORMATION || title == iptv_guide::LOADING {
             return None;
         }
-        let epoch = s.epoch_unix();
+        let (start, end) = (unix_of(s, program.start), unix_of(s, program.end));
+        let start_label = presentation.time(start);
         Some(json!({
             "title": title,
-            "start": epoch + i64::from(p.start) * 60,
-            "end": epoch + i64::from(p.end) * 60,
+            "start": start,
+            "end": end,
+            "line": format!("{start_label}  {title}"),
+            "startLabel": start_label,
+            "endLabel": presentation.time(end),
+            "progress": presentation.timing(start, end).progress,
         }))
     }
 
-    fn channel_json(&self, s: &dyn Schedule, channel: usize, number: Option<u32>) -> Value {
+    fn channel_json(&self, s: &dyn Schedule, channel: usize, presentation: &Presentation) -> Value {
         let minute = now_minute(s, wall_secs(), 0);
-        let now = Self::program_json(s, channel, minute);
-        let next = now
-            .as_ref()
-            .and_then(|_| Self::program_json(s, channel, s.program_at(channel, minute).end));
+        let current = s.program_at(channel, minute);
+        let now = Self::program_json(s, channel, current, presentation);
+        let next = now.as_ref().and_then(|_| {
+            Self::program_json(s, channel, s.program_at(channel, current.end), presentation)
+        });
         json!({
             "id": channel,
-            "number": number.unwrap_or_else(|| self.number_of(channel, s)),
+            "number": self.number_of(channel, s),
             "name": s.channel_name(channel),
             // Playlist artwork is content: only public addresses are loaded.
             "logo": s.channel_logo(channel).filter(|l| crate::exec::allowed(l, true)),
@@ -988,6 +1091,33 @@ impl App {
         }
     }
 
+    fn guide_hint(&self, grid: &Grid, can_watch: bool, replay: bool) -> String {
+        if self.reorder.is_some() {
+            return "Moving: Up/Down one place · Left/Right: to the top or the end · OK: done"
+                .into();
+        }
+        match grid.pane() {
+            Pane::Preview => "OK: full screen · Down: guide".into(),
+            Pane::Groups => "Up/Down: lists · OK: open · Left: the rail".into(),
+            Pane::Rail => "OK: open · Right: groups".into(),
+            Pane::Guide => {
+                let ok = if can_watch {
+                    "OK: watch · "
+                } else if replay {
+                    "OK: watch from the start · "
+                } else {
+                    ""
+                };
+                let reorder = if grid.entry() == FAVORITES && self.rows.len() > 1 {
+                    " · Blue: move"
+                } else {
+                    ""
+                };
+                format!("{ok}Channel Up/Down: page · Yellow: favorite{reorder} · Back: groups")
+            }
+        }
+    }
+
     fn window(focus: usize, len: usize, shown: usize) -> usize {
         focus
             .saturating_sub(shown / 2)
@@ -1003,13 +1133,14 @@ impl App {
             return json!({ "type": "view", "ready": false, "status": self.status });
         };
         let logo = |c: usize| s.channel_logo(c).filter(|l| crate::exec::allowed(l, true));
-        let playing = self.playing.map(|c| self.channel_json(s, c, None));
+        let presentation = Presentation::from_host();
+        let playing = self.playing.map(|c| self.channel_json(s, c, &presentation));
         match (self.mode, &self.search) {
             (Mode::Search, Some(state)) => json!({
                 "type": "view",
                 "ready": true,
                 "mode": "search",
-                "search": search::json(state, s, self.indexes.preparing(), &logo),
+                "search": search::json(state, s, self.indexes.preparing(), &logo, &presentation),
                 "playing": playing,
                 "guide": self.guide_loaded,
                 "status": self.status,
@@ -1018,8 +1149,13 @@ impl App {
                 "type": "view",
                 "ready": true,
                 "mode": "full",
-                "bar": self.bar.map(|focus| json!({
-                    "focus": BAR[focus],
+                "bar": self.bar.focus.map(|focus| json!({
+                    "focus": match focus {
+                        Control::Favorite => "favorite",
+                        Control::Guide => "guide",
+                        Control::Search => "search",
+                        _ => "",
+                    },
                     "favorite": self.playing.is_some_and(|c| self.is_favorite(c)),
                 })),
                 "playing": playing,
@@ -1027,7 +1163,8 @@ impl App {
                 "status": self.status,
             }),
             _ => {
-                let screen = grid.json(self.playing, &logo, &|c| self.is_favorite(c));
+                let screen =
+                    grid.json(self.playing, &logo, &|c| self.is_favorite(c), &presentation);
                 // The groups column is sent only while it shows.
                 let groups = (screen["columns"] == true).then(|| {
                     let entries = lists::entry_count(s);
@@ -1048,6 +1185,7 @@ impl App {
                     "reorder": self.reorder.is_some(),
                     // The list is built once the groups column's key settles.
                     "pending": self.rows_pending,
+                    "hint": self.guide_hint(grid, screen["focused"]["airing"] == "live", screen["focused"]["catchup"] == true),
                     "playing": playing,
                     "guide": self.guide_loaded,
                     "status": self.status,
@@ -1066,7 +1204,14 @@ fn emit_view() {
 /// the host knows the command was handled (views are also emitted for
 /// other reasons).
 fn emit_reply(seq: Option<u64>) {
-    let mut v = with_app(|a| a.view());
+    let mut v = with_app(|a| {
+        let mut view = a.view();
+        view["session"] = a.session.into();
+        if let Some(at) = a.input_deadline() {
+            view["keyDeadlineMs"] = at.into();
+        }
+        view
+    });
     if let Some(seq) = seq {
         v["seq"] = seq.into();
     }
@@ -1496,20 +1641,37 @@ pub(crate) fn command(text: &str) {
                 }
             }
         }
-        // Every key is answered with a view (also one that changed
-        // nothing), which carries the command's `seq`.
-        "key" => {
-            let key = cmd.get("key").and_then(Value::as_str).unwrap_or("");
-            let repeat = cmd.get("repeat").and_then(Value::as_bool).unwrap_or(false);
-            // Back with nowhere to go does nothing: only the remote's Exit
-            // key leaves the app, and the page handles that key itself.
-            with_app(|a| a.key(key, repeat));
-            emit_reply(cmd.get("seq").and_then(Value::as_u64));
-        }
-        // The page's repeating key was released: a list left pending while
-        // the groups column scrolled is built now.
-        "settle" => {
-            with_app(App::settle_rows);
+        // Every input command acknowledges the page's sequence number,
+        // including a key phase that produces no action.
+        "key" | "keyPoll" | "cancelKeys" | "keyboard" | "settle" => {
+            let at = cmd.get("atMs").and_then(Value::as_u64);
+            with_app(|a| match cmd["cmd"].as_str() {
+                Some("key") => {
+                    let key = cmd["key"].as_str().and_then(RemoteKey::from_name);
+                    let phase = match cmd["phase"].as_str() {
+                        Some("down") => Some(KeyPhase::Down),
+                        Some("repeat") => Some(KeyPhase::Repeat),
+                        Some("up") => Some(KeyPhase::Up),
+                        _ => None,
+                    };
+                    if let (Some(key), Some(phase), Some(at)) = (key, phase, at) {
+                        a.key(key, phase, at);
+                    }
+                }
+                Some("keyPoll") => {
+                    if let Some(at) = at {
+                        a.poll_input(at);
+                    }
+                }
+                Some("cancelKeys") => a.cancel_keys(),
+                Some("keyboard") => {
+                    if let Some(complete) = cmd["complete"].as_bool() {
+                        a.cancel_keys();
+                        a.search_keyboard(complete);
+                    }
+                }
+                _ => a.settle_rows(),
+            });
             emit_reply(cmd.get("seq").and_then(Value::as_u64));
         }
         "view" => emit_view(),

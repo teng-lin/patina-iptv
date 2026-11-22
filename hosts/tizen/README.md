@@ -136,6 +136,36 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   presses it), and has no pause, seek or track buttons.
 - No hint card after a list is chosen, and no program descriptions.
 
+- Hold Left in the grid for 400 ms to open the groups. A tap moves to the
+  previous program when the guide has one. Held Back acts once. Exit
+  remains a system key handled by the page.
+- Programs chosen in Search tune their channel live, including upcoming
+  programs. Back returns to the result list. The Recently watched list
+  includes channels played from their archive.
+- Page Up and Down fit the time to the destination row's listings. Back
+  on the rail stays in the app.
+
+## Input and view protocol
+
+The page sends `key` commands with a stable `iptv-nav` key name, a
+`phase` (`down`, `repeat` or `up`), and `atMs` from
+`performance.now()` when the event was received. A view's
+`keyDeadlineMs` uses that same clock. When the deadline arrives the page
+sends `keyPoll` with the current `atMs`. That lets a remote without
+auto-repeat hold Left and lets the core own the play bar timeout.
+
+The input queue keeps one command in flight and coalesces queued repeats.
+Each key phase, poll, keyboard or cancel command carries a `seq` that
+comes back on its view. A late answer can't release a newer command.
+The page sends `cancelKeys` on blur, hiding, setup and keyboard capture.
+The worker drops the held press and settles the groups list. Installing a
+new source also resets input state. The search keyboard sends `keyboard`
+with `complete: true` for Done or `false` for Back or Cancel.
+
+Views carry guide and player labels, progress, search result times and the
+ruler marks. The worker supplies the UTC offset for each displayed
+instant. The page uses the labels and positions directly when drawing.
+
 ## What is kept on the TV
 
 Per playlist, in the app's IndexedDB: Favorites in their order, Recently

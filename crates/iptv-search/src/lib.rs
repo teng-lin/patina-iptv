@@ -20,6 +20,7 @@ mod channels;
 mod history;
 mod programs;
 mod programs_builder;
+mod selection;
 mod state;
 mod text;
 
@@ -27,6 +28,7 @@ pub use channels::{ChannelHit, ChannelIndex, ChannelSearchOptions};
 pub use history::SearchHistory;
 pub use programs::{GroupBy, ProgramHit, ProgramIndex, ProgramSearchOptions};
 pub use programs_builder::ProgramIndexBuilder;
+pub use selection::{ResultPolicy, ResultSelection, select_result};
 pub use state::{Focus, Phase, ResultId, SearchAction, SearchEffect, SearchState, Tab};
 pub use text::{MIN_INFIX, MatchQuality, Query, fold, tokens};
 

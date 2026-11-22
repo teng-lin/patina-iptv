@@ -111,6 +111,8 @@ pub enum Action {
     ToggleEnlarge,
     Record,
     ToggleFavorite,
+    /// Show the Favorites list, or begin moving the focused favorite.
+    ShowFavorites,
     Digit(u8),
     /// Bound explicitly to do nothing (a user override).
     Ignore,
@@ -149,6 +151,50 @@ impl Default for Keymap {
 }
 
 impl Keymap {
+    /// Navigation supported by the JavaScript Tizen bridge.
+    pub fn tizen_bridge() -> Self {
+        use Action as A;
+        use Context::{Controls, Guide, Player};
+        use Press::{Long, Short};
+        use RemoteKey as K;
+
+        let mut map = Self::defaults();
+        map.defaults.retain(|binding| {
+            matches!(
+                (binding.context, binding.key, binding.press),
+                (
+                    None,
+                    K::Up
+                        | K::Down
+                        | K::Left
+                        | K::Right
+                        | K::Ok
+                        | K::Back
+                        | K::Guide
+                        | K::Search
+                        | K::PageUp
+                        | K::PageDown
+                        | K::ChannelUp
+                        | K::ChannelDown,
+                    Short,
+                ) | (Some(Guide), K::Left, Long)
+                    | (Some(Guide), K::ChannelUp | K::ChannelDown, Short)
+                    | (
+                        Some(Player | Controls),
+                        K::Up | K::Down | K::PageUp | K::PageDown,
+                        Short
+                    )
+            )
+        });
+        map.defaults.extend([
+            b(None, K::Yellow, Short, A::ToggleFavorite),
+            b(None, K::Blue, Short, A::ShowFavorites),
+            b(Some(Player), K::Left, Short, A::ShowGuide),
+            b(Some(Player), K::Ok, Short, A::ShowPanels),
+        ]);
+        map
+    }
+
     /// The map of `profile`'s keys: the same for both ([`Profile`]).
     pub fn for_profile(_profile: Profile) -> Keymap {
         Keymap::defaults()
@@ -302,6 +348,35 @@ impl Keymap {
 mod tests {
     use super::*;
     use Context::{ChannelList, Controls, Groups, Guide, Menu, Player};
+
+    #[test]
+    fn bridge_overrides_do_not_change_the_nsh_remote() {
+        use Action::{Back, ChannelUp, ShowFavorites, ShowGroups, ShowGuide, ToggleFavorite};
+        use Press::{Long, Short};
+        use RemoteKey as K;
+
+        let bridge = Keymap::tizen_bridge();
+        let nsh = Keymap::for_profile(Profile::Remote);
+        for map in [&bridge, &nsh] {
+            assert_eq!(map.resolve(Guide, K::Left, Long), Some(ShowGroups));
+            assert_eq!(map.resolve(Player, K::Up, Short), Some(ChannelUp));
+            assert_eq!(map.resolve(Player, K::Back, Short), Some(Back));
+        }
+        assert_eq!(bridge.resolve(Player, K::Left, Short), Some(ShowGuide));
+        assert!(!bridge.has_long(Player, K::Left));
+        assert!(nsh.has_long(Player, K::Left));
+        assert!(!bridge.has_long(Player, K::Back));
+        assert!(nsh.has_long(Player, K::Back));
+        assert_eq!(
+            bridge.resolve(Guide, K::Yellow, Short),
+            Some(ToggleFavorite)
+        );
+        assert_eq!(bridge.resolve(Guide, K::Blue, Short), Some(ShowFavorites));
+        assert_eq!(bridge.resolve(Guide, K::Red, Short), None);
+        assert_eq!(nsh.resolve(Guide, K::Yellow, Short), None);
+        assert_eq!(nsh.resolve(Guide, K::Blue, Short), None);
+        assert_eq!(nsh.resolve(Guide, K::Red, Short), Some(ToggleFavorite));
+    }
 
     #[test]
     fn default_installs_the_same_bindings_as_the_explicit_constructors() {

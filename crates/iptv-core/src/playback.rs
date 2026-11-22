@@ -9,7 +9,9 @@
 
 use std::ops::Range;
 
+use crate::favorites::Recent;
 use crate::guide::Schedule;
+use crate::lists::ChannelList;
 
 mod error;
 mod health;
@@ -105,39 +107,34 @@ impl PlaySource {
 }
 
 /// How many channels the recent-channels list keeps.
-pub const RECENT_MAX: usize = 30;
+pub const RECENT_MAX: usize = crate::favorites::RECENT_LIMIT;
 
 /// The channels played live, newest first, by content identity (stable
 /// keys): "previous channel" and the player's History list.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChannelHistory {
-    recent: Vec<String>,
+    recent: Recent,
 }
 
 impl ChannelHistory {
     /// `key` started playing: it moves to the front. Replaying the current
     /// channel changes nothing.
     pub fn played(&mut self, key: &str) {
-        if self.current() == Some(key) {
-            return;
-        }
-        self.recent.retain(|k| k != key);
-        self.recent.insert(0, key.to_owned());
-        self.recent.truncate(RECENT_MAX);
+        self.recent.played(key);
     }
 
     pub fn current(&self) -> Option<&str> {
-        self.recent.first().map(String::as_str)
+        self.recent.keys().first().map(String::as_str)
     }
 
     /// The channel before the current one (pressing it again comes back).
     pub fn previous(&self) -> Option<&str> {
-        self.recent.get(1).map(String::as_str)
+        self.recent.keys().get(1).map(String::as_str)
     }
 
     /// Every channel played, newest (the current one) first.
     pub fn recent(&self) -> &[String] {
-        &self.recent
+        self.recent.keys()
     }
 }
 
@@ -165,6 +162,47 @@ pub fn zap_target(schedule: &dyn Schedule, channel: usize, step: isize) -> usize
         None => 0,
     };
     channels[to]
+}
+
+/// The starting point for a channel change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZapOrigin {
+    Row(usize),
+    OtherGroup(usize),
+}
+
+impl ZapOrigin {
+    /// Finds the playing channel in the displayed list, or falls back to
+    /// the focused row when nothing is playing.
+    pub fn from_channel(
+        channel: Option<usize>,
+        row_of: impl FnOnce(usize) -> Option<usize>,
+        focused_row: impl FnOnce() -> usize,
+    ) -> Self {
+        match channel {
+            Some(channel) => row_of(channel).map_or(Self::OtherGroup(channel), Self::Row),
+            None => Self::Row(focused_row()),
+        }
+    }
+}
+
+/// Zaps within the displayed list or within the playing channel's group.
+pub fn zap_from_list(
+    schedule: &dyn Schedule,
+    list: &ChannelList,
+    from: ZapOrigin,
+    step: isize,
+    allowed: impl Fn(usize) -> bool,
+) -> Option<usize> {
+    match from {
+        ZapOrigin::Row(row) => (1..=list.len())
+            .filter_map(|offset| list.zap(row, (offset as isize).wrapping_mul(step)))
+            .filter_map(|row| list.channel(row))
+            .find(|&channel| allowed(channel)),
+        ZapOrigin::OtherGroup(channel) => {
+            Some(zap_target(schedule, channel, step)).filter(|&c| allowed(c))
+        }
+    }
 }
 
 /// Counts from native position samples while the viewer is watching live TV.

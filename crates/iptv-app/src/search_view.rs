@@ -28,8 +28,9 @@ use iptv_epg::UnixTime;
 use iptv_guide::EpgSchedule;
 use iptv_nav::Action;
 use iptv_search::{
-    ChannelSearchOptions, Focus, Phase, ProgramHit, ProgramSearchOptions, ResultId, SearchAction,
-    SearchEffect, SearchHistory, SearchState, Tab,
+    ChannelSearchOptions, Focus, Phase, ProgramHit, ProgramSearchOptions, ResultId, ResultPolicy,
+    ResultSelection as Outcome, SearchAction, SearchEffect, SearchHistory, SearchState, Tab,
+    select_result,
 };
 use iptv_settings::{Settings, Target, keys};
 use nsh_base::input;
@@ -72,24 +73,6 @@ pub struct Screen {
 
 // --- Glue (pure, unit-tested) ------------------------------------------------
 
-/// What choosing a result does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Outcome {
-    /// Channels and programs on now: the channel, live.
-    Live(usize),
-    /// A past program still in the archive: replay from its start.
-    CatchUp {
-        channel: usize,
-        start: UnixTime,
-    },
-    /// Upcoming programs (and past ones without replay): their details.
-    Details {
-        channel: usize,
-        start: UnixTime,
-    },
-    Nothing,
-}
-
 /// The `search.*` settings the screen follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Options {
@@ -131,27 +114,6 @@ fn resolve_result_channel(
 ) -> Option<usize> {
     let channel = owner.resolve_search_channel(identity, schedule)?;
     (!schedule.channel_hidden(channel)).then_some(channel)
-}
-
-fn outcome(id: &ResultId, hit: Option<&ProgramHit>, channel: Option<usize>) -> Outcome {
-    let Some(channel) = channel else {
-        return Outcome::Nothing;
-    };
-    match (id, hit) {
-        (ResultId::Channel(_), _) => Outcome::Live(channel),
-        (ResultId::Program { .. }, None) => Outcome::Nothing,
-        (ResultId::Program { start, .. }, Some(h)) => match h.airing {
-            Airing::Live => Outcome::Live(channel),
-            Airing::Ended if h.catchup => Outcome::CatchUp {
-                channel,
-                start: *start,
-            },
-            Airing::Ended | Airing::Upcoming => Outcome::Details {
-                channel,
-                start: *start,
-            },
-        },
-    }
 }
 
 /// The remote's action on the search screen.
@@ -571,7 +533,7 @@ fn choose(ui: Ui, id: ResultId) {
     });
     let schedule = crate::schedule();
     let channel = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule);
-    match outcome(&id, hit.as_ref(), channel) {
+    match select_result(&id, hit.as_ref(), channel, ResultPolicy::Guide) {
         Outcome::Live(channel) => watch(ui, channel, Playback::Live),
         Outcome::CatchUp { channel, start } => {
             let start = guide_minute(start, guide_epoch());
@@ -604,6 +566,11 @@ fn watch(ui: Ui, channel: usize, playback: Playback) {
             s.suspended = true;
         }
     });
+}
+
+#[cfg(test)]
+fn outcome(id: &ResultId, hit: Option<&ProgramHit>, channel: Option<usize>) -> Outcome {
+    select_result(id, hit, channel, ResultPolicy::Guide)
 }
 
 #[cfg(test)]

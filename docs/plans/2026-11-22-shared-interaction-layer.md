@@ -1,12 +1,12 @@
 # Shared interaction decisions for the NSH app and the Tizen bridge
 
-Status: proposed on 2026-11-22, revised the same day after checking the
-plan against the code and after two external reviews (Codex, agy). Nothing
-here is implemented. It follows the
-[decision on Tizen 5.5](2026-11-21-browser-tv-architecture.md): the JavaScript
-bridge (`crates/iptv-web`, `hosts/tizen`) is the supported app on 2020 Samsung
-TVs, and it should behave like the Android TV app without re-creating that
-app's logic.
+Status: proposed on 2026-11-22 and implemented on top of merged #209.
+The JavaScript bridge (`crates/iptv-web`, `hosts/tizen`) remains the
+supported app on Tizen 5.5. The opt-in NSH package in
+[#205](https://github.com/teng-lin/patina-iptv/pull/205) runs `iptv-app`
+through the browser adapters. It uses the same input and screen code as
+other NSH hosts. See the [browser TV plan](2026-11-21-browser-tv-architecture.md)
+for the migration gates.
 
 ## Problem
 
@@ -24,16 +24,18 @@ Patina's interaction logic exists twice.
 - **In the bridge, written again:** the same glue in `iptv-web/src/app.rs`
   (about 1,400 lines), and hold and repeat rules in `hosts/tizen/app/main.js`.
 
-The bridge's guide screen matches Android TV because it calls
-`iptv_core::guide::Focus` and `iptv_core::browse`. Where it wrote its own
-glue it diverged: reviews of #209 found its zap, its held keys and its play
-bar differing from the Android TV app. (#209 has since adopted
-`zap_target` and moved the held-Left decision into the core.)
+Since #209, `iptv-web/src/grid.rs` drives `iptv_core::guide::Focus`
+over a `lists::ListView` and uses `iptv_core::browse::Columns` and
+`Outcome` for the rail, groups and guide. The NSH app uses those same
+models in `lists.rs`. Sharing the focus transitions still leaves different
+rail items, paging, program selection effects and Back behavior to account
+for. The bridge also uses the core's group zap target and `Focus::open_groups`.
 
 ## Findings that shape the plan
 
-- **Where the bridge shares a model, it matches.** Both presenters call
-  `iptv_core::guide::Focus` and `browse` and handle the same outcomes.
+- **Guide navigation already shares the focus model.** The migration
+  covers the surrounding key handling, the decisions made after a focus
+  outcome and the focused program's presentation.
 - **The bridge's interaction glue is small.** A few hundred lines across
   `iptv-web`'s `app.rs` (1,509 lines in all), `grid.rs` and `search.rs`,
   plus key handling in `main.js`. The rest is import, guide refresh, search
@@ -48,10 +50,8 @@ bar differing from the Android TV app. (#209 has since adopted
   answer (`Panels::select` → `Pick`, `Focus::navigate` → `Outcome`). The
   decisions are what must be shared; the dispatch is not.
 - **The shared models do not fit the bridge as they are** (see step 2).
-- **The bridge may be a stopgap.** If NSH runs well on 2022 and later TVs,
-  the bridge serves only older sets. The
-  [browser TV plan](2026-11-21-browser-tv-architecture.md) calls it
-  bug-fix-only; this plan adds behavior to it (decision 1).
+- **The bridge's support window may narrow.** Once NSH meets the gates
+  on a newer TV generation, that generation can move to the NSH package.
 
 ## Target architecture
 
@@ -94,18 +94,20 @@ Rules that follow:
 - No new crate. `iptv-web` gains a dependency on `iptv-nav`; it depends on
   `iptv-core` and `iptv-search` already.
 
-## Steps (one pull request each, in this order)
+## Migration
 
-0. **Decide the bridge's contract** (decisions 1 and 2 below). It fixes the
-   key overrides and the panel model that the later steps need.
+0. **Bridge contract.** Share decisions for supported behavior and keep
+   the remote and panel differences listed in the
+   [bridge README](../../hosts/tizen/README.md#differences-from-the-android-tv-app).
+   Preserve the existing NSH behavior across platforms.
 1. **Shared scenarios first.** The same synthetic key traces, with a
    controlled clock, run against the headless app
-   (`iptv-app/tests/app/tv_player.rs`) and the bridge's fake host
+   (`iptv-app/tests/app/tv_remote_journey.rs`) and the bridge's fake host
    (`iptv-web/src/tests.rs`). They assert the visible surface, the focused
-   content, the playback effects and the listed exceptions. Start with: a
-   lost or late key-up, an overlay opening during a hold, held Back, rapid
-   zaps with a stale failure, and Search → player → Back. An unlisted
-   difference is a bug.
+   content, playback effects and the listed exceptions. The lost or late
+   key-up trace runs in both presenters. Their existing journeys and
+   bridge regression tests also cover an overlay opening during a hold,
+   held Back, rapid zaps with a stale failure, and Search → player → Back.
 2. **The bridge adopts the shared models**, in separate pull requests:
    - **Transport.** The page sends key down and up with its own event
      timestamps (a key can wait behind an unanswered one, so the worker's
@@ -118,11 +120,9 @@ Rules that follow:
      supports (a long binding defers the tap to release), its color keys,
      and Back and Exit. The bridge's string keys become `iptv_nav::Action`,
      so a changed action fails to compile.
-   - **Panel.** One of `Panels` (card and action cards) or `PlayBar`, not
-     both. Core changes needed either way: `Panels` indexes two fixed
-     lists (`QUICK_ACTIONS` and `CONTROLS`) and neither takes a subset;
-     neither model has Search; the opening focus and the hide delays are
-     fixed (the bridge uses 7 s, the play bar 3 s).
+   - **Panel.** The bridge uses `PlayBar` with Favorite, Guide and Search,
+     Favorite initially focused and a 7 s idle timeout. The NSH app keeps
+     its existing controls and 3 s play bar timeout.
 3. **Shared decisions, extracted one at a time.** Each becomes a pure
    function that both presenters call, in the crate the table above gives
    (state decisions in `iptv-core`, search ones in `iptv-search`, key
@@ -148,15 +148,14 @@ Rules that follow:
    - Not a candidate as first written: a failed stream. The app stays in
      full screen behind a retry card; the bridge leaves full screen. Share
      it only after defining rejected, retryable and terminal failures.
-4. **View-models:** the focused program's details, the card and the bar as
-   plain data. The strings are in `iptv-app`'s own i18n today
-   (`header.rs`, `player_panels.rs`), not `iptv-core`'s: moving them is
-   part of this step. The bridge computes progress and formats times in JS
-   today; the app formats with language, hour cycle and a per-instant
-   offset.
-5. **The page renders and hosts:** all shared text, times and progress
-   come from the core; the page protocol is documented in the bridge's
-   README.
+4. **View models.** Program timing comes from `iptv-core`. NSH retains
+   guide-minute precision and its localized captions. The bridge uses its
+   English 24-hour labels and wall-clock progress with the TV's UTC offset
+   at each instant.
+5. **Page rendering.** The bridge receives guide labels, progress, ruler
+   marks, search result times and player program labels in its view. The
+   page handles drawing, AVPlay, setup, keyboard capture and lifecycle.
+   See the [bridge protocol](../../hosts/tizen/README.md#input-and-view-protocol).
 
 ## Risks
 
@@ -188,16 +187,11 @@ It can be reconsidered if a second non-NSH presenter appears, or if an NSH
 web mode (the app's logic in a small Worker module, with a renderer that
 turns elements into DOM and CSS) becomes the plan for browser TVs.
 
-## Open decisions
+## Host choices
 
-1. **The bridge's scope.** Bug-fix-only, as the browser TV plan says, or
-   the 2020 TVs' supported app that follows the Android TV app. This plan
-   assumes the second; say so in the browser TV plan if confirmed.
-2. **Bridge exceptions, needed before step 2.** Today: Yellow toggles a
-   favorite and Red opens setup (Android: Red toggles); Left in full
-   screen opens the guide and Right does nothing (Android: the channel
-   list, the previous channel); OK opens one bar with Favorite focused for
-   7 s (Android: short OK an unfocused card, long OK or Menu the play
-   bar). Recommended: keep them as a bridge key profile and host inputs,
-   listed in the bridge's README.
-3. **Timing:** step 1 after #209 merges.
+- The bridge follows the NSH app for the decisions it shares. The package
+  in #205 uses the NSH presenter directly and has its own migration gates.
+- The bridge keeps its own color keys, full-screen Left and Right behavior
+  and 7 s play bar, as documented in its README.
+- The transport and bridge performance still need a run on the supported
+  Samsung TV, including the new key-to-frame measurement.

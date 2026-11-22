@@ -34,12 +34,27 @@ pub const PAST: i32 = 30;
 /// [`Schedule::browsable`] reaches).
 pub const HISTORY: i32 = 7 * 24 * 60;
 
+/// The row reached by a signed page step, clamped to the list.
+pub fn page_row(row: usize, rows: usize, step: isize) -> usize {
+    row.saturating_add_signed(step).min(rows.saturating_sub(1))
+}
+
 /// Where a program sits relative to now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Airing {
     Ended,
     Live,
     Upcoming,
+}
+
+/// The result of selecting a listing in the guide.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProgramSelection {
+    Live,
+    AlreadyLive,
+    Replay,
+    Upcoming,
+    Unavailable,
 }
 
 impl Program {
@@ -58,6 +73,24 @@ impl Program {
     pub fn can_replay(&self, now: i32, archive_days: u8) -> bool {
         let window = i32::from(archive_days) * 24 * 60;
         window > 0 && self.start <= now && self.start >= now.saturating_sub(window)
+    }
+
+    /// The playback or information action for this listing. The selected and
+    /// playing channels are catalog indices on the same schedule.
+    pub fn select(
+        &self,
+        now: i32,
+        archive_days: u8,
+        channel: usize,
+        live_channel: Option<usize>,
+    ) -> ProgramSelection {
+        match self.airing(now) {
+            Airing::Live if live_channel == Some(channel) => ProgramSelection::AlreadyLive,
+            Airing::Live => ProgramSelection::Live,
+            Airing::Ended if self.can_replay(now, archive_days) => ProgramSelection::Replay,
+            Airing::Ended => ProgramSelection::Unavailable,
+            Airing::Upcoming => ProgramSelection::Upcoming,
+        }
     }
 
     /// Played fraction of a live program at `now` (0 otherwise).
@@ -703,6 +736,22 @@ mod tests {
         let f = Focus::default();
         assert_eq!((f.window, f.cursor), (-PAST, 0));
         assert_eq!(f.program(&S).airing(0), Airing::Live);
+    }
+
+    #[test]
+    fn choosing_a_program_uses_the_airing_and_archive_boundary() {
+        let program = Program {
+            start: 120,
+            end: 180,
+        };
+        let select = |now, days, playing| program.select(now, days, 2, playing);
+        assert_eq!(select(119, 1, Some(2)), ProgramSelection::Upcoming);
+        assert_eq!(select(120, 1, Some(1)), ProgramSelection::Live);
+        assert_eq!(select(179, 1, Some(2)), ProgramSelection::AlreadyLive);
+        assert_eq!(select(180, 0, Some(2)), ProgramSelection::Unavailable);
+        assert_eq!(select(180, 1, Some(2)), ProgramSelection::Replay);
+        assert_eq!(select(120 + 1440, 1, None), ProgramSelection::Replay);
+        assert_eq!(select(121 + 1440, 1, None), ProgramSelection::Unavailable);
     }
 
     #[test]

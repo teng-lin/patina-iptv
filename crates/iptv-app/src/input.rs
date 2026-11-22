@@ -958,8 +958,7 @@ fn page(ui: Ui, dir: isize) {
     let rows = ui.visible_rows.get().map_or(8, |(a, b)| (b - a).max(1));
     let len = ui.list.with(|l| l.len());
     ui.focus.update(|f| {
-        let to = (f.channel as isize + dir * rows as isize).clamp(0, (len as isize - 1).max(0));
-        f.channel = to as usize;
+        f.channel = iptv_core::guide::page_row(f.channel, len, dir * rows as isize);
     });
 }
 

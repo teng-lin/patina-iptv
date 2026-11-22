@@ -147,6 +147,9 @@ impl Recent {
 
     /// `key` started playing: first in the list, once.
     pub fn played(&mut self, key: &str) {
+        if self.keys.first().is_some_and(|current| current == key) {
+            return;
+        }
         self.keys.retain(|k| k != key);
         self.keys.insert(0, key.to_owned());
         self.keys.truncate(RECENT_LIMIT);

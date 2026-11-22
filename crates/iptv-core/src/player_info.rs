@@ -4,8 +4,58 @@
 //! caller passes (no clock access here).
 
 use crate::clock::Style;
+use crate::guide::{Airing, Program};
 use crate::i18n::{self, Language};
 use crate::tracks::{audio_layout, fps_label, resolution_class};
+
+/// Timing data for a focused or playing program.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProgramTiming {
+    pub airing: Airing,
+    /// Fraction of the current broadcast that has elapsed.
+    pub progress: f32,
+    /// Minutes until an upcoming program starts or a live program ends.
+    pub minutes_remaining: u32,
+}
+
+impl ProgramTiming {
+    /// The guide's minute-resolution display.
+    pub fn in_guide(program: Program, now: i32) -> Self {
+        let airing = program.airing(now);
+        let remaining = match airing {
+            Airing::Live => program.end.abs_diff(now),
+            Airing::Upcoming => program.start.abs_diff(now),
+            Airing::Ended => 0,
+        };
+        Self {
+            airing,
+            progress: program.progress(now),
+            minutes_remaining: remaining,
+        }
+    }
+
+    /// A wall-clock display with sub-minute progress and rounded-up minutes.
+    pub fn at_wall_time(start: i64, end: i64, now_seconds: f64) -> Self {
+        let start = start as f64;
+        let end = end as f64;
+        let (airing, remaining, progress) = if end <= now_seconds {
+            (Airing::Ended, 0.0, 0.0)
+        } else if start <= now_seconds {
+            (
+                Airing::Live,
+                end - now_seconds,
+                (now_seconds - start) / (end - start),
+            )
+        } else {
+            (Airing::Upcoming, start - now_seconds, 0.0)
+        };
+        Self {
+            airing,
+            progress: progress as f32,
+            minutes_remaining: (remaining / 60.0).ceil() as u32,
+        }
+    }
+}
 
 /// What the player reports of the stream that plays.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

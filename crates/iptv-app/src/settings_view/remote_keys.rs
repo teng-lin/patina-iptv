@@ -170,6 +170,7 @@ pub(crate) fn action_name(action: Action) -> &'static str {
         Action::Record => tr("Record"),
         Action::ToggleFavorite => tr("Favorite on or off"),
         Action::Digit(_) => tr("Channel number"),
+        Action::ShowFavorites => tr("Favorites"),
         Action::Ignore => tr("Nothing"),
     }
 }

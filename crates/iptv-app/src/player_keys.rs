@@ -15,8 +15,9 @@
 
 use iptv_core::channel_list::ListMode;
 use iptv_core::panels::{Control, Pick, QuickAction};
+use iptv_core::playback::{ZapOrigin, zap_from_list};
 use iptv_core::tracks::Kind as Track;
-use iptv_nav::{Action, Context, RemoteKey};
+use iptv_nav::{Action, Context, RemoteKey, seek_arrows, seek_key, up_down_key};
 
 use crate::{Playback, Ui, ViewMode};
 
@@ -55,42 +56,6 @@ pub(crate) fn seeks(ui: &Ui, ctx: Context, key: RemoteKey) -> bool {
 
 fn seek_scheme() -> &'static str {
     crate::settings::choice(iptv_settings::keys::SEEK_KEYS)
-}
-
-/// The arrows that step along a replay's time bar under `scheme`.
-fn seek_arrows(scheme: &str) -> &'static [RemoteKey] {
-    match scheme {
-        "left_right" => &[RemoteKey::Left, RemoteKey::Right],
-        "down_up" => &[RemoteKey::Down, RemoteKey::Up],
-        _ => &[],
-    }
-}
-
-/// The player's action for `key` during catch-up under the `seek_keys`
-/// choice `scheme`: Left/Right (the default, instead of the channel list
-/// and the most recent channel) or Down/Up (instead of zapping); with
-/// `transport` only the media keys seek (Rewind/Fast-forward always do).
-pub(crate) fn seek_key(scheme: &str, key: RemoteKey, action: Option<Action>) -> Option<Action> {
-    match (scheme, key) {
-        ("left_right", RemoteKey::Left) | ("down_up", RemoteKey::Down) => Some(Action::TimeBarBack),
-        ("left_right", RemoteKey::Right) | ("down_up", RemoteKey::Up) => {
-            Some(Action::TimeBarForward)
-        }
-        _ => action,
-    }
-}
-
-/// Up/Down over the video under `remote.player_up_down`: zap (the
-/// default) or open the channel list. Channel+/− and Page keys always zap.
-pub(crate) fn up_down_key(choice: &str, key: RemoteKey, action: Option<Action>) -> Option<Action> {
-    match (choice, key, action) {
-        (
-            "channel_list",
-            RemoteKey::Up | RemoteKey::Down,
-            Some(Action::ChannelUp | Action::ChannelDown),
-        ) => Some(Action::ShowChannels),
-        _ => action,
-    }
 }
 
 /// Seeking in a replay: whether OK plays and pauses (the arrows seek, as
@@ -189,20 +154,15 @@ pub(crate) fn zap(ui: Ui, step: isize) {
             .and_then(|t| crate::favorites::channel_of(&t.key))
             .or(ui.playing.get())
     };
-    let from_row = playing
-        .and_then(|ch| list.row_of(ch))
-        .or_else(|| playing.is_none().then(|| ui.focus.with(|f| f.channel)));
+    let from = ZapOrigin::from_channel(
+        playing,
+        |channel| list.row_of(channel),
+        || ui.focus.with(|f| f.channel),
+    );
     let catalog = crate::schedule();
-    let allowed = |channel| catalog.channel_block(channel) == iptv_core::organization::Block::None;
-    let to = match from_row {
-        Some(row) if !list.is_empty() => (1..=list.len())
-            .filter_map(|offset| list.zap(row, offset as isize * step))
-            .filter_map(|row| list.channel(row))
-            .find(|&channel| allowed(channel)),
-        _ => playing
-            .map(|channel| iptv_core::playback::zap_target(&*catalog, channel, step))
-            .filter(|&channel| allowed(channel)),
-    };
+    let to = zap_from_list(&*catalog, &list, from, step, |channel| {
+        catalog.channel_block(channel) == iptv_core::organization::Block::None
+    });
     let Some(to) = to else {
         return;
     };

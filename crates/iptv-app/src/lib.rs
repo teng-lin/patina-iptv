@@ -114,7 +114,7 @@ pub(crate) const IOS: bool = crate::host::IPAD;
 use nsh_core::time::Instant;
 use std::time::Duration;
 
-use guide::{Airing, Focus, Pane, Program, Schedule};
+use guide::{Focus, Pane, Program, ProgramSelection, Schedule};
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -445,18 +445,17 @@ impl Ui {
         let Some(channel) = view.channel(row) else {
             return;
         };
-        match program.airing(now) {
-            Airing::Live => {
-                let live = self.playback.get() == Playback::Live;
-                if self.playing.get() == Some(channel) && live {
-                    self.mode.set(ViewMode::Fullscreen);
-                    self.show_playing();
-                } else {
-                    browse_playback::select(*self);
-                }
+        let live = (self.playback.get() == Playback::Live)
+            .then(|| self.playing.get())
+            .flatten();
+        let selection = program.select(now, view.catchup_days(row), channel, live);
+        match selection {
+            ProgramSelection::AlreadyLive => {
+                self.mode.set(ViewMode::Fullscreen);
+                self.show_playing();
             }
-            // Replay an ended listing only within the channel's archive.
-            Airing::Ended if in_archive(channel, program, now) => {
+            ProgramSelection::Live => browse_playback::select(*self),
+            ProgramSelection::Replay => {
                 if !player::allow_guide_channel(channel) {
                     return;
                 }
@@ -470,12 +469,12 @@ impl Ui {
                 self.mode.set(ViewMode::Fullscreen);
                 self.show_playing();
             }
-            Airing::Upcoming | Airing::Ended => {
+            ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
                 let origin = Origin {
                     channel,
                     program_start: program.start,
                 };
-                if program.airing(now) == Airing::Upcoming {
+                if selection == ProgramSelection::Upcoming {
                     recordings_view::remember(*self, origin);
                 }
                 self.description.set(Some(origin));

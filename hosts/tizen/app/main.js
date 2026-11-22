@@ -62,19 +62,8 @@ function hasTizen() { return typeof tizen !== 'undefined'; }
 function hasAvplay() { return typeof webapis !== 'undefined' && webapis.avplay; }
 
 /* ---------- formatting ---------- */
-function two(n) { return n < 10 ? '0' + n : String(n); }
-function clock(unix) { var d = new Date(unix * 1000); return two(d.getHours()) + ':' + two(d.getMinutes()); }
-function progress(p) {
-    if (!p) return 0;
-    var now = Date.now() / 1000;
-    return Math.max(0, Math.min(1, (now - p.start) / Math.max(1, p.end - p.start)));
-}
-function programLine(p) { return p ? clock(p.start) + '  ' + p.title : 'No information'; }
-var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-function day(unix) {
-    var d = new Date(unix * 1000), today = new Date();
-    return d.toDateString() === today.toDateString() ? '' : DAYS[d.getDay()] + ' ';
-}
+function programLine(p) { return p ? p.line : 'No information'; }
+function percent(p) { return Math.round((p ? p.progress : 0) * 100) + '%'; }
 function setLogo(img, logo) {
     logo = logo || '';
     if (img.getAttribute('data-src') === logo) return;
@@ -324,13 +313,13 @@ function renderInfo(p) {
     if (p) {
         $('info-channel').textContent = p.number + '  ' + p.name;
         $('info-now').textContent = programLine(p.now);
-        $('info-progress').firstChild.style.width = Math.round(progress(p.now) * 100) + '%';
+        $('info-progress').firstChild.style.width = percent(p.now);
         $('info-next').textContent = p.next ? 'Next  ' + programLine(p.next) : '';
     }
 }
 
 /* ---------- guide grid ---------- */
-var guideRulerStart = null;
+var guideRuler = null;
 var PANES = ['guide', 'groups', 'rail', 'preview'];
 function makeGuideRows() {
     var box = $('guide-rows');
@@ -345,23 +334,6 @@ function makeGuideRows() {
         box.appendChild(row);
     }
 }
-function minutes(secs) {
-    var m = Math.max(1, Math.ceil(secs / 60));
-    return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + m % 60 + ' min' : '');
-}
-function guideHint(v, f) {
-    var g = v.grid;
-    if (v.reorder) return 'Moving: Up/Down one place · Left/Right: to the top or the end · OK: done';
-    switch (g.pane) {
-    case 'preview': return 'OK: full screen · Down: guide';
-    case 'groups': return 'Up/Down: lists · OK: open · Left: the rail';
-    case 'rail': return 'OK: open · Right: groups';
-    default:
-        var ok = !f ? '' : f.airing === 'live' ? 'OK: watch · ' : f.catchup ? 'OK: watch from the start · ' : '';
-        var move = v.title === 'Favorites' && g.rows.total > 1 ? ' · Blue: move' : '';
-        return ok + 'Channel Up/Down: page · Yellow: favorite' + move + ' · Back: groups';
-    }
-}
 function renderGuide(v) {
     var g = v.grid;
     var perMinute = GRID.width / g.minutes;
@@ -373,20 +345,18 @@ function renderGuide(v) {
     for (var p = 0; p < PANES.length; p++) body.toggle('pane-' + PANES[p], g.pane === PANES[p]);
 
     /* The focused program, beside the preview. */
-    var now = Date.now() / 1000;
     $('guide-channel').textContent = f ? f.number + '  ' + f.name : '';
     $('guide-title').textContent = f ? (f.title || 'No information') + (f.favorite ? '  ★' : '') : '';
-    $('guide-time').textContent = f ? day(f.start) + clock(f.start) + ' – ' + clock(f.end) : '';
+    $('guide-time').textContent = f ? f.timeLabel : '';
     var live = f && f.airing === 'live';
     $('guide-progress').style.display = live ? 'inline-block' : 'none';
-    if (live) $('guide-progress').firstChild.style.width = Math.round(progress(f) * 100) + '%';
-    $('guide-left').textContent = !f ? '' : live ? minutes(f.end - now) + ' left'
-        : f.airing === 'upcoming' ? 'in ' + minutes(f.start - now) : 'Ended';
+    if (live) $('guide-progress').firstChild.style.width = percent(f);
+    $('guide-left').textContent = f ? f.timingLabel : '';
     /* While a held key moves through the groups, the list is built once it
      * is released (the core's `pending`). */
     var count = v.pending ? '…' : g.rows.total ? (g.rows.focus + 1) + ' / ' + g.rows.total : 'No channels';
     $('guide-list').textContent = v.title + '  ·  ' + count;
-    $('guide-hint').textContent = guideHint(v, f);
+    $('guide-hint').textContent = v.hint;
 
     /* The rail and the groups column, while they show. */
     var rail = $('rail').children;
@@ -408,19 +378,18 @@ function renderGuide(v) {
         }
     }
 
-    var d = new Date();
-    $('guide-clock').textContent = DAYS[d.getDay()] + ' ' + d.getDate() + '  ' + two(d.getHours()) + ':' + two(d.getMinutes());
-    if (guideRulerStart !== g.start) {
-        guideRulerStart = g.start;
+    $('guide-clock').textContent = g.clock;
+    var ruler = g.start + ':' + g.marks.map(function (mark) { return mark.time; }).join(',');
+    if (guideRuler !== ruler) {
+        guideRuler = ruler;
         var marks = $('guide-marks');
         marks.textContent = '';
-        var end = g.start + g.minutes * 60;
-        for (var t = Math.ceil(g.start / 1800) * 1800; t < end; t += 1800) {
+        g.marks.forEach(function (mark) {
             var tick = document.createElement('span');
-            tick.style.left = Math.round(GRID.left + (t - g.start) / 60 * perMinute) + 'px';
-            tick.textContent = clock(t);
+            tick.style.left = Math.round(GRID.left + (mark.at - g.start) / 60 * perMinute) + 'px';
+            tick.textContent = mark.time;
             marks.appendChild(tick);
-        }
+        });
     }
     var nowX = (g.now - g.start) / 60 * perMinute;
     var line = $('guide-now');
@@ -513,7 +482,10 @@ function renderSearch(s) {
     if ((!typing || setup.open) && document.activeElement === input) input.blur();
     if (document.activeElement !== input && input.value !== s.query) input.value = s.query;
     /* The setup owns the keyboard while it is open. */
-    if (typing && !setup.open && document.activeElement !== input) input.focus();
+    if (typing && !setup.open && document.activeElement !== input) {
+        keysLost();
+        input.focus();
+    }
     $('search-field').classList.toggle('focus', s.focus === 'input');
 
     var idle = s.phase === 'idle';
@@ -540,7 +512,7 @@ function renderSearch(s) {
         setLogo(li.children[1], history ? '' : item.logo);
         if (item.kind === 'program') {
             li.children[2].textContent = item.title;
-            li.children[3].textContent = day(item.start) + clock(item.start) + '–' + clock(item.end) + '  ' + item.name + (item.live ? '  ·  On now' : '');
+            li.children[3].textContent = item.timeLabel + '  ' + item.name + (item.live ? '  ·  On now' : '');
         } else {
             li.children[2].textContent = history ? item.text : item.name;
             li.children[3].textContent = '';
@@ -562,34 +534,17 @@ function scheduleRender() {
     requestAnimationFrame(render);
 }
 
-/* The play bar (OK over full-screen video): the playing channel, its
- * program with times, and buttons. It hides after BAR_TIMEOUT ms without a
- * key: the core is told, as it owns the bar's state. */
-var BAR_TIMEOUT = 7000;
-var barTimer = null, barShown = false;
-/* Counts the 7 s again: from when the bar shows, and from every key. An
- * expiry still waiting in the key queue (behind keys the core has not
- * answered yet) is from before: it is dropped. */
-function armBar() {
-    clearTimeout(barTimer);
-    keys.pending = keys.pending.filter(function (k) { return k.cmd.key !== 'barTimeout'; });
-    if (barShown) barTimer = setTimeout(function () { sendKey({ cmd: 'key', key: 'barTimeout' }, null); }, BAR_TIMEOUT);
-}
+/* The play bar (OK over full-screen video). */
 function renderBar(v) {
     var bar = v && v.bar, p = v && v.playing;
     $('bar').classList.toggle('hidden', !bar || !p);
-    var shown = !!(bar && p);
-    if (shown !== barShown) {
-        barShown = shown;
-        armBar();
-    }
     if (!bar || !p) return;
     $('banner').classList.add('hidden');
     $('bar-channel').textContent = p.number + '  ' + p.name;
     $('bar-now').textContent = p.now ? p.now.title : 'No information';
-    $('bar-start').textContent = p.now ? clock(p.now.start) : '';
-    $('bar-end').textContent = p.now ? clock(p.now.end) : '';
-    $('bar-progress').firstChild.style.width = Math.round(progress(p.now) * 100) + '%';
+    $('bar-start').textContent = p.now ? p.now.startLabel : '';
+    $('bar-end').textContent = p.now ? p.now.endLabel : '';
+    $('bar-progress').firstChild.style.width = percent(p.now);
     $('bar-next').textContent = p.next ? 'Next  ' + programLine(p.next) : '';
     var buttons = $('bar-buttons').children;
     for (var i = 0; i < buttons.length; i++) {
@@ -603,7 +558,7 @@ function showBanner(channel) {
     if (!view || view.mode !== 'full' || view.bar) return;
     $('banner-channel').textContent = channel.number + '  ' + channel.name;
     $('banner-now').textContent = programLine(channel.now);
-    $('banner-progress').firstChild.style.width = Math.round(progress(channel.now) * 100) + '%';
+    $('banner-progress').firstChild.style.width = percent(channel.now);
     $('banner-next').textContent = channel.next ? 'Next  ' + programLine(channel.next) : '';
     $('banner').classList.remove('hidden');
     clearTimeout(bannerTimer);
@@ -620,7 +575,7 @@ worker.onmessage = function (e) {
         if (m.ready && m.mode === 'search') searchAnswered(m.search);
         else if (m.ready) resetSearch();
         if (m.seq !== undefined) keyAnswered(m.seq);
-        settleIfPending();
+        if (m.session === session) armInputTimer(m.keyDeadlineMs);
         scheduleRender();
         if (m.ready && m.mode === 'full' && m.playing && !wasFull) {
             setTimeout(function () { showBanner(m.playing); }, 0);
@@ -642,6 +597,7 @@ worker.onmessage = function (e) {
         /* The core stopped: nothing it showed works any more, and only
          * the Exit key still does something. */
         stopped = true;
+        resetKeys();
         player.stop();
         $('fatal-text').textContent = m.text;
         $('fatal').classList.remove('hidden');
@@ -679,6 +635,7 @@ function openSetup() {
         $('m3u').value = saved.url || '';
     }
     setup.open = true;
+    keysLost();
     setup.index = 0;
     /* The search field must not keep the TV's keyboard under the setup. */
     $('search-input').blur();
@@ -761,30 +718,26 @@ function setupKey(code, repeat) {
 
 /* ---------- keys ---------- */
 var KEYS = { 37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'ok', 10009: 'back',
-    427: 'chup', 428: 'chdown', 33: 'pageup', 34: 'pagedown',
-    406: 'blue', 458: 'guide', 10225: 'search' };
+    427: 'channel_up', 428: 'channel_down', 33: 'page_up', 34: 'page_down',
+    405: 'yellow', 406: 'blue', 458: 'guide', 10225: 'search' };
 /* The TV keyboard's Done and Cancel. */
 var IME_DONE = 65376, IME_CANCEL = 65385;
 var EXIT = 10182;
 
-/* Keys to the core: one at a time. Each `key` and `settle` command has a
- * sequence number, which the core returns in the view it emits for that
- * command; the next one goes when that view arrives (views also arrive for
- * other reasons: the clock, search text, the guide), so a held key never
- * queues work in the worker. While one is in flight, a repeat replaces a
- * repeat waiting behind it; other keys wait in order.
- *
- * `inFlight` and the entries of `pending` are { cmd, at, code, first }:
- * `at` is when the key was pressed (null for what no key press sent),
- * `code` the remote key that sent it, `first` whether it is a hold's first
- * repeat (never replaced nor dropped). */
+/* Only one input command waits on the worker. Physical phases and the
+ * timer use the same page clock even when commands queue behind a reply. */
 var KEY_TIMEOUT = 1000;
-var keys = { seq: 0, inFlight: null, timer: null, pending: [] };
-function sendKey(cmd, code, first) {
-    var entry = { cmd: cmd, at: code === null ? null : performance.now(), code: code, first: !!first };
+var keys = { seq: 0, inFlight: null, timer: null, deadline: null, deadlineTimer: null, pending: [] };
+var pressed = null;
+
+function sendKey(cmd, measure) {
+    var entry = { cmd: cmd, at: measure ? cmd.atMs : null };
     var last = keys.pending[keys.pending.length - 1];
-    if (cmd.repeat && last && last.cmd.repeat && !last.first) keys.pending[keys.pending.length - 1] = entry;
-    else keys.pending.push(entry);
+    if (cmd.phase === 'repeat' && last && last.cmd.phase === 'repeat' && last.cmd.key === cmd.key) {
+        keys.pending[keys.pending.length - 1] = entry;
+    } else {
+        keys.pending.push(entry);
+    }
     if (!keys.inFlight) nextKey();
 }
 function nextKey() {
@@ -797,54 +750,44 @@ function nextKey() {
     /* Unanswered (the core is still starting): the queue goes on anyway. */
     keys.timer = setTimeout(nextKey, KEY_TIMEOUT);
 }
-/* The view for command `seq` arrived. Only the command in flight releases
- * the queue (an answer that came after its timeout releases nothing). */
 function keyAnswered(seq) {
     var answered = keys.inFlight;
     if (!answered || answered.cmd.seq !== seq) return;
     if (answered.at !== null) keyTimes.push(answered.at);
     nextKey();
 }
+function inputNow() { return Math.floor(performance.now()); }
+function armInputTimer(at) {
+    if (keys.deadline === at) return;
+    keys.deadline = at;
+    clearTimeout(keys.deadlineTimer);
+    if (at !== undefined && !stopped) {
+        keys.deadlineTimer = setTimeout(function () {
+            sendKey({ cmd: 'keyPoll', atMs: Math.max(at, inputNow()) }, false);
+        }, Math.max(0, at - inputNow()));
+    }
+}
 function resetKeys() {
     clearTimeout(keys.timer);
+    armInputTimer(undefined);
     keys.inFlight = null;
     keys.pending = [];
     keyTimes.length = 0;
-    held = null;
     pressed = null;
 }
 
-/* The remote key that is repeating (held), by its code. */
-var held = null;
-/* The key last pressed (not a repeat), until it is released or the page
- * can no longer tell (blur, hidden). Repeats of any other key are not
- * sent: they would act on the context of a press the page has not seen. */
-var pressed = null;
 function keysLost() {
     pressed = null;
-    releaseHeld();
-}
-/* The held key was released (or the page can no longer tell): its repeats
- * still waiting are dropped, so it stops at once. */
-function releaseHeld() {
-    if (held === null) return;
-    var code = held;
-    held = null;
-    keys.pending = keys.pending.filter(function (k) { return !(k.cmd.repeat && !k.first && k.code === code); });
-    settleIfPending();
-}
-/* While a key held in the groups column moves through the lists, the core
- * puts off building the selected one (the view's `pending`). Once no key
- * is held, it is asked to build it: `settle`. */
-function settleIfPending() {
-    if (held !== null || !view || !view.pending) return;
-    /* After what is on its way to the core: its answer asks again. */
-    if (keys.inFlight || keys.pending.length) return;
-    sendKey({ cmd: 'settle' }, null);
+    armInputTimer(undefined);
+    keys.pending = [];
+    sendKey({ cmd: 'cancelKeys' }, false);
 }
 
-/* Keys whose repeats are dropped: holding one acts once. */
-var ONCE = { ok: true, back: true, blue: true, guide: true, search: true };
+function dropRepeats(key) {
+    keys.pending = keys.pending.filter(function (entry) {
+        return !(entry.cmd.phase === 'repeat' && entry.cmd.key === key);
+    });
+}
 
 function exit() {
     player.stop();
@@ -853,58 +796,52 @@ function exit() {
 
 document.addEventListener('keydown', function (e) {
     var code = e.keyCode;
-    /* The remote's Exit key leaves the app, from any screen; Back never does. */
+    /* The remote's Exit key leaves the app, from any screen. */
     if (code === EXIT) { e.preventDefault(); if (!e.repeat) exit(); return; }
     if (stopped) { e.preventDefault(); return; }
-    /* A new press: whatever was held is not any more (its keyup was lost). */
-    if (!e.repeat) { releaseHeld(); pressed = code; }
     if (setup.open) { if (setupKey(code, e.repeat)) e.preventDefault(); return; }
-    /* Any key, also a held one that acts only once, keeps the play bar. */
-    armBar();
-    /* The color keys act once per press. */
-    if (code >= 403 && code <= 405 && e.repeat) { e.preventDefault(); return; }
-    if (code === 403) { openSetup(); return; } /* red */
-    if (code === 404) { send({ cmd: 'refreshGuide' }); notice('Updating the TV guide…', true); return; } /* green */
-    if (code === 405) { sendKey({ cmd: 'key', key: 'favorite' }, code); return; } /* yellow */
-    /* While the search field has the focus, the TV keyboard owns the keys;
-     * Done, Cancel and Back leave it. */
+    if (code === 403) { if (!e.repeat) openSetup(); return; }
+    if (code === 404) {
+        if (!e.repeat) { send({ cmd: 'refreshGuide' }); notice('Updating the TV guide…', true); }
+        return;
+    }
+    /* The TV keyboard owns input while the query field is focused. */
     if (document.activeElement === $('search-input')) {
-        var ime = code === IME_DONE || code === 13 ? 'done' : code === IME_CANCEL ? 'cancel' : code === 10009 ? 'back' : null;
-        if (ime) {
+        var done = code === IME_DONE || code === 13;
+        if (done || code === IME_CANCEL || code === 10009) {
             e.preventDefault();
             if (e.repeat) return;
-            if (ime === 'done') flushSearch();
-            sendKey({ cmd: 'key', key: ime }, code);
+            if (done) flushSearch();
+            sendKey({ cmd: 'keyboard', complete: done }, false);
         }
         return;
     }
     var key = KEYS[code];
     if (!key) return;
     e.preventDefault();
-    /* A repeat whose press was lost (blur, hidden) waits for a new press:
-     * the core would give it the meaning of the press before. */
-    if (e.repeat && (ONCE[key] || pressed !== code)) return;
-    /* Keys that may start a stream: the zap timing starts here. */
+    if (e.repeat && pressed !== code) return;
+    if (!e.repeat) {
+        /* A new key takes over when the previous key-up was lost. */
+        if (pressed !== null) dropRepeats(KEYS[pressed]);
+        pressed = code;
+    }
+    var at = inputNow();
     var full = view && view.mode === 'full';
-    if (key === 'ok' || key === 'chup' || key === 'chdown' || (full && (key === 'up' || key === 'down'))) {
-        player.askedAt = performance.now();
+    if (key === 'ok' || key === 'channel_up' || key === 'channel_down'
+        || (full && (key === 'up' || key === 'down'))) {
+        player.askedAt = at;
     } else if (!full) {
         player.askedAt = null;
     }
-    /* Repeats go as they are, Left's too: the core knows where the press
-     * acted and what holding it there does (in the guide grid, it opens
-     * the groups column). */
-    /* The first repeat of a hold is kept: the core gives it its meaning
-     * (held Left in the grid opens the groups), however late it goes. */
-    var first = e.repeat && held !== code;
-    if (e.repeat) held = code;
-    sendKey({ cmd: 'key', key: key, repeat: e.repeat }, code, first);
+    sendKey({ cmd: 'key', key: key, phase: e.repeat ? 'repeat' : 'down', atMs: at }, true);
 });
 
-/* Only the release of the key that was repeating ends the hold. */
 document.addEventListener('keyup', function (e) {
-    if (e.keyCode === pressed) pressed = null;
-    if (e.keyCode === held) releaseHeld();
+    if (e.keyCode !== pressed) return;
+    var key = KEYS[pressed];
+    pressed = null;
+    dropRepeats(key);
+    sendKey({ cmd: 'key', key: key, phase: 'up', atMs: inputNow() }, key === 'left');
 });
 /* No keyup reaches a page that lost the focus or is hidden. */
 window.addEventListener('blur', keysLost);
