@@ -232,3 +232,17 @@ fn input_during_a_hold_does_not_pull_its_deadline_in() {
     p.show_controls(3_100);
     assert_eq!(p.hide_at_ms(), Some(4_100));
 }
+
+#[test]
+fn a_strip_with_fewer_controls_focuses_only_those() {
+    const SOME: [Control; 3] = [Control::Search, Control::ChannelList, Control::Settings];
+    let mut p = Panels::default().with_controls(&SOME);
+    assert_eq!(p.controls(), &SOME);
+    assert_eq!(Panels::default().controls(), &CONTROLS);
+    p.show_controls(0);
+    for _ in 0..5 {
+        p.move_focus(1, 0);
+    }
+    assert_eq!(p.focused(), Control::Settings);
+    assert_eq!(p.select(0), Pick::Control(Control::Settings));
+}

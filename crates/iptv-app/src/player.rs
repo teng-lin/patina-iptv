@@ -182,6 +182,33 @@ impl Player {
 
 /// What `surface` plays: surface 0 the playing channel as `playback`
 /// says, the others their channel live.
+/// Whether `surface` may open `channel` beside what records: the runtime
+/// keeps the provider's connections for recordings (none where nothing
+/// records).
+pub fn try_reserve_viewing(surface: usize, channel: usize, live: bool) -> bool {
+    let source = crate::schedule()
+        .channel_key(channel)
+        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key));
+    source.is_none_or(|(source, channel)| {
+        if live {
+            crate::runtime().reserve_live_viewing(surface, source, &channel)
+        } else {
+            crate::runtime().reserve_viewing(surface, source)
+        }
+    })
+}
+
+/// As [`try_reserve_viewing`], saying why when it may not.
+pub fn reserve_viewing(_ui: Ui, surface: usize, channel: usize, live: bool) -> bool {
+    if !try_reserve_viewing(surface, channel, live) {
+        crate::settings_view::notify(crate::i18n::tr(
+            "No provider connection available while recording; stop a recording or check Streams at once",
+        ));
+        return false;
+    }
+    true
+}
+
 pub fn target(ui: Ui, surface: usize) -> Option<(usize, Playback)> {
     if surface == 0 {
         Some((ui.playing.get_untracked()?, ui.playback.get_untracked()))
@@ -384,7 +411,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
         ui.play(channel, Playback::Live);
         return ui.playing.get_untracked() == Some(channel);
     }
-    if !crate::recordings_view::reserve_viewing(ui, surface, channel, true) {
+    if !reserve_viewing(ui, surface, channel, true) {
         let previous = ui.player.stream(surface).channel.get_untracked();
         ui.multiview.update(|m| {
             if let Some(m) = m {
@@ -712,11 +739,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         }
         return;
     };
-    if !crate::recordings_view::try_reserve_viewing(
-        surface,
-        channel,
-        matches!(playback, Playback::Live),
-    ) {
+    if !try_reserve_viewing(surface, channel, matches!(playback, Playback::Live)) {
         fail(
             ui,
             surface,

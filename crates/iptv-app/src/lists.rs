@@ -52,17 +52,27 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
 /// Catalogs stay visible; discovery shelves follow enabled playlists
 /// with imported movies or shows.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
-    rail_items(VodAvailability {
+    built_rail(VodAvailability {
         shown: ui.app.has_vod.get(),
         any: ui.app.any_vod.get(),
     })
 }
 
 fn rail_untracked(ui: Ui) -> Vec<RailItem> {
-    rail_items(VodAvailability {
+    built_rail(VodAvailability {
         shown: ui.app.has_vod.get_untracked(),
         any: ui.app.any_vod.get_untracked(),
     })
+}
+
+/// The rail's items in this build: no Recordings without the recordings
+/// screen (feature `recordings`).
+pub fn built_rail(vod: VodAvailability) -> Vec<RailItem> {
+    let mut items = rail_items(vod);
+    if !cfg!(feature = "recordings") {
+        items.retain(|item| *item != RailItem::Recordings);
+    }
+    items
 }
 
 /// Localize built-in lists by identity; provider group names are opaque.
@@ -448,6 +458,7 @@ fn open(ui: Ui, item: RailItem) {
         RailItem::Recent => crate::vod_view::open_shelf(ui, iptv_core::vod::Shelf::RecentlyAdded),
         RailItem::Movies => crate::vod_view::open(ui, iptv_core::vod::Kind::Movie),
         RailItem::Shows => crate::vod_view::open(ui, iptv_core::vod::Kind::Series),
+        #[cfg(feature = "recordings")]
         RailItem::Recordings => crate::recordings_view::open(ui),
         RailItem::Playlists => crate::playlists_view::open(ui),
         RailItem::Settings => crate::settings_view::open(ui),

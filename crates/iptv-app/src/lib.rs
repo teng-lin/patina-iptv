@@ -72,6 +72,10 @@ mod menu_view;
 pub(crate) mod parental_view;
 #[cfg(feature = "test-support")]
 mod performance_probe;
+#[cfg(feature = "recordings")]
+mod recordings_view;
+#[cfg(not(feature = "recordings"))]
+#[path = "recordings_off.rs"]
 mod recordings_view;
 mod vod_view;
 use iptv_runtime as runtime;
@@ -389,7 +393,7 @@ impl Ui {
             menu: signal(None),
             description: signal(None),
             recordings,
-            vod: signal(iptv_core::vod::Screen::default()),
+            vod: signal(vod_view::screen()),
             recordings_open,
             playback: signal(Playback::Live),
             channel_number: signal(Default::default()),
@@ -516,8 +520,7 @@ impl Ui {
             }
             return;
         }
-        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
-        {
+        if !player::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live)) {
             return;
         }
         // Accepted: the viewer's playback now (`interruption.rs`).
@@ -949,6 +952,18 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
 /// Everything over the video: the guide, the full-screen tap catcher,
 /// the player panels and every screen and popup. None of it shows in the
 /// picture-in-picture window.
+/// The recordings screen's layer: none in a build without it (feature
+/// `recordings`).
+fn recordings_layer(ui: Ui) -> Vec<AnyElement> {
+    #[cfg(feature = "recordings")]
+    return vec![recordings_view::layer(ui).into_element()];
+    #[cfg(not(feature = "recordings"))]
+    {
+        let _ = ui;
+        Vec::new()
+    }
+}
+
 /// The guide data chooser's layer: none in a build without the guide
 /// tools (feature `guide-tools`).
 fn guide_assign_layer(ui: Ui) -> Vec<AnyElement> {
@@ -1063,7 +1078,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
         .child(vod_view::layer(ui))
-        .child(recordings_view::layer(ui))
+        .children(recordings_layer(ui))
         .children(guide_assign_layer(ui))
         // The playlists screen opens over settings, a guide sources screen
         // over both.
@@ -1209,6 +1224,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::Vod) => vod_view::back(ui),
+            #[cfg(feature = "recordings")]
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
             #[cfg(feature = "guide-tools")]
@@ -1252,6 +1268,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 desktop::set_fullscreen(false);
                 true
             }
+            #[cfg(feature = "recordings")]
             (ViewMode::Fullscreen, _, false) if ui.player.recorded.with(Option::is_some) => {
                 recordings_view::open(ui);
                 true

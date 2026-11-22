@@ -14,7 +14,7 @@
 use crate::i18n::{tr, trf};
 use std::time::Duration;
 
-use iptv_core::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
+use iptv_core::panels::{Control, QUICK_ACTIONS, Shown};
 use iptv_core::player_info::date_time;
 use iptv_core::sound::delay_label;
 use iptv_core::tracks::{Kind as Track, audio_layout_in};
@@ -127,6 +127,27 @@ fn is_favorite(ui: Ui) -> bool {
         .get()
         .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
 }
+
+/// The control strip of this build: without Recordings and Record where
+/// there is no recordings screen (feature `recordings`).
+#[cfg(feature = "recordings")]
+pub const STRIP: &[Control] = &iptv_core::panels::CONTROLS;
+#[cfg(not(feature = "recordings"))]
+pub const STRIP: &[Control] = &[
+    Control::Search,
+    Control::ChannelList,
+    Control::Multiview,
+    Control::PictureInPicture,
+    Control::VideoTracks,
+    Control::AudioTracks,
+    Control::AudioOffset,
+    Control::Captions,
+    Control::Scaling,
+    Control::SleepTimer,
+    Control::Favorite,
+    Control::ChannelOptions,
+    Control::Settings,
+];
 
 /// Whether a control can act now; the rest show disabled.
 pub fn enabled(ui: Ui, control: Control) -> bool {
@@ -478,9 +499,9 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
             list.scroll_to_index(at as u32, percentage(0.5), px(0.0), true);
         }
     });
-    virtual_list(CONTROLS.len(), move |at| {
+    virtual_list(STRIP.len(), move |at| {
         let index = at.index();
-        let control = CONTROLS[index];
+        let control = STRIP[index];
         let focused = move || {
             ui.keys_shown()
                 && ui

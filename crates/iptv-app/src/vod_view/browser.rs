@@ -32,10 +32,14 @@ pub(super) fn activate_navigation(ui: Ui) {
                 open(ui, kind);
             }
         }
+        #[cfg(feature = "recordings")]
         Destination::Recordings => {
             close(ui);
             crate::recordings_view::open(ui);
         }
+        // Not on this build's rail (`vod_view::screen`).
+        #[cfg(not(feature = "recordings"))]
+        Destination::Recordings => {}
     }
 }
 
@@ -86,6 +90,10 @@ fn navigation(ui: Ui, size: Scale) -> View {
                 ),
             ]
             .into_iter()
+            .filter(move |(destination, ..)| {
+                ui.vod
+                    .with_untracked(|s| s.destinations().contains(destination))
+            })
             .map(move |(destination, item, label)| {
                 let focused = move || {
                     ui.vod

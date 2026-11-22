@@ -461,6 +461,9 @@ pub struct Screen {
     /// Search and goes to the titles only if the reply has something to
     /// focus ([`Screen::close_search`]).
     search_closed_pending: bool,
+    /// The rail has no Recordings destination ([`Screen::without_recordings`]),
+    /// kept across [`Screen::begin`].
+    no_recordings: bool,
 }
 impl Screen {
     pub fn begin(&mut self, kind: Kind) -> u64 {
@@ -481,10 +484,29 @@ impl Screen {
             library: self.library,
             offered: self.library.action().map(EmptyAction::target),
             compact: self.compact,
+            no_recordings: self.no_recordings,
             ..Default::default()
         };
         self.reload()
     }
+    /// No Recordings destination on the rail: for a build without the
+    /// recordings screen.
+    pub fn without_recordings(mut self) -> Self {
+        self.no_recordings = true;
+        self
+    }
+
+    /// The rail's destinations, top to bottom.
+    pub fn destinations(&self) -> &'static [Destination] {
+        const ALL: [Destination; 4] = [
+            Destination::Live,
+            Destination::Movies,
+            Destination::Shows,
+            Destination::Recordings,
+        ];
+        if self.no_recordings { &ALL[..3] } else { &ALL }
+    }
+
     /// Sets whether the window is compact. A compact window shows one pane
     /// at a time ([`Screen::one_pane`]).
     pub fn set_compact(&mut self, compact: bool) {
@@ -1085,12 +1107,7 @@ impl Screen {
     fn move_vertical(&mut self, step: isize) -> bool {
         match self.control {
             Control::Navigation => {
-                let destinations = [
-                    Destination::Live,
-                    Destination::Movies,
-                    Destination::Shows,
-                    Destination::Recordings,
-                ];
+                let destinations = self.destinations();
                 let at = destinations
                     .iter()
                     .position(|d| *d == self.destination)
@@ -1413,6 +1430,21 @@ mod tests {
             duration_secs: None,
             progress: Progress::default(),
         }
+    }
+    #[test]
+    fn the_rail_without_recordings_stops_at_shows() {
+        let mut s = Screen::default().without_recordings();
+        s.begin(Kind::Movie);
+        assert_eq!(
+            s.destinations(),
+            &[Destination::Live, Destination::Movies, Destination::Shows]
+        );
+        s.control = Control::Navigation;
+        for _ in 0..4 {
+            s.browse_vertical(1);
+        }
+        assert_eq!(s.destination, Destination::Shows);
+        assert_eq!(Screen::default().destinations().len(), 4);
     }
     #[test]
     fn refresh_restores_content_identity_and_rejects_old_results() {

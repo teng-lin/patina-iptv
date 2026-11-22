@@ -105,27 +105,6 @@ pub fn available(channel: usize) -> bool {
         .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
         .is_some()
 }
-pub fn try_reserve_viewing(surface: usize, channel: usize, live: bool) -> bool {
-    let source = crate::schedule()
-        .channel_key(channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key));
-    source.is_none_or(|(source, channel)| {
-        if live {
-            crate::runtime().reserve_live_viewing(surface, source, &channel)
-        } else {
-            crate::runtime().reserve_viewing(surface, source)
-        }
-    })
-}
-pub fn reserve_viewing(_ui: Ui, surface: usize, channel: usize, live: bool) -> bool {
-    if !try_reserve_viewing(surface, channel, live) {
-        crate::settings_view::notify(tr(
-            "No provider connection available while recording; stop a recording or check Streams at once",
-        ));
-        return false;
-    }
-    true
-}
 pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static str {
     if ui.recordings.with(|s| s.jobs.is_empty()) {
         return "";

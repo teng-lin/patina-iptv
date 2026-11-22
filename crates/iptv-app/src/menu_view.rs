@@ -151,6 +151,17 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             }
         },
     );
+    // No Record rows in a build without recordings.
+    #[cfg(not(feature = "recordings"))]
+    rows.retain(|row| {
+        !matches!(
+            row,
+            Row::Action {
+                item: MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording,
+                ..
+            }
+        )
+    });
     // No guide data chooser in a build without the guide tools.
     #[cfg(not(feature = "guide-tools"))]
     rows.retain(|row| {
@@ -247,8 +258,11 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 open_channel_editor(ui, origin.channel, mode, scope, list);
             }
         }
+        #[cfg(feature = "recordings")]
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
+        #[cfg(feature = "recordings")]
         MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
+        #[cfg(feature = "recordings")]
         MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
         // Details replaces the menu; Back from it returns to the guide.
         MenuItem::Description => ui.description.set(Some(origin)),
@@ -685,6 +699,48 @@ fn origin_program(schedule: &dyn crate::guide::Schedule, origin: Origin) -> crat
     schedule.program_at(origin.channel, minute)
 }
 
+/// The details' Record button, while the program can still be recorded:
+/// none in a build without recordings (feature `recordings`).
+#[cfg(feature = "recordings")]
+fn record_details_button(
+    ui: Ui,
+    size: Scale,
+    program: impl Fn() -> Option<(usize, crate::guide::Program)> + Copy + 'static,
+) -> Option<impl IntoElement> {
+    Some(when(
+        move || {
+            ui.player_surface == 0
+                && program().is_some_and(|(ch, p)| {
+                    crate::recordings_view::available(ch)
+                        && crate::guide::unix_of(&*crate::schedule(), p.end)
+                            > crate::time::wall_unix()
+                })
+        },
+        move || {
+            crate::ui_kit::button(
+                ui,
+                size,
+                tr("Record"),
+                || true,
+                move || {
+                    if let Some(origin) = ui.description.get_untracked() {
+                        crate::recordings_view::program(ui, origin, false);
+                    }
+                },
+            )
+        },
+    ))
+}
+
+#[cfg(not(feature = "recordings"))]
+fn record_details_button(
+    _ui: Ui,
+    _size: Scale,
+    _program: impl Fn() -> Option<(usize, crate::guide::Program)> + Copy + 'static,
+) -> Option<View> {
+    None
+}
+
 /// The description popover: title, time range and text; no actions (those
 /// live in the menu). Back or a tap closes it.
 fn description(ui: Ui) -> impl IntoElement {
@@ -760,29 +816,7 @@ fn description(ui: Ui) -> impl IntoElement {
                     .text_size(move || size.text_px(HEADER_BODY))
                     .text_color(rgb(LIST_TEXT)),
                 )
-                .child(when(
-                    move || {
-                        ui.player_surface == 0
-                            && program().is_some_and(|(ch, p)| {
-                                crate::recordings_view::available(ch)
-                                    && crate::guide::unix_of(&*crate::schedule(), p.end)
-                                        > crate::time::wall_unix()
-                            })
-                    },
-                    move || {
-                        crate::ui_kit::button(
-                            ui,
-                            size,
-                            tr("Record"),
-                            || true,
-                            move || {
-                                if let Some(origin) = ui.description.get_untracked() {
-                                    crate::recordings_view::program(ui, origin, false);
-                                }
-                            },
-                        )
-                    },
-                )),
+                .children(record_details_button(ui, size, program)),
         )
 }
 

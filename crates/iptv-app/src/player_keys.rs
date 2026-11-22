@@ -110,6 +110,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         crate::seek::key(ui, step, repeat);
     };
     match action {
+        #[cfg(feature = "recordings")]
         Action::Record => crate::recordings_view::current(ui),
         Action::MoveLeft if buttons => ui.update_panels(|p, now| p.move_focus(-1, now)),
         Action::MoveRight if buttons => ui.update_panels(|p, now| p.move_focus(1, now)),
@@ -237,8 +238,13 @@ pub fn press_control(ui: Ui, control: Control) {
         return;
     }
     match control {
+        #[cfg(feature = "recordings")]
         Control::Recordings => crate::recordings_view::open(ui),
+        #[cfg(feature = "recordings")]
         Control::Record => crate::recordings_view::current(ui),
+        // Not in this build's strip (`player_panels::STRIP`).
+        #[cfg(not(feature = "recordings"))]
+        Control::Recordings | Control::Record => {}
         Control::Search => crate::search_view::open(ui),
         Control::Multiview => crate::multiview::open(ui),
         Control::ChannelList => crate::channels_view::open(ui, ListMode::Overlay),

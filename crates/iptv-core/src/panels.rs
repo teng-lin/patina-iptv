@@ -148,8 +148,10 @@ pub struct Panels {
     /// Index into [`QUICK_ACTIONS`] of the focused action card; none until
     /// Left or Right reaches the row.
     pub quick: Option<usize>,
-    /// Index into [`CONTROLS`] of the focused control.
+    /// Index into [`Panels::controls`] of the focused control.
     pub focus: usize,
+    /// The strip's controls ([`CONTROLS`] unless [`Panels::with_controls`]).
+    controls: &'static [Control],
     pub timeouts: Timeouts,
     /// The mouse showed (or last kept) them.
     by_pointer: bool,
@@ -166,6 +168,7 @@ impl Default for Panels {
             shown: Shown::Hidden,
             quick: None,
             focus: 0,
+            controls: &CONTROLS,
             timeouts: Timeouts::default(),
             by_pointer: false,
             hide_at_ms: None,
@@ -263,7 +266,21 @@ impl Panels {
     }
 
     pub fn focused(&self) -> Control {
-        CONTROLS[self.focus]
+        self.controls[self.focus]
+    }
+
+    /// A strip of `controls` (in [`CONTROLS`]' order, none empty), for a
+    /// build without some of them.
+    pub fn with_controls(mut self, controls: &'static [Control]) -> Self {
+        debug_assert!(!controls.is_empty());
+        self.controls = controls;
+        self.focus = self.focus.min(controls.len() - 1);
+        self
+    }
+
+    /// The strip's controls, in order.
+    pub fn controls(&self) -> &'static [Control] {
+        self.controls
     }
 
     pub fn quick_focused(&self) -> Option<QuickAction> {
@@ -279,7 +296,7 @@ impl Panels {
             Shown::Card => {
                 self.quick = Some(self.quick.map_or(0, |at| clamp(at, QUICK_ACTIONS.len())));
             }
-            Shown::Controls => self.focus = clamp(self.focus, CONTROLS.len()),
+            Shown::Controls => self.focus = clamp(self.focus, self.controls.len()),
             Shown::Hidden | Shown::Banner | Shown::Info => {}
         }
         self.by_pointer = false;

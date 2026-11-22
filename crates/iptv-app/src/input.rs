@@ -741,6 +741,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         crate::parental_view::key(ui, action);
         return;
     }
+    #[cfg(feature = "recordings")]
     if top == Some(Overlay::Recordings) {
         crate::recordings_view::key(ui, action);
         return;
@@ -817,6 +818,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::Description) {
+        #[cfg(feature = "recordings")]
         if ui.player_surface == 0
             && matches!(action, Action::Select | Action::Record)
             && let Some(origin) = ui.description.get_untracked()
@@ -904,6 +906,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     match action {
+        #[cfg(feature = "recordings")]
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);

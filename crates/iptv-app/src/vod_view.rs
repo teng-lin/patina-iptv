@@ -22,6 +22,15 @@ fn edit<R>(ui: Ui, f: impl FnOnce(&mut iptv_core::vod::Screen) -> R) -> R {
     result.unwrap()
 }
 
+/// The screen's state at startup: no Recordings destination in a build
+/// without the recordings screen (feature `recordings`).
+pub fn screen() -> iptv_core::vod::Screen {
+    let screen = iptv_core::vod::Screen::default();
+    #[cfg(not(feature = "recordings"))]
+    let screen = screen.without_recordings();
+    screen
+}
+
 pub fn is_open(ui: Ui) -> bool {
     ui.vod.with(|s| s.open)
 }

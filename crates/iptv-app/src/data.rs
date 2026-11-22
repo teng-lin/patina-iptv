@@ -47,6 +47,7 @@ pub fn start(ui: Ui) {
     crate::runtime().bind_tasks(spawn_in_app, |duration| Box::pin(timer(duration)));
     crate::runtime().bind(move |event| crate::runtime_events::apply(ui, event));
     crate::runtime().start_services();
+    #[cfg(feature = "recordings")]
     crate::recordings_view::bind(ui);
     // NSH drops cleanup callbacks without invoking them when the entire Rust
     // runtime exits. Capture an RAII guard so both owner disposal and runtime

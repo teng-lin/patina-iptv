@@ -527,7 +527,11 @@ fn activate(
             );
         }
         Control::PlayPause => crate::player::toggle_pause(ui),
+        #[cfg(feature = "recordings")]
         Control::Record => crate::recordings_view::toggle_current(ui),
+        // No Record button in this build (`record_button`).
+        #[cfg(not(feature = "recordings"))]
+        Control::Record => {}
         Control::Favorite => {
             if let Some(ch) = ui.playing.get_untracked() {
                 crate::favorites::toggle(ui, ch);
@@ -907,7 +911,7 @@ fn right(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_end()
         .gap(px(2.0))
-        .child(button(ui, Control::Record, || Icon::Record, size))
+        .children(record_button(ui, size))
         .child(button(
             ui,
             Control::Favorite,
@@ -968,6 +972,12 @@ fn right(ui: Ui) -> impl IntoElement {
                 .text_size(px(12.0))
                 .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA)),
         )
+}
+
+/// The Record button: none in a build without recordings (feature
+/// `recordings`).
+fn record_button(ui: Ui, size: f32) -> Option<View> {
+    cfg!(feature = "recordings").then(|| button(ui, Control::Record, || Icon::Record, size))
 }
 
 /// The playing program's details (the description popover), or closes

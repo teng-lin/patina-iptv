@@ -186,7 +186,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
     });
     let part = move |bottom: bool| {
         view().children(
-            iptv_core::browse::rail_items(iptv_core::browse::VodAvailability {
+            crate::lists::built_rail(iptv_core::browse::VodAvailability {
                 shown: true,
                 any: true,
             })
