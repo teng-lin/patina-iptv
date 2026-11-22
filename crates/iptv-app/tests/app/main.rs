@@ -79,6 +79,7 @@ mod stalker_cancel;
 mod tablet_gestures;
 mod tablet_journey;
 mod tablet_rows;
+mod tv_feature_set;
 mod tv_player;
 mod tv_remote_journey;
 mod tv_replay;

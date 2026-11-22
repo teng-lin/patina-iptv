@@ -275,3 +275,22 @@ fn without_downloads_no_guide_is_added_or_updated() {
     let empty = Screen::new(P, Vec::new()).without_downloads();
     assert_eq!(empty.focus(), Item::Inspect);
 }
+
+#[test]
+fn without_inspection_no_inspect_row_is_offered() {
+    let mut s = screen().without_inspection();
+    assert!(!s.items().contains(&Item::Inspect));
+    for _ in 0..s.items().len() + 1 {
+        assert_ne!(s.key(Key::Down), Some(Effect::Inspect));
+        assert_ne!(s.focus(), Item::Inspect);
+    }
+    // Neither guides to add nor an inspection: an empty list that Back
+    // closes and no other key acts on.
+    let mut empty = Screen::new(P, Vec::new())
+        .without_downloads()
+        .without_inspection();
+    assert!(empty.items().is_empty());
+    assert_eq!(empty.key(Key::Down), None);
+    assert_eq!(empty.key(Key::Ok), None);
+    assert_eq!(empty.key(Key::Back), Some(Effect::Close));
+}

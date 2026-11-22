@@ -53,6 +53,15 @@ section. `NSH_UNSTRIPPED=1` keeps the names section for `twiggy` (never for
 a package). A package that installs over the same version is refused by the
 TV: uninstall this app id first.
 
+## What the TV build leaves out
+
+The runner builds `iptv-app` without its default features, which keep
+screens a TV does not offer out of the module (their way in goes with
+them; `tests/app/tv_feature_set.rs` checks it):
+
+- `guide-tools`: Inspect guide coverage (Guide sources), its repairs and
+  Choose guide data… (the channel menu).
+
 ## What does not work yet
 
 - Recording, backup files and picture in picture (no workers, one

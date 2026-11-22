@@ -100,6 +100,14 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         steps.append(step("runtime-wasm", *WASM_CLIPPY[:3], "-p", "iptv-runtime", "--no-default-features",
                           *WASM_CLIPPY[3:]))
         steps.append(step("app-wasm", *WASM_CLIPPY[:3], "-p", "iptv-app", *WASM_CLIPPY[3:]))
+        # The browser TV package's feature set (hosts/tizen-nsh): linted for
+        # wasm32, and its scenario run natively (no way into the screens it
+        # leaves out).
+        steps.append(step("app-wasm-tv", *WASM_CLIPPY[:3], "-p", "iptv-app", "--no-default-features",
+                          "--features", "browser-package", *WASM_CLIPPY[3:]))
+        steps.append(step("app-tv-feature-set", "cargo", "test", "--locked", "-p", "iptv-app",
+                          "--no-default-features", "--features", "test-support", "--test", "app",
+                          "tv_feature_set", "--", "--format=pretty"))
         # The adapters the shell links, without the Live TV bridge.
         steps.append(step("web-adapters-wasm", *WASM_CLIPPY[:3], "-p", "iptv-web", "--no-default-features",
                           *WASM_CLIPPY[3:]))

@@ -40,8 +40,11 @@ mod fav_editor;
 mod favorites;
 mod fonts;
 mod grid;
+#[cfg(feature = "guide-tools")]
 mod guide_assign_view;
+#[cfg(feature = "guide-tools")]
 mod guide_inspect_view;
+#[cfg(feature = "guide-tools")]
 mod guide_repair_view;
 mod header;
 mod host;
@@ -279,11 +282,16 @@ pub struct Ui {
     /// A playlist's guide sources screen, when open (over the playlists
     /// and settings screens).
     pub guide_sources: Signal<Option<epg_sources_view::Open>>,
+    #[cfg(feature = "guide-tools")]
     pub guide_inspect: Signal<Option<iptv_library::guide_inspect::Screen>>,
+    #[cfg(feature = "guide-tools")]
     pub guide_repair: Signal<Option<iptv_library::guide_repair_screen::Screen>>,
+    #[cfg(feature = "guide-tools")]
     pub guide_repair_cancel: Stored<Option<iptv_import::CancelToken>>,
+    #[cfg(feature = "guide-tools")]
     pub guide_inspect_cancel: Stored<Option<iptv_import::CancelToken>>,
     /// The guide data chooser of a channel, when open.
+    #[cfg(feature = "guide-tools")]
     pub guide_assign: Signal<Option<guide_assign_view::Open>>,
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
@@ -397,10 +405,15 @@ impl Ui {
             wizard: signal(None),
             playlists: signal(None),
             guide_sources: signal(None),
+            #[cfg(feature = "guide-tools")]
             guide_inspect: signal(None),
+            #[cfg(feature = "guide-tools")]
             guide_repair: signal(None),
+            #[cfg(feature = "guide-tools")]
             guide_repair_cancel: stored(None),
+            #[cfg(feature = "guide-tools")]
             guide_inspect_cancel: stored(None),
+            #[cfg(feature = "guide-tools")]
             guide_assign: signal(None),
             parental: signal(None),
             settings_screen: signal(None),
@@ -936,6 +949,33 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
 /// Everything over the video: the guide, the full-screen tap catcher,
 /// the player panels and every screen and popup. None of it shows in the
 /// picture-in-picture window.
+/// The guide data chooser's layer: none in a build without the guide
+/// tools (feature `guide-tools`).
+fn guide_assign_layer(ui: Ui) -> Vec<AnyElement> {
+    #[cfg(feature = "guide-tools")]
+    return vec![guide_assign_view::layer(ui).into_element()];
+    #[cfg(not(feature = "guide-tools"))]
+    {
+        let _ = ui;
+        Vec::new()
+    }
+}
+
+/// The guide inspection's and its repairs' layers, inspection below:
+/// none in a build without the guide tools (feature `guide-tools`).
+fn guide_inspection_layers(ui: Ui) -> Vec<AnyElement> {
+    #[cfg(feature = "guide-tools")]
+    return vec![
+        guide_inspect_view::layer(ui).into_element(),
+        guide_repair_view::layer(ui).into_element(),
+    ];
+    #[cfg(not(feature = "guide-tools"))]
+    {
+        let _ = ui;
+        Vec::new()
+    }
+}
+
 fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
@@ -1024,7 +1064,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(settings_view::layer(ui))
         .child(vod_view::layer(ui))
         .child(recordings_view::layer(ui))
-        .child(guide_assign_view::layer(ui))
+        .children(guide_assign_layer(ui))
         // The playlists screen opens over settings, a guide sources screen
         // over both.
         .child(playlists_view::layer(ui))
@@ -1032,8 +1072,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(custom_groups::layer(ui))
         .child(organization_view::layer(ui))
         .child(epg_sources_view::layer(ui))
-        .child(guide_inspect_view::layer(ui))
-        .child(guide_repair_view::layer(ui))
+        .children(guide_inspection_layers(ui))
         .child(wizard_view::layer(ui))
         .child(parental_view::layer(ui))
 }
@@ -1172,13 +1211,16 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             _ if top == Some(Overlay::Vod) => vod_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
             _ if top == Some(Overlay::GuideSources) => epg_sources_view::back(ui),
+            #[cfg(feature = "guide-tools")]
             _ if top == Some(Overlay::GuideRepair) => guide_repair_view::back(ui),
+            #[cfg(feature = "guide-tools")]
             _ if top == Some(Overlay::GuideInspection) => guide_inspect_view::back(ui),
             _ if top == Some(Overlay::RemoteEditor) => remote_editor::back(ui),
             _ if top == Some(Overlay::Organization) => organization_view::back(ui),
             _ if top == Some(Overlay::CustomGroups) => custom_groups::back(ui),
             _ if top == Some(Overlay::Playlists) => playlists_view::back(ui),
             _ if top == Some(Overlay::Settings) => settings_view::back(ui),
+            #[cfg(feature = "guide-tools")]
             _ if top == Some(Overlay::GuideAssign) => guide_assign_view::back(ui),
             _ if top == Some(Overlay::FavoritesEditor) => {
                 fav_editor::close(ui);

@@ -20,12 +20,15 @@ pub(crate) enum Overlay {
     Recordings,
     Vod,
     GuideSources,
+    #[cfg(feature = "guide-tools")]
     GuideInspection,
+    #[cfg(feature = "guide-tools")]
     GuideRepair,
     Organization,
     CustomGroups,
     RemoteEditor,
     Playlists,
+    #[cfg(feature = "guide-tools")]
     GuideAssign,
     Settings,
     FavoritesEditor,
@@ -51,18 +54,19 @@ impl Overlay {
         match self {
             Self::Vod
             | Self::Recordings
-            | Self::GuideRepair
-            | Self::GuideInspection
             | Self::GuideSources
             | Self::Organization
             | Self::CustomGroups
             | Self::RemoteEditor
             | Self::Settings
             | Self::FavoritesEditor => Context::Editor,
+            #[cfg(feature = "guide-tools")]
+            Self::GuideRepair | Self::GuideInspection => Context::Editor,
+            #[cfg(feature = "guide-tools")]
+            Self::GuideAssign => Context::Menu,
             Self::Parental
             | Self::Wizard
             | Self::Playlists
-            | Self::GuideAssign
             | Self::Chooser
             | Self::Description
             | Self::Menu => Context::Menu,
@@ -72,18 +76,21 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 20] = [
+    pub(crate) const ALL: [Overlay; Self::COUNT] = [
         Overlay::Parental,
         Overlay::Wizard,
         Overlay::Recordings,
         Overlay::Vod,
+        #[cfg(feature = "guide-tools")]
         Overlay::GuideRepair,
+        #[cfg(feature = "guide-tools")]
         Overlay::GuideInspection,
         Overlay::GuideSources,
         Overlay::Organization,
         Overlay::CustomGroups,
         Overlay::RemoteEditor,
         Overlay::Playlists,
+        #[cfg(feature = "guide-tools")]
         Overlay::GuideAssign,
         Overlay::Settings,
         Overlay::FavoritesEditor,
@@ -95,6 +102,10 @@ impl Overlay {
         Overlay::ChannelList,
     ];
 
+    /// How many overlays this build has (the guide tools' three are
+    /// feature `guide-tools`).
+    const COUNT: usize = 17 + if cfg!(feature = "guide-tools") { 3 } else { 0 };
+
     /// Whether it is open (a tracked read, like each screen's `is_open`).
     pub(crate) fn is_open(self, ui: Ui) -> bool {
         match self {
@@ -102,13 +113,16 @@ impl Overlay {
             Overlay::Wizard => crate::wizard_view::is_open(ui),
             Overlay::Vod => crate::vod_view::is_open(ui),
             Overlay::Recordings => crate::recordings_view::is_open(ui),
+            #[cfg(feature = "guide-tools")]
             Overlay::GuideRepair => crate::guide_repair_view::is_open(ui),
+            #[cfg(feature = "guide-tools")]
             Overlay::GuideInspection => crate::guide_inspect_view::is_open(ui),
             Overlay::GuideSources => crate::epg_sources_view::is_open(ui),
             Overlay::Organization => crate::organization_view::is_open(ui),
             Overlay::CustomGroups => crate::custom_groups::is_open(ui),
             Overlay::RemoteEditor => crate::remote_editor::is_open(ui),
             Overlay::Playlists => crate::playlists_view::is_open(ui),
+            #[cfg(feature = "guide-tools")]
             Overlay::GuideAssign => crate::guide_assign_view::is_open(ui),
             Overlay::Settings => crate::settings_view::is_open(ui),
             Overlay::FavoritesEditor => ui.editor.with(Option::is_some),
@@ -146,17 +160,16 @@ impl Overlay {
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
-            | Overlay::GuideRepair
-            | Overlay::GuideInspection
             | Overlay::GuideSources
             | Overlay::Organization
             | Overlay::CustomGroups
             | Overlay::RemoteEditor
             | Overlay::Playlists
-            | Overlay::GuideAssign
             | Overlay::Settings
             | Overlay::FavoritesEditor
             | Overlay::Search => true,
+            #[cfg(feature = "guide-tools")]
+            Overlay::GuideRepair | Overlay::GuideInspection | Overlay::GuideAssign => true,
             Overlay::Chooser
             | Overlay::Description
             | Overlay::Menu
@@ -174,18 +187,17 @@ impl Overlay {
     pub(crate) fn keeps_pointer_from_play_bar(self) -> bool {
         match self {
             Overlay::Description => false,
+            #[cfg(feature = "guide-tools")]
+            Overlay::GuideRepair | Overlay::GuideInspection | Overlay::GuideAssign => true,
             Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
-            | Overlay::GuideRepair
-            | Overlay::GuideInspection
             | Overlay::GuideSources
             | Overlay::Organization
             | Overlay::CustomGroups
             | Overlay::RemoteEditor
             | Overlay::Playlists
-            | Overlay::GuideAssign
             | Overlay::Settings
             | Overlay::FavoritesEditor
             | Overlay::Chooser
@@ -235,6 +247,7 @@ mod tests {
             open.retain(|overlay| *overlay != top);
         }
         assert_eq!(Overlay::top(|overlay| open.contains(&overlay)), None);
+        #[cfg(feature = "guide-tools")]
         assert_eq!(
             Overlay::top(|overlay| [Overlay::Settings, Overlay::GuideAssign].contains(&overlay)),
             Some(Overlay::GuideAssign),
@@ -257,14 +270,11 @@ mod tests {
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
-            | Overlay::GuideRepair
-            | Overlay::GuideInspection
             | Overlay::GuideSources
             | Overlay::Organization
             | Overlay::CustomGroups
             | Overlay::RemoteEditor
             | Overlay::Playlists
-            | Overlay::GuideAssign
             | Overlay::Settings
             | Overlay::FavoritesEditor
             | Overlay::Chooser
@@ -273,9 +283,20 @@ mod tests {
             | Overlay::Search
             | Overlay::ChannelPicker
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
+            #[cfg(feature = "guide-tools")]
+            Overlay::GuideRepair | Overlay::GuideInspection | Overlay::GuideAssign => {
+                Overlay::ALL.contains(&overlay)
+            }
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 20);
+        assert_eq!(
+            Overlay::ALL.len(),
+            if cfg!(feature = "guide-tools") {
+                20
+            } else {
+                17
+            }
+        );
     }
 
     #[test]

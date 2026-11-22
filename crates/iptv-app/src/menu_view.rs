@@ -151,6 +151,17 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             }
         },
     );
+    // No guide data chooser in a build without the guide tools.
+    #[cfg(not(feature = "guide-tools"))]
+    rows.retain(|row| {
+        !matches!(
+            row,
+            Row::Action {
+                item: MenuItem::AssignEpg,
+                ..
+            }
+        )
+    });
     if (crate::host::LINUX || crate::host::MACOS)
         && program.airing(now) == crate::guide::Airing::Live
     {
@@ -349,6 +360,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         // The chooser opens over the guide; the guide's focus stays.
+        #[cfg(feature = "guide-tools")]
         MenuItem::AssignEpg => {
             close(ui);
             crate::guide_assign_view::open(ui, origin.channel);

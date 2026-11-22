@@ -751,10 +751,12 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     }
     // Top-most first: a guide sources screen opens over the playlists
     // screen, which opens over settings.
+    #[cfg(feature = "guide-tools")]
     if top == Some(Overlay::GuideRepair) {
         crate::guide_repair_view::key(ui, action);
         return;
     }
+    #[cfg(feature = "guide-tools")]
     if top == Some(Overlay::GuideInspection) {
         crate::guide_inspect_view::key(ui, action);
         return;
@@ -783,6 +785,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         crate::settings_view::key(ui, action);
         return;
     }
+    #[cfg(feature = "guide-tools")]
     if top == Some(Overlay::GuideAssign) {
         crate::guide_assign_view::key(ui, action);
         return;

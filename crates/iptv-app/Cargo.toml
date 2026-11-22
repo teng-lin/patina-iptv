@@ -15,6 +15,12 @@ path = "src/main.rs"
 test = false
 
 [features]
+# Every screen; a browser TV package (hosts/tizen-nsh) leaves out the
+# ones listed below.
+default = ["guide-tools"]
+# The guide tools: Inspect guide coverage (Guide sources), its repairs,
+# and Choose guide data… (the channel menu).
+guide-tools = []
 # Synthetic fixture transport and key injection; never enabled in packages.
 test-support = ["iptv-runtime/test-support"]
 # A browser package (hosts/tizen-nsh) keeps its data out of the module,

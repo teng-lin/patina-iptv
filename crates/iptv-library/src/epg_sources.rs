@@ -115,6 +115,8 @@ pub struct Screen {
     /// Adding and downloading guides are offered: false where the host
     /// cannot download them.
     downloads: bool,
+    /// The coverage inspection is offered: false in a build without it.
+    inspection: bool,
 }
 
 impl Screen {
@@ -131,6 +133,7 @@ impl Screen {
             retry: None,
             notice: None,
             downloads: true,
+            inspection: true,
         }
     }
 
@@ -138,14 +141,24 @@ impl Screen {
     pub fn without_downloads(mut self) -> Self {
         self.downloads = false;
         if !self.items().contains(&self.focus) {
-            self.focus = self.items()[0];
+            self.focus = self.items().first().copied().unwrap_or(Item::Add);
         }
         self
     }
 
-    /// The row the list falls back to when its focus is gone.
+    /// Without the coverage inspection: no Inspect row.
+    pub fn without_inspection(mut self) -> Self {
+        self.inspection = false;
+        if !self.items().contains(&self.focus) {
+            self.focus = self.first_action();
+        }
+        self
+    }
+
+    /// The row the list falls back to when its focus is gone (Add when
+    /// the list has no row at all: no key then moves to it).
     fn first_action(&self) -> Item {
-        if self.downloads {
+        if self.downloads || !self.inspection {
             Item::Add
         } else {
             Item::Inspect
@@ -186,7 +199,9 @@ impl Screen {
         if self.downloads {
             items.extend([Item::Add, Item::Update]);
         }
-        items.push(Item::Inspect);
+        if self.inspection {
+            items.push(Item::Inspect);
+        }
         items
     }
 
@@ -270,6 +285,9 @@ impl Screen {
 
     fn list_key(&mut self, key: Key) -> Option<Effect> {
         let items = self.items();
+        if items.is_empty() {
+            return (key == Key::Back).then_some(Effect::Close);
+        }
         let at = items.iter().position(|i| *i == self.focus).unwrap_or(0);
         match (key, self.focus) {
             (Key::Up, _) => self.focus = items[at.saturating_sub(1)],

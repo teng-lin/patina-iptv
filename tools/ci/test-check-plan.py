@@ -170,6 +170,13 @@ class Plan(unittest.TestCase):
         self.assertEqual(self.by_name["runtime-wasm"],
                          ["cargo", "clippy", "--locked", "-p", "iptv-runtime", "--no-default-features", *wasm])
         self.assertEqual(self.by_name["app-wasm"], ["cargo", "clippy", "--locked", "-p", "iptv-app", *wasm])
+        self.assertEqual(self.by_name["app-wasm-tv"],
+                         ["cargo", "clippy", "--locked", "-p", "iptv-app", "--no-default-features",
+                          "--features", "browser-package", *wasm])
+        self.assertEqual(self.by_name["app-tv-feature-set"],
+                         ["cargo", "test", "--locked", "-p", "iptv-app", "--no-default-features",
+                          "--features", "test-support", "--test", "app", "tv_feature_set", "--",
+                          "--format=pretty"])
         self.assertEqual(self.by_name["web-adapters-wasm"],
                          ["cargo", "clippy", "--locked", "-p", "iptv-web", "--no-default-features", *wasm])
         self.assertEqual(self.by_name["runtime-portable-tests"],
@@ -180,8 +187,8 @@ class Plan(unittest.TestCase):
         self.assertTrue((checks.ROOT / "hosts/tizen-nsh/Cargo.lock").is_file())
         for host in ("macos", "windows"):
             names = {step["name"] for step in checks.plan(host=host)}
-            self.assertFalse({"runtime-wasm", "app-wasm", "web-adapters-wasm", "runtime-portable-tests",
-                              "tizen-nsh-wasm"} & names)
+            self.assertFalse({"runtime-wasm", "app-wasm", "app-wasm-tv", "app-tv-feature-set",
+                              "web-adapters-wasm", "runtime-portable-tests", "tizen-nsh-wasm"} & names)
 
     def test_release_only_changes_the_normal_app_build(self):
         release = {step["name"]: step["argv"] for step in checks.plan(release=True)}

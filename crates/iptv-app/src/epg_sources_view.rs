@@ -52,9 +52,12 @@ pub fn open(ui: Ui, playlist: SourceId) {
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide
-/// to add or download.
+/// to add or download, and a build without the guide tools (feature
+/// `guide-tools`) no coverage inspection.
 fn screen(playlist: SourceId) -> Screen {
     let screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
+    #[cfg(not(feature = "guide-tools"))]
+    let screen = screen.without_inspection();
     if crate::host::IMPORTS {
         screen
     } else {
@@ -143,7 +146,11 @@ fn cancel(ui: Ui) {
 /// Carries out `effect` of the screen of `playlist`.
 fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
     match effect {
+        #[cfg(feature = "guide-tools")]
         Effect::Inspect => crate::guide_inspect_view::open(ui, playlist),
+        // The screen offers no Inspect row (`screen`).
+        #[cfg(not(feature = "guide-tools"))]
+        Effect::Inspect => {}
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
             crate::data::spawn_in_app(async move {
@@ -183,7 +190,9 @@ fn edit_name(edit: &crate::data::guides::Edit) -> String {
     }
 }
 
-/// A guide source's title (its name, else where it comes from).
+/// A guide source's title (its name, else where it comes from), for the
+/// guide data chooser.
+#[cfg(feature = "guide-tools")]
 pub fn source_title(s: &crate::runtime::model::GuideSource) -> String {
     words::title(s)
 }
