@@ -237,10 +237,6 @@ impl Runtime {
         crate::favorites::recent_channels(self)
     }
 
-    pub fn favorites_history(&self, playing: Option<usize>) -> iptv_core::favorites::History {
-        crate::favorites::history(self, playing)
-    }
-
     pub fn favorites_channel_of(&self, key: &str) -> Option<usize> {
         crate::favorites::channel_of(self, key)
     }

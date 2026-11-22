@@ -17,7 +17,7 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use iptv_core::favorites::{Favorites, History, KeyIndex, RECENT_LIMIT, Recent, diff};
+use iptv_core::favorites::{Favorites, KeyIndex, RECENT_LIMIT, Recent, diff};
 use iptv_core::guide::Schedule;
 use iptv_providers::ContentId;
 use iptv_providers::model::ContentKind;
@@ -409,15 +409,6 @@ pub fn recent_channels(owner: &super::Runtime) -> Vec<usize> {
     owner.favorites.with(|s| {
         let s = s.borrow();
         s.recent.channels(&s.index)
-    })
-}
-
-/// The player's History: the recently watched channels (newest first) and
-/// the row of `playing` among them.
-pub fn history(owner: &super::Runtime, playing: Option<usize>) -> History {
-    owner.favorites.with(|s| {
-        let s = s.borrow();
-        s.recent.history(&s.index, playing)
     })
 }
 

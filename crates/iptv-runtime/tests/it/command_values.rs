@@ -19,6 +19,7 @@ fn every_public_command_returns_its_declared_application_value() {
     let owner = Runtime::new(Ports::new(std::path::PathBuf::new(), |_| {
         panic!("type checking command futures must not open storage")
     }));
+    let _: fn(&Runtime) -> Vec<usize> = Runtime::recent_channels;
     let source = SourceId(1);
     let group = CustomGroupId(1);
     let content = || ContentId::from_stored("generated-channel");
