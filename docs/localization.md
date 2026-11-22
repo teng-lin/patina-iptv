@@ -66,7 +66,7 @@ not be applied) use the device's language.
 A count chooses the form its language needs: `1 channel`, `5 channels`;
 `1 канал`, `2 канала`, `5 каналов`, `21 канал`; `5 个频道`. The rules are the
 Unicode CLDR's cardinal rules for whole numbers, written out for the eleven
-languages in `crates/iptv-core/src/i18n/plural.rs`:
+languages in `crates/iptv-presentation/src/i18n/plural.rs`:
 
 | Languages | Forms |
 |---|---|
@@ -82,7 +82,7 @@ rules are more than a few lines, that is the point to take a library.
 ## Dates and times
 
 Weekday and month names, their order, and the 12-hour day's two halves come
-from `crates/iptv-core/src/i18n/calendar.rs` (`Tue 10 Nov`, `Di., 10. Nov.`,
+from `crates/iptv-presentation/src/i18n/calendar.rs` (`Tue 10 Nov`, `Di., 10. Nov.`,
 `11月10日(火)`). **Settings → General → Clock** chooses the clock:
 
 - **As the language writes it** (the default): 12-hour for English outside
@@ -99,12 +99,12 @@ not times of day, and are the same in every language.
 ## Maintaining translations
 
 The portable lookup, formatting and language resolution live in
-`crates/iptv-core/src/i18n.rs` and `crates/iptv-core/src/i18n/`; platform
+`crates/iptv-presentation/src/i18n.rs` and `crates/iptv-presentation/src/i18n/`; platform
 locale discovery is confined to `crates/iptv-app/src/i18n.rs`. `sys-locale`
 supplies the native device locale. No network service is involved in
-translating messages, and the core takes no dependency for it.
+translating messages, and the portable catalog needs no dependency for it.
 
-`crates/iptv-core/src/i18n/messages.tsv` is UTF-8 with one message per line.
+`crates/iptv-presentation/src/i18n/messages.tsv` is UTF-8 with one message per line.
 Columns follow `LANGUAGES` in `i18n.rs`: English source, Spanish, French, German,
 Italian, Portuguese, Russian, Simplified Chinese, Traditional Chinese, Japanese,
 Korean. Each row must have every column, with no empty translations or duplicate
@@ -208,7 +208,7 @@ Adding a language also requires adding its tag to
 and its calendar to `calendar.rs`; tests check each of the three.
 The setting remains text-valued so older backups and unlisted locale tags survive.
 
-Run `cargo test -p iptv-core -p iptv-settings`, the core wasm build, the app
+Run `cargo test -p iptv-presentation -p iptv-settings`, the presentation wasm build, the app
 build, `cargo test -p iptv-app --features test-support --test app catalog_lint`
 and `cargo test -p iptv-app --features test-support --test app interface_languages`. The `interface_languages` headless
 scenarios check switching languages without remounting settings, persistence,

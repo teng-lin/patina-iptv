@@ -142,8 +142,8 @@ fn surface(ui: &Ui) -> Surface {
             InputOwner::PlayBar
         } else {
             match ui.panels.with(|p| p.shown) {
-                iptv_core::panels::Shown::Card => InputOwner::Card,
-                iptv_core::panels::Shown::Controls => InputOwner::Strip,
+                iptv_presentation::panels::Shown::Card => InputOwner::Card,
+                iptv_presentation::panels::Shown::Controls => InputOwner::Strip,
                 _ => InputOwner::Video,
             }
         }
@@ -396,7 +396,9 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         if number::backspace(ui) {
             return;
         }
-        if ui.player_surface != 0 && crate::pip::exit(ui, iptv_core::pip_window::Exit::BackToApp) {
+        if ui.player_surface != 0
+            && crate::pip::exit(ui, iptv_presentation::pip_window::Exit::BackToApp)
+        {
             return;
         }
         crate::go_back(ui);
@@ -662,7 +664,7 @@ fn resolve(
 /// A key going down counts as use of the panels and the play bar on
 /// screen, as an applied key does (`apply`).
 fn keep_controls(ui: Ui) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.update_panels(|p, now| p.touch(now));
     }
     if untracked(|| crate::play_bar::shows(ui)) {
@@ -692,7 +694,7 @@ fn release_controls(ui: Ui) {
 
 /// Keeps a shown card or play bar until at least `at` (ms).
 fn keep_controls_until(ui: Ui, at: u64) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.panels.update(|p| p.keep_until(at));
     }
     if untracked(|| crate::play_bar::shows(ui)) {
@@ -912,7 +914,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            if (key == RemoteKey::Menu && entry == iptv_core::lists::ALL)
+            if (key == RemoteKey::Menu && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
                     && ui.app.library.shown.get_untracked().is_none())
             {
@@ -959,7 +961,7 @@ fn page(ui: Ui, dir: isize) {
     let rows = ui.visible_rows.get().map_or(8, |(a, b)| (b - a).max(1));
     let len = ui.list.with(|l| l.len());
     ui.focus.update(|f| {
-        f.channel = iptv_core::guide::page_row(f.channel, len, dir * rows as isize);
+        f.channel = iptv_presentation::guide::page_row(f.channel, len, dir * rows as isize);
     });
 }
 

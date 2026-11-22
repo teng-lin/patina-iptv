@@ -1,6 +1,6 @@
 //! The search screen: a query field, recent searches, and results in two
 //! tabs (channels, programs). State and rules live in
-//! `iptv_search::SearchState`; this module builds the indexes, runs the
+//! `iptv_presentation::search::SearchState`; this module builds the indexes, runs the
 //! searches (debounced), maps remote keys and taps to search actions and
 //! carries out what the state answers (play, show details, close).
 //!
@@ -23,15 +23,15 @@ use nsh_core::time::Instant;
 use std::time::Duration;
 
 use iptv_core::guide::{Airing, Schedule};
-use iptv_core::menu::Origin;
 use iptv_epg::UnixTime;
 use iptv_guide::EpgSchedule;
 use iptv_nav::Action;
-use iptv_search::{
-    ChannelSearchOptions, Focus, Phase, ProgramHit, ProgramSearchOptions, ResultId, ResultPolicy,
-    ResultSelection as Outcome, SearchAction, SearchEffect, SearchHistory, SearchState, Tab,
-    select_result,
+use iptv_presentation::menu::Origin;
+use iptv_presentation::search::{
+    Focus, Phase, ResultId, ResultPolicy, ResultSelection as Outcome, SearchAction, SearchEffect,
+    SearchState, Tab, select_result,
 };
+use iptv_search::{ChannelSearchOptions, ProgramHit, ProgramSearchOptions, SearchHistory};
 use iptv_settings::{Settings, Target, keys};
 use nsh_base::input;
 use nsh_core::prelude::*;

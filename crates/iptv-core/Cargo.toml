@@ -1,18 +1,11 @@
 [package]
 name = "iptv-core"
-description = "UI-independent core of iptv-rs: guide model and remote/touch focus. No NSH dependency; must build for wasm32."
+description = "Portable Domain values and rules for Patina IPTV."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
-
-[features]
-# The interface languages' messages outside the module: read per language
-# from the host (`i18n::set_catalog_reader`), for a browser package, whose
-# module size is its launch time. Off by default; on wasm32 only, so native
-# builds (`--all-features` included) embed them.
-external-catalog = []
 
 [dependencies]
 zeroize = "1.8"

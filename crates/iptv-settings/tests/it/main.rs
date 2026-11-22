@@ -9,5 +9,4 @@
 mod backup;
 mod catalog;
 mod schema;
-mod screen;
 mod store;

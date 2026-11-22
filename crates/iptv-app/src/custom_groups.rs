@@ -10,9 +10,9 @@ use crate::{
     ui_kit,
     wizard_view::entry::{self, Sheet},
 };
-use iptv_core::membership::Membership;
 use iptv_library::{ChannelScope, CustomGroup, CustomGroupId, SourceId};
 use iptv_nav::Action;
+use iptv_presentation::membership::Membership;
 use iptv_providers::ContentId;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
@@ -451,7 +451,7 @@ fn act(ui: Ui, index: usize) {
                 s.source,
                 crate::organization_view::Kind::CustomChannels(g),
                 None,
-                iptv_core::organization::Mode::Reorder,
+                iptv_presentation::organization::Mode::Reorder,
             ),
             3 => update(ui, |s| {
                 s.page = Page::Delete(g);

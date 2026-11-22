@@ -19,7 +19,7 @@
 use nsh_core::time::Instant;
 
 use crate::timeline::{Band, MARGIN, SLOP, Timeline};
-use iptv_core::guide::view_range;
+use iptv_presentation::guide::view_range;
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -200,7 +200,7 @@ impl Pan {
         }
         let next = focused(ui)
             .2
-            .then(|| iptv_core::browse_playback::PanAnchor::new(channel, &focus));
+            .then(|| iptv_presentation::browse_playback::PanAnchor::new(channel, &focus));
         if next.is_some() || ui.pan_anchor.with_untracked(Option::is_some) {
             ui.pan_anchor.set(next);
         }

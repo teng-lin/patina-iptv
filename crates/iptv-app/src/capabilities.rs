@@ -1,13 +1,14 @@
 //! One host projection for feature controls and action admission.
 use crate::Ui;
-use iptv_core::capabilities::{Availability, Host, Reason};
+use iptv_core::capabilities::Host;
+use iptv_presentation::capabilities::{Availability, Reason};
 
 pub const HOST: Host = Host {
     platform: crate::host::PLATFORM,
 };
 
 pub fn multiview(ui: Ui) -> Availability {
-    iptv_core::capabilities::multiview(
+    iptv_presentation::capabilities::multiview(
         HOST,
         ui.player_surface == 0,
         ui.playing.get().is_some(),

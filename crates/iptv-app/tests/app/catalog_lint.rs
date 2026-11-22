@@ -1,5 +1,5 @@
 //! Text the user reads goes through the message catalog
-//! (`crates/iptv-core/src/i18n/messages.tsv`), or is on a list here.
+//! (`crates/iptv-presentation/src/i18n/messages.tsv`), or is on a list here.
 //!
 //! Five failures, all found by reading the sources:
 //!
@@ -67,7 +67,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use iptv_core::i18n::is_cataloged;
+use iptv_presentation::i18n::is_cataloged;
 
 /// How many `[untranslated]` entries there are. Lower it with the list;
 /// it is never raised.
@@ -77,6 +77,7 @@ const UNTRANSLATED: usize = 0;
 const ROOTS: &[&str] = &[
     "iptv-app/src",
     "iptv-core/src",
+    "iptv-presentation/src",
     "iptv-guide/src",
     "iptv-library/src",
     "iptv-runtime/src",
@@ -86,8 +87,9 @@ const ROOTS: &[&str] = &[
 
 /// The catalog itself and its formatter: messages about messages.
 const NOT_READ: &[&str] = &[
-    "iptv-core/src/i18n.rs",
-    "iptv-core/src/i18n/",
+    "iptv-presentation/src/i18n.rs",
+    "iptv-presentation/src/i18n/",
+    "iptv-guide/src/test_support/",
     // Declared only by opening.rs's #[cfg(test)] mod revocation; synthetic fixtures.
     "iptv-runtime/src/opening/revocation.rs",
     // Private unit modules declared only under #[cfg(test)]; synthetic fixtures.
@@ -133,7 +135,7 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
 /// translated when the user is told (`backup::report`, `App`).
 const MESSAGE_FILES: &[&str] = &[
     "iptv-core/src/parental.rs",
-    "iptv-core/src/parental_state.rs",
+    "iptv-presentation/src/parental.rs",
     "iptv-runtime/src/parental.rs",
     "iptv-app/src/parental_view.rs",
     "iptv-runtime/src/backup.rs",
@@ -143,7 +145,7 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/recordings/host.rs",
     "iptv-runtime/src/recordings/rules.rs",
     "iptv-core/src/recording.rs",
-    "iptv-core/src/recording_state.rs",
+    "iptv-presentation/src/recording.rs",
     "iptv-app/src/recordings_view.rs",
 ];
 
@@ -170,16 +172,15 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/parental_view.rs", "message"),
     ("iptv-app/src/parental_view.rs", "title"),
     ("iptv-runtime/src/recordings.rs", "notice"),
-    // The typed capability notice returns key-marked messages in core
+    // The capability notice returns key-marked messages in presentation
     // capabilities.rs, or the existing checked recording wake messages.
     ("iptv-app/src/host/native/recording_host.rs", "message"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport
     // failure keys are additionally enumerated by the recording transport test.
-    ("iptv-app/src/recordings_view.rs", "job"),
-    ("iptv-app/src/recordings_view.rs", "j"),
+    ("iptv-app/src/recordings_view.rs", "status_label"),
     ("iptv-app/src/recordings_view.rs", "name"),
     ("iptv-app/src/recordings_view.rs", "message"),
-    // What `tr` and `trf` hand to the core is what they were given.
+    // What `tr` and `trf` hand to the presentation is what they were given.
     ("iptv-app/src/i18n.rs", "source"),
     // `key(…)` constants.
     ("iptv-app/src/backup.rs", "EXPORT_NOTE"),
@@ -1072,7 +1073,7 @@ fn misfilled<'a>(
     let mut placed = BTreeSet::new();
     let mut all = all;
     for message in messages {
-        match iptv_core::i18n::message::shape(message) {
+        match iptv_presentation::i18n::message::shape(message) {
             Ok(shape) => {
                 for name in &shape.names {
                     if given.is_some_and(|given| !given.contains(name)) {
@@ -1397,7 +1398,7 @@ fn every_message_has_a_catalog_row() {
     }
     assert!(
         missing.is_empty(),
-        "{} messages have no row in crates/iptv-core/src/i18n/messages.tsv:\n{}",
+        "{} messages have no row in crates/iptv-presentation/src/i18n/messages.tsv:\n{}",
         missing.len(),
         missing.join("\n")
     );
@@ -1818,7 +1819,7 @@ fn a_message_the_lint_cannot_follow_is_refused() {
         "names.iter().copied().map(tr).collect::<Vec<_>>()",
         "let say = trf",
         "let say = crate::i18n::tr",
-        "let say = iptv_core::i18n::format",
+        "let say = iptv_presentation::i18n::format",
         "let mark = iptv_core::message::key",
         "let say: fn(&Language, &str) -> &str = i18n::translate",
     ] {
@@ -1828,7 +1829,7 @@ fn a_message_the_lint_cannot_follow_is_refused() {
     // An import under another name would hide every call.
     for (source, refused) in [
         ("use crate::i18n::{tr, trf, key};", 0),
-        ("pub use iptv_core::i18n::{format, translate};", 0),
+        ("pub use iptv_presentation::i18n::{format, translate};", 0),
         ("use std::fmt::format as write;", 0),
         (
             "fn f<'a>(x: &'a str) -> impl Sized + use<'a> { tr(\"Kept\") }",
@@ -1838,7 +1839,7 @@ fn a_message_the_lint_cannot_follow_is_refused() {
         ("use iptv_core::message::key as mark;", 1),
         ("use crate::i18n::{key as mark, trf as fill};", 2),
         (
-            "use iptv_core::i18n::{format as fill, translate as say};",
+            "use iptv_presentation::i18n::{format as fill, translate as say};",
             2,
         ),
         ("use crate::runtime::RuntimeEvent::Notify as Tell;", 1),
@@ -1869,7 +1870,7 @@ fn the_core_calls_are_followed_like_tr() {
         ),
         ("translate(language, (text))", &[], &["text"], 0),
         (
-            "iptv_core::i18n::format(language, if soon { \"{n} min left\" } else { later }, \
+            "iptv_presentation::i18n::format(language, if soon { \"{n} min left\" } else { later }, \
              &[(\"n\", n.into())])",
             &["{n} min left"],
             &["later"],
@@ -2169,7 +2170,7 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
     );
     assert_eq!(
         verdict(
-            "iptv-core/src/player_info.rs",
+            "iptv-presentation/src/player_info.rs",
             &literal("{minutes} min left", Some("format"), 1)
         ),
         Verdict::Message

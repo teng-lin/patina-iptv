@@ -1,14 +1,15 @@
 //! The guide's context menu (Long OK / Menu) as a scrolling side panel, and
-//! the program description popover. State lives in `iptv_core::menu`;
+//! the program description popover. State lives in `iptv_presentation::menu`;
 //! this opens, draws and performs it. Labels are iptv-rs's own wording.
 
 use crate::i18n::tr;
 use crate::organization_view::{self, Kind};
 use crate::runtime::model::SourceId;
-use iptv_core::lists::{Entry, ListId};
-use iptv_core::organization::{Block, BlockKind, Mode};
+use iptv_core::organization::{Block, BlockKind};
+use iptv_presentation::lists::{Entry, ListId};
+use iptv_presentation::organization::Mode;
 
-use iptv_core::menu::{Heading, Menu, MenuItem, Origin, Row, program_menu};
+use iptv_presentation::menu::{Heading, Menu, MenuItem, Origin, Row, program_menu};
 use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, LIST_ITEM, MEDIUM, SANS, SECTION, TITLE};

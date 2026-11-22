@@ -299,7 +299,7 @@ pub(crate) fn resolve_data_dir() -> std::io::Result<PathBuf> {
 /// languages' messages from the package from here on.
 pub(crate) fn initialize() -> std::io::Result<PathBuf> {
     #[cfg(feature = "browser-package")]
-    iptv_core::i18n::set_catalog_reader(package_catalog);
+    iptv_presentation::i18n::set_catalog_reader(package_catalog);
     resolve_data_dir()
 }
 

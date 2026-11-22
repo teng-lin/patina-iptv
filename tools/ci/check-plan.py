@@ -16,7 +16,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 PORTABLE = (
-    "iptv-core", "iptv-nav", "iptv-settings", "iptv-epg", "iptv-providers",
+    "iptv-core", "iptv-presentation", "iptv-nav", "iptv-settings", "iptv-epg", "iptv-providers",
     "iptv-guide", "iptv-import", "iptv-search", "iptv-library",
 )
 REPAIR = "guide_repair::tests::repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive"

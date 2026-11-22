@@ -23,7 +23,7 @@ mod startup;
 pub(crate) fn command(key: &str) {
     if key == "recordings.background_status" {
         let capability = crate::runtime().recording_capabilities();
-        if let Some(message) = capability.notice() {
+        if let Some(message) = iptv_presentation::capabilities::recording_notice(capability) {
             crate::settings_view::notify(crate::i18n::tr(message));
             return;
         }

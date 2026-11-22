@@ -25,11 +25,15 @@ use crate::i18n::key;
 use std::rc::Rc;
 use std::time::Duration;
 
-use iptv_core::playback::{ChannelHistory, ErrorKind, Health, PlaySource, Retry};
-use iptv_core::player_info::StreamFormat as Format;
-use iptv_core::tracks::{Choice, Tracks};
+use iptv_core::playback::{ErrorKind, PlaySource};
+use iptv_core::tracks::Tracks;
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
+use iptv_presentation::playback::ChannelHistory;
+use iptv_presentation::playback_health::Health;
+use iptv_presentation::playback_health::Retry;
+use iptv_presentation::player_info::StreamFormat as Format;
+use iptv_presentation::tracks::Choice;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
@@ -76,7 +80,7 @@ pub struct Stream {
     /// Where the open stream is (ms from where it was opened), as the
     /// player last reported.
     pub position_ms: Signal<u64>,
-    pub timeline: Signal<iptv_core::on_demand::Timeline>,
+    pub timeline: Signal<iptv_presentation::on_demand::Timeline>,
     pub seek: Signal<Option<iptv_player_mpv::SeekProps>>,
     pub resume_ms: Signal<Option<u64>>,
     pub finished: Signal<bool>,

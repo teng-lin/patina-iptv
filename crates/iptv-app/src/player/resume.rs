@@ -131,7 +131,10 @@ pub fn adopt(ui: Ui) -> bool {
     // health session and its in-flight preparation.
     let requested = main.source.with_untracked(Option::is_some)
         || main.health.with_untracked(|health| {
-            matches!(health.phase(), iptv_core::playback::Phase::Resolving)
+            matches!(
+                health.phase(),
+                iptv_presentation::playback_health::Phase::Resolving
+            )
         });
     nsh_core::prelude::batch(|| {
         main.key.set(Some(early.key.clone()));

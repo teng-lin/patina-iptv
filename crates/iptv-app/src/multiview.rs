@@ -41,9 +41,10 @@
 mod lifecycle;
 mod pointer;
 
-use iptv_core::multiview::{Key, Limits, MAX_SURFACES, Multiview, Outcome};
-use iptv_core::play_bar::PlayBar;
+use iptv_core::multiview::MAX_SURFACES;
 use iptv_nav::Action;
+use iptv_presentation::multiview::{Key, Limits, Multiview, Outcome};
+use iptv_presentation::play_bar::PlayBar;
 use nsh_core::prelude::*;
 
 use crate::{Playback, Ui, ViewMode};
@@ -228,7 +229,7 @@ pub fn key(ui: Ui, action: Action) {
     };
     apply(ui, |m, failed| {
         if key == Key::Ok
-            && let Some(iptv_core::multiview::Dialog::Warning { focus, .. }) = m.dialog()
+            && let Some(iptv_presentation::multiview::Dialog::Warning { focus, .. }) = m.dialog()
             && !can_confirm_pick(m, *focus)
         {
             return m.key(Key::Back, failed);
@@ -278,7 +279,7 @@ pub fn paused(ui: Ui, surface: usize) -> bool {
 }
 
 fn can_confirm_pick(state: &State, index: usize) -> bool {
-    use iptv_core::multiview::{WARNING_CHOICES, WarningChoice};
+    use iptv_presentation::multiview::{WARNING_CHOICES, WarningChoice};
     WARNING_CHOICES.get(index) != Some(&WarningChoice::AddAnyway)
         || state
             .pending_pick_channel()
@@ -303,7 +304,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
                 crate::runtime::model::SourceId(source.id),
             )?;
             let replacing = match m.pick() {
-                Some(iptv_core::multiview::Pick::Replace(tile)) => Some(tile),
+                Some(iptv_presentation::multiview::Pick::Replace(tile)) => Some(tile),
                 _ => None,
             };
             let count = m

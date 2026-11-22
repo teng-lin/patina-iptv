@@ -4,7 +4,7 @@ mod error;
 mod states;
 
 pub use error::{Cause, ErrorKind, Failure};
-pub use states::{Phase, PlayerState, Retry, RetryPolicy, Waiting};
+pub use states::PlayerState;
 
 /// What the player should open: a URL and the HTTP headers to send with it
 /// (User-Agent, Referer, provider identity). Header names keep their case;
@@ -118,10 +118,6 @@ impl WatchTime {
         std::mem::take(&mut self.pending_ms)
     }
 }
-
-pub use crate::playback_health::Health;
-pub use crate::playback_state::ChannelHistory;
-pub use crate::zap::{ZapOrigin, group_range, zap_from_list, zap_target};
 
 #[cfg(test)]
 mod tests;

@@ -1,10 +1,9 @@
 //! Poster browsing: navigation, category preview, focused metadata and a
 //! bounded, virtualized grid. No provider URL is passed to the image host.
 use super::*;
-use iptv_core::{
-    browse::RailItem,
-    vod::{Card, Destination},
-};
+use iptv_core::vod::Card;
+use iptv_presentation::browse::RailItem;
+use iptv_presentation::vod::Destination;
 
 fn all_label(ui: Ui) -> &'static str {
     if ui.vod.with(|s| s.query.kind == Kind::Series) {

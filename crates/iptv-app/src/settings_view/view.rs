@@ -277,13 +277,13 @@ fn row_view(
         let settings = crate::settings::read(ui);
         if row().is_some_and(|row| row.key() == Some(iptv_settings::keys::PIP_ON_LEAVE.as_str())) {
             let unavailable = ui.pip.with(|pip| {
-                iptv_core::capabilities::pip(pip, true)
+                iptv_presentation::capabilities::pip(pip, true)
                     .reason()
                     .filter(|reason| {
                         matches!(
                             reason,
-                            iptv_core::capabilities::Reason::WaitingForPlayer
-                                | iptv_core::capabilities::Reason::UnsupportedPip
+                            iptv_presentation::capabilities::Reason::WaitingForPlayer
+                                | iptv_presentation::capabilities::Reason::UnsupportedPip
                         )
                     })
             });

@@ -2,7 +2,7 @@
 //! on the menu's items, a tap beside the menu, a long press, and the
 //! pointer chrome's toolbar and tile buttons (`multiview_view/chrome.rs`).
 
-use iptv_core::multiview::Outcome;
+use iptv_presentation::multiview::Outcome;
 
 use super::apply;
 use crate::{Ui, ViewMode};
@@ -30,7 +30,7 @@ pub fn choose(ui: Ui, index: usize) {
         if super::can_confirm_pick(m, index) {
             m.choose(index)
         } else {
-            m.key(iptv_core::multiview::Key::Back, failed)
+            m.key(iptv_presentation::multiview::Key::Back, failed)
         }
     });
 }

@@ -2,9 +2,11 @@
 //! the shell renders it and sends named runtime commands.
 use crate::i18n::trf;
 use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
-use iptv_core::menu::Origin;
-use iptv_core::recording::{Draft, Job, JobId, Request, Status};
+use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
+use iptv_presentation::capabilities::recording_notice;
+use iptv_presentation::menu::Origin;
+use iptv_presentation::recording::{Draft, status_label};
 use nsh_core::prelude::*;
 use std::time::Duration;
 
@@ -65,7 +67,7 @@ fn reload(ui: Ui) {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
         let repeating = owner.repeating_recording_jobs().await.unwrap_or_default();
-        let background_notice = owner.recording_capabilities().notice().map(str::to_owned);
+        let background_notice = recording_notice(owner.recording_capabilities()).map(str::to_owned);
         ui.recordings.update(|s| {
             if s.read_generation != generation {
                 return;
@@ -472,7 +474,7 @@ fn save_allowed(ui: Ui, draft: Draft) {
                     s.error = Some(
                         error
                             .unavailable_reason()
-                            .filter(|reason| iptv_core::i18n::is_cataloged(reason))
+                            .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
                             .unwrap_or("Recording action failed")
                             .into(),
                     )
@@ -795,7 +797,7 @@ fn status(job: &Job) -> &'static str {
     if job.status == Status::Recording && job.bytes == 0 {
         tr("Starting recording")
     } else {
-        tr(job.status.label())
+        tr(status_label(job.status))
     }
 }
 
@@ -821,7 +823,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
                                 format!("{:.2} {}", j.bytes as f64 / (1024.0 * 1024.0), tr("MiB"));
                             format!(
                                 "{} · {}\n{}–{} · {}\n{}",
-                                tr(j.status.label()),
+                                tr(status_label(j.status)),
                                 j.request.channel_name,
                                 date(j.request.start),
                                 crate::time::time_only(j.request.end),
@@ -1029,7 +1031,7 @@ fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
 fn translated_reason(message: &str) -> &str {
     if message.is_empty() {
         ""
-    } else if iptv_core::i18n::is_cataloged(message) {
+    } else if iptv_presentation::i18n::is_cataloged(message) {
         tr(message)
     } else {
         tr("Recording action failed")

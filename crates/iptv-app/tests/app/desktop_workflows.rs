@@ -428,8 +428,15 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
     step(app.press("id:navigation-rail >> label:Recordings"));
     step(app.wait_for("id:recording-job >> nth=1"));
     let before = names(app, "Generated recording ");
-    step(app.wheel("id:recording-job >> nth=1", Point::new(px(0.0), px(3000.0))));
-    app.idle(Duration::from_millis(400)).unwrap();
+    // Wheel inside the viewport. If the list is already against one end,
+    // the opposite direction should still move it.
+    for delta in [3000.0, -3000.0] {
+        step(app.wheel("id:recordings-screen", Point::new(px(0.0), px(delta))));
+        app.idle(Duration::from_millis(400)).unwrap();
+        if names(app, "Generated recording ") != before {
+            break;
+        }
+    }
     assert_ne!(
         names(app, "Generated recording "),
         before,

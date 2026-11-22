@@ -59,12 +59,9 @@ header's type sizes and the translations.
 | Domain | What is true about the content and the viewer's data, and what do the rules allow? | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-search`, `iptv-settings` |
 | Adapters | How does one technology do the I/O that a port describes? | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`, `iptv-player-mpv`, the browser adapters of `iptv-web` |
 | Application | Which operation runs, in what order, and who owns the result? | `iptv-runtime` |
-| Presentation state | While a person operates a feature: what did they ask for, where are they in it, and what is shown? | `iptv-nav`, `iptv-presentation`\* |
+| Presentation state | While a person operates a feature: what did they ask for, where are they in it, and what is shown? | `iptv-nav`, `iptv-presentation` |
 | View | How is that laid out and drawn on this toolkit, which features are open, and who carries out the effects? | `iptv-app` (NSH), the bridge of `iptv-web` |
 | Hosts | How is it packaged and started on one platform? | `hosts/android`, `hosts/tizen`, `hosts/tizen-nsh`, `iptv-tui` |
-
-\* Not a crate yet: its code is still inside other crates
-([departures](#where-the-code-departs-from-the-rules)).
 
 Presentation state and View together are the presentation. A screen is
 presentation, not business logic: the business is the Domain's rules and the
@@ -75,7 +72,7 @@ Application's operations.
                         │    └──────────────────────────────┐
                         ▼                                   ▼
   Presentation state  iptv-nav            Application   iptv-runtime
-                      iptv-presentation*                    │
+                      iptv-presentation                    │
                         │                                   ▼
                         │                 Adapters      iptv-net  iptv-store-sqlite
                         │                               iptv-sqlcipher-init  iptv-player-mpv
@@ -110,10 +107,9 @@ What each layer holds:
   `Action` for a `Context`. `iptv-presentation` has one module per feature,
   each around its state holder, with the functions that compute its display
   data, and the localization those functions use: the message catalog,
-  plural rules, calendar names and the clock's labels. The
-  [shared interaction plan](plans/2026-11-22-shared-interaction-layer.md)
-  was written before this split: where it says `iptv-core`, read
-  `iptv-presentation`.
+  plural rules, calendar names and the clock's labels. Both front ends
+  share these decisions as described in the
+  [shared interaction plan](plans/2026-11-22-shared-interaction-layer.md).
 - **View.** Views, geometry, type and color on one toolkit. A front end
   turns platform input into keys, keeps the navigation (each front end has
   its own set of features), routes each action to the holder on top, and
@@ -260,32 +256,31 @@ adapters.
 
 ## Crates
 
-The workspace has seventeen crates under `crates/` and the vendored
-`nsh-tv`. A crate depends only on what its layer's row in
-[Dependency rules](#dependency-rules) allows. This table is what the
-manifests say today.
+The workspace has eighteen crates under `crates/` and the vendored
+`nsh-tv`. [Dependency rules](#dependency-rules) govern their dependencies.
 
 | Crate | Layer | Depends on (workspace crates) |
 | --- | --- | --- |
-| `iptv-core` | Domain and presentation, split into modules | none |
-| `iptv-settings` | Domain, with one feature's state holder | none |
+| `iptv-core` | Domain | none |
+| `iptv-settings` | Domain | none |
 | `iptv-providers`, `iptv-epg` | Domain | `iptv-core` |
 | `iptv-guide` | Domain | `iptv-core`, `iptv-epg`, `iptv-providers` |
-| `iptv-search` | Domain, with one feature's state holder | `iptv-core`, `iptv-epg` |
-| `iptv-library` | Domain, with six features' state holders | `iptv-core`, `iptv-providers`, `iptv-epg` |
+| `iptv-search` | Domain | `iptv-core`, `iptv-epg` |
+| `iptv-library` | Domain | `iptv-providers`, `iptv-epg` |
 | `iptv-import` | Domain | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-settings`, `iptv-library` |
 | `iptv-nav` | Presentation state | none |
+| `iptv-presentation` | Presentation state | `iptv-core`, `iptv-epg`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`; `iptv-guide` for tests |
 | `iptv-net` | Adapters | `iptv-providers`, `iptv-import` |
 | `iptv-store-sqlite` | Adapters | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` (native only) |
 | `iptv-sqlcipher-init` | Adapters | none |
 | `iptv-player-mpv` | Adapters | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | Application | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite`; `iptv-net` with its `native` feature |
-| `iptv-web` | Adapters, and with its `bridge` feature View | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers`, `iptv-search`; `iptv-nav` with `bridge` |
+| `iptv-web` | Adapters, and with its `bridge` feature View | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers`, `iptv-search`; `iptv-nav` and `iptv-presentation` with `bridge` |
 | `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, in the browser `iptv-web` and `iptv-store-sqlite` |
 | `nsh-tv` (vendored) | View | NSH |
 | `iptv-tui` | Hosts | `iptv-app`, `iptv-library`, `iptv-net`, `iptv-player-mpv`, `iptv-providers`, `iptv-settings`, `iptv-store-sqlite`, NSH |
 
-What each crate owns once the departures are done:
+What each crate owns:
 
 - `iptv-core`: the values and rules more than one crate needs. Guide time,
   `Program` and the `Schedule` trait, lists by content key, organization,
@@ -359,41 +354,16 @@ files and legacy snapshot conversion use the same initialization boundary.
 
 ## Where the code departs from the rules
 
-Each row is a debt with a destination. No change adds a row or makes one
-larger: no new state holder in a Domain crate, no new use of one by
-`iptv-runtime`, an adapter or a Domain crate, no new wording below the
-presentation, no new measurement outside a front end. Until
-`iptv-presentation` exists, a new holder goes where its kind lives today, in
-a module that holds no Domain values, so that the move is a file move.
+The [layer boundaries plan](plans/2026-11-22-layer-boundaries.md) records
+the migration to `iptv-presentation`. These departures remain.
 
 | What | Where it is today | Rule | Where it goes |
 | --- | --- | --- | --- |
-| Modules that are presentation state only | `iptv_core::{browse, browse_playback, channel_list, channel_number, channel_picker, editor, heard, library_recovery, menu, panels, pip, play_bar, player_info, player_options, seek_hold, sound}` and `playback_windows` | 1 | `iptv-presentation` |
-| Temporary re-exports | The split presentation holders still live under their original `iptv-core` paths. The `layer_inventory` test tracks those re-exports. | 1 | Move each holder to `iptv-presentation` and remove its re-export. |
-| State holders in three other Domain crates | `iptv_library::{details, epg_sources, guide_assign, guide_inspect, guide_repair_screen, playlists}`, `iptv_search::{state, selection}`, `iptv_settings::screen` | 1 | `iptv-presentation` |
-| Domain crates' tests that drive a holder | `iptv-guide`'s unit tests build `Focus`, `ChannelList` and `ListView` over its schedule | 1 | They move beside the holders, in `iptv-presentation`'s tests, with `iptv-guide`'s fixtures exported for tests. |
 | A holder issues an operation's identity | Each `Wizard` numbers its imports from 1 (`ImportId`), so a wizard opened again can take a reply meant for the last one | 5 | The runtime issues the identity when it accepts the import. |
 | Refusals as English sentences | `recording::Request::validate` returns sentences, which reach the screen through `iptv-store-sqlite`'s error and the runtime's admission | 7 | A typed reason. |
-| Localization in the Domain's crate | `iptv_core::{i18n, clock}` and the crate's `external-catalog` feature | 1 | `iptv-presentation`, once nothing below it translates. The `key` marker for message ids stays in `iptv-core`. |
 | A lookup that reads a file | In a browser package the first lookup of a language reads a package file inside `translate`, and a failed read stays an empty catalog | 4 | The host loads a language's catalog and hands it in; `translate` only looks up. |
+| Untyped message IDs | `key` marks a string in `iptv_core::message`. Its type also admits unmarked sentences. | 7 | A typed message ID. |
 | One crate in two layers | `iptv-web`: browser adapters, and behind `bridge` the bridge | 1 | Two crates, with one owner for the wasm entry points both workers call. It waits for the decision on the bridge's future. |
-
-The [layer boundaries plan](plans/2026-11-22-layer-boundaries.md) removes
-these rows in three pull requests:
-
-1. **Untangle in place.** Runtime commands use Domain values. Split holders
-   keep their original paths through temporary re-exports. Layout and touch
-   geometry live in `iptv-app`, and the platform adapter owns the desktop
-   picture-in-picture window identity and placement.
-2. **Listings as values.** The guide exposes stored titles, gaps and
-   loading slots as distinct values. Both front ends preserve a stored
-   title even when it has the same wording as a placeholder.
-3. **`iptv-presentation`.** The presentation files move, dependents first,
-   then the localization. Renames only; front-end paths change once.
-
-The operation identity, the refusals, the lookup that reads a file and
-`iptv-web`'s two layers are separate issues that do not block those three.
-Their rows stay in this table after the third pull request.
 
 Exceptions that stay, each with its reason:
 
@@ -416,8 +386,8 @@ Exceptions that stay, each with its reason:
 | Rule | Check |
 | --- | --- |
 | No cycles; a crate names only what its manifest lists | Cargo |
-| Declared dependencies follow the layer rules | `tools/ci/test-layers.py` reads Cargo metadata and checks the bridge feature edge |
-| The temporary presentation names below the front ends match the inventory | `iptv-core/tests/it/layer_inventory.rs` checks shipped and test-only entries separately |
+| Each workspace crate depends only on its allowed layers, and only the front ends depend on `iptv-presentation` | `tools/ci/test-layers.py` reads Cargo metadata, including dev, target-specific, renamed and optional dependencies |
+| Only the bridge feature of `iptv-web` can name a state holder | `tools/ci/test-layers.py` enforces the feature edge, and the adapters-only wasm check builds without it |
 | The portable crates compile for wasm32 with no platform crate | the wasm32 builds ([Portability](#portability)) |
 | The runtime depends on and names only its listed crates, and no toolkit, shell or player | `iptv-runtime/tests/it/architecture.rs` |
 | The shell names only the listed runtime items and no store type; runtime events enter at one place | `iptv-runtime/tests/it/shell_boundary.rs` |
@@ -425,9 +395,6 @@ Exceptions that stay, each with its reason:
 
 The lists in those tests are exact: a new name fails until it is added on
 purpose, and an unused entry fails until it is removed.
-
-Review checks ownership within each crate. The inventory tracks migration
-references until the presentation crate makes the compiler enforce the edge.
 
 ## Sans-IO ports
 
@@ -473,9 +440,9 @@ State has four lifetimes, and each has one owner.
 | Presentation state | the focused program, the open panel and its timer, a wizard's step and its input | the feature's state holder, held by the front end | while the feature is open, across view rebuilds |
 | UI element state | a scroll offset in points, an animation's progress, a measured size | the view | until a rebuild |
 
-"State lives in the core" in [AGENTS.md](../AGENTS.md) means the first three
-rows: no state that matters is kept in a view. Views render state and send
-actions.
+The runtime owns durable data and operations. The front ends hold their
+feature state in `iptv-presentation` holders. Views render that state and
+send actions.
 
 1. **Input.** NSH reports a keystroke. `iptv-app/src/input.rs` turns it into an
    `iptv_nav::RemoteKey` with a phase, a `PressDetector` decides short or long,
@@ -508,9 +475,9 @@ service failure/restart scenarios and distinguishes headless, decoder and device
 
 ## The video layer
 
-Recording state and its remote/touch screen model live in
-`iptv-core::recording`; the app's `recordings_view` renders that state and
-calls the experimental `iptv-runtime` recording service. SQLite stores durable,
+Recording jobs and rules live in `iptv_core::recording`. The remote and
+touch screen model lives in `iptv_presentation::recording`. The app's
+`recordings_view` renders it and calls the `iptv-runtime` recording service. SQLite stores durable,
 source-scoped intent without resolved stream URLs. A scheduler conditionally
 claims the saved time window, so cancellation or editing invalidates an old
 read. Jobs are host-local and are removed from portable snapshots/restores.
@@ -547,7 +514,8 @@ acknowledgements. Seeking preserves the player surface and pause state; stale
 observations cannot undo a newer seek. Recording and on-demand resume metadata
 live in the encrypted catalog, independently of retained media bytes.
 
-Parental policy, unlock scopes and PIN-dialog state live in `iptv-core::parental`.
+Parental policy and unlock scopes live in `iptv_core::parental`. The PIN
+dialog state lives in `iptv_presentation::parental`.
 The native runtime stores salted one-way PIN/recovery verifiers, durable attempt
 backoff and source-qualified blocks. Provider/category membership is checked
 from current storage at native admission, with final grant checks before

@@ -373,7 +373,11 @@ fn language_tag() -> String {
 }
 
 fn word(source: &str) -> String {
-    iptv_core::i18n::translate(iptv_core::i18n::resolve(&language_tag(), None), source).to_owned()
+    iptv_presentation::i18n::translate(
+        iptv_presentation::i18n::resolve(&language_tag(), None),
+        source,
+    )
+    .to_owned()
 }
 
 fn message(source: &str) -> String {

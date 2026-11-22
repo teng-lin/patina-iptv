@@ -115,11 +115,6 @@ impl Tracks {
     }
 }
 
-pub use crate::track_labels::{
-    Choice, audio_layout, audio_layout_in, bitrate_label, codec_name, entries, entries_in,
-    fps_label, language_name, language_name_in, resolution_class, summary, summary_in,
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;

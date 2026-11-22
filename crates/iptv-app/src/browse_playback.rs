@@ -1,8 +1,9 @@
 //! Adapter for the core's cancelable live-preview policy.
 use crate::{Playback, Ui, ViewMode};
-use iptv_core::browse_playback::{BrowsePlayback, Effect, Policy, Surface, Target};
-use iptv_core::{channel_list::ListPane, guide::Airing};
+use iptv_core::guide::Airing;
 use iptv_nav::Context;
+use iptv_presentation::browse_playback::{BrowsePlayback, Effect, Policy, Surface, Target};
+use iptv_presentation::channel_list::ListPane;
 use iptv_settings::keys;
 use nsh_core::prelude::*;
 use std::time::Duration;

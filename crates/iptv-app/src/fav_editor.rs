@@ -6,7 +6,7 @@
 
 use crate::i18n::{tr, trf};
 
-use iptv_core::editor::FavoritesEditor;
+use iptv_presentation::editor::FavoritesEditor;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 

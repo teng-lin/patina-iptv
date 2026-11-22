@@ -241,7 +241,7 @@ mod tests {
     /// language, each by a name of its own.
     #[test]
     fn actions_and_screens_have_their_own_names_in_every_language() {
-        for language in iptv_core::i18n::LANGUAGES {
+        for language in iptv_presentation::i18n::LANGUAGES {
             in_language(language.tag, || {
                 let actions: std::collections::BTreeSet<_> =
                     ACTIONS.iter().map(|action| action_name(*action)).collect();
@@ -282,7 +282,7 @@ mod tests {
             assert_eq!(remote_only(&key_name(RemoteKey::Back)), "Zurück");
         });
         in_language("ru", || assert_eq!(key_name(RemoteKey::Green), "Зелёная"));
-        for language in iptv_core::i18n::LANGUAGES {
+        for language in iptv_presentation::i18n::LANGUAGES {
             in_language(language.tag, || {
                 let names: std::collections::BTreeSet<_> =
                     KEYS.iter().map(|key| key_name(*key)).collect();

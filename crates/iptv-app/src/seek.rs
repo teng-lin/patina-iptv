@@ -9,12 +9,12 @@
 //! rewind 10 s, one time-bar step 5 min); `catchup.seek_keys` chooses
 //! which keys step along the time bar (`player_keys.rs`). A held key steps
 //! a few times a second, faster the longer it is held
-//! (`iptv_core::seek_hold`); OK opens the archive at the target at once.
+//! (`iptv_presentation::seek_hold`); OK opens the archive at the target at once.
 
 use std::cell::Cell;
 use std::time::Duration;
 
-use iptv_core::seek_hold::SeekHold;
+use iptv_presentation::seek_hold::SeekHold;
 use iptv_settings::{Settings, Target, keys};
 use nsh_core::prelude::*;
 

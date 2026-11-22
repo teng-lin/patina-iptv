@@ -6,7 +6,7 @@
 //! strip; a channel change a compact banner. The card's time line is the
 //! only one: a replay's card shows its seek bar there. A pointer (desktop
 //! mouse, tablet touch) has the play bar instead (`play_bar.rs`, never on
-//! a TV). State lives in `iptv_core::panels`; keys in `player_keys.rs`;
+//! a TV). State lives in `iptv_presentation::panels`; keys in `player_keys.rs`;
 //! this draws them and schedules their idle deadline. Panels are views over
 //! the video SurfaceView. [`status`] draws the waiting and error
 //! states of `player.rs`.
@@ -14,10 +14,11 @@
 use crate::i18n::{tr, trf};
 use std::time::Duration;
 
-use iptv_core::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
-use iptv_core::player_info::date_time;
-use iptv_core::sound::delay_label;
-use iptv_core::tracks::{Kind as Track, audio_layout_in, summary_in};
+use iptv_core::tracks::Kind as Track;
+use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
+use iptv_presentation::player_info::date_time;
+use iptv_presentation::sound::delay_label;
+use iptv_presentation::tracks::{audio_layout_in, summary_in};
 use nsh_core::prelude::*;
 
 use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
@@ -64,7 +65,9 @@ fn label(ui: Ui, control: Control) -> String {
         PictureInPicture => with(
             tr("Picture in picture"),
             ui.pip
-                .with(|pip| iptv_core::capabilities::pip(pip, crate::pip::playing(ui)).reason())
+                .with(|pip| {
+                    iptv_presentation::capabilities::pip(pip, crate::pip::playing(ui)).reason()
+                })
                 .map(|reason| crate::capabilities::reason(reason).to_owned()),
         ),
         VideoTracks => {
@@ -430,7 +433,7 @@ fn quick_row(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElem
                 },
                 focused,
                 move || {
-                    action == iptv_core::panels::QuickAction::Multiview
+                    action == iptv_presentation::panels::QuickAction::Multiview
                         && ui.playing.get().is_none()
                 },
                 move || {

@@ -44,17 +44,6 @@ impl Status {
     pub fn active(self) -> bool {
         matches!(self, Self::Scheduled | Self::Recording)
     }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Scheduled => "Scheduled",
-            Self::Recording => "Recording",
-            Self::Completed => "Completed",
-            Self::Partial => "Partial recording",
-            Self::Failed => "Failed",
-            Self::Canceled => "Canceled",
-            Self::Missed => "Missed",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -93,22 +82,6 @@ pub enum Repeat {
     Weekly,
     Series,
 }
-impl Repeat {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Once => "Once",
-            Self::Daily => "Every day",
-            Self::Weekly => "Every week",
-            Self::Series => "Every matching program",
-        }
-    }
-    pub fn advance(self, step: i64) -> Self {
-        let values = [Self::Once, Self::Daily, Self::Weekly, Self::Series];
-        let index = values.iter().position(|value| *value == self).unwrap_or(0) as i64;
-        values[(index + step).rem_euclid(values.len() as i64) as usize]
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RuleId(pub i64);
 
@@ -169,8 +142,6 @@ pub struct Job {
     /// Fixed application messages only; never transport errors or provider replies.
     pub message: String,
 }
-
-pub use crate::recording_state::{Draft, Entry, EntryField, Screen};
 
 #[cfg(test)]
 mod tests {

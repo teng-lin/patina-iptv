@@ -3,9 +3,10 @@
 
 use crate::i18n::{tr, trf};
 
-use iptv_core::panels::{QuickAction, Shown};
-use iptv_core::playback::{Cause, ErrorKind, Waiting};
+use iptv_core::playback::{Cause, ErrorKind};
 use iptv_nav::Profile;
+use iptv_presentation::panels::{QuickAction, Shown};
+use iptv_presentation::playback_health::Waiting;
 
 /// An action card's label (ours); the favorite's shows its state.
 pub(crate) fn quick_label(action: QuickAction, favorite: bool, detour: bool) -> &'static str {

@@ -1,6 +1,6 @@
 [package]
 name = "iptv-library"
-description = "Portable library model and pure playlist and guide screen state."
+description = "Portable playlist and guide models, source policies and organization data."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,6 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-iptv-core.workspace = true
 iptv-providers.workspace = true
 iptv-epg.workspace = true
 

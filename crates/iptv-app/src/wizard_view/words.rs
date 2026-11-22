@@ -2,7 +2,7 @@
 
 use crate::i18n::{tr, trf};
 
-use iptv_core::wizard::{
+use iptv_presentation::wizard::{
     FailureKind, Field, FieldError, ImportFailure, ImportInput, ImportProgress, ImportStage,
     PlaylistKind,
 };
@@ -126,7 +126,7 @@ pub fn stage(progress: Option<ImportProgress>) -> String {
     }
 }
 
-pub fn counts(c: iptv_core::wizard::ImportCounts) -> String {
+pub fn counts(c: iptv_presentation::wizard::ImportCounts) -> String {
     let mut parts = vec![trf(
         "{channels, plural, one {# channel} other {# channels}} in \
          {groups, plural, one {# group} other {# groups}}",
@@ -150,7 +150,7 @@ pub fn counts(c: iptv_core::wizard::ImportCounts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iptv_core::wizard::ImportCounts;
+    use iptv_presentation::wizard::ImportCounts;
 
     #[test]
     fn every_failure_kind_has_its_own_message() {
@@ -297,7 +297,7 @@ mod tests {
             PlaylistKind::Xtream,
         ] {
             let english = told(kind);
-            for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+            for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
                 let texts = in_language(language.tag, || told(kind));
                 let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
                 assert_eq!(distinct.len(), kinds.len(), "{}", language.tag);
@@ -320,7 +320,7 @@ mod tests {
             FieldError::InvalidPort,
             FieldError::InvalidMac,
         ];
-        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+        for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
             let texts: std::collections::BTreeSet<_> = in_language(language.tag, || {
                 errors.map(field_error).into_iter().collect()
             });

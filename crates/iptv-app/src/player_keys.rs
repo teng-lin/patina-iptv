@@ -13,11 +13,11 @@
 //! Up/Down still zap. In a replay the `catchup.seek_keys` seek instead
 //! (held: faster, `seek.rs`), the card showing its seek bar.
 
-use iptv_core::channel_list::ListMode;
-use iptv_core::panels::{Control, Pick, QuickAction};
-use iptv_core::playback::{ZapOrigin, zap_from_list};
 use iptv_core::tracks::Kind as Track;
 use iptv_nav::{Action, Context, RemoteKey, seek_arrows, seek_key, up_down_key};
+use iptv_presentation::channel_list::ListMode;
+use iptv_presentation::panels::{Control, Pick, QuickAction};
+use iptv_presentation::zap::{ZapOrigin, zap_from_list};
 
 use crate::{Playback, Ui, ViewMode};
 

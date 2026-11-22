@@ -220,9 +220,6 @@ impl Pin {
     pub fn take(&mut self) -> Self {
         std::mem::take(self)
     }
-    pub fn masked(&self) -> String {
-        "•".repeat(self.len)
-    }
 }
 impl Drop for Pin {
     fn drop(&mut self) {
@@ -231,8 +228,6 @@ impl Drop for Pin {
         self.len.zeroize();
     }
 }
-
-pub use crate::parental_state::{Dialog, Phase, Submission};
 
 #[cfg(test)]
 mod tests {
@@ -329,7 +324,7 @@ mod tests {
         assert!(Pin::parse("12345x").is_none());
         let mut pin = Pin::parse("2468").unwrap();
         assert_eq!(format!("{pin:?}"), "PIN(\"***\")");
-        assert_eq!(pin.masked(), "••••");
+        assert_eq!(pin.len(), 4);
         pin.erase();
         assert!(!pin.valid());
         pin.push(1);

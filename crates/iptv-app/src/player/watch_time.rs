@@ -1,7 +1,8 @@
 //! Live watch time is sampled from the native player while it advances.
 use crate::{Playback, Ui, ViewMode};
-use iptv_core::playback::{Phase, WatchTime};
+use iptv_core::playback::WatchTime;
 use iptv_library::SourceId;
+use iptv_presentation::playback_health::Phase;
 use nsh_core::{platform::Lifecycle, prelude::*};
 
 #[derive(Clone, Debug)]

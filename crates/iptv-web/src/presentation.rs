@@ -1,8 +1,8 @@
 //! Guide and player labels for the bridge's English 24-hour display.
 
-use iptv_core::clock::{self, Style};
 use iptv_core::guide::Airing;
-use iptv_core::player_info::ProgramTiming;
+use iptv_presentation::clock::{self, Style};
+use iptv_presentation::player_info::ProgramTiming;
 
 use crate::host::host;
 

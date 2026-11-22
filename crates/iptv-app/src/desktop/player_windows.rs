@@ -1,7 +1,7 @@
 //! Desktop guide-menu prototype: auxiliary players belong to the app, independently
 //! of the main guide's navigation and the multiview layout.
 use crate::{Ui, i18n::tr};
-use iptv_core::playback_windows::SessionId;
+use iptv_presentation::playback_windows::SessionId;
 use nsh_core::prelude::*;
 
 pub fn mounted(ui: Ui, surface: usize) -> bool {
@@ -50,7 +50,7 @@ pub fn open(ui: Ui, channel: usize) {
 }
 
 fn admit_session(
-    workspace: Signal<iptv_core::playback_windows::Workspace<String>>,
+    workspace: Signal<iptv_presentation::playback_windows::Workspace<String>>,
     key: String,
     start: impl FnOnce(usize) -> bool,
 ) {
@@ -73,9 +73,9 @@ fn admit_session(
 }
 
 fn follow_clock(
-    parent: Signal<iptv_core::guide::Focus>,
-    local: Signal<iptv_core::guide::Focus>,
-    view: impl Fn() -> iptv_core::lists::ListView + 'static,
+    parent: Signal<iptv_presentation::guide::Focus>,
+    local: Signal<iptv_presentation::guide::Focus>,
+    view: impl Fn() -> iptv_presentation::lists::ListView + 'static,
 ) {
     let now = computed(move || parent.with(|f| f.now));
     effect(move || {
@@ -104,8 +104,9 @@ fn follow_lists(local: Ui) {
                 local.description.set(None);
                 local.chooser.set(None);
             } else if matches!(
-                iptv_core::lists::Entry::at(local.focus.with_untracked(|f| f.group)),
-                iptv_core::lists::Entry::Favorites | iptv_core::lists::Entry::Recent
+                iptv_presentation::lists::Entry::at(local.focus.with_untracked(|f| f.group)),
+                iptv_presentation::lists::Entry::Favorites
+                    | iptv_presentation::lists::Entry::Recent
             ) {
                 crate::lists::rebuild(local, true);
             }
@@ -252,7 +253,7 @@ fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::des
     let was_compact = std::cell::Cell::new(false);
     let key_window = window.clone();
     on_key("escape", move |_| {
-        if crate::pip::exit(local, iptv_core::pip_window::Exit::BackToApp) {
+        if crate::pip::exit(local, iptv_presentation::pip_window::Exit::BackToApp) {
             return;
         }
         if local.top_overlay().is_some() {
@@ -489,8 +490,9 @@ mod tests {
 
     #[component]
     fn LocalStateHarness() -> impl IntoElement {
-        use iptv_core::guide::{Focus, Schedule, SyntheticSchedule};
-        use iptv_core::lists::{ALL, ChannelList, ListView};
+        use iptv_core::guide::{Schedule, SyntheticSchedule};
+        use iptv_presentation::guide::Focus;
+        use iptv_presentation::lists::{ALL, ChannelList, ListView};
         use std::rc::Rc;
         let parent = signal(Focus::at(0));
         let mut focus = Focus::at(0);
@@ -514,9 +516,11 @@ mod tests {
                     .on_press(move || parent.update(|f| f.now += 60)),
             )
             .child(text(move || {
-                workspace.with(|w: &iptv_core::playback_windows::Workspace<String>| {
-                    format!("sessions {}", w.sessions().len())
-                })
+                workspace.with(
+                    |w: &iptv_presentation::playback_windows::Workspace<String>| {
+                        format!("sessions {}", w.sessions().len())
+                    },
+                )
             }))
             .child(
                 view()

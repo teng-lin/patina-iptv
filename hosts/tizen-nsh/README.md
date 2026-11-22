@@ -15,7 +15,7 @@ responsiveness gates there (decision of 2026-11-21 and its numbers in
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Module | `src/lib.rs` (`patina-tizen`) | `iptv-app`'s root and UI set in the platform's runner (`nsh_platform_tizen::app!`). The engine, screens, runtime and SQLite store run in one WebAssembly instance in a Web Worker. |
+| Module | `src/lib.rs` (`patina-tizen`) | `iptv-app`'s root and UI set in the platform's runner (`nsh_platform_tizen::app!`). The engine, screens, `iptv-presentation` holders, runtime and SQLite store run in one WebAssembly instance in a Web Worker. |
 | Worker services | `app/patina-worker.js` | The imports iptv-web's adapters link: fetch and its streams, timers, clocks, randomness, the time zone, key-value storage, and the store's 64 KiB chunks in IndexedDB (read before the module starts, saved after each commit). |
 | Page | `app/index.html`, `app/patina-host.js` | Starts the platform, which draws the app's views on the page; `tv.player` is the platform's AVPlay component, refusing sources that need request headers (AVPlay cannot send them). |
 | Package | `app/config.xml`, `build.sh` | Its own application id (`PatinaNsh1.Patina` by default), CSP mode, the `tizen` profile. |

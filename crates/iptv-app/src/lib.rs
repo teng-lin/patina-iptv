@@ -18,7 +18,18 @@ pub(crate) fn is_tui_mode() -> bool {
     TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub use iptv_core::guide;
+/// Guide values and navigation used by the shell.
+pub mod guide {
+    pub use iptv_core::guide::{
+        Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, Program,
+        SYNTHETIC_EPOCH_UNIX, Schedule, SyntheticSchedule, VISIBLE, catchup_days, floor, floor_of,
+        group_start, now_minute, program_at, secs_to_next_minute, unix_of,
+    };
+    pub use iptv_presentation::guide::{
+        Focus, Move, PAST, Pane, PreviewOrigin, ProgramSelection, STEP, home_window, moves,
+        page_row, view_range,
+    };
+}
 #[cfg(all(
     feature = "test-support",
     any(target_os = "linux", target_os = "macos")
@@ -122,11 +133,11 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use iptv_core::editor::FavoritesEditor;
-use iptv_core::lists::ChannelList;
-use iptv_core::menu::{Menu, Origin};
-use iptv_core::panels::Panels;
-use iptv_core::player_options::{PictureSettings, SleepTimer};
+use iptv_presentation::editor::FavoritesEditor;
+use iptv_presentation::lists::ChannelList;
+use iptv_presentation::menu::{Menu, Origin};
+use iptv_presentation::panels::Panels;
+use iptv_presentation::player_options::{PictureSettings, SleepTimer};
 use nsh_core::prelude::*;
 use theme::Theme;
 
@@ -135,9 +146,9 @@ fn native_module(registry: &mut Registry) {
     registry.register::<App>();
 }
 
-/// The last kind of input (`iptv_core::layout`): the focus fill and key
+/// The last kind of input (`iptv_presentation::input_mode`): the focus fill and key
 /// hints only show for keys, as in Android's touch mode.
-pub use iptv_core::layout::InputMode as Input;
+pub use iptv_presentation::input_mode::InputMode as Input;
 
 /// A pointer went down: a finger, or a mouse, trackpad or pen. Recorded at
 /// the root as the touch starts, before the pressed control hears the press.
@@ -218,17 +229,17 @@ pub struct Ui {
     pub app: SharedUi,
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
-    pub browse_playback: Signal<iptv_core::browse_playback::BrowsePlayback>,
+    pub browse_playback: Signal<iptv_presentation::browse_playback::BrowsePlayback>,
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
-    pub pending_zap: Signal<Option<iptv_core::browse_playback::Target>>,
+    pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
     /// A timeline pan's hold on the channel whose program on air it
     /// started from: browse playback keeps that channel while the pan
     /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
-    pub pan_anchor: Signal<Option<iptv_core::browse_playback::PanAnchor>>,
+    pub pan_anchor: Signal<Option<iptv_presentation::browse_playback::PanAnchor>>,
     /// The host's audio interruptions' policy (`interruption.rs`).
-    pub interruptions: Signal<iptv_core::interruption::Interruptions>,
+    pub interruptions: Signal<iptv_presentation::interruption::Interruptions>,
     /// The list the guide shows: catalog channels (`lists.rs`).
     pub list: Signal<Rc<ChannelList>>,
     /// The playing channel (catalog).
@@ -246,7 +257,7 @@ pub struct Ui {
     /// Player panels over full-screen video.
     pub panels: Signal<Panels>,
     /// The pointer's play bar over full-screen video (`play_bar.rs`).
-    pub play_bar: Signal<iptv_core::play_bar::PlayBar>,
+    pub play_bar: Signal<iptv_presentation::play_bar::PlayBar>,
     /// The play bar's laid-out height above the window's bottom (0 until
     /// it first shows): its rows wrap in a narrow window.
     pub play_bar_height: Signal<f32>,
@@ -258,12 +269,13 @@ pub struct Ui {
     pub menu: Signal<Option<Menu>>,
     /// The program description popover, if open.
     pub description: Signal<Option<Origin>>,
-    pub recordings: Signal<iptv_core::recording::Screen>,
-    pub vod: Signal<iptv_core::vod::Screen>,
+    pub recordings: Signal<iptv_presentation::recording::Screen>,
+    pub vod: Signal<iptv_presentation::vod::Screen>,
     pub recordings_open: Memo<bool>,
     /// Live or catch-up for the playing channel.
     pub playback: Signal<Playback>,
-    pub channel_number: Signal<iptv_core::channel_number::ChannelNumber<iptv_search::ChannelId>>,
+    pub channel_number:
+        Signal<iptv_presentation::channel_number::ChannelNumber<iptv_search::ChannelId>>,
     pub sleep: Signal<SleepTimer>,
     /// The open chooser over the video (picture size, sleep timer).
     pub chooser: Signal<Option<chooser::Open>>,
@@ -286,15 +298,15 @@ pub struct Ui {
     /// A playlist's guide sources screen, when open (over the playlists
     /// and settings screens).
     pub guide_sources: Signal<Option<epg_sources_view::Open>>,
-    pub guide_inspect: Signal<Option<iptv_library::guide_inspect::Screen>>,
-    pub guide_repair: Signal<Option<iptv_library::guide_repair_screen::Screen>>,
+    pub guide_inspect: Signal<Option<iptv_presentation::library::guide_inspect::Screen>>,
+    pub guide_repair: Signal<Option<iptv_presentation::library::guide_repair_screen::Screen>>,
     pub guide_repair_cancel: Stored<Option<iptv_import::CancelToken>>,
     pub guide_inspect_cancel: Stored<Option<iptv_import::CancelToken>>,
     /// The guide data chooser of a channel, when open.
     pub guide_assign: Signal<Option<guide_assign_view::Open>>,
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
-    pub settings_screen: Signal<Option<iptv_settings::screen::Screen>>,
+    pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
@@ -303,13 +315,13 @@ pub struct Ui {
     pub media: media::Media,
     /// Several channels at once, while open (`multiview.rs`).
     pub multiview: Signal<Option<multiview::State>>,
-    pub player_windows: Signal<iptv_core::playback_windows::Workspace<String>>,
+    pub player_windows: Signal<iptv_presentation::playback_windows::Workspace<String>>,
     /// The channel list over full-screen video, while open.
-    pub channels: Signal<Option<iptv_core::channel_list::ChannelList>>,
+    pub channels: Signal<Option<iptv_presentation::channel_list::ChannelList>>,
     /// Group and search selection while adding or replacing a multiview tile.
     pub channel_picker: Signal<Option<multiview_picker::Screen>>,
     /// The picture-in-picture window, as the host reports it (`pip.rs`).
-    pub pip: Signal<iptv_core::pip::Pip>,
+    pub pip: Signal<iptv_presentation::pip::Pip>,
     /// A Long Back acted: the platform's Back on its release is swallowed
     /// (`input.rs`).
     pub back_guard: Signal<iptv_nav::BackGuard>,
@@ -337,7 +349,7 @@ impl Ui {
     /// Allocate all presentation state afresh; shared signals and native stream
     /// ownership are supplied explicitly, never inherited from another window.
     pub(crate) fn new(app: SharedUi, player: player::Player) -> Self {
-        let recordings = signal(iptv_core::recording::Screen::default());
+        let recordings = signal(iptv_presentation::recording::Screen::default());
         let recordings_open = computed(move || recordings.with(|s| s.open));
         let ui = Self {
             app,
@@ -348,7 +360,7 @@ impl Ui {
             pan_anchor: signal(None),
             interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
-                iptv_core::lists::ALL,
+                iptv_presentation::lists::ALL,
                 &*schedule(),
                 &[],
                 &[],
@@ -388,7 +400,7 @@ impl Ui {
             menu: signal(None),
             description: signal(None),
             recordings,
-            vod: signal(iptv_core::vod::Screen::default()),
+            vod: signal(iptv_presentation::vod::Screen::default()),
             recordings_open,
             playback: signal(Playback::Live),
             channel_number: signal(Default::default()),
@@ -557,7 +569,7 @@ impl Ui {
         )
     }
 
-    /// Visible ways back (`iptv_core::layout::InputMode::back_controls`):
+    /// Visible ways back (`iptv_presentation::input_mode::InputMode::back_controls`):
     /// always on tablets and desktops, including after a keyboard is used;
     /// on TVs and terminals only once touch or a pointer is used.
     pub fn back_controls(&self) -> bool {
@@ -1088,7 +1100,7 @@ fn toggle_panels(ui: Ui) {
         play_bar::tapped(ui);
         return;
     }
-    if ui.panels.with(|p| p.shown) == iptv_core::panels::Shown::Hidden {
+    if ui.panels.with(|p| p.shown) == iptv_presentation::panels::Shown::Hidden {
         ui.update_panels(|p, now| p.show_card(now));
     } else {
         log::info!("iptv panels hidden by a tap");
@@ -1139,8 +1151,8 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
 /// so a handler stays while one is pending, even where Back would leave.
 fn bind_back(ui: Ui) {
     let back_target = computed(move || {
-        let panels =
-            ui.panels.with(|p| p.shown) != iptv_core::panels::Shown::Hidden || play_bar::shows(ui);
+        let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
+            || play_bar::shows(ui);
         let menu = ui.menu.with(Option::is_some)
             || ui.description.with(Option::is_some)
             || ui.chooser.with(Option::is_some)
@@ -1179,8 +1191,8 @@ pub(crate) fn go_back(ui: Ui) -> bool {
     untracked(|| {
         use overlays::Overlay;
         let top = ui.top_overlay();
-        let panels =
-            ui.panels.with(|p| p.shown) != iptv_core::panels::Shown::Hidden || play_bar::shows(ui);
+        let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
+            || play_bar::shows(ui);
         let menu = ui.menu.with(Option::is_some)
             || ui.description.with(Option::is_some)
             || ui.chooser.with(Option::is_some)
@@ -1217,7 +1229,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::Search) => {
-                search_view::apply(ui, iptv_search::SearchAction::Back);
+                search_view::apply(ui, iptv_presentation::search::SearchAction::Back);
                 true
             }
             _ if top == Some(Overlay::ChannelList) => {
@@ -1246,7 +1258,8 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             _ if multiview::detour(ui) => multiview::resume(ui),
             (ViewMode::Fullscreen, _, true) => {
                 ui.panels.update(|p| p.hide());
-                ui.play_bar.update(iptv_core::play_bar::PlayBar::hide);
+                ui.play_bar
+                    .update(iptv_presentation::play_bar::PlayBar::hide);
                 true
             }
             // Hint, past program → now, guide → groups → rail → leave

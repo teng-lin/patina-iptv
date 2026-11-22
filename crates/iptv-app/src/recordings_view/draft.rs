@@ -2,7 +2,7 @@
 use super::*;
 use crate::input::dismiss_keyboard;
 use crate::wizard_view::entry::{self, Sheet};
-use iptv_core::recording::{Entry, EntryField};
+use iptv_presentation::recording::{Entry, EntryField};
 use std::rc::Rc;
 
 fn local(unix: i64) -> i64 {

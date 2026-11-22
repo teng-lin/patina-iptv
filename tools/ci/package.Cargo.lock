@@ -2890,6 +2890,7 @@ dependencies = [
  "iptv-nav",
  "iptv-net",
  "iptv-player-mpv",
+ "iptv-presentation",
  "iptv-providers",
  "iptv-runtime",
  "iptv-search",
@@ -2958,7 +2959,6 @@ dependencies = [
 name = "iptv-library"
 version = "0.1.5"
 dependencies = [
- "iptv-core",
  "iptv-epg",
  "iptv-providers",
 ]
@@ -3009,6 +3009,19 @@ dependencies = [
  "objc2-ui-kit",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "iptv-presentation"
+version = "0.1.5"
+dependencies = [
+ "iptv-core",
+ "iptv-epg",
+ "iptv-library",
+ "iptv-providers",
+ "iptv-search",
+ "iptv-settings",
+ "zeroize",
 ]
 
 [[package]]

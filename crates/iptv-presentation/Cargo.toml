@@ -1,0 +1,34 @@
+[package]
+name = "iptv-presentation"
+description = "Platform-independent IPTV interaction state and localized display data."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+# The interface languages' messages outside the module: read per language
+# from the host (`i18n::set_catalog_reader`), for a browser package, whose
+# module size is its launch time. Off by default; on wasm32 only, so native
+# builds (`--all-features` included) embed them.
+external-catalog = []
+
+[dependencies]
+iptv-core.workspace = true
+iptv-epg.workspace = true
+iptv-providers.workspace = true
+iptv-library.workspace = true
+iptv-search.workspace = true
+iptv-settings.workspace = true
+zeroize = "1.8"
+
+[dev-dependencies]
+iptv-guide = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

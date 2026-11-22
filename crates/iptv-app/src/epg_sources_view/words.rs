@@ -3,7 +3,7 @@
 use crate::i18n::{tr, trf};
 
 use crate::runtime::model::{GuideSource, ImportErrorKind};
-use iptv_core::wizard::FieldError;
+use iptv_presentation::wizard::FieldError;
 
 use super::state::{Act, EditKind, Notice};
 use crate::data::stored::SourceLine;
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn names_actions_notices_and_sheets() {
-        use iptv_core::wizard::FieldError;
+        use iptv_presentation::wizard::FieldError;
         let mut l = line(true, None);
         // The provider's second guide, a named source.
         let urls = [
@@ -370,7 +370,7 @@ mod tests {
             ImportErrorKind::Other,
         ];
         let english = kinds.map(failure);
-        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+        for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
             let texts = in_language(language.tag, || kinds.map(failure));
             let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
             assert_eq!(distinct.len(), kinds.len(), "{}", language.tag);

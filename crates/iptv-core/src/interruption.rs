@@ -12,5 +12,3 @@ pub enum Interruption {
     /// The audio's route went away (headphones, a Bluetooth headset).
     Noisy,
 }
-
-pub use crate::interruption_state::{Interruptions, Response};

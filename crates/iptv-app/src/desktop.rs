@@ -55,7 +55,7 @@ pub fn bind(ui: Ui) {
             // The viewer's Stop, not only the stream's: nothing counts as
             // playing, so choosing the same channel after reopening plays it.
             crate::parental_view::hidden(ui);
-            crate::pip::exit(ui, iptv_core::pip_window::Exit::Close);
+            crate::pip::exit(ui, iptv_presentation::pip_window::Exit::Close);
             player_windows::close_all(ui);
             crate::player_keys::stop_playback(ui);
             // Nothing autoplays in the hidden window, nor on showing again.

@@ -7,12 +7,9 @@ use crate::{
     scale::Scale,
     ui_kit,
 };
-use iptv_library::{
-    Choice, SourceId, guide_repair as model,
-    guide_repair_screen::{Row, Screen},
-    inspection::*,
-};
+use iptv_library::{Choice, SourceId, guide_repair as model, inspection::*};
 use iptv_nav::Action;
+use iptv_presentation::library::guide_repair_screen::{Row, Screen};
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 use std::time::Duration;

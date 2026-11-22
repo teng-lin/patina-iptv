@@ -15,8 +15,6 @@ pub const SYNTHETIC_EPOCH_UNIX: i64 = 1_794_333_600;
 pub const HORIZON: i32 = 12 * 60;
 /// Minutes visible across the guide at once.
 pub const VISIBLE: i32 = 150;
-/// How far before "now" the guide can show (the window's lower bound).
-pub const PAST: i32 = 30;
 /// How far back the synthetic guide has data (and a schedule's default
 /// [`Schedule::browsable`] reaches).
 pub const HISTORY: i32 = 7 * 24 * 60;
@@ -156,7 +154,7 @@ pub trait Schedule {
     fn channel_name(&self, channel: usize) -> String;
     /// The provider's channel number when it has one, else the 1-based
     /// position. (The guide numbers rows by their place in the list it
-    /// shows: [`crate::lists::ListView`].)
+    /// shows: the active list view.)
     fn channel_number(&self, channel: usize) -> u32 {
         channel as u32 + 1
     }
@@ -362,11 +360,6 @@ pub fn group_start(group: usize) -> usize {
 pub const DAY: i32 = 24 * 60;
 /// Minutes Shift + Left/Right move the time column by.
 pub const HOUR: i32 = 60;
-
-pub use crate::guide_state::{
-    Focus, Move, Pane, PreviewOrigin, ProgramSelection, STEP, home_window, moves, page_row,
-    view_range,
-};
 
 #[cfg(test)]
 mod tests {

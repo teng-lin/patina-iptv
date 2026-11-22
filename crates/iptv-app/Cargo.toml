@@ -1,6 +1,6 @@
 [package]
 name = "iptv-app"
-description = "The NSH shell of iptv-rs: TV + tablet screens rendering iptv-core."
+description = "The NSH front end for Patina IPTV."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -22,7 +22,7 @@ test-support = ["iptv-runtime/test-support"]
 # read per language from the package, the fonts are the page's (its
 # `fonts` option) and the splash is the package's `assets/banner.png`.
 # For the browser host only; native builds embed them.
-browser-package = ["iptv-core/external-catalog"]
+browser-package = ["iptv-presentation/external-catalog"]
 
 [dependencies]
 iptv-runtime.workspace = true
@@ -30,6 +30,7 @@ iptv-library.workspace = true
 base64 = "0.22"
 sys-locale = "0.3.2"
 iptv-core.workspace = true
+iptv-presentation.workspace = true
 iptv-player-mpv.workspace = true
 iptv-nav.workspace = true
 iptv-guide.workspace = true

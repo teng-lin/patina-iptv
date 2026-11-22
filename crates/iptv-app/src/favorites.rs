@@ -1,7 +1,7 @@
 //! Shell entry points for favorite actions; state and persistence live in Runtime.
 use crate::Ui;
-use iptv_core::favorites::History;
 use iptv_core::guide::Schedule;
+use iptv_presentation::favorites::History;
 use std::collections::BTreeSet;
 
 pub fn catalog_changed(_ui: Ui, catalog: &dyn Schedule) {
@@ -31,7 +31,7 @@ pub fn recent_channels() -> Vec<usize> {
 /// The player's History: the recently watched channels (newest first) and
 /// the row of `playing` among them.
 pub fn history(playing: Option<usize>) -> History {
-    iptv_core::favorites::history(recent_channels(), playing)
+    iptv_presentation::favorites::history(recent_channels(), playing)
 }
 /// The catalog channel with `key`.
 pub fn channel_of(key: &str) -> Option<usize> {

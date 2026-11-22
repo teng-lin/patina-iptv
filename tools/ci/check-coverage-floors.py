@@ -8,6 +8,7 @@ import tomllib
 
 FLOORS = {
     "iptv-core": 94.0,
+    "iptv-presentation": 94.0,
     "iptv-nav": 97.0,
     "iptv-settings": 97.0,
     "iptv-epg": 93.0,

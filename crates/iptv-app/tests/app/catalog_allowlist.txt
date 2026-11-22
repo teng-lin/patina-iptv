@@ -20,29 +20,29 @@ iptv-app/src/input/keys.rs	Escape
 iptv-runtime/src/commands.rs	legacy search history could not be removed
 # Redacted Debug type/variant labels; views render typed state with their own wording.
 iptv-core/src/playback.rs	PlaySource
-iptv-core/src/wizard.rs	Back
-iptv-core/src/wizard.rs	Cancel
-iptv-core/src/wizard.rs	ClipboardText
-iptv-core/src/wizard.rs	Down
-iptv-core/src/wizard.rs	Failed
-iptv-core/src/wizard.rs	FilePicked
-iptv-core/src/wizard.rs	Ok
-iptv-core/src/wizard.rs	Paste
-iptv-core/src/wizard.rs	Progress
-iptv-core/src/wizard.rs	SetField
-iptv-core/src/wizard.rs	Succeeded
-iptv-core/src/wizard.rs	Tap
-iptv-core/src/wizard.rs	Up
+iptv-presentation/src/wizard.rs	Back
+iptv-presentation/src/wizard.rs	Cancel
+iptv-presentation/src/wizard.rs	ClipboardText
+iptv-presentation/src/wizard.rs	Down
+iptv-presentation/src/wizard.rs	Failed
+iptv-presentation/src/wizard.rs	FilePicked
+iptv-presentation/src/wizard.rs	Ok
+iptv-presentation/src/wizard.rs	Paste
+iptv-presentation/src/wizard.rs	Progress
+iptv-presentation/src/wizard.rs	SetField
+iptv-presentation/src/wizard.rs	Succeeded
+iptv-presentation/src/wizard.rs	Tap
+iptv-presentation/src/wizard.rs	Up
 iptv-guide/src/playback.rs	Stalker
 iptv-guide/src/playback.rs	StalkerLink
 iptv-guide/src/playback.rs	Xtream
-iptv-library/src/epg_sources.rs	AddLink
-iptv-library/src/epg_sources.rs	AddName
-iptv-library/src/epg_sources.rs	Editing
-iptv-library/src/epg_sources.rs	Relink
-iptv-library/src/epg_sources.rs	Rename
-iptv-library/src/guide_inspect.rs	Screen
-iptv-library/src/playlists.rs	Editing
+iptv-presentation/src/library/epg_sources.rs	AddLink
+iptv-presentation/src/library/epg_sources.rs	AddName
+iptv-presentation/src/library/epg_sources.rs	Editing
+iptv-presentation/src/library/epg_sources.rs	Relink
+iptv-presentation/src/library/epg_sources.rs	Rename
+iptv-presentation/src/library/guide_inspect.rs	Screen
+iptv-presentation/src/library/playlists.rs	Editing
 # Search build errors are logged; the screen uses translated Programs status labels.
 iptv-app/src/search_view/program_index.rs	Search guide is unavailable
 iptv-app/src/search_view/program_index.rs	Search source is unavailable
@@ -67,7 +67,7 @@ iptv-app/src/host/native/platform_data.rs	synthetic database key was not install
 # Persisted locale token; shown by the picker as the translated System language label.
 iptv-settings/src/catalog/general.rs	system
 # CLDR territory codes used to choose the automatic clock.
-iptv-core/src/clock.rs	419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE
+iptv-presentation/src/clock.rs	419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE
 # Font families and measuring.
 iptv-app/src/fonts.rs	'Roboto Condensed', Roboto, sans-serif
 iptv-app/src/host.rs	Roboto

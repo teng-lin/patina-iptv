@@ -2,8 +2,8 @@
 //! binds them; a remote never sends them): Home back to now, Shift + Left
 //! and Right an hour, Ctrl (Cmd) + Left and Right a day, Tab the groups.
 
-use iptv_core::guide::moves::{DAY, HOUR};
 use iptv_nav::Action;
+use iptv_presentation::guide::moves::{DAY, HOUR};
 
 use crate::Ui;
 

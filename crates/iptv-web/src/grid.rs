@@ -1,8 +1,8 @@
 //! The guide screen below the preview: the navigation rail, the groups
 //! column and the guide grid (a time ruler, one row per channel of the list
 //! shown, programs as cells sized by duration). The focus rules are the
-//! core's ([`iptv_core::guide::Focus`] over a [`ListView`] of the list, its
-//! columns in [`iptv_core::browse`]), so the screen moves as Patina's guide
+//! core's ([`iptv_presentation::guide::Focus`] over a [`ListView`] of the list, its
+//! columns in [`iptv_presentation::browse`]), so the screen moves as Patina's guide
 //! does on the other platforms. The bridge shows no hint card after a list
 //! is chosen, so the focus never keeps one.
 //!
@@ -16,10 +16,11 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use iptv_core::browse::{self, Columns, RailItem};
-use iptv_core::guide::{Airing, Focus, Listing, Move, Pane, Program, Schedule, page_row};
-use iptv_core::lists::{ChannelList as Rows, ListView};
+use iptv_core::guide::{Airing, Listing, Program, Schedule};
 use iptv_nav::Action;
+use iptv_presentation::browse::{self, Columns, RailItem};
+use iptv_presentation::guide::{Focus, Move, Pane, page_row};
+use iptv_presentation::lists::{ChannelList as Rows, ListView};
 use serde_json::{Value, json};
 
 use crate::presentation::{Presentation, timing_label};
@@ -431,12 +432,13 @@ impl Grid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iptv_core::guide::{SyntheticSchedule, home_window};
+    use iptv_core::guide::SyntheticSchedule;
+    use iptv_presentation::guide::home_window;
 
     const ENTRIES: usize = 10;
 
     fn grid(len: usize, row: usize) -> Grid {
-        let rows = Rows::new(iptv_core::lists::ALL, (0..len).collect());
+        let rows = Rows::new(iptv_presentation::lists::ALL, (0..len).collect());
         let mut g = Grid::open(Rc::new(SyntheticSchedule), Rc::new(rows), 0);
         g.show_channel(row);
         g

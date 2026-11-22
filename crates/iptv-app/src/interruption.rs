@@ -6,8 +6,8 @@
 //! no such event. It only pauses and resumes: a stream the viewer stopped stays
 //! stopped, and resuming opens no stream.
 
-use iptv_core::interruption::Response;
 use iptv_player_mpv::AudioChange;
+use iptv_presentation::interruption::Response;
 use nsh_core::prelude::*;
 
 use crate::Ui;

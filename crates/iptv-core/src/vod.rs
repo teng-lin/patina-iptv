@@ -173,16 +173,6 @@ pub enum Sort {
     Year,
     Rating,
 }
-impl Sort {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Name => Self::Newest,
-            Self::Newest => Self::Year,
-            Self::Year => Self::Rating,
-            Self::Rating => Self::Name,
-        }
-    }
-}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Query {
     pub kind: Kind,
@@ -278,32 +268,20 @@ pub struct Playing {
     pub last_saved_ms: Option<u64>,
     pub ended: bool,
 }
-pub use crate::vod_state::{
-    Control, Destination, EmptyAction, Handoff, ImportProblem, Operation, Retried, Screen,
-    SourceVod, VodState,
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn card(id: &str) -> Card {
-        Card {
-            key: Key {
-                source: 1,
-                kind: Kind::Movie,
-                id: id.into(),
-            },
-            name: id.into(),
-            source_name: String::new(),
-            categories: vec![],
-            poster: None,
-            plot: None,
-            year: None,
-            rating_x10: None,
-            duration_secs: None,
-            progress: Progress::default(),
-        }
+    #[test]
+    fn continue_watching_needs_five_seconds_and_no_completion() {
+        assert!(!Progress::observed(4_999, Some(100_000), false).unfinished());
+        assert!(Progress::observed(CONTINUE_MIN_MS, Some(100_000), false).unfinished());
+        assert!(!Progress::observed(99_000, Some(100_000), false).unfinished());
+        assert!(!Progress::observed(30_000, Some(100_000), true).unfinished());
+        assert!(
+            Progress::observed(30_000, None, false).unfinished(),
+            "a live-length unknown title still resumes"
+        );
     }
 
     #[test]
@@ -315,29 +293,6 @@ mod tests {
         assert_eq!(
             Progress::observed(30_000, Some(100_000), false).resume_ms(),
             30_000
-        );
-    }
-
-    #[test]
-    fn independent_sources_do_not_share_identity() {
-        let a = card("same");
-        let mut b = a.clone();
-        b.key.source = 2;
-        let mut s = Screen::default();
-        let g = s.begin(Kind::Movie);
-        s.publish(g, vec![a, b], false, false);
-        assert_eq!(s.cards.len(), 2);
-    }
-
-    #[test]
-    fn continue_watching_needs_five_seconds_and_no_completion() {
-        assert!(!Progress::observed(4_999, Some(100_000), false).unfinished());
-        assert!(Progress::observed(CONTINUE_MIN_MS, Some(100_000), false).unfinished());
-        assert!(!Progress::observed(99_000, Some(100_000), false).unfinished());
-        assert!(!Progress::observed(30_000, Some(100_000), true).unfinished());
-        assert!(
-            Progress::observed(30_000, None, false).unfinished(),
-            "a live-length unknown title still resumes"
         );
     }
 

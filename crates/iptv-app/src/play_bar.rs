@@ -2,7 +2,7 @@
 //! desktop the mouse moving over the video shows it, on a tablet a tap
 //! (a click on the desktop) shows it and another hides it; it hides after
 //! a few seconds without input, but not while the mouse rests on it nor
-//! while a screen reader runs (`iptv_core::play_bar`). A TV opens this same bar with long OK or Menu
+//! while a screen reader runs (`iptv_presentation::play_bar`). A TV opens this same bar with long OK or Menu
 //! and traverses its controls with the D-pad. Short OK keeps the info card.
 //!
 //! Left: mute and (desktop) volume, the stream's quality, the channel.
@@ -24,12 +24,13 @@ mod progress;
 
 use std::time::Duration;
 
-use iptv_core::channel_list::ListMode;
-use iptv_core::menu::Origin;
-use iptv_core::panels::QuickAction;
-use iptv_core::play_bar::{Control, PlayBar};
-use iptv_core::tracks::{Kind as Track, fps_label, resolution_class};
+use iptv_core::tracks::Kind as Track;
 use iptv_nav::{Action, RemoteKey};
+use iptv_presentation::channel_list::ListMode;
+use iptv_presentation::menu::Origin;
+use iptv_presentation::panels::QuickAction;
+use iptv_presentation::play_bar::{Control, PlayBar};
+use iptv_presentation::tracks::{fps_label, resolution_class};
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};
@@ -168,7 +169,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
 
 /// The bar replaces the remote's panels while a pointer is used.
 fn show(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.panels.update(|p| p.hide());
     }
     update(ui, f);
@@ -495,7 +496,9 @@ fn enabled(ui: Ui, control: Control) -> bool {
         Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
         }
-        Control::Record => crate::player_panels::enabled(ui, iptv_core::panels::Control::Record),
+        Control::Record => {
+            crate::player_panels::enabled(ui, iptv_presentation::panels::Control::Record)
+        }
         Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => crate::capabilities::multiview(ui).available(),

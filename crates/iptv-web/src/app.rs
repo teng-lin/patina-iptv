@@ -2,20 +2,15 @@
 //! top left beside the focused program, and below them the rail, the groups
 //! column and the guide grid: `grid`), the full-screen player with its play
 //! bar and channel zapping, search (`search`) and the Favorites order. The
-//! state is the core's (`iptv_core`'s guide focus, browse columns, lists and
-//! reorder models over an `iptv_guide` schedule, `iptv_search`'s search
-//! screen); the host renders the views this emits and plays what it is told
-//! to.
+//! bridge uses `iptv_presentation` for guide focus, browse columns, lists,
+//! reordering and search state. The host renders the emitted views and
+//! plays the selected stream.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iptv_core::favorites::{Favorites, KeyIndex, Recent};
-use iptv_core::guide::{GroupName, Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
-use iptv_core::lists::{self, ChannelList as Rows, FAVORITES};
-use iptv_core::play_bar::{Control, PlayBar};
-use iptv_core::playback::{ZapOrigin, zap_from_list};
-use iptv_core::reorder::{self, Exit, Reorder};
+use iptv_core::guide::{GroupName, Program, Schedule, now_minute, unix_of};
 use iptv_epg::{GuideStore, Overrides, StoreOptions};
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, PlaybackContext, Resolution};
@@ -24,13 +19,19 @@ use iptv_import::{
     Progress, RefreshPolicy, SourceMeta, Trigger, decide, matching_fingerprint, plan_startup,
 };
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
+use iptv_presentation::guide::{Pane, ProgramSelection};
+use iptv_presentation::lists::{self, ChannelList as Rows, FAVORITES};
+use iptv_presentation::play_bar::{Control, PlayBar};
+use iptv_presentation::reorder::{self, Exit, Reorder};
+use iptv_presentation::search::{
+    ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchState, Tab,
+    select_result,
+};
+use iptv_presentation::zap::{ZapOrigin, zap_from_list};
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};
-use iptv_search::{
-    ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchHistory,
-    SearchState, Tab, select_result,
-};
+use iptv_search::SearchHistory;
 use serde_json::{Value, json};
 
 use crate::exec::{HostFetch, spawn};
@@ -334,10 +335,10 @@ impl App {
             // Program results the new guide no longer lists are dropped;
             // the others stay (with the tab and the focused result) until
             // the query runs again on the new index. Channels run now.
-            if state.phase() != iptv_search::Phase::Idle {
+            if state.phase() != iptv_presentation::search::Phase::Idle {
                 self.search_return.get_or_insert_with(|| {
                     let result = match state.focus() {
-                        iptv_search::Focus::Result(id) => Some(id.clone()),
+                        iptv_presentation::search::Focus::Result(id) => Some(id.clone()),
                         _ => None,
                     };
                     (state.tab(), result)
@@ -580,7 +581,7 @@ impl App {
                 }
                 a.search
                     .as_ref()
-                    .filter(|s| s.phase() != iptv_search::Phase::Idle)
+                    .filter(|s| s.phase() != iptv_presentation::search::Phase::Idle)
                     .map(|s| s.query().to_owned())
             });
             if let Some(query) = rerun {
@@ -632,7 +633,7 @@ impl App {
         };
         let on_results = matches!(
             state.focus(),
-            iptv_search::Focus::Result(_) | iptv_search::Focus::Tabs
+            iptv_presentation::search::Focus::Result(_) | iptv_presentation::search::Focus::Tabs
         );
         if !on_results || result.is_some_and(|id| state.focus_listed(&id)) {
             return;
@@ -683,7 +684,8 @@ impl App {
             Action::MoveLeft => SearchAction::Left,
             Action::MoveRight => SearchAction::Right,
             Action::Select
-                if *state.focus() == iptv_search::Focus::Input && !state.keyboard_visible() =>
+                if *state.focus() == iptv_presentation::search::Focus::Input
+                    && !state.keyboard_visible() =>
             {
                 SearchAction::ShowKeyboard
             }
@@ -699,7 +701,7 @@ impl App {
         if self.mode == Mode::Search
             && let Some(state) = &self.search
         {
-            let action = if complete && state.phase() != iptv_search::Phase::Idle {
+            let action = if complete && state.phase() != iptv_presentation::search::Phase::Idle {
                 SearchAction::Ok
             } else {
                 SearchAction::KeyboardHidden
@@ -1086,7 +1088,7 @@ impl App {
     }
 
     fn entry_name(s: &dyn Schedule, entry: usize) -> String {
-        match iptv_core::lists::entry_name(entry, s) {
+        match iptv_presentation::lists::entry_name(entry, s) {
             GroupName::Named(name) => name,
             GroupName::Ungrouped => "Other".into(),
             GroupName::Favorites => "Favorites".into(),
@@ -1748,7 +1750,8 @@ mod listing_tests {
             let current = schedule.program_at(0, 0);
             assert_eq!(schedule.listing(0, current), Some(listing));
             assert!(App::program_json(&schedule, 0, current, &presentation).is_none());
-            let rows = iptv_core::lists::ChannelList::new(iptv_core::lists::ALL, vec![0]);
+            let rows =
+                iptv_presentation::lists::ChannelList::new(iptv_presentation::lists::ALL, vec![0]);
             let grid = Grid::open(Rc::new(schedule), Rc::new(rows), 0);
             let json = grid.json(None, &|_| None, &|_| false, &presentation);
             let title = json["focused"]

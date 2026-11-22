@@ -20,7 +20,7 @@ name must retain the full title. Actions must remain visible or scroll into view
 | First source setup | Source-type choices and fields have useful names; errors are readable; Back leaves the editor before the wizard | `screens_look`, `cov_settings_wizard`, `interface_languages` |
 | Guide, groups and list changes | One selected content identity; D-pad follows the guide; sorting/reordering/refresh does not restore by old row number | `tablet_rows`, `guide_nav`, `personalization_order`, `accessibility_visibility` |
 | Player and track chooser | Controls/choices expose roles and selected state; inactive controls and covered video are absent from accessibility | `tv_player`, `tv_replay`, `accessibility_visibility` |
-| Parental PIN and recovery | Keypad, recovery and manager use their own focus ranges; Cancel remains visible; disabled controls cannot activate while checking; credential results remain private across a background-recording window hide and require a fresh PIN before redisplay | `parental`, `accessibility_visibility`, core `parental::dialog_tests` |
+| Parental PIN and recovery | Keypad, recovery and manager use their own focus ranges; Cancel remains visible; disabled controls cannot activate while checking; credential results remain private across a background-recording window hide and require a fresh PIN before redisplay | `parental`, `accessibility_visibility`, presentation `parental::dialog_tests` |
 | Schedule a recording | D-pad reveals focused values and Save, including with enlarged text; Back cancels the draft and returns to its channel | `recordings`, `accessibility_visibility` |
 | VOD details, seasons and episodes | Catalog and episode selection expose content identity; Back and resume retain the intended item | `vod_library` |
 | Nested modal dismissal | Covered controls cannot receive accessibility focus; Back exposes only the next layer and restores content selection | `accessibility_visibility` |
@@ -29,7 +29,7 @@ name must retain the full title. Actions must remain visible or scroll into view
 Run the affected suites while iterating:
 
 ```sh
-cargo test -p iptv-core parental
+cargo test -p iptv-core -p iptv-presentation parental
 cargo test -p iptv-app --features test-support --lib
 cargo test -p iptv-app --features test-support --test app accessibility_visibility
 cargo test -p iptv-app --features test-support --test app parental
