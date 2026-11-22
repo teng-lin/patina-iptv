@@ -38,11 +38,13 @@ nsh-engine = { path = "../../../nsh-patina/crates/nsh-engine" }
 nsh-base = { path = "../../../nsh-patina/crates/nsh-base" }
 
 # The TV build (build.sh uses it; every size and timing on the TV comes
-# from it). `opt-level` is the one measured best for this TV
-# (docs/plans/2026-11-21-browser-tv-architecture.md, "Module size").
+# from it). opt-level z: a third less code than 3 and a third less
+# compile time on a 2020 set, and the one whose compiled module caches
+# (docs/plans/2026-11-21-browser-tv-architecture.md, "Module size and
+# launch").
 [profile.tizen]
 inherits = "release"
-opt-level = 3
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 panic = "abort"

@@ -419,10 +419,30 @@ timings are the platform's own record (`localStorage['nsh.metrics']`), read
 afterwards with DevTools. Code and Data are the module's sections
 (`hosts/tizen-nsh/sections.py`); compile time follows Code.
 
-| Build | Total | Code | Data | First launch: compile | Cache write | Second launch: load | App start | First paint |
+Each row adds to the one above it (except the last, which is the default
+`build.sh` now makes). First launch is after a fresh install; the second
+launch reads the compiled module from IndexedDB when the first cached it.
+One run per row: launches of the same build varied by up to 9 s, so
+differences of a few seconds are noise.
+
+| Build | Total | Code | Data | First launch: compile | Cache write | Second launch: compile or load | App start | First paint (first / second) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| opt-level 3 | 16.15 MB | 13.61 MB | 2.50 MB | 49.6 s (45–54 s over three launches) | fails (`QuotaExceededError`; an earlier run: transaction timeout) | compiles again: 54.2 s | 5.0–10.5 s | 57–76 s |
-| opt-level z | 11.54 MB | 8.91 MB | 2.55 MB | 32.1 s | succeeds, 12.7 s | from the cache: 13.4 s | 4.9–7.1 s | 47 s first, 22 s cached |
+| opt-level 3 | 16,147,460 | 13,606,508 | 2,500,633 | 49.6 s | fails (`QuotaExceededError`; earlier: transaction timeout) | compiles again, 54.2 s | 5.0–10.5 s | 69 / 76 s |
+| opt-level z | 11,540,123 | 8,914,666 | 2,547,233 | 32.1 s | 12.7 s | 13.4 s from the cache | 4.9–7.1 s | 47 / 22 s |
+| + `-Cpanic=immediate-abort` only | 11,230,223 | 8,741,068 | 2,412,249 | 32.2 s | 20.8 s | 12.0 s | 5.2–8.4 s | 58 / 20 s |
+| + std `optimize_for_size` (no panic change) | 11,244,692 | 8,625,338 | 2,542,281 | not installed | | | | |
+| + `-Zlocation-detail=none` | 11,033,182 | 8,595,706 | 2,361,073 | not installed | | | | |
+| + `-Zfmt-debug=none` | 10,894,852 | 8,496,019 | 2,325,545 | not installed | | | | |
+| all four (z, immediate-abort, optimize_for_size, location-detail, fmt-debug) | 10,745,497 | 8,372,047 | 2,301,121 | 25.4 s | 9.4 s | 11.1 s | 5.7–6.2 s | 37 / 19 s |
+| all four + `wasm-opt -Oz` (binaryen 132) | 8,790,469 | 6,487,536 | 2,260,113 | 24.4 s | 7.1 s | 10.1 s | 5.1–6.0 s | 39 / 18 s |
+| default: all but fmt-debug + wasm-opt | 8,891,118 | 6,552,697 | 2,292,907 | see below | | | | |
+
+`-Zfmt-debug=none` saves 0.1 MB but empties every `{:?}`, which the app
+also shows (remote key labels) and logs, so the default leaves it out.
+`-Cpanic=immediate-abort` turns a panic into a trap without its message:
+the platform still reports it as the app's fatal error (one trap, the
+components closed), with the stack but not the panic's text. Logs keep
+their text.
 
 Findings:
 

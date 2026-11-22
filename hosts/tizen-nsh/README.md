@@ -35,10 +35,15 @@ TIZEN_SIGNING_PROFILE='<profile>' hosts/tizen-nsh/build.sh --install <tv-ip>:261
 NSH_OPT=z hosts/tizen-nsh/build.sh --stage                        # another opt-level
 ```
 
-Every build uses the `tizen` profile (release: fat LTO, one codegen unit,
-panic=abort, stripped), `-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals`,
-`-Zbuild-std=std,panic_abort` and the same feature set for SQLite
-(`CFLAGS_wasm32_unknown_unknown`). `build.sh` prints the module's total, Code
+Every build uses the `tizen` profile (release, opt-level z: fat LTO, one
+codegen unit, panic=abort, stripped), `-C target-cpu=mvp -C
+target-feature=+sign-ext,+mutable-globals`, `-Zbuild-std=std,panic_abort`
+and the same feature set for SQLite (`CFLAGS_wasm32_unknown_unknown`). By
+default it also builds for size: std with `optimize_for_size`,
+`-Cpanic=immediate-abort` (a panic is a trap without its message),
+`-Zlocation-detail=none`, then binaryen's `wasm-opt -Oz` limited to MVP
+plus the two features, when `wasm-opt` is on `PATH` (`NSH_SIZE=0` and
+`NSH_WASM_OPT=0` turn them off for comparisons). `build.sh` prints the module's total, Code
 and Data bytes (`sections.py`); compile time on the TV follows the Code
 section. `NSH_UNSTRIPPED=1` keeps the names section for `twiggy` (never for
 a package). A package that installs over the same version is refused by the

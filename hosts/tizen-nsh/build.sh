@@ -10,9 +10,20 @@
 #   hosts/tizen-nsh/build.sh --stage              build and stage only (no Tizen Studio, no signing)
 #   hosts/tizen-nsh/build.sh --install HOST:PORT  also install it on a TV in Developer Mode and run it
 #
-#   NSH_OPT=s|z|3       opt-level of the tizen profile (default: the profile's)
-#   NSH_WASM_OPT=1      also run binaryen's wasm-opt -Oz (MVP + the two features) when found
+#   NSH_OPT=s|z|3       opt-level of the tizen profile (default: the profile's, z)
+#   NSH_WASM_OPT=0      skip binaryen's wasm-opt -Oz (MVP + the two features),
+#                       which runs by default when wasm-opt is on PATH
+#   NSH_SIZE=0          build without the size flags below (for comparisons)
 #   NSH_UNSTRIPPED=1    keep the names section (for twiggy; never installed)
+#   NSH_STD_FEATURES    -Zbuild-std-features for the rebuilt std
+#   NSH_RUSTFLAGS       more rustc flags
+#
+# The size flags (the plan's "Module size and launch" measures each):
+# std built with optimize_for_size, panics that abort at once
+# (-Cpanic=immediate-abort: a panic is a trap without its message, which
+# the platform reports as the app's fatal error), and no panic locations.
+# -Zfmt-debug=none is not used: it would also empty `{:?}` output the app
+# shows (key labels) and its logs.
 #   TIZEN_APP_ID        the application id (default PatinaNsh1.Patina; Tizen packages are 10 letters or digits)
 #
 # Signing uses a local Tizen Studio certificate profile named by
@@ -41,10 +52,19 @@ if [[ -n "${NSH_UNSTRIPPED:-}" ]]; then
 fi
 
 flags="-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals"
-echo "Building the module (profile tizen${NSH_OPT:+, opt-level $NSH_OPT}; $flags)…"
+if [[ "${NSH_SIZE:-1}" != 0 ]]; then
+    flags+=" -Zunstable-options -Cpanic=immediate-abort -Zlocation-detail=none"
+    NSH_STD_FEATURES="${NSH_STD_FEATURES:-optimize_for_size}"
+fi
+flags+="${NSH_RUSTFLAGS:+ $NSH_RUSTFLAGS}"
+std_features=()
+if [[ -n "${NSH_STD_FEATURES:-}" ]]; then
+    std_features=("-Zbuild-std-features=$NSH_STD_FEATURES")
+fi
+echo "Building the module (profile tizen${NSH_OPT:+, opt-level $NSH_OPT}; $flags${NSH_STD_FEATURES:+; std features $NSH_STD_FEATURES})…"
 (cd "$here" && RUSTFLAGS="$flags" \
     CFLAGS_wasm32_unknown_unknown="-mcpu=mvp -msign-ext -mmutable-globals" \
-    cargo "+$nightly" build -Zbuild-std=std,panic_abort --target wasm32-unknown-unknown \
+    cargo "+$nightly" build -Zbuild-std=std,panic_abort "${std_features[@]}" --target wasm32-unknown-unknown \
     --profile tizen --locked --target-dir "$out/cargo" "${config[@]}")
 module="$out/cargo/wasm32-unknown-unknown/tizen/patina_tizen.wasm"
 
@@ -61,12 +81,14 @@ rm -f "$stage/nsh-bench.js" "$stage/nsh-engine.js"
 cp "$here"/app/{index.html,page.css,patina-host.js,patina-worker.js} "$stage/"
 cp "$root/art/icon/play-512.png" "$stage/icon.png"
 cp "$module" "$stage/app.wasm"
-if [[ -n "${NSH_WASM_OPT:-}" ]]; then
+if [[ "${NSH_WASM_OPT:-1}" != 0 ]]; then
+    # Binaryen (version_132 measured) keeps the module to MVP plus the two
+    # features the TV validates.
     if command -v wasm-opt >/dev/null; then
         wasm-opt -Oz --mvp-features --enable-sign-ext --enable-mutable-globals \
             "$stage/app.wasm" -o "$stage/app.wasm"
     else
-        echo "warning: NSH_WASM_OPT set but wasm-opt is not installed" >&2
+        echo "warning: wasm-opt is not installed: the module is about 2 MB larger (binaryen)" >&2
     fi
 fi
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
