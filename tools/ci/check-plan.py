@@ -103,6 +103,11 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         # The adapters the shell links, without the Live TV bridge.
         steps.append(step("web-adapters-wasm", *WASM_CLIPPY[:3], "-p", "iptv-web", "--no-default-features",
                           *WASM_CLIPPY[3:]))
+        # The Tizen runner of the NSH interface (hosts/tizen-nsh, its own
+        # workspace and lock) on the pinned toolchain; its TV module, with
+        # the rebuilt std, and its size are built by hosts/tizen-nsh/build.sh.
+        steps.append(step("tizen-nsh-wasm", *WASM_CLIPPY[:3], "--manifest-path", "hosts/tizen-nsh/Cargo.toml",
+                          *WASM_CLIPPY[3:]))
         # The runtime's unit tests without its native services, on the host.
         steps.append(step("runtime-portable-tests", "cargo", "test", "--locked", "-p", "iptv-runtime",
                           "--no-default-features", "--lib", "--", "--format=pretty"))

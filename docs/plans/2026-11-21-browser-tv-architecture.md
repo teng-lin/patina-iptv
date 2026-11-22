@@ -1,6 +1,6 @@
 # Patina on browser TVs: target architecture, crates and boundaries
 
-Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a, 1b, 1d and 1e are implemented (see their status lines); 1c is the store's own change. This is the Patina integration plan that M7 of
+Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a to 1e are implemented (see their status lines); step 2 runs Patina on the TV (`hosts/tizen-nsh`); steps 3 and 4 are measured below ("Module size and launch"), and the 2020 set stays on the bridge. This is the Patina integration plan that M7 of
 [External NSH TV support](2026-11-15-nsh-tv-platform-support.md) asks for. It is
 based on the current code and on spikes run on a 2020 Samsung TV (Tizen 5.5).
 Sections marked **Today** describe the code as it is; everything else is a
@@ -244,13 +244,24 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   before following, so such a source fails there where it redirects. The store driver (open, chunk persistence,
   a `Services` wrapper that pushes a publish on the writer lane as a
   `Sliced` job over the copy store, holding the lane's connection only per
-  step) follows #193.
+  step) follows #193: see 1c.
 - **1c. Store on wasm32.** `iptv-store-sqlite` builds with the
   `sqlite-wasm-rs` backend on an in-memory VFS that persists changed pages
   to IndexedDB; staging databases are in-memory files; publishes run in
   slices on a copy (see Decisions). Probe the VFS and sliced publishing
   first. *Gate*: the store's tests pass in a Wasm test run, and on the TV a
   guide publish never holds the app's thread for more than 50 ms at a time.
+  *Status*: the store's part is #193. The driver is `Ports::store_host`
+  (`iptv_runtime::store_host::StoreHost`: open, persist after each writer
+  job, the publish copy) and `publish.rs`, a `Sliced` job on the writer
+  lane (prepare on the live store, 200-row steps on the copy, the swap and
+  the writes that follow). The web host implements it on IndexedDB chunks
+  (`host/web/store.rs`) with the five SQLite hooks. Differs from the plan:
+  imports and guide downloads run in the browser as cooperative tasks, one
+  at a time (`Services::submit_import`), rather than staying unavailable;
+  their blocking store requests run the writer lane inline, which is safe
+  because only one import runs and it awaits its own publish. The 50 ms
+  gate is not measured on the TV yet.
 - **1d. Native-only services behind `native`.** Recording, backup, credential
   store, staged probes, with the capability model reporting them unavailable.
   *Gate*: `cargo check -p iptv-runtime --no-default-features --target
@@ -274,7 +285,12 @@ together in one pull request (#195), each as its own commits; 1c is #193.
 - **2. Tizen platform.** The spike becomes the extension's Tizen platform:
   native-component registry (for `tv.player`), text input, fonts, images,
   the remaining mount items. `hosts/tizen` gains the AVPlay player and host
-  services for the NSH build.
+  services for the NSH build. *Status*: done as a sibling host,
+  `hosts/tizen-nsh` (the bridge stays as it is), on nsh-platform-tizen at
+  b80462a8. The player is the platform's AVPlay component behind a filter
+  that refuses sources needing headers. The app starts on the TV, draws its
+  screens and takes the remote's keys (the browser host uses the remote's
+  key phases: the platform has no NSH keymap).
 - **3. Measure and shrink.** Build Patina's real module. Link only the base
   components in use; record size, launch and key latency on the device.
 - **4. Switch per TV generation.** *Gates*: module small enough to cache
@@ -389,6 +405,42 @@ Measured on the same TV on 2026-11-21.
    save peaked at 110 MB of Wasm memory in the probe, beside the app. Within
    the 300–380 MB per-app limit Samsung documents for some models, but it
    has to be measured with Patina's whole app running.
+
+## Module size and launch (steps 3 and 4)
+
+Patina's real module (`hosts/tizen-nsh`), measured on the UN55TU7000 on
+2026-11-21. Every number comes from the `tizen` profile: release, fat LTO,
+one codegen unit, panic=abort, stripped, `-C target-cpu=mvp -C
+target-feature=+sign-ext,+mutable-globals`, std rebuilt on
+nightly-2026-10-24 (`-Zbuild-std=std,panic_abort`), SQLite with
+`-mcpu=mvp -msign-ext -mmutable-globals`. Each build was installed fresh
+(uninstalled first), then launched normally twice with `tizen run`; the
+timings are the platform's own record (`localStorage['nsh.metrics']`), read
+afterwards with DevTools. Code and Data are the module's sections
+(`hosts/tizen-nsh/sections.py`); compile time follows Code.
+
+| Build | Total | Code | Data | First launch: compile | Cache write | Second launch: load | App start | First paint |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| opt-level 3 | 16.15 MB | 13.61 MB | 2.50 MB | 49.6 s (45–54 s over three launches) | fails (`QuotaExceededError`; an earlier run: transaction timeout) | compiles again: 54.2 s | 5.0–10.5 s | 57–76 s |
+| opt-level z | 11.54 MB | 8.91 MB | 2.55 MB | 32.1 s | succeeds, 12.7 s | from the cache: 13.4 s | 4.9–7.1 s | 47 s first, 22 s cached |
+
+Findings:
+
+- The cache limit is not a fixed 6 MB: the 11.5 MB module cached (the
+  quota was about 68 MB with no other data; the earlier failures were the
+  quota and a transaction timeout during the clone). Reading the cached
+  module back is slow on this set (13.4 s for 11.5 MB), so a cached launch
+  is still far from the 8 s gate.
+- "App start" is the engine's first pump, including opening the store
+  (empty here) and building the first screen: about 5 s on this set.
+- Where the bytes are (opt-level z, unstripped, `twiggy`, by the crate a
+  function's name starts with; generic code counts where it is
+  instantiated, so `core`, `alloc` and `hashbrown` are mostly Patina's and
+  NSH's types): `nsh_core` 2.5 MB, `core` 1.0 MB, `alloc` 0.9 MB, SQLite
+  (C) 0.73 MB, `iptv_runtime` 0.72 MB, `iptv_app` 0.65 MB,
+  `iptv_store_sqlite` 0.38 MB, `hashbrown` 0.36 MB. Data is 2.5 MB, of
+  which the translations (`messages.tsv`, 0.66 MB), the banner (0.40 MB)
+  and the three Roboto fonts (0.27 MB) are files.
 
 ## Not goals
 

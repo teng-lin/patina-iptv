@@ -60,8 +60,11 @@ iptv-web's adapters.
 The shell's platform code lives in `iptv-app/src/host`: `host/native`
 (desktops, iPad, Android: key stores, private directories, OS recording
 schedulers, the libmpv components, the local time zone) and `host/web` (a
-browser TV, over `iptv-web`'s adapters; a stub until the NSH TV platform runs
-the shell). Screens ask the host's facade (`crate::host`) for platform facts
+browser TV, over `iptv-web`'s adapters: the page's fetch, the cooperative
+executor, and the browser store on IndexedDB chunks in `host/web/store.rs`,
+the one shell file that names the store adapter). `hosts/tizen-nsh` builds
+the shell for Samsung TVs on the external NSH platform nsh-platform-tizen
+(its own workspace and lockfile, built by its `build.sh`). Screens ask the host's facade (`crate::host`) for platform facts
 instead of using `cfg`; `iptv-app/tests/app/architecture.rs` keeps the short
 list of files that still have one.
 
@@ -364,7 +367,12 @@ the host's event loop, a blocking request runs its lane's queue inline, and a
 `Sliced` job (a resumable publish) runs at most one step per turn, the rest of
 the turn going to the other lanes' reads. It has no workers,
 so the services built on them report themselves unavailable, and staged
-probes, whose workers block, are refused. Only `native` modules may name
+probes, whose workers block, are refused. Where the host keeps the store
+itself (`Ports::store_host`, the browser), the runtime opens and persists it
+through that port, runs catalog and guide publishes as `Sliced` jobs on a
+publish copy (`publish.rs`: reads continue on the last commit between
+200-row steps, writes wait for the swap), and runs imports and guide
+downloads as tasks, one at a time (`Services::submit_import`). Only `native` modules may name
 `iptv-net` or start threads and Tokio runtimes
 (`iptv-runtime/tests/it/architecture.rs`).
 Native workers capture those inputs with their accepting service. JNI entry

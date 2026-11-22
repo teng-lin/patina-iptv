@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
+        id="https://github.com/teng-lin/patina-iptv/tizen-nsh" version="__VERSION__" viewmodes="maximized">
+    <!-- Its own id beside the JavaScript bridge (PatinaIPTV.Patina): both
+         can be installed, and their storage stays apart. -->
+    <tizen:application id="__APP_ID__" package="__PACKAGE__" required_version="5.5"/>
+    <tizen:profile name="tv-samsung"/>
+    <name>Patina NSH</name>
+    <icon src="icon.png"/>
+    <content src="index.html"/>
+    <!-- Providers are user-chosen hosts; the app's own destination checks
+         (Rust) still apply to every request. -->
+    <access origin="*" subdomains="true"/>
+    <!-- Declaring a policy moves Tizen from WARP to CSP mode. The renderer
+         needs inline styles (its <style> elements) and blob: images,
+         AVPlay object-src; every script is a file of the package. The
+         Worker compiles WebAssembly outside the page's policy. -->
+    <tizen:content-security-policy>default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * blob: data:; font-src 'self'; media-src *; connect-src *; object-src 'self'; worker-src 'self'</tizen:content-security-policy>
+    <tizen:privilege name="http://tizen.org/privilege/internet"/>
+    <tizen:privilege name="http://tizen.org/privilege/tv.inputdevice"/>
+    <tizen:setting screen-orientation="landscape" context-menu="disable" background-support="disable" hwkey-event="enable"/>
+</widget>

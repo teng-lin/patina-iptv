@@ -1,0 +1,49 @@
+# The Tizen runner of Patina's NSH interface: `iptv-app` on the external
+# NSH platform for Samsung TVs (nsh-platform-tizen), built by build.sh for
+# Tizen 5.5's WebAssembly (MVP + sign-extension + mutable globals, a
+# rebuilt std on the pinned nightly).
+#
+# Its own workspace, as the TV build has its own toolchain, profile and
+# lockfile: the root workspace's checks never build it, and the platform's
+# git source stays out of the root lock and its audit.
+[workspace]
+resolver = "3"
+
+[package]
+name = "patina-tizen"
+description = "Patina's NSH interface on Samsung Tizen TVs: iptv-app linked into nsh-platform-tizen's module."
+version = "0.1.5"
+edition = "2024"
+license = "AGPL-3.0-only"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+test = false
+
+[dependencies]
+iptv-app = { path = "../../crates/iptv-app" }
+nsh-core = { path = "../../../nsh-patina/crates/nsh-core" }
+# The platform, pinned by revision (docs/patina-integration.md there says
+# what a host supplies).
+nsh-platform-tizen = { git = "https://github.com/teng-lin/nsh-platform-tizen", rev = "b80462a8dcb9145c612de76a3ddb1476ddc16c69" }
+
+# The platform takes NSH from its git repository at the commit Patina pins
+# (nsh.rev); Patina takes it from the checkout beside the repository. One
+# NSH in the module: the git source is the checkout.
+[patch."https://github.com/teng-lin/nsh"]
+nsh-core = { path = "../../../nsh-patina/crates/nsh-core" }
+nsh-engine = { path = "../../../nsh-patina/crates/nsh-engine" }
+nsh-base = { path = "../../../nsh-patina/crates/nsh-base" }
+
+# The TV build (build.sh uses it; every size and timing on the TV comes
+# from it). `opt-level` is the one measured best for this TV
+# (docs/plans/2026-11-21-browser-tv-architecture.md, "Module size").
+[profile.tizen]
+inherits = "release"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
