@@ -45,7 +45,7 @@ pub(crate) fn frame(
                         .items_center()
                         .gap(move || size.px(12.0))
                         .py(move || size.px(22.0))
-                        .child(ui_kit::title(size, "Patina").font_weight(MEDIUM))
+                        .child(ui_kit::title(size, crate::startup::APP_NAME).font_weight(MEDIUM))
                         .child(ui_kit::body(size, section)),
                 )
                 .child(

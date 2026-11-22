@@ -580,8 +580,8 @@ impl std::fmt::Debug for WizardEvent {
         match self {
             Self::Up => f.write_str("Up"),
             Self::Down => f.write_str("Down"),
-            Self::Left => f.write_str("Left"),
-            Self::Right => f.write_str("Right"),
+            Self::Left => f.write_str(stringify!(Left)),
+            Self::Right => f.write_str(stringify!(Right)),
             Self::Ok => f.write_str("Ok"),
             Self::Back => f.write_str("Back"),
             Self::Tap(target) => f.debug_tuple("Tap").field(target).finish(),

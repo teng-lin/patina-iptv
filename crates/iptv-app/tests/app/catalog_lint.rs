@@ -193,7 +193,6 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     // `key(…)` constants.
     ("iptv-app/src/backup.rs", "EXPORT_NOTE"),
     ("iptv-app/src/backup.rs", "PENDING_NOTE"),
-    ("iptv-app/src/backup.rs", "RESTORE_NOTE"),
     ("iptv-app/src/backup.rs", "RESTART_NOTE"),
     ("iptv-app/src/custom_groups.rs", "CAPTION"),
     ("iptv-app/src/remote_editor.rs", "CAPTION"),

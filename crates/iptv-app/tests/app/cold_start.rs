@@ -319,5 +319,5 @@ fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
     let screen = app.screen();
     assert!(screen.matches("id:store-startup-failure").unwrap());
     assert!(!screen.shows("Set up your library"));
-    assert!(!screen.shows("Choose playlist type"));
+    assert!(!screen.matches("id:wizard-source-picker").unwrap());
 }

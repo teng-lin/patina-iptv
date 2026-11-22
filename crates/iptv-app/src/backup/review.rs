@@ -5,13 +5,13 @@ use std::rc::Rc;
 
 use futures_channel::oneshot;
 use iptv_nav::Action;
-use nsh_core::element::ImageSrc;
 use nsh_core::prelude::*;
 
 use crate::Ui;
 use crate::fonts::MEDIUM;
 use crate::i18n::tr;
 use crate::overlays::Overlay;
+use crate::play_bar::icons::{self, Icon};
 use crate::scale::Scale;
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS};
@@ -197,15 +197,11 @@ fn archive(ui: Ui, size: Scale) -> View {
         .gap(move || size.px(14.0))
         .bg(move || rgb(ui.app.theme.with(|theme| theme.background.alt)))
         .child(
-            svg(ImageSrc::svg_markup(
-                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24' \
-                 fill='none' stroke='currentColor' stroke-width='2' stroke-linejoin='round'>\
-                 <path d='M3 4h18v5H3zM5 9v11h14V9m-9 5h4'/></svg>",
-            ))
-            .size(move || size.px(20.0))
-            .flex_shrink_0()
-            .text_color(move || rgb(ui.app.theme.with(|theme| theme.accent.light)))
-            .accessibility_elements_hidden(true),
+            svg(icons::src(Icon::Archive))
+                .size(move || size.px(20.0))
+                .flex_shrink_0()
+                .text_color(move || rgb(ui.app.theme.with(|theme| theme.accent.light)))
+                .accessibility_elements_hidden(true),
         )
         .child(
             view()

@@ -28,6 +28,8 @@ use nsh_core::time::Instant;
 use std::sync::Mutex;
 use std::time::Duration;
 
+pub(crate) const APP_NAME: &str = "Patina";
+
 /// The phases marked so far.
 static MARKED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 /// Where [`since_start`] counts from where the process start is unknown.
@@ -114,7 +116,7 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
         .child(
             image(artwork)
                 .accessible(true)
-                .label("Patina")
+                .label(APP_NAME)
                 .w_full()
                 .h_full()
                 .object_fit(ResizeMode::Contain),

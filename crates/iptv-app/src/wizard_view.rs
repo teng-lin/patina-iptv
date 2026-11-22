@@ -333,8 +333,8 @@ fn focused(ui: Ui, target: Target) -> bool {
 fn button(
     ui: Ui,
     size: Scale,
-    scrolling: ui_kit::FocusScroll,
     label: &'static str,
+    scrolling: ui_kit::FocusScroll,
     target: Target,
 ) -> View {
     let has_focus = move || focused(ui, target);
@@ -486,7 +486,7 @@ fn choose_type(ui: Ui) -> View {
             })
         }))
         .child(
-            button(ui, size, scrolling, "Back", Target::Back)
+            button(ui, size, "Back", scrolling, Target::Back)
                 .self_start()
                 .test_id("wizard-source-back"),
         );
@@ -629,7 +629,7 @@ fn field_row(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll, field: Field) 
                 .gap(move || size.px(8.0))
                 .child(scrolling.control(field_control, move || focused(ui, target)))
                 .children((field == Field::PlaylistUrl).then(|| {
-                    button(ui, size, scrolling, "Paste", Target::PastePlaylistLink)
+                    button(ui, size, "Paste", scrolling, Target::PastePlaylistLink)
                         .label(move || format!("{} · {}", tr("Paste"), words::label(field)))
                         .test_id("wizard-paste")
                         .flex_shrink_0()
@@ -743,7 +743,7 @@ fn form(ui: Ui, kind: PlaylistKind) -> View {
                         move || focused(ui, submit),
                     ),
                 )
-                .child(button(ui, size, scrolling, "Back", Target::Back)),
+                .child(button(ui, size, "Back", scrolling, Target::Back)),
         );
     setup_view::frame(
         ui,
@@ -801,7 +801,7 @@ fn processing(ui: Ui) -> View {
             },
         ))
         // OK does nothing here (no accidental cancel); Back or a tap cancels.
-        .child(button(ui, size, scrolling, "Cancel", Target::CancelImport).self_start());
+        .child(button(ui, size, "Cancel", scrolling, Target::CancelImport).self_start());
     setup_view::frame(
         ui,
         size,
@@ -884,8 +884,8 @@ fn failed(ui: Ui) -> View {
                 button(
                     ui,
                     size,
-                    scrolling,
                     "Choose another type",
+                    scrolling,
                     Target::ChooseAnotherType,
                 )
                 .self_start(),

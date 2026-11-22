@@ -91,7 +91,9 @@ fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
                         // backoffs. Prepare the reader before resuming library work.
                         services.read_at_startup(|_| Ok(())).await?;
                         owner.parental_refresh().await.map_err(|_| {
-                            crate::Error::unavailable("Parental settings are unavailable")
+                            crate::Error::unavailable(iptv_core::i18n::key(
+                                "Parental settings are unavailable",
+                            ))
                         })?;
                         Ok(snapshot)
                     }
