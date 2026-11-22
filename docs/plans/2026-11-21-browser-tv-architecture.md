@@ -487,10 +487,11 @@ AVPlay) is the likely cause, not established. The TV also dropped off the
 network once during the first import. Memory during a guide refresh was
 not measured before that.
 
-The longest publish steps are the ends of a publish (taking the copy,
-then the swap with the writes that follow), not the 200-row slices: the
-average guide step is 25 ms. Splitting those ends is the next step for the
-50 ms gate.
+The average guide step is 25 ms, so most 200-row slices are within the
+gate; which steps take longest is not recorded yet (the log keeps only
+the longest). The likely ones are the ends of a publish (taking the copy,
+then the swap with the writes that follow) and steps that create indexes;
+timing each phase is the next step for the 50 ms gate.
 
 ## Not goals
 
