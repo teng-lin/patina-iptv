@@ -1,5 +1,7 @@
 use crate::EpgSchedule;
 use crate::tests::{NOW, mid_minute_schedule, schedule};
+use iptv_core::guide::GroupName;
+use iptv_core::guide::Listing;
 use iptv_core::guide::{Focus, Move, Program, Schedule};
 use iptv_epg::GuideStore;
 use iptv_providers::m3u::parse_m3u;
@@ -157,7 +159,10 @@ fn a_tap_uses_the_minute_of_a_cell_starting_mid_minute() {
     let second = s.program_at(0, 30);
     let mut focus = Focus::at(10);
     focus.tap(0, second.start, &s);
-    assert_eq!(s.title(0, focus.program(&s)), "Second");
+    assert_eq!(
+        s.listing(0, focus.program(&s)),
+        Some(Listing::Title("Second".into()))
+    );
 }
 
 #[test]
@@ -166,7 +171,10 @@ fn guide_focus_advances_when_the_next_program_goes_live() {
     let mut f = Focus::at(25);
     assert!(f.tick(30, &s));
     assert_eq!(f.program(&s), Program { start: 30, end: 60 });
-    assert_eq!(s.title(0, f.program(&s)), "Alpha Talk");
+    assert_eq!(
+        s.listing(0, f.program(&s)),
+        Some(Listing::Title("Alpha Talk".into()))
+    );
 }
 
 #[test]
@@ -181,18 +189,9 @@ fn a_list_preserves_generated_text_provenance() {
         NOW,
         None,
     ));
-    let ja = iptv_core::i18n::resolve("ja", None);
-    // The app renders guide rows through ListView; that adapter must retain
-    // generated text provenance and the requested language too.
     use iptv_core::lists::{ChannelList, FIRST_GROUP, ListView};
     let list = ChannelList::build(FIRST_GROUP, &s, &[], &[]);
     let view = ListView::new(std::rc::Rc::new(s), std::rc::Rc::new(list));
-    assert_eq!(
-        view.group_name_in(0, ja),
-        iptv_core::i18n::translate(ja, "Other")
-    );
-    assert_eq!(
-        view.title_in(0, view.program_at(0, 0), ja),
-        iptv_core::i18n::translate(ja, "No information")
-    );
+    assert_eq!(view.group_label(0), GroupName::Ungrouped);
+    assert_eq!(view.listing(0, view.program_at(0, 0)), Some(Listing::Gap));
 }

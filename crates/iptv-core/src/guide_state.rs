@@ -315,7 +315,9 @@ impl Focus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guide::{CHANNELS, HISTORY, HORIZON, SyntheticSchedule, group_start};
+    use crate::guide::{
+        CHANNELS, GroupName, HISTORY, HORIZON, Listing, SyntheticSchedule, group_start,
+    };
 
     const S: SyntheticSchedule = SyntheticSchedule;
 
@@ -552,11 +554,11 @@ mod tests {
         fn channel_name(&self, channel: usize) -> String {
             format!("Small {channel}")
         }
-        fn group_name(&self, group: usize) -> String {
-            format!("Small group {group}")
+        fn group_label(&self, group: usize) -> GroupName {
+            GroupName::Named(format!("Small group {group}"))
         }
-        fn title(&self, _channel: usize, _program: Program) -> String {
-            String::new()
+        fn listing(&self, _channel: usize, _program: Program) -> Option<Listing> {
+            Some(Listing::Gap)
         }
     }
 

@@ -63,6 +63,29 @@ pub struct Program {
     pub end: i32,
 }
 
+/// What the schedule knows about a listing on an existing channel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Listing {
+    /// The provider's title, including a title that is empty.
+    Title(String),
+    /// No listing covers this slot.
+    Gap,
+    /// The guide's page is being loaded.
+    Loading,
+}
+
+/// A schedule group name before wording for a particular language.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GroupName {
+    /// An opaque name from a provider, user or playlist.
+    Named(String),
+    Ungrouped,
+    Favorites,
+    Recent,
+    AllChannels,
+    AllPlaylists,
+}
+
 /// Guide data the focus model and the UI read: channels, groups and
 /// programs by guide minute (minute 0 is [`Schedule::epoch_unix`]). Implemented by
 /// [`SyntheticSchedule`] (tests, demos) and by the store + EPG backed
@@ -85,7 +108,10 @@ pub trait Schedule {
     fn group_start(&self, group: usize) -> usize;
     /// Stable group identity, independent of its display name.
     fn group_key(&self, group: usize) -> String {
-        self.group_name(group)
+        match self.group_label(group) {
+            GroupName::Named(name) => name,
+            _ => group.to_string(),
+        }
     }
     /// Explicit membership permits custom order without renumbering playback channels.
     fn group_channels(&self, group: usize) -> Vec<usize> {
@@ -143,7 +169,7 @@ pub trait Schedule {
     fn playlist_order(&self) -> Vec<usize> {
         (0..self.channel_count()).collect()
     }
-    fn group_name(&self, group: usize) -> String;
+    fn group_label(&self, group: usize) -> GroupName;
 
     /// A playlist parent in a multi-source group browser.
     fn group_is_playlist(&self, _group: usize) -> bool {
@@ -155,24 +181,14 @@ pub trait Schedule {
     fn group_depth(&self, _group: usize) -> usize {
         0
     }
-    fn all_channels_name(&self) -> String {
-        "All channels".into()
+    /// The all-channels entry can represent a single playlist or all playlists.
+    fn all_channels_label(&self) -> GroupName {
+        GroupName::AllChannels
     }
 
-    fn title(&self, channel: usize, program: Program) -> String;
-    /// Translate generated gap/loading labels only; provider titles stay opaque.
-    fn title_in(
-        &self,
-        channel: usize,
-        program: Program,
-        _language: &crate::i18n::Language,
-    ) -> String {
-        self.title(channel, program)
-    }
-    /// Generated group labels may be translated by adapters that know their origin.
-    fn group_name_in(&self, group: usize, _language: &crate::i18n::Language) -> String {
-        self.group_name(group)
-    }
+    /// The listing at `program`, or `None` for a row with no channel.
+    fn listing(&self, channel: usize, program: Program) -> Option<Listing>;
+
     /// The channel's live stream URL, when the schedule knows it.
     fn stream_url(&self, _channel: usize) -> Option<String> {
         None
@@ -278,11 +294,12 @@ impl Schedule for SyntheticSchedule {
     fn channel_name(&self, channel: usize) -> String {
         format!("Channel {}", channel + 1)
     }
-    fn group_name(&self, group: usize) -> String {
-        format!("Group {:02}", group + 1)
+    fn group_label(&self, group: usize) -> GroupName {
+        GroupName::Named(format!("Group {:02}", group + 1))
     }
-    fn title(&self, _channel: usize, program: Program) -> String {
-        format!("Show {}", program.start.rem_euclid(97))
+    fn listing(&self, channel: usize, program: Program) -> Option<Listing> {
+        (channel < self.channel_count())
+            .then(|| Listing::Title(format!("Show {}", program.start.rem_euclid(97))))
     }
     fn channel_key(&self, channel: usize) -> Option<String> {
         (channel < CHANNELS).then(|| format!("synthetic:{channel}"))
@@ -394,11 +411,11 @@ mod tests {
         fn channel_name(&self, channel: usize) -> String {
             format!("Small {channel}")
         }
-        fn group_name(&self, group: usize) -> String {
-            format!("Small group {group}")
+        fn group_label(&self, group: usize) -> GroupName {
+            GroupName::Named(format!("Small group {group}"))
         }
-        fn title(&self, _channel: usize, _program: Program) -> String {
-            String::new()
+        fn listing(&self, _channel: usize, _program: Program) -> Option<Listing> {
+            Some(Listing::Gap)
         }
     }
 

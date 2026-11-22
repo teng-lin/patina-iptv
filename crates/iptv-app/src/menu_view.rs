@@ -96,7 +96,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
 }
 
 fn title(channel: usize, p: crate::guide::Program) -> String {
-    crate::schedule().title_in(channel, p, crate::i18n::language())
+    crate::listing_labels::listing(crate::schedule().listing(channel, p))
 }
 
 /// Long OK / Menu: the menu for the focused program (in full screen, the

@@ -1,5 +1,6 @@
 //! Older days paged in on demand (`pages.rs`).
 
+use iptv_core::guide::Listing;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -10,7 +11,7 @@ use iptv_epg::{
 };
 
 use super::pages::{MAX_PAGES, PageRequest, PagedWindow};
-use super::{EpgSchedule, GuideChannel, LOADING, NO_INFORMATION};
+use super::{EpgSchedule, GuideChannel};
 
 /// Hour-aligned "now".
 pub(crate) const NOW: i64 = 1_800_000_000;
@@ -98,7 +99,7 @@ fn the_recent_window_needs_no_page() {
     let (s, requests) = paged(NOW - 7 * DAY);
     for t in [NOW, NOW - 3600, NOW - DAY + 60, NOW + DAY / 2] {
         let p = s.program_at(0, minute_of(&s, t));
-        assert_eq!(s.title(0, p), title_at(t));
+        assert_eq!(s.listing(0, p), Some(Listing::Title(title_at(t))));
     }
     assert!(requests.borrow().is_empty());
     assert_eq!(s.loaded_from(), Some(NOW - DAY));
@@ -110,7 +111,7 @@ fn an_older_day_loads_on_demand_and_then_shows() {
     let t = NOW - DAY - 5 * 3600 - 600;
     let m = minute_of(&s, t);
     let loading = s.program_at(0, m);
-    assert_eq!(s.title(0, loading), LOADING);
+    assert_eq!(s.listing(0, loading), Some(Listing::Loading));
     let slot = t - t.rem_euclid(3600);
     assert_eq!(
         loading,
@@ -134,7 +135,7 @@ fn an_older_day_loads_on_demand_and_then_shows() {
     deliver(&s, &requests);
     assert!(s.ensure_loaded(t));
     let p = s.program_at(0, m);
-    assert_eq!(s.title(0, p), title_at(t));
+    assert_eq!(s.listing(0, p), Some(Listing::Title(title_at(t))));
     assert_eq!(
         s.unix(p.start),
         FIRST + (t - FIRST) / LEN * LEN,
@@ -150,12 +151,15 @@ fn programs_across_the_window_edge_read_the_same_from_both_sides() {
     // The program airing at the edge started before it.
     let straddling = s.program_at(0, minute_of(&s, edge));
     assert!(s.unix(straddling.start) < edge);
-    assert_eq!(s.title(0, straddling), title_at(edge));
+    assert_eq!(
+        s.listing(0, straddling),
+        Some(Listing::Title(title_at(edge)))
+    );
     s.program_at(0, minute_of(&s, edge) - 1);
     deliver(&s, &requests);
     let before = s.program_at(0, minute_of(&s, edge) - 1);
     assert_eq!(before, straddling);
-    assert_eq!(s.title(0, before), title_at(edge));
+    assert_eq!(s.listing(0, before), Some(Listing::Title(title_at(edge))));
 }
 
 #[test]
@@ -163,7 +167,7 @@ fn days_before_what_the_store_keeps_are_empty_without_a_read() {
     let (s, requests) = paged(NOW - 3 * DAY);
     let t = NOW - 4 * DAY - 7200;
     let p = s.program_at(0, minute_of(&s, t));
-    assert_eq!(s.title(0, p), NO_INFORMATION);
+    assert_eq!(s.listing(0, p), Some(Listing::Gap));
     assert!(s.ensure_loaded(t));
     assert!(requests.borrow().is_empty());
 }
@@ -229,7 +233,10 @@ fn without_pages_the_store_is_the_whole_guide() {
         NOW,
     );
     let t = NOW - 5 * DAY;
-    assert_eq!(s.title(0, s.program_at(0, minute_of(&s, t))), title_at(t));
+    assert_eq!(
+        s.listing(0, s.program_at(0, minute_of(&s, t))),
+        Some(Listing::Title(title_at(t)))
+    );
     assert_eq!(s.loaded_from(), None);
 }
 

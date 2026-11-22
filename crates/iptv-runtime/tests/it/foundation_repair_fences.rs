@@ -2,6 +2,7 @@
 //! Public native APIs and generated HTTP fixtures exercise the publication fence.
 #![cfg(feature = "test-support")]
 
+use iptv_core::guide::Listing;
 use iptv_library::{
     Choice,
     guide_repair::{Effective, FeedEdit, OperationPhase, Request, Target},
@@ -250,7 +251,7 @@ fn repair_during_old_work(hold_report: bool) {
             if schedule.channel_count() == 1 && after.get() {
                 let minute = ((now - schedule.epoch_unix()) / 60) as i32;
                 let program = schedule.program_at(0, minute);
-                captured.borrow_mut().push(schedule.title(0, program));
+                captured.borrow_mut().push(schedule.listing(0, program));
             }
             weak.upgrade().unwrap().set_schedule(schedule);
         }
@@ -336,9 +337,14 @@ fn repair_during_old_work(hold_report: bool) {
     }
     let schedule = owner.schedule();
     let minute = ((now - schedule.epoch_unix()) / 60) as i32;
-    assert_ne!(schedule.title(0, schedule.program_at(0, minute)), TITLE);
+    assert_ne!(
+        schedule.listing(0, schedule.program_at(0, minute)),
+        Some(Listing::Title(TITLE.into()))
+    );
     assert!(
-        seen.borrow().iter().all(|title| title != TITLE),
+        seen.borrow()
+            .iter()
+            .all(|listing| listing != &Some(Listing::Title(TITLE.into()))),
         "the old in-memory schedule bypassed the newer stored mapping"
     );
 }
@@ -370,7 +376,7 @@ fn import_fixture(host: &Host, server: &Server, now: i64) -> (Source, ChannelRef
             return false;
         }
         let minute = ((now - schedule.epoch_unix()) / 60) as i32;
-        schedule.title(0, schedule.program_at(0, minute)) == TITLE
+        schedule.listing(0, schedule.program_at(0, minute)) == Some(Listing::Title(TITLE.into()))
     });
     let source_id = owner.shown_source().unwrap();
     if let Some(initial) = owner.pending_import_completion(source_id) {

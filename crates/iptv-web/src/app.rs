@@ -11,8 +11,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iptv_core::favorites::{Favorites, KeyIndex, Recent};
-use iptv_core::guide::{Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
-use iptv_core::lists::{self, ChannelList as Rows, Entry, FAVORITES};
+use iptv_core::guide::{GroupName, Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
+use iptv_core::lists::{self, ChannelList as Rows, FAVORITES};
 use iptv_core::play_bar::{Control, PlayBar};
 use iptv_core::playback::{ZapOrigin, zap_from_list};
 use iptv_core::reorder::{self, Exit, Reorder};
@@ -1052,10 +1052,7 @@ impl App {
         program: Program,
         presentation: &Presentation,
     ) -> Option<Value> {
-        let title = s.title(channel, program);
-        if title.is_empty() || title == iptv_guide::NO_INFORMATION || title == iptv_guide::LOADING {
-            return None;
-        }
+        let title = crate::grid::stored_title(s.listing(channel, program))?;
         let (start, end) = (unix_of(s, program.start), unix_of(s, program.end));
         let start_label = presentation.time(start);
         Some(json!({
@@ -1089,11 +1086,13 @@ impl App {
     }
 
     fn entry_name(s: &dyn Schedule, entry: usize) -> String {
-        match Entry::at(entry) {
-            Entry::Favorites => "Favorites".into(),
-            Entry::Recent => "Recently watched".into(),
-            Entry::All => "All channels".into(),
-            Entry::Group(g) => s.group_name(g),
+        match iptv_core::lists::entry_name(entry, s) {
+            GroupName::Named(name) => name,
+            GroupName::Ungrouped => "Other".into(),
+            GroupName::Favorites => "Favorites".into(),
+            GroupName::Recent => "Recently watched".into(),
+            GroupName::AllChannels => "All channels".into(),
+            GroupName::AllPlaylists => "All playlists".into(),
         }
     }
 
@@ -1714,5 +1713,57 @@ pub(crate) fn command(text: &str) {
         other => host().emit(
             &json!({ "type": "notice", "text": format!("unknown command {other}") }).to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+    use iptv_core::guide::Listing;
+    use iptv_epg::{ChannelKey, GuideStore};
+
+    #[test]
+    fn absent_listings_keep_the_legacy_json_shapes() {
+        let now = iptv_core::guide::SYNTHETIC_EPOCH_UNIX;
+        let presentation = Presentation::utc(now);
+        for (held, listing) in [(false, Listing::Gap), (true, Listing::Loading)] {
+            let schedule = EpgSchedule::new(
+                vec![(
+                    "Generated group".into(),
+                    vec![iptv_guide::GuideChannel {
+                        key: ChannelKey::new("generated"),
+                        name: "Generated channel".into(),
+                        number: 1,
+                        catchup_days: 0,
+                    }],
+                )],
+                GuideStore::new(),
+                now,
+            );
+            let schedule = if held {
+                schedule.held_only(now + 4 * 3600, now + 5 * 3600)
+            } else {
+                schedule
+            };
+            let current = schedule.program_at(0, 0);
+            assert_eq!(schedule.listing(0, current), Some(listing));
+            assert!(App::program_json(&schedule, 0, current, &presentation).is_none());
+            let rows = iptv_core::lists::ChannelList::new(iptv_core::lists::ALL, vec![0]);
+            let grid = Grid::open(Rc::new(schedule), Rc::new(rows), 0);
+            let json = grid.json(None, &|_| None, &|_| false, &presentation);
+            let title = json["focused"]
+                .get("title")
+                .expect("title on the focused row");
+            assert!(title.is_null());
+            let cells = json["rows"]["items"][0]["cells"]
+                .as_array()
+                .expect("visible row cells");
+            assert!(!cells.is_empty());
+            assert!(cells.iter().all(|cell| cell["title"] == ""));
+        }
+        assert_eq!(
+            crate::grid::stored_title(Some(Listing::Title(String::new()))),
+            None
+        );
     }
 }

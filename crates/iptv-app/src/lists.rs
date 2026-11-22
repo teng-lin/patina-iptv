@@ -21,7 +21,6 @@ use iptv_core::lists::{
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::i18n::tr;
 
 /// How long the hint card stays after a group was chosen.
 const HINT: Duration = Duration::from_secs(6);
@@ -67,11 +66,7 @@ fn rail_untracked(ui: Ui) -> Vec<RailItem> {
 
 /// Localize built-in lists by identity; provider group names are opaque.
 pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
-    let name = iptv_core::lists::entry_name(entry, catalog);
-    match Entry::at(entry) {
-        Entry::Group(group) => catalog.group_name_in(group, crate::i18n::language()),
-        _ => tr(&name).to_owned(),
-    }
+    crate::listing_labels::group(iptv_core::lists::entry_name(entry, catalog))
 }
 
 /// The name of the list on screen.

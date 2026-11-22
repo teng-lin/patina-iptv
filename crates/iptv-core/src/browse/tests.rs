@@ -1,3 +1,4 @@
+use crate::guide::{GroupName, Listing};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -418,11 +419,11 @@ impl Schedule for SyntheticList {
     fn channel_name(&self, _: usize) -> String {
         String::new()
     }
-    fn group_name(&self, _: usize) -> String {
-        String::new()
+    fn group_label(&self, _: usize) -> GroupName {
+        GroupName::Named(String::new())
     }
-    fn title(&self, _: usize, _: crate::guide::Program) -> String {
-        String::new()
+    fn listing(&self, _: usize, _: crate::guide::Program) -> Option<Listing> {
+        Some(Listing::Gap)
     }
 }
 

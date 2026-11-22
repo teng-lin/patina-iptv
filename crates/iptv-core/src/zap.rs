@@ -74,7 +74,7 @@ pub fn zap_from_list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guide::{GROUPS, SyntheticSchedule, group_start};
+    use crate::guide::{GROUPS, GroupName, Listing, SyntheticSchedule, group_start};
 
     #[test]
     fn zapping_wraps_within_the_group() {
@@ -127,11 +127,11 @@ mod tests {
         fn channel_name(&self, _: usize) -> String {
             String::new()
         }
-        fn group_name(&self, _: usize) -> String {
-            String::new()
+        fn group_label(&self, _: usize) -> GroupName {
+            GroupName::Named(String::new())
         }
-        fn title(&self, _: usize, _: crate::guide::Program) -> String {
-            String::new()
+        fn listing(&self, _: usize, _: crate::guide::Program) -> Option<Listing> {
+            Some(Listing::Gap)
         }
     }
 

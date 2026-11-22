@@ -301,7 +301,7 @@ fn request(origin: Origin) -> Option<Request> {
         source: source.0,
         channel,
         channel_name: crate::channel_name(origin.channel),
-        title: schedule.title_in(origin.channel, program, crate::i18n::language()),
+        title: crate::listing_labels::listing(schedule.listing(origin.channel, program)),
         start: crate::guide::unix_of(&*schedule, program.start).max(crate::time::wall_unix()),
         end: crate::guide::unix_of(&*schedule, program.end),
     })
