@@ -167,6 +167,13 @@ fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, source: Opt
     *last = now;
 }
 
+/// Whether the backdrops under the video layer leave it transparent: on a
+/// platform whose video plane is under the page, while the main surface has
+/// a stream (reactive).
+pub(crate) fn backdrop_clear(ui: Ui) -> bool {
+    crate::host::VIDEO_UNDER_PAGE && source_prop(ui, 0).is_some()
+}
+
 /// The stream as the host's `source` prop: `{url, headers, token, live,
 /// reconnect}`, or null when nothing plays.
 fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {

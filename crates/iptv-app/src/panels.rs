@@ -65,7 +65,14 @@ pub fn preview_rect() -> (f32, f32, f32, f32) {
 /// laid out: today the preview rectangle.
 pub fn backdrop(ui: Ui) -> impl IntoElement {
     let panel = move || rgb(ui.app.theme.with(|t| t.background.panel));
-    let window = move || rgb(ui.app.theme.with(|t| t.background.window));
+    // Clear while a video under the page plays (`video::backdrop_clear`).
+    let window = move || {
+        if crate::video::backdrop_clear(ui) {
+            rgba(0)
+        } else {
+            rgb(ui.app.theme.with(|t| t.background.window))
+        }
+    };
     view()
         .absolute()
         .inset_0()

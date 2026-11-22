@@ -518,6 +518,18 @@ It rests on these measurements, against step 4's gates:
 | WebAssembly memory | 61 MB at launch; about 94 MB in use (comparison run) | |
 | Stability | the app was closed twice while zapping | |
 
+On the same TV and provider, three other Tizen IPTV players and the bridge
+(medians; zap is channel up to a moving picture, mostly the provider's
+cold start):
+
+| App | Launch to channel list | Key to frame | Zap | Notes |
+| --- | --- | --- | --- | --- |
+| Patina NSH | 23–25 s | 147 ms | 3.16 s | HLS streams dropped about every 37 s |
+| Patina bridge | 5.0 s | 42–44 ms | 1.81 s | MPEG-TS, no drops |
+| OpenIPTV | 3.9 s | 36–41 ms | 3.06 s | |
+| APL TV | 5.2 s | 34–65 ms | 2.30 s | |
+| Xtivio | 20 s (to its home screen) | 55 ms | 3.87 s | HTML5 video at 720p; one 118 s freeze |
+
 Limits of the evidence: one 2020 set (UN55TU7000), one provider account,
 a few runs per build, release builds only.
 

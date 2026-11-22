@@ -49,6 +49,13 @@ pub(crate) const MACOS: bool = on(Platform::Macos);
 /// The Windows desktop.
 pub(crate) const WINDOWS: bool = on(Platform::Windows);
 
+/// The video plane is under the whole page (a browser TV package: Tizen's
+/// AVPlay), not a view among the app's layers: everything over a playing
+/// video, the backdrops below the video layer included, must stay
+/// transparent for the picture to show.
+pub(crate) const VIDEO_UNDER_PAGE: bool =
+    cfg!(all(target_family = "wasm", feature = "browser-package"));
+
 /// Keys come from a TV remote that reports each key's press and release
 /// (Android's, and a browser TV's through its NSH platform), not from a
 /// keyboard whose bindings NSH's keymap fires.

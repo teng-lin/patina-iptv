@@ -29,7 +29,7 @@ iptv-app = { path = "../../crates/iptv-app", features = ["browser-package"] }
 nsh-core = { path = "../../../nsh-patina/crates/nsh-core" }
 # The platform, pinned by revision (docs/patina-integration.md there says
 # what a host supplies).
-nsh-platform-tizen = { git = "https://github.com/teng-lin/nsh-platform-tizen", rev = "b80462a8dcb9145c612de76a3ddb1476ddc16c69" }
+nsh-platform-tizen = { git = "https://github.com/teng-lin/nsh-platform-tizen", rev = "32492c00ffbed477c4f01b26074fa985e066e999" }
 
 # The platform takes NSH from its git repository at the commit Patina pins
 # (nsh.rev); Patina takes it from the checkout beside the repository. One

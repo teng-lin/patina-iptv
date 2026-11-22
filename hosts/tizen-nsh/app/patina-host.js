@@ -81,6 +81,9 @@ NshTizen.start({
     version: window.NSH_MODULE_VERSION,
     worker: 'nsh-worker.js',
     scripts: ['patina-worker.js'],
+    /* Patina's TV layout is made for 960 x 540 points (Android TV's 1080p
+     * screen): drawn at 2 page pixels per point it has its TV size. */
+    scale: 2,
     /* iptv-app's fonts (its `browser-package` feature leaves them out of
      * the module): loaded in the Worker and on the page before it starts. */
     fonts: [
