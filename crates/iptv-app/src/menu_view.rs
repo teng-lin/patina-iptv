@@ -6,10 +6,13 @@ use crate::i18n::tr;
 use crate::organization_view::{self, Kind};
 use crate::runtime::model::SourceId;
 use iptv_core::organization::{Block, BlockKind};
+use iptv_library::ChannelScope;
 use iptv_presentation::lists::{Entry, ListId};
 use iptv_presentation::organization::Mode;
 
-use iptv_presentation::menu::{Heading, Menu, MenuItem, Origin, Row, program_menu};
+use iptv_presentation::menu::{
+    Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_options, program_menu,
+};
 use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, LIST_ITEM, MEDIUM, SANS, SECTION, TITLE};
@@ -45,6 +48,7 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
             | MenuItem::ManageFavorites
             | MenuItem::AssignEpg
             | MenuItem::HideChannel
+            | MenuItem::HideGroup
             | MenuItem::ManageHidden
             | MenuItem::ReorderChannels
             | MenuItem::SortChannels
@@ -92,6 +96,8 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         SortGroups => tr("Group order"),
         ReorderGroups => tr("Reorder groups"),
         ManageGroups => tr("Manage groups"),
+        RenameGroup => tr("Rename group"),
+        ResetGroupName => tr("Use provider name"),
         HideGroup => tr("Hide group"),
     }
 }
@@ -116,42 +122,46 @@ pub fn open(ui: Ui) {
     open_for(ui, channel, minute);
 }
 
-pub fn open_for(ui: Ui, channel: usize, minute: i32) {
+fn open_for(ui: Ui, channel: usize, minute: i32) {
     let now = ui.focus.with(|f| f.now);
+    let schedule = crate::schedule();
+    let Some(key) = schedule.channel_key(channel) else {
+        return;
+    };
     let list = current_list(ui);
     let scope = channel_scope(ui, &list);
-    let program = crate::schedule().program_at(channel, minute);
-    let mut rows = program_menu(
-        program,
-        crate::schedule().catchup_days(channel),
-        now,
-        |item| {
-            if matches!(item, MenuItem::BlockGroup | MenuItem::ProtectGroup)
-                && group_target(scope.as_ref()).is_none()
-            {
-                return false;
+    let program = schedule.program_at(channel, minute);
+    let mut rows = program_menu(program, schedule.catchup_days(channel), now, |item| {
+        if matches!(
+            item,
+            MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording
+        ) {
+            return ui.player_surface == 0 && crate::recordings_view::available(channel);
+        }
+        match item {
+            MenuItem::ManageHidden | MenuItem::ManageBlocked | MenuItem::ReorderChannels => {
+                scope.is_some()
             }
-            if matches!(
-                item,
-                MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording
-            ) {
-                return ui.player_surface == 0 && crate::recordings_view::available(channel);
-            }
-            match item {
-                MenuItem::ManageHidden
-                | MenuItem::ManageBlocked
-                | MenuItem::ReorderChannels
-                | MenuItem::GroupOptions => scope.is_some(),
-                MenuItem::SortChannels => scope
-                    .as_ref()
-                    .is_some_and(|(_, kind)| *kind != Kind::Favorites),
-                MenuItem::CopyChannels | MenuItem::CreateGroup => {
-                    !crate::data::combined::active(&crate::runtime())
+            MenuItem::GroupOptions => scope.is_some() || aggregate_options(&list),
+            MenuItem::SortChannels => scope
+                .as_ref()
+                .is_some_and(|(_, kind)| *kind != Kind::Favorites),
+            MenuItem::CopyChannels => copy_scope(scope.as_ref()).is_some(),
+            MenuItem::CreateGroup => scope.is_some(),
+            _ => implemented(item, ui.player_surface),
+        }
+    });
+    if group_target(scope.as_ref()).is_none() {
+        rows.retain(|row| {
+            !matches!(
+                row,
+                Row::Action {
+                    item: MenuItem::BlockGroup | MenuItem::HideGroup | MenuItem::ProtectGroup,
+                    ..
                 }
-                _ => implemented(item, ui.player_surface),
-            }
-        },
-    );
+            )
+        });
+    }
     if (crate::host::LINUX || crate::host::MACOS)
         && program.airing(now) == crate::guide::Airing::Live
     {
@@ -168,57 +178,106 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
         program_start: program.start,
     };
     crate::recordings_view::remember(ui, origin);
-    let mut menu = Menu::new(rows, origin);
-    menu.list = Some(list);
-    ui.menu.set(Some(menu));
+    let target = Target::Program {
+        channel: key,
+        start: program.start,
+    };
+    ui.menu.set(Some(Menu::new(rows, target, list)));
 }
 
-/// Closes the menu or popover; guide focus stays on the program it was
-/// opened on (it does not jump to now).
+/// Opens the actions for a channel row in the guide or player list.
+pub fn open_channel(ui: Ui, channel: usize) {
+    let Some(key) = crate::schedule().channel_key(channel) else {
+        return;
+    };
+    let rows = channel_menu(|item| match item {
+        MenuItem::WatchInNewWindow => {
+            (crate::host::LINUX || crate::host::MACOS)
+                && crate::desktop::player_windows::can_open(ui, channel)
+        }
+        _ => implemented(item, ui.player_surface),
+    });
+    ui.menu.set(Some(Menu::new(
+        rows,
+        Target::Channel(key),
+        current_list(ui),
+    )));
+}
+
+fn menu_channel(target: &Target) -> Option<usize> {
+    crate::schedule().find_channel(target.channel_key()?)
+}
+
+fn program_origin(target: &Target) -> Option<Origin> {
+    let Target::Program { start, .. } = target else {
+        return None;
+    };
+    Some(Origin {
+        channel: menu_channel(target)?,
+        program_start: *start,
+    })
+}
+
+/// Closes the menu or popover, keeping focus on its guide selection.
 pub fn close(ui: Ui) {
     let origin = ui
         .menu
-        .with(|m| m.as_ref().filter(|m| !m.group_context).map(|m| m.origin))
+        .with(|m| {
+            let menu = m.as_ref().filter(|menu| menu.list == current_list(ui))?;
+            program_origin(&menu.target)
+        })
         .or_else(|| ui.description.get());
     ui.menu.set(None);
     ui.description.set(None);
     if let Some(origin) = origin
         && ui.mode.get() != ViewMode::Fullscreen
+        && ui.list.with(|list| list.row_of(origin.channel)).is_some()
     {
         crate::lists::tap(ui, origin.channel, origin.program_start);
     }
 }
 
 pub fn perform(ui: Ui, item: MenuItem) {
-    let Some((origin, list, group_context)) = ui.menu.with(|menu| {
+    let Some((target, list)) = ui.menu.with(|menu| {
         let menu = menu.as_ref()?;
-        Some((menu.origin, menu.list.clone(), menu.group_context))
+        menu.rows
+            .contains(&Row::Action {
+                item,
+                enabled: true,
+            })
+            .then(|| (menu.target.clone(), menu.list.clone()))
     }) else {
         return;
     };
     ui.menu.set(None);
-    let list = list.unwrap_or_else(|| current_list(ui));
+    if list.resolve(&*crate::schedule()).is_none() {
+        return;
+    }
     let scope = channel_scope(ui, &list);
+    let channel = menu_channel(&target);
+    if channel.is_none() && target != Target::Group {
+        return;
+    }
     match item {
         MenuItem::BlockChannel | MenuItem::BlockGroup => {
             if item == MenuItem::BlockChannel
-                && crate::schedule().channel_block(origin.channel) == Block::Group
+                && channel.is_some_and(|ch| crate::schedule().channel_block(ch) == Block::Group)
             {
                 crate::settings_view::notify(tr("This channel is blocked by a group."));
                 return;
             }
-            if let Some(target) = block_target(ui, item, origin.channel, scope.as_ref()) {
+            if let Some(target) = block_target(ui, item, channel, scope.as_ref()) {
                 let kind = if item == MenuItem::BlockGroup {
                     BlockKind::Group
                 } else {
                     BlockKind::Channel
                 };
-                let blocked = !directly_blocked(&list, item, origin.channel);
+                let blocked = !directly_blocked(&list, item, channel);
                 organization_view::set_block(ui, SourceId(target.source), kind, target.id, blocked);
             }
         }
         MenuItem::ProtectChannel | MenuItem::ProtectGroup => {
-            if let Some(target) = block_target(ui, item, origin.channel, scope.as_ref()) {
+            if let Some(target) = block_target(ui, item, channel, scope.as_ref()) {
                 crate::parental_view::block(ui, target, true);
             }
         }
@@ -229,62 +288,36 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 MenuItem::ManageHidden => Mode::Visibility,
                 _ => Mode::Reorder,
             };
-            if group_context {
-                if let Some((source, kind)) = scope {
-                    organization_view::open_guide_mode(ui, source, kind, None, mode, list);
-                }
-            } else {
-                open_channel_editor(ui, origin.channel, mode, scope, list);
+            if let Some(channel) = channel {
+                open_channel_editor(ui, channel, mode, scope, list);
+            } else if let Some((source, kind)) = scope {
+                organization_view::open_guide_mode(ui, source, kind, None, mode, list);
             }
         }
-        MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
-        MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
-        MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
-        // Details replaces the menu; Back from it returns to the guide.
-        MenuItem::Description => ui.description.set(Some(origin)),
+        MenuItem::Record
+        | MenuItem::CustomRecording
+        | MenuItem::ScheduleRecording
+        | MenuItem::Description
+        | MenuItem::StartFromBeginning => {
+            if let Some(origin) = program_origin(&target) {
+                perform_program(ui, item, origin);
+            }
+        }
         MenuItem::WatchInNewWindow => {
-            crate::desktop::player_windows::open(ui, origin.channel);
-        }
-        MenuItem::StartFromBeginning => {
-            close(ui);
-            let schedule = crate::schedule();
-            let now = ui.focus.with_untracked(|focus| focus.now);
-            let program = origin_program(&*schedule, origin);
-            if program.start != origin.program_start
-                || !program.can_replay(now, schedule.catchup_days(origin.channel))
-                || !crate::player::allow_guide_channel(origin.channel)
-            {
-                return;
+            if let Some(channel) = channel {
+                crate::desktop::player_windows::open(ui, channel);
             }
-            ui.play(
-                origin.channel,
-                crate::Playback::CatchUp {
-                    start: origin.program_start,
-                    offset: 0,
-                },
-            );
-            ui.mode.set(ViewMode::Fullscreen);
-            ui.show_playing();
         }
-        MenuItem::ManageFavorites => {
-            close(ui);
-            crate::fav_editor::open(ui);
-        }
-        MenuItem::Search => {
-            close(ui);
-            crate::search_view::open(ui);
-        }
-        MenuItem::Settings => {
-            close(ui);
-            crate::settings_view::open(ui);
-        }
+        MenuItem::ManageFavorites => crate::fav_editor::open(ui, &list, channel),
+        MenuItem::Search => crate::search_view::open(ui),
+        MenuItem::Settings => crate::settings_view::open(ui),
         MenuItem::ToggleFavorite => {
-            close(ui);
-            crate::favorites::toggle(ui, origin.channel);
+            if let Some(channel) = channel {
+                crate::favorites::toggle(ui, channel);
+            }
         }
         MenuItem::HideChannel => {
-            close(ui);
-            if let Some(target) = crate::parental_view::live_target(ui, origin.channel) {
+            if let Some(target) = channel.and_then(|ch| crate::parental_view::live_target(ui, ch)) {
                 let source = SourceId(target.source);
                 let saved =
                     crate::runtime::commands::hide_channel(&crate::runtime(), source, target.id);
@@ -298,14 +331,20 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 });
             }
         }
-        MenuItem::CreateGroup | MenuItem::CopyChannels => {
-            close(ui);
-            if let Some(source) = ui.app.library.shown.get_untracked() {
-                crate::custom_groups::open(ui, source, item == MenuItem::CopyChannels);
+        MenuItem::CreateGroup => {
+            if let Some((source, _)) = scope {
+                crate::custom_groups::open(ui, source);
+            }
+        }
+        MenuItem::CopyChannels => {
+            if let Some((source, channels)) = copy_scope(scope.as_ref()) {
+                crate::custom_groups::open_copy(ui, source, channels);
             }
         }
         MenuItem::ChannelOptions => {
-            open_channel_editor(ui, origin.channel, Mode::Options, scope, list);
+            if let Some(channel) = channel {
+                open_channel_editor(ui, channel, Mode::Options, scope, list);
+            }
         }
         MenuItem::SortChannels => {
             if let Some((source, kind)) = scope {
@@ -314,6 +353,31 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::GroupOptions => {
             show_group_options(ui, list);
+        }
+        MenuItem::RenameGroup => {
+            if let Some(target) = group_target(scope.as_ref()) {
+                organization_view::rename_group(ui, SourceId(target.source), target.id);
+            }
+        }
+        MenuItem::ResetGroupName => {
+            if let Some((source, Kind::GroupChannels(id))) = scope {
+                let owner = crate::runtime();
+                let save = crate::runtime::commands::rename_organization_item(
+                    &owner,
+                    source,
+                    Kind::Groups,
+                    id.as_str().to_owned(),
+                    String::new(),
+                );
+                crate::data::spawn_in_app(async move {
+                    match save.await {
+                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Err(_) => crate::settings_view::notify(tr(
+                            "The change could not be saved. Reopen the list and try again.",
+                        )),
+                    }
+                });
+            }
         }
         MenuItem::SortGroups | MenuItem::ReorderGroups | MenuItem::ManageGroups => {
             if let Some((source, _)) = scope.as_ref() {
@@ -351,13 +415,43 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         // The chooser opens over the guide; the guide's focus stays.
         MenuItem::AssignEpg => {
-            close(ui);
-            crate::guide_assign_view::open(ui, origin.channel);
+            if let Some(channel) = channel {
+                crate::guide_assign_view::open(ui, channel);
+            }
         }
         other => {
             log::info!("iptv menu {other:?} not implemented yet");
-            close(ui);
         }
+    }
+}
+
+fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
+    match item {
+        MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
+        MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
+        MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
+        MenuItem::Description => ui.description.set(Some(origin)),
+        MenuItem::StartFromBeginning => {
+            let schedule = crate::schedule();
+            let now = ui.focus.with_untracked(|focus| focus.now);
+            let program = origin_program(&*schedule, origin);
+            if program.start != origin.program_start
+                || !program.can_replay(now, schedule.catchup_days(origin.channel))
+                || !crate::player::allow_guide_channel(origin.channel)
+            {
+                return;
+            }
+            ui.play(
+                origin.channel,
+                crate::Playback::CatchUp {
+                    start: origin.program_start,
+                    offset: 0,
+                },
+            );
+            ui.mode.set(ViewMode::Fullscreen);
+            ui.show_playing();
+        }
+        _ => {}
     }
 }
 
@@ -378,27 +472,40 @@ fn group_target(scope: Option<&(SourceId, Kind)>) -> Option<iptv_core::parental:
 fn block_target(
     ui: Ui,
     item: MenuItem,
-    channel: usize,
+    channel: Option<usize>,
     scope: Option<&(SourceId, Kind)>,
 ) -> Option<iptv_core::parental::Target> {
     match item {
         MenuItem::BlockChannel | MenuItem::ProtectChannel => {
-            crate::parental_view::live_target(ui, channel)
+            crate::parental_view::live_target(ui, channel?)
         }
         MenuItem::BlockGroup | MenuItem::ProtectGroup => group_target(scope),
         _ => None,
     }
 }
 
-fn directly_blocked(list: &ListId, item: MenuItem, channel: usize) -> bool {
+fn directly_blocked(list: &ListId, item: MenuItem, channel: Option<usize>) -> bool {
     let schedule = crate::schedule();
     match item {
-        MenuItem::BlockChannel => schedule.channel_block(channel) == Block::Channel,
+        MenuItem::BlockChannel => {
+            channel.is_some_and(|ch| schedule.channel_block(ch) == Block::Channel)
+        }
         MenuItem::BlockGroup => {
-            matches!(Entry::at(list.find(&*schedule)), Entry::Group(group) if schedule.group_blocked(group))
+            matches!(list.resolve(&*schedule).map(Entry::at), Some(Entry::Group(group)) if schedule.group_blocked(group))
         }
         _ => false,
     }
+}
+
+fn copy_scope(scope: Option<&(SourceId, Kind)>) -> Option<(SourceId, ChannelScope)> {
+    let (source, kind) = scope?;
+    let channels = match kind {
+        Kind::Channels => ChannelScope::All,
+        Kind::GroupChannels(id) => ChannelScope::Group(id.clone()),
+        Kind::CustomChannels(id) => ChannelScope::Custom(*id),
+        _ => return None,
+    };
+    Some((*source, channels))
 }
 
 fn current_list(ui: Ui) -> ListId {
@@ -452,12 +559,21 @@ fn open_channel_editor(
 /// Whether entry `entry` of a groups column has group options (what
 /// [`open_group_options`] would open): its row shows a ⋯ for them.
 pub fn has_group_options(ui: Ui, entry: usize) -> bool {
-    channel_scope(ui, &ListId::of(entry, &*crate::schedule())).is_some()
+    let schedule = crate::schedule();
+    if entry >= iptv_presentation::lists::entry_count(&*schedule) {
+        return false;
+    }
+    let list = ListId::of(entry, &*schedule);
+    channel_scope(ui, &list).is_some() || aggregate_options(&list)
 }
 
 /// A focused group is actionable even when none of its channels are visible.
 pub fn open_group_options(ui: Ui, entry: usize) -> bool {
-    let list = ListId::of(entry, &*crate::schedule());
+    let schedule = crate::schedule();
+    if entry >= iptv_presentation::lists::entry_count(&*schedule) {
+        return false;
+    }
+    let list = ListId::of(entry, &*schedule);
     show_group_options(ui, list)
 }
 
@@ -465,72 +581,56 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
     use MenuItem::*;
 
     let scope = channel_scope(ui, &list);
-    let Some((_, kind)) = scope.as_ref() else {
+    let rows = if let Some((_, kind)) = scope.as_ref() {
+        let named = group_target(scope.as_ref()).is_some();
+        group_options(|item| match item {
+            RenameGroup | BlockGroup | HideGroup => named,
+            ResetGroupName => matches!(kind, Kind::GroupChannels(_)),
+            ManageGroups | SortGroups | ReorderGroups | SortChannels => *kind != Kind::Favorites,
+            ManageFavorites => false,
+            _ => true,
+        })
+    } else if aggregate_options(&list) {
+        group_options(|item| item == ManageFavorites)
+    } else {
         return false;
     };
-    let mut rows = vec![Row::Heading(Heading::Group)];
-    let mut add = |item| {
-        rows.push(Row::Action {
-            item,
-            enabled: true,
-        })
-    };
-    if *kind != Kind::Favorites {
-        add(SortGroups);
-        add(ReorderGroups);
-        add(SortChannels);
-    }
-    add(ReorderChannels);
-    if group_target(scope.as_ref()).is_some() {
-        add(HideGroup);
-        add(BlockGroup);
-    }
-    add(ManageHidden);
-    add(ManageBlocked);
-    if *kind != Kind::Favorites {
-        add(ManageGroups);
-    }
-    let origin = Origin {
-        channel: crate::lists::focused_channel(ui).unwrap_or_default(),
-        program_start: ui.focus.with_untracked(|focus| focus.now),
-    };
-    let mut menu = Menu::new(rows, origin);
-    menu.list = Some(list);
-    menu.group_context = true;
-    ui.menu.set(Some(menu));
+    ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
     true
 }
 
+fn aggregate_options(list: &ListId) -> bool {
+    matches!(list, ListId::All | ListId::Favorites)
+        && crate::data::combined::active(&crate::runtime())
+}
+
 fn heading_text(ui: Ui, heading: Heading) -> String {
-    let Some(origin) = ui.menu.with(|m| m.as_ref().map(|m| m.origin)) else {
-        return String::new();
-    };
-    match heading {
-        Heading::Program => {
-            let p = origin_program(&*crate::schedule(), origin);
-            format!(
-                "{} · {}–{}",
-                title(origin.channel, p),
-                clock(p.start),
-                clock(p.end)
-            )
+    ui.guide_data();
+    ui.menu.with(|menu| {
+        let Some(menu) = menu.as_ref() else {
+            return String::new();
+        };
+        match heading {
+            Heading::Program => program_origin(&menu.target).map_or_else(String::new, |origin| {
+                let p = origin_program(&*crate::schedule(), origin);
+                format!(
+                    "{} · {}–{}",
+                    title(origin.channel, p),
+                    clock(p.start),
+                    clock(p.end)
+                )
+            }),
+            Heading::Channel => menu_channel(&menu.target).map_or_else(String::new, channel_name),
+            Heading::Group => {
+                let catalog = crate::schedule();
+                menu.list
+                    .resolve(&*catalog)
+                    .map_or_else(String::new, |entry| {
+                        crate::lists::entry_name(entry, &*catalog)
+                    })
+            }
         }
-        Heading::Channel => channel_name(origin.channel),
-        Heading::Group => {
-            ui.guide_data();
-            let catalog = crate::schedule();
-            let entry = ui.menu.with(|menu| {
-                menu.as_ref()?
-                    .list
-                    .as_ref()
-                    .map(|list| list.find(&*catalog))
-            });
-            entry.map_or_else(
-                || crate::lists::list_name(ui),
-                |entry| crate::lists::entry_name(entry, &*catalog),
-            )
-        }
-    }
+    })
 }
 
 pub fn layer(ui: Ui) -> impl IntoElement {
@@ -549,10 +649,6 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             ui.menu
                 .with(|m| m.as_ref().and_then(|m| m.rows.get(at.index()).copied()))
         };
-        let favorite = move || {
-            let ch = ui.menu.with(|m| m.as_ref().map(|m| m.origin.channel));
-            ch.is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
-        };
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
         let mark = move || Mark::of(focused(), false);
         let heading = move || matches!(row(), Some(Row::Heading(_)));
@@ -560,14 +656,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             Some(Row::Heading(h)) => heading_text(ui, h),
             Some(Row::Action { item, .. }) => {
                 ui.guide_data();
-                let blocked = ui.menu.with(|menu| {
-                    menu.as_ref().is_some_and(|menu| {
-                        menu.list
-                            .as_ref()
-                            .is_some_and(|list| directly_blocked(list, item, menu.origin.channel))
-                    })
-                });
-                label(item, favorite(), blocked).to_owned()
+                ui.menu.with(|menu| {
+                    let Some(menu) = menu.as_ref() else {
+                        return String::new();
+                    };
+                    let channel = menu_channel(&menu.target);
+                    let favorite = item == MenuItem::ToggleFavorite
+                        && channel.is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)));
+                    let blocked = directly_blocked(&menu.list, item, channel);
+                    label(item, favorite, blocked).to_owned()
+                })
             }
             None => String::new(),
         };
@@ -596,10 +694,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .child(name)
             .on_press(move || {
                 ui.touched();
-                let picked = ui
-                    .menu
-                    .with(|m| m.clone())
-                    .and_then(|mut m| m.tap(at.index()));
+                let picked = ui.menu.with(|m| m.as_ref()?.action_at(at.index()));
                 if let Some(item) = picked {
                     perform(ui, item);
                 }
@@ -775,11 +870,15 @@ fn description(ui: Ui) -> impl IntoElement {
         )
 }
 
-/// Context-click targets a channel without tuning the main player.
-pub fn open_at(ui: Ui, channel: usize, minute: i32) {
+/// A channel header gesture selects its row without tuning or moving to now.
+pub fn open_at(ui: Ui, channel: usize) {
     ui.touched();
-    crate::lists::tap(ui, channel, minute);
-    open_focused(ui);
+    batch(|| {
+        let minute = ui.focus.with_untracked(|focus| focus.cursor);
+        crate::lists::tap(ui, channel, minute);
+        crate::browse_playback::hold(ui);
+        open_channel(ui, channel);
+    });
 }
 
 /// A right-click or long press moved the guide's focus to a program:

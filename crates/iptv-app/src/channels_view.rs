@@ -195,8 +195,16 @@ fn open_channel_menu(ui: Ui, row: usize) {
     if !crate::multiview::picking(ui)
         && let Some(channel) = ui.list.with_untracked(|list| list.channel(row))
     {
-        let minute = ui.focus.with_untracked(|focus| focus.now);
-        crate::menu_view::open_for(ui, channel, minute);
+        batch(|| {
+            ui.pending_zap.set(None);
+            ui.channels.update(|state| {
+                if let Some(state) = state {
+                    state.focus_row(row);
+                }
+            });
+            crate::browse_playback::hold(ui);
+            crate::menu_view::open_channel(ui, channel);
+        });
     }
 }
 

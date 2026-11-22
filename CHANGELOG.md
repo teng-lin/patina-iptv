@@ -46,6 +46,12 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Long press or right-click on a channel opens its own actions. In the
+  player’s channel list, long OK also opens those actions without tuning.
+  Named groups have a direct rename action, and provider groups can restore
+  their original name.
+  Copying from a group starts with that group's channels.
+
 - Whole-app backups no longer include the downloaded TV guide: its programs
   and descriptions, which can be most of a backup's size. Guide sources,
   channel matches, guide repairs and local guide files are still backed up.

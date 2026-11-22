@@ -122,6 +122,7 @@ fn capture(ui: Ui) -> Option<Capture> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InputOwner {
     Overlay(crate::overlays::Overlay),
+    ChannelList(iptv_presentation::channel_list::ListPane),
     Multiview,
     PlayBar,
     Card,
@@ -134,7 +135,13 @@ type Surface = (Context, InputOwner);
 
 fn surface(ui: &Ui) -> Surface {
     let owner = if let Some(overlay) = ui.top_overlay() {
-        InputOwner::Overlay(overlay)
+        if overlay == crate::overlays::Overlay::ChannelList {
+            ui.channels
+                .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
+                .unwrap_or(InputOwner::Overlay(overlay))
+        } else {
+            InputOwner::Overlay(overlay)
+        }
     } else if crate::multiview::is_open(*ui) {
         InputOwner::Multiview
     } else if ui.mode.get() == ViewMode::Fullscreen {
@@ -942,9 +949,10 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            if (key == RemoteKey::Menu && entry == iptv_presentation::lists::ALL)
+            if (key == RemoteKey::Menu && !long_press() && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
-                    && ui.app.library.shown.get_untracked().is_none())
+                    && ui.app.library.shown.get_untracked().is_none()
+                    && !crate::data::combined::active(&crate::runtime()))
             {
                 crate::wizard_view::open_add(ui);
             }

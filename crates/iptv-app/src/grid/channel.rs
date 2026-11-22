@@ -83,7 +83,7 @@ pub(super) fn cell(
                 return;
             }
             if let Some(ch) = channel.get() {
-                crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));
+                crate::menu_view::open_at(ui, ch);
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
@@ -92,7 +92,7 @@ pub(super) fn cell(
             if !crate::organization_view::guide_order_open(ui)
                 && let Some(ch) = channel.get()
             {
-                crate::menu_view::open_at(ui, ch, ui.focus.with(|f| f.now));
+                crate::menu_view::open_at(ui, ch);
             }
         })
         .role(move || {

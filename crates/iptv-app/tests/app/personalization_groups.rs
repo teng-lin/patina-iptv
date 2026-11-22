@@ -3,6 +3,18 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope};
 use personalization::*;
 use std::time::Duration;
+
+#[test]
+fn copy_channels_from_the_guide_is_scoped_to_its_group() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, Settings::new(), false);
+    let app = &mut f.app;
+    group(app, "News");
+    menu(app, "Copy channels to a group…");
+    step(app.wait_for("text:0 selected · 2 matching · 2 total"));
+    assert!(!app.shows("id:custom-groups-screen >> text:Local C"));
+}
+
 #[test]
 fn custom_groups_filter_select_copy_move_rename_delete_and_restore_focus() {
     let Some(home) = isolated!() else { return };
@@ -272,6 +284,17 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
     step(app.press_key("shift+f10"));
     step(app.wait_for("id:menu-panel >> text:Group order"));
     step(app.back());
+    step(app.right_click("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:News"));
+    step(app.type_text("text:Empty restores the provider name", "Generated news"));
+    step(app.submit("text:Generated news"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.wait_for("id:guide-groups >> text:Generated news"));
+    step(app.right_click("id:guide-groups >> text:Generated news"));
+    step(app.press("id:menu-panel >> text:Use provider name"));
+    step(app.wait_for("id:guide-groups >> text:News"));
     step(app.right_click("id:guide-groups >> text:News"));
     step(app.wait_for("id:menu-panel >> text:Hide group"));
     step(app.press("text:Block group"));

@@ -212,13 +212,16 @@ visible entry point for touch and pointer users.
 
 - **Now:** in the guide, the channel list and recordings: Menu on a remote, and
   long OK on Android; M on a keyboard, and Shift+F10 on desktop. Long press and
-  right-click open the same menu on guide programs and channels, the channel
-  list and recordings. During playback, Menu and long OK open the playback bar
-  instead ([TV controls](tv-controls.md)).
+  right-click open program actions on a guide cell, channel actions on a
+  channel header or player-list row, and group options on a group. In the
+  guide grid, the program menu also includes actions for its channel and
+  group. The keyboard's M shortcut on the All channels group adds a
+  playlist. During fullscreen playback, Menu and long OK open the playback bar
+  ([TV controls](tv-controls.md)).
 - **Now:** while touch or a pointer drives the app, a visible "More options"
-  control (⋯) opens the program and channel menu: in the guide header, after
-  the focused or tapped program's title, and at the end of each channel list
-  row. The header's ⋯ hides during an inline reorder of channels or groups,
+  control (⋯) opens the program menu in the guide header after the selected
+  program's title, and the channel menu at the end of each channel list row.
+  The header's ⋯ hides during an inline reorder of channels or groups,
   and the rows' ⋯ while multiview picks a channel (rows have no menu then).
   Keys hide it; they have Menu. Where touch or a pointer is usual, the
   title keeps the ⋯'s room while it is hidden, so switching input moves no

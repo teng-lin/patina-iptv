@@ -217,7 +217,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     }
 
     // A main-window editor is not an invisible overlay in this player.
-    step(app.right_click("id:guide-ui >> label:Local A"));
+    step(app.right_click("id:guide-ui >> role:cell[No information] >> nth=1"));
     step(app.press("text:Manage favorites…"));
     step(app.wait_for("text:Tap a channel to add or remove it"));
     step(app.hover("text:Tap a channel to add or remove it"));

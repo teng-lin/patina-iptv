@@ -92,13 +92,18 @@ impl ListId {
     /// The entry with this identity in `catalog`: "All channels" when its
     /// group is gone.
     pub fn find(&self, catalog: &dyn Schedule) -> usize {
+        self.resolve(catalog).unwrap_or(ALL)
+    }
+
+    /// Resolves the entry without substituting a different list if it is gone.
+    pub fn resolve(&self, catalog: &dyn Schedule) -> Option<usize> {
         match self {
-            ListId::Favorites => FAVORITES,
-            ListId::Recent => RECENT,
-            ListId::All => ALL,
+            ListId::Favorites => Some(FAVORITES),
+            ListId::Recent => Some(RECENT),
+            ListId::All => Some(ALL),
             ListId::Group(name) => (0..catalog.group_count())
                 .find(|&g| catalog.group_key(g) == *name)
-                .map_or(ALL, |g| Entry::Group(g).index()),
+                .map(|g| Entry::Group(g).index()),
         }
     }
 }

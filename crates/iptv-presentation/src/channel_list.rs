@@ -135,9 +135,14 @@ impl ChannelList {
 
     /// A tap on a row: focuses it and picks it.
     pub fn tap_row(&mut self, row: usize, playing: Option<usize>, list: &Rows) -> Outcome {
+        self.focus_row(row);
+        self.select(playing, list)
+    }
+
+    /// Marks a channel targeted by a secondary gesture without picking it.
+    pub fn focus_row(&mut self, row: usize) {
         self.pane = ListPane::Channels;
         self.row = row;
-        self.select(playing, list)
     }
 
     /// Back: from the groups to the channels, else closes.

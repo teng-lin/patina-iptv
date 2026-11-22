@@ -7,6 +7,7 @@
 use crate::i18n::{tr, trf};
 
 use iptv_presentation::editor::FavoritesEditor;
+use iptv_presentation::lists::{ChannelList, ListId};
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
@@ -16,14 +17,20 @@ use crate::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::LIST_TEXT;
 
-/// Opens the editor on the list on screen, at the focused channel.
-pub fn open(ui: Ui) {
-    let (group, channels) = ui.list.with(|l| (l.entry(), l.channels().to_vec()));
-    let mut editor = FavoritesEditor::new(group, channels);
-    editor.focus = ui
-        .focus
-        .with(|f| f.channel)
-        .min(editor.len().saturating_sub(1));
+/// Opens the editor on the list that owns the action, at its selected channel.
+pub fn open(ui: Ui, list: &ListId, channel: Option<usize>) {
+    let catalog = crate::schedule();
+    let Some(group) = list.resolve(&*catalog) else {
+        return;
+    };
+    let channels = ChannelList::build(
+        group,
+        &*catalog,
+        &crate::favorites::favorite_channels(),
+        &crate::favorites::recent_channels(),
+    );
+    let mut editor = FavoritesEditor::new(group, channels.channels().to_vec());
+    editor.focus = channel.and_then(|ch| channels.row_of(ch)).unwrap_or(0);
     ui.editor.set(Some(editor));
 }
 

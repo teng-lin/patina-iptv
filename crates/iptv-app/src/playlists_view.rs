@@ -197,7 +197,7 @@ fn perform(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::CustomGroups(id) => {
-                crate::custom_groups::open(ui, id, false);
+                crate::custom_groups::open(ui, id);
                 Ok(())
             }
             Effect::Organize(id, groups) => {
