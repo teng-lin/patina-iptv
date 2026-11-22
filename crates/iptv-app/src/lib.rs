@@ -123,8 +123,8 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use iptv_core::lists::ChannelList;
-use iptv_core::menu::{Menu, Origin};
 use iptv_presentation::editor::FavoritesEditor;
+use iptv_presentation::menu::{Menu, Origin};
 use iptv_presentation::panels::Panels;
 use iptv_presentation::player_options::{PictureSettings, SleepTimer};
 use nsh_core::prelude::*;

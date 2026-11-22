@@ -24,10 +24,10 @@
 //! often carry credentials in their path or query. Labels and the empty
 //! state's wording are the shell's own (i18n), not stored here.
 
-use crate::add_playlist::{UrlError, UrlScheme, url_origin, validate_url};
+use iptv_core::add_playlist::{UrlError, UrlScheme, url_origin, validate_url};
 use std::collections::BTreeMap;
 
-pub use crate::add_playlist::{
+pub use iptv_core::add_playlist::{
     DraftSource, FailureKind, ImportCounts, ImportFailure, ImportId, ImportInput, ImportProgress,
     ImportStage, PlaylistDraft, SecretText, UrlText, normalize_mac,
 };

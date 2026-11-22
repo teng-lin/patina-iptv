@@ -207,7 +207,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iptv_core::wizard::{FailureKind, ImportFailure};
+    use iptv_presentation::wizard::{FailureKind, ImportFailure};
     use iptv_providers::model::SourceKind;
 
     fn playlist(kind: SourceKind) -> crate::data::Playlist {

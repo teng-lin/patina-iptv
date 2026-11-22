@@ -20,7 +20,3 @@ pub fn move_to_present<T: PartialEq<Q>, Q: ?Sized>(
     items.insert(anchor, moved);
     true
 }
-
-pub use crate::reorder_state::{
-    Exit, Hint, HintAction, HintKey, Key, LeaveChoice, Outcome, Reorder, SubMode,
-};

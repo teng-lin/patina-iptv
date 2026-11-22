@@ -8,7 +8,7 @@
 
 use crate::i18n::tr;
 
-use iptv_core::multiview::{Dialog, TileAction};
+use iptv_presentation::multiview::{Dialog, TileAction};
 use nsh_core::prelude::*;
 
 use super::with_state;

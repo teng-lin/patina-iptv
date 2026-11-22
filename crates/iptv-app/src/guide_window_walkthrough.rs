@@ -22,7 +22,7 @@ pub fn bind(ui: Ui) {
         println!("DEMO: channel context menu offers Watch in new window");
     });
     let _open = set_timeout(Duration::from_secs(9), move || {
-        crate::menu_view::perform(ui, iptv_core::menu::MenuItem::WatchInNewWindow);
+        crate::menu_view::perform(ui, iptv_presentation::menu::MenuItem::WatchInNewWindow);
         println!("DEMO: channel two plays in a new window; main playback unchanged");
     });
     let _next_menu = set_timeout(Duration::from_secs(14), move || {
@@ -36,7 +36,7 @@ pub fn bind(ui: Ui) {
         }
     });
     let _next = set_timeout(Duration::from_secs(18), move || {
-        crate::menu_view::perform(ui, iptv_core::menu::MenuItem::WatchInNewWindow);
+        crate::menu_view::perform(ui, iptv_presentation::menu::MenuItem::WatchInNewWindow);
         println!("DEMO: two independent windows and the original guide/player in one process");
     });
 }

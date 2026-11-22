@@ -7,7 +7,7 @@
 //! here switches an import on or invents titles: M3U playlists never carry
 //! movies or series, so they only ever lead to adding another playlist.
 
-use iptv_core::wizard::FailureKind;
+use crate::wizard::FailureKind;
 
 /// What one enabled playlist says about its movies (or shows).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

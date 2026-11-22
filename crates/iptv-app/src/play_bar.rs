@@ -25,11 +25,12 @@ mod progress;
 use std::time::Duration;
 
 use iptv_core::channel_list::ListMode;
-use iptv_core::menu::Origin;
-use iptv_core::tracks::{Kind as Track, fps_label, resolution_class};
+use iptv_core::tracks::Kind as Track;
 use iptv_nav::{Action, RemoteKey};
+use iptv_presentation::menu::Origin;
 use iptv_presentation::panels::QuickAction;
 use iptv_presentation::play_bar::{Control, PlayBar};
+use iptv_presentation::tracks::{fps_label, resolution_class};
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};

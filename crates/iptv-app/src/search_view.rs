@@ -23,10 +23,10 @@ use nsh_core::time::Instant;
 use std::time::Duration;
 
 use iptv_core::guide::{Airing, Schedule};
-use iptv_core::menu::Origin;
 use iptv_epg::UnixTime;
 use iptv_guide::EpgSchedule;
 use iptv_nav::Action;
+use iptv_presentation::menu::Origin;
 use iptv_presentation::search::{
     Focus, Phase, ResultId, ResultPolicy, ResultSelection as Outcome, SearchAction, SearchEffect,
     SearchState, Tab, select_result,

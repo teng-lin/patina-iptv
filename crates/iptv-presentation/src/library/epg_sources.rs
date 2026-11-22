@@ -5,7 +5,7 @@
 //! Focus is kept by identity (a source's feed id), never by position.
 //! Pure: the view feeds it keys and taps and carries out its [`Effect`]s.
 
-use iptv_core::wizard::{Field, FieldError, validate_field};
+use crate::wizard::{Field, FieldError, validate_field};
 use iptv_epg::FeedId as Feed;
 use iptv_library::SourceId;
 use iptv_providers::SecretUrl;

@@ -14,7 +14,6 @@ use iptv_core::favorites::{Favorites, KeyIndex, Recent};
 use iptv_core::guide::{GroupName, Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
 use iptv_core::lists::{self, ChannelList as Rows, FAVORITES};
 use iptv_core::playback::{ZapOrigin, zap_from_list};
-use iptv_core::reorder::{self, Exit, Reorder};
 use iptv_epg::{GuideStore, Overrides, StoreOptions};
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, PlaybackContext, Resolution};
@@ -24,6 +23,7 @@ use iptv_import::{
 };
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
 use iptv_presentation::play_bar::{Control, PlayBar};
+use iptv_presentation::reorder::{self, Exit, Reorder};
 use iptv_presentation::search::{
     ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchState, Tab,
     select_result,
