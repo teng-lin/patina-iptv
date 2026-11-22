@@ -45,7 +45,7 @@ fn span(p: Program) -> String {
 
 /// How far along it is, in our words.
 fn left(now: i32, p: Program) -> String {
-    let timing = iptv_core::player_info::ProgramTiming::in_guide(p, now);
+    let timing = iptv_presentation::player_info::ProgramTiming::in_guide(p, now);
     match timing.airing {
         Airing::Live => trf(
             "{minutes} min left",
@@ -278,8 +278,10 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                                 .w(move || {
                                     let done = program.with(|p| {
                                         p.map_or(0.0, |(_, now, _, _, p)| {
-                                            iptv_core::player_info::ProgramTiming::in_guide(p, now)
-                                                .progress
+                                            iptv_presentation::player_info::ProgramTiming::in_guide(
+                                                p, now,
+                                            )
+                                            .progress
                                         })
                                     });
                                     px(if live() {

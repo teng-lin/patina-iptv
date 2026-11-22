@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FavoritesEditor {
-    /// The groups column entry the list belongs to ([`crate::lists`]).
+    /// The groups column entry the list belongs to ([`iptv_core::lists`]).
     pub group: usize,
     /// The list's catalog channels, in order, as it was when opened.
     pub channels: Vec<usize>,

@@ -33,8 +33,6 @@ impl Progress {
     }
 }
 
-pub use crate::on_demand_state::{Seek, Timeline};
-
 #[cfg(test)]
 mod tests {
     use super::Progress;

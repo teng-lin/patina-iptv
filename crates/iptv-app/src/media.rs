@@ -6,9 +6,9 @@
 //! stay. `video.rs` binds these to the hosts; the panels and choosers read
 //! and change the full-screen player's (surface 0).
 
-use iptv_core::player_info::StreamFormat;
 use iptv_core::sound::{VOLUME_STEP, Volume};
 use iptv_core::tracks::{Choice, Kind, Tracks};
+use iptv_presentation::player_info::StreamFormat;
 use nsh_core::prelude::*;
 
 use crate::Ui;

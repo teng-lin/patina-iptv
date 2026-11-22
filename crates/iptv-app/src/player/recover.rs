@@ -1,5 +1,5 @@
 //! Recovering a stream: errors and states from the host go through the
-//! core's health machine (`iptv_core::playback::Health`), whose retries run
+//! core's health machine (`iptv_presentation::playback_health::Health`), whose retries run
 //! here on timers. A live channel retries for as long as it stays selected
 //! (fast, then slowly, then slowly behind the failure card); a retry that
 //! comes due while the Android app is away waits for its return

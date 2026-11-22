@@ -55,7 +55,7 @@ pub struct PanAnchor {
 
 impl PanAnchor {
     /// A pan starts on `channel`'s program on air, the focus at `focus`.
-    pub fn new(channel: String, focus: &crate::guide::Focus) -> Self {
+    pub fn new(channel: String, focus: &iptv_core::guide::Focus) -> Self {
         PanAnchor {
             channel,
             group: focus.group,
@@ -65,12 +65,12 @@ impl PanAnchor {
     }
 
     /// The pan moved the focus along the row to `focus`.
-    pub fn panned(&mut self, focus: &crate::guide::Focus) {
+    pub fn panned(&mut self, focus: &iptv_core::guide::Focus) {
         self.cursor = focus.cursor;
     }
 
     /// Whether it still holds with the focus at `focus` on `channel`.
-    pub fn holds(&self, channel: &str, focus: &crate::guide::Focus) -> bool {
+    pub fn holds(&self, channel: &str, focus: &iptv_core::guide::Focus) -> bool {
         self.channel == channel
             && self.group == focus.group
             && self.row == focus.channel
@@ -275,7 +275,7 @@ mod tests {
     }
     #[test]
     fn a_pan_anchor_holds_only_where_the_pan_left_the_focus() {
-        let mut focus = crate::guide::Focus::at(0);
+        let mut focus = iptv_core::guide::Focus::at(0);
         focus.channel = 3;
         let mut anchor = PanAnchor::new("ch".into(), &focus);
         assert!(anchor.holds("ch", &focus));

@@ -7,16 +7,14 @@ use crate::{
     scale::Scale,
     ui_kit,
 };
-use iptv_core::vod::{
-    Control, Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Operation, Progress, Retried,
-    Shelf, Sort,
-};
+use iptv_core::vod::{Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Progress, Shelf, Sort};
 use iptv_nav::Action;
+use iptv_presentation::vod::{Control, Operation, Retried};
 use nsh_base::input;
 use nsh_core::prelude::*;
 mod browser;
 mod empty;
-fn edit<R>(ui: Ui, f: impl FnOnce(&mut iptv_core::vod::Screen) -> R) -> R {
+fn edit<R>(ui: Ui, f: impl FnOnce(&mut iptv_presentation::vod::Screen) -> R) -> R {
     let mut result = None;
     ui.vod.update(|s| result = Some(f(s)));
     result.unwrap()
@@ -59,7 +57,7 @@ pub fn close(ui: Ui) {
     crate::runtime().vod_discovery_cancel();
     ui.vod.update(|s| {
         s.open = false;
-        s.handoff = iptv_core::vod::Handoff::None;
+        s.handoff = iptv_presentation::vod::Handoff::None;
         s.generation = s.generation.wrapping_add(1);
     });
 }
@@ -111,7 +109,7 @@ pub fn back(ui: Ui) -> bool {
         // the progress (`Screen::return_from_player`), and reading it
         // again from its first page could lose a deep title's focus.
         let watched = had_details
-            && s.handoff == iptv_core::vod::Handoff::Returned
+            && s.handoff == iptv_presentation::vod::Handoff::Returned
             && (s.is_shelf() || s.query.continue_watching);
         s.back();
         if had_details {

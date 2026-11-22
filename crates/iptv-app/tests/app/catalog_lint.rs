@@ -134,7 +134,7 @@ const TRANSLATING_HELPERS: &[(&str, &str, usize)] = &[
 /// translated when the user is told (`backup::report`, `App`).
 const MESSAGE_FILES: &[&str] = &[
     "iptv-core/src/parental.rs",
-    "iptv-core/src/parental_state.rs",
+    "iptv-presentation/src/parental.rs",
     "iptv-runtime/src/parental.rs",
     "iptv-app/src/parental_view.rs",
     "iptv-runtime/src/backup.rs",
@@ -144,7 +144,7 @@ const MESSAGE_FILES: &[&str] = &[
     "iptv-runtime/src/recordings/host.rs",
     "iptv-runtime/src/recordings/rules.rs",
     "iptv-core/src/recording.rs",
-    "iptv-core/src/recording_state.rs",
+    "iptv-presentation/src/recording.rs",
     "iptv-app/src/recordings_view.rs",
 ];
 
@@ -2170,7 +2170,7 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
     );
     assert_eq!(
         verdict(
-            "iptv-core/src/player_info.rs",
+            "iptv-presentation/src/player_info.rs",
             &literal("{minutes} min left", Some("format"), 1)
         ),
         Verdict::Message

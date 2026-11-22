@@ -142,8 +142,8 @@ fn surface(ui: &Ui) -> Surface {
             InputOwner::PlayBar
         } else {
             match ui.panels.with(|p| p.shown) {
-                iptv_core::panels::Shown::Card => InputOwner::Card,
-                iptv_core::panels::Shown::Controls => InputOwner::Strip,
+                iptv_presentation::panels::Shown::Card => InputOwner::Card,
+                iptv_presentation::panels::Shown::Controls => InputOwner::Strip,
                 _ => InputOwner::Video,
             }
         }
@@ -662,7 +662,7 @@ fn resolve(
 /// A key going down counts as use of the panels and the play bar on
 /// screen, as an applied key does (`apply`).
 fn keep_controls(ui: Ui) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.update_panels(|p, now| p.touch(now));
     }
     if untracked(|| crate::play_bar::shows(ui)) {
@@ -692,7 +692,7 @@ fn release_controls(ui: Ui) {
 
 /// Keeps a shown card or play bar until at least `at` (ms).
 fn keep_controls_until(ui: Ui, at: u64) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_core::panels::Shown::Hidden {
+    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.panels.update(|p| p.keep_until(at));
     }
     if untracked(|| crate::play_bar::shows(ui)) {

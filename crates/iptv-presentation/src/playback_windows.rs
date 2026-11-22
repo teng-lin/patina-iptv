@@ -2,7 +2,7 @@
 //! Playback sessions outlive browsing and carry stable identities.
 //!
 //! Exactly one player is heard (#135): the main player (`None`) or one
-//! session's window, kept by the session's identity ([`crate::heard`]),
+//! session's window, kept by the session's identity ([`iptv_core::heard`]),
 //! so resizing, full screen or the compact presentation never move it,
 //! nor does the keyboard focus. Opening a window does not take the sound;
 //! Listen to this ([`Workspace::listen`], [`Workspace::listen_to_main`])
@@ -22,7 +22,7 @@ pub struct Session<C> {
     /// Compact PiP presentation in this session's existing player window.
     pub compact: bool,
     pub paused: bool,
-    pub volume: crate::sound::Volume,
+    pub volume: iptv_core::sound::Volume,
     pub audio_delay: i32,
 }
 
@@ -32,7 +32,7 @@ pub struct Workspace<C> {
     next_id: u64,
     pub browsing: Option<C>,
     /// The heard player: a session, or the main player (`None`).
-    heard: crate::heard::Heard<Option<SessionId>>,
+    heard: iptv_core::heard::Heard<Option<SessionId>>,
 }
 
 impl<C> Default for Workspace<C> {
@@ -41,7 +41,7 @@ impl<C> Default for Workspace<C> {
             sessions: Vec::new(),
             next_id: 1,
             browsing: None,
-            heard: crate::heard::Heard::new(None),
+            heard: iptv_core::heard::Heard::new(None),
         }
     }
 }
@@ -77,7 +77,7 @@ impl<C: Clone + PartialEq> Workspace<C> {
             session.separate = true;
             return Some(session.id);
         }
-        let surface = (first_surface..crate::multiview::MAX_SURFACES)
+        let surface = (first_surface..iptv_core::multiview::MAX_SURFACES)
             .find(|surface| self.on_surface(*surface).is_none())?;
         let id = SessionId(self.next_id);
         self.next_id += 1;
@@ -88,7 +88,7 @@ impl<C: Clone + PartialEq> Workspace<C> {
             separate: true,
             compact: false,
             paused: false,
-            volume: crate::sound::Volume {
+            volume: iptv_core::sound::Volume {
                 muted: first_surface > 0,
                 ..Default::default()
             },
@@ -141,7 +141,7 @@ impl<C: Clone + PartialEq> Workspace<C> {
             s.paused = paused;
         }
     }
-    pub fn set_volume(&mut self, id: SessionId, volume: crate::sound::Volume) {
+    pub fn set_volume(&mut self, id: SessionId, volume: iptv_core::sound::Volume) {
         if let Some(s) = self.sessions.iter_mut().find(|s| s.id == id) {
             s.volume = volume;
             // Its own Mute gives the sound to the main player; its
@@ -204,16 +204,16 @@ mod tests {
     fn main_audio_selection_mutes_auxiliaries_without_closing_them() {
         let mut w = Workspace::default();
         let id = w.open_auxiliary("one").unwrap();
-        w.set_volume(id, crate::sound::Volume::default());
+        w.set_volume(id, iptv_core::sound::Volume::default());
         assert_eq!(w.audible(), Some(id));
         w.listen_to_main();
         assert_eq!(w.audible(), None);
         assert!(w.on_surface(1).unwrap().volume.muted);
-        w.set_volume(id, crate::sound::Volume::default());
+        w.set_volume(id, iptv_core::sound::Volume::default());
         assert_eq!(w.audible(), Some(id), "sound can be selected again");
         // Taking it with another window's volume mutes this one.
         let other = w.open_auxiliary("two").unwrap();
-        w.set_volume(other, crate::sound::Volume::default());
+        w.set_volume(other, iptv_core::sound::Volume::default());
         assert_eq!(w.audible(), Some(other));
         assert!(w.on_surface(1).unwrap().volume.muted);
     }

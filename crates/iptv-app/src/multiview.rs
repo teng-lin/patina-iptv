@@ -42,8 +42,8 @@ mod lifecycle;
 mod pointer;
 
 use iptv_core::multiview::{Key, Limits, MAX_SURFACES, Multiview, Outcome};
-use iptv_core::play_bar::PlayBar;
 use iptv_nav::Action;
+use iptv_presentation::play_bar::PlayBar;
 use nsh_core::prelude::*;
 
 use crate::{Playback, Ui, ViewMode};

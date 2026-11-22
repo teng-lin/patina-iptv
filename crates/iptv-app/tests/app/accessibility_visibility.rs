@@ -704,7 +704,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     activate(app, video);
     exposure.shown(app, "play-bar-layer", true);
     step(app.run_for(Duration::from_secs(
-        4 * iptv_core::play_bar::HIDE_AFTER_MS / 1000,
+        4 * iptv_presentation::play_bar::HIDE_AFTER_MS / 1000,
     )));
     exposure.shown(app, "play-bar-layer", true);
     // Its Guide button goes back to the guide, on the playing channel.
@@ -722,7 +722,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     activate(app, video);
     exposure.shown(app, "play-bar-layer", true);
     step(app.run_for(Duration::from_millis(
-        iptv_core::play_bar::HIDE_AFTER_MS + 500,
+        iptv_presentation::play_bar::HIDE_AFTER_MS + 500,
     )));
     step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(3)));
 }

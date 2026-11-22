@@ -3,8 +3,9 @@
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
 use crate::{Ui, scale::Scale, tint, ui_kit};
-use iptv_core::parental::{ContentKind, Dialog, Phase, Submission, Target};
+use iptv_core::parental::{ContentKind, Target};
 use iptv_nav::{Action, RemoteKey};
+use iptv_presentation::parental::{Dialog, Phase, Submission};
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 use std::{cell::RefCell, rc::Rc};
@@ -307,7 +308,7 @@ pub fn enforce(ui: Ui) {
         ui.vod.update(|s| {
             s.details = None;
             s.episode = None;
-            s.control = iptv_core::vod::Control::Catalog;
+            s.control = iptv_presentation::vod::Control::Catalog;
         });
     }
 

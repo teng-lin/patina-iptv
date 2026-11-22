@@ -1,21 +1,10 @@
-shipped iptv-core/src/capabilities.rs re-exports capabilities_state
-shipped iptv-core/src/favorites.rs re-exports favorites_state
 shipped iptv-core/src/guide.rs re-exports guide_state
 shipped iptv-core/src/guide/floor.rs re-exports guide_state
-shipped iptv-core/src/interruption.rs re-exports interruption_state
 shipped iptv-core/src/lists.rs re-exports lists_state
-shipped iptv-core/src/membership.rs re-exports membership_state
 shipped iptv-core/src/multiview.rs re-exports multiview_state
-shipped iptv-core/src/on_demand.rs re-exports on_demand_state
-shipped iptv-core/src/organization.rs re-exports organization_state
-shipped iptv-core/src/parental.rs re-exports parental_state
-shipped iptv-core/src/playback.rs re-exports playback_health
-shipped iptv-core/src/playback.rs re-exports playback_state
 shipped iptv-core/src/playback.rs re-exports zap
-shipped iptv-core/src/recording.rs re-exports recording_state
 shipped iptv-core/src/reorder.rs re-exports reorder_state
 shipped iptv-core/src/tracks.rs re-exports track_labels
-shipped iptv-core/src/vod.rs re-exports vod_state
 shipped iptv-library/src/details.rs iptv_core::wizard
 shipped iptv-library/src/details.rs iptv_library::playlists
 shipped iptv-library/src/epg_sources.rs iptv_core::wizard

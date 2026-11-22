@@ -1,6 +1,6 @@
 //! The live player's current and previous channel identities.
 
-use crate::favorites::Recent;
+use iptv_core::favorites::Recent;
 
 /// The channels played live, newest first, by content identity (stable
 /// keys): "previous channel" and the player's History list.
@@ -34,7 +34,7 @@ impl ChannelHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::favorites::RECENT_LIMIT;
+    use iptv_core::favorites::RECENT_LIMIT;
 
     #[test]
     fn previous_channel_toggles() {

@@ -7,10 +7,10 @@
 //! while the library is unchanged:
 //!
 //! - **Continue watching** lists a movie whose saved progress is
-//!   [`Progress::unfinished`]: at least [`CONTINUE_MIN_MS`] in and not
+//!   [`iptv_core::vod::Progress::unfinished`]: at least [`iptv_core::vod::CONTINUE_MIN_MS`] in and not
 //!   completed. A series contributes its single parent record, which follows
 //!   the episode watched last. It is listed while the series is not
-//!   completed and either that record is [`CONTINUE_MIN_MS`] in or another
+//!   completed and either that record is [`iptv_core::vod::CONTINUE_MIN_MS`] in or another
 //!   of its episodes was finished or watched that long: a series advanced
 //!   to its next episode stays listed even if that episode was stopped at
 //!   once, while a series only glanced at does not appear. Once the whole
@@ -37,7 +37,7 @@
 //! An empty catalog says why ([`VodState`], set by the shell from the
 //! playlists on screen) and offers one action ([`Screen::empty_action`]).
 
-use crate::vod::{
+use iptv_core::vod::{
     Card, Category, Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Query, Shelf, Source,
 };
 
@@ -1123,7 +1123,7 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vod::{DISCOVERY_PAGE, Episode, Progress};
+    use iptv_core::vod::{CONTINUE_MIN_MS, DISCOVERY_PAGE, Episode, Progress};
     fn card(id: &str) -> Card {
         Card {
             key: Key {
@@ -1142,6 +1142,29 @@ mod tests {
             progress: Progress::default(),
         }
     }
+    #[test]
+    fn independent_sources_do_not_share_identity() {
+        let a = card("same");
+        let mut b = a.clone();
+        b.key.source = 2;
+        let mut s = Screen::default();
+        let g = s.begin(Kind::Movie);
+        s.publish(g, vec![a, b], false, false);
+        assert_eq!(s.cards.len(), 2);
+    }
+
+    #[test]
+    fn continue_watching_needs_five_seconds_and_no_completion() {
+        assert!(!Progress::observed(4_999, Some(100_000), false).unfinished());
+        assert!(Progress::observed(CONTINUE_MIN_MS, Some(100_000), false).unfinished());
+        assert!(!Progress::observed(99_000, Some(100_000), false).unfinished());
+        assert!(!Progress::observed(30_000, Some(100_000), true).unfinished());
+        assert!(
+            Progress::observed(30_000, None, false).unfinished(),
+            "a live-length unknown title still resumes"
+        );
+    }
+
     #[test]
     fn refresh_restores_content_identity_and_rejects_old_results() {
         let mut s = Screen::default();

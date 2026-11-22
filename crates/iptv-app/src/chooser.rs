@@ -10,9 +10,9 @@ use crate::i18n::{tr, trf};
 
 use std::time::Duration;
 
-use iptv_core::player_options::{Chooser, PictureSize, SLEEP_MINUTES};
 use iptv_core::sound::{audio_delays, delay_label};
 use iptv_core::tracks::{Kind as Track, entries_in};
+use iptv_presentation::player_options::{Chooser, PictureSize, SLEEP_MINUTES};
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 

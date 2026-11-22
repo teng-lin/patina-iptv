@@ -288,7 +288,7 @@ fn run(ui: Ui, key: &'static str) {
             let saved = owner.clear_watch_history();
             ui.player
                 .history
-                .set(iptv_core::playback::ChannelHistory::default());
+                .set(iptv_presentation::playback::ChannelHistory::default());
             crate::data::spawn_in_app(async move {
                 if saved.await {
                     crate::lists::favorites_changed(ui);

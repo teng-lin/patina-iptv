@@ -1,6 +1,7 @@
 //! Availability of playback features in the current presentation.
 
-use crate::{capabilities::Host, pip::Pip};
+use crate::pip::Pip;
+use iptv_core::capabilities::Host;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
@@ -69,7 +70,7 @@ pub fn multiview(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::Platform;
+    use iptv_core::capabilities::Platform;
 
     #[test]
     fn live_player_reports_replace_unknown_support_and_revoke_actions() {

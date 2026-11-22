@@ -170,8 +170,6 @@ pub struct Job {
     pub message: String,
 }
 
-pub use crate::recording_state::{Draft, Entry, EntryField, Screen};
-
 #[cfg(test)]
 mod tests {
     use super::*;

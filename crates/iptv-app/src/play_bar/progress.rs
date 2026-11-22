@@ -142,14 +142,20 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                         })
                         .disabled(move || !catch_up())
                         .accessibility_state(move || AccessibilityState {
-                            selected: super::focused(ui, iptv_core::play_bar::Control::Timeline),
+                            selected: super::focused(
+                                ui,
+                                iptv_presentation::play_bar::Control::Timeline,
+                            ),
                             ..Default::default()
                         })
                         .border(px(2.0))
                         .border_color(move || {
                             tint(
                                 ui.app.theme.with(|t| t.accent.light),
-                                if super::focused(ui, iptv_core::play_bar::Control::Timeline) {
+                                if super::focused(
+                                    ui,
+                                    iptv_presentation::play_bar::Control::Timeline,
+                                ) {
                                     255
                                 } else {
                                     0

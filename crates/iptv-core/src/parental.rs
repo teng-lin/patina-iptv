@@ -232,8 +232,6 @@ impl Drop for Pin {
     }
 }
 
-pub use crate::parental_state::{Dialog, Phase, Submission};
-
 #[cfg(test)]
 mod tests {
     use super::*;
