@@ -126,6 +126,7 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
 #[derive(Clone, PartialEq, Eq)]
 enum Cause {
     Newer { found: u32, supported: u32 },
+    RestartRequired(&'static str),
     Other(String),
 }
 
@@ -142,13 +143,16 @@ pub(crate) fn store_failed(
     error: crate::runtime::Error,
 ) {
     let retryable = error.retryable_open();
-    let cause = match error.newer_schema() {
-        Some((found, supported)) => Cause::Newer { found, supported },
-        None => Cause::Other(
+    let cause = if let Some((found, supported)) = error.newer_schema() {
+        Cause::Newer { found, supported }
+    } else if let Some(reason) = error.reopen_reason() {
+        Cause::RestartRequired(reason)
+    } else {
+        Cause::Other(
             error
                 .unavailable_reason()
                 .map_or_else(|| error.to_string(), str::to_owned),
-        ),
+        )
     };
     ui.store_startup_failure.update(|failure| {
         let retrying = failure
@@ -241,6 +245,13 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
                 .is_some_and(|failure| matches!(failure.cause, Cause::Newer { .. }))
         })
     };
+    let restart = move || {
+        ui.store_startup_failure.with(|failure| {
+            failure
+                .as_ref()
+                .is_some_and(|failure| matches!(failure.cause, Cause::RestartRequired(_)))
+        })
+    };
     let focus_at = move |action| {
         ui.keys_shown() && controls(ui).is_some_and(|controls| controls.focus() == action)
     };
@@ -272,6 +283,8 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
             .gap(move || size.px(14.0))
             .child(ui_kit::body(size, move || tr(if newer() {
                 "Install the same version you last used, or a newer one, then reopen Patina."
+            } else if restart() {
+                "Unlock the device, check file permissions, then reopen Patina."
             } else if retry() != Retry::Unavailable {
                 "Unlock the device and check that Patina has access to storage and enough free space. Then try again."
             } else {
@@ -347,6 +360,7 @@ fn failure_details(
                         "Database schema version {found} is newer than this build supports ({supported}).",
                         &[("found", (*found).into()), ("supported", (*supported).into())],
                     ),
+                    Cause::RestartRequired(reason) => (*reason).to_owned(),
                     Cause::Other(message) => message.clone(),
                 };
                 view()

@@ -13,6 +13,8 @@ use crate::SourceId;
 pub enum StoreError {
     /// The service or platform key broker is unavailable; contains no secrets.
     Unavailable(&'static str),
+    /// The host must initialize storage again before the library can be opened.
+    RestartRequired(&'static str),
     /// SQLite failed (I/O, constraint, busy, corrupt file).
     Sqlite(rusqlite::Error),
     /// Applying a numbered migration failed; the database stays at the
@@ -87,7 +89,9 @@ impl StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unavailable(reason) => write!(f, "store unavailable: {reason}"),
+            Self::Unavailable(reason) | Self::RestartRequired(reason) => {
+                write!(f, "store unavailable: {reason}")
+            }
             Self::Sqlite(err) => write!(f, "database error: {err}"),
             Self::Migration { version, source } => {
                 write!(f, "schema migration {version} failed: {source}")
