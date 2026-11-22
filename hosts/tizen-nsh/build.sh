@@ -18,6 +18,8 @@
 #   NSH_INFO_LOGS=1     forward the app's info logs to the page (development only)
 #   NSH_PACKAGE_VERSION a higher package version, to reinstall over a development install
 #   NSH_STD_FEATURES    -Zbuild-std-features for the rebuilt std
+#   SQLITE_WASM_RS_FLAGS  SQLite's compile options over sqlite-wasm-rs's
+#                       (default: the TV's, below; empty for its own)
 #   NSH_RUSTFLAGS       more rustc flags
 #
 # The size flags (the plan's "Module size and launch" measures each):
@@ -62,6 +64,29 @@ flags+="${NSH_RUSTFLAGS:+ $NSH_RUSTFLAGS}"
 std_features=()
 if [[ -n "${NSH_STD_FEATURES:-}" ]]; then
     std_features=("-Zbuild-std-features=$NSH_STD_FEATURES")
+fi
+# SQLite without what Patina never asks of it (sqlite-wasm-rs enables
+# these extensions and APIs for every app): R*Tree, sessions and the
+# preupdate hook, the introspection virtual tables, column metadata,
+# sqlite_offset, unlock notify, the math functions, authorizers, trace
+# and profile, UTF-16 entry points, sqlite3_complete, sqlite3_get_table,
+# Tcl variables, the introspection pragmas, deserialize, declared types,
+# auto-vacuum and memory statistics. FTS5 (channel search), JSON (the
+# store's queries) and EXPLAIN (the store's query plan tests) stay.
+# A function a build still calls fails the link. The store's wasm tests
+# pass with them: SQLITE_WASM_RS_FLAGS="…" node tools/wasm-test.mjs --cargo
+# --locked -p iptv-store-sqlite --lib --test it.
+if [[ -z "${SQLITE_WASM_RS_FLAGS+set}" ]]; then
+    sqlite_flags=""
+    for option in RTREE SESSION PREUPDATE_HOOK BYTECODE_VTAB DBPAGE_VTAB DBSTAT_VTAB STMTVTAB \
+        UNKNOWN_SQL_FUNCTION COLUMN_METADATA OFFSET_SQL_FUNC UNLOCK_NOTIFY MATH_FUNCTIONS; do
+        sqlite_flags+=" -USQLITE_ENABLE_$option"
+    done
+    for option in AUTHORIZATION TRACE UTF16 COMPLETE GET_TABLE TCL_VARIABLE INTROSPECTION_PRAGMAS \
+        DESERIALIZE DECLTYPE AUTOVACUUM; do
+        sqlite_flags+=" -DSQLITE_OMIT_$option"
+    done
+    export SQLITE_WASM_RS_FLAGS="${sqlite_flags# } -DSQLITE_DEFAULT_MEMSTATUS=0"
 fi
 echo "Building the module (profile tizen${NSH_OPT:+, opt-level $NSH_OPT}; $flags${NSH_STD_FEATURES:+; std features $NSH_STD_FEATURES})…"
 (cd "$here" && RUSTFLAGS="$flags" \
