@@ -134,6 +134,9 @@ pub struct Runtime {
     favorites: Slot<RefCell<favorites::State>>,
     favorite_writer: Slot<RefCell<Option<std::sync::mpsc::Sender<favorites::Write>>>>,
     favorite_unsaved: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    /// A favorites write queued on the store's writer lane failed since the
+    /// last barrier (hosts without workers, `favorites::send`).
+    favorite_failed: RefCell<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     activity: RefCell<BTreeMap<SourceId, library::Activity>>,
     all: Cell<bool>,
     generation: Slot<Cell<u64>>,
@@ -205,6 +208,7 @@ impl Runtime {
             favorites: Slot::default(),
             favorite_writer: Slot::default(),
             favorite_unsaved: Default::default(),
+            favorite_failed: Default::default(),
             activity: RefCell::default(),
             all: Cell::new(false),
             generation: Slot::default(),
@@ -753,6 +757,7 @@ pub(crate) mod assign;
 pub(crate) mod credential_store;
 pub mod model;
 
+pub mod file_host;
 pub mod settings;
 
 #[cfg(feature = "native")]

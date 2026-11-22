@@ -2108,12 +2108,14 @@ dependencies = [
 name = "iptv-web"
 version = "0.1.5"
 dependencies = [
+ "futures-channel",
  "iptv-core",
  "iptv-epg",
  "iptv-guide",
  "iptv-import",
  "iptv-providers",
  "iptv-search",
+ "log",
  "serde_json",
  "url",
 ]
@@ -2672,7 +2674,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-tizen"
 version = "0.0.1"
-source = "git+https://github.com/teng-lin/nsh-platform-tizen?rev=32492c00ffbed477c4f01b26074fa985e066e999#32492c00ffbed477c4f01b26074fa985e066e999"
+source = "git+https://github.com/teng-lin/nsh-platform-tizen?rev=c2257cbbb3876f343e6ee0f4dea12b185009b9a6#c2257cbbb3876f343e6ee0f4dea12b185009b9a6"
 dependencies = [
  "log",
  "nsh-core",

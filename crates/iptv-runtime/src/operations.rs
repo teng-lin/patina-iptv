@@ -119,8 +119,8 @@ impl Runtime {
         crate::playback::link_client(self, config)
     }
 
-    /// Tells the user, once per owner, that changes last for the session:
-    /// this host has no writer to save them.
+    /// Tells the user, once per owner, that settings last for the session:
+    /// this host has neither a file writer nor a file host to save them.
     pub(crate) fn note_session_only(&self) {
         if !self.session_only_noted.replace(true) {
             self.emit(crate::RuntimeEvent::Notify(
@@ -129,10 +129,11 @@ impl Runtime {
         }
     }
 
-    /// The host has blocking workers: imports, guide downloads, staged
-    /// probes, backups and the file and favorites writers need them. A
-    /// cooperative browser host has none, and its shell offers none of
-    /// those services.
+    /// The host has blocking workers: staged probes and backups need them,
+    /// and natively imports, guide downloads and the file and favorites
+    /// writers run on them. A cooperative browser host has none: its shell
+    /// offers no probes or backups, and the others take their cooperative
+    /// forms there.
     pub fn has_workers(&self) -> bool {
         self.services().has_workers()
     }

@@ -55,13 +55,15 @@ plus the two features, when `wasm-opt` is on `PATH` (`NSH_SIZE=0` and
 and Data bytes (`sections.py`); compile time on the TV follows the Code
 section. `NSH_UNSTRIPPED=1` keeps the names section for `twiggy` (never for
 a package). A package that installs over the same version is refused by the
-TV: uninstall this app id first.
+TV. Set `NSH_PACKAGE_VERSION` to a higher version to update in place
+and keep the installed app's data.
 
 ## What does not work yet
 
 - Recording, backup files and picture in picture (no workers, one
-  decoder). Settings and favorites edits last for the session.
+  decoder).
 - Stalker portals (a page cannot send their `Cookie` and `User-Agent`), and
-  sources whose streams need request headers.
+  sources whose streams require custom request headers. A source with
+  only a configured `User-Agent` is accepted and AVPlay sends its own.
 - Tracks, volume and the player's format events (the AVPlay component
   does not report them).

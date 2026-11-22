@@ -1,8 +1,9 @@
 //! The app's small files (settings, each playlist's last channel) are
 //! written by one background worker of the execution port, never on the UI
 //! thread: a zap or a settings change only queues the new content. A host
-//! without workers (a cooperative browser executor) has no file writer:
-//! writes answer that nothing was published.
+//! that keeps the files itself (a browser, [`crate::file_host`]) is handed
+//! each write instead, and answers reads; a host with neither has no file
+//! writer: writes answer that nothing was published.
 //!
 //! - **Latest wins.** A file with a write still queued takes the newer
 //!   content in its place; the older one is never written. Every caller
@@ -79,14 +80,26 @@ pub(crate) struct Files {
     closed: std::sync::atomic::AtomicBool,
     writer: OnceLock<Arc<Writer>>,
     execution: Arc<dyn crate::execution::Execution>,
+    /// Keeps the files in place of the writer and the disk.
+    host: Option<Arc<dyn crate::file_host::FileHost>>,
 }
 impl Files {
-    pub(crate) fn new(execution: Arc<dyn crate::execution::Execution>) -> Self {
+    pub(crate) fn new(
+        execution: Arc<dyn crate::execution::Execution>,
+        host: Option<Arc<dyn crate::file_host::FileHost>>,
+    ) -> Self {
         Self {
             closed: Default::default(),
             writer: OnceLock::new(),
             execution,
+            host,
         }
+    }
+
+    /// Writes can be saved: by the host that keeps the files, or by the
+    /// file writer, which needs a worker.
+    pub(crate) fn can_write(&self) -> bool {
+        self.host.is_some() || self.execution.has_workers()
     }
 
     fn writer(&self) -> Arc<Writer> {
@@ -169,6 +182,36 @@ impl Files {
         path: PathBuf,
         content: Content,
     ) -> impl Future<Output = Result<(), WriteError>> + 'static {
+        enum Answer {
+            Host(crate::file_host::Stored),
+            Writer(oneshot::Receiver<Result<(), WriteError>>),
+            Closed,
+        }
+        let answer = if let Some(host) = &self.host {
+            if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+                Answer::Closed
+            } else {
+                Answer::Host(host.write(&path, content))
+            }
+        } else {
+            Answer::Writer(self.queue(path, content))
+        };
+        async move {
+            match answer {
+                Answer::Host(stored) => match stored.await {
+                    true => Ok(()),
+                    false => Err(WriteError::Storage(io::ErrorKind::Other)),
+                },
+                Answer::Writer(answer) => answer
+                    .await
+                    .unwrap_or(Err(WriteError::Storage(io::ErrorKind::Interrupted))),
+                Answer::Closed => Err(WriteError::Storage(io::ErrorKind::Interrupted)),
+            }
+        }
+    }
+
+    /// Queues `content` for `path` on the file writer.
+    fn queue(&self, path: PathBuf, content: Content) -> oneshot::Receiver<Result<(), WriteError>> {
         let (reply, answer) = oneshot::channel();
         let writer = self.writer();
         {
@@ -190,16 +233,15 @@ impl Files {
             }
         }
         writer.ready.notify_one();
-        async move {
-            answer
-                .await
-                .unwrap_or(Err(WriteError::Storage(io::ErrorKind::Interrupted)))
-        }
+        answer
     }
 
     /// The content `path` will have: queued content first, else the file.
     /// `None` for no file (or one that cannot be read).
     pub(crate) fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        if let Some(host) = &self.host {
+            return host.read(path);
+        }
         // Nothing was ever queued: no writer thread is started for a read.
         let queued = self.writer.get().and_then(|writer| {
             let queue = lock(writer);
@@ -222,6 +264,9 @@ impl Files {
     }
 
     /// Waits, at most `limit`, until every write queued so far is done.
+    /// With a host that keeps the files there is nothing to wait for: it
+    /// was handed every write, in order, and one thread cannot wait for
+    /// its answers.
     pub(crate) fn flush(&self, limit: Duration) -> bool {
         let Some(writer) = self.writer.get() else {
             return true;
@@ -362,7 +407,7 @@ mod tests {
     #[test]
     fn the_latest_content_wins_and_reads_see_it_before_the_disk() {
         let dir = tempfile::tempdir().unwrap();
-        let files = Files::new(Arc::new(crate::native::execution::NativeExecution));
+        let files = Files::new(Arc::new(crate::native::execution::NativeExecution), None);
         let path = dir.path().join("nested").join("last_channel-1");
         let first = files.write(path.clone(), b"synthetic:1".to_vec());
         let second = files.write(path.clone(), b"synthetic:2".to_vec());
@@ -390,7 +435,7 @@ mod tests {
     #[test]
     fn a_failed_write_keeps_the_previous_file() {
         let dir = tempfile::tempdir().unwrap();
-        let files = Files::new(Arc::new(crate::native::execution::NativeExecution));
+        let files = Files::new(Arc::new(crate::native::execution::NativeExecution), None);
         let path = dir.path().join("settings.json");
         assert_eq!(block_on(files.write(path.clone(), b"{}".to_vec())), Ok(()));
         // A directory where the temporary file goes: nothing is published.
@@ -421,7 +466,7 @@ mod tests {
     #[test]
     fn many_queued_writes_flush_in_order_per_file() {
         let dir = tempfile::tempdir().unwrap();
-        let files = Files::new(Arc::new(crate::native::execution::NativeExecution));
+        let files = Files::new(Arc::new(crate::native::execution::NativeExecution), None);
         for round in 0..50 {
             for file in 0..4 {
                 drop(files.write(

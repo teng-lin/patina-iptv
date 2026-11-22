@@ -49,6 +49,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "time",
     // The browser host keeps the store on its memory files (host/web).
     "store_host",
+    // The browser host keeps the small files in IndexedDB (host/web).
+    "file_host",
     // The guide status and the lines of the guide sources screen.
     "stored",
 ];

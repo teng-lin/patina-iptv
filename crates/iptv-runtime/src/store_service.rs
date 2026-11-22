@@ -258,7 +258,7 @@ impl Service {
             writer,
             reader,
             analysis,
-            files: super::file_writer::Files::new(execution),
+            files: super::file_writer::Files::new(execution, ports.file_host.clone()),
             ports,
             epochs: Epochs::default(),
             tasks: OnceLock::new(),
