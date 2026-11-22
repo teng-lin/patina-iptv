@@ -1,15 +1,15 @@
 //! Filtered bulk selection by stable member identity.
 
-use crate::membership::Member;
+use iptv_core::membership::Member;
 use std::collections::{BTreeSet, HashSet};
 
 /// Filtered membership whose cached positions can only change through its methods.
 /// ```compile_fail
-/// let mut membership = iptv_core::membership::Membership::default();
+/// let mut membership = iptv_presentation::membership::Membership::default();
 /// membership.rows.clear();
 /// ```
 /// ```compile_fail
-/// let mut membership = iptv_core::membership::Membership::default();
+/// let mut membership = iptv_presentation::membership::Membership::default();
 /// membership.query = "news".into();
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

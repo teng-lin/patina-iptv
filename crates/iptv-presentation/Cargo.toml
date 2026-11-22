@@ -18,3 +18,7 @@ zeroize = "1.8"
 
 [lints]
 workspace = true
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"

@@ -2,7 +2,7 @@
 
 use iptv_core::clock::{self, Style};
 use iptv_core::guide::Airing;
-use iptv_core::player_info::ProgramTiming;
+use iptv_presentation::player_info::ProgramTiming;
 
 use crate::host::host;
 

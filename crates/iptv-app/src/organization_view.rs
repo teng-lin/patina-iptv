@@ -8,12 +8,12 @@ use crate::wizard_view::entry::{self, TextSheet};
 use crate::{Ui, data, ui_kit};
 use iptv_core::guide::Pane;
 use iptv_core::lists::ListId;
-use iptv_core::organization::{
-    ACTIONS, Action as Edit, Block, BlockKind, Blocks, Editor, GROUP_SORTS, LEAVE_CHOICES, Mode,
-    Sort, step_choice,
-};
+use iptv_core::organization::{Block, BlockKind, Blocks, Sort};
 use iptv_core::reorder::{Key, LeaveChoice, Outcome};
 use iptv_nav::Action;
+use iptv_presentation::organization::{
+    ACTIONS, Action as Edit, Editor, GROUP_SORTS, LEAVE_CHOICES, Mode, step_choice,
+};
 use nsh_core::{Checked, prelude::*};
 use std::collections::HashMap;
 

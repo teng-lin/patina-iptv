@@ -5,5 +5,3 @@ pub struct Member {
     pub id: String,
     pub name: String,
 }
-
-pub use crate::membership_state::Membership;

@@ -1,6 +1,6 @@
 //! Dialog flow for setting, changing and entering a parental PIN.
 
-use crate::parental::Pin;
+use iptv_core::parental::Pin;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {

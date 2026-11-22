@@ -23,7 +23,7 @@
 //! and `video rendered` (a current-source native renderer submission where supported,
 //! never display presentation/scanout).
 
-use iptv_core::library_recovery::{Action as RecoveryAction, Recovery, Retry};
+use iptv_presentation::library_recovery::{Action as RecoveryAction, Recovery, Retry};
 use nsh_core::time::Instant;
 use std::sync::Mutex;
 use std::time::Duration;

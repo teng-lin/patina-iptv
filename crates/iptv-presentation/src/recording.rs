@@ -1,12 +1,12 @@
 //! The recordings screen and its entry draft.
 
-use crate::recording::{Job, JobId, MAX_DURATION, Repeat, Request, Status};
+use iptv_core::recording::{Job, JobId, MAX_DURATION, Repeat, Request, Status};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Screen {
     pub open: bool,
     pub jobs: Vec<Job>,
-    pub progress: Vec<(JobId, crate::on_demand::Progress)>,
+    pub progress: Vec<(JobId, iptv_core::on_demand::Progress)>,
     pub repeating: Vec<JobId>,
     pub focus: Option<JobId>,
     pub actions: bool,
@@ -22,7 +22,7 @@ pub struct Screen {
     pub read_generation: u64,
     /// The content selected when an action menu opened; catalog row indices
     /// may change while that menu remains visible.
-    pub context: Option<(crate::menu::Origin, Request)>,
+    pub context: Option<(iptv_core::menu::Origin, Request)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

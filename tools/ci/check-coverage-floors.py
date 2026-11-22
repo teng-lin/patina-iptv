@@ -8,6 +8,7 @@ import tomllib
 
 FLOORS = {
     "iptv-core": 94.0,
+    "iptv-presentation": 94.0,
     "iptv-nav": 97.0,
     "iptv-settings": 97.0,
     "iptv-epg": 93.0,
@@ -30,7 +31,6 @@ FLOORS = {
 # isolated-child tests. Coverage collection includes it; a stable independent
 # percentage is not yet established. The vendored TV adapter has its own decoder and transport tests.
 EXEMPTIONS = {
-    "iptv-presentation": "no executable code until the presentation modules move",
     "iptv-sqlcipher-init": "process-global FFI initialization; store child-process regressions",
     "iptv-tui": "optional local terminal binary host; interactive TTY and subprocess video adapter",
     "nsh-tv": "vendored upstream adapter with decoder and Android transport tests",

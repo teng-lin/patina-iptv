@@ -4,7 +4,7 @@
 //! A live channel never dead-ends on a failure that a retry can fix: after
 //! the fast attempts it retries slowly for as long as it is the session's
 //! (the channel stays selected). The card shows only for a failure retrying
-//! cannot fix ([`crate::playback::Cause::Fatal`]), for a stream that played after it
+//! cannot fix ([`iptv_core::playback::Cause::Fatal`]), for a stream that played after it
 //! has been down [`RetryPolicy::card_after_ms`], and for one that never
 //! played once the fast attempts are used up; behind the card the retries
 //! go on every [`RetryPolicy::background_delay_ms`], and the stream plays
@@ -16,7 +16,7 @@
 //! A played live stream also retries HTTP 404/410: reopening can resolve a
 //! fresh resource after the provider's rolling live window advances.
 
-use crate::playback::{ErrorKind, Failure, Phase, PlayerState, Retry, RetryPolicy, Waiting};
+use iptv_core::playback::{ErrorKind, Failure, Phase, PlayerState, Retry, RetryPolicy, Waiting};
 
 /// Player health for one playback session (see the module's docs).
 #[derive(Clone, Debug, PartialEq, Eq)]

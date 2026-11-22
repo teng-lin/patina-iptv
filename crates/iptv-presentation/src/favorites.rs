@@ -18,10 +18,8 @@ pub fn history(channels: Vec<usize>, playing: Option<usize>) -> History {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        favorites::{KeyIndex, Recent},
-        guide::SyntheticSchedule,
-    };
+    use iptv_core::favorites::{KeyIndex, Recent};
+    use iptv_core::guide::SyntheticSchedule;
 
     fn key(channel: usize) -> String {
         format!("synthetic:{channel}")

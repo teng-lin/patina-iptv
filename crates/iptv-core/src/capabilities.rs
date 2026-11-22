@@ -74,8 +74,6 @@ impl Recording {
     }
 }
 
-pub use crate::capabilities_state::{Availability, Reason, multiview, pip};
-
 #[cfg(test)]
 mod tests {
     use super::*;

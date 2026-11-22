@@ -2,10 +2,10 @@
 //! time line, next program) and the compact banner a channel change
 //! shows (number and name, program, progress). The time line is the
 //! program's progress live and the seek bar in a replay
-//! (`iptv_core::panels::Line`): the card owns it, nothing else draws one.
+//! (`iptv_presentation::panels::Line`): the card owns it, nothing else draws one.
 
-use iptv_core::panels::Line;
-use iptv_core::player_info::{StreamFormat, badges, minutes_left};
+use iptv_presentation::panels::Line;
+use iptv_presentation::player_info::{StreamFormat, badges, minutes_left};
 use nsh_core::prelude::*;
 
 use super::WHITE;

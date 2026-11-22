@@ -172,8 +172,6 @@ pub fn diff(before: &BTreeSet<usize>, after: &BTreeSet<usize>) -> (Vec<usize>, V
     )
 }
 
-pub use crate::favorites_state::{History, history};
-
 #[cfg(test)]
 mod tests {
     use super::*;

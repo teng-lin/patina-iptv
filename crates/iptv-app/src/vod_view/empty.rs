@@ -5,7 +5,7 @@
 use super::*;
 use crate::data::Activity;
 use crate::runtime::model::{ImportErrorKind, SourceId};
-use iptv_core::vod::{EmptyAction, ImportProblem, SourceVod, VodState};
+use iptv_presentation::vod::{EmptyAction, ImportProblem, SourceVod, VodState};
 
 fn problem(kind: ImportErrorKind) -> ImportProblem {
     match kind {
