@@ -428,7 +428,14 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
     step(app.press("id:navigation-rail >> label:Recordings"));
     step(app.wait_for("id:recording-job >> nth=1"));
     let before = names(app, "Generated recording ");
-    step(app.wheel("id:recording-job >> nth=1", Point::new(px(0.0), px(3000.0))));
+    // The initial focus can leave the list at either end.
+    let last = format!("Generated recording {RECORDINGS:02}");
+    let delta = if before.contains(&last) {
+        -3000.0
+    } else {
+        3000.0
+    };
+    step(app.wheel("id:recording-job >> nth=1", Point::new(px(0.0), px(delta))));
     app.idle(Duration::from_millis(400)).unwrap();
     assert_ne!(
         names(app, "Generated recording "),
