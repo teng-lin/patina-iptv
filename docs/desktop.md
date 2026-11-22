@@ -168,6 +168,6 @@ recordings keep the app running, as it already did when quitting.
   `pip_control`, `pane_collapse`, `guide_nav` (the wheel through time) and
   `pointer`.
 - App unit tests in `iptv_app::desktop::display_bounds` (display recovery,
-  session and sound state) and `iptv_core::heard` (the heard player and
-  its hand-back).
+  session and sound state) and presentation tests in `iptv_presentation::heard` (the heard
+  player and its hand-back).
 - The real-window journey: [issue #89 desktop journey](validation/issue-89-desktop-journey.md).

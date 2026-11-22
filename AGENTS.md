@@ -9,11 +9,12 @@
   copy files, code, artwork, icons, fonts, layouts or wording from the
   reference APK. `crates/iptv-app/src/theme.rs` holds the original Patina palette;
   preserve its independent design.
-- **Core stays portable.** `crates/iptv-core` (and future core crates) must not
+- **Domain and presentation stay portable.** `iptv-core`, `iptv-presentation` and the other portable crates must not
   depend on NSH or platform APIs, must not block, and must build for
   `wasm32-unknown-unknown`.
-- **State lives in the core.** Views render state and send actions; focus is
-  restored by content identity, never by list index.
+- **State ownership.** The runtime owns content and operations. Feature
+  holders in `iptv-presentation` track focus by content identity. Views
+  render state and send actions.
 - **NSH pin.** Use the Patina NSH fork (`teng-lin/nsh`, branch `patina`) at
   `../nsh-patina` and the exact revision in `nsh.rev`. Patina consumes TV input through
   `vendor/nsh-tv` and NSH's public keyboard API.
@@ -34,6 +35,6 @@
   `tv.player` per further tile while it is open (`video.rs`). The
   desktops' picture-in-picture window shows surface 0's player through
   its `tv.pip` view without a second player or stream (`mpv/pip.rs`).
-- **Check before finishing:** `cargo test -p iptv-core`, the wasm build of
-  `iptv-core`, `cargo build -p iptv-app`, and for Android changes a run on
+- **Check before finishing:** `cargo test -p iptv-core -p iptv-presentation`, the wasm
+  builds of both crates, `cargo build -p iptv-app`, and for Android changes a run on
   `tab36` and/or `tv36`.

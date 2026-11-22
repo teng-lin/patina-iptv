@@ -345,8 +345,8 @@ They issue no playback command of their own.
 
 Exactly one player is heard at a time, and the viewer chooses it; focus
 never moves the sound (#135). The state is the core's
-(`iptv_core::heard`, kept by `iptv_core::multiview` and
-`iptv_core::playback_windows`), by the surface's identity.
+(`iptv_presentation::heard`, kept by `iptv_presentation::multiview` and
+`iptv_presentation::playback_windows`), by the surface's identity.
 
 - **Now:** in multiview, moving the focus between tiles (the arrows, a
   tap, opening a tile's menu, changing its channel, enlarging or reducing
@@ -518,11 +518,11 @@ Unavailable actions say why, using the host's reported capabilities
 ## Verification
 
 - The repository's required checks in [AGENTS.md](../AGENTS.md), including
-  `cargo test -p iptv-core` for core state and transition rules, the
-  `iptv-core` wasm build and `cargo build -p iptv-app`.
-- Which player is heard: core tests in `iptv_core::heard`,
-  `iptv_core::multiview` (`heard_tests`, both with and without the sound
-  following the selected tile) and `iptv_core::playback_windows`; app
+  `cargo test -p iptv-core -p iptv-presentation` for Domain and interaction
+  rules, the wasm builds of both crates and `cargo build -p iptv-app`.
+- Which player is heard: presentation tests in `iptv_presentation::heard`,
+  `iptv_presentation::multiview` (`heard_tests`, both with and without the sound
+  following the selected tile) and `iptv_presentation::playback_windows`; app
   scenarios `multiview_heard` and, for windows, `desktop_workflows`.
 - Choosing, staying and returning: app scenarios `personalization_overlay`,
   `tv_shared_controls`, `pip_control`, `cov_nav` and `cov_nav_touch`; on a

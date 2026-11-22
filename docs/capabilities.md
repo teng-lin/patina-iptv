@@ -2,6 +2,8 @@
 
 The portable [capability model](../crates/iptv-core/src/capabilities.rs) separates
 host facilities, live player reports and recording wake registration. The
+[presentation capability rules](../crates/iptv-presentation/src/capabilities.rs)
+decide when to offer PiP and multiview. The
 [shell adapter](../crates/iptv-app/src/capabilities.rs) chooses the host profile;
 native services report what the operating system actually accepted.
 

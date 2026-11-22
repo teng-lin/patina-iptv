@@ -12,9 +12,9 @@ for the migration gates.
 
 Patina's interaction logic exists twice.
 
-- **Shared, no NSH (today):** `iptv-core` has the guide and browse focus rules
+- **Shared, no NSH (today):** `iptv-presentation` holds the guide and browse focus rules
   (`guide`, `browse`), the info card and play bar models (`panels`,
-  `play_bar`), zap targets and channel history (`playback`), tune delays
+  `play_bar`), zap targets (`zap`) and channel history (`playback`), tune delays
   (`browse_playback`), favorites, reordering and lists. `iptv-nav` has the
   keymap and the tap or hold detector, with no dependencies.
 - **In `iptv-app`, bound to NSH signals:** the glue that routes a key to those
@@ -24,12 +24,12 @@ Patina's interaction logic exists twice.
 - **In the bridge, written again:** the same glue in `iptv-web/src/app.rs`
   (about 1,400 lines), and hold and repeat rules in `hosts/tizen/app/main.js`.
 
-Since #209, `iptv-web/src/grid.rs` drives `iptv_core::guide::Focus`
-over a `lists::ListView` and uses `iptv_core::browse::Columns` and
+Since #209, `iptv-web/src/grid.rs` drives `iptv_presentation::guide::Focus`
+over a `lists::ListView` and uses `iptv_presentation::browse::Columns` and
 `Outcome` for the rail, groups and guide. The NSH app uses those same
 models in `lists.rs`. Sharing the focus transitions still leaves different
 rail items, paging, program selection effects and Back behavior to account
-for. The bridge also uses the core's group zap target and `Focus::open_groups`.
+for. The bridge also uses the shared group zap target and `Focus::open_groups`.
 
 ## Findings that shape the plan
 
@@ -46,7 +46,7 @@ for. The bridge also uses the core's group zap target and `Focus::open_groups`.
   3,200 lines (rendering and tests included). `overlays.rs` declares 22
   overlays, and each action goes to the top open one before the guide or
   the player. Settings and NSH state are read inline.
-- **That routing is already thin.** It asks a core model and acts on the
+- **That routing is already thin.** It asks a presentation holder and acts on the
   answer (`Panels::select` → `Pick`, `Focus::navigate` → `Outcome`). The
   decisions are what must be shared; the dispatch is not.
 - **The shared models do not fit the bridge as they are** (see step 2).
@@ -60,7 +60,7 @@ views, `iptv-web` with JSON for a page). What changes is the rule:
 
 - Every **decision** both presenters make (what a key means, where focus
   goes, what OK on a program does, which channel a zap reaches, what a card
-  shows) is a model or a pure function in `iptv-core` or `iptv-nav`, tested
+  shows) is a holder or a pure function in `iptv-presentation` or `iptv-nav`, tested
   there once.
 - Each presenter keeps its own thin **routing** and its host-only parts.
   For the bridge's page that is AVPlay, setup, the TV keyboard and the app
@@ -78,21 +78,21 @@ and that stays. Each keeps its own question.
 | Question | Crate | Speaks in | Examples |
 | --- | --- | --- | --- |
 | What did the viewer ask for? | `iptv-nav` | keys, press phases, times, a context → `Action` | tap or hold, repeats, the bridge's key profile, key choices such as "Up/Down zap or open the list" (`player_keys::up_down_key`, `seek_key`, in the app today) |
-| What does that do to the screen's state? | `iptv-core` | `Move`s and model methods → outcomes | OK on a program, the zap target, focus restore after Favorites change, paging, the card and bar models, view-models |
-| The search screen's state | `iptv-search` | its own state machine | OK on a result, what Back returns to |
+| What does that do to the screen's state? | `iptv-presentation` | `Move`s and model methods → outcomes | OK on a program, the zap target, focus restore after Favorites change, paging, the card and bar models, view-models |
+| The search screen's state | `iptv-presentation::search` | its own state machine | OK on a result, what Back returns to |
 | Which model gets the action, and carrying out the outcome | each presenter | its own state and effects | overlay order, tuning, saving, rendering |
 
 Rules that follow:
 
-- `iptv-core` never takes a key or an `Action`; `iptv-nav` never reads
+- `iptv-presentation` never takes a key or an `Action`; `iptv-nav` never reads
   guide or playback state. A decision that needs both is two decisions:
   `iptv-nav` picks the action (given a context and host choices passed in
-  as plain values), `iptv-core` applies it to state.
+  as plain values), and `iptv-presentation` applies it to state.
 - The context (`iptv_nav::Context`) is the one value that crosses: the
   presenter derives it from its state (`input::context` in the app) and
   hands it to the keymap.
-- No new crate. `iptv-web` gains a dependency on `iptv-nav`; it depends on
-  `iptv-core` and `iptv-search` already.
+- The `bridge` feature of `iptv-web` enables its dependencies on
+  `iptv-nav` and `iptv-presentation`.
 
 ## Migration
 
@@ -125,8 +125,8 @@ Rules that follow:
      its existing controls and 3 s play bar timeout.
 3. **Shared decisions, extracted one at a time.** Each becomes a pure
    function that both presenters call, in the crate the table above gives
-   (state decisions in `iptv-core`, search ones in `iptv-search`, key
-   choices in `iptv-nav`):
+   (screen and search state in `iptv-presentation`, key choices in
+   `iptv-nav`):
    - OK on a program: live, already live, replay, or details, with whether
      details exist as an input (the bridge shows a notice). Tune timing
      stays apart: the app uses `BrowsePlayback` (switch delay, autoplay,
