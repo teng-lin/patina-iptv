@@ -685,7 +685,7 @@ fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     let mut keypad = view().gap(px(6.0)).child(ui_kit::title(size, move || {
         ui.parental.with(|o| {
             o.as_ref()
-                .map_or(String::new(), |o| o.dialog.input.masked())
+                .map_or(String::new(), |o| o.dialog.masked_input())
         })
     }));
     for row in 0..4 {

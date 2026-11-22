@@ -16,12 +16,12 @@
 //!   `iptv_epg` snapshot) with its refresh state, and the user's lists.
 //! - `app`: Live TV: import a source (Xtream or M3U), its guide, the
 //!   guide screen under the preview, full screen and zapping, moving
-//!   favorites, on `iptv_core`'s list, guide focus and reorder models.
+//!   favorites, using the list, guide focus and reorder models in `iptv_presentation`.
 //! - `grid`: the guide screen's rail, groups column and grid, on
-//!   `iptv_core`'s guide focus and browse columns, emitting only the rows
+//!   `iptv_presentation`'s guide focus and browse columns, emitting only the rows
 //!   and time on screen.
 //! - `search`: channel and program search with `iptv_search`'s indexes and
-//!   search screen state.
+//!   `iptv_presentation`'s search screen state.
 //!
 //! Live channels only: movies and series are not imported here.
 //!

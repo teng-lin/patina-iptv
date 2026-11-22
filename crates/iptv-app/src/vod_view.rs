@@ -666,7 +666,7 @@ fn activate(ui: Ui) {
         }
         Control::Category => cycle_category(ui),
         Control::Sort => {
-            ui.vod.update(|s| s.query.sort = s.query.sort.next());
+            ui.vod.update(|s| s.cycle_sort());
             reload(ui, false);
         }
         Control::Continue => {

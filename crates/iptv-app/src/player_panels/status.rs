@@ -5,7 +5,7 @@
 
 use crate::i18n::{tr, trf};
 
-use iptv_core::playback::Phase;
+use iptv_presentation::playback_health::Phase;
 use nsh_core::prelude::*;
 
 use super::words::{failure_message, waiting_text};

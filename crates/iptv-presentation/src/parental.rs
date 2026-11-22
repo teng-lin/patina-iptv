@@ -43,6 +43,11 @@ pub enum Submission {
     Done,
 }
 impl Dialog {
+    /// Display only the number of entered digits.
+    pub fn masked_input(&self) -> String {
+        "•".repeat(self.input.len())
+    }
+
     pub fn new(phase: Phase) -> Self {
         Self {
             phase,
@@ -216,6 +221,7 @@ mod dialog_tests {
     fn setup_requires_confirmation_and_clears_mismatch() {
         let mut d = Dialog::new(Phase::New);
         enter(&mut d, "2468");
+        assert_eq!(d.masked_input(), "••••");
         d.focus = 11;
         assert!(matches!(d.submit(), Submission::None));
         assert_eq!(d.phase, Phase::Confirm);

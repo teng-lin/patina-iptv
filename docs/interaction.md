@@ -38,7 +38,7 @@ The app tracks the last input used, not the device type.
 | Touch | A touch | Visible controls; no focus highlight or key hints |
 | Pointer | Mouse or trackpad movement or click | Visible controls and hover; no key hints |
 
-- **Now:** all three modes (`iptv_core::layout::InputMode`). Each press records
+- **Now:** all three modes (`iptv_presentation::input_mode::InputMode`). Each press records
   whether a finger or a mouse, trackpad or pen made it; on desktop, mouse
   movement anywhere (and a sideways wheel in the guide) counts as Pointer,
   without moving focus. A remote's Back counts as a key. The
@@ -56,7 +56,7 @@ The app tracks the last input used, not the device type.
 ## Destinations
 
 The navigation rail holds a stable set of destinations
-(`iptv_core::browse::rail_items`): Search, Live TV, Movies, Shows, Continue
+(`iptv_presentation::browse::rail_items`): Search, Live TV, Movies, Shows, Continue
 watching, Recently added, Recordings, Watchlist, Playlists and Settings.
 
 - **Now:** Live TV is the start screen. With **Play the last channel on start**
@@ -65,7 +65,7 @@ watching, Recently added, Recordings, Watchlist, Playlists and Settings.
   the Favorites category is offered (`channels.show_favorites`, not yet
   editable in Settings), the guide behind it shows Favorites, so Back lands
   there with the channel focused; otherwise it shows All channels
-  (`iptv_core::lists::resume_entry`). The list is chosen once the channel
+  (`iptv_presentation::lists::resume_entry`). The list is chosen once the channel
   plays (after its PIN, if it has one); later favorite edits and the
   viewer's own choices are left alone. Movies and Shows always appear.
   Continue watching and Recently added appear when any enabled playlist has
@@ -112,7 +112,7 @@ In the guide:
   stays until the viewer hides it (a double tap on the video, Back, or a
   key off a TV) instead of hiding after its few seconds: moving from
   control to control by swipes takes longer than that (WCAG 2.2.1,
-  `iptv_core::play_bar`). Multiview's pointer chrome, on the bar's timer,
+  `iptv_presentation::play_bar`). Multiview's pointer chrome, on the bar's timer,
   stays the same way.
 
 ### Touch gestures in the guide
@@ -139,7 +139,7 @@ In the guide:
   `tests/app/tablet_gestures.rs`).
 - **Now:** a timeline pan that starts on a channel's program on air
   keeps that channel for browse playback while it moves the focus along
-  the row (`iptv_core::browse_playback::PanAnchor`, by the channel's
+  the row (`iptv_presentation::browse_playback::PanAnchor`, by the channel's
   identity): a choice waiting for its switch delay still plays, and
   panning back to now starts no preview again. Any other move of the
   focus (keys, a tap, another list, a zap) ends that hold.
@@ -291,7 +291,7 @@ what the content needs at the current text size, not from the device type.
   titles, nothing filtered) is a pane of its own: its message and action take
   the width beside the rail (Close and the destinations), which stays narrow
   even with the remote on it, and the categories, which have nothing to
-  filter, give way (`iptv_core::vod::Screen::one_pane`).
+  filter, give way (`iptv_presentation::vod::Screen::one_pane`).
 - **Planned:** collapsing the categories beside the posters in Compact; until
   then they share the width with the poster grid.
 - **Now:** the play bar keeps its three groups on one row where the window
@@ -400,7 +400,7 @@ never moves the sound (#135). The state is the core's
 ## Interruptions and the background
 
 The host reports what happens to the app's sound and window; one portable
-policy decides what playback does (`iptv_core::interruption`). It only
+policy decides what playback does (`iptv_presentation::interruption`). It only
 pauses and resumes: it never opens, retunes or restarts a stream.
 
 | Host report | Playback |
@@ -439,7 +439,7 @@ muted), as the tile's own pause.
 - **Now:** the Recordings screen states what limits a recording in the
   background, from what the host reports: precise background starts
   unavailable, a wake that could not be registered, or a device that must
-  stay awake (`iptv_core::capabilities::Recording::notice`).
+  stay awake (`iptv_presentation::capabilities::recording_notice`).
 - **Now (iPad):** the app runs in either orientation and in Split View,
   Slide Over and Stage Manager windows. Another app taking the focus beside
   Patina leaves the scene visible (inactive): playback carries on, with no
