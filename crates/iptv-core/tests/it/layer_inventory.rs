@@ -25,8 +25,12 @@ const LOWER: &[&str] = &[
 const NAMES: &[(&str, &[&str])] = &[
     ("iptv_core::browse", &[]),
     ("iptv_core::browse_playback", &[]),
-    ("iptv_core::capabilities", &["pip", "multiview"]),
+    (
+        "iptv_core::capabilities",
+        &["pip", "multiview", "Availability", "Reason"],
+    ),
     ("iptv_core::channel_list", &[]),
+    ("iptv_core::channel_number", &[]),
     ("iptv_core::channel_picker", &[]),
     ("iptv_core::clock", &[]),
     ("iptv_core::editor", &[]),
@@ -47,7 +51,9 @@ const NAMES: &[(&str, &[&str])] = &[
             "STEP",
         ],
     ),
+    ("iptv_core::heard", &[]),
     ("iptv_core::i18n", &[]),
+    ("iptv_core::interruption", &["Interruptions", "Response"]),
     ("iptv_core::layout", &[]),
     ("iptv_core::library_recovery", &[]),
     (
@@ -68,7 +74,26 @@ const NAMES: &[(&str, &[&str])] = &[
     ),
     ("iptv_core::membership", &["Membership"]),
     ("iptv_core::menu", &[]),
-    ("iptv_core::multiview", &["State", "menu", "layout"]),
+    ("iptv_core::on_demand", &["Seek", "Timeline"]),
+    (
+        "iptv_core::multiview",
+        &[
+            "Dialog",
+            "Key",
+            "Layout",
+            "Limits",
+            "Multiview",
+            "Outcome",
+            "Pick",
+            "Rect",
+            "THUMB",
+            "Tile",
+            "TileAction",
+            "VIDEO",
+            "WARNING_CHOICES",
+            "WarningChoice",
+        ],
+    ),
     (
         "iptv_core::organization",
         &[
@@ -104,11 +129,41 @@ const NAMES: &[(&str, &[&str])] = &[
         "iptv_core::recording",
         &["Screen", "Draft", "EntryField", "Entry"],
     ),
-    ("iptv_core::reorder", &["Reorder", "Key", "Outcome"]),
+    (
+        "iptv_core::reorder",
+        &[
+            "Reorder",
+            "Key",
+            "Outcome",
+            "Exit",
+            "Hint",
+            "HintAction",
+            "HintKey",
+            "LeaveChoice",
+            "SubMode",
+        ],
+    ),
     ("iptv_core::seek_hold", &[]),
     ("iptv_core::sound", &[]),
     ("iptv_core::timeline", &[]),
-    ("iptv_core::tracks", &["Choice"]),
+    (
+        "iptv_core::tracks",
+        &[
+            "Choice",
+            "audio_layout",
+            "audio_layout_in",
+            "bitrate_label",
+            "codec_name",
+            "entries",
+            "entries_in",
+            "fps_label",
+            "language_name",
+            "language_name_in",
+            "resolution_class",
+            "summary",
+            "summary_in",
+        ],
+    ),
     (
         "iptv_core::vod",
         &[
@@ -221,6 +276,19 @@ fn names_in(code: &str, path: &str, local: &str) -> BTreeSet<String> {
     names
 }
 
+fn core_reexports(source: &str) -> impl Iterator<Item = (&str, &str)> {
+    source.lines().filter_map(|line| {
+        let (kind, target) = if let Some(target) = line.strip_prefix("pub use crate::") {
+            ("shipped", target)
+        } else {
+            ("test", line.strip_prefix("pub(crate) use crate::")?)
+        };
+        let module = target.split("::").next()?;
+        (module.ends_with("_state") || matches!(module, "playback_health" | "track_labels" | "zap"))
+            .then_some((kind, module))
+    })
+}
+
 #[test]
 fn lower_layers_name_only_the_inventoried_presentation_items() {
     // The scanner uses the source tree, so it is irrelevant to the wasm
@@ -239,12 +307,18 @@ fn lower_layers_name_only_the_inventoried_presentation_items() {
                 .expect("path under crates")
                 .to_string_lossy();
             let path = path.replace('\\', "/");
-            // Domain and presentation live together in core during the
-            // migration. Each temporary core re-export is inventoried below.
+            let source = fs::read_to_string(&file).expect("read inventoried source");
             if name == "iptv-core" {
+                for (kind, module) in core_reexports(&source) {
+                    actual.insert(format!("{kind} {path} re-exports {module}"));
+                }
+                // Schedule's remaining language arguments are the final
+                // dependencies of the domain on localization during the split.
+                if path == "iptv-core/src/guide.rs" && source.contains("crate::i18n::Language") {
+                    actual.insert(format!("shipped {path} iptv_core::i18n::Language"));
+                }
                 continue;
             }
-            let source = fs::read_to_string(&file).expect("read inventoried source");
             let filename = file
                 .file_stem()
                 .expect("source file name")

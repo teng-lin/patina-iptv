@@ -413,8 +413,8 @@ fn a_day_back_by_key_or_pan_pages_that_day_in() {
     let now = minute_of(&s, NOW);
     let mut f = Focus::at(now);
     // Ctrl + Left twice: two days back, past the held day.
-    f.step_time(-iptv_core::guide::moves::DAY, &s);
-    f.step_time(-iptv_core::guide::moves::DAY, &s);
+    f.step_time(-iptv_core::guide::DAY, &s);
+    f.step_time(-iptv_core::guide::DAY, &s);
     let cells = s.programs_between(0, f.window, iptv_core::guide::VISIBLE);
     assert!(cells.iter().all(|&p| s.title(0, p) == LOADING));
     // The window starts an hour before that day: two days are asked for.
@@ -425,7 +425,7 @@ fn a_day_back_by_key_or_pan_pages_that_day_in() {
     }
     // The oldest day kept bounds the keys.
     for _ in 0..10 {
-        f.step_time(-iptv_core::guide::moves::DAY, &s);
+        f.step_time(-iptv_core::guide::DAY, &s);
     }
     assert_eq!(f.cursor, minute_of(&s, FIRST));
     assert!(f.window <= f.cursor && f.cursor < f.window + iptv_core::guide::VISIBLE);

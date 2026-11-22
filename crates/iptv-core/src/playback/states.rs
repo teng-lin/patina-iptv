@@ -1,5 +1,4 @@
-//! The retry policy and the states [`super::Health`] moves through and
-//! reports.
+//! The retry policy and the states reported by a player.
 
 use super::error::{ErrorKind, Failure};
 

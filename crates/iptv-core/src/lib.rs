@@ -51,3 +51,23 @@ pub mod organization;
 pub mod vod;
 
 pub mod channel_number;
+
+mod capabilities_state;
+mod favorites_state;
+mod membership_state;
+mod multiview_state;
+mod organization_state;
+mod parental_state;
+mod recording_state;
+mod reorder_state;
+mod track_labels;
+mod vod_state;
+
+mod guide_state;
+mod lists_state;
+mod playback_health;
+mod playback_state;
+mod zap;
+
+mod interruption_state;
+mod on_demand_state;
