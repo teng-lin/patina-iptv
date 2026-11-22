@@ -19,7 +19,7 @@ fn full(app: &crate::headless::Headless) -> bool {
         > 1900.0
 }
 #[test]
-fn default_explicit_choices_debounce_close_the_guide_and_list_and_cancel_on_back() {
+fn explicit_guide_and_list_choices_debounce_and_cancel_when_focus_leaves() {
     let Some(home) = isolated!() else { return };
     let mut f = start(home, Settings::new(), true);
     let app = &mut f.app;

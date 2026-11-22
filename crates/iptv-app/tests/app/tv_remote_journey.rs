@@ -18,7 +18,7 @@
 use crate::headless::KeyPhase;
 use crate::personalization::{self, Fixture, step};
 use crate::tv_shared_controls::{Lifetime, persistent, record_players, selected};
-use iptv_settings::{Settings, Value};
+use iptv_settings::{KeyBinding, PressKind, Settings, Value, keys};
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{NodeId, Size, ViewKind, prelude::px};
 use nsh_tv::RemoteKey;
@@ -228,24 +228,24 @@ fn back_to_guide(app: &mut crate::Headless) {
     step(app.back());
 }
 
+fn remap_guide_down_to_select(settings: &mut Settings) {
+    settings
+        .set(
+            keys::KEY_OVERRIDES.as_str(),
+            Value::KeyBindings(vec![KeyBinding::new(
+                Some("guide"),
+                "down",
+                PressKind::Short,
+                "select",
+            )]),
+        )
+        .unwrap();
+}
+
 #[test]
 fn a_remapped_select_only_activates_once_per_remote_press() {
-    use iptv_settings::{KeyBinding, PressKind, keys};
-
     let Some(home) = isolated!() else { return };
-    let (mut fixture, lifetime, player) = tv(home, |settings| {
-        settings
-            .set(
-                keys::KEY_OVERRIDES.as_str(),
-                Value::KeyBindings(vec![KeyBinding::new(
-                    Some("guide"),
-                    "down",
-                    PressKind::Short,
-                    "select",
-                )]),
-            )
-            .unwrap();
-    });
+    let (mut fixture, lifetime, player) = tv(home, remap_guide_down_to_select);
     let app = &mut fixture.app;
 
     step(app.remote_phase(RemoteKey::Down, KeyPhase::Down));
@@ -259,6 +259,34 @@ fn a_remapped_select_only_activates_once_per_remote_press() {
     step(app.wait_for("id:player-banner >> text:/Local A/"));
     assert_eq!(iptv_app::player_opens(0), 1);
     persistent(app, &lifetime, player);
+}
+
+#[test]
+fn a_desktop_key_remapped_to_select_repeats_only_outside_the_guide_grid() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    remap_guide_down_to_select(&mut settings);
+    let mut fixture = personalization::start(home, settings, true);
+    let app = &mut fixture.app;
+
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(false));
+    assert_eq!(iptv_app::keyboard_repeats("up"), Some(true));
+    step(app.press_key("tab"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(true));
+    step(app.press_key("tab"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(false));
+
+    step(app.press_key("down"));
+    step(app.wait_until(
+        "the remapped key starts preview playback",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+    assert!(shows(app, "id:guide-preview"));
+    step(app.press_key("down"));
+    step(app.wait_for("id:player-banner >> text:/Local A/"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(true));
+    assert_eq!(iptv_app::player_opens(0), 1);
 }
 
 #[test]

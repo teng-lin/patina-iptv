@@ -64,6 +64,7 @@ fn guide_activates_a_live_channel_twice_and_wraps_rows_and_groups() {
     step(app.press_key("enter"));
     step(app.wait_for("id:player-banner >> text:/Local A$/"));
     assert!(!preview(app));
+    step(app.run_for(Duration::from_millis(500)));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
 
@@ -101,6 +102,7 @@ fn guide_activates_a_live_channel_twice_and_wraps_rows_and_groups() {
     step(app.press(&row("Local B")));
     step(app.wait_for("id:player-banner >> text:/Local B$/"));
     assert!(!preview(app));
+    step(app.run_for(Duration::from_millis(500)));
     assert_eq!(iptv_app::player_opens(0), opens + 1);
     persistent(app, &lifetime, player);
 }
