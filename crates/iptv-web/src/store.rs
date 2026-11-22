@@ -4,7 +4,9 @@
 //! things on the native hosts.
 //!
 //! Keys name the playlist by a hash of its identity, never its
-//! credentials. Values are JSON, except the guide (`iptv_epg`'s snapshot).
+//! credentials. The lists record ([`Lists`]) keeps the shape it had
+//! before search and reordering, so an existing install keeps its
+//! favorites. Values are JSON, except the guide (`iptv_epg`'s snapshot).
 //!
 //! Old data does not accumulate: each refresh overwrites the one stored
 //! guide, which holds only bound channels, no descriptions and programs
@@ -16,6 +18,7 @@ use iptv_epg::{FeedId, StoreOptions, TimePolicy};
 use iptv_import::{EpgSourceConfig, GuideState};
 use iptv_providers::SecretUrl;
 use iptv_providers::model::SourceConfig;
+use iptv_search::SearchHistory;
 use serde_json::{Value, json};
 
 use crate::exec::{storage_get, storage_put};
@@ -68,19 +71,42 @@ fn strings(v: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-pub(crate) async fn load_lists(id: &str) -> (Favorites, Recent) {
-    let Some(bytes) = storage_get(&lists_key(id)).await else {
-        return Default::default();
-    };
-    let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-    (
-        Favorites::from_keys(strings(&v["favorites"])),
-        Recent::from_keys(strings(&v["recent"])),
-    )
+/// The user's lists of a playlist, stored as one record:
+/// `{"favorites": [key], "recent": [key], "searches": [text]}`. The order
+/// of `favorites` is the Favorites list's order. Records from before
+/// search have no `searches`; a missing or unreadable list is empty.
+pub(crate) struct Lists {
+    pub(crate) favorites: Favorites,
+    pub(crate) recent: Recent,
+    pub(crate) searches: SearchHistory,
 }
 
-pub(crate) fn save_lists(id: &str, favorites: &Favorites, recent: &Recent) {
-    let v = json!({ "favorites": favorites.keys(), "recent": recent.keys() });
+pub(crate) async fn load_lists(id: &str) -> Lists {
+    let v: Value = match storage_get(&lists_key(id)).await {
+        Some(bytes) => serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        None => Value::Null,
+    };
+    Lists {
+        favorites: Favorites::from_keys(strings(&v["favorites"])),
+        recent: Recent::from_keys(strings(&v["recent"])),
+        searches: SearchHistory::from_list(
+            strings(&v["searches"]),
+            SearchHistory::DEFAULT_CAPACITY,
+        ),
+    }
+}
+
+pub(crate) fn save_lists(
+    id: &str,
+    favorites: &Favorites,
+    recent: &Recent,
+    searches: &SearchHistory,
+) {
+    let v = json!({
+        "favorites": favorites.keys(),
+        "recent": recent.keys(),
+        "searches": searches.entries(),
+    });
     storage_put(&lists_key(id), v.to_string().as_bytes());
 }
 
