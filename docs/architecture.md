@@ -200,7 +200,7 @@ Rules that follow:
    and the front end derives it.
 9. **Shared code means the same for every caller.** Share the
    classification and let each front end choose its response:
-   `Program::select` classifies OK on a program, and for an upcoming one the
+   `ProgramSelection::for_program` classifies OK on a program, and for an upcoming one the
    shell opens its details and the bridge shows when it starts. A host's
    choice enters shared code as a plain value (`ResultPolicy`, the play
    bar's idle delay), never as a test of which host is running. A
@@ -238,7 +238,7 @@ One press through the layers, OK on a program that ended an hour ago:
 | Presentation state | What did the viewer ask for? | `iptv-nav`: a short press in `Context::Guide` is `Action::Select` |
 | View | Which feature is on top? | `input.rs` routes the action to the guide |
 | Domain | Can this program be replayed? | `Program::can_replay`, from its start, now and the channel's archive days |
-| Presentation state | What kind of selection is this, given what is playing? | `Program::select`: `ProgramSelection::Replay` |
+| Presentation state | What kind of selection is this, given what is playing? | `ProgramSelection::for_program`: `ProgramSelection::Replay` |
 | View | What does this front end do with a replay? | `iptv-app` asks the runtime for the stream and changes the view mode |
 | Application | Which stream is that, and may it play? | `iptv-runtime`: the archive stream, with a provider round trip where one is needed, after the parental check |
 | Adapters | How is it fetched and decoded? | `iptv-net`'s loopback relay; `tv.player` |
@@ -371,7 +371,7 @@ a module that holds no Domain values, so that the move is a file move.
 | Modules that are presentation state only | `iptv_core::{browse, browse_playback, channel_list, channel_number, channel_picker, editor, heard, library_recovery, menu, panels, pip, play_bar, player_info, player_options, seek_hold, sound}` and `playback_windows` apart from its geometry | 1 | `iptv-presentation` |
 | State holders in modules that also hold Domain values | `iptv_core`: `guide` (`Focus`, `Pane`, `Move`, `ProgramSelection`), `lists` (`Entry`, `ListId`, `ChannelList`, `ListView`), `favorites` (`History`), `playback` (`Health`, `ChannelHistory`, zap targets), `organization` (`Editor`, `Action`), `parental` (`Dialog`), `recording` (`Screen`, `Draft`), `vod` (`Screen`, `Control`, `Destination`), `tracks` (chooser entries and labels), `multiview` (all but `MAX_SURFACES`), `reorder` (all but `move_to_present`), `membership` (all but `Member`), `wizard` (the state machine and its form), `capabilities` (`pip` and `multiview`, the availability of two features) | 1 | Each holder moves whole to `iptv-presentation`, with its inherent methods (`browse` has an `impl Focus`). The values stay in `iptv-core`; the wizard's request and the import's report become a Domain module there. |
 | State holders in three other Domain crates | `iptv_library::{details, epg_sources, guide_assign, guide_inspect, guide_repair_screen, playlists}`, `iptv_search::{state, selection}`, `iptv_settings::screen`. `iptv_settings::backup` repairs restored values with the screen's `grid`. | 1 | `iptv-presentation`. The grid arithmetic goes to the settings' validation API. |
-| Domain types with methods that name a holder | `Recent::history` returns `History`; `Tracks` words its chooser entries; `PlaylistDraft::kind` returns the form's kind; `validate_url` returns the form's error; `Program::select` | 1 | Functions in the presentation, and a Domain error for the URL check. |
+| Domain types with methods that name a holder | `Recent::history` returns `History`; `Tracks` words its chooser entries; `PlaylistDraft::kind` returns the form's kind; `validate_url` returns the form's error; `ProgramSelection::for_program` | 1 | Functions in the presentation, and a Domain error for the URL check. |
 | Domain crates' tests that drive a holder | `iptv-guide`'s unit tests build `Focus`, `ChannelList` and `ListView` over its schedule | 1 | They move beside the holders, in `iptv-presentation`'s tests, with `iptv-guide`'s fixtures exported for tests. |
 | A command returns a state holder | `iptv_runtime::favorites::history` returns `favorites::History`, which marks the playing row | 5 | It returns the recent channels. The presentation marks the row. |
 | A command takes a state holder | `iptv_runtime::commands::edit_organization` takes `organization::Editor` (focus, mode, selection) and the menu's `Action` | 5 | It takes the items, a Domain edit and the selection. |
