@@ -70,7 +70,29 @@ views, `iptv-web` with JSON for a page). What changes is the rule:
 - Hosts run a subset by passing what they have (as `PlayBar::move_focus`
   takes `enabled`), and state their deliberate exceptions.
 
-No new crate: the functions fit in `iptv-core`.
+## Where each decision lives
+
+The two shared crates are independent today: neither depends on the other,
+and that stays. Each keeps its own question.
+
+| Question | Crate | Speaks in | Examples |
+| --- | --- | --- | --- |
+| What did the viewer ask for? | `iptv-nav` | keys, press phases, times, a context → `Action` | tap or hold, repeats, the bridge's key profile, key choices such as "Up/Down zap or open the list" (`player_keys::up_down_key`, `seek_key`, in the app today) |
+| What does that do to the screen's state? | `iptv-core` | `Move`s and model methods → outcomes | OK on a program, the zap target, focus restore after Favorites change, paging, the card and bar models, view-models |
+| The search screen's state | `iptv-search` | its own state machine | OK on a result, what Back returns to |
+| Which model gets the action, and carrying out the outcome | each presenter | its own state and effects | overlay order, tuning, saving, rendering |
+
+Rules that follow:
+
+- `iptv-core` never takes a key or an `Action`; `iptv-nav` never reads
+  guide or playback state. A decision that needs both is two decisions:
+  `iptv-nav` picks the action (given a context and host choices passed in
+  as plain values), `iptv-core` applies it to state.
+- The context (`iptv_nav::Context`) is the one value that crosses: the
+  presenter derives it from its state (`input::context` in the app) and
+  hands it to the keymap.
+- No new crate. `iptv-web` gains a dependency on `iptv-nav`; it depends on
+  `iptv-core` and `iptv-search` already.
 
 ## Steps (one pull request each, in this order)
 
@@ -102,7 +124,9 @@ No new crate: the functions fit in `iptv-core`.
      neither model has Search; the opening focus and the hide delays are
      fixed (the bridge uses 7 s, the play bar 3 s).
 3. **Shared decisions, extracted one at a time.** Each becomes a pure
-   function that both presenters call:
+   function that both presenters call, in the crate the table above gives
+   (state decisions in `iptv-core`, search ones in `iptv-search`, key
+   choices in `iptv-nav`):
    - OK on a program: live, already live, replay, or details, with whether
      details exist as an input (the bridge shows a notice). Tune timing
      stays apart: the app uses `BrowsePlayback` (switch delay, autoplay,
