@@ -11,9 +11,6 @@ shipped iptv-library/src/lib.rs iptv_library::guide_inspect
 shipped iptv-library/src/lib.rs iptv_library::guide_repair_screen
 shipped iptv-library/src/lib.rs iptv_library::playlists
 shipped iptv-player-mpv/src/mpv/gtk_placement.rs iptv_core::pip_window
-shipped iptv-runtime/src/commands.rs edit_organization takes Editor
-shipped iptv-runtime/src/commands.rs iptv_core::organization::Action
-shipped iptv-runtime/src/commands.rs iptv_core::organization::Editor
 shipped iptv-runtime/src/data.rs iptv_core::wizard
 shipped iptv-runtime/src/data/library.rs iptv_core::wizard
 shipped iptv-runtime/src/imports.rs iptv_core::wizard
@@ -58,13 +55,7 @@ test iptv-guide/tests/it/personalization.rs iptv_core::lists::ListId
 test iptv-player-mpv/src/mpv/gtk_placement.rs iptv_core::pip_window
 test iptv-runtime/src/wizard_map.rs iptv_core::i18n
 test iptv-runtime/src/wizard_map.rs iptv_core::wizard
-test iptv-runtime/tests/it/command_journeys.rs iptv_core::organization::Action
-test iptv-runtime/tests/it/command_journeys.rs iptv_core::organization::Editor
-test iptv-runtime/tests/it/command_values.rs iptv_core::organization::Action
-test iptv-runtime/tests/it/command_values.rs iptv_core::organization::Editor
 test iptv-runtime/tests/it/data_startup.rs iptv_core::wizard
-test iptv-runtime/tests/it/relative_organization_moves.rs iptv_core::organization::Action
-test iptv-runtime/tests/it/relative_organization_moves.rs iptv_core::organization::Editor
 test iptv-runtime/tests/it/vod_import_pipeline.rs iptv_core::wizard
 test iptv-runtime/tests/it/vod_library.rs iptv_core::vod::Screen
 test iptv-settings/tests/it/main.rs iptv_settings::screen
