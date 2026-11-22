@@ -3,10 +3,13 @@
 The same Patina as on the desktops and Android (`crates/iptv-app` and the
 whole runtime, store and import pipeline) built for Samsung TVs with the
 external NSH platform [nsh-platform-tizen](https://github.com/teng-lin/nsh-platform-tizen),
-pinned by revision in `Cargo.toml`. It sits beside the JavaScript bridge
-(`hosts/tizen`), which stays the default package for 2020 sets until this
-build meets the gates in `docs/plans/2026-11-21-browser-tv-architecture.md`
-(see "Module size and launch" there for the numbers).
+pinned by revision in `Cargo.toml`.
+
+**Opt-in on Tizen 5.5.** The JavaScript bridge (`hosts/tizen`) is the
+supported app on 2020 sets: this package misses the launch and
+responsiveness gates there (decision of 2026-11-21 and its numbers in
+`docs/plans/2026-11-21-browser-tv-architecture.md`, "Decision on Tizen
+5.5"). A newer set (Tizen 6.5+, Chromium 85+) is measured next.
 
 ## How it runs
 

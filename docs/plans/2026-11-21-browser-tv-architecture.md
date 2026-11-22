@@ -1,6 +1,6 @@
 # Patina on browser TVs: target architecture, crates and boundaries
 
-Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a to 1e are implemented (see their status lines); step 2 runs Patina on the TV (`hosts/tizen-nsh`); steps 3 and 4 are measured below ("Module size and launch"), and the 2020 set stays on the bridge. This is the Patina integration plan that M7 of
+Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a to 1e are implemented (see their status lines); step 2 runs Patina on the TV (`hosts/tizen-nsh`); steps 3 and 4 are measured below ("Module size and launch"). Decided on 2026-11-21: on Tizen 5.5 the JavaScript bridge stays the supported app and the NSH package is opt-in (see "Decision on Tizen 5.5"). This is the Patina integration plan that M7 of
 [External NSH TV support](2026-11-15-nsh-tv-platform-support.md) asks for. It is
 based on the current code and on spikes run on a 2020 Samsung TV (Tizen 5.5).
 Sections marked **Today** describe the code as it is; everything else is a
@@ -293,10 +293,16 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   key phases: the platform has no NSH keymap).
 - **3. Measure and shrink.** Build Patina's real module. Link only the base
   components in use; record size, launch and key latency on the device.
+  *Status*: done for the 2020 set ("Module size and launch"): from 16.1 MB
+  to 7.5 MB (6.5 MB of code), and its compiled module now caches. Ended on
+  Tizen 5.5 by the decision below.
 - **4. Switch per TV generation.** *Gates*: module small enough to cache
   (about 6 MB on the 2020 set), first launch within 30 s behind a splash,
   cached launch within 8 s, key to frame within 80 ms. Generations that meet
-  them move to the NSH build; the others stay on the bridge.
+  them move to the NSH build; the others stay on the bridge. *Status*: the
+  2020 set (Tizen 5.5) meets none of the launch and responsiveness gates
+  and stays on the bridge, with the NSH package opt-in. A 2022 or later
+  set (Tizen 6.5+, Chromium 85+) is measured next.
 
 ## Decisions after the second round of spikes
 
@@ -493,6 +499,36 @@ gate; which steps take longest is not recorded yet (the log keeps only
 the longest). The likely ones are the ends of a publish (taking the copy,
 then the swap with the writes that follow) and steps that create indexes;
 timing each phase is the next step for the 50 ms gate.
+
+## Decision on Tizen 5.5 (2026-11-21)
+
+On Tizen 5.5 the JavaScript bridge (`hosts/tizen`) stays the supported
+app, and Patina's NSH package (`hosts/tizen-nsh`) is opt-in: built and
+installable beside it, never the default package for that generation.
+No further shrinking or performance work targets Tizen 5.5.
+
+It rests on these measurements, against step 4's gates:
+
+| | Measured | Gate |
+| --- | --- | --- |
+| First launch after an install | about 41 s to first paint (26 s of it compiling) | 30 s |
+| Cached launch | first paint 13–17 s; the channel list 22–27 s (comparison run) | 8 s |
+| Key to frame on the guide | median about 148 ms | 80 ms |
+| A publish step | up to 2.4 s (catalog 665 ms) | 50 ms |
+| WebAssembly memory | 61 MB at launch; about 94 MB in use (comparison run) | |
+| Stability | the app was closed twice while zapping | |
+
+Limits of the evidence: one 2020 set (UN55TU7000), one provider account,
+a few runs per build, release builds only.
+
+What carries forward from this work whatever the next generation shows:
+the store driver (`Ports::store_host`, sliced publishes), the browser host
+(IndexedDB chunks, the SQLite hooks, imports as cooperative tasks), the
+browser key names and remote key phases, and the size tooling
+(`sections.py`, the `tizen` profile, the size flags, package files).
+
+Next: measure the NSH package on a 2022 or later set (Tizen 6.5+,
+Chromium 85+) before deciding NSH on Tizen as a whole.
 
 ## Not goals
 
