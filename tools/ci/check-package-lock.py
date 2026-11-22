@@ -71,7 +71,15 @@ def main():
     root = Path(__file__).resolve().parents[2]
     packaged = tomllib.loads((root / "tools/ci/package.Cargo.lock").read_text())["package"]
     validate_references(packaged)
-    metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--format-version", "1"], cwd=root))
+    command = ["cargo", "metadata", "--locked", "--format-version", "1"]
+    manifests = json.loads(subprocess.check_output([*command, "--no-deps"], cwd=root))
+    # The workspace builds the standalone bridge by default. The NSH runner
+    # requests only iptv-web's adapters with default-features = false.
+    defaults = [f"{p['name']}/default" for p in manifests["packages"]
+                if p["name"] != "iptv-web" and "default" in p["features"]]
+    metadata = json.loads(subprocess.check_output([
+        *command, "--no-default-features", "--features", ",".join(defaults),
+    ], cwd=root))
     nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
     packages_by_id = {p["id"]: p for p in metadata["packages"]}
     pending = [
