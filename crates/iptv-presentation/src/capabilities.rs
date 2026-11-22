@@ -1,7 +1,9 @@
 //! Availability of playback features in the current presentation.
 
 use crate::pip::Pip;
-use iptv_core::capabilities::Host;
+use iptv_core::capabilities::{Host, Recording};
+use iptv_core::message::key;
+use iptv_core::recording::WakeCapability;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
@@ -67,10 +69,47 @@ pub fn multiview(
     }
 }
 
+/// Message ID for the last recording wake report.
+pub fn recording_notice(recording: Recording) -> Option<&'static str> {
+    match recording.wake {
+        Some(wake @ (WakeCapability::Inexact | WakeCapability::Denied)) => wake.notice(),
+        Some(WakeCapability::AwakeOnly) if recording.background => Some(key(concat!(
+            "Closing the window keeps accepted recordings running. ",
+            "Enable start at login to recover after restart. ",
+            "Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. ",
+            "Quit stops the recorder.",
+        ))),
+        Some(WakeCapability::AwakeOnly) => Some(key(
+            "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
+        )),
+        None | Some(WakeCapability::Exact) => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use iptv_core::capabilities::Platform;
+
+    #[test]
+    fn recording_wake_notices_distinguish_exact_from_limited_starts() {
+        for wake in [
+            WakeCapability::Exact,
+            WakeCapability::Inexact,
+            WakeCapability::Denied,
+            WakeCapability::AwakeOnly,
+        ] {
+            let state = Recording {
+                background: true,
+                wake: Some(wake),
+            };
+            assert_eq!(
+                recording_notice(state).is_some(),
+                wake != WakeCapability::Exact
+            );
+        }
+        assert!(recording_notice(Recording::default()).is_none());
+    }
 
     #[test]
     fn live_player_reports_replace_unknown_support_and_revoke_actions() {

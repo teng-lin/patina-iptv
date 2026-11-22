@@ -2,10 +2,9 @@
 //! top left beside the focused program, and below them the rail, the groups
 //! column and the guide grid: `grid`), the full-screen player with its play
 //! bar and channel zapping, search (`search`) and the Favorites order. The
-//! state is the core's (`iptv_core`'s guide focus, browse columns, lists and
-//! reorder models over an `iptv_guide` schedule, `iptv_search`'s search
-//! screen); the host renders the views this emits and plays what it is told
-//! to.
+//! bridge uses `iptv_presentation` for guide focus, browse columns, lists,
+//! reordering and search state. The host renders the emitted views and
+//! plays the selected stream.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

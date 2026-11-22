@@ -173,16 +173,6 @@ pub enum Sort {
     Year,
     Rating,
 }
-impl Sort {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Name => Self::Newest,
-            Self::Newest => Self::Year,
-            Self::Year => Self::Rating,
-            Self::Rating => Self::Name,
-        }
-    }
-}
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Query {
     pub kind: Kind,
@@ -281,6 +271,18 @@ pub struct Playing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn continue_watching_needs_five_seconds_and_no_completion() {
+        assert!(!Progress::observed(4_999, Some(100_000), false).unfinished());
+        assert!(Progress::observed(CONTINUE_MIN_MS, Some(100_000), false).unfinished());
+        assert!(!Progress::observed(99_000, Some(100_000), false).unfinished());
+        assert!(!Progress::observed(30_000, Some(100_000), true).unfinished());
+        assert!(
+            Progress::observed(30_000, None, false).unfinished(),
+            "a live-length unknown title still resumes"
+        );
+    }
 
     #[test]
     fn completed_media_does_not_resume_near_its_ending() {

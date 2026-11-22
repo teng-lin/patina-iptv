@@ -21,13 +21,13 @@ pub(crate) fn is_tui_mode() -> bool {
 /// Guide values and navigation used by the shell.
 pub mod guide {
     pub use iptv_core::guide::{
-        Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, PAST, Program,
+        Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, Program,
         SYNTHETIC_EPOCH_UNIX, Schedule, SyntheticSchedule, VISIBLE, catchup_days, floor, floor_of,
         group_start, now_minute, program_at, secs_to_next_minute, unix_of,
     };
     pub use iptv_presentation::guide::{
-        Focus, Move, Pane, PreviewOrigin, ProgramSelection, STEP, home_window, moves, page_row,
-        view_range,
+        Focus, Move, PAST, Pane, PreviewOrigin, ProgramSelection, STEP, home_window, moves,
+        page_row, view_range,
     };
 }
 #[cfg(all(

@@ -16,7 +16,10 @@
 //! A played live stream also retries HTTP 404/410: reopening can resolve a
 //! fresh resource after the provider's rolling live window advances.
 
-use iptv_core::playback::{ErrorKind, Failure, Phase, PlayerState, Retry, RetryPolicy, Waiting};
+use iptv_core::playback::{ErrorKind, Failure, PlayerState};
+
+mod states;
+pub use states::{Phase, Retry, RetryPolicy, Waiting};
 
 /// Player health for one playback session (see the module's docs).
 #[derive(Clone, Debug, PartialEq, Eq)]

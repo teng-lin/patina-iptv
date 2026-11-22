@@ -106,17 +106,17 @@ pub fn resolve(preference: &str, system: Option<&str>) -> &'static Language {
 
 // The catalog is outside the module only where a browser host installs its
 // reader (wasm32): a native build with the feature on (`--all-features`)
-// keeps the embedded catalog, or it would show English everywhere. This
-// crate's own tests read the external catalog natively too.
-#[cfg(not(all(feature = "external-catalog", any(target_family = "wasm", test))))]
+// uses the embedded catalog. Native feature tests exercise the external
+// file reader independently.
+#[cfg(not(all(feature = "external-catalog", target_family = "wasm")))]
 const CATALOG: &str = include_str!("i18n/messages.tsv");
 
-#[cfg(not(all(feature = "external-catalog", any(target_family = "wasm", test))))]
+#[cfg(not(all(feature = "external-catalog", target_family = "wasm")))]
 type Catalog = std::collections::HashMap<&'static str, Vec<&'static str>>;
-#[cfg(not(all(feature = "external-catalog", any(target_family = "wasm", test))))]
+#[cfg(not(all(feature = "external-catalog", target_family = "wasm")))]
 static MESSAGES: std::sync::OnceLock<Catalog> = std::sync::OnceLock::new();
 
-#[cfg(not(all(feature = "external-catalog", any(target_family = "wasm", test))))]
+#[cfg(not(all(feature = "external-catalog", target_family = "wasm")))]
 fn messages() -> &'static Catalog {
     MESSAGES.get_or_init(|| {
         CATALOG
@@ -137,12 +137,12 @@ fn find(language: &Language, source: &str) -> Option<&'static str> {
     if column == 0 {
         return None;
     }
-    #[cfg(not(all(feature = "external-catalog", any(target_family = "wasm", test))))]
+    #[cfg(not(all(feature = "external-catalog", target_family = "wasm")))]
     let text = messages()
         .get(source)
         .and_then(|row| row.get(column))
         .copied();
-    #[cfg(all(feature = "external-catalog", any(target_family = "wasm", test)))]
+    #[cfg(all(feature = "external-catalog", target_family = "wasm"))]
     let text = external::column(column).get(source).copied();
     text.filter(|s| !s.is_empty())
 }
@@ -150,7 +150,7 @@ fn find(language: &Language, source: &str) -> Option<&'static str> {
 /// The catalog outside the module (feature `external-catalog` on wasm32,
 /// for a browser package, whose module size is its launch time): one file per
 /// language, read when the language is first shown through the reader
-/// the host installs ([`set_catalog_reader`]). A language's file has a
+/// the host installs through `set_catalog_reader`. A language's file has a
 /// line per message, its English source and its text separated by a tab;
 /// English's has the sources alone (for [`is_cataloged`]).
 #[cfg(all(feature = "external-catalog", any(target_family = "wasm", test)))]
@@ -189,7 +189,7 @@ mod external {
 /// `external-catalog` on wasm32): `read(tag)` returns that language's file (see the
 /// `external` module), `None` when there is none. Only the first call
 /// counts; set it before the first message is shown.
-#[cfg(all(feature = "external-catalog", any(target_family = "wasm", test)))]
+#[cfg(all(feature = "external-catalog", target_family = "wasm"))]
 pub fn set_catalog_reader(read: fn(tag: &str) -> Option<String>) {
     let _ = external::READER.set(read);
 }
@@ -216,9 +216,9 @@ pub fn format(language: &Language, source: &str, args: &Args<'_>) -> String {
 /// Whether the catalog has a row for `source`: for the checks that no
 /// message reaches [`translate`] or [`format()`] without one.
 pub fn is_cataloged(source: &str) -> bool {
-    #[cfg(not(all(feature = "external-catalog", any(target_family = "wasm", test))))]
+    #[cfg(not(all(feature = "external-catalog", target_family = "wasm")))]
     return messages().contains_key(source);
-    #[cfg(all(feature = "external-catalog", any(target_family = "wasm", test)))]
+    #[cfg(all(feature = "external-catalog", target_family = "wasm"))]
     return external::column(0).contains_key(source);
 }
 
@@ -236,29 +236,29 @@ mod external_tests {
 
     #[test]
     fn languages_are_read_from_the_host_when_first_shown() {
-        set_catalog_reader(read);
-        let fr = resolve("fr", None);
-        assert_eq!(translate(fr, "Settings"), "Paramètres");
-        assert_eq!(translate(fr, "Search"), "Search", "no row: English");
+        external::READER.set(read).unwrap();
+        let column = |tag| {
+            let index = LANGUAGES
+                .iter()
+                .position(|language| language.tag == tag)
+                .unwrap();
+            external::column(index)
+        };
+        let french = column("fr");
+        assert_eq!(french.get("Settings"), Some(&"Paramètres"));
+        assert_eq!(french.get("Search"), None);
+        let channels = "{count, plural, one {# channel} other {# channels}}";
         assert_eq!(
-            format(
-                fr,
-                "{count, plural, one {# channel} other {# channels}}",
-                &[("count", Arg::Count(2))]
-            ),
+            message::render(french[channels], "fr", &[("count", Arg::Count(2))]),
             "2 chaînes"
         );
-        assert_eq!(
-            translate(resolve("de", None), "Settings"),
-            "Settings",
-            "no file: English"
-        );
-        assert!(is_cataloged("Search"));
-        assert!(!is_cataloged("Paramètres"));
+        assert!(column("de").is_empty());
+        assert!(column("en").contains_key("Search"));
+        assert!(!column("en").contains_key("Paramètres"));
     }
 }
 
-#[cfg(all(test, not(feature = "external-catalog")))]
+#[cfg(all(test, not(all(feature = "external-catalog", target_family = "wasm"))))]
 mod tests {
     use super::*;
 

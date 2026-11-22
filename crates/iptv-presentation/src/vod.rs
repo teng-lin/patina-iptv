@@ -38,7 +38,7 @@
 //! playlists on screen) and offers one action ([`Screen::empty_action`]).
 
 use iptv_core::vod::{
-    Card, Category, Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Query, Shelf, Source,
+    Card, Category, Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Query, Shelf, Sort, Source,
 };
 
 mod library;
@@ -190,6 +190,16 @@ pub struct Screen {
     search_closed_pending: bool,
 }
 impl Screen {
+    /// Cycle through the catalog sort choices in display order.
+    pub fn cycle_sort(&mut self) {
+        self.query.sort = match self.query.sort {
+            Sort::Name => Sort::Newest,
+            Sort::Newest => Sort::Year,
+            Sort::Year => Sort::Rating,
+            Sort::Rating => Sort::Name,
+        };
+    }
+
     pub fn begin(&mut self, kind: Kind) -> u64 {
         *self = Self {
             open: true,
@@ -1123,7 +1133,7 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iptv_core::vod::{CONTINUE_MIN_MS, DISCOVERY_PAGE, Episode, Progress};
+    use iptv_core::vod::{DISCOVERY_PAGE, Episode, Progress};
     fn card(id: &str) -> Card {
         Card {
             key: Key {
@@ -1151,18 +1161,6 @@ mod tests {
         let g = s.begin(Kind::Movie);
         s.publish(g, vec![a, b], false, false);
         assert_eq!(s.cards.len(), 2);
-    }
-
-    #[test]
-    fn continue_watching_needs_five_seconds_and_no_completion() {
-        assert!(!Progress::observed(4_999, Some(100_000), false).unfinished());
-        assert!(Progress::observed(CONTINUE_MIN_MS, Some(100_000), false).unfinished());
-        assert!(!Progress::observed(99_000, Some(100_000), false).unfinished());
-        assert!(!Progress::observed(30_000, Some(100_000), true).unfinished());
-        assert!(
-            Progress::observed(30_000, None, false).unfinished(),
-            "a live-length unknown title still resumes"
-        );
     }
 
     #[test]

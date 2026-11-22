@@ -4,7 +4,10 @@ mod floor;
 pub mod moves;
 pub use floor::view_range;
 
-use iptv_core::guide::{Airing, PAST, Program, Schedule, VISIBLE};
+use iptv_core::guide::{Airing, Program, Schedule, VISIBLE};
+
+/// Minutes before now in the default guide window.
+pub const PAST: i32 = 30;
 
 /// Minutes per step in the guide time header.
 pub const STEP: i32 = 30;

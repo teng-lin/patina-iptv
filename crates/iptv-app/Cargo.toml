@@ -1,6 +1,6 @@
 [package]
 name = "iptv-app"
-description = "The NSH shell of iptv-rs: TV + tablet screens rendering iptv-core."
+description = "The NSH front end for Patina IPTV."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,5 +1,4 @@
 //! Host facts and current feature availability. These values grant no content access.
-use crate::message::key;
 use crate::recording::WakeCapability;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -57,21 +56,6 @@ impl Recording {
     pub fn exact_start(self) -> bool {
         self.wake == Some(WakeCapability::Exact)
     }
-    pub fn notice(self) -> Option<&'static str> {
-        match self.wake {
-            Some(wake @ (WakeCapability::Inexact | WakeCapability::Denied)) => wake.notice(),
-            Some(WakeCapability::AwakeOnly) if self.background => Some(key(concat!(
-                "Closing the window keeps accepted recordings running. ",
-                "Enable start at login to recover after restart. ",
-                "Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. ",
-                "Quit stops the recorder.",
-            ))),
-            Some(WakeCapability::AwakeOnly) => Some(key(
-                "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
-            )),
-            None | Some(WakeCapability::Exact) => None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -124,7 +108,7 @@ mod tests {
     }
 
     #[test]
-    fn wake_permission_reports_keep_awake_and_denial_distinct() {
+    fn only_an_exact_report_implies_an_exact_start() {
         for wake in [
             WakeCapability::Exact,
             WakeCapability::Inexact,
@@ -136,8 +120,6 @@ mod tests {
                 wake: Some(wake),
             };
             assert_eq!(state.exact_start(), wake == WakeCapability::Exact);
-            assert_eq!(state.notice().is_some(), wake != WakeCapability::Exact);
         }
-        assert!(Recording::default().notice().is_none());
     }
 }

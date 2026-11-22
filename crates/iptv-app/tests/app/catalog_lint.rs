@@ -172,16 +172,15 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-app/src/parental_view.rs", "message"),
     ("iptv-app/src/parental_view.rs", "title"),
     ("iptv-runtime/src/recordings.rs", "notice"),
-    // The typed capability notice returns key-marked messages in core
+    // The capability notice returns key-marked messages in presentation
     // capabilities.rs, or the existing checked recording wake messages.
     ("iptv-app/src/host/native/recording_host.rs", "message"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport
     // failure keys are additionally enumerated by the recording transport test.
-    ("iptv-app/src/recordings_view.rs", "job"),
-    ("iptv-app/src/recordings_view.rs", "j"),
+    ("iptv-app/src/recordings_view.rs", "status_label"),
     ("iptv-app/src/recordings_view.rs", "name"),
     ("iptv-app/src/recordings_view.rs", "message"),
-    // What `tr` and `trf` hand to the core is what they were given.
+    // What `tr` and `trf` hand to the presentation is what they were given.
     ("iptv-app/src/i18n.rs", "source"),
     // `key(…)` constants.
     ("iptv-app/src/backup.rs", "EXPORT_NOTE"),
