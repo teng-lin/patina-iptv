@@ -191,6 +191,23 @@ iptv-runtime/src/store_service.rs	recursive store request
 iptv-runtime/src/store_service.rs	request belongs to a closed application
 iptv-runtime/src/store_service.rs	store reply lost
 iptv-runtime/src/store_service.rs	store worker stopped
+# A host-kept store (the browser's) fails to open as the native store does
+# (store_service open_store); its sliced publishes refuse with store errors
+# that imports and guide updates turn into typed failures; the restored size
+# is only logged.
+iptv-app/src/host/web/store.rs	stored chunk {index} is missing
+iptv-app/src/host/web/store.rs	the TV's storage could not be read
+iptv-app/src/host/web/store.rs	{size} bytes restored
+iptv-runtime/src/imports.rs	the catalog publish did not finish
+iptv-runtime/src/imports.rs	the catalog publish started twice
+iptv-runtime/src/imports.rs	the catalog publish was not prepared
+iptv-runtime/src/publish.rs	a sliced publish needs a store host
+iptv-runtime/src/publish.rs	request belongs to a closed application
+iptv-runtime/src/publish.rs	store reply lost
+iptv-runtime/src/publish.rs	the application closed during a publish
+iptv-runtime/src/publish.rs	the publish copy is gone
+iptv-runtime/src/stored.rs	the guide publish did not finish
+iptv-runtime/src/stored.rs	the guide publish started twice
 iptv-app/src/startup.rs	guide shown
 iptv-app/src/performance_probe.rs	guide frame
 iptv-core/src/import_limits.rs	decoded byte budget exceeded
