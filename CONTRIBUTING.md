@@ -96,13 +96,15 @@ guide experience, but shares none of its code, artwork, icons, fonts, layouts
 or wording. Do not copy any of those. The palette in
 `crates/iptv-app/src/theme.rs` is Patina's own.
 
-**The core stays portable.** `iptv-core` and the other portable crates must
+**Domain and presentation stay portable.** `iptv-core`,
+`iptv-presentation` and the other portable crates must
 not depend on NSH or platform APIs, must not block, and must build for
 `wasm32-unknown-unknown`. Put I/O behind a port and implement it in an
 adapter crate.
 
-**State lives in the core.** Views render state and send actions. Restore
-focus by content identity, never by list index.
+**State ownership.** The runtime owns content and operations. Feature
+holders in `iptv-presentation` track focus by content identity. Views
+render state and send actions.
 
 **One persistent player surface.** Modes change its layout only. Never hide,
 detach or re-parent the player view.

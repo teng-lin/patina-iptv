@@ -1,4 +1,4 @@
-//! Portable library model and screen state machines. No persistence or UI toolkit.
+//! Portable playlist and guide models, source policies and organization data.
 #![forbid(unsafe_code)]
 
 mod records;

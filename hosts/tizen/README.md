@@ -17,7 +17,7 @@ Patina's own core in WebAssembly:
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Core | `crates/iptv-web` | Imports the source and its guide with `iptv-import`, builds the schedule with `iptv-guide`, and owns the lists, the guide screen's focus and columns, and the reorder state (`iptv-core`) and the search indexes and screen (`iptv-search`). Emits views as JSON: only what is on screen. |
+| Core | `crates/iptv-web` | Imports the source and its guide with `iptv-import`, builds the schedule with `iptv-guide`, and uses the search indexes in `iptv-search`. Guide focus, lists, reordering and the search screen live in `iptv-presentation`. Emits views as JSON: only what is on screen. |
 | Worker | `app/worker.js` | Runs the core in a Web Worker and performs the HTTP requests it describes, so importing a large guide never blocks the remote. |
 | Page | `app/main.js`, `index.html`, `style.css` | Renders the views, sends remote keys, plays streams with the TV's native player (AVPlay) on the video plane under the page. |
 

@@ -1,6 +1,6 @@
 [package]
 name = "iptv-core"
-description = "UI-independent core of iptv-rs: guide model and remote/touch focus. No NSH dependency; must build for wasm32."
+description = "Portable Domain values and rules for Patina IPTV."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
