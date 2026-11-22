@@ -47,6 +47,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "storage",
     // The browser host installs its clocks (the Worker has no other).
     "time",
+    // The browser host keeps the store on its memory files (host/web).
+    "store_host",
     // The guide status and the lines of the guide sources screen.
     "stored",
 ];
@@ -152,10 +154,23 @@ fn the_shell_names_only_the_listed_runtime_items() {
     }
 }
 
+/// The browser host (`src/host/web`) opens and persists the store on its
+/// memory files (`Ports::store_host`): the one place in the shell that
+/// names the adapter, and only in the browser build.
+fn browser_host(file: &Path) -> bool {
+    file.components()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|pair| pair[0].as_os_str() == "host" && pair[1].as_os_str() == "web")
+}
+
 #[test]
 fn the_shell_names_no_store_type_and_does_not_depend_on_the_adapter() {
     for (file, code) in shell_sources() {
         for forbidden in ["iptv_store_sqlite", "store_service"] {
+            if forbidden == "iptv_store_sqlite" && browser_host(&file) {
+                continue;
+            }
             assert!(
                 !code.contains(forbidden),
                 "{} names {forbidden}",
@@ -173,9 +188,10 @@ fn the_shell_names_no_store_type_and_does_not_depend_on_the_adapter() {
         if line.starts_with('[') {
             section = line;
         } else if line.starts_with("iptv-store-sqlite") {
-            assert_eq!(
-                section, "[dev-dependencies]",
-                "the shell depends on the store adapter outside its tests"
+            assert!(
+                section == "[dev-dependencies]"
+                    || section == "[target.'cfg(target_family = \"wasm\")'.dependencies]",
+                "the shell depends on the store adapter outside its tests and its browser host"
             );
         }
     }

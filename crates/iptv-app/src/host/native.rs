@@ -43,6 +43,9 @@ pub(crate) use recording_host::command as recording_command;
 /// (`Runtime::has_workers`).
 pub(crate) const HAS_WORKERS: bool = true;
 
+/// Imports and guide downloads run on the refresh pool's workers.
+pub(crate) const IMPORTS: bool = true;
+
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);

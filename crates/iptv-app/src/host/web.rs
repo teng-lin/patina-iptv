@@ -7,15 +7,16 @@
 //! for the network and the cooperative executor over the Worker's event
 //! loop. What it does not have yet, it says so instead of pretending:
 //!
-//! - No key store: the database key broker refuses. The browser store opens
-//!   without a key on memory files the host persists (`iptv-store-sqlite`'s
-//!   `Store::open_browser`); the runtime's browser opening path is still to
-//!   be wired, so until then the store reports itself unavailable.
-//! - No entropy import yet: operations that need randomness fail
-//!   (`Ports::entropy`'s default).
-//! - The local time zone is UTC until the host reports its offset.
+//! - The store is the browser store (`store.rs`): SQLite on memory files,
+//!   restored from IndexedDB at launch and saved in chunks after each
+//!   commit, without a key (no key store: `docs/security.md`). Catalog
+//!   and guide publishes run in slices on a copy.
+//! - Imports and guide downloads run as tasks, one at a time, on the
+//!   cooperative executor ([`IMPORTS`]).
+//! - Randomness and the local time zone come from the host's imports.
 //! - Recording, backup files and staged probes are unavailable (the
-//!   runtime's capability model reports them so).
+//!   runtime's capability model reports them so), and settings and
+//!   favorites edits last for the session (there is no file writer).
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -28,6 +29,8 @@ use iptv_providers::{HttpRequest, HttpResponse};
 use iptv_web::adapters::{HostBody, HostFetch};
 
 use crate::runtime::execution::{Cooperative, CooperativeHost, Task};
+
+mod store;
 use crate::runtime::network::{Body, Chunks, Client, NetFuture, Network, NetworkConfig, Transport};
 
 /// A browser TV is none of the native platforms: one decoder, no
@@ -38,6 +41,10 @@ pub(crate) const PLATFORM: iptv_core::capabilities::Platform =
 /// The cooperative executor has no blocking workers
 /// (`Runtime::has_workers`): no imports, recording or backups yet.
 pub(crate) const HAS_WORKERS: bool = false;
+
+/// Imports and guide downloads run here as cooperative tasks over the
+/// browser store's sliced publishes.
+pub(crate) const IMPORTS: bool = true;
 
 /// The name the store's memory files are kept under.
 const DIRECTORY: &str = "/patina";
@@ -61,6 +68,8 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     );
     ports.startup_mark = |phase, detail| crate::startup::mark_with(phase, detail);
     ports.file_storage = false;
+    ports.entropy = iptv_web::adapters::fill_random;
+    ports.store_host = Some(Arc::new(store::BrowserStore::default()));
     ports
 }
 
@@ -282,9 +291,9 @@ pub(crate) fn since_epoch() -> Option<Duration> {
     Some(iptv_web::adapters::wall())
 }
 
-/// UTC until the host reports the device's offset.
-pub(crate) fn offset_minutes(_unix: i64) -> i32 {
-    0
+/// The device's offset from UTC at `unix` (the host's time zone).
+pub(crate) fn offset_minutes(unix: i64) -> i32 {
+    iptv_web::adapters::utc_offset_minutes(unix)
 }
 
 pub(crate) fn reload_time_zone() {}

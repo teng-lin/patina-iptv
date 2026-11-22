@@ -52,10 +52,10 @@ fn open_with(ui: Ui, wizard: Wizard) {
     }));
 }
 
-/// Imports need blocking workers: without them the wizard is not offered,
-/// and the user hears why.
+/// A host that cannot import does not offer the wizard, and the user
+/// hears why.
 fn imports_unavailable() -> bool {
-    if crate::host::HAS_WORKERS {
+    if crate::host::IMPORTS {
         return false;
     }
     crate::settings_view::notify(crate::i18n::tr("This device cannot import playlists yet."));

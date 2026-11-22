@@ -54,6 +54,8 @@ getrandom = "0.4"
 [target.'cfg(target_family = "wasm")'.dependencies]
 # The adapters only, without the Live TV bridge.
 iptv-web = { path = "../iptv-web", default-features = false }
+# The browser store's memory files and their persistence (host/web/store.rs).
+iptv-store-sqlite.workspace = true
 # Artwork headers (NSH's own probe is native only).
 imagesize = "0.15"
 
