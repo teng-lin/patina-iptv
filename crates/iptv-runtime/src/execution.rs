@@ -67,9 +67,11 @@ pub trait Execution: Send + Sync {
 
     /// The host has workers that may block on I/O and timers
     /// ([`Execution::worker`], [`Tasks::block_on`]). False for a cooperative
-    /// executor: what needs them (imports, staged probes, the file and
-    /// favorites writers) is unavailable there, and reported so, instead of
-    /// being started. Asking makes no thread or runtime.
+    /// executor: what needs them (staged probes, backups) is unavailable
+    /// there, and reported so, instead of being started; imports, the file
+    /// writer and the favorites writer have their cooperative forms (tasks,
+    /// the host's [`crate::file_host`], jobs on the store's writer lane).
+    /// Asking makes no thread or runtime.
     fn has_workers(&self) -> bool {
         true
     }

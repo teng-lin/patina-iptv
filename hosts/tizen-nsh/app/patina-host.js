@@ -87,6 +87,10 @@ NshTizen.start({
     /* Patina's TV layout is made for 960 x 540 points (Android TV's 1080p
      * screen): drawn at 2 page pixels per point it has its TV size. */
     scale: 2,
+    /* Every Back press is the app's, as on Android TV: two quick presses
+     * step back twice, and iptv-nav tells a tap from a hold. (The
+     * platform's default drops a Back within 600 ms of the last.) */
+    backDebounceMs: 0,
     /* iptv-app's fonts (its `browser-package` feature leaves them out of
      * the module): loaded in the Worker and on the page before it starts. */
     fonts: [

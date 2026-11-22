@@ -97,7 +97,7 @@ owner. It grows from platform inputs into the full I/O boundary.
 | Network | `iptv_import::Fetch`: request, streamed body, elapsed, sleep. The adapter owns TLS, timeouts, redirects and the destination policy. A factory makes clients per configuration (the Stalker link client keeps cookies). | `iptv-net` `NetClient` | `iptv-web` `HostFetch` | Trait exists. The runtime holds `iptv_net::NetClient` directly. |
 | Execution | Run store jobs and blocking work; spawn local tasks; delay. | Store reader and writer threads, Tokio pool | Cooperative, on the owner's thread | `TaskHost { spawn, delay }` exists for the owner. Services start their own threads. |
 | Store | The existing `iptv-store-sqlite` API. Not a trait: one implementation, two SQLite builds. Opening, persistence and the key are host inputs. | SQLCipher file, WAL, key from the credential broker | `sqlite-wasm-rs`; persistence and encryption are open decisions | Native only. |
-| Private files | Read and atomically replace small named blobs (settings, markers). | `file_writer` thread | IndexedDB key-value (`iptv-web` has it) | Direct `std::fs`. |
+| Private files | Read and atomically replace small named blobs (settings, last channels). | `file_writer` thread | `Ports::file_host` over IndexedDB key-value entries | Direct `std::fs`. |
 | Credentials | `database_key` broker. | Keyring, Android Keystore via JNI | None, or an app-held key | Exists in `Ports`. |
 | Playback transport | Turn a resolved source into what the player opens. | Loopback `PlaybackRelay`, which scopes headers per origin | Identity: AVPlay fetches the stream itself | Concrete `iptv_net::playback`. |
 | Player | The `tv.player` wire contract: props and events. | libmpv; Media3 on Android | AVPlay in `hosts/tizen` | Contract in `iptv-player-mpv` (`wire.rs`); Android already implements it in Java. |
@@ -227,12 +227,11 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   lanes, long-lived workers and a per-owner task executor, native as
   before; `execution::Cooperative` for the browser, which also drives
   `Sliced` jobs at most one step per turn, the rest of the turn going to
-  reads (the shape of the store's resumable publish). Differs from the plan: the refresh pool, the file writer and
-  the favorites writer are blocking workers, which a cooperative host
-  does not have, so in the browser they report themselves unavailable;
-  imports there need the pool's work as local tasks over the async store
-  calls (next step); until then `Runtime::has_workers` is false there and
-  the shell offers none of those services. The cooperative lanes share one
+  reads. The browser runs imports as local tasks over async store calls.
+  Favorites and history writes use the cooperative store writer, and
+  settings and last channels use IndexedDB through the private files port.
+  The native worker implementations remain available to native hosts.
+  The cooperative lanes share one
   turn and, in the browser, one connection (the store has no reader
   there); a `Sliced` step's budget is rows, as the store's `step(rows)`.
   The runtime's clocks are `crate::time` (std's natively, the host's in a
@@ -288,8 +287,8 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   the remaining mount items. `hosts/tizen` gains the AVPlay player and host
   services for the NSH build. *Status*: done as a sibling host,
   `hosts/tizen-nsh` (the bridge stays as it is), on nsh-platform-tizen at
-  32492c0. The player is the platform's AVPlay component behind a filter
-  that refuses sources needing headers. The app starts on the TV, draws its
+  c2257cb. The player is the platform's AVPlay component behind a filter
+  that refuses sources needing custom stream headers other than User-Agent. The app starts on the TV, draws its
   screens and takes the remote's keys (the browser host uses the remote's
   key phases: the platform has no NSH keymap).
 - **3. Measure and shrink.** Build Patina's real module. Link only the base

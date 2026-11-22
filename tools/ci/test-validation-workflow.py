@@ -116,12 +116,15 @@ class Workflows(unittest.TestCase):
         # them (IPTV_HELPERS_CHECKED): each must be in that job, by name or
         # through its tools/ci/test-*.py loop.
         script = (ROOT / 'tools/check.sh').read_text()
-        skipped = script.split('if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then\n')[2].split('\nfi\n', 1)[0]
+        guards = script.split('if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then\n')[1:]
+        skipped = '\n'.join(block.split('\nfi\n', 1)[0] for block in guards)
         tests = re.findall(r'python3 (\S+\.py)', skipped)
+        self.assertIn('python3 -m unittest discover -s tools -p test_version.py', skipped)
         self.assertIn('hosts/tizen-nsh/test_sections.py', tests)
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         helpers = text.split('  helpers:\n', 1)[1].split('  host:\n', 1)[0]
         self.assertIn('for script in tools/ci/test-*.py; do python3 "$script"; done', helpers)
+        self.assertIn('python3 -m unittest discover -s tools -p test_version.py', helpers)
         for test in tests:
             if re.fullmatch(r'tools/ci/test-[^/]+\.py', test):
                 continue

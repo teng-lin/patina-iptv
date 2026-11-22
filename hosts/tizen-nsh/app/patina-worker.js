@@ -10,9 +10,11 @@
  * After a reply calls into the module (an `on_*` export, which polls
  * iptv-web's executor), `engine.pump()` sends what the app committed.
  *
- * The store's chunks are read before the module is instantiated (the
- * engine's `instantiate` waits for them), so the store's open, which
- * cannot wait, finds them at hand (iptv-app's host/web/store.rs).
+ * The store's chunks and the app's small files (settings, last channels:
+ * kv entries `file.<path>`) are read before the module is instantiated
+ * (the engine's `instantiate` waits for them), so the store's open and the
+ * app's start, which cannot wait, find them at hand (iptv-app's
+ * host/web/store.rs, iptv-web's files.rs).
  *
  * Package files the module reads (an interface language's messages,
  * iptv-web's package.rs) are read synchronously: they are local, and the
@@ -113,31 +115,71 @@
     var db = null;
     var dbWaiting = [];
     function withDb(f) { if (db === null) dbWaiting.push(f); else f(); }
+    function opened(result) {
+        db = result;
+        var waiting = dbWaiting;
+        dbWaiting = [];
+        waiting.forEach(function (f) { f(); });
+    }
     /* The stored database, read before the module starts: its size (-1
      * none stored, -2 unreadable) and its chunks by index. */
     var stored = { size: -1, chunks: [] };
+    /* The app's small files, packed as iptv-web's files.rs reads them,
+     * until the module copies them. */
+    var storedFiles = null;
+    var FILE = 'file.';
+    function packFiles(names, values) {
+        var parts = [], total = 0;
+        for (var i = 0; i < names.length; i++) {
+            if (!(values[i] instanceof ArrayBuffer)) continue;
+            var name = encoder.encode(String(names[i]).slice(FILE.length));
+            parts.push(name, new Uint8Array(values[i]));
+            total += 8 + name.length + values[i].byteLength;
+        }
+        var out = new Uint8Array(total), view = new DataView(out.buffer), at = 0;
+        for (var j = 0; j < parts.length; j++) {
+            view.setUint32(at, parts[j].length, true);
+            out.set(parts[j], at + 4);
+            at += 4 + parts[j].length;
+        }
+        return out;
+    }
     var restored = new Promise(function (done) {
         var req;
-        try { req = indexedDB.open('patina-nsh', 1); } catch (e) { stored.size = -2; done(); return; }
+        function unavailable() {
+            stored.size = -2;
+            opened(false);
+            done();
+        }
+        try { req = indexedDB.open('patina-nsh', 1); } catch (e) { unavailable(); return; }
         req.onupgradeneeded = function () {
             req.result.createObjectStore('kv');
             req.result.createObjectStore('chunks');
         };
-        req.onerror = function () { stored.size = -2; db = false; done(); };
+        req.onerror = unavailable;
         req.onsuccess = function () {
-            db = req.result;
-            var waiting = dbWaiting;
-            dbWaiting = [];
-            waiting.forEach(function (f) { f(); });
+            opened(req.result);
             var t0 = performance.now();
             var tx = db.transaction(['kv', 'chunks'], 'readonly');
             var size = tx.objectStore('kv').get('db.size');
-            var all = tx.objectStore('chunks').getAll();
+            var chunkKeys = tx.objectStore('chunks').getAllKeys();
+            var chunkValues = tx.objectStore('chunks').getAll();
+            /* '0' is the code point after '.': every `file.` key. */
+            var files = IDBKeyRange.bound(FILE, 'file0', false, true);
+            var fileNames = tx.objectStore('kv').getAllKeys(files);
+            var fileValues = tx.objectStore('kv').getAll(files);
             tx.oncomplete = function () {
+                storedFiles = packFiles(fileNames.result || [], fileValues.result || []);
                 if (typeof size.result === 'number') {
                     var count = Math.ceil(size.result / CHUNK);
-                    var chunks = all.result || [];
-                    var whole = chunks.length >= count;
+                    var chunks = [];
+                    var keys = chunkKeys.result;
+                    var values = chunkValues.result;
+                    for (var k = 0; k < keys.length; k++) {
+                        var index = keys[k];
+                        if (Number.isInteger(index) && index >= 0 && index < count) chunks[index] = values[k];
+                    }
+                    var whole = chunks.length === count;
                     for (var i = 0; i < count && whole; i++) {
                         var expected = Math.min(CHUNK, size.result - i * CHUNK);
                         whole = chunks[i] instanceof ArrayBuffer && chunks[i].byteLength === expected;
@@ -146,7 +188,7 @@
                 }
                 /* For DevTools on the page (the Worker is not inspectable
                  * there): how the last launch's restore went. */
-                var restore = { at: Date.now(), ms: Math.round(performance.now() - t0), size: stored.size, chunks: (all.result || []).length };
+                var restore = { at: Date.now(), ms: Math.round(performance.now() - t0), size: stored.size, chunks: chunkKeys.result.length };
                 try { db.transaction('kv', 'readwrite').objectStore('kv').put(restore, 'diag.restore'); } catch (e) { /* optional */ }
                 done();
             };
@@ -198,6 +240,26 @@
             var count = Math.ceil(size / CHUNK);
             chunks.delete(IDBKeyRange.lowerBound(count));
             tx.objectStore('kv').put(size, 'db.size');
+            tx.oncomplete = function () { answer(true); };
+            tx.onabort = function () { answer(false); };
+        });
+    }
+
+    /* A small file's new content (null: removed), in its own transaction;
+     * IndexedDB runs them in the order they were made. */
+    function putFile(id, name, value) {
+        var answer = function (ok) { deliver(function () { ex.on_chunks_saved(id, ok ? 1 : 0); }); };
+        withDb(function () {
+            if (!db) return answer(false);
+            var tx;
+            try {
+                tx = db.transaction('kv', 'readwrite');
+                var kv = tx.objectStore('kv');
+                if (value) kv.put(value, FILE + name); else kv.delete(FILE + name);
+            } catch (e) {
+                if (tx) tx.abort();
+                return answer(false);
+            }
             tx.oncomplete = function () { answer(true); };
             tx.onabort = function () { answer(false); };
         });
@@ -300,6 +362,21 @@
         },
         chunks_commit: function (id, size) {
             setTimeout(function () { commitChunks(id, size); }, 0);
+        },
+        files_stored_size: function () { return storedFiles ? storedFiles.length : -1; },
+        files_stored_read: function (ptr, len) {
+            var files = storedFiles;
+            storedFiles = null;
+            if (!files || files.length !== len) return 0;
+            new Uint8Array(memory(), ptr, len).set(files);
+            return len;
+        },
+        files_put: function (id, nptr, nlen, ptr, len, present) {
+            /* Copied now: the memory may move before the write runs. */
+            var name = text(nptr, nlen);
+            var value = present ? new Uint8Array(memory(), ptr, len).slice().buffer : null;
+            /* Answered later, never from inside this call. */
+            setTimeout(function () { putFile(id, name, value); }, 0);
         }
     });
 

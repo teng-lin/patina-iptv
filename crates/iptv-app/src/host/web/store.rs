@@ -126,28 +126,26 @@ impl StoreHost for BrowserStore {
         let state = self.saves.clone();
         iptv_web::adapters::spawn(async move {
             let ok = written.await;
+            if ok {
+                take.saved();
+                lock(&state).saved_size = Some(size);
+                log::info!(
+                    "iptv store: saved {count} chunks in {} ms",
+                    (iptv_web::adapters::monotonic() - started).as_millis()
+                );
+            } else {
+                // Return the chunks to the next take. Keep the writer
+                // reserved during the delay so commits join the retry.
+                drop(take);
+                log::warn!("iptv store: the TV did not save {count} chunks; retrying");
+                iptv_web::adapters::sleep(RETRY).await;
+            }
             let next = {
                 let mut saves = lock(&state);
                 saves.writing = false;
-                if ok {
-                    take.saved();
-                    saves.saved_size = Some(size);
-                    log::info!(
-                        "iptv store: saved {count} chunks in {} ms",
-                        (iptv_web::adapters::monotonic() - started).as_millis()
-                    );
-                    saves.behind.take()
-                } else {
-                    // Its chunks return to the next take.
-                    drop(take);
-                    log::warn!("iptv store: the TV did not save {count} chunks; retrying");
-                    Some(saves.behind.take().unwrap_or(again))
-                }
+                saves.behind.take().or_else(|| (!ok).then_some(again))
             };
             if let Some(next) = next {
-                if !ok {
-                    iptv_web::adapters::sleep(RETRY).await;
-                }
                 next();
             }
         });

@@ -20,10 +20,11 @@
 //! 3. The swap, then [`Publish::finish`] on the live store: the writes
 //!    that follow (feed results, pruning), and the reply.
 //!
-//! Any error, a closed owner, a cancel at shutdown or the publish's own
-//! cancel ([`Publish::canceled`], looked at before every step and before
-//! the swap) abandons the copy, leaving the live store as it was;
-//! [`Publish::failed`] then undoes what `prepare` wrote.
+//! Before the swap, an error, a closed owner, a shutdown or a publish
+//! cancellation ([`Publish::canceled`], checked before every step and the
+//! swap) abandons the copy. [`Publish::failed`] then undoes what
+//! `prepare` wrote. After the swap, an error in [`Publish::finish`]
+//! leaves the replacement live.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};

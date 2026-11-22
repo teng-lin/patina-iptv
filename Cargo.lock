@@ -2616,6 +2616,7 @@ dependencies = [
 name = "iptv-web"
 version = "0.1.5"
 dependencies = [
+ "futures-channel",
  "iptv-core",
  "iptv-epg",
  "iptv-guide",
@@ -2623,6 +2624,7 @@ dependencies = [
  "iptv-nav",
  "iptv-providers",
  "iptv-search",
+ "log",
  "serde_json",
  "url",
 ]

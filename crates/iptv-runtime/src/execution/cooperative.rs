@@ -23,8 +23,10 @@
 //!   panicking step is dropped and logged, and a lane or turn is not left
 //!   marked running. A browser build aborts on panic.
 //! - Tasks are the host's tasks; CPU-bound work runs as a task too.
-//! - There are no workers. Services built on them (the refresh pool, the
-//!   file and favorites writers) report themselves unavailable.
+//! - There are no workers. Services built on them report themselves
+//!   unavailable, or take their cooperative forms: imports as tasks, small
+//!   files through the host ([`crate::file_host`]), favorites writes as
+//!   jobs on the store's writer lane.
 
 use std::collections::VecDeque;
 use std::io;

@@ -66,6 +66,9 @@ pub struct Ports {
     /// `directory` (a browser's memory files), and publishes on a copy
     /// in slices. `None` natively.
     pub store_host: Option<Arc<dyn crate::store_host::StoreHost>>,
+    /// Keeps the app's small files (settings, last channels) in place of
+    /// files in `directory` (a browser's IndexedDB). `None` natively.
+    pub file_host: Option<Arc<dyn crate::file_host::FileHost>>,
 }
 
 impl Ports {
@@ -112,6 +115,7 @@ impl Ports {
             },
             file_storage: true,
             store_host: None,
+            file_host: None,
         }
     }
 

@@ -5,10 +5,11 @@
 //! watched lists are built from here (`lists.rs`).
 //!
 //! The in-memory lists are the truth while a source is shown; writes go to
-//! one writer thread in order, so a toggle never waits for the store. They
-//! are read when a source is shown, on the store's reader unless writes
-//! of this module are still queued ([`load`]). The synthetic guide keeps
-//! them in memory only.
+//! one writer thread in order, so a toggle never waits for the store (on a
+//! host without workers, a browser, to the store's writer lane in order,
+//! [`queue_on_writer`]). They are read when a source is shown, on the
+//! store's reader unless writes of this module are still queued
+//! ([`load`]). The synthetic guide keeps them in memory only.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};
@@ -204,6 +205,7 @@ pub fn reset(owner: &super::Runtime) {
     owner
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
+    *owner.favorite_failed.borrow_mut() = Default::default();
     owner
         .favorites
         .with(|state| *state.borrow_mut() = State::default());
@@ -540,19 +542,7 @@ pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, 
 fn send(owner: &super::Runtime, write: Write) {
     let counted = !matches!(write, Write::Barrier(_) | Write::Shutdown(_));
     if !owner.services().has_workers() {
-        // No writer can run here: changes last for the session. They are
-        // kept in memory, and what waits for them hears that they are done.
-        match write {
-            Write::Barrier(done) => drop(done.send(true)),
-            Write::Shutdown(done) => drop(done.send(true)),
-            // Watching is recorded automatically; only an edit of the
-            // user's own lists is worth telling them about.
-            Write::Watched { .. } | Write::WatchTime { .. } => {}
-            Write::SaveOrder(_) => unreachable!("a session-only reorder never builds a writer job"),
-            Write::ClearHistory | Write::MoveFavorite { .. } | Write::Favorite { .. } => {
-                owner.note_session_only()
-            }
-        }
+        queue_on_writer(owner, write);
         return;
     }
     owner.favorite_writer.with(|w| {
@@ -584,6 +574,126 @@ fn send(owner: &super::Runtime, write: Write) {
         // A write that never reached the thread is never saved; it stays
         // counted, so reads keep going behind the writer's queue.
     });
+}
+
+/// Keeps a write counted in [`unsaved`] until it ran or was dropped.
+struct Counted(std::sync::Arc<AtomicUsize>);
+
+impl Counted {
+    fn new(owner: &super::Runtime) -> Self {
+        let unsaved = unsaved(owner);
+        unsaved.fetch_add(1, Ordering::AcqRel);
+        Self(unsaved)
+    }
+}
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// A store open or an expired epoch can discard the job before its
+/// closure runs. Count that as a failure as well as a failed SQLite edit.
+struct ReportFailure(Option<std::sync::Arc<std::sync::atomic::AtomicBool>>);
+
+impl Drop for ReportFailure {
+    fn drop(&mut self) {
+        if let Some(failed) = &self.0 {
+            failed.store(true, Ordering::Release);
+        }
+    }
+}
+
+/// A host without workers (a browser) has no writer thread: each write is
+/// a job on the store's writer lane, which runs them in the order queued,
+/// after the writes of other modules queued before them, and persists each
+/// commit (`store_host`). A write that fails is logged and lost, unlike
+/// the thread's, which keeps it at the head and retries: the next barrier
+/// answers false, as the thread's would while it retries.
+fn queue_on_writer(owner: &super::Runtime, write: Write) {
+    let services = owner.services();
+    let failed = owner.favorite_failed.borrow().clone();
+    let barrier = |done: Box<dyn FnOnce(bool) + Send>| {
+        let failed = failed.clone();
+        // A barrier that cannot be queued is dropped, and its waiter hears
+        // that nothing was saved.
+        drop(services.call(move |_| {
+            done(!failed.swap(false, Ordering::AcqRel));
+            Ok(())
+        }));
+    };
+    let operation = match write {
+        Write::Barrier(done) => {
+            return barrier(Box::new(move |saved| {
+                let _ = done.send(saved);
+            }));
+        }
+        Write::Shutdown(done) => {
+            return barrier(Box::new(move |saved| {
+                let _ = done.send(saved);
+            }));
+        }
+        Write::SaveOrder(_) => {
+            unreachable!("without workers a reorder is saved by `save_order` itself")
+        }
+        Write::ClearHistory => PendingWrite::ClearHistory,
+        Write::MoveFavorite { source, key, index } => {
+            PendingWrite::MoveFavorite { source, key, index }
+        }
+        Write::Favorite { source, key, on } => PendingWrite::Favorite { source, key, on },
+        Write::Watched { source, key, at } => PendingWrite::Watched { source, key, at },
+        Write::WatchTime {
+            source,
+            key,
+            elapsed_ms,
+        } => PendingWrite::WatchTime {
+            source,
+            key,
+            elapsed_ms,
+        },
+    };
+    let counted = Counted::new(owner);
+    let failure = ReportFailure(Some(failed));
+    drop(services.call(move |store| {
+        let _counted = counted;
+        let mut failure = failure;
+        match persist(store, operation) {
+            Ok(()) | Err(StoreError::SourceNotFound(_)) => {
+                failure.0 = None;
+                Ok(())
+            }
+            Err(error) => {
+                log::warn!("iptv favorites: could not save ({error})");
+                Err(error)
+            }
+        }
+    }));
+}
+
+/// One write, on the store.
+fn persist(store: &mut Store, write: PendingWrite) -> Result<(), StoreError> {
+    match write {
+        PendingWrite::ClearHistory => store.clear_history(None).map(|_| ()),
+        PendingWrite::MoveFavorite { source, key, index } => store
+            .move_favorite(source, &ContentId::from_stored(key), index)
+            .map(|_| ()),
+        PendingWrite::Favorite { source, key, on } => {
+            store.set_favorite(source, &ContentId::from_stored(key), on)
+        }
+        PendingWrite::WatchTime {
+            source,
+            key,
+            elapsed_ms,
+        } => store.add_channel_watch_time(source, &ContentId::from_stored(key), elapsed_ms),
+        PendingWrite::Watched { source, key, at } => store.record_watch(
+            source,
+            &ContentId::from_stored(key),
+            ContentKind::Live,
+            at,
+            None,
+        ),
+    }
 }
 
 /// Clear in writer order so older queued plays cannot resurrect deleted history.
@@ -643,27 +753,7 @@ fn write_all(
 ) {
     write_all_with(rx, |write| {
         let operation = write.clone();
-        let result = services.blocking(move |store| match operation {
-            PendingWrite::ClearHistory => store.clear_history(None).map(|_| ()),
-            PendingWrite::MoveFavorite { source, key, index } => store
-                .move_favorite(source, &ContentId::from_stored(key), index)
-                .map(|_| ()),
-            PendingWrite::Favorite { source, key, on } => {
-                store.set_favorite(source, &ContentId::from_stored(key), on)
-            }
-            PendingWrite::WatchTime {
-                source,
-                key,
-                elapsed_ms,
-            } => store.add_channel_watch_time(source, &ContentId::from_stored(key), elapsed_ms),
-            PendingWrite::Watched { source, key, at } => store.record_watch(
-                source,
-                &ContentId::from_stored(key),
-                ContentKind::Live,
-                at,
-                None,
-            ),
-        });
+        let result = services.blocking(move |store| persist(store, operation));
         // Deleting a playlist also deletes its customization/history. A queued
         // change whose owner was explicitly removed must not block other sources.
         if matches!(
@@ -843,10 +933,23 @@ pub(crate) async fn save_order(
             .await
             .map_err(|_| StoreError::Unavailable("the favorites order was not saved"))??;
     } else {
-        // No writer saves the order here: it applies for the session, as
-        // every other change does, and nothing is counted as unsaved.
-        drop((original, order));
-        owner.note_session_only();
+        // No writer thread: the order is saved on the store's writer lane,
+        // after the writes queued before it (`queue_on_writer`), unless
+        // one of them failed.
+        let failed = owner.favorite_failed.borrow().clone();
+        let counted = Counted::new(owner);
+        owner
+            .services()
+            .call(move |store| {
+                let _counted = counted;
+                if failed.swap(false, Ordering::AcqRel) {
+                    return Err(StoreError::Unavailable(
+                        "recent favorite edits are not saved",
+                    ));
+                }
+                store.save_favorite_order(source, &original, &order)
+            })
+            .await?;
     }
     let changed = owner.favorites.with(|state| {
         let mut state = state.borrow_mut();
@@ -1384,13 +1487,54 @@ mod start_tests {
         }
     }
 
-    #[test]
-    fn without_workers_changes_are_session_only_and_said_so_once() {
-        let mut ports = crate::Ports::for_tests();
-        ports.execution = std::sync::Arc::new(crate::execution::Cooperative::new(
-            std::sync::Arc::new(Unpolled),
-        ));
+    /// A runtime on a cooperative executor (a browser's), over a store
+    /// file in `directory`, with one synthetic playlist on screen.
+    fn cooperative(directory: &std::path::Path) -> (crate::Runtime, SourceId) {
+        let ports = crate::Ports::with_adapters(
+            directory.to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x5c; 32])),
+            std::sync::Arc::new(crate::native::network::NativeNetwork),
+            std::sync::Arc::new(crate::execution::Cooperative::new(std::sync::Arc::new(
+                Unpolled,
+            ))),
+        );
         let owner = crate::Runtime::new(ports);
+        owner.start_services();
+        let source = owner
+            .services()
+            .blocking(|store| {
+                store.add_source(&iptv_providers::model::Source {
+                    name: "Synthetic favorites".into(),
+                    config: iptv_providers::model::SourceConfig::M3u(
+                        iptv_providers::model::M3uSourceConfig {
+                            location: iptv_providers::SecretUrl::new(
+                                "https://example.invalid/favorites.m3u",
+                            ),
+                            user_agent: None,
+                            referrer: None,
+                        },
+                    ),
+                })
+            })
+            .unwrap();
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().source = Some(source));
+        (owner, source)
+    }
+
+    fn poll<T>(future: std::pin::Pin<&mut impl std::future::Future<Output = T>>) -> Option<T> {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match future.poll(&mut context) {
+            std::task::Poll::Ready(value) => Some(value),
+            std::task::Poll::Pending => None,
+        }
+    }
+
+    #[test]
+    fn without_workers_changes_are_saved_on_the_stores_writer_in_order() {
+        let directory = tempfile::tempdir().unwrap();
+        let (owner, source) = cooperative(directory.path());
         let notices = std::rc::Rc::new(std::cell::Cell::new(0));
         let seen = notices.clone();
         owner.bind(move |event| {
@@ -1398,40 +1542,119 @@ mod start_tests {
                 seen.set(seen.get() + 1);
             }
         });
-        owner.start_services();
-        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
-        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
-        let cleared = clear_history(&owner);
-        let mut cleared = std::pin::pin!(cleared);
-        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        set_key(&owner, "synthetic-a", true);
+        set_key(&owner, "synthetic-b", true);
+        set_key(&owner, "synthetic-a", false);
+        set_key(&owner, "synthetic-c", true);
+        played(&owner, "synthetic-b");
         assert_eq!(
-            cleared.as_mut().poll(&mut context),
-            std::task::Poll::Ready(true),
-            "a session-only change is done"
+            unsaved(&owner).load(Ordering::Acquire),
+            5,
+            "queued, not yet run"
         );
-        assert_eq!(notices.get(), 1, "the user hears it once");
+        {
+            let flushed = flush(&owner);
+            let mut flushed = std::pin::pin!(flushed);
+            assert_eq!(
+                poll(flushed.as_mut()),
+                None,
+                "the barrier waits for the writes"
+            );
+            // A blocking request runs the writer's queue up to it, as a turn
+            // of the host's loop would.
+            let (keys, recent) = owner
+                .services()
+                .blocking(move |store| {
+                    Ok((
+                        store.favorite_keys(source)?,
+                        store.recent(Some(source), Some(ContentKind::Live), 10)?,
+                    ))
+                })
+                .unwrap();
+            assert_eq!(keys, ["synthetic-b", "synthetic-c"]);
+            assert_eq!(recent.len(), 1);
+            assert_eq!(poll(flushed.as_mut()), Some(true), "everything was saved");
+        }
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
+        assert_eq!(notices.get(), 0, "nothing tells the user changes are lost");
+
+        // What a relaunch reads.
+        assert!(owner.drain_services());
+        drop(owner);
+        let (owner, _) = cooperative(directory.path());
+        let keys = owner
+            .services()
+            .blocking(move |store| store.favorite_keys(source))
+            .unwrap();
+        assert_eq!(keys, ["synthetic-b", "synthetic-c"]);
     }
 
     #[test]
-    fn without_workers_a_reorder_applies_in_memory_on_the_ui_thread() {
-        let mut ports = crate::Ports::for_tests();
-        ports.execution = std::sync::Arc::new(crate::execution::Cooperative::new(
-            std::sync::Arc::new(Unpolled),
-        ));
-        let owner = crate::Runtime::new(ports);
-        // The UI thread starts the services: a blocking store call here
-        // would assert.
-        owner.start_services();
+    fn without_workers_a_failed_write_is_reported_by_the_next_barrier() {
+        let directory = tempfile::tempdir().unwrap();
+        let (owner, _) = cooperative(directory.path());
+        // A playlist the store does not have is dropped, as natively; a
+        // store error is not.
         owner
             .favorites
-            .with(|state| state.borrow_mut().source = Some(SourceId(1)));
-        let saved = save_order(&owner, SourceId(1), Vec::new(), Vec::new());
+            .with(|state| state.borrow_mut().source = Some(SourceId(999)));
+        set_key(&owner, "synthetic-gone", true);
+        let first = flush(&owner);
+        let mut first = std::pin::pin!(first);
+        assert_eq!(poll(first.as_mut()), None, "queued");
+        owner.services().blocking(|_| Ok(())).unwrap();
+        assert_eq!(poll(first.as_mut()), Some(true));
+        owner
+            .favorite_failed
+            .borrow()
+            .store(true, Ordering::Release);
+        let failed = flush(&owner);
+        let mut failed = std::pin::pin!(failed);
+        assert_eq!(poll(failed.as_mut()), None, "queued");
+        let next = flush(&owner);
+        let mut next = std::pin::pin!(next);
+        assert_eq!(poll(next.as_mut()), None, "queued");
+        owner.services().blocking(|_| Ok(())).unwrap();
+        assert_eq!(poll(failed.as_mut()), Some(false));
+        assert_eq!(poll(next.as_mut()), Some(true), "reported once");
+    }
+
+    #[test]
+    fn without_workers_a_reorder_is_saved_on_the_stores_writer() {
+        let directory = tempfile::tempdir().unwrap();
+        let (owner, source) = cooperative(directory.path());
+        // The order is kept among channels the catalog has.
+        let parsed = iptv_providers::m3u::parse_m3u(
+            "#EXTM3U\n#EXTINF:-1,Synthetic A\nhttps://example.invalid/a.ts\n\
+             #EXTINF:-1,Synthetic B\nhttps://example.invalid/b.ts\n",
+        );
+        let keys: Vec<String> = parsed
+            .channels
+            .items
+            .iter()
+            .map(|channel| channel.id.as_str().to_owned())
+            .collect();
+        owner
+            .services()
+            .blocking(move |store| {
+                store.replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+            })
+            .unwrap();
+        set_key(&owner, &keys[0], true);
+        set_key(&owner, &keys[1], true);
+        let order = vec![keys[1].clone(), keys[0].clone()];
+        let saved = save_order(&owner, source, keys.clone(), order.clone());
         let mut saved = std::pin::pin!(saved);
-        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
-        assert!(matches!(
-            saved.as_mut().poll(&mut context),
-            std::task::Poll::Ready(Ok(()))
-        ));
+        assert!(
+            poll(saved.as_mut()).is_none(),
+            "queued behind the additions"
+        );
+        let stored = owner
+            .services()
+            .blocking(move |store| store.favorite_keys(source))
+            .unwrap();
+        assert_eq!(stored, order);
+        assert!(matches!(poll(saved.as_mut()), Some(Ok(()))));
         assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
     }
 

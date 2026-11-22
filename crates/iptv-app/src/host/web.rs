@@ -1,11 +1,8 @@
 //! The browser TV host (Samsung Tizen first): the whole app in one Web
 //! Worker, which the page drives (keys in, drawing and the player out).
 //!
-//! A stub until the NSH TV platform runs this crate (step 2 of
-//! `docs/plans/2026-11-21-browser-tv-architecture.md`). What it builds is
-//! real: the runtime's ports over `iptv-web`'s adapters, the page's fetch
-//! for the network and the cooperative executor over the Worker's event
-//! loop. What it does not have yet, it says so instead of pretending:
+//! The runtime's ports use `iptv-web`'s adapters for browser fetch,
+//! IndexedDB, and cooperative execution on the Worker's event loop.
 //!
 //! - The store is the browser store (`store.rs`): SQLite on memory files,
 //!   restored from IndexedDB at launch and saved in chunks after each
@@ -14,9 +11,11 @@
 //! - Imports and guide downloads run as tasks, one at a time, on the
 //!   cooperative executor ([`IMPORTS`]).
 //! - Randomness and the local time zone come from the host's imports.
+//! - Favorites, recent channels and the other lists are the store's,
+//!   saved with it; settings and each playlist's last channel are small
+//!   files kept in IndexedDB beside it ([`PageFiles`]).
 //! - Recording, backup files and staged probes are unavailable (the
-//!   runtime's capability model reports them so), and settings and
-//!   favorites edits last for the session (there is no file writer).
+//!   runtime's capability model reports them so).
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -75,7 +74,35 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     ports.file_storage = false;
     ports.entropy = iptv_web::adapters::fill_random;
     ports.store_host = Some(Arc::new(store::BrowserStore::default()));
+    // One set for the process: the host hands its stored files over once,
+    // and every owner after the first sees the writes of those before it.
+    use crate::runtime::file_host::FileHost;
+    static FILES: std::sync::OnceLock<Option<Arc<dyn FileHost>>> = std::sync::OnceLock::new();
+    ports.file_host = FILES
+        .get_or_init(|| {
+            let files = iptv_web::adapters::files::StoredFiles::restore()?;
+            Some(Arc::new(PageFiles(files)))
+        })
+        .clone();
     ports
+}
+
+/// The app's small files in the page's IndexedDB, by their path under
+/// [`DIRECTORY`] (`iptv_web::adapters::files`).
+struct PageFiles(iptv_web::adapters::files::StoredFiles);
+
+impl crate::runtime::file_host::FileHost for PageFiles {
+    fn read(&self, path: &std::path::Path) -> Option<Vec<u8>> {
+        self.0.read(&path.to_string_lossy())
+    }
+
+    fn write(
+        &self,
+        path: &std::path::Path,
+        content: Option<Vec<u8>>,
+    ) -> crate::runtime::file_host::Stored {
+        Box::pin(self.0.write(&path.to_string_lossy(), content))
+    }
 }
 
 /// The page's fetch, through the Worker's host.

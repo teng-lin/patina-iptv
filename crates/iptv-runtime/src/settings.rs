@@ -289,9 +289,9 @@ fn apply(
     }
     let revision = owner.settings_changed.get() + 1;
     owner.settings_changed.set(revision);
-    if !services.has_workers() {
-        // No file writer runs here (a browser host keeps its files through
-        // a port still to come): the settings apply for this session.
+    if !services.files().can_write() {
+        // Neither a file writer nor a host keeps the files here: the
+        // settings apply for this session.
         owner.note_session_only();
         return Ok(());
     }
@@ -394,9 +394,10 @@ mod persistence_tests {
     /// What a restart reads, with no write queued.
     fn read_file(path: &Path) -> Settings {
         super::read_file(
-            &crate::file_writer::Files::new(std::sync::Arc::new(
-                crate::native::execution::NativeExecution,
-            )),
+            &crate::file_writer::Files::new(
+                std::sync::Arc::new(crate::native::execution::NativeExecution),
+                None,
+            ),
             path,
         )
         .0
@@ -553,5 +554,75 @@ mod host_tests {
             "SyntheticAgent/2"
         );
         assert!(!path(directory.path()).exists());
+    }
+
+    /// A browser's file port, in memory.
+    #[derive(Default)]
+    struct Kept(std::sync::Mutex<std::collections::HashMap<PathBuf, Vec<u8>>>);
+    impl crate::file_host::FileHost for Kept {
+        fn read(&self, path: &Path) -> Option<Vec<u8>> {
+            self.0.lock().unwrap().get(path).cloned()
+        }
+        fn write(&self, path: &Path, content: Option<Vec<u8>>) -> crate::file_host::Stored {
+            let mut files = self.0.lock().unwrap();
+            match content {
+                Some(bytes) => files.insert(path.to_owned(), bytes),
+                None => files.remove(path),
+            };
+            Box::pin(async { true })
+        }
+    }
+
+    #[test]
+    fn with_a_file_host_settings_are_saved_and_read_at_the_next_launch() {
+        let directory = tempfile::tempdir().unwrap();
+        let kept = Arc::new(Kept::default());
+        let launch = || {
+            let mut ports = crate::Ports::for_tests();
+            ports.directory = directory.path().to_owned();
+            ports.execution = Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled)));
+            ports.file_host = Some(kept.clone());
+            let owner = std::rc::Rc::new(crate::Runtime::new(ports));
+            let tasks = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+            let spawned = tasks.clone();
+            owner.bind_tasks(
+                move |task| spawned.borrow_mut().push(task),
+                |_| Box::pin(std::future::pending()),
+            );
+            owner.start_services();
+            owner.load_settings();
+            (owner, tasks)
+        };
+        let (owner, tasks) = launch();
+        let notices = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = notices.clone();
+        owner.bind(move |event| {
+            if matches!(event, crate::RuntimeEvent::Notify(_)) {
+                seen.set(seen.get() + 1);
+            }
+        });
+        owner
+            .set_setting(
+                keys::USER_AGENT.as_str(),
+                Value::Text("SyntheticAgent/3".into()),
+            )
+            .unwrap();
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        for task in tasks.borrow_mut().iter_mut() {
+            assert!(task.as_mut().poll(&mut context).is_ready());
+        }
+        assert_eq!(notices.get(), 0, "nothing tells the user changes are lost");
+        assert!(crate::file_host::FileHost::read(&*kept, &path(directory.path())).is_some());
+        assert!(
+            !path(directory.path()).exists(),
+            "the host keeps it, not the disk"
+        );
+        drop(owner);
+
+        let (owner, _) = launch();
+        assert_eq!(
+            owner.settings().text(keys::USER_AGENT, &Target::Global),
+            "SyntheticAgent/3"
+        );
     }
 }

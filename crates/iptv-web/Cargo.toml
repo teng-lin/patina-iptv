@@ -19,6 +19,7 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
+futures-channel = "0.3"
 iptv-core.workspace = true
 iptv-epg.workspace = true
 iptv-guide.workspace = true
@@ -26,6 +27,7 @@ iptv-import.workspace = true
 iptv-nav = { workspace = true, optional = true }
 iptv-providers.workspace = true
 iptv-search.workspace = true
+log.workspace = true
 serde_json.workspace = true
 url.workspace = true
 
