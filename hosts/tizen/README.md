@@ -56,25 +56,32 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
 - Grid: Up/Down move between channels in the same time column,
   Left/Right between programs (Left from the earliest one shows the
   groups column), Channel Up/Down or Page Up/Down turn a page of
-  8 channels. Up from the first channel focuses the preview while a
-  channel plays (OK: full screen, Down: back to the grid).
+  8 channels. Holding Left on the guide screen opens the groups column at
+  once (a Left held from full screen only opens the guide). Up from the
+  first channel focuses the preview while a channel plays (OK: full
+  screen, Down: back to the grid).
 - OK on a program on now plays it full screen (on the channel already
   playing, it only goes full screen); on an ended program the archive
   still has, it plays that program from its start. A program that has
   not started, or one the archive no longer has, shows a notice.
 - Groups column: Up/Down move through the lists and show each in the grid
-  at once; Right or OK enters it (an empty Favorites cannot be entered);
+  (while a held key moves through them, the list shows once it is
+  released); Right or OK enters it (an empty Favorites cannot be entered);
   Left goes to the rail (Search and TV). Back: a past or future program
   returns to now, then the groups, then the rail; on the rail Back does
   nothing.
-- Full screen: Up/Down or Channel Up/Down zap within the list shown, Left
-  or Back return to the guide on the playing channel (Back returns to the
-  search that played the channel). The Guide key opens the guide.
+- Full screen: Up/Down or Channel Up/Down zap within the list shown (a
+  channel played from search that the list does not have zaps within its
+  own group), Left or Back return to the guide on the playing channel
+  (Back returns to the search that played the channel). The Guide key
+  opens the guide. When a stream fails, full screen returns to where it
+  was played from.
 - Play bar: OK in full screen shows the channel, its program with start
   and end times, the next program, and the buttons Favorite, TV guide
   and Search, with Favorite focused. Left/Right move between the
   buttons, OK presses one, Back hides it, and it hides after
-  7 seconds without a key. Up/Down still zap under it.
+  7 seconds without a key. Up/Down still zap under it. Holding OK, Back
+  or a color key acts once.
 - Search: the rail's Search (Left of the groups), Search on the play bar,
   or the remote's Search key. Type with the TV's keyboard; Done shows the
   results, Cancel or Back closes the keyboard. Channels are found by name,
@@ -83,10 +90,23 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   Before typing, recent searches are listed. Back on the field returns to
   the guide.
 - Favorites: Yellow, or Favorite on the play bar, adds or removes the
-  focused (or playing) channel; Blue shows the Favorites list in the
-  grid. Blue on a favorite there starts moving it: Up/Down move it one place, Left/Right to the top or the end,
-  OK, Back or Blue end the move and keep the order.
+  focused (or playing) channel, and a Favorites list on screen follows at
+  once; Blue shows the Favorites list in the grid. Blue on a favorite
+  there (with at least two) starts moving it: Up/Down move it one place,
+  Left/Right to the top or the end, OK, Back or Blue end the move and keep
+  the order.
 - Green updates the TV guide now.
+
+## Differences from the Android TV app
+
+- Yellow (not Red) adds or removes a favorite; Red opens the playlist
+  setup.
+- In full screen, Left opens the guide and Right does nothing (on Android
+  TV, Left shows the channel list over the video and Right returns to the
+  previous channel).
+- The play bar opens with Favorite focused (a deliberate choice: OK again
+  presses it), and has no pause, seek or track buttons.
+- No hint card after a list is chosen, and no program descriptions.
 
 ## What is kept on the TV
 

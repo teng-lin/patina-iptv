@@ -2,7 +2,7 @@
 //! are imported over the host protocol, then the remote drives the guide
 //! screen, full screen, search and Favorites.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use serde_json::Value;
@@ -22,6 +22,8 @@ struct Fake {
     timers: RefCell<Vec<(u32, f64)>>,
     /// Every URL requested, in order.
     urls: RefCell<Vec<String>>,
+    /// Added to the wall clock (time passing).
+    wall_offset_ms: Cell<f64>,
 }
 
 impl Host for Fake {
@@ -59,7 +61,7 @@ impl Host for Fake {
         0.0
     }
     fn wall_ms(&self) -> f64 {
-        NOW_MS
+        NOW_MS + self.wall_offset_ms.get()
     }
 }
 
@@ -96,13 +98,19 @@ fn playlist() -> String {
 }
 
 fn guide() -> String {
+    // An hour that has ended, then the one on now and the next.
+    guide_of(&["one", "two", "three"], &["Dawn", "Morning", "Noon"])
+}
+
+/// A guide for channels `ids`: hour-long programs named `names`, the first
+/// an hour before now.
+fn guide_of(ids: &[&str], names: &[&str]) -> String {
     let now = (NOW_MS / 1000.0) as i64;
     let hour = now - now.rem_euclid(3600);
     let mut xml = String::from("<tv>");
-    for id in ["one", "two", "three"] {
+    for id in ids {
         xml += &format!("<channel id=\"{id}.ex\"><display-name>Example</display-name></channel>");
-        // An hour that has ended, then the one on now and the next.
-        for (i, name) in ["Dawn", "Morning", "Noon"].iter().enumerate() {
+        for (i, name) in names.iter().enumerate() {
             let start = hour + (i as i64 - 1) * 3600;
             xml += &format!(
                 "<programme start=\"{}\" stop=\"{}\" channel=\"{id}.ex\"><title>{id} {name}</title></programme>",
@@ -1343,4 +1351,299 @@ fn the_play_bar_favorites_the_playing_channel_and_back_never_leaves() {
     key("back");
     assert_eq!(last_view(&fake)["mode"], "guide");
     assert!(fake.events.borrow().iter().all(|e| e["type"] != "exit"));
+}
+
+/// Answers the playlist with `playlist` and every guide with `guide`.
+fn serve(playlist: String, guide: String) -> impl Fn(&str) -> Result<(u16, String), u32> {
+    move |url| {
+        Ok((
+            200,
+            if url.ends_with(".m3u") {
+                playlist.clone()
+            } else {
+                guide.clone()
+            },
+        ))
+    }
+}
+
+fn launch_with(fake: &Rc<Fake>, respond: &Responder) {
+    send(
+        serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "http://lists.example.com/list.m3u" } }),
+    );
+    deliver_with(fake, respond);
+}
+
+fn focused_title(fake: &Fake) -> Value {
+    last_view(fake)["grid"]["focused"]["title"].clone()
+}
+
+#[test]
+fn a_stream_that_fails_in_full_screen_returns_to_where_it_was_played_from() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    // Full screen with the play bar; the stream fails: the guide, without
+    // the bar (it would take keys over a black screen).
+    key("ok");
+    key("ok");
+    assert!(!last_view(&fake)["bar"].is_null());
+    send(serde_json::json!({ "cmd": "playFailed" }));
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "guide");
+    assert!(view["playing"].is_null());
+    assert!(view["bar"].is_null());
+    assert_eq!(view["grid"]["pane"], "guide");
+
+    // Played from search: back to search.
+    key("search");
+    send(serde_json::json!({ "cmd": "searchText", "text": "two" }));
+    key("done");
+    key("ok");
+    assert_eq!(last_view(&fake)["mode"], "full");
+    send(serde_json::json!({ "cmd": "playFailed" }));
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "search");
+    assert!(view["playing"].is_null());
+}
+
+#[test]
+fn a_channel_played_from_search_zaps_within_its_own_group() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    // The guide shows Sport (three only).
+    key("back");
+    key("down");
+    key("down");
+    assert_eq!(last_view(&fake)["title"], "Sport");
+    key("right");
+    // Two, from search, is not on it: Down zaps within News (one, two).
+    key("search");
+    send(serde_json::json!({ "cmd": "searchText", "text": "two" }));
+    key("done");
+    key("ok");
+    assert_eq!(
+        last_of(&fake, "play")["url"],
+        "http://media.example.com/two.ts"
+    );
+    key("down");
+    assert_eq!(
+        last_of(&fake, "play")["url"],
+        "http://media.example.com/one.ts"
+    );
+}
+
+#[test]
+fn a_guide_refreshed_in_a_later_hour_keeps_the_focused_program() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let names = ["Dawn", "Morning", "Noon", "Dusk", "Night"];
+    let respond = serve(playlist(), guide_of(&["one", "two", "three"], &names));
+    launch_with(&fake, &respond);
+    key("right");
+    key("right");
+    assert_eq!(focused_title(&fake), "one Dusk");
+    let start = last_view(&fake)["grid"]["focused"]["start"].clone();
+    // An hour and five minutes later the guide is updated: its schedule
+    // counts minutes from the new hour.
+    fake.wall_offset_ms.set(65.0 * 60_000.0);
+    send(serde_json::json!({ "cmd": "view" }));
+    assert_eq!(focused_title(&fake), "one Dusk");
+    let downloads = guide_downloads(&fake);
+    send(serde_json::json!({ "cmd": "refreshGuide" }));
+    deliver_with(&fake, &respond);
+    assert_eq!(guide_downloads(&fake), downloads + 1, "refreshed");
+    let view = last_view(&fake);
+    assert_eq!(view["grid"]["focused"]["title"], "one Dusk", "{view}");
+    assert_eq!(view["grid"]["focused"]["start"], start);
+}
+
+#[test]
+fn the_favorites_list_follows_its_members_at_once() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    for _ in 0..3 {
+        key("favorite");
+        key("down");
+    }
+    key("blue");
+    key("down");
+    assert_eq!(last_view(&fake)["grid"]["focused"]["name"], "Example Two");
+    // Two is removed: the row that took its place has the focus.
+    key("favorite");
+    assert_eq!(favorite_names(&fake), ["Example One", "Example Three"]);
+    let view = last_view(&fake);
+    assert_eq!(view["grid"]["rows"]["focus"], 1);
+    assert_eq!(view["grid"]["focused"]["name"], "Example Three");
+    key("favorite");
+    // One favorite left: Blue does not start moving it.
+    assert_eq!(favorite_names(&fake), ["Example One"]);
+    key("blue");
+    assert_eq!(last_view(&fake)["reorder"], false);
+    // Emptied: the focus goes to the groups column.
+    key("favorite");
+    let view = last_view(&fake);
+    assert_eq!(view["grid"]["rows"]["total"], 0);
+    assert_eq!(view["grid"]["pane"], "groups");
+    key("blue");
+    assert_eq!(last_view(&fake)["reorder"], false);
+}
+
+#[test]
+fn moving_a_favorite_keeps_a_focus_on_a_past_program() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    key("favorite");
+    key("down");
+    key("favorite");
+    key("blue");
+    key("left");
+    assert_eq!(focused_title(&fake), "one Dawn");
+    key("blue");
+    assert_eq!(last_view(&fake)["reorder"], true);
+    // Time passes until Dawn is before the default window; the moved list
+    // still reaches back to it.
+    fake.wall_offset_ms.set(50.0 * 60_000.0);
+    key("down");
+    let view = last_view(&fake);
+    assert_eq!(favorite_names(&fake), ["Example Two", "Example One"]);
+    assert_eq!(view["grid"]["rows"]["focus"], 1);
+    assert_eq!(view["grid"]["focused"]["title"], "one Dawn", "{view}");
+}
+
+#[test]
+fn a_page_keeps_the_time_past_rows_without_listings() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    // Two has no guide.
+    let names = ["Dawn", "Morning", "Noon"];
+    launch_with(
+        &fake,
+        &serve(playlist(), guide_of(&["one", "three"], &names)),
+    );
+    key("left");
+    assert_eq!(focused_title(&fake), "one Dawn");
+    key("chdown");
+    let view = last_view(&fake);
+    assert_eq!(view["grid"]["rows"]["focus"], 2);
+    assert_eq!(view["grid"]["focused"]["title"], "three Dawn", "{view}");
+    key("chup");
+    assert_eq!(focused_title(&fake), "one Dawn");
+}
+
+#[test]
+fn a_row_signature_includes_the_row_number() {
+    use crate::grid::Grid;
+    use iptv_core::guide::SyntheticSchedule;
+    use iptv_core::lists::{ALL, ChannelList};
+    let open = |channels: Vec<usize>| {
+        Grid::open(
+            Rc::new(SyntheticSchedule),
+            Rc::new(ChannelList::new(ALL, channels)),
+            0,
+        )
+    };
+    let a = open((0..20).collect());
+    // Channel 0 on row 8, shown in the first slot after a page down.
+    let mut b = open((100..108).chain(0..20).collect());
+    b.key("chdown", 0, 10, false);
+    let first = |g: &Grid| g.json(None, &|_| None, &|_| false)["rows"]["items"][0].clone();
+    let (a, b) = (first(&a), first(&b));
+    assert_eq!(
+        (a["name"].clone(), b["name"].clone()),
+        ("Channel 1".into(), "Channel 1".into())
+    );
+    assert_eq!(
+        (a["number"].clone(), b["number"].clone()),
+        (1.into(), 9.into())
+    );
+    assert_ne!(a["sig"], b["sig"]);
+}
+
+#[test]
+fn search_keeps_its_history_and_drops_stale_program_results() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    // Back hides the keyboard first, then leaves.
+    key("search");
+    assert_eq!(last_view(&fake)["search"]["keyboard"], true);
+    key("back");
+    let view = last_view(&fake);
+    assert_eq!(view["mode"], "search");
+    assert_eq!(view["search"]["keyboard"], false);
+    key("back");
+    assert_eq!(last_view(&fake)["mode"], "guide");
+
+    // A completed query is history at once (leaving the app keeps it).
+    key("search");
+    send(serde_json::json!({ "cmd": "searchText", "text": "two" }));
+    key("done");
+    let lists: Value = fake
+        .kv
+        .borrow()
+        .iter()
+        .find(|(k, _)| k.starts_with("lists:"))
+        .map(|(_, v)| serde_json::from_slice(v).unwrap())
+        .unwrap();
+    assert_eq!(lists["searches"], serde_json::json!(["two"]));
+    assert_eq!(last_view(&fake)["mode"], "search");
+
+    // Program results of a guide that was replaced are not offered while
+    // the new index builds.
+    deliver(&fake);
+    assert_eq!(last_view(&fake)["search"]["counts"]["programs"], 2);
+    fake.events.borrow_mut().clear();
+    send(serde_json::json!({ "cmd": "refreshGuide" }));
+    deliver(&fake);
+    let events = fake.events.borrow();
+    let preparing: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["type"] == "view" && e["search"]["preparing"] == true)
+        .collect();
+    assert!(!preparing.is_empty());
+    for v in preparing {
+        assert_eq!(v["search"]["counts"]["programs"], 0, "{v}");
+    }
+    drop(events);
+    assert_eq!(last_view(&fake)["search"]["counts"]["programs"], 2);
+}
+
+#[test]
+fn held_keys_in_the_groups_column_build_the_list_once_settled() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    // Three plays; its number is its row in the list shown.
+    key("down");
+    key("down");
+    key("ok");
+    assert_eq!(last_view(&fake)["playing"]["number"], 3);
+    key("back");
+    key("back");
+    assert_eq!(last_view(&fake)["grid"]["pane"], "groups");
+    let repeat = |k: &str| send(serde_json::json!({ "cmd": "key", "key": k, "repeat": true }));
+    repeat("down");
+    let view = last_view(&fake);
+    assert_eq!(view["title"], "News");
+    assert_eq!(view["pending"], true);
+    assert_eq!(view["grid"]["rows"]["total"], 0);
+    repeat("down");
+    assert_eq!(last_view(&fake)["title"], "Sport");
+    send(serde_json::json!({ "cmd": "settle" }));
+    let view = last_view(&fake);
+    assert_eq!(view["pending"], false);
+    assert_eq!(view["grid"]["rows"]["total"], 1);
+    assert_eq!(view["playing"]["number"], 1, "three's row in Sport");
+    // A key that is not a repeat builds at once.
+    repeat("up");
+    key("right");
+    let view = last_view(&fake);
+    assert_eq!(view["title"], "News");
+    assert_eq!(view["grid"]["rows"]["total"], 2);
+    assert_eq!(view["grid"]["pane"], "guide");
+    assert_eq!(view["playing"]["number"], 3, "not in News: its own number");
 }

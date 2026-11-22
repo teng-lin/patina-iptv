@@ -107,11 +107,19 @@ impl Grid {
     }
 
     /// The same screen on a new schedule of the same catalog (the guide
-    /// arrived): the focused channel is found again, the time stays.
+    /// arrived): the focused channel is found again, the time stays. A
+    /// schedule made in a later hour counts minutes from that hour: the
+    /// focus's minutes are converted through Unix time first.
     pub(crate) fn rebase(&mut self, catalog: Rc<dyn Schedule>, rows: Rc<Rows>, now: i32) {
         let channel = self.focused_channel();
         let offset = self.focus.channel.saturating_sub(self.first);
         let row = channel.and_then(|c| rows.row_of(c));
+        let shift = (self.view.epoch_unix() - catalog.epoch_unix()).div_euclid(60);
+        let shift = i32::try_from(shift).unwrap_or(0);
+        let f = &mut self.focus;
+        f.cursor = f.cursor.saturating_add(shift);
+        f.window = f.window.saturating_add(shift);
+        f.now = f.now.saturating_add(shift);
         self.view = ListView::new(catalog, rows);
         self.focus.restore(Some(row.unwrap_or(0)), &self.view);
         self.first = self.focus.channel.saturating_sub(offset);
@@ -243,12 +251,25 @@ impl Grid {
         }
     }
 
-    /// Channel Up/Down: a screen of rows up or down, the time column kept.
+    /// Channel Up/Down: a screen of rows up or down, the time column kept
+    /// (within the destination row's listings: rows between do not move
+    /// it).
     fn page(&mut self, down: bool) {
-        let step = if down { Move::Down } else { Move::Up };
-        for _ in 0..GRID_ROWS {
-            self.focus.apply(step, &self.view);
+        let len = self.view.channel_count();
+        if len == 0 {
+            return;
         }
+        let row = self.focus.channel;
+        let to = if down {
+            (row + GRID_ROWS).min(len - 1)
+        } else {
+            row.saturating_sub(GRID_ROWS)
+        };
+        // As a tap there: the time clamped to that row's floor and the
+        // guide's bounds; then the window follows the focused program.
+        let cursor = self.focus.cursor;
+        self.focus.tap(to, cursor, &self.view);
+        self.focus.set_visible(self.focus.visible, &self.view);
         self.first = if down {
             self.first + GRID_ROWS
         } else {
@@ -326,7 +347,9 @@ impl Grid {
                 let is_playing = playing == Some(channel);
                 let archive_days = s.catchup_days(row);
                 let mut sig = DefaultHasher::new();
-                (channel, from, to, is_playing).hash(&mut sig);
+                // The row's number too: a slot can show the same channel at
+                // another row (another list), numbered differently.
+                (row, channel, from, to, is_playing).hash(&mut sig);
                 let mut focus = -1i64;
                 let cells: Vec<Value> = s
                     .programs_between(row, from, to - from)

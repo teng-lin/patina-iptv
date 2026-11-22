@@ -71,7 +71,9 @@ body.pane-preview #guide-frame { outline: 4px solid #9CCBEB; }
 #guide-progress div { height: 6px; width: 0; background: #9CCBEB; }
 #guide-list { font-size: 26px; }
 #guide-hint { position: absolute; left: 612px; top: 300px; width: 1280px; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#status { position: absolute; left: 1296px; top: 32px; width: 600px; font-size: 24px; text-align: right; }
+/* Below the focused program's lines (they run the header's width), above
+ * the hint. */
+#status { position: absolute; left: 612px; top: 262px; width: 1260px; font-size: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* The rail and the groups column: shown while one has the focus. */
 #rail, #group-rows { display: none; position: absolute; top: 356px; height: 724px; box-sizing: border-box; }
@@ -296,6 +298,8 @@ body.full #status { display: none; }
 }
 
 #notice.info { background: #285575; }
+/* Centered over the search column, clear of the preview beside it. */
+body.search #notice { left: 260px; }
 
 #setup {
     position: absolute;

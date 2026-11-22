@@ -86,11 +86,14 @@ function setLogo(img, logo) {
 /* ---------- player ---------- */
 /* Places the video plane: the method first, then the rectangle. On a 2020
  * TV (UN55TU7000, Tizen 5.5) LETTER_BOX in a rectangle smaller than the
- * screen draws no picture at all while the sound plays; FULL_SCREEN in the
- * same rectangle shows it. The previews and the sources are 16:9. */
+ * screen draws no picture at all while the sound plays, so the previews
+ * (16:9, as most sources) use FULL_SCREEN, which fills the rectangle. Full
+ * screen uses LETTER_BOX, which works there and keeps 4:3 streams from
+ * being stretched. */
 function setDisplay(r) {
     var av = webapis.avplay;
-    av.setDisplayMethod('PLAYER_DISPLAY_MODE_FULL_SCREEN');
+    var whole = r[2] >= FULL[2] && r[3] >= FULL[3];
+    av.setDisplayMethod(whole ? 'PLAYER_DISPLAY_MODE_LETTER_BOX' : 'PLAYER_DISPLAY_MODE_FULL_SCREEN');
     av.setDisplayRect(r[0], r[1], r[2], r[3]);
 }
 
@@ -101,10 +104,14 @@ var player = {
     rect: GUIDE_PREVIEW,
     lastStart: 0,
     deferred: null,
+    /* What the core last asked to play, [url, userAgent], also while that
+     * waits below; null once stopped. */
+    wanted: null,
     /* Held channel keys: a zap within 300 ms of the last one waits, and only
      * the newest is opened (opening is synchronous on the main thread). */
     play: function (url, userAgent) {
         var now = performance.now();
+        this.wanted = [url, userAgent];
         clearTimeout(this.deferred);
         if (now - this.lastStart < 300) {
             var self = this;
@@ -174,6 +181,7 @@ var player = {
     stop: function () {
         this.token++;
         this.url = null;
+        this.wanted = null;
         clearTimeout(this.deferred);
         loading(false);
         screensaver(true);
@@ -201,13 +209,16 @@ function screensaver(on) {
 }
 
 /* ---------- views ---------- */
-function loading(on, text) {
+/* `cover`: over the whole screen, opaque, also once the list shows (the
+ * core stopped). */
+var stopped = false;
+function loading(on, text, cover) {
     var box = $('loading');
     box.classList.toggle('hidden', !on);
     if (text) $('loading-text').textContent = text;
     /* Before the list exists it covers the screen; afterwards it only
      * marks the video (the preview, or the full screen). */
-    var over = view && view.ready;
+    var over = !cover && !stopped && view && view.ready;
     var r = over ? player.rect : FULL;
     box.style.background = over ? 'transparent' : '#141C21';
     box.style.left = r[0] + 'px';
@@ -251,7 +262,7 @@ function statusText(s) {
 function render() {
     drawn = false;
     var v = view;
-    if (!v) return;
+    if (!v || stopped) return;
     if (v.ready) mark('channelsShown');
     if (v.guide) mark('guideShown');
     if (!v.ready) {
@@ -264,7 +275,12 @@ function render() {
     document.body.classList.toggle('full', full);
     document.body.classList.toggle('guide', mode === 'guide');
     document.body.classList.toggle('search', mode === 'search');
-    player.setRect(full ? FULL : mode === 'guide' ? GUIDE_PREVIEW : PREVIEW);
+    var rect = full ? FULL : mode === 'guide' ? GUIDE_PREVIEW : PREVIEW;
+    if (player.rect !== rect) {
+        player.setRect(rect);
+        /* "Buffering…" marks the video where it now is. */
+        if (!$('loading').classList.contains('hidden')) loading(true);
+    }
     $('status').textContent = statusText(v.status);
     if (mode === 'guide') renderGuide(v);
     else if (mode === 'search') { renderSearch(v.search); renderInfo(v.playing); }
@@ -274,7 +290,12 @@ function render() {
      * full screen, guideKeys: the guide screen, searchKeys: search). */
     var drawnAt = performance.now();
     var samples = mode === 'guide' ? metrics.guideKeys : mode === 'search' ? metrics.searchKeys : metrics.keys;
-    while (keyTimes.length) sample(samples, Math.round(drawnAt - keyTimes.shift()));
+    /* A key older than a second was not answered by this view (one sent
+     * before the list was ready): it is dropped, not counted. */
+    while (keyTimes.length) {
+        var at = keyTimes.shift();
+        if (drawnAt - at < 1000) sample(samples, Math.round(drawnAt - at));
+    }
     if (searching.answeredAt) {
         sample(metrics.search, Math.round(drawnAt - searching.answeredAt));
         searching.answeredAt = 0;
@@ -316,7 +337,7 @@ function guideHint(v, f) {
     if (v.reorder) return 'Moving: Up/Down one place · Left/Right: to the top or the end · OK: done';
     switch (g.pane) {
     case 'preview': return 'OK: full screen · Down: guide';
-    case 'groups': return 'Up/Down: lists · OK: open · Left: search';
+    case 'groups': return 'Up/Down: lists · OK: open · Left: the rail';
     case 'rail': return 'OK: open · Right: groups';
     default:
         var ok = !f ? '' : f.airing === 'live' ? 'OK: watch · ' : f.catchup ? 'OK: watch from the start · ' : '';
@@ -344,7 +365,10 @@ function renderGuide(v) {
     if (live) $('guide-progress').firstChild.style.width = Math.round(progress(f) * 100) + '%';
     $('guide-left').textContent = !f ? '' : live ? minutes(f.end - now) + ' left'
         : f.airing === 'upcoming' ? 'in ' + minutes(f.start - now) : 'Ended';
-    $('guide-list').textContent = v.title + '  ·  ' + (g.rows.total ? (g.rows.focus + 1) + ' / ' + g.rows.total : 'No channels');
+    /* While a held key moves through the groups, the list is built once it
+     * is released (the core's `pending`). */
+    var count = v.pending ? '…' : g.rows.total ? (g.rows.focus + 1) + ' / ' + g.rows.total : 'No channels';
+    $('guide-list').textContent = v.title + '  ·  ' + count;
     $('guide-hint').textContent = guideHint(v, f);
 
     /* The rail and the groups column, while they show. */
@@ -357,9 +381,11 @@ function renderGuide(v) {
     if (v.groups) {
         var groups = $('group-rows').children;
         for (var e = 0; e < groups.length; e++) {
+            /* A group may be named "" (still a row). */
             var entry = v.groups.items[e];
-            groups[e].style.visibility = entry ? 'visible' : 'hidden';
-            if (!entry) continue;
+            var exists = entry !== undefined && entry !== null;
+            groups[e].style.visibility = exists ? 'visible' : 'hidden';
+            if (!exists) continue;
             groups[e].textContent = entry;
             groups[e].classList.toggle('shown', v.groups.start + e === v.groups.focus);
         }
@@ -373,10 +399,10 @@ function renderGuide(v) {
         marks.textContent = '';
         var end = g.start + g.minutes * 60;
         for (var t = Math.ceil(g.start / 1800) * 1800; t < end; t += 1800) {
-            var mark = document.createElement('span');
-            mark.style.left = Math.round(GRID.left + (t - g.start) / 60 * perMinute) + 'px';
-            mark.textContent = clock(t);
-            marks.appendChild(mark);
+            var tick = document.createElement('span');
+            tick.style.left = Math.round(GRID.left + (t - g.start) / 60 * perMinute) + 'px';
+            tick.textContent = clock(t);
+            marks.appendChild(tick);
         }
     }
     var nowX = (g.now - g.start) / 60 * perMinute;
@@ -431,6 +457,14 @@ function renderGuide(v) {
 }
 
 /* ---------- search ---------- */
+/* Search closed (or the playlist reloads): an answer still due belongs to
+ * that session, and nothing waits for it. */
+function resetSearch() {
+    searching.busy = false;
+    searching.text = '';
+    searching.pending = null;
+    searching.answeredAt = 0;
+}
 function askSearch(text) {
     if (searching.busy) { searching.pending = text; return; }
     searching.busy = true;
@@ -459,9 +493,10 @@ function renderSearch(s) {
     var typing = s.focus === 'input' && s.keyboard;
     /* DOM focus follows the core's focus: the field (and the TV's
      * keyboard) only while the core says the keyboard is up. */
-    if (!typing && document.activeElement === input) input.blur();
+    if ((!typing || setup.open) && document.activeElement === input) input.blur();
     if (document.activeElement !== input && input.value !== s.query) input.value = s.query;
-    if (typing && document.activeElement !== input) input.focus();
+    /* The setup owns the keyboard while it is open. */
+    if (typing && !setup.open && document.activeElement !== input) input.focus();
     $('search-field').classList.toggle('focus', s.focus === 'input');
 
     var idle = s.phase === 'idle';
@@ -514,15 +549,19 @@ function scheduleRender() {
  * program with times, and buttons. It hides after BAR_TIMEOUT ms without a
  * key: the core is told, as it owns the bar's state. */
 var BAR_TIMEOUT = 7000;
-var barTimer = null, barShown = null;
+var barTimer = null, barShown = false;
+/* Counts the 7 s again: from when the bar shows, and from every key. */
+function armBar() {
+    clearTimeout(barTimer);
+    if (barShown) barTimer = setTimeout(function () { sendKey({ cmd: 'key', key: 'barTimeout' }); }, BAR_TIMEOUT);
+}
 function renderBar(v) {
     var bar = v && v.bar, p = v && v.playing;
     $('bar').classList.toggle('hidden', !bar || !p);
-    var state = bar && p ? JSON.stringify([bar, p.id]) : null;
-    if (state !== barShown) {
-        barShown = state;
-        clearTimeout(barTimer);
-        if (state) barTimer = setTimeout(function () { send({ cmd: 'key', key: 'barTimeout' }); }, BAR_TIMEOUT);
+    var shown = !!(bar && p);
+    if (shown !== barShown) {
+        barShown = shown;
+        armBar();
     }
     if (!bar || !p) return;
     $('banner').classList.add('hidden');
@@ -559,6 +598,8 @@ worker.onmessage = function (e) {
         var wasFull = view && view.mode === 'full';
         view = m;
         if (m.ready && m.mode === 'search') searchAnswered(m.search);
+        else if (m.ready) resetSearch();
+        keyAnswered();
         scheduleRender();
         if (m.ready && m.mode === 'full' && m.playing && !wasFull) {
             setTimeout(function () { showBanner(m.playing); }, 0);
@@ -573,7 +614,12 @@ worker.onmessage = function (e) {
         break;
     case 'notice': notice(m.text, m.kind === 'info'); break;
     case 'sourceRejected': loading(false); openSetup(); notice(m.text); break;
-    case 'fatal': loading(true, m.text); break;
+    case 'fatal':
+        /* The core stopped: nothing it showed works any more. */
+        player.stop();
+        loading(true, m.text, true);
+        stopped = true;
+        break;
     case 'metric': metrics[m.name] = m; saveMetrics(); break;
     }
 };
@@ -608,6 +654,8 @@ function openSetup() {
     }
     setup.open = true;
     setup.index = 0;
+    /* The search field must not keep the TV's keyboard under the setup. */
+    $('search-input').blur();
     $('setup').classList.remove('hidden');
     drawSetup();
 }
@@ -620,6 +668,8 @@ function savedSource() {
 }
 function load(source) {
     player.stop();
+    resetSearch();
+    keys.pending = [];
     send({ cmd: 'source', source: source, utcOffsetSecs: -new Date().getTimezoneOffset() * 60 });
 }
 /* Returns whether the key was the setup's own (so the page swallows it). */
@@ -677,6 +727,30 @@ var KEYS = { 37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'ok', 10009: 'ba
 var IME_DONE = 65376, IME_CANCEL = 65385;
 var EXIT = 10182;
 
+/* Keys to the core: one at a time, the next sent when the view for the
+ * previous one arrives, so a held key never queues work in the worker.
+ * While one is in flight, a repeat replaces a repeat waiting behind it (a
+ * released key stops at once); other keys wait in order. */
+var keys = { inFlight: false, sentAt: 0, pending: [] };
+function sendKey(cmd) {
+    var last = keys.pending[keys.pending.length - 1];
+    if (cmd.repeat && last && last.repeat) keys.pending[keys.pending.length - 1] = cmd;
+    else keys.pending.push(cmd);
+    /* Unanswered for a second (the core is still loading): go on anyway. */
+    if (keys.inFlight && performance.now() - keys.sentAt < 1000) return;
+    keyAnswered();
+}
+/* A view arrived: the next key waiting goes. */
+function keyAnswered() {
+    var next = keys.pending.shift();
+    keys.inFlight = !!next;
+    if (!next) return;
+    keys.sentAt = performance.now();
+    send(next);
+}
+/* Keys whose repeats are dropped: holding one acts once. */
+var ONCE = { ok: true, back: true, blue: true, guide: true, search: true };
+
 function exit() {
     player.stop();
     try { tizen.application.getCurrentApplication().exit(); } catch (e) { window.close(); }
@@ -685,32 +759,46 @@ function exit() {
 document.addEventListener('keydown', function (e) {
     var code = e.keyCode;
     /* The remote's Exit key leaves the app, from any screen; Back never does. */
-    if (code === EXIT) { e.preventDefault(); exit(); return; }
+    if (code === EXIT) { e.preventDefault(); if (!e.repeat) exit(); return; }
     if (setup.open) { if (setupKey(code)) e.preventDefault(); return; }
+    /* The color keys act once per press. */
+    if (code >= 403 && code <= 405 && e.repeat) { e.preventDefault(); return; }
     if (code === 403) { openSetup(); return; } /* red */
     if (code === 404) { send({ cmd: 'refreshGuide' }); notice('Updating the TV guide…', true); return; } /* green */
-    if (code === 405) { send({ cmd: 'key', key: 'favorite' }); return; } /* yellow */
+    if (code === 405) { armBar(); sendKey({ cmd: 'key', key: 'favorite' }); return; } /* yellow */
     /* While the search field has the focus, the TV keyboard owns the keys;
      * Done, Cancel and Back leave it. */
     if (document.activeElement === $('search-input')) {
         var ime = code === IME_DONE || code === 13 ? 'done' : code === IME_CANCEL ? 'cancel' : code === 10009 ? 'back' : null;
         if (ime) {
             e.preventDefault();
+            if (e.repeat) return;
             if (ime === 'done') flushSearch();
             keyTimes.push(performance.now());
-            send({ cmd: 'key', key: ime });
+            sendKey({ cmd: 'key', key: ime });
         }
         return;
     }
     var key = KEYS[code];
     if (!key) return;
     e.preventDefault();
+    if (e.repeat && ONCE[key]) return;
     /* Left held in the guide opens the groups column (Android TV's Long
-     * Left): its first repeat sends `groups` once, later repeats nothing. */
-    if (key === 'left' && e.repeat && view && view.mode === 'guide') {
-        if (!leftHeld) { leftHeld = true; keyTimes.push(performance.now()); send({ cmd: 'key', key: 'groups' }); }
-        return;
+     * Left): its first repeat sends `groups` once, later repeats nothing.
+     * Only a press that started on the guide screen does (a Left from full
+     * screen opens the guide, and holding it must not go on). */
+    if (key === 'left') {
+        if (!e.repeat) leftFrom = view && view.mode;
+        else {
+            if (leftFrom === 'guide' && !leftHeld) {
+                leftHeld = true;
+                keyTimes.push(performance.now());
+                sendKey({ cmd: 'key', key: 'groups' });
+            }
+            return;
+        }
     }
+    if (barShown) armBar();
     keyTimes.push(performance.now());
     /* Keys that may start a stream: the zap timing starts here. */
     var full = view && view.mode === 'full';
@@ -719,17 +807,28 @@ document.addEventListener('keydown', function (e) {
     } else if (!full) {
         player.askedAt = null;
     }
-    send({ cmd: 'key', key: key });
+    sendKey({ cmd: 'key', key: key, repeat: e.repeat });
+    if (e.repeat) repeated = true;
 });
 
-var leftHeld = false;
-document.addEventListener('keyup', function (e) { if (e.keyCode === 37) leftHeld = false; });
+var leftHeld = false, leftFrom = null;
+/* A key was repeating: the core builds what it put off meanwhile (the
+ * groups column's list). */
+var repeated = false;
+document.addEventListener('keyup', function (e) {
+    if (e.keyCode === 37) leftHeld = false;
+    if (repeated) {
+        repeated = false;
+        sendKey({ cmd: 'settle' });
+    }
+});
 
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
-        var url = player.url, ua = player.userAgent;
+        /* What the core thinks plays, also a zap still waiting to open. */
+        var wanted = player.wanted;
         player.stop();
-        player.resume = url ? [url, ua] : null;
+        player.resume = wanted;
     } else if (player.resume) {
         player.play(player.resume[0], player.resume[1]);
         player.resume = null;

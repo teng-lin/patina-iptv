@@ -7,12 +7,13 @@
 //! screen); the host renders the views this emits and plays what it is told
 //! to.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iptv_core::favorites::{Favorites, KeyIndex, Recent};
 use iptv_core::guide::{Pane, Program, Schedule, now_minute};
 use iptv_core::lists::{self, ChannelList as Rows, Entry, FAVORITES};
+use iptv_core::playback::zap_target;
 use iptv_core::reorder::{self, Exit, Reorder};
 use iptv_epg::{GuideStore, Overrides, StoreOptions};
 use iptv_guide::EpgSchedule;
@@ -57,6 +58,14 @@ pub(crate) struct App {
     grid: Option<Grid>,
     mode: Mode,
     playing: Option<usize>,
+    /// `rows`' row of one catalog channel, the last one asked for (the
+    /// playing channel, on every view and zap), so it is not searched for
+    /// on every key. Cleared whenever `rows` changes.
+    row_cache: Cell<Option<(usize, Option<usize>)>>,
+    /// The groups column's selection moved while its key repeats: the
+    /// selected entry's list is built when the key settles (`settle_rows`),
+    /// not once per step; the guide shows an empty list meanwhile.
+    rows_pending: bool,
     /// The playing channel plays live (not a program from its archive).
     playing_live: bool,
     /// The playlist's identity for stored data (no credentials).
@@ -120,6 +129,8 @@ impl App {
             grid: None,
             mode: Mode::Guide,
             playing: None,
+            row_cache: Cell::new(None),
+            rows_pending: false,
             playing_live: false,
             source_id: None,
             favorites: Favorites::default(),
@@ -156,9 +167,40 @@ impl App {
     /// The guide shows `rows`, focused on `row` (else where it was).
     fn set_rows(&mut self, rows: Rows, row: Option<usize>) {
         self.rows = Rc::new(rows);
+        self.row_cache.set(None);
+        self.rows_pending = false;
         if let Some(grid) = &mut self.grid {
             grid.set_list(self.rows.clone(), row);
         }
+    }
+
+    /// The row of `rows` showing catalog `channel` (cached for the last
+    /// channel asked for).
+    fn row_of(&self, channel: usize) -> Option<usize> {
+        if let Some((c, row)) = self.row_cache.get()
+            && c == channel
+        {
+            return row;
+        }
+        let row = self.rows.row_of(channel);
+        self.row_cache.set(Some((channel, row)));
+        row
+    }
+
+    /// The number catalog `channel` shows: [`Rows::number_of`], cached.
+    fn number_of(&self, channel: usize, s: &dyn Schedule) -> u32 {
+        self.row_of(channel)
+            .map_or_else(|| s.channel_number(channel), Rows::number)
+    }
+
+    /// The groups column's selected list, built now when its key repeats
+    /// left it pending.
+    fn settle_rows(&mut self) {
+        if !self.rows_pending {
+            return;
+        }
+        let entry = self.grid.as_ref().map_or(lists::ALL, Grid::entry);
+        self.show_entry(entry);
     }
 
     /// Shows the list of groups column `entry`.
@@ -186,8 +228,8 @@ impl App {
     }
 
     /// Adds or removes the focused row's channel (the playing one in full
-    /// screen or on the preview) from Favorites. The Favorites list itself
-    /// updates when shown again.
+    /// screen or on the preview) from Favorites. A Favorites list on screen
+    /// follows at once, so no removed channel stays on it.
     fn toggle_favorite(&mut self) {
         let channel = match (self.mode, self.grid.as_ref().map(Grid::pane)) {
             (Mode::Full, _) | (Mode::Guide, Some(Pane::Preview)) => self.playing,
@@ -200,6 +242,17 @@ impl App {
         let on = !self.favorites.contains(&key);
         self.favorites.set(&key, on);
         self.save_lists();
+        if self.rows.entry() == FAVORITES
+            && let Some(s) = self.schedule.clone()
+        {
+            // The focus stays on its channel when it is still a favorite,
+            // else on the row that took its place (`set_list`); an emptied
+            // list hands it to the groups column.
+            let focused = self.grid.as_ref().and_then(Grid::focused_channel);
+            let rows = self.build_rows(FAVORITES, &*s);
+            let row = focused.and_then(|c| rows.row_of(c));
+            self.set_rows(rows, row);
+        }
         info(if on {
             "Added to Favorites"
         } else {
@@ -218,12 +271,25 @@ impl App {
         let now = now_minute(&*s, wall_secs(), 0);
         let entry = self.grid.as_ref().map_or(lists::ALL, Grid::entry);
         self.rows = Rc::new(self.build_rows(entry, &*s));
+        self.row_cache.set(None);
+        self.rows_pending = false;
         match &mut self.grid {
             Some(grid) => grid.rebase(s, self.rows.clone(), now),
             None => self.grid = Some(Grid::open(s, self.rows.clone(), now)),
         }
         self.indexes.reset();
         if self.search.is_some() {
+            // Results of the old guide's program index are dropped (they
+            // may name programs it no longer has): the query runs again on
+            // channels now, and with programs once the new index is built.
+            let rerun = self
+                .search
+                .as_ref()
+                .filter(|state| state.phase() != iptv_search::Phase::Idle)
+                .map(|state| state.query().to_owned());
+            if let Some(query) = rerun {
+                self.run_search(&query);
+            }
             self.start_program_index();
         }
     }
@@ -284,22 +350,29 @@ impl App {
         }
     }
 
-    /// Channel up/down from the playing channel, within the list shown. The
-    /// guide's focus follows, so the guide shows it again on the same row.
+    /// Channel up/down from the playing channel, within the list shown; a
+    /// channel the list does not have (played from search) zaps within its
+    /// own group, as on Android TV. The guide's focus follows, so the guide
+    /// shows it again on the same row.
     fn zap(&mut self, step: isize) {
-        let row = self
-            .playing
-            .and_then(|c| self.rows.row_of(c))
-            .or_else(|| self.grid.as_ref().map(Grid::row))
-            .unwrap_or(0);
-        let Some(to_row) = self.rows.zap(row, step) else {
+        let Some(s) = self.schedule.clone() else {
             return;
         };
-        if let Some(to) = self.rows.channel(to_row) {
-            self.play(to);
-            if let Some(grid) = &mut self.grid {
-                grid.show_channel(to_row);
+        let from = self.playing;
+        let to = match (from, from.and_then(|c| self.row_of(c))) {
+            (_, Some(row)) => self.rows.zap(row, step).and_then(|r| self.rows.channel(r)),
+            (Some(channel), None) => Some(zap_target(&*s, channel, step)),
+            (None, None) => {
+                let row = self.grid.as_ref().map_or(0, Grid::row);
+                self.rows.zap(row, step).and_then(|r| self.rows.channel(r))
             }
+        };
+        let Some(to) = to.filter(|&to| Some(to) != from) else {
+            return;
+        };
+        self.play(to);
+        if let (Some(row), Some(grid)) = (self.row_of(to), &mut self.grid) {
+            grid.show_channel(row);
         }
     }
 
@@ -319,7 +392,7 @@ impl App {
         self.close_search();
         self.back_to_search = false;
         self.mode = Mode::Guide;
-        let row = self.playing.and_then(|c| self.rows.row_of(c));
+        let row = self.playing.and_then(|c| self.row_of(c));
         let now = self.now();
         if let Some(grid) = &mut self.grid {
             grid.tick(now);
@@ -330,8 +403,9 @@ impl App {
         }
     }
 
-    /// A key on the guide screen.
-    fn guide_key(&mut self, key: &str) {
+    /// A key on the guide screen. `scrolling`: a repeat of Up/Down in the
+    /// groups column, whose list is built once the key settles.
+    fn guide_key(&mut self, key: &str, scrolling: bool) {
         let now = self.now();
         let entries = self.schedule().map_or(0, lists::entry_count);
         let playing = self.playing.is_some();
@@ -340,6 +414,11 @@ impl App {
         };
         match grid.key(key, now, entries, playing) {
             GridOutcome::Stay => {}
+            GridOutcome::Preview if scrolling => {
+                let entry = grid.entry();
+                self.set_rows(Rows::new(entry, Vec::new()), None);
+                self.rows_pending = true;
+            }
             GridOutcome::Preview => {
                 let entry = grid.entry();
                 self.show_entry(entry);
@@ -383,7 +462,14 @@ impl App {
 
     /// Ends the search screen, keeping its history.
     fn close_search(&mut self) {
-        if let Some(state) = self.search.take()
+        self.keep_history();
+        self.search = None;
+    }
+
+    /// Stores the search screen's history when it changed (a query
+    /// completed, a result played), so leaving the app keeps it.
+    fn keep_history(&mut self) {
+        if let Some(state) = &self.search
             && state.history() != &self.searches
         {
             self.searches = state.history().clone();
@@ -460,16 +546,11 @@ impl App {
                     return;
                 };
                 // What was searched for is history once a result plays.
-                if let Some(state) = &self.search
-                    && state.history() != &self.searches
-                {
-                    self.searches = state.history().clone();
-                    self.save_lists();
-                }
+                self.keep_history();
                 // Programs found are on now or later: their channel plays.
                 if self.play_from(channel, None) {
                     // The guide follows, so it shows the channel later.
-                    if let (Some(row), Some(grid)) = (self.rows.row_of(channel), &mut self.grid) {
+                    if let (Some(row), Some(grid)) = (self.row_of(channel), &mut self.grid) {
                         grid.show_channel(row);
                     }
                     self.back_to_search = true;
@@ -497,11 +578,14 @@ impl App {
             // Done on an empty query only closes the keyboard.
             "done" if idle => SearchAction::KeyboardHidden,
             "ok" | "done" => SearchAction::Ok,
+            // Back first hides the keyboard, as Cancel does.
             "cancel" => SearchAction::KeyboardHidden,
+            "back" if state.keyboard_visible() => SearchAction::KeyboardHidden,
             "back" => SearchAction::Back,
             _ => return,
         };
         let effect = state.apply(action);
+        self.keep_history();
         self.search_effect(effect);
     }
 
@@ -525,10 +609,11 @@ impl App {
         };
         match self.mode {
             Mode::Search => {}
+            // Moving needs another favorite to move past.
             Mode::Guide
                 if grid.entry() == FAVORITES
                     && grid.pane() == Pane::Guide
-                    && !self.rows.is_empty() =>
+                    && self.rows.len() > 1 =>
             {
                 self.start_reorder();
             }
@@ -589,7 +674,13 @@ impl App {
         };
         if order.key(k) == reorder::Outcome::Moved {
             let row = order.focus_index().unwrap_or(0);
-            let rows = Rows::new(FAVORITES, self.keys.channels(order.items()));
+            let channels = self.keys.channels(order.items());
+            let Some(s) = self.schedule.clone() else {
+                return;
+            };
+            // Built as the list is (not `Rows::new`), so it keeps how far
+            // back its listings reach: a focus on a past program stays.
+            let rows = Rows::build(FAVORITES, &*s, &channels, &[]);
             self.set_rows(rows, Some(row));
         }
     }
@@ -642,35 +733,65 @@ impl App {
             "up" | "chup" => self.zap(-1),
             "down" | "chdown" => self.zap(1),
             // OK shows the play bar (the channel, its program and buttons)
-            // with Favorite focused.
-            "ok" => self.bar = Some(0),
+            // with Favorite focused, over what plays.
+            "ok" if self.playing.is_some() => self.bar = Some(0),
             "left" => self.guide_on_playing(),
             // Back returns to the search that played the channel, else to
             // the guide on the playing channel. It never leaves the app
             // (the Exit key does).
-            "back" if self.back_to_search && self.search.is_some() => {
-                self.back_to_search = false;
-                self.mode = Mode::Search;
-                let effect = self.search.as_mut().map(SearchState::resume);
-                if let Some(effect) = effect {
-                    self.search_effect(effect);
-                }
-            }
-            "back" => self.guide_on_playing(),
+            "back" => self.leave_full(),
             _ => {}
         }
     }
 
-    /// One remote key.
-    fn key(&mut self, key: &str) {
-        self.dispatch_key(key);
+    /// Back from full screen: to the search that played the channel, else
+    /// to the guide on the playing channel.
+    fn leave_full(&mut self) {
+        if self.back_to_search && self.search.is_some() {
+            self.back_to_search = false;
+            self.mode = Mode::Search;
+            let effect = self.search.as_mut().map(SearchState::resume);
+            if let Some(effect) = effect {
+                self.search_effect(effect);
+            }
+        } else {
+            self.guide_on_playing();
+        }
+    }
+
+    /// The player could not play the stream: nothing plays, and full
+    /// screen (black now, its bar over nothing) gives way to where it was
+    /// entered from.
+    fn play_failed(&mut self) {
+        self.playing = None;
+        self.playing_live = false;
+        self.bar = None;
+        if self.mode == Mode::Full {
+            self.leave_full();
+        }
+        if let Some(grid) = &mut self.grid {
+            grid.preview_gone();
+        }
+    }
+
+    /// One remote key; `repeat` when the page saw it repeat (held).
+    fn key(&mut self, key: &str, repeat: bool) {
+        let scrolling = repeat
+            && matches!(key, "up" | "down")
+            && self.mode == Mode::Guide
+            && self.reorder.is_none()
+            && self.grid.as_ref().is_some_and(|g| g.pane() == Pane::Groups);
+        if !scrolling {
+            self.settle_rows();
+        }
+        self.dispatch_key(key, scrolling);
         // The play bar belongs to full screen.
         if self.mode != Mode::Full {
             self.bar = None;
         }
     }
 
-    fn dispatch_key(&mut self, key: &str) {
+    fn dispatch_key(&mut self, key: &str, scrolling: bool) {
         if self.schedule.is_none() {
             return;
         }
@@ -692,7 +813,7 @@ impl App {
             ("search", _) => self.open_search(),
             ("blue", _) => self.favorites_key(),
             (_, Mode::Full) => self.full_key(key),
-            (_, Mode::Guide) => self.guide_key(key),
+            (_, Mode::Guide) => self.guide_key(key, scrolling),
             (_, Mode::Search) => self.search_key(key),
         }
     }
@@ -719,7 +840,7 @@ impl App {
             .and_then(|_| Self::program_json(s, channel, s.program_at(channel, minute).end));
         json!({
             "id": channel,
-            "number": number.unwrap_or_else(|| self.rows.number_of(channel, s)),
+            "number": number.unwrap_or_else(|| self.number_of(channel, s)),
             "name": s.channel_name(channel),
             // Playlist artwork is content: only public addresses are loaded.
             "logo": s.channel_logo(channel).filter(|l| crate::exec::allowed(l, true)),
@@ -796,6 +917,8 @@ impl App {
                     "grid": screen,
                     "groups": groups,
                     "reorder": self.reorder.is_some(),
+                    // The list is built once the groups column's key settles.
+                    "pending": self.rows_pending,
                     "playing": playing,
                     "guide": self.guide_loaded,
                     "status": self.status,
@@ -1222,9 +1345,16 @@ pub(crate) fn command(text: &str) {
         },
         "key" => {
             let key = cmd.get("key").and_then(Value::as_str).unwrap_or("");
+            let repeat = cmd.get("repeat").and_then(Value::as_bool).unwrap_or(false);
             // Back with nowhere to go does nothing: only the remote's Exit
             // key leaves the app, and the page handles that key itself.
-            with_app(|a| a.key(key));
+            with_app(|a| a.key(key, repeat));
+            emit_view();
+        }
+        // The page's repeating key was released: a list left pending while
+        // the groups column scrolled is built now.
+        "settle" => {
+            with_app(App::settle_rows);
             emit_view();
         }
         "view" => emit_view(),
@@ -1248,12 +1378,7 @@ pub(crate) fn command(text: &str) {
             }
         }
         "playFailed" => {
-            with_app(|a| {
-                a.playing = None;
-                if let Some(grid) = &mut a.grid {
-                    grid.preview_gone();
-                }
-            });
+            with_app(App::play_failed);
             emit_view();
         }
         other => host().emit(
