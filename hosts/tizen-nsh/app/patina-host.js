@@ -15,7 +15,21 @@
  */
 'use strict';
 
+/* What the player did, for DevTools: never a source's address or
+ * headers (they can carry an account's credentials). */
+window.__patinaPlayer = { props: [], events: [] };
+function note(list, entry) {
+    entry.at = Math.round(performance.now());
+    list.push(entry);
+    if (list.length > 50) list.shift();
+}
+
 function PatinaPlayer(ctx) {
+    var emit = ctx.emit;
+    ctx.emit = function (name, data) {
+        note(window.__patinaPlayer.events, { name: name, state: data && data.state, code: data && data.code, token: data && data.token });
+        return emit.apply(ctx, arguments);
+    };
     var inner = NshTizen.avplay(ctx);
     var refused = null;
     function filtered(props) {
@@ -35,6 +49,14 @@ function PatinaPlayer(ctx) {
     }
     return {
         props: function (changed, all, removed) {
+            var source = all.source;
+            note(window.__patinaPlayer.props, {
+                changed: Object.keys(changed),
+                source: !!source,
+                token: source ? source.token : null,
+                headers: source && source.headers ? Object.keys(source.headers).length : 0,
+                paused: all.paused
+            });
             if (inner.props) inner.props(filtered(changed), filtered(all), removed);
         },
         frame: function (rect) { if (inner.frame) inner.frame(rect); },

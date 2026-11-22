@@ -140,7 +140,10 @@
                     }
                     stored = whole ? { size: size.result, chunks: chunks } : { size: -2, chunks: [] };
                 }
-                self.__patina = { restoreMs: Math.round(performance.now() - t0), restoredBytes: Math.max(stored.size, 0) };
+                /* For DevTools on the page (the Worker is not inspectable
+                 * there): how the last launch's restore went. */
+                var restore = { at: Date.now(), ms: Math.round(performance.now() - t0), size: stored.size, chunks: (all.result || []).length };
+                try { db.transaction('kv', 'readwrite').objectStore('kv').put(restore, 'diag.restore'); } catch (e) { /* optional */ }
                 done();
             };
             tx.onerror = tx.onabort = function () { stored.size = -2; done(); };
