@@ -1,7 +1,7 @@
 //! A cold start's first schedule holds only its first screen: some hours
 //! ([`EpgSchedule::held_only`]) of some channels
 //! ([`EpgSchedule::held_channels`]). Everything else shows as
-//! [`crate::LOADING`] and asks for nothing; the schedule with the whole
+//! [`iptv_core::guide::Listing::Loading`] and asks for nothing; the schedule with the whole
 //! window replaces it (`iptv-app` `data/opening.rs`).
 
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
@@ -11,7 +11,7 @@ use crate::{EpgSchedule, SLOT};
 impl EpgSchedule {
     /// `store` holds only the programs overlapping `[from, to)` (a cold
     /// start's first screen, read before the rest of the window): other
-    /// times show as [`crate::LOADING`], and ask for nothing; the schedule with the
+    /// times show as [`iptv_core::guide::Listing::Loading`], and ask for nothing; the schedule with the
     /// whole window replaces this one.
     pub fn held_only(mut self, from: UnixTime, to: UnixTime) -> Self {
         self.held = Some((from, to));

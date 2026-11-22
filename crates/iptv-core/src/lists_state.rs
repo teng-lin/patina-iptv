@@ -15,7 +15,7 @@
 
 use std::rc::Rc;
 
-use crate::guide::{Program, Schedule};
+use crate::guide::{GroupName, Listing, Program, Schedule};
 
 /// The groups column's fixed entries, before the playlist's groups.
 pub const FAVORITES: usize = 0;
@@ -59,13 +59,13 @@ pub fn entry_count(catalog: &dyn Schedule) -> usize {
     FIRST_GROUP + catalog.group_count()
 }
 
-/// The entry's name in the groups column (iptv-rs's own wording).
-pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
+/// The name of an entry in the groups column, before localization.
+pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> GroupName {
     match Entry::at(entry) {
-        Entry::Favorites => "Favorites".to_owned(),
-        Entry::Recent => "Recently watched".to_owned(),
-        Entry::All => catalog.all_channels_name(),
-        Entry::Group(g) => catalog.group_name(g),
+        Entry::Favorites => GroupName::Favorites,
+        Entry::Recent => GroupName::Recent,
+        Entry::All => catalog.all_channels_label(),
+        Entry::Group(group) => catalog.group_label(group),
     }
 }
 
@@ -327,29 +327,11 @@ impl Schedule for ListView {
     fn channel_logo(&self, row: usize) -> Option<String> {
         self.catalog.channel_logo(self.channel(row)?)
     }
-    fn group_name(&self, _group: usize) -> String {
+    fn group_label(&self, _group: usize) -> GroupName {
         entry_name(self.list.entry(), &*self.catalog)
     }
-    fn title(&self, row: usize, program: Program) -> String {
-        self.channel(row)
-            .map_or_else(String::new, |c| self.catalog.title(c, program))
-    }
-    fn title_in(&self, row: usize, program: Program, language: &crate::i18n::Language) -> String {
-        self.channel(row)
-            .map_or_else(String::new, |c| self.catalog.title_in(c, program, language))
-    }
-    fn group_name_in(&self, _group: usize, language: &crate::i18n::Language) -> String {
-        use crate::i18n::translate;
-        match Entry::at(self.list.entry()) {
-            Entry::Favorites => translate(language, "Favorites").to_owned(),
-            Entry::Recent => translate(language, "Recently watched").to_owned(),
-            Entry::Group(group) => self.catalog.group_name_in(group, language),
-            Entry::All => match self.catalog.all_channels_name().as_str() {
-                "All channels" => translate(language, "All channels").to_owned(),
-                "All playlists" => translate(language, "All playlists").to_owned(),
-                name => name.to_owned(),
-            },
-        }
+    fn listing(&self, row: usize, program: Program) -> Option<Listing> {
+        self.catalog.listing(self.channel(row)?, program)
     }
     fn stream_url(&self, row: usize) -> Option<String> {
         self.catalog.stream_url(self.channel(row)?)

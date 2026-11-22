@@ -1,10 +1,11 @@
+use iptv_core::guide::Listing;
 use std::rc::Rc;
 
 use crate::pages::PagedWindow;
 use crate::pages_tests::{
     FIRST, NOW, Requests, deliver, minute_of, paged, store_between, title_at,
 };
-use crate::{EpgSchedule, GuideChannel, LOADING, NO_INFORMATION};
+use crate::{EpgSchedule, GuideChannel};
 use iptv_core::guide::{Focus, Schedule};
 use iptv_epg::{
     ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder,
@@ -26,15 +27,18 @@ fn browsing_back_in_the_guide_pages_in_the_previous_day() {
         f.apply(iptv_core::guide::Move::Left, &s);
     }
     assert!(f.cursor < edge);
-    assert_eq!(s.title(0, f.program(&s)), LOADING);
+    assert_eq!(s.listing(0, f.program(&s)), Some(Listing::Loading));
     assert_eq!(requests.borrow().len(), 1);
     deliver(&s, &requests);
     let shown = f.program(&s);
-    assert_eq!(s.title(0, shown), title_at(s.unix(f.cursor)));
+    assert_eq!(
+        s.listing(0, shown),
+        Some(Listing::Title(title_at(s.unix(f.cursor))))
+    );
     // The cells across the window are real programs again.
     for p in s.programs_between(0, f.window, iptv_core::guide::VISIBLE) {
-        assert_ne!(s.title(0, p), LOADING);
-        assert_ne!(s.title(0, p), NO_INFORMATION);
+        assert_ne!(s.listing(0, p), Some(Listing::Loading));
+        assert_ne!(s.listing(0, p), Some(Listing::Gap));
     }
 }
 
@@ -91,7 +95,10 @@ fn retained_coverage_is_per_channel_and_inspectable_before_a_page_is_loaded() {
     let mut focus = Focus::at(now);
     assert_eq!(focus.floor(&schedule), floor);
     focus.tap(0, floor, &schedule);
-    assert_eq!(schedule.title(0, focus.program(&schedule)), LOADING);
+    assert_eq!(
+        schedule.listing(0, focus.program(&schedule)),
+        Some(Listing::Loading)
+    );
     assert_eq!(requests.borrow().len(), 1);
 
     let mut builder = SourceBuilder::new(FeedId(1), 0, StoreOptions::default(), NOW);
@@ -124,7 +131,10 @@ fn retained_coverage_is_per_channel_and_inspectable_before_a_page_is_loaded() {
     assert!(schedule.insert_page(request, page));
     let listing = focus.program(&schedule);
     assert_eq!(listing.start, schedule.minute(start));
-    assert_eq!(schedule.title(0, listing), "Generated overlap");
+    assert_eq!(
+        schedule.listing(0, listing),
+        Some(Listing::Title("Generated overlap".into()))
+    );
     assert_eq!(
         schedule.description(0, listing).as_deref(),
         Some("Generated overlap details")
@@ -162,12 +172,19 @@ fn a_day_back_by_key_or_pan_pages_that_day_in() {
     f.step_time(-iptv_core::guide::DAY, &s);
     f.step_time(-iptv_core::guide::DAY, &s);
     let cells = s.programs_between(0, f.window, iptv_core::guide::VISIBLE);
-    assert!(cells.iter().all(|&p| s.title(0, p) == LOADING));
+    assert!(
+        cells
+            .iter()
+            .all(|&p| s.listing(0, p) == Some(Listing::Loading))
+    );
     // The window starts an hour before that day: two days are asked for.
     assert_eq!(requests.borrow().len(), 2, "{:?}", requests.borrow());
     deliver(&s, &requests);
     for p in s.programs_between(0, f.window, iptv_core::guide::VISIBLE) {
-        assert_eq!(s.title(0, p), title_at(s.unix(p.start.max(f.window))));
+        assert_eq!(
+            s.listing(0, p),
+            Some(Listing::Title(title_at(s.unix(p.start.max(f.window)))))
+        );
     }
     // The oldest day kept bounds the keys.
     for _ in 0..10 {

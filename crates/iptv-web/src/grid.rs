@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use iptv_core::browse::{self, Columns, RailItem};
-use iptv_core::guide::{Airing, Focus, Move, Pane, Program, Schedule, page_row};
+use iptv_core::guide::{Airing, Focus, Listing, Move, Pane, Program, Schedule, page_row};
 use iptv_core::lists::{ChannelList as Rows, ListView};
 use iptv_nav::Action;
 use serde_json::{Value, json};
@@ -76,8 +76,12 @@ fn pane_name(p: Pane) -> &'static str {
     }
 }
 
-fn is_placeholder(title: &str) -> bool {
-    title.is_empty() || title == iptv_guide::NO_INFORMATION || title == iptv_guide::LOADING
+/// The legacy bridge leaves placeholders and empty titles blank.
+pub(crate) fn stored_title(listing: Option<Listing>) -> Option<String> {
+    match listing? {
+        Listing::Title(title) if !title.is_empty() => Some(title),
+        Listing::Title(_) | Listing::Gap | Listing::Loading => None,
+    }
 }
 
 fn columns(entries: usize) -> Columns<'static> {
@@ -345,14 +349,13 @@ impl Grid {
                     .into_iter()
                     .enumerate()
                     .map(|(i, p)| {
-                        let title = s.title(row, p);
-                        let title = if is_placeholder(&title) { "" } else { &title };
+                        let title = stored_title(s.listing(row, p)).unwrap_or_default();
                         // An ended program the archive has is not dimmed.
                         let airing = match p.airing(f.now) {
                             Airing::Ended if p.can_replay(f.now, archive_days) => "archive",
                             a => airing_name(a),
                         };
-                        (p.start, p.end, title, airing).hash(&mut sig);
+                        (p.start, p.end, &title, airing).hash(&mut sig);
                         if row == f.channel && p == focused {
                             focus = i as i64;
                         }
@@ -377,14 +380,14 @@ impl Grid {
             })
             .collect();
         let detail = s.channel(f.channel).map(|channel| {
-            let title = s.title(f.channel, focused);
+            let title = stored_title(s.listing(f.channel, focused));
             let (start, end) = (unix(focused.start), unix(focused.end));
             let timing = presentation.timing(start, end);
             let airing = focused.airing(f.now);
             json!({
                 "number": Rows::number(f.channel),
                 "name": s.channel_name(f.channel),
-                "title": if is_placeholder(&title) { None } else { Some(title) },
+                "title": title,
                 "start": start,
                 "end": end,
                 "timeLabel": presentation.span(start, end, " – "),

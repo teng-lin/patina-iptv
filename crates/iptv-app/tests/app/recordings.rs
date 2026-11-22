@@ -25,11 +25,32 @@ fn recording_capture_failures_have_translations() {
     }
 }
 
+#[derive(Clone, Copy)]
+enum GuideFixture {
+    Listing(&'static str),
+    Gap,
+}
+
 fn fixture(
     home: &crate::isolated::Home,
     idiom: Idiom,
     media_url: &str,
-    with_guide: bool,
+    guide_fixture: Option<GuideFixture>,
+) -> (
+    Headless,
+    std::path::PathBuf,
+    iptv_library::SourceId,
+    Option<(i64, i64)>,
+) {
+    fixture_in(home, idiom, media_url, guide_fixture, "en")
+}
+
+fn fixture_in(
+    home: &crate::isolated::Home,
+    idiom: Idiom,
+    media_url: &str,
+    guide_fixture: Option<GuideFixture>,
+    locale: &str,
 ) -> (
     Headless,
     std::path::PathBuf,
@@ -38,6 +59,9 @@ fn fixture(
 ) {
     let mut settings = Settings::new();
     settings
+        .set("general.language", Value::text(locale))
+        .unwrap();
+    settings
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
@@ -45,7 +69,7 @@ fn fixture(
     settings
         .set("playlists.max_connections", Value::Int(3))
         .unwrap();
-    if with_guide {
+    if guide_fixture.is_some() {
         settings
             .set("epg.update_on_start", Value::Bool(true))
             .unwrap();
@@ -81,23 +105,37 @@ fn fixture(
         )
         .unwrap();
     let mut expected = None;
-    if with_guide {
+    if let Some(guide_fixture) = guide_fixture {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i64;
-        let future = now / 60 * 60 + 1200;
-        expected = Some((future, future + 2700));
+        let (future, end) = match guide_fixture {
+            GuideFixture::Listing(_) => {
+                let start = now / 60 * 60 + 1200;
+                (start, start + 2700)
+            }
+            GuideFixture::Gap => {
+                let start = now.div_euclid(60) * 60 + 1200;
+                let end = start.div_euclid(3600) * 3600 + 3600;
+                (start, end)
+            }
+        };
+        expected = Some((future, end));
         let stamp = iptv_epg::format_xmltv_time;
-        let xml = format!(
+        let mut xml = format!(
             "<tv><channel id=\"generated\"><display-name>A</display-name></channel>\
-             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated live program</title></programme>\
-             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated future program</title></programme></tv>",
+             <programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>Generated live program</title></programme>",
             stamp(now - 1200),
             stamp(future),
-            stamp(future),
-            stamp(future + 2700)
         );
+        if let GuideFixture::Listing(title) = guide_fixture {
+            xml.push_str(&format!(
+                "<programme channel=\"generated\" start=\"{}\" stop=\"{}\"><title>{title}</title></programme>",
+                stamp(future), stamp(end),
+            ));
+        }
+        xml.push_str("</tv>");
         let guide = home.path().join("generated-guide.xml");
         std::fs::write(&guide, xml).unwrap();
         store
@@ -136,7 +174,7 @@ fn fixture(
 
 fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     let (mut app, path, source, _) =
-        fixture(&home, idiom, "https://example.test/generated.ts", false);
+        fixture(&home, idiom, "https://example.test/generated.ts", None);
     // The custom form works without guide data, with the selected channel retained.
     if idiom == Idiom::Tv {
         step(app.press_key("m"));
@@ -283,10 +321,19 @@ fn desktop_schedules_cancels_and_confirms_deletion() {
     exercise(home, Idiom::Desktop);
 }
 
-fn future_program(home: crate::isolated::Home, idiom: Idiom) {
-    let (mut app, path, source, expected) =
-        fixture(&home, idiom, "https://example.test/generated.ts", true);
-    step(app.wait_for("text:Generated future program"));
+fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixture) {
+    let (mut app, path, source, expected) = fixture(
+        &home,
+        idiom,
+        "https://example.test/generated.ts",
+        Some(listing),
+    );
+    step(app.wait_for("text:Generated live program"));
+    let title = match listing {
+        GuideFixture::Listing(title) => title,
+        GuideFixture::Gap => "No information",
+    };
+    step(app.wait_for(&format!("text:{title}")));
     step(app.press_key("right"));
     let selected = app
         .screen()
@@ -329,7 +376,7 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom) {
         .unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].request.source, source.0);
-    assert_eq!(jobs[0].request.title, "Generated future program");
+    assert_eq!(jobs[0].request.title, title);
     assert!(
         jobs[0].request.start > now,
         "future program must not become record-now"
@@ -362,19 +409,58 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom) {
 #[test]
 fn right_click_on_a_future_program_schedules_without_a_form() {
     let Some(home) = isolated!() else { return };
-    future_program(home, Idiom::Desktop);
+    future_program(
+        home,
+        Idiom::Desktop,
+        GuideFixture::Listing("No information"),
+    );
 }
 
 #[test]
 fn long_press_on_a_future_program_schedules_without_a_form() {
     let Some(home) = isolated!() else { return };
-    future_program(home, Idiom::Pad);
+    future_program(home, Idiom::Pad, GuideFixture::Listing("Loading…"));
+}
+
+#[test]
+fn recording_a_guide_gap_keeps_its_display_name() {
+    let Some(home) = isolated!() else { return };
+    future_program(home, Idiom::Desktop, GuideFixture::Gap);
+}
+
+fn stored_title_in_japanese_guide(home: crate::isolated::Home, title: &'static str) {
+    let (mut app, _, _, _) = fixture_in(
+        &home,
+        Idiom::Pad,
+        "https://example.test/generated.ts",
+        Some(GuideFixture::Listing(title)),
+        "ja",
+    );
+    step(app.wait_for(&format!("role:cell[{title}]")));
+    step(app.wait_for("role:cell[情報なし]"));
+}
+
+#[test]
+fn japanese_guide_preserves_the_providers_loading_title() {
+    let Some(home) = isolated!() else { return };
+    stored_title_in_japanese_guide(home, "Loading…");
+}
+
+#[test]
+fn japanese_guide_preserves_the_providers_no_information_title() {
+    let Some(home) = isolated!() else { return };
+    stored_title_in_japanese_guide(home, "No information");
 }
 
 #[test]
 fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     let Some(home) = isolated!() else { return };
-    let (mut app, _, _, _) = fixture(&home, Idiom::Pad, "https://example.test/generated.ts", true);
+    let (mut app, _, _, _) = fixture(
+        &home,
+        Idiom::Pad,
+        "https://example.test/generated.ts",
+        Some(GuideFixture::Listing("Generated future program")),
+    );
     step(app.wait_for("text:Generated live program"));
     let opens = iptv_app::player_opens(0);
     step(app.long_press("role:cell[Generated live program]"));
@@ -534,7 +620,7 @@ fn local_capture_serves_two_streams_without_waiting_for_either_to_close() {
 fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     let Some(home) = isolated!() else { return };
     let (url, server) = local_capture();
-    let (mut app, path, _, _) = fixture(&home, Idiom::Pad, &url, false);
+    let (mut app, path, _, _) = fixture(&home, Idiom::Pad, &url, None);
     step(app.press("text:A"));
     step(app.press("text:A"));
     step(app.wait_for_within("text:▶", Duration::from_secs(15)));
@@ -592,7 +678,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
 fn a_recordings_screen_opened_during_record_now_stays_open_after_save() {
     let Some(home) = isolated!() else { return };
     let (url, server) = local_capture();
-    let (mut app, _, _, _) = fixture(&home, Idiom::Pad, &url, false);
+    let (mut app, _, _, _) = fixture(&home, Idiom::Pad, &url, None);
     step(app.press("text:A"));
     step(app.press("text:A"));
     step(app.wait_for_within("text:▶", Duration::from_secs(15)));
@@ -620,7 +706,7 @@ fn a_recordings_screen_opened_during_record_now_stays_open_after_save() {
 fn one_recording_list_keeps_scheduled_and_finished_jobs_visible() {
     let Some(home) = isolated!() else { return };
     let (mut app, path, source, _) =
-        fixture(&home, Idiom::Tv, "https://example.test/generated.ts", false);
+        fixture(&home, Idiom::Tv, "https://example.test/generated.ts", None);
     use iptv_core::recording::{JobId, Request, Status};
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
