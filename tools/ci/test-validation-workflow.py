@@ -111,6 +111,22 @@ class Workflows(unittest.TestCase):
         self.assertIn('needs: [plan, helpers]', host)
         self.assertIn('helpers-checked: true', host)
 
+    def test_delegated_helpers_run_every_helper_test_the_host_skips(self):
+        # tools/check.sh skips its helper tests when the helpers job ran
+        # them (IPTV_HELPERS_CHECKED): each must be in that job, by name or
+        # through its tools/ci/test-*.py loop.
+        script = (ROOT / 'tools/check.sh').read_text()
+        skipped = script.split('if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then\n')[2].split('\nfi\n', 1)[0]
+        tests = re.findall(r'python3 (\S+\.py)', skipped)
+        self.assertIn('hosts/tizen-nsh/test_sections.py', tests)
+        text = (ROOT / '.github/workflows/validation.yml').read_text()
+        helpers = text.split('  helpers:\n', 1)[1].split('  host:\n', 1)[0]
+        self.assertIn('for script in tools/ci/test-*.py; do python3 "$script"; done', helpers)
+        for test in tests:
+            if re.fullmatch(r'tools/ci/test-[^/]+\.py', test):
+                continue
+            self.assertIn(f'python3 {test}\n', helpers, test)
+
     def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         self.assertIn("&& 'validation-master'", text)

@@ -20,9 +20,10 @@
 //! 3. The swap, then [`Publish::finish`] on the live store: the writes
 //!    that follow (feed results, pruning), and the reply.
 //!
-//! Any error, a closed owner or a cancel at shutdown abandons the copy,
-//! leaving the live store as it was; [`Publish::failed`] then undoes what
-//! `prepare` wrote.
+//! Any error, a closed owner, a cancel at shutdown or the publish's own
+//! cancel ([`Publish::canceled`], looked at before every step and before
+//! the swap) abandons the copy, leaving the live store as it was;
+//! [`Publish::failed`] then undoes what `prepare` wrote.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -56,7 +57,19 @@ pub(crate) trait Publish: Send + 'static {
 
     /// The publish ended without a swap: undo what `prepare` wrote.
     fn failed(&mut self, _live: &mut Store) {}
+
+    /// Whether the publish lost its right to land since `prepare` admitted
+    /// it (the user canceled the import, newer work superseded the guide).
+    /// The one-shot form checks once, in the same job as its writes; here
+    /// slices of other turns follow `prepare`, so the driver checks before
+    /// each step and before the swap.
+    fn canceled(&self) -> bool {
+        false
+    }
 }
+
+/// What a canceled publish replies (the one-shot forms' refusal).
+const CANCELED: StoreError = StoreError::Unavailable("the publish was canceled");
 
 /// A replacement job as [`Publish::step`] drives it: the store's
 /// `CatalogReplacement` and `EpgReplacement`.
@@ -245,8 +258,16 @@ impl<P: Publish> Job<P> {
                 Ok(false)
             }
             Phase::Steps => {
+                if publish.canceled() {
+                    return Err(CANCELED);
+                }
                 if !publish.step(rows)? {
                     return Ok(false);
+                }
+                // A cancel during the last step: the copy is complete but
+                // must not replace the live store.
+                if publish.canceled() {
+                    return Err(CANCELED);
                 }
                 let copy = publish
                     .take_copy()
@@ -463,6 +484,10 @@ mod tests {
         source: Option<SourceId>,
         steps: Arc<AtomicU32>,
         running: Replacing<CatalogReplacement<'static, Store>>,
+        /// The publish's cancel ([`Publish::canceled`]).
+        cancel: Arc<AtomicBool>,
+        /// Cancels in the step that commits the replacement's last one.
+        cancel_when_done: bool,
     }
 
     impl Publish for Fixture {
@@ -485,7 +510,14 @@ mod tests {
         }
         fn step(&mut self, rows: u32) -> Result<bool, StoreError> {
             self.steps.fetch_add(1, Ordering::SeqCst);
-            self.running.step(rows)
+            let done = self.running.step(rows)?;
+            if done && self.cancel_when_done {
+                self.cancel.store(true, Ordering::SeqCst);
+            }
+            Ok(done)
+        }
+        fn canceled(&self) -> bool {
+            self.cancel.load(Ordering::SeqCst)
         }
         fn take_copy(&mut self) -> Option<Store> {
             self.running.take_copy()
@@ -524,7 +556,18 @@ mod tests {
             source: None,
             steps: steps.clone(),
             running: Replacing::Idle,
+            cancel: Arc::new(AtomicBool::new(false)),
+            cancel_when_done: false,
         }
+    }
+
+    /// The store the publish wrote to, opened again.
+    fn reopen(directory: &tempfile::TempDir) -> Store {
+        Store::open_encrypted(
+            directory.path().join("synthetic.sqlite"),
+            &DatabaseKey::from_bytes(KEY),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -616,5 +659,82 @@ mod tests {
             store.sources().unwrap().is_empty(),
             "the prepared source is gone"
         );
+    }
+
+    #[test]
+    fn a_cancel_between_slices_abandons_the_copy_and_undoes_what_it_prepared() {
+        let (directory, host, service, calls) = setup();
+        let services = service.accept();
+        let steps = Arc::new(AtomicU32::new(0));
+        let publish = fixture(2_000, &steps);
+        let cancel = publish.cancel.clone();
+        let answer = Arc::new(Mutex::new(None));
+        {
+            let answer = answer.clone();
+            host.spawn(Box::pin(async move {
+                let result = services.publish(publish).await;
+                *answer.lock().unwrap() = Some(result.map(|(_, channels)| channels));
+            }));
+        }
+        // Prepared and begun, a few slices in.
+        for _ in 0..3 {
+            host.poll();
+        }
+        assert_eq!(calls.begun.load(Ordering::SeqCst), 1);
+        let before = steps.load(Ordering::SeqCst);
+        cancel.store(true, Ordering::SeqCst);
+        while host.poll() {}
+        assert!(
+            matches!(
+                *answer.lock().unwrap(),
+                Some(Err(StoreError::Unavailable(_)))
+            ),
+            "the publish reports its cancel"
+        );
+        assert_eq!(
+            steps.load(Ordering::SeqCst),
+            before,
+            "no slice ran after the cancel"
+        );
+        assert_eq!(calls.abandoned.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.finished.load(Ordering::SeqCst), 0, "no swap");
+        assert!(
+            reopen(&directory).sources().unwrap().is_empty(),
+            "the prepared source is gone"
+        );
+        assert!(service.drain_on_shutdown_with(|| {}));
+    }
+
+    #[test]
+    fn a_cancel_in_the_last_slice_keeps_the_finished_copy_out() {
+        let (directory, host, service, calls) = setup();
+        let services = service.accept();
+        let steps = Arc::new(AtomicU32::new(0));
+        let mut publish = fixture(500, &steps);
+        publish.cancel_when_done = true;
+        let answer = Arc::new(Mutex::new(None));
+        {
+            let answer = answer.clone();
+            host.spawn(Box::pin(async move {
+                let result = services.publish(publish).await;
+                *answer.lock().unwrap() = Some(result.map(|(_, channels)| channels));
+            }));
+        }
+        while host.poll() {}
+        assert!(
+            matches!(
+                *answer.lock().unwrap(),
+                Some(Err(StoreError::Unavailable(_)))
+            ),
+            "the publish reports its cancel"
+        );
+        assert_eq!(calls.begun.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.abandoned.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.finished.load(Ordering::SeqCst), 0, "no swap");
+        assert!(
+            reopen(&directory).sources().unwrap().is_empty(),
+            "the prepared source is gone"
+        );
+        assert!(service.drain_on_shutdown_with(|| {}));
     }
 }

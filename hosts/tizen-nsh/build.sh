@@ -21,6 +21,7 @@
 #   SQLITE_WASM_RS_FLAGS  SQLite's compile options over sqlite-wasm-rs's
 #                       (default: the TV's, below; empty for its own)
 #   NSH_RUSTFLAGS       more rustc flags
+#   IPTV_ALLOW_NSH_DRIFT=1  build on an NSH checkout other than nsh.rev's (development only)
 #
 # The size flags (the plan's "Module size and launch" measures each):
 # std built with optimize_for_size, panics that abort at once
@@ -100,6 +101,11 @@ if [[ -z "${SQLITE_WASM_RS_FLAGS+set}" ]]; then
     done
     export SQLITE_WASM_RS_FLAGS="${sqlite_flags# } -DSQLITE_DEFAULT_MEMSTATUS=0"
 fi
+# NSH is a path dependency (../nsh-patina, as Cargo.toml's [patch] names
+# it), so Cargo.lock cannot pin it: nsh.rev does. A drifted or modified
+# checkout must not become a package (IPTV_ALLOW_NSH_DRIFT=1 allows it, as
+# for tools/check.sh).
+python3 "$root/tools/ci/pins.py" check-nsh
 echo "Building the module (profile tizen${NSH_OPT:+, opt-level $NSH_OPT}; $flags${NSH_STD_FEATURES:+; std features $NSH_STD_FEATURES}; C $cflags)…"
 (cd "$here" && RUSTFLAGS="$flags" \
     CFLAGS_wasm32_unknown_unknown="$cflags" \

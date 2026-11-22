@@ -61,6 +61,10 @@ pub struct Stream {
     /// The open is a retry of a stream that played: the player keeps its
     /// last frame instead of going black.
     pub reconnect: Signal<bool>,
+    /// The token whose first frame the player drew (its `firstRender`),
+    /// cleared by an error; kept where the video plane is under the page
+    /// (`video::backdrop_clear`).
+    pub rendered: Signal<Option<u64>>,
     /// The playing channel's key (live or catch-up): finds it again in a
     /// new schedule.
     pub key: Signal<Option<String>>,
@@ -104,6 +108,7 @@ impl Stream {
             publication: signal(Default::default()),
             live: signal(true),
             reconnect: signal(false),
+            rendered: signal(None),
             key: signal(None),
             channel: signal(None),
             size: signal(None),

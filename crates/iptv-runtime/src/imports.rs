@@ -967,6 +967,8 @@ pub(crate) async fn save_published(
     ) {
         (Ok(saved), _) => saved,
         (Err(_), SUPERSEDED) => Err(PublicationError::Superseded),
+        // Canceled between its slices ([`CatalogPublish::canceled`]).
+        (Err(_), _) if publication.cancel.is_canceled() => Err(PublicationError::Superseded),
         (Err(_), DENIED) => Err(PublicationError::Denied),
         (Err(error), _) => Err(PublicationError::Store(error)),
     }
@@ -1074,6 +1076,12 @@ impl crate::publish::Publish for CatalogPublish {
         if let Some((id, true)) = self.source {
             let _ = live.delete_source(id);
         }
+    }
+
+    /// The user's Cancel during Saving: `prepare` looked at it once, and
+    /// the slices that follow run in later turns.
+    fn canceled(&self) -> bool {
+        self.publication.cancel.is_canceled()
     }
 }
 

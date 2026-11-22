@@ -31,7 +31,8 @@ app").
 Requirements as for `hosts/tizen`: the pinned nightly with `rust-src`
 (`tools/ci/fuzz-imports.sh --toolchain`), a `clang` that targets wasm32
 (SQLite's C code), Tizen Studio's CLI, a signing profile for the TV, and the
-TV in Developer Mode.
+TV in Developer Mode. `build.sh` first checks that `../nsh-patina` is clean
+at `nsh.rev` (`tools/ci/pins.py check-nsh`), as `tools/check.sh` does.
 
 ```sh
 hosts/tizen-nsh/build.sh --stage                                  # target/tizen-nsh/stage

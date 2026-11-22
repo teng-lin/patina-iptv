@@ -261,7 +261,8 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   at a time (`Services::submit_import`), rather than staying unavailable;
   their blocking store requests run the writer lane inline, which is safe
   because only one import runs and it awaits its own publish. The 50 ms
-  gate is not measured on the TV yet.
+  gate is measured on the TV and missed: the longest guide step took
+  2,364 ms and the longest catalog step 665 ms ("With a real account").
 - **1d. Native-only services behind `native`.** Recording, backup, credential
   store, staged probes, with the capability model reporting them unavailable.
   *Gate*: `cargo check -p iptv-runtime --no-default-features --target
@@ -287,15 +288,17 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   the remaining mount items. `hosts/tizen` gains the AVPlay player and host
   services for the NSH build. *Status*: done as a sibling host,
   `hosts/tizen-nsh` (the bridge stays as it is), on nsh-platform-tizen at
-  b80462a8. The player is the platform's AVPlay component behind a filter
+  32492c0. The player is the platform's AVPlay component behind a filter
   that refuses sources needing headers. The app starts on the TV, draws its
   screens and takes the remote's keys (the browser host uses the remote's
   key phases: the platform has no NSH keymap).
 - **3. Measure and shrink.** Build Patina's real module. Link only the base
   components in use; record size, launch and key latency on the device.
   *Status*: done for the 2020 set ("Module size and launch"): from 16.1 MB
-  to 7.5 MB (6.5 MB of code), and its compiled module now caches. Ended on
-  Tizen 5.5 by the decision below.
+  to 7.5 MB (6.5 MB of code). The compiled module caches from the 11.5 MB
+  opt-level z build on, as timed on the TV down to the 8.9 MB default; the
+  7.5 MB build was not timed on the TV. Ended on Tizen 5.5 by the decision
+  below.
 - **4. Switch per TV generation.** *Gates*: module small enough to cache
   (about 6 MB on the 2020 set), first launch within 30 s behind a splash,
   cached launch within 8 s, key to frame within 80 ms. Generations that meet
@@ -512,15 +515,16 @@ It rests on these measurements, against step 4's gates:
 | | Measured | Gate |
 | --- | --- | --- |
 | First launch after an install | about 41 s to first paint (26 s of it compiling) | 30 s |
-| Cached launch | first paint 13–17 s; the channel list 22–27 s (comparison run) | 8 s |
-| Key to frame on the guide | median about 148 ms | 80 ms |
+| Cached launch | first paint 13–17 s (real-account run); the channel list 23–25 s (comparison run, below) | 8 s |
+| Key to frame on the guide | median about 148 ms (real-account run); 147 ms (comparison run) | 80 ms |
 | A publish step | up to 2.4 s (catalog 665 ms) | 50 ms |
 | WebAssembly memory | 61 MB at launch; about 94 MB in use (comparison run) | |
-| Stability | the app was closed twice while zapping | |
+| Stability | the app was closed twice while zapping (real-account run); HLS streams dropped about every 37 s (comparison run) | |
 
 On the same TV and provider, three other Tizen IPTV players and the bridge
 (medians; zap is channel up to a moving picture, mostly the provider's
-cold start):
+cold start). Patina NSH played the provider's HLS streams where the bridge
+played MPEG-TS, so their zap and drop columns are not like for like:
 
 | App | Launch to channel list | Key to frame | Zap | Notes |
 | --- | --- | --- | --- | --- |
@@ -557,6 +561,7 @@ Chromium 85+) before deciding NSH on Tizen as a whole.
 | --- | --- |
 | Bridge performance, limits and what it stores | `hosts/tizen/README.md`, PR #190 |
 | NSH engine on the TV, compile time and cache limit by module size, per-key cost | `../nsh-platform-tizen/README.md` |
+| Comparison with other Tizen players (Decision on Tizen 5.5) | Runs on 2026-11-21/22 on the same TV (UN55TU7000) and provider account: Patina NSH, the Patina bridge, OpenIPTV, APL TV and Xtivio; timings recorded with DevTools, and the player's state (AVPlay) |
 | Worker against page thread | `../nsh-platform-tizen` (`worker.html`, `bench-common.js`), runs on 2026-11-21 |
 | Real store size | Native import of one real account into a temporary unencrypted store (`dbstat` per table); the database was deleted after measuring |
 | SQLite persistence on the TV | In-memory database built, serialized, written to IndexedDB, read back and restored across launches (probe, 2026-11-21) |

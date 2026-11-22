@@ -524,6 +524,12 @@ impl crate::publish::Publish for GuidePublish {
         );
         Ok(counts)
     }
+
+    /// A guide action or newer work superseded it after `prepare`
+    /// ([`Stops`]): the copy must not replace a guide decided since.
+    fn canceled(&self) -> bool {
+        self.stops.superseded()
+    }
 }
 
 /// What ends guide work's right to write its result: the tokens that stop

@@ -40,11 +40,14 @@ function PatinaPlayer(ctx) {
         return emit.apply(ctx, arguments);
     };
     var inner = NshTizen.avplay(ctx);
+    /* The token of the source last refused: one error per source. Only
+     * the full props (`all`) say what the source is now; `changed` often
+     * has no source at all (a pause, a seek), which says nothing about it. */
     var refused = null;
-    function filtered(props) {
+    function filtered(props, full) {
         var source = props.source;
         if (source && required(source.headers).length) {
-            if (refused !== source.token) {
+            if (full && refused !== source.token) {
                 refused = source.token;
                 ctx.emit('error', { code: 'headersUnsupported' });
             }
@@ -53,7 +56,7 @@ function PatinaPlayer(ctx) {
             copy.source = null;
             return copy;
         }
-        refused = null;
+        if (full) refused = null;
         return props;
     }
     return {
@@ -66,7 +69,7 @@ function PatinaPlayer(ctx) {
                 headers: source ? Object.keys(source.headers || {}) : [],
                 paused: all.paused
             });
-            if (inner.props) inner.props(filtered(changed), filtered(all), removed);
+            if (inner.props) inner.props(filtered(changed, false), filtered(all, true), removed);
         },
         frame: function (rect) { if (inner.frame) inner.frame(rect); },
         command: function (name, args) { if (inner.command) inner.command(name, args); },
