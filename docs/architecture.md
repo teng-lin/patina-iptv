@@ -267,7 +267,7 @@ manifests say today.
 
 | Crate | Layer | Depends on (workspace crates) |
 | --- | --- | --- |
-| `iptv-core` | Domain, with presentation state and View code still inside | none |
+| `iptv-core` | Domain and presentation, split into modules | none |
 | `iptv-settings` | Domain, with one feature's state holder | none |
 | `iptv-providers`, `iptv-epg` | Domain | `iptv-core` |
 | `iptv-guide` | Domain | `iptv-core`, `iptv-epg`, `iptv-providers` |
@@ -368,34 +368,24 @@ a module that holds no Domain values, so that the move is a file move.
 
 | What | Where it is today | Rule | Where it goes |
 | --- | --- | --- | --- |
-| Modules that are presentation state only | `iptv_core::{browse, browse_playback, channel_list, channel_number, channel_picker, editor, heard, library_recovery, menu, panels, pip, play_bar, player_info, player_options, seek_hold, sound}` and `playback_windows` apart from its geometry | 1 | `iptv-presentation` |
-| State holders in modules that also hold Domain values | `iptv_core`: `guide` (`Focus`, `Pane`, `Move`, `ProgramSelection`), `lists` (`Entry`, `ListId`, `ChannelList`, `ListView`), `favorites` (`History`), `playback` (`Health`, `ChannelHistory`, zap targets), `organization` (`Editor`, `Action`), `parental` (`Dialog`), `recording` (`Screen`, `Draft`), `vod` (`Screen`, `Control`, `Destination`), `tracks` (chooser entries and labels), `multiview` (all but `MAX_SURFACES`), `reorder` (all but `move_to_present`), `membership` (all but `Member`), `wizard` (the state machine and its form), `capabilities` (`pip` and `multiview`, the availability of two features) | 1 | Each holder moves whole to `iptv-presentation`, with its inherent methods (`browse` has an `impl Focus`). The values stay in `iptv-core`; the wizard's request and the import's report become a Domain module there. |
-| State holders in three other Domain crates | `iptv_library::{details, epg_sources, guide_assign, guide_inspect, guide_repair_screen, playlists}`, `iptv_search::{state, selection}`, `iptv_settings::screen`. `iptv_settings::backup` repairs restored values with the screen's `grid`. | 1 | `iptv-presentation`. The grid arithmetic goes to the settings' validation API. |
-| Domain types with methods that name a holder | `Recent::history` returns `History`; `Tracks` words its chooser entries; `PlaylistDraft::kind` returns the form's kind; `validate_url` returns the form's error; `ProgramSelection::for_program` | 1 | Functions in the presentation, and a Domain error for the URL check. |
+| Modules that are presentation state only | `iptv_core::{browse, browse_playback, channel_list, channel_number, channel_picker, editor, heard, library_recovery, menu, panels, pip, play_bar, player_info, player_options, seek_hold, sound}` and `playback_windows` | 1 | `iptv-presentation` |
+| Temporary re-exports | The split presentation holders still live under their original `iptv-core` paths. The `layer_inventory` test tracks those re-exports. | 1 | Move each holder to `iptv-presentation` and remove its re-export. |
+| State holders in three other Domain crates | `iptv_library::{details, epg_sources, guide_assign, guide_inspect, guide_repair_screen, playlists}`, `iptv_search::{state, selection}`, `iptv_settings::screen` | 1 | `iptv-presentation` |
 | Domain crates' tests that drive a holder | `iptv-guide`'s unit tests build `Focus`, `ChannelList` and `ListView` over its schedule | 1 | They move beside the holders, in `iptv-presentation`'s tests, with `iptv-guide`'s fixtures exported for tests. |
-| A command returns a state holder | `iptv_runtime::favorites::history` returns `favorites::History`, which marks the playing row | 5 | It returns the recent channels. The presentation marks the row. |
-| A command takes a state holder | `iptv_runtime::commands::edit_organization` takes `organization::Editor` (focus, mode, selection) and the menu's `Action` | 5 | It takes the items, a Domain edit and the selection. |
-| The runtime speaks the wizard's vocabulary | `ImportProgress`, `ImportStage`, `ImportCounts`, `ImportFailure` and `FailureKind` are defined in `iptv_core::wizard`, and the runtime takes the wizard's `PlaylistDraft`; `iptv-runtime/src/wizard_map.rs` translates `iptv-import`'s own progress and failures into them, and `imports.rs` sets `ImportFailure::field` to `Field::EpgUrl` | 5, 6 | The runtime takes a Domain request and reports imports in Domain values, with which input failed. The wizard maps that to a field. |
 | A holder issues an operation's identity | Each `Wizard` numbers its imports from 1 (`ImportId`), so a wizard opened again can take a reply meant for the last one | 5 | The runtime issues the identity when it accepts the import. |
 | Placeholders in the same string as a title | `Schedule::{title, title_in, group_name, group_name_in, all_channels_name}`; `iptv-guide` translates "No information", "Loading…" and its own "Other" bucket into them, and `lists.rs` compares the all-channels name as a string. The bridge compares titles with those strings (`iptv-web/src/grid.rs`), so a program titled "Loading…" reads as a placeholder. | 7 | The schedule returns a listing (a stored title unchanged, no information, or loading) and a group's name (a stored name, the guide's ungrouped bucket, a fixed entry, or an all-channels kind). The presentation words them. |
 | Refusals as English sentences | `recording::Request::validate` returns sentences, which reach the screen through `iptv-store-sqlite`'s error and the runtime's admission | 7 | A typed reason. |
-| The runtime translates | `wizard_map.rs` translates the word a new playlist is named when it has no name, host or file to go by | 7 | The caller passes that word in, already translated. The runtime keeps deriving the name. |
 | Localization in the Domain's crate | `iptv_core::{i18n, clock}` and the crate's `external-catalog` feature | 1 | `iptv-presentation`, once nothing below it translates. The `key` marker for message ids stays in `iptv-core`. |
 | A lookup that reads a file | In a browser package the first lookup of a language reads a package file inside `translate`, and a failed read stays an empty catalog | 4 | The host loads a language's catalog and hands it in; `translate` only looks up. |
-| Distances on screen in toolkit-free modules | `iptv_core::timeline` takes a drag's distance and speed in dp; `playback_windows::reachable` takes rectangles in points; `play_bar::seek_target` takes a touch's x and the bar's width. Only `iptv-app` uses them. | 7 | `iptv-app`. The holders they feed keep taking guide minutes and identities. |
-| Layout policy and type sizes | `iptv_core::layout`: `Class`, `GuideHeader`, `ListPanel`. The header's title, times and progress sizes are declared there and again in `iptv-app/src/fonts.rs` and `header.rs`. Only `iptv-app` uses them. | 7 | `iptv-app`, with one declaration of each size. `InputMode` goes to `iptv-presentation`. |
-| The desktop picture-in-picture window's title and placement | `iptv_core::pip_window::{TITLE, WIDTH, popup_rects}`, used by `iptv-player-mpv` to find and place windows through the compositor, and `size_for`, used by `iptv-app` | 1 | `TITLE`, `WIDTH` and `popup_rects` go to `iptv-player-mpv`, which the shell already depends on. `size_for` goes to `iptv-app`. `Hover` and `Exit` go to `iptv-presentation`. |
 | One crate in two layers | `iptv-web`: browser adapters, and behind `bridge` the bridge | 1 | Two crates, with one owner for the wasm entry points both workers call. It waits for the decision on the bridge's future. |
 
 The [layer boundaries plan](plans/2026-11-22-layer-boundaries.md) removes
 these rows in three pull requests:
 
-1. **Untangle in place.** The lower layers stop naming presentation state:
-   the runtime rows above, the picture-in-picture title and placement, the
-   settings arithmetic, and each Domain type's methods that take or return
-   a holder. Each mixed file is split in two inside its crate, and the
-   layout and the distances on screen go to `iptv-app`. The two checks
-   arrive here.
+1. **Untangle in place.** Runtime commands use Domain values. Split holders
+   keep their original paths through temporary re-exports. Layout and touch
+   geometry live in `iptv-app`, and the platform adapter owns the desktop
+   picture-in-picture window identity and placement.
 2. **Listings as values.** The placeholder row, which is the one change a
    viewer can see.
 3. **`iptv-presentation`.** The presentation files move, dependents first,
@@ -426,6 +416,8 @@ Exceptions that stay, each with its reason:
 | Rule | Check |
 | --- | --- |
 | No cycles; a crate names only what its manifest lists | Cargo |
+| Declared dependencies follow the layer rules | `tools/ci/test-layers.py` reads Cargo metadata and checks the bridge feature edge |
+| The temporary presentation names below the front ends match the inventory | `iptv-core/tests/it/layer_inventory.rs` checks shipped and test-only entries separately |
 | The portable crates compile for wasm32 with no platform crate | the wasm32 builds ([Portability](#portability)) |
 | The runtime depends on and names only its listed crates, and no toolkit, shell or player | `iptv-runtime/tests/it/architecture.rs` |
 | The shell names only the listed runtime items and no store type; runtime events enter at one place | `iptv-runtime/tests/it/shell_boundary.rs` |
@@ -434,15 +426,8 @@ Exceptions that stay, each with its reason:
 The lists in those tests are exact: a new name fails until it is added on
 purpose, and an unused entry fails until it is removed.
 
-Not checked yet:
-
-- The dependency rules for crates other than the runtime. One check over
-  every manifest, with each crate's layer and the layers it may use, is the
-  plan's first commit.
-- The rules inside the crates that still hold more than one layer. An
-  inventory of what the lower layers name holds the line during the
-  migration, and review holds the rest until the new crate makes the
-  compiler do it.
+Review checks ownership within each crate. The inventory tracks migration
+references until the presentation crate makes the compiler enforce the edge.
 
 ## Sans-IO ports
 
