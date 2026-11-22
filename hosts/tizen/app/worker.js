@@ -222,7 +222,14 @@ function command(cmd) {
     if (!ex) return queue.push(cmd);
     call(function () { ex.command(put(encoder.encode(JSON.stringify(cmd)))); });
 }
-onmessage = function (e) { command(e.data); };
+onmessage = function (e) {
+    /* Measurements: the core's memory, answered here. */
+    if (e.data && e.data.cmd === 'memory') {
+        postMessage(JSON.stringify({ type: 'metric', name: 'memory', wasmBytes: ex ? ex.memory.buffer.byteLength : 0 }));
+        return;
+    }
+    command(e.data);
+};
 
 (function load() {
     var x = new XMLHttpRequest();
