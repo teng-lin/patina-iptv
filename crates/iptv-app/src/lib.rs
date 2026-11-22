@@ -45,6 +45,7 @@ mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
 mod host;
+pub mod layout;
 // A browser host exports nothing: the glob is empty there.
 #[allow(unused_imports)]
 #[doc(inline)]
@@ -1330,14 +1331,14 @@ pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySour
 /// The guide header a desktop window `width` × `height` gets at the default
 /// text size (for tests: the same policy the header and the video follow).
 #[cfg(feature = "test-support")]
-pub fn desktop_guide_header(width: f32, height: f32) -> iptv_core::layout::GuideHeader {
-    iptv_core::layout::GuideHeader::of(width, height, scale::scale_for(width, height, true), 1.0)
+pub fn desktop_guide_header(width: f32, height: f32) -> crate::layout::GuideHeader {
+    crate::layout::GuideHeader::of(width, height, scale::scale_for(width, height, true), 1.0)
 }
 
 /// The guide header a phone's window `width` × `height` gets at the text
 /// factor `text` (for tests: the same policy the header and the video
 /// follow, at the phone's guide scale).
 #[cfg(feature = "test-support")]
-pub fn phone_guide_header(width: f32, height: f32, text: f32) -> iptv_core::layout::GuideHeader {
-    iptv_core::layout::GuideHeader::of(width, height, scale::PHONE, text)
+pub fn phone_guide_header(width: f32, height: f32, text: f32) -> crate::layout::GuideHeader {
+    crate::layout::GuideHeader::of(width, height, scale::PHONE, text)
 }

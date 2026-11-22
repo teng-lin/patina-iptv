@@ -3,7 +3,7 @@
 //! focused channel or the preview, the poster browser's title, a show's
 //! selected episode — on the same `tv.player`, and sends no playback
 //! command. A compact guide header moves its shortcuts under the preview
-//! (`iptv_core::layout::Shortcuts`), and the video keeps following the
+//! (`iptv_app::layout::Shortcuts`), and the video keeps following the
 //! preview's rectangle.
 //!
 //! Synthetic data only: the personalization playlist, and a generated
@@ -50,7 +50,7 @@ fn guide_sizes() -> impl Iterator<Item = (f32, f32)> {
 
 /// Whether the shortcuts go under the preview, by the app's own policy.
 fn below((w, h): (f32, f32)) -> bool {
-    iptv_app::desktop_guide_header(w, h).shortcuts == iptv_core::layout::Shortcuts::Below
+    iptv_app::desktop_guide_header(w, h).shortcuts == iptv_app::layout::Shortcuts::Below
 }
 
 fn by_id(id: &'static str) -> impl Fn(&nsh_testing::LayoutNode) -> bool {
@@ -104,7 +104,7 @@ fn video_follows_the_preview(app: &Headless, player: NodeId, (w, h): (f32, f32))
         "the policy's preview at {w}x{h}"
     );
     assert!(
-        video[3] >= iptv_core::layout::PREVIEW_MIN_H,
+        video[3] >= iptv_app::layout::PREVIEW_MIN_H,
         "the preview shrinks, never goes: {video:?}"
     );
     assert!(video[0] + video[2] <= w, "the preview fits the window");

@@ -14,16 +14,15 @@ use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
 use crate::guide::{Airing, Pane, Program};
+use crate::layout::{DETAILS_GAP, MAX_TIMES_LINES, Shortcuts, TIMES_GAP, TIMES_PROGRESS_W};
 use crate::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, header_now};
 use crate::scale::Scale;
 use crate::theme::{BRIGHT_TEXT, RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, clock, tint};
-use iptv_core::layout::Shortcuts;
 
 const WHITE: u32 = 0xFFFFFF;
 /// The progress bar on the times line (at full size: it, the type and the
 /// gaps scale with the grid, `scale.rs`).
-const PROGRESS_W: f32 = 64.0;
 const PROGRESS_H: f32 = 4.0;
 /// Lines of description under the times.
 const BODY_LINES: u32 = 4;
@@ -199,12 +198,12 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         // A compact header gives it less room than its lines want: clip them
         // (the header grows for the title and times: `GuideHeader`).
         .overflow_hidden()
-        .gap(move || size.px(6.0))
+        .gap(move || size.px(DETAILS_GAP))
         .child(
             view()
                 .flex_row()
                 .items_center()
-                .gap(move || size.px(12.0))
+                .gap(move || size.px(TIMES_GAP))
                 .child(
                     text(move || {
                         program.with(|p| {
@@ -251,18 +250,24 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 .flex_row()
                 .flex_wrap()
                 .items_center()
-                .gap(move || size.px(12.0))
+                .gap(move || size.px(TIMES_GAP))
                 .child(
                     text(move || program.with(|p| p.map(|p| span(p.4)).unwrap_or_default()))
                         .max_w(percentage(1.0))
-                        .number_of_lines(2)
+                        .number_of_lines(MAX_TIMES_LINES)
                         .font_family(SANS)
                         .text_size(move || size.text_px(HEADER_TIMES))
                         .text_color(rgb(BRIGHT_TEXT)),
                 )
                 .child(
                     view()
-                        .w(move || px(if live() { size.of(PROGRESS_W) } else { 0.0 }))
+                        .w(move || {
+                            px(if live() {
+                                size.of(TIMES_PROGRESS_W)
+                            } else {
+                                0.0
+                            })
+                        })
                         .h(move || size.px(PROGRESS_H))
                         .rounded(move || size.px(PROGRESS_H / 2.0))
                         .bg(tint(WHITE, RESTING_ALPHA * 3))
@@ -278,7 +283,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                                         })
                                     });
                                     px(if live() {
-                                        size.of(PROGRESS_W) * done
+                                        size.of(TIMES_PROGRESS_W) * done
                                     } else {
                                         0.0
                                     })
@@ -292,7 +297,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                             .with(|p| p.map(|(_, now, _, _, p)| left(now, p)).unwrap_or_default())
                     })
                     .max_w(percentage(1.0))
-                    .number_of_lines(2)
+                    .number_of_lines(MAX_TIMES_LINES)
                     .font_family(SANS)
                     .text_size(move || size.text_px(HEADER_TIMES))
                     .text_color(secondary()),
@@ -505,7 +510,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
         })
     });
     // A compact window moves the shortcuts under the preview and the
-    // program (`iptv_core::layout`). Only this header's own views change:
+    // program (`crate::layout`). Only this header's own views change:
     // the preview keeps its place, and the player under it is resized.
     let below = computed(move || crate::panels::shortcuts_now() == Shortcuts::Below);
     // A compact portrait window stacks the program under a preview as wide

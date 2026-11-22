@@ -12,8 +12,8 @@
 use crate::i18n::tr;
 use crate::lists::entry_name;
 
+use crate::layout::ListPanel;
 use iptv_core::channel_list::{ChannelList, ListMode, ListPane, Outcome};
-use iptv_core::layout::ListPanel;
 use iptv_core::lists::{ChannelList as Rows, Entry, FAVORITES, entry_count};
 use iptv_nav::Action;
 use nsh_core::prelude::*;
@@ -76,7 +76,7 @@ fn groups_shown(ui: Ui) -> bool {
 }
 
 /// The columns at the left in a window `width` points wide, kept inside
-/// it (`iptv_core::layout::ListPanel`).
+/// it (`crate::layout::ListPanel`).
 fn panel(ui: Ui, width: f32) -> ListPanel {
     let scale = crate::scale::now();
     let groups = if groups_shown(ui) {

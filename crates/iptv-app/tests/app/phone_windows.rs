@@ -3,7 +3,7 @@
 //! default text size and at large ones, the guide drawn at the phone's scale
 //! (0.7). Upright, the guide's header stacks
 //! a preview as wide as the window over the focused program
-//! (`iptv_core::layout::GuideHeader::stacked`); on its side it keeps the
+//! (`iptv_app::layout::GuideHeader::stacked`); on its side it keeps the
 //! preview beside the program. The player's channel list stays inside an
 //! upright window, a strip beside it for a tap, and in the preview layout
 //! the video stays full screen under it until the window has room for it
@@ -17,7 +17,7 @@ use std::time::Duration;
 use crate::ipad_windows::{BAR_CONTROLS, channel_selected, header_fits_as, player, present};
 use crate::personalization::step;
 use crate::tv_shared_controls::{persistent, preview_fixture_with};
-use iptv_core::layout::{LIST_BESIDE_MIN, PREVIEW_MARGIN};
+use iptv_app::layout::{LIST_BESIDE_MIN, PREVIEW_MARGIN};
 use iptv_settings::Value;
 use nsh_core::platform::{Idiom, Os};
 
@@ -32,7 +32,7 @@ const SIDEWAYS: [(f32, f32); 2] = [(792.0, 360.0), (915.0, 412.0)];
 const TEXT: [f32; 4] = [1.0, 1.15, 1.5, 2.0];
 
 /// The header a phone's window gets: the guide at the phone's scale.
-fn policy(size: (f32, f32), text: f32) -> iptv_core::layout::GuideHeader {
+fn policy(size: (f32, f32), text: f32) -> iptv_app::layout::GuideHeader {
     iptv_app::phone_guide_header(size.0, size.1, text)
 }
 

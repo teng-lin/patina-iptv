@@ -241,7 +241,7 @@ what the content needs at the current text size, not from the device type.
 - Below the space a pane needs, the layout collapses rather than shrinking text
   or touch targets further.
 - Remote focus treatment does not change with window size.
-- **Now:** the class policy (`iptv_core::layout::Class`): Compact below 620
+- **Now:** the class policy (`iptv_app::layout::Class`): Compact below 620
   points and Expanded from 960, each divided by the text factor (the guide's
   scale times the text size: the app's own text size times the system's,
   Android's font scale or iOS Dynamic Type). Search's two-row header uses
@@ -256,7 +256,7 @@ what the content needs at the current text size, not from the device type.
   screen (smallest width under 600 dp, not a TV) asks for landscape on
   either side, as the rotation lock allows, until portrait has a design of
   its own. Tablets, an unfolded phone and TVs rotate freely.
-- **Now:** the guide's header (`iptv_core::layout::GuideHeader`) puts its
+- **Now:** the guide's header (`iptv_app::layout::GuideHeader`) puts its
   shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
   own under the preview and the focused program in Compact, and in Medium
   wherever the program would have less than its room beside them. The
@@ -282,7 +282,7 @@ what the content needs at the current text size, not from the device type.
   (400 × 600 is 1.5) and a phone on its side keep the preview beside the
   program.
 - **Now:** the player's channel list keeps its columns inside the window
-  (`iptv_core::layout::ListPanel`): the groups column first, then the list in
+  (`iptv_app::layout::ListPanel`): the groups column first, then the list in
   what is left. In the preview layout the video goes beside them only where
   it keeps 160 points of width. A narrower window, a phone held upright for
   one, leaves it full screen under the list, as the overlay layout does.

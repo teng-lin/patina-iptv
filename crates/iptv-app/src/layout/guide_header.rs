@@ -11,6 +11,7 @@
 //! never shrinks below [`PREVIEW_MIN_H`] (the header grows instead).
 
 use super::Class;
+use crate::fonts::{HEADER_TIMES, HEADER_TITLE};
 
 /// The header's share of the window's height.
 pub const HEADER_SHARE: f32 = 0.33;
@@ -46,8 +47,6 @@ pub const DETAILS_MIN_W: f32 = 240.0;
 /// "12:40 PM – 1:00 PM", the progress bar, "15 min left") and the gaps.
 /// [`details_height`] estimates from them the room the title and the
 /// times take, before the description, which gives way.
-pub const TITLE_PT: f32 = 22.0;
-pub const TIMES_PT: f32 = 17.0;
 pub const LINE_HEIGHT: f32 = 1.2;
 pub const TIMES_SPAN_W: f32 = 187.0;
 pub const TIMES_PROGRESS_W: f32 = 64.0;
@@ -56,7 +55,7 @@ pub const DETAILS_GAP: f32 = 6.0;
 pub const TIMES_GAP: f32 = 12.0;
 /// The most lines each part of the times row takes: the app ends a longer
 /// part with an ellipsis (`header.rs`, `number_of_lines(2)`).
-pub const MAX_TIMES_LINES: f32 = 2.0;
+pub const MAX_TIMES_LINES: u32 = 2;
 /// A compact window at least this many times as tall as it is wide stacks
 /// the header ([`GuideHeader::stacked`]): a phone held upright (about 2.2)
 /// and a portrait tablet's narrow Split View window, not a small desktop
@@ -220,7 +219,7 @@ fn arrange(
 pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
     let column = column.max(1.0);
     let line = |pt: f32| (pt * text * LINE_HEIGHT).ceil();
-    let times_line = line(TIMES_PT);
+    let times_line = line(HEADER_TIMES);
     let gap = TIMES_GAP * scale;
     // Lay the parts out greedily, as the flex row wraps them.
     let parts = [
@@ -233,7 +232,7 @@ pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
     for (w, h) in parts {
         // The app draws each part on at most two lines (`number_of_lines`),
         // ending a longer one with an ellipsis: two is the most it takes.
-        let lines = (w / column).ceil().clamp(1.0, MAX_TIMES_LINES);
+        let lines = (w / column).ceil().clamp(1.0, MAX_TIMES_LINES as f32);
         let w = w.min(column);
         let h = h * lines;
         // A part that does not fit the row's rest wraps, even by a hair.
@@ -247,7 +246,7 @@ pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
         }
     }
     let times: f32 = rows.iter().sum::<f32>() + gap * (rows.len().saturating_sub(1)) as f32;
-    line(TITLE_PT) + DETAILS_GAP * scale + times
+    line(HEADER_TITLE) + DETAILS_GAP * scale + times
 }
 
 /// The header's height and the preview's width in a window `width` ×
@@ -438,10 +437,10 @@ mod tests {
         // three lines; the app ellipsizes it after two, so two are budgeted,
         // then the progress on a line and the minutes left (235 points) on two.
         let ax3 = 40.0 / 17.0;
-        let line = (TIMES_PT * ax3 * LINE_HEIGHT).ceil();
+        let line = (HEADER_TIMES * ax3 * LINE_HEIGHT).ceil();
         assert_eq!(
             details_height(214.0, 1.0, ax3),
-            (TITLE_PT * ax3 * LINE_HEIGHT).ceil()
+            (HEADER_TITLE * ax3 * LINE_HEIGHT).ceil()
                 + 6.0
                 + 2.0 * line
                 + 12.0

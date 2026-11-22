@@ -176,7 +176,7 @@ pub struct Screen {
     /// adding a playlist).
     offered: Option<Option<i64>>,
     /// Whether the window is in the compact layout class
-    /// ([`crate::layout::Class::Compact`]); set by the shell through
+    /// (the compact window class); set by the shell through
     /// [`Screen::set_compact`] and kept across [`Screen::begin`].
     compact: bool,
     /// The remote was sent off the empty screen's action because it moved

@@ -676,10 +676,10 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
 
 pub(super) fn screen(ui: Ui, size: Scale) -> View {
     super::empty::bind(ui);
-    // The layout class at the current text size (`iptv_core::layout`):
+    // The layout class at the current text size (`crate::layout`):
     // a compact window shows the empty catalog as its one pane.
     let compact = computed(move || {
-        use iptv_core::layout::Class;
+        use crate::layout::Class;
         let text = size.of(1.0) * crate::settings::text_factor();
         Class::of(window().width.0, text) == Class::Compact
     });
