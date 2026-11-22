@@ -153,6 +153,7 @@ impl Services {
                     publish: Some(Box::new(publish)),
                     phase: Phase::Prepare,
                     reply: Some(reply),
+                    timing: Timing::default(),
                 };
                 self.service().push_sliced(Box::new(job))
             }
@@ -188,6 +189,27 @@ struct Job<P: Publish> {
     publish: Option<Box<P>>,
     phase: Phase,
     reply: Option<oneshot::Sender<Result<P::Output, StoreError>>>,
+    /// Steps run, their total and the longest (the plan's 50 ms gate for
+    /// one step on a TV), logged when the publish ends.
+    timing: Timing,
+}
+
+#[derive(Default)]
+struct Timing {
+    steps: u32,
+    total: std::time::Duration,
+    longest: std::time::Duration,
+}
+
+impl Timing {
+    fn log(&self, outcome: &str) {
+        log::info!(
+            "iptv store: publish {outcome}: {} steps, {} ms in steps, longest {} ms",
+            self.steps,
+            self.total.as_millis(),
+            self.longest.as_millis()
+        );
+    }
 }
 
 impl<P: Publish> Job<P> {
@@ -253,18 +275,29 @@ impl<P: Publish> Sliced for Job<P> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let service = self.service.clone();
+        let started = crate::time::Instant::now();
+        let mut failed = false;
         let ended = service.with_writer_store(self.epoch, &mut connection, |live| {
             match self.advance(live, budget.rows) {
                 Ok(ended) => Ok(ended),
                 Err(error) => {
+                    failed = true;
                     self.fail(Some(live), error);
                     Ok(true)
                 }
             }
         });
+        let took = started.elapsed();
+        self.timing.steps += 1;
+        self.timing.total += took;
+        self.timing.longest = self.timing.longest.max(took);
         match ended {
             Ok(false) => Progress::Pending,
-            Ok(true) => Progress::Done,
+            Ok(true) => {
+                self.timing
+                    .log(if failed { "abandoned" } else { "finished" });
+                Progress::Done
+            }
             // The owner closed, or the store would not open: nothing to
             // swap into. Dropping the copy abandons the publish.
             Err(error) => {
