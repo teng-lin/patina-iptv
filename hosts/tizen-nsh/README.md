@@ -42,7 +42,10 @@ target-feature=+sign-ext,+mutable-globals`, `-Zbuild-std=std,panic_abort`
 and the same feature set for SQLite (`CFLAGS_wasm32_unknown_unknown`). By
 default it also builds for size: std with `optimize_for_size`,
 `-Cpanic=immediate-abort` (a panic is a trap without its message),
-`-Zlocation-detail=none`, then binaryen's `wasm-opt -Oz` limited to MVP
+`-Zlocation-detail=none`, SQLite's C code in the link-time optimization
+when `clang` has rustc's LLVM major version (`-flto`,
+`-Clinker-plugin-lto`) and without the SQLite options Patina never uses
+(`SQLITE_WASM_RS_FLAGS`), then binaryen's `wasm-opt -Oz` limited to MVP
 plus the two features, when `wasm-opt` is on `PATH` (`NSH_SIZE=0` and
 `NSH_WASM_OPT=0` turn them off for comparisons). `build.sh` prints the module's total, Code
 and Data bytes (`sections.py`); compile time on the TV follows the Code
