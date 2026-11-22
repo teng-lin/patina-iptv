@@ -13,8 +13,8 @@ pub use tracks::parse_tracks;
 /// The player component, registered by each host.
 pub const PLAYER_VIEW: &str = "tv.player";
 
-/// The PiP component shares surface zero's player and stream.
-pub const PIP_VIEW: &str = "tv.pip";
+pub mod pip_window;
+pub use pip_window::PIP_VIEW;
 
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
 mod mpv;
