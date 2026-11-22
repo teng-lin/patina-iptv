@@ -57,6 +57,26 @@ pub enum ProgramSelection {
     Unavailable,
 }
 
+impl ProgramSelection {
+    /// The playback or information action for this listing. The selected and
+    /// playing channels are catalog indices on the same schedule.
+    pub fn for_program(
+        program: &Program,
+        now: i32,
+        archive_days: u8,
+        channel: usize,
+        live_channel: Option<usize>,
+    ) -> Self {
+        match program.airing(now) {
+            Airing::Live if live_channel == Some(channel) => Self::AlreadyLive,
+            Airing::Live => Self::Live,
+            Airing::Ended if program.can_replay(now, archive_days) => Self::Replay,
+            Airing::Ended => Self::Unavailable,
+            Airing::Upcoming => Self::Upcoming,
+        }
+    }
+}
+
 impl Program {
     /// Where the program sits at guide minute `now`.
     pub fn airing(&self, now: i32) -> Airing {
@@ -73,24 +93,6 @@ impl Program {
     pub fn can_replay(&self, now: i32, archive_days: u8) -> bool {
         let window = i32::from(archive_days) * 24 * 60;
         window > 0 && self.start <= now && self.start >= now.saturating_sub(window)
-    }
-
-    /// The playback or information action for this listing. The selected and
-    /// playing channels are catalog indices on the same schedule.
-    pub fn select(
-        &self,
-        now: i32,
-        archive_days: u8,
-        channel: usize,
-        live_channel: Option<usize>,
-    ) -> ProgramSelection {
-        match self.airing(now) {
-            Airing::Live if live_channel == Some(channel) => ProgramSelection::AlreadyLive,
-            Airing::Live => ProgramSelection::Live,
-            Airing::Ended if self.can_replay(now, archive_days) => ProgramSelection::Replay,
-            Airing::Ended => ProgramSelection::Unavailable,
-            Airing::Upcoming => ProgramSelection::Upcoming,
-        }
     }
 
     /// Played fraction of a live program at `now` (0 otherwise).
@@ -744,7 +746,8 @@ mod tests {
             start: 120,
             end: 180,
         };
-        let select = |now, days, playing| program.select(now, days, 2, playing);
+        let select =
+            |now, days, playing| ProgramSelection::for_program(&program, now, days, 2, playing);
         assert_eq!(select(119, 1, Some(2)), ProgramSelection::Upcoming);
         assert_eq!(select(120, 1, Some(1)), ProgramSelection::Live);
         assert_eq!(select(179, 1, Some(2)), ProgramSelection::AlreadyLive);

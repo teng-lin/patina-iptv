@@ -448,7 +448,8 @@ impl Ui {
         let live = (self.playback.get() == Playback::Live)
             .then(|| self.playing.get())
             .flatten();
-        let selection = program.select(now, view.catchup_days(row), channel, live);
+        let selection =
+            ProgramSelection::for_program(&program, now, view.catchup_days(row), channel, live);
         match selection {
             ProgramSelection::AlreadyLive => {
                 self.mode.set(ViewMode::Fullscreen);

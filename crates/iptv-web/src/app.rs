@@ -495,7 +495,13 @@ impl App {
             return;
         };
         let live = self.playing.filter(|_| self.playing_live);
-        let tuned = match program.select(now, schedule.catchup_days(channel), channel, live) {
+        let tuned = match ProgramSelection::for_program(
+            &program,
+            now,
+            schedule.catchup_days(channel),
+            channel,
+            live,
+        ) {
             ProgramSelection::AlreadyLive => true,
             ProgramSelection::Live => self.play_from(channel, None),
             ProgramSelection::Replay => self.play_from(channel, Some(program)),
