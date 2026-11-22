@@ -4,7 +4,7 @@ mod floor;
 pub mod moves;
 pub use floor::view_range;
 
-use crate::guide::{Airing, PAST, Program, Schedule, VISIBLE};
+use iptv_core::guide::{Airing, PAST, Program, Schedule, VISIBLE};
 
 /// Minutes per step in the guide time header.
 pub const STEP: i32 = 30;
@@ -86,7 +86,7 @@ pub struct Focus {
     pub pane: Pane,
     /// The originating content while the existing video preview owns focus.
     pub preview_origin: PreviewOrigin,
-    /// The selected entry of the groups column ([`crate::lists`]): the
+    /// The selected entry of the groups column ([`iptv_core::lists`]): the
     /// list the guide shows.
     pub group: usize,
     /// The focused row of that list.
@@ -315,7 +315,7 @@ impl Focus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guide::{
+    use iptv_core::guide::{
         CHANNELS, GroupName, HISTORY, HORIZON, Listing, SyntheticSchedule, group_start,
     };
 

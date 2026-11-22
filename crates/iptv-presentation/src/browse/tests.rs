@@ -1,12 +1,13 @@
-use crate::guide::{GroupName, Listing};
+use iptv_core::guide::{GroupName, Listing};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use super::*;
-use crate::favorites::{Favorites, KeyIndex};
-use crate::guide::{Airing, Focus, Move, Pane, home_window};
+use crate::guide::{Focus, Move, Pane, home_window};
 use crate::lists::tests::Catalog;
 use crate::lists::{ALL, ChannelList, Entry, FAVORITES, FIRST_GROUP, ListView, entry_count};
+use iptv_core::favorites::{Favorites, KeyIndex};
+use iptv_core::guide::Airing;
 
 /// The guide screen as the shell runs it: the focus, the list it shows and
 /// the favorites, with the list rebuilt as the shell rebuilds it.
@@ -404,13 +405,13 @@ impl Schedule for SyntheticList {
     fn group_start(&self, _: usize) -> usize {
         0
     }
-    fn program_at(&self, _: usize, minute: i32) -> crate::guide::Program {
-        crate::guide::Program {
+    fn program_at(&self, _: usize, minute: i32) -> iptv_core::guide::Program {
+        iptv_core::guide::Program {
             start: minute,
             end: minute + 1,
         }
     }
-    fn programs_between(&self, _: usize, _: i32, _: i32) -> Vec<crate::guide::Program> {
+    fn programs_between(&self, _: usize, _: i32, _: i32) -> Vec<iptv_core::guide::Program> {
         Vec::new()
     }
     fn catchup_days(&self, _: usize) -> u8 {
@@ -422,7 +423,7 @@ impl Schedule for SyntheticList {
     fn group_label(&self, _: usize) -> GroupName {
         GroupName::Named(String::new())
     }
-    fn listing(&self, _: usize, _: crate::guide::Program) -> Option<Listing> {
+    fn listing(&self, _: usize, _: iptv_core::guide::Program) -> Option<Listing> {
         Some(Listing::Gap)
     }
 }

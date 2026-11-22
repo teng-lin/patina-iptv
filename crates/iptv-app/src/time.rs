@@ -1,6 +1,6 @@
 //! The app's clock: the guide's "now" (from the wall clock for real data,
 //! from when the schedule was shown for synthetic data), local-time labels
-//! and the minute tick that advances [`iptv_core::guide::Focus::now`].
+//! and the minute tick that advances [`iptv_presentation::guide::Focus::now`].
 //!
 //! Local time comes from the host (`crate::host::offset_minutes`); natively
 //! from the C library's `localtime_r` (`tm_gmtoff`), per
@@ -49,7 +49,7 @@ fn shown_secs() -> u64 {
 }
 
 /// The guide minute it is now on the current schedule (not reactive: views
-/// read [`guide::Focus::now`], which the tick keeps equal to this).
+/// read [`iptv_presentation::guide::Focus::now`], which the tick keeps equal to this).
 pub fn now_minute() -> i32 {
     guide::now_minute(&*schedule(), wall_unix(), shown_secs())
 }

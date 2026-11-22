@@ -18,7 +18,18 @@ pub(crate) fn is_tui_mode() -> bool {
     TUI_MODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub use iptv_core::guide;
+/// Guide values and navigation used by the shell.
+pub mod guide {
+    pub use iptv_core::guide::{
+        Airing, CHANNELS, DAY, GROUPS, GroupName, HISTORY, HORIZON, HOUR, Listing, PAST, Program,
+        SYNTHETIC_EPOCH_UNIX, Schedule, SyntheticSchedule, VISIBLE, catchup_days, floor, floor_of,
+        group_start, now_minute, program_at, secs_to_next_minute, unix_of,
+    };
+    pub use iptv_presentation::guide::{
+        Focus, Move, Pane, PreviewOrigin, ProgramSelection, STEP, home_window, moves, page_row,
+        view_range,
+    };
+}
 #[cfg(all(
     feature = "test-support",
     any(target_os = "linux", target_os = "macos")
@@ -122,8 +133,8 @@ use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
-use iptv_core::lists::ChannelList;
 use iptv_presentation::editor::FavoritesEditor;
+use iptv_presentation::lists::ChannelList;
 use iptv_presentation::menu::{Menu, Origin};
 use iptv_presentation::panels::Panels;
 use iptv_presentation::player_options::{PictureSettings, SleepTimer};
@@ -306,7 +317,7 @@ pub struct Ui {
     pub multiview: Signal<Option<multiview::State>>,
     pub player_windows: Signal<iptv_presentation::playback_windows::Workspace<String>>,
     /// The channel list over full-screen video, while open.
-    pub channels: Signal<Option<iptv_core::channel_list::ChannelList>>,
+    pub channels: Signal<Option<iptv_presentation::channel_list::ChannelList>>,
     /// Group and search selection while adding or replacing a multiview tile.
     pub channel_picker: Signal<Option<multiview_picker::Screen>>,
     /// The picture-in-picture window, as the host reports it (`pip.rs`).
@@ -349,7 +360,7 @@ impl Ui {
             pan_anchor: signal(None),
             interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
-                iptv_core::lists::ALL,
+                iptv_presentation::lists::ALL,
                 &*schedule(),
                 &[],
                 &[],

@@ -1,9 +1,10 @@
-use crate::EpgSchedule;
-use crate::tests::{NOW, mid_minute_schedule, schedule};
 use iptv_core::guide::GroupName;
 use iptv_core::guide::Listing;
-use iptv_core::guide::{Focus, Move, Program, Schedule};
+use iptv_core::guide::{Program, Schedule};
 use iptv_epg::GuideStore;
+use iptv_guide::EpgSchedule;
+use iptv_guide::test_support::schedule::{NOW, mid_minute_schedule, schedule};
+use iptv_presentation::guide::{Focus, Move};
 use iptv_providers::m3u::parse_m3u;
 
 #[test]
@@ -34,7 +35,7 @@ fn the_focus_model_navigates_real_data_and_gaps() {
 
 #[test]
 fn organization_filters_lists_but_preserves_playback_and_group_identity() {
-    use iptv_core::lists::{ALL, ChannelList, FIRST_GROUP, ListId};
+    use iptv_presentation::lists::{ALL, ChannelList, FIRST_GROUP, ListId};
     let m = parse_m3u(
         "#EXTM3U\n#EXTINF:-1 group-title=\"News\",A\nhttp://example.test/a\n#EXTINF:-1 group-title=\"Sport\",B\nhttp://example.test/b\n#EXTINF:-1 group-title=\"News\",C\nhttp://example.test/c\n",
     );
@@ -42,7 +43,7 @@ fn organization_filters_lists_but_preserves_playback_and_group_identity() {
     let key = s.channel_key(0).unwrap();
     let group = ListId::of(FIRST_GROUP, &s);
     let url = s.stream_url(0);
-    s.set_organization(crate::Organization {
+    s.set_organization(iptv_guide::Organization {
         channels: [2, 1, 0]
             .into_iter()
             .map(|c| (s.channel_key(c).unwrap(), format!("Renamed {c}"), c == 0))
@@ -73,11 +74,11 @@ fn organization_filters_lists_but_preserves_playback_and_group_identity() {
         "favorites obey visibility without removing membership"
     );
     assert_eq!(
-        iptv_core::playback::zap_target(&s, 0, 1),
+        iptv_presentation::zap::zap_target(&s, 0, 1),
         1,
         "hidden playing channel can zap to visible neighbor"
     );
-    let org = crate::Organization {
+    let org = iptv_guide::Organization {
         channels: Vec::new(),
         groups: vec![(m.groups[0].id.as_str().into(), "News".into(), true)],
         ..Default::default()
@@ -85,7 +86,7 @@ fn organization_filters_lists_but_preserves_playback_and_group_identity() {
     s.set_organization(org);
     assert_eq!(s.group_count(), 1);
     assert_eq!(ChannelList::build(ALL, &s, &[], &[]).channels(), [2]);
-    s.set_organization(crate::Organization::default());
+    s.set_organization(iptv_guide::Organization::default());
     assert_eq!(s.group_count(), 2);
     assert_eq!(ChannelList::build(ALL, &s, &[], &[]).channels(), [0, 2, 1]);
 }
@@ -99,7 +100,7 @@ fn returning_and_new_channels_keep_provider_identity_and_fill_missing_preference
     let a = m.channels.items[0].id.as_str().to_owned();
     let b = m.channels.items[1].id.as_str().to_owned();
     let c = m.channels.items[2].id.as_str().to_owned();
-    let preferences = crate::Organization {
+    let preferences = iptv_guide::Organization {
         channels: vec![
             ("temporarily-absent".into(), "Orphan".into(), true),
             (c.clone(), "Local C".into(), true),
@@ -109,7 +110,12 @@ fn returning_and_new_channels_keep_provider_identity_and_fill_missing_preference
         ..Default::default()
     };
     schedule.set_organization(preferences.clone());
-    let list = iptv_core::lists::ChannelList::build(iptv_core::lists::ALL, &schedule, &[], &[]);
+    let list = iptv_presentation::lists::ChannelList::build(
+        iptv_presentation::lists::ALL,
+        &schedule,
+        &[],
+        &[],
+    );
     assert_eq!(
         list.channels()
             .iter()
@@ -136,7 +142,12 @@ fn returning_and_new_channels_keep_provider_identity_and_fill_missing_preference
     let refreshed =
         EpgSchedule::from_catalog(&added.groups, &added.channels.items, GuideStore::new(), NOW);
     refreshed.set_organization(preferences);
-    let visible = iptv_core::lists::ChannelList::build(iptv_core::lists::ALL, &refreshed, &[], &[]);
+    let visible = iptv_presentation::lists::ChannelList::build(
+        iptv_presentation::lists::ALL,
+        &refreshed,
+        &[],
+        &[],
+    );
     assert_eq!(
         visible
             .channels()
@@ -189,7 +200,7 @@ fn a_list_preserves_generated_text_provenance() {
         NOW,
         None,
     ));
-    use iptv_core::lists::{ChannelList, FIRST_GROUP, ListView};
+    use iptv_presentation::lists::{ChannelList, FIRST_GROUP, ListView};
     let list = ChannelList::build(FIRST_GROUP, &s, &[], &[]);
     let view = ListView::new(std::rc::Rc::new(s), std::rc::Rc::new(list));
     assert_eq!(view.group_label(0), GroupName::Ungrouped);

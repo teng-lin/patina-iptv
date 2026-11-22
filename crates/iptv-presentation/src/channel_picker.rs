@@ -2,8 +2,8 @@
 //! Channels and groups retain focus by content identity as filters or the
 //! catalog change. It never changes the guide's selected list.
 
-use crate::guide::Schedule;
 use crate::lists::{ChannelList, ListId, entry_count};
+use iptv_core::guide::Schedule;
 use std::rc::Rc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

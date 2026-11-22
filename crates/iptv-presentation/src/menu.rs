@@ -9,8 +9,8 @@
 //! disabled); which actions are enabled is the app's call (what it has
 //! built). Labels are the shell's own (i18n), not stored here.
 
+use crate::lists::ListId;
 use iptv_core::guide::{Airing, Program};
-use iptv_core::lists::ListId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MenuItem {

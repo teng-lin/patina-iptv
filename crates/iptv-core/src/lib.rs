@@ -7,17 +7,13 @@
 //! its columns (rail, groups, lists), favorites, menus, panels, playback.
 
 pub mod add_playlist;
-pub mod browse;
 pub mod capabilities;
-pub mod channel_list;
-pub mod channel_picker;
 pub mod clock;
 pub mod favorites;
 pub mod guide;
 pub mod i18n;
 pub mod import_limits;
 pub mod interruption;
-pub mod listings;
 pub mod lists;
 pub mod live;
 pub mod membership;
@@ -33,7 +29,3 @@ pub mod on_demand;
 pub mod organization;
 
 pub mod vod;
-
-mod guide_state;
-mod lists_state;
-mod zap;

@@ -25,14 +25,6 @@ pub fn scan_group_of(catalog: &(impl Schedule + ?Sized), channel: usize) -> Opti
         })
 }
 
-pub use crate::lists_state::{
-    ALL, ChannelList, Entry, FAVORITES, FIRST_GROUP, ListId, ListView, RECENT, entry_count,
-    entry_name, resume_entry,
-};
-
-#[cfg(test)]
-pub(crate) use crate::lists_state::tests;
-
 #[cfg(test)]
 mod domain_tests {
     use super::group_of;

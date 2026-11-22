@@ -19,7 +19,7 @@
 use nsh_core::time::Instant;
 
 use crate::timeline::{Band, MARGIN, SLOP, Timeline};
-use iptv_core::guide::view_range;
+use iptv_presentation::guide::view_range;
 use nsh_core::prelude::*;
 
 use crate::Ui;

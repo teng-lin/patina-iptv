@@ -28,7 +28,7 @@ mod wheel;
 const BAND: i32 = 360 + 2 * crate::timeline::MARGIN;
 use pan::Pan;
 
-use iptv_core::lists::{FAVORITES, RECENT};
+use iptv_presentation::lists::{FAVORITES, RECENT};
 use nsh_core::prelude::*;
 
 use crate::fonts::CHANNEL;

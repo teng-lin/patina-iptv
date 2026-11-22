@@ -119,8 +119,6 @@ impl WatchTime {
     }
 }
 
-pub use crate::zap::{ZapOrigin, group_range, zap_from_list, zap_target};
-
 #[cfg(test)]
 mod tests;
 

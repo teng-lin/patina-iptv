@@ -1,6 +1,6 @@
 //! The list the guide shows (`iptv_core::lists`) and the guide screen's
 //! keys across the rail, the groups column and the grid
-//! (`iptv_core::browse`).
+//! (`iptv_presentation::browse`).
 //!
 //! `crate::schedule()` stays the full catalog: `Ui::playing`, `Ui::play`,
 //! search and the player use catalog channels. The focus works on rows of
@@ -12,11 +12,13 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use iptv_core::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
-use iptv_core::channel_list::ChannelList as PlayerList;
-use iptv_core::guide::{Focus, Move, Pane, Schedule};
-use iptv_core::lists::{
-    ALL, ChannelList, Entry, ListId, ListView, entry_count, group_of, resume_entry,
+use iptv_core::guide::Schedule;
+use iptv_core::lists::group_of;
+use iptv_presentation::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
+use iptv_presentation::channel_list::ChannelList as PlayerList;
+use iptv_presentation::guide::{Focus, Move, Pane};
+use iptv_presentation::lists::{
+    ALL, ChannelList, Entry, ListId, ListView, entry_count, resume_entry,
 };
 use nsh_core::prelude::*;
 
@@ -66,7 +68,7 @@ fn rail_untracked(ui: Ui) -> Vec<RailItem> {
 
 /// Localize built-in lists by identity; provider group names are opaque.
 pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
-    crate::listing_labels::group(iptv_core::lists::entry_name(entry, catalog))
+    crate::listing_labels::group(iptv_presentation::lists::entry_name(entry, catalog))
 }
 
 /// The name of the list on screen.
@@ -500,8 +502,8 @@ pub fn browser_entry_name(entry: usize) -> String {
 #[cfg(test)]
 mod identity_tests {
     use super::*;
-    use iptv_core::lists::{FAVORITES, FIRST_GROUP, RECENT};
     use iptv_guide::{EpgSchedule, GuideChannel, Organization};
+    use iptv_presentation::lists::{FAVORITES, FIRST_GROUP, RECENT};
 
     fn catalog(groups: &[(&str, &[&str])]) -> EpgSchedule {
         EpgSchedule::new(

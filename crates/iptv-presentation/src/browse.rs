@@ -2,7 +2,7 @@
 //! groups column and the guide grid ([`Focus`] owns the remote's place in
 //! all three).
 //!
-//! - Left from the oldest retained listing ([`crate::guide::floor`])
+//! - Left from the oldest retained listing ([`iptv_core::guide::floor`])
 //!   shows the groups column and, beside it, the
 //!   rail (collapsed to icons); the guide shifts right. Hold Left (Tab on a
 //!   keyboard) shows them from anywhere in the grid ([`Focus::open_groups`]).
@@ -21,7 +21,8 @@
 //! An empty list (no favorites yet) cannot be entered: the focus stays in
 //! the groups column while the guide explains how to add some.
 
-use crate::guide::{Focus, Move, Pane, PreviewOrigin, Schedule};
+use crate::guide::{Focus, Move, Pane, PreviewOrigin};
+use iptv_core::guide::Schedule;
 
 /// An item of the navigation rail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,10 +31,10 @@ pub enum RailItem {
     /// The guide (this screen).
     Tv,
     /// Unfinished movies and series from every enabled playlist
-    /// ([`crate::vod::Shelf::ContinueWatching`]).
+    /// ([`iptv_core::vod::Shelf::ContinueWatching`]).
     Continue,
     /// Newest movies and series from every enabled playlist
-    /// ([`crate::vod::Shelf::RecentlyAdded`]).
+    /// ([`iptv_core::vod::Shelf::RecentlyAdded`]).
     Recent,
     Movies,
     Shows,
