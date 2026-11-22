@@ -7,13 +7,12 @@
 'use strict';
 
 var STORAGE_KEY = 'patina.source';
-var PREVIEW = [1144, 48, 752, 423]; /* #side + #preview-frame, in 1920x1080 */
-var GUIDE_PREVIEW = [1416, 24, 480, 270]; /* #guide-side + #guide-frame */
+var PREVIEW = [1144, 48, 752, 423]; /* #search-side + #preview-frame, in 1920x1080 */
+var GUIDE_PREVIEW = [24, 24, 548, 308]; /* #guide-frame: the guide screen's top left */
 var FULL = [0, 0, 1920, 1080];
-var ROWS = 9;
-var ENTRIES = 11;
+var ENTRIES = 10; /* the groups column (the core's VISIBLE_ENTRIES) */
 /* The guide grid (style.css): rows, the channel column, the time area. */
-var GRID = { rows: 8, left: 400, width: 1496, top: 50, rowHeight: 88 };
+var GRID = { rows: 8, left: 690, width: 1206, top: 58, rowHeight: 80 };
 var SEARCH_ROWS = 8;
 
 /*
@@ -78,16 +77,28 @@ function setLogo(img, logo) {
     logo = logo || '';
     if (img.getAttribute('data-src') === logo) return;
     img.setAttribute('data-src', logo);
-    img.style.visibility = logo ? 'visible' : 'hidden';
+    /* No logo hides the image; one inherits its row's visibility (an
+     * explicit `visible` would show it in a row hidden as unused). */
+    img.style.visibility = logo ? '' : 'hidden';
     if (logo) img.src = logo; else img.removeAttribute('src');
 }
 
 /* ---------- player ---------- */
+/* Places the video plane: the method first, then the rectangle. On a 2020
+ * TV (UN55TU7000, Tizen 5.5) LETTER_BOX in a rectangle smaller than the
+ * screen draws no picture at all while the sound plays; FULL_SCREEN in the
+ * same rectangle shows it. The previews and the sources are 16:9. */
+function setDisplay(r) {
+    var av = webapis.avplay;
+    av.setDisplayMethod('PLAYER_DISPLAY_MODE_FULL_SCREEN');
+    av.setDisplayRect(r[0], r[1], r[2], r[3]);
+}
+
 var player = {
     url: null,
     userAgent: null,
     token: 0,
-    rect: PREVIEW,
+    rect: GUIDE_PREVIEW,
     lastStart: 0,
     deferred: null,
     /* Held channel keys: a zap within 300 ms of the last one waits, and only
@@ -115,8 +126,7 @@ var player = {
         try {
             av.open(url);
             if (userAgent) av.setStreamingProperty('USER_AGENT', userAgent);
-            av.setDisplayRect(this.rect[0], this.rect[1], this.rect[2], this.rect[3]);
-            av.setDisplayMethod('PLAYER_DISPLAY_MODE_LETTER_BOX');
+            setDisplay(this.rect);
             av.setListener({
                 onbufferingstart: function () { if (token === player.token) loading(true, 'Buffering…'); },
                 onbufferingcomplete: function () { if (token === player.token) loading(false); },
@@ -150,7 +160,7 @@ var player = {
     place: function () {
         var r = this.rect;
         if (hasAvplay()) {
-            try { webapis.avplay.setDisplayRect(r[0], r[1], r[2], r[3]); } catch (e) { /* not open yet */ }
+            try { setDisplay(r); } catch (e) { /* not open yet */ }
         } else {
             var s = $('fallback').style;
             s.left = r[0] + 'px'; s.top = r[1] + 'px'; s.width = r[2] + 'px'; s.height = r[3] + 'px';
@@ -258,52 +268,16 @@ function render() {
     $('status').textContent = statusText(v.status);
     if (mode === 'guide') renderGuide(v);
     else if (mode === 'search') { renderSearch(v.search); renderInfo(v.playing); }
-    else { renderList(v); renderInfo(v.playing); }
     if (!full) $('banner').classList.add('hidden');
-    /* Key to rendered page: the core's answer and the DOM updates. */
+    renderBar(full ? v : null);
+    /* Key to rendered page: the core's answer and the DOM updates (keys:
+     * full screen, guideKeys: the guide screen, searchKeys: search). */
     var drawnAt = performance.now();
     var samples = mode === 'guide' ? metrics.guideKeys : mode === 'search' ? metrics.searchKeys : metrics.keys;
     while (keyTimes.length) sample(samples, Math.round(drawnAt - keyTimes.shift()));
     if (searching.answeredAt) {
         sample(metrics.search, Math.round(drawnAt - searching.answeredAt));
         searching.answeredAt = 0;
-    }
-}
-
-function renderList(v) {
-    var groups = $('group-rows').children;
-    for (var g = 0; g < groups.length; g++) {
-        var item = v.groups.items[g];
-        groups[g].style.visibility = item ? 'visible' : 'hidden';
-        if (!item) continue;
-        groups[g].textContent = item.name;
-        groups[g].classList.toggle('focus', !v.searchRow && v.groups.start + g === v.groups.focus);
-        groups[g].classList.toggle('shown', item.shown);
-    }
-    $('group-search').classList.toggle('focus', !!v.searchRow);
-    $('groups').classList.toggle('active', v.pane === 'groups');
-    $('channels').classList.toggle('active', v.pane === 'channels');
-    $('list-title').textContent = v.title;
-    var count = v.rows.total ? (v.rows.focus + 1) + ' / ' + v.rows.total : 'No channels';
-    if (v.reorder) count += ' · Moving: Up/Down one place, Left/Right to the top/end, OK when done';
-    else if (v.title === 'Favorites' && v.rows.total > 1 && v.pane === 'channels') count += ' · Blue: move';
-    else if (v.pane === 'channels') count += ' · Right: TV guide';
-    $('list-count').textContent = count;
-
-    var rows = $('channel-rows').children;
-    for (var r = 0; r < rows.length; r++) {
-        var c = v.rows.items[r];
-        rows[r].style.visibility = c ? 'visible' : 'hidden';
-        if (!c) continue;
-        var li = rows[r];
-        li.children[0].textContent = c.number;
-        setLogo(li.children[1], c.logo);
-        li.children[2].textContent = c.name;
-        li.children[3].textContent = c.now ? clock(c.now.start) + '  ' + c.now.title : '';
-        var focused = v.rows.start + r === v.rows.focus;
-        li.classList.toggle('focus', focused);
-        li.classList.toggle('moving', focused && !!v.reorder);
-        li.classList.toggle('playing', c.playing);
     }
 }
 
@@ -319,6 +293,7 @@ function renderInfo(p) {
 
 /* ---------- guide grid ---------- */
 var guideRulerStart = null;
+var PANES = ['guide', 'groups', 'rail', 'preview'];
 function makeGuideRows() {
     var box = $('guide-rows');
     for (var i = 0; i < GRID.rows; i++) {
@@ -332,25 +307,76 @@ function makeGuideRows() {
         box.appendChild(row);
     }
 }
+function minutes(secs) {
+    var m = Math.max(1, Math.ceil(secs / 60));
+    return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + m % 60 + ' min' : '');
+}
+function guideHint(v, f) {
+    var g = v.grid;
+    if (v.reorder) return 'Moving: Up/Down one place · Left/Right: to the top or the end · OK: done';
+    switch (g.pane) {
+    case 'preview': return 'OK: full screen · Down: guide';
+    case 'groups': return 'Up/Down: lists · OK: open · Left: search';
+    case 'rail': return 'OK: open · Right: groups';
+    default:
+        var ok = !f ? '' : f.airing === 'live' ? 'OK: watch · ' : f.catchup ? 'OK: watch from the start · ' : '';
+        var move = v.title === 'Favorites' && g.rows.total > 1 ? ' · Blue: move' : '';
+        return ok + 'Channel Up/Down: page · Yellow: favorite' + move + ' · Back: groups';
+    }
+}
 function renderGuide(v) {
     var g = v.grid;
     var perMinute = GRID.width / g.minutes;
     var f = g.focused;
-    $('guide-list').textContent = v.title + '  ·  ' + (g.rows.total ? (g.rows.focus + 1) + ' / ' + g.rows.total : 'No channels');
+    var body = document.body.classList;
+    body.toggle('columns', g.columns);
+    body.toggle('rail-open', g.layout === 'rail');
+    body.toggle('idle', !v.playing);
+    for (var p = 0; p < PANES.length; p++) body.toggle('pane-' + PANES[p], g.pane === PANES[p]);
+
+    /* The focused program, beside the preview. */
+    var now = Date.now() / 1000;
     $('guide-channel').textContent = f ? f.number + '  ' + f.name : '';
-    $('guide-title').textContent = f ? (f.title || 'No information') : '';
-    $('guide-time').textContent = f ? day(f.start) + clock(f.start) + ' – ' + clock(f.end) + (f.airing === 'live' ? '  ·  On now' : '') : '';
-    $('guide-hint').textContent = f && f.catchup ? 'OK: watch from the start · Back: list' : 'OK: watch · Channel Up/Down: page · Back: list';
+    $('guide-title').textContent = f ? (f.title || 'No information') + (f.favorite ? '  ★' : '') : '';
+    $('guide-time').textContent = f ? day(f.start) + clock(f.start) + ' – ' + clock(f.end) : '';
+    var live = f && f.airing === 'live';
+    $('guide-progress').style.display = live ? 'inline-block' : 'none';
+    if (live) $('guide-progress').firstChild.style.width = Math.round(progress(f) * 100) + '%';
+    $('guide-left').textContent = !f ? '' : live ? minutes(f.end - now) + ' left'
+        : f.airing === 'upcoming' ? 'in ' + minutes(f.start - now) : 'Ended';
+    $('guide-list').textContent = v.title + '  ·  ' + (g.rows.total ? (g.rows.focus + 1) + ' / ' + g.rows.total : 'No channels');
+    $('guide-hint').textContent = guideHint(v, f);
+
+    /* The rail and the groups column, while they show. */
+    var rail = $('rail').children;
+    for (var r = 0; r < rail.length; r++) {
+        var name = rail[r].getAttribute('data-item');
+        rail[r].classList.toggle('focus', name === g.rail);
+        rail[r].classList.toggle('current', name === 'tv');
+    }
+    if (v.groups) {
+        var groups = $('group-rows').children;
+        for (var e = 0; e < groups.length; e++) {
+            var entry = v.groups.items[e];
+            groups[e].style.visibility = entry ? 'visible' : 'hidden';
+            if (!entry) continue;
+            groups[e].textContent = entry;
+            groups[e].classList.toggle('shown', v.groups.start + e === v.groups.focus);
+        }
+    }
+
+    var d = new Date();
+    $('guide-clock').textContent = DAYS[d.getDay()] + ' ' + d.getDate() + '  ' + two(d.getHours()) + ':' + two(d.getMinutes());
     if (guideRulerStart !== g.start) {
         guideRulerStart = g.start;
-        var ruler = $('guide-ruler');
-        ruler.textContent = '';
+        var marks = $('guide-marks');
+        marks.textContent = '';
         var end = g.start + g.minutes * 60;
         for (var t = Math.ceil(g.start / 1800) * 1800; t < end; t += 1800) {
             var mark = document.createElement('span');
             mark.style.left = Math.round(GRID.left + (t - g.start) / 60 * perMinute) + 'px';
             mark.textContent = clock(t);
-            ruler.appendChild(mark);
+            marks.appendChild(mark);
         }
     }
     var nowX = (g.now - g.start) / 60 * perMinute;
@@ -367,6 +393,9 @@ function renderGuide(v) {
             continue;
         }
         row.style.visibility = 'visible';
+        var focusedRow = g.rows.start + i === g.rows.focus;
+        row.classList.toggle('focus', focusedRow);
+        row.classList.toggle('moving', focusedRow && !!v.reorder);
         /* The core says what changed: a row's cells are rebuilt only when
          * its signature did; otherwise only the focus mark moves. */
         if (row.sig !== item.sig) {
@@ -481,8 +510,38 @@ function scheduleRender() {
     requestAnimationFrame(render);
 }
 
+/* The play bar (OK over full-screen video): the playing channel, its
+ * program with times, and buttons. It hides after BAR_TIMEOUT ms without a
+ * key: the core is told, as it owns the bar's state. */
+var BAR_TIMEOUT = 7000;
+var barTimer = null, barShown = null;
+function renderBar(v) {
+    var bar = v && v.bar, p = v && v.playing;
+    $('bar').classList.toggle('hidden', !bar || !p);
+    var state = bar && p ? JSON.stringify([bar, p.id]) : null;
+    if (state !== barShown) {
+        barShown = state;
+        clearTimeout(barTimer);
+        if (state) barTimer = setTimeout(function () { send({ cmd: 'key', key: 'barTimeout' }); }, BAR_TIMEOUT);
+    }
+    if (!bar || !p) return;
+    $('banner').classList.add('hidden');
+    $('bar-channel').textContent = p.number + '  ' + p.name;
+    $('bar-now').textContent = p.now ? p.now.title : 'No information';
+    $('bar-start').textContent = p.now ? clock(p.now.start) : '';
+    $('bar-end').textContent = p.now ? clock(p.now.end) : '';
+    $('bar-progress').firstChild.style.width = Math.round(progress(p.now) * 100) + '%';
+    $('bar-next').textContent = p.next ? 'Next  ' + programLine(p.next) : '';
+    var buttons = $('bar-buttons').children;
+    for (var i = 0; i < buttons.length; i++) {
+        var b = buttons[i], name = b.getAttribute('data-button');
+        if (name === 'favorite') b.textContent = bar.favorite ? '\u2605 Favorite' : '\u2606 Favorite';
+        b.classList.toggle('focus', bar.focus === name);
+    }
+}
+
 function showBanner(channel) {
-    if (!view || view.mode !== 'full') return;
+    if (!view || view.mode !== 'full' || view.bar) return;
     $('banner-channel').textContent = channel.number + '  ' + channel.name;
     $('banner-now').textContent = programLine(channel.now);
     $('banner-progress').firstChild.style.width = Math.round(progress(channel.now) * 100) + '%';
@@ -514,7 +573,6 @@ worker.onmessage = function (e) {
         break;
     case 'notice': notice(m.text, m.kind === 'info'); break;
     case 'sourceRejected': loading(false); openSetup(); notice(m.text); break;
-    case 'exit': $('confirm').classList.remove('hidden'); break;
     case 'fatal': loading(true, m.text); break;
     case 'metric': metrics[m.name] = m; saveMetrics(); break;
     }
@@ -602,7 +660,7 @@ function setupKey(code) {
             return true;
         }
     } else if (code === 10009) {
-        if (savedSource()) closeSetup(); else exit();
+        if (savedSource()) closeSetup();
         return true;
     } else {
         return false;
@@ -617,6 +675,7 @@ var KEYS = { 37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'ok', 10009: 'ba
     406: 'blue', 458: 'guide', 10225: 'search' };
 /* The TV keyboard's Done and Cancel. */
 var IME_DONE = 65376, IME_CANCEL = 65385;
+var EXIT = 10182;
 
 function exit() {
     player.stop();
@@ -625,15 +684,9 @@ function exit() {
 
 document.addEventListener('keydown', function (e) {
     var code = e.keyCode;
+    /* The remote's Exit key leaves the app, from any screen; Back never does. */
+    if (code === EXIT) { e.preventDefault(); exit(); return; }
     if (setup.open) { if (setupKey(code)) e.preventDefault(); return; }
-    if (!$('confirm').classList.contains('hidden')) {
-        e.preventDefault();
-        /* A held Back that opened the dialog must not also confirm it. */
-        if (e.repeat) return;
-        if (code === 13 || code === 10009) exit();
-        else $('confirm').classList.add('hidden');
-        return;
-    }
     if (code === 403) { openSetup(); return; } /* red */
     if (code === 404) { send({ cmd: 'refreshGuide' }); notice('Updating the TV guide…', true); return; } /* green */
     if (code === 405) { send({ cmd: 'key', key: 'favorite' }); return; } /* yellow */
@@ -652,6 +705,12 @@ document.addEventListener('keydown', function (e) {
     var key = KEYS[code];
     if (!key) return;
     e.preventDefault();
+    /* Left held in the guide opens the groups column (Android TV's Long
+     * Left): its first repeat sends `groups` once, later repeats nothing. */
+    if (key === 'left' && e.repeat && view && view.mode === 'guide') {
+        if (!leftHeld) { leftHeld = true; keyTimes.push(performance.now()); send({ cmd: 'key', key: 'groups' }); }
+        return;
+    }
     keyTimes.push(performance.now());
     /* Keys that may start a stream: the zap timing starts here. */
     var full = view && view.mode === 'full';
@@ -662,6 +721,9 @@ document.addEventListener('keydown', function (e) {
     }
     send({ cmd: 'key', key: key });
 });
+
+var leftHeld = false;
+document.addEventListener('keyup', function (e) { if (e.keyCode === 37) leftHeld = false; });
 
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
@@ -677,12 +739,11 @@ document.addEventListener('visibilitychange', function () {
 (function start() {
     mark('scriptStart');
     if (hasTizen()) {
-        ['ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'Guide', 'Search'].forEach(function (k) {
+        ['ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'Guide', 'Search', 'Exit'].forEach(function (k) {
             try { tizen.tvinputdevice.registerKey(k); } catch (e) { /* the remote may lack it */ }
         });
     }
     makeRows($('group-rows'), ENTRIES, false);
-    makeRows($('channel-rows'), ROWS, true);
     makeRows($('search-rows'), SEARCH_ROWS, true);
     makeGuideRows();
     $('search-input').addEventListener('input', function () { askSearch(this.value); });

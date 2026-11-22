@@ -12,10 +12,11 @@
 //! - `store`: what is kept between launches: the stored guide (an
 //!   `iptv_epg` snapshot) with its refresh state, and the user's lists.
 //! - `app`: Live TV: import a source (Xtream or M3U), its guide, the
-//!   channel list beside the preview, full screen and zapping, moving
-//!   favorites, on `iptv_core`'s list, focus and reorder models.
-//! - `grid`: the guide grid, on `iptv_core`'s guide focus, emitting only
-//!   the rows and time on screen.
+//!   guide screen under the preview, full screen and zapping, moving
+//!   favorites, on `iptv_core`'s list, guide focus and reorder models.
+//! - `grid`: the guide screen's rail, groups column and grid, on
+//!   `iptv_core`'s guide focus and browse columns, emitting only the rows
+//!   and time on screen.
 //! - `search`: channel and program search with `iptv_search`'s indexes and
 //!   search screen state.
 //!

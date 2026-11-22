@@ -11,11 +11,39 @@
 <object id="player" type="application/avplayer"></object>
 <video id="fallback" playsinline></video>
 
-<div id="list">
-  <section id="groups" class="column"><h2>Groups</h2><div id="group-search">Search</div><ol id="group-rows"></ol></section>
-  <section id="channels" class="column"><h2 id="list-title">Channels</h2><ol id="channel-rows"></ol>
-    <div id="list-count" class="muted"></div></section>
-  <section id="side">
+<!-- The guide screen: the preview (transparent over the video) and the
+     focused program in the header; the rail, the groups column and the
+     grid below it. -->
+<div id="guide">
+  <div id="guide-head">
+    <div id="guide-frame"><div id="guide-idle">Nothing playing</div></div>
+    <div id="guide-info">
+      <div id="guide-channel" class="muted"></div>
+      <div id="guide-title"></div>
+      <div id="guide-time"></div>
+      <div id="guide-when"><div id="guide-progress"><div></div></div><span id="guide-left" class="muted"></span></div>
+      <div id="guide-list" class="muted"></div>
+    </div>
+    <div id="guide-hint" class="muted"></div>
+  </div>
+  <div id="rail"><div data-item="search"><i class="icon-search"></i><span>Search</span></div><div data-item="tv"><i class="icon-tv"></i><span>TV</span></div></div>
+  <ol id="group-rows"></ol>
+  <div id="guide-pane">
+    <div id="guide-ruler"><span id="guide-clock"></span><div id="guide-marks"></div></div>
+    <div id="guide-rows"></div>
+    <div id="guide-now"></div>
+  </div>
+</div>
+
+<div id="search">
+  <div id="search-main">
+    <h2>Search</h2>
+    <div id="search-field"><input id="search-input" type="text" autocomplete="off" placeholder="A channel or a program"></div>
+    <div id="search-tabs"><span id="tab-channels"></span><span id="tab-programs"></span></div>
+    <ol id="search-rows"></ol>
+    <div id="search-status" class="muted"></div>
+  </div>
+  <div id="search-side">
     <div id="preview-frame"></div>
     <div id="info">
       <div id="info-channel"></div>
@@ -23,33 +51,9 @@
       <div id="info-progress"><div></div></div>
       <div id="info-next" class="muted"></div>
     </div>
-    <div id="status" class="muted"></div>
-  </section>
-</div>
-
-<div id="guide">
-  <div id="guide-head">
-    <div id="guide-list" class="muted"></div>
-    <div id="guide-channel"></div>
-    <div id="guide-title"></div>
-    <div id="guide-time" class="muted"></div>
-    <div id="guide-hint" class="muted"></div>
-  </div>
-  <div id="guide-side"><div id="guide-frame"></div></div>
-  <div id="guide-pane">
-    <div id="guide-ruler"></div>
-    <div id="guide-rows"></div>
-    <div id="guide-now"></div>
   </div>
 </div>
-
-<div id="search">
-  <h2>Search</h2>
-  <div id="search-field"><input id="search-input" type="text" autocomplete="off" placeholder="A channel or a program"></div>
-  <div id="search-tabs"><span id="tab-channels"></span><span id="tab-programs"></span></div>
-  <ol id="search-rows"></ol>
-  <div id="search-status" class="muted"></div>
-</div>
+<div id="status" class="muted"></div>
 
 <div id="banner" class="hidden">
   <div id="banner-channel"></div>
@@ -58,9 +62,16 @@
   <div id="banner-next" class="muted"></div>
 </div>
 
+<div id="bar" class="hidden">
+  <div id="bar-channel"></div>
+  <div id="bar-now"></div>
+  <div id="bar-line"><span id="bar-start" class="muted"></span><div id="bar-progress"><div></div></div><span id="bar-end" class="muted"></span></div>
+  <div id="bar-next" class="muted"></div>
+  <div id="bar-buttons"><span data-button="favorite"></span><span data-button="guide">TV guide</span><span data-button="search">Search</span></div>
+</div>
+
 <div id="loading" class="hidden"><div id="loading-text">Loading…</div></div>
 <div id="notice" class="hidden"></div>
-<div id="confirm" class="hidden"><div>Exit Patina?</div><div class="muted">OK or Back: exit · any other button: keep watching</div></div>
 
 <div id="setup" class="hidden">
   <h1>Add a playlist</h1>

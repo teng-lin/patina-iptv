@@ -1,9 +1,9 @@
 # Patina on Samsung Tizen TVs (experimental)
 
 Live TV on Samsung TVs from 2020 (Tizen 5.5) on: an Xtream Codes account or
-an M3U playlist, its TV guide as a list and as a full guide grid, the
-channel list beside the playing channel, full-screen video and channel
-zapping, search of channels and programs, Favorites (in your own order) and
+an M3U playlist, its TV guide as a guide grid beside the groups with the
+playing channel's preview above it (as on Android TV), full-screen video
+and channel zapping, search of channels and programs, Favorites (in your own order) and
 Recently watched. Movies, series and recordings are not part of this host
 yet.
 
@@ -17,7 +17,7 @@ Patina's own core in WebAssembly:
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Core | `crates/iptv-web` | Imports the source and its guide with `iptv-import`, builds the schedule with `iptv-guide`, and owns the list, guide focus and reorder state (`iptv-core`) and the search indexes and screen (`iptv-search`). Emits views as JSON: only what is on screen. |
+| Core | `crates/iptv-web` | Imports the source and its guide with `iptv-import`, builds the schedule with `iptv-guide`, and owns the lists, the guide screen's focus and columns, and the reorder state (`iptv-core`) and the search indexes and screen (`iptv-search`). Emits views as JSON: only what is on screen. |
 | Worker | `app/worker.js` | Runs the core in a Web Worker and performs the HTTP requests it describes, so importing a large guide never blocks the remote. |
 | Page | `app/main.js`, `index.html`, `style.css` | Renders the views, sends remote keys, plays streams with the TV's native player (AVPlay) on the video plane under the page. |
 
@@ -44,31 +44,47 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
 ## Using it
 
 - First launch asks for the playlist. Up/Down move between fields, OK opens
-  a field's keyboard (Done returns), Save loads it. The red button opens it
+  a field's keyboard (Done returns), Save loads it, Back closes it once a
+  playlist is saved. The red button opens it
   again later.
-- In the list: Up/Down move, OK plays in the preview, OK on the playing
-  channel goes full screen, Left opens the groups (moving through them
-  previews their channels), Back returns to the channels. Back in the
-  channels goes full screen when a channel plays, and asks to exit when
-  none does.
-- Full screen: Up/Down or Channel Up/Down zap within the list, OK or Left
-  opens the list, Back asks to exit (or returns to the guide grid or the
-  search that played the channel).
-- Guide grid: Right in the channels, or the remote's Guide key, opens it for
-  the list shown. Up/Down move between channels, Left/Right between
-  programs (the time scrolls with them), Channel Up/Down turn a page of
-  channels. OK plays the channel; on an ended program its archive still
-  has, it plays that program from its start. Back first returns to now,
-  then to the list.
-- Search: the Search row above the groups (Left, then Up past Favorites),
+- The remote's Exit key leaves the app from any screen. Back never does.
+- The guide screen: the preview of the playing channel at the top left
+  ("Nothing playing" until one plays), the focused program beside it
+  (title, ★ for a favorite, times, progress, minutes left or until it
+  starts, the list), and the guide grid below: 8 channels, two and a half
+  hours, the playing channel marked ▶. Moving never tunes.
+- Grid: Up/Down move between channels in the same time column,
+  Left/Right between programs (Left from the earliest one shows the
+  groups column), Channel Up/Down or Page Up/Down turn a page of
+  8 channels. Up from the first channel focuses the preview while a
+  channel plays (OK: full screen, Down: back to the grid).
+- OK on a program on now plays it full screen (on the channel already
+  playing, it only goes full screen); on an ended program the archive
+  still has, it plays that program from its start. A program that has
+  not started, or one the archive no longer has, shows a notice.
+- Groups column: Up/Down move through the lists and show each in the grid
+  at once; Right or OK enters it (an empty Favorites cannot be entered);
+  Left goes to the rail (Search and TV). Back: a past or future program
+  returns to now, then the groups, then the rail; on the rail Back does
+  nothing.
+- Full screen: Up/Down or Channel Up/Down zap within the list shown, Left
+  or Back return to the guide on the playing channel (Back returns to the
+  search that played the channel). The Guide key opens the guide.
+- Play bar: OK in full screen shows the channel, its program with start
+  and end times, the next program, and the buttons Favorite, TV guide
+  and Search, with Favorite focused. Left/Right move between the
+  buttons, OK presses one, Back hides it, and it hides after
+  7 seconds without a key. Up/Down still zap under it.
+- Search: the rail's Search (Left of the groups), Search on the play bar,
   or the remote's Search key. Type with the TV's keyboard; Done shows the
   results, Cancel or Back closes the keyboard. Channels are found by name,
   programs by title (on now or later). Down reaches the Channels/Programs
   tabs, Left/Right switch them, OK plays the channel (of the program).
-  Before typing, recent searches are listed. Back on the field leaves.
-- Favorites: Yellow adds or removes the focused (or playing) channel; Blue
-  shows the Favorites list (the first group). Blue on a favorite starts
-  moving it: Up/Down move it one place, Left/Right to the top or the end,
+  Before typing, recent searches are listed. Back on the field returns to
+  the guide.
+- Favorites: Yellow, or Favorite on the play bar, adds or removes the
+  focused (or playing) channel; Blue shows the Favorites list in the
+  grid. Blue on a favorite there starts moving it: Up/Down move it one place, Left/Right to the top or the end,
   OK, Back or Blue end the move and keep the order.
 - Green updates the TV guide now.
 
@@ -95,22 +111,22 @@ guide:
   imported and matched (6,022 channels bound) about 18 s after launch, in
   the background.
 - Later launches (stored guide, normal launch without a debugger): the
-  channel list with its guide shows about 5 s after the page starts.
+  guide screen shows about 5 s after the page starts.
 - Channel change, input to moving video: about 1.6 s (raw TS on AVPlay).
-- Remote input to rendered list while the guide imports: median 31 ms,
-  worst 79 ms. When idle, a page jump that loads a screen of new logos can
-  take about 0.2 s.
-- The guide grid, search and moving favorites are not yet measured on the
-  TV. On a desktop browser with a synthetic account of the same size
-  (7,300 channels, 242,000 programs): grid key to rendered page median
-  3 ms; search answer to rendered results 12 to 19 ms; the program index
-  takes 143 ms to build and 3.4 MB, and the core's memory grows from
-  25.4 MB to 28.4 MB with it.
+- Remote input to the rendered guide screen (stored guide, idle, with a
+  debugger attached): median about 10 ms, worst about 40 ms, over
+  28 keys in the grid, the groups column and the rail. OK to full screen,
+  including opening the stream, about 0.2 s.
+- Search and moving favorites are not yet measured on the TV. On a
+  desktop browser with a synthetic account of the same size
+  (7,300 channels, 242,000 programs): search answer to rendered results
+  12 to 19 ms; the program index takes 143 ms to build and 3.4 MB, and
+  the core's memory grows from 25.4 MB to 28.4 MB with it.
 
 The page records its timings in local storage (`patina.metrics`, the last
-five launches): `keys`, `guideKeys` and `searchKeys` (remote key to
-rendered page, per screen), `search` (query to rendered results),
-`searchIndex` (its build) and, on request (`send({cmd: 'memory'})` in
+five launches): `keys` (full screen), `guideKeys` (the guide screen) and
+`searchKeys` (remote key to rendered page), `search` (query to rendered
+results), `searchIndex` (its build) and, on request (`send({cmd: 'memory'})` in
 DevTools), `memory`.
 
 ## Known limits
