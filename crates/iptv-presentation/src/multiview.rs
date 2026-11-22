@@ -66,7 +66,8 @@ mod tests;
 
 pub use layout::{Layout, Rect, THUMB, VIDEO};
 
-use crate::{heard::Heard, multiview::MAX_SURFACES};
+use crate::heard::Heard;
+use iptv_core::multiview::MAX_SURFACES;
 pub use menu::{Dialog, TileAction, WARNING_CHOICES, WarningChoice};
 
 #[derive(Clone, Debug, PartialEq, Eq)]

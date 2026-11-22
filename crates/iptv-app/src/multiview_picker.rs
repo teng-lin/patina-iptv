@@ -324,7 +324,10 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         .child(ui_kit::title(size, move || {
             ui.multiview.with(|m| {
                 if m.as_ref().is_some_and(|m| {
-                    matches!(m.pick(), Some(iptv_core::multiview::Pick::Replace(_)))
+                    matches!(
+                        m.pick(),
+                        Some(iptv_presentation::multiview::Pick::Replace(_))
+                    )
                 }) {
                     tr("Change channel")
                 } else {

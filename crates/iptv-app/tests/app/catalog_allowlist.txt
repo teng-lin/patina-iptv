@@ -21,19 +21,19 @@ iptv-app/src/input/keys.rs	Escape
 iptv-runtime/src/commands.rs	legacy search history could not be removed
 # Redacted Debug type/variant labels; views render typed state with their own wording.
 iptv-core/src/playback.rs	PlaySource
-iptv-core/src/wizard.rs	Back
-iptv-core/src/wizard.rs	Cancel
-iptv-core/src/wizard.rs	ClipboardText
-iptv-core/src/wizard.rs	Down
-iptv-core/src/wizard.rs	Failed
-iptv-core/src/wizard.rs	FilePicked
-iptv-core/src/wizard.rs	Ok
-iptv-core/src/wizard.rs	Paste
-iptv-core/src/wizard.rs	Progress
-iptv-core/src/wizard.rs	SetField
-iptv-core/src/wizard.rs	Succeeded
-iptv-core/src/wizard.rs	Tap
-iptv-core/src/wizard.rs	Up
+iptv-presentation/src/wizard.rs	Back
+iptv-presentation/src/wizard.rs	Cancel
+iptv-presentation/src/wizard.rs	ClipboardText
+iptv-presentation/src/wizard.rs	Down
+iptv-presentation/src/wizard.rs	Failed
+iptv-presentation/src/wizard.rs	FilePicked
+iptv-presentation/src/wizard.rs	Ok
+iptv-presentation/src/wizard.rs	Paste
+iptv-presentation/src/wizard.rs	Progress
+iptv-presentation/src/wizard.rs	SetField
+iptv-presentation/src/wizard.rs	Succeeded
+iptv-presentation/src/wizard.rs	Tap
+iptv-presentation/src/wizard.rs	Up
 iptv-guide/src/playback.rs	Stalker
 iptv-guide/src/playback.rs	StalkerLink
 iptv-guide/src/playback.rs	Xtream

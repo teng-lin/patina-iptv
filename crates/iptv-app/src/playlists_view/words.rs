@@ -3,7 +3,7 @@
 use crate::i18n::{tr, trf};
 
 use crate::runtime::model::ImportErrorKind;
-use iptv_core::wizard::{FailureKind, ImportFailure};
+use iptv_presentation::wizard::{FailureKind, ImportFailure};
 use iptv_providers::model::SourceKind;
 
 use super::details::{Form, Param};

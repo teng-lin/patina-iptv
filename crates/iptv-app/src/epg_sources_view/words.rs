@@ -3,7 +3,7 @@
 use crate::i18n::{tr, trf};
 
 use crate::runtime::model::{GuideSource, ImportErrorKind};
-use iptv_core::wizard::FieldError;
+use iptv_presentation::wizard::FieldError;
 
 use super::state::{Act, EditKind, Notice};
 use crate::data::stored::SourceLine;
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn names_actions_notices_and_sheets() {
-        use iptv_core::wizard::FieldError;
+        use iptv_presentation::wizard::FieldError;
         let mut l = line(true, None);
         // The provider's second guide, a named source.
         let urls = [

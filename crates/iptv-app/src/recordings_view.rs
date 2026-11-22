@@ -2,9 +2,9 @@
 //! the shell renders it and sends named runtime commands.
 use crate::i18n::trf;
 use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
-use iptv_core::menu::Origin;
 use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
+use iptv_presentation::menu::Origin;
 use iptv_presentation::recording::Draft;
 use nsh_core::prelude::*;
 use std::time::Duration;

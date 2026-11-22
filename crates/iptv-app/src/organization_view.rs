@@ -9,11 +9,11 @@ use crate::{Ui, data, ui_kit};
 use iptv_core::guide::Pane;
 use iptv_core::lists::ListId;
 use iptv_core::organization::{Block, BlockKind, Blocks, Sort};
-use iptv_core::reorder::{Key, LeaveChoice, Outcome};
 use iptv_nav::Action;
 use iptv_presentation::organization::{
     ACTIONS, Action as Edit, Editor, GROUP_SORTS, LEAVE_CHOICES, Mode, step_choice,
 };
+use iptv_presentation::reorder::{Key, LeaveChoice, Outcome};
 use nsh_core::{Checked, prelude::*};
 use std::collections::HashMap;
 

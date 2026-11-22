@@ -10,9 +10,10 @@ use crate::i18n::{tr, trf};
 
 use std::time::Duration;
 
-use iptv_core::sound::{audio_delays, delay_label};
-use iptv_core::tracks::{Kind as Track, entries_in};
+use iptv_core::tracks::Kind as Track;
 use iptv_presentation::player_options::{Chooser, PictureSize, SLEEP_MINUTES};
+use iptv_presentation::sound::{audio_delays, delay_label};
+use iptv_presentation::tracks::entries_in;
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
@@ -509,7 +510,7 @@ mod snapshot_tests {
             let labels = open.track_labels_in(language);
             assert_eq!(
                 labels[1],
-                iptv_core::tracks::language_name_in("eng", language).unwrap()
+                iptv_presentation::tracks::language_name_in("eng", language).unwrap()
             );
             assert_ne!(labels, entries_in(&live, Track::Text, language));
             assert_eq!(open.values[1], "original-text-track");

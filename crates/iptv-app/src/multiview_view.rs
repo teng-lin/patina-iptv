@@ -16,7 +16,8 @@ use crate::i18n::{tr, trf};
 mod chrome;
 mod menu;
 
-use iptv_core::multiview::{Dialog, MAX_SURFACES, WARNING_CHOICES, WarningChoice};
+use iptv_core::multiview::MAX_SURFACES;
+use iptv_presentation::multiview::{Dialog, WARNING_CHOICES, WarningChoice};
 
 use nsh_core::prelude::*;
 

@@ -1,4 +1,4 @@
-//! The first-run / add-playlist wizard screen. `iptv_core::wizard` owns the
+//! The first-run / add-playlist wizard screen. `iptv_presentation::wizard` owns the
 //! flow, focus and validation; this draws each step full screen, feeds it
 //! remote keys and taps, and performs its effects (text entry, clipboard,
 //! file picker, import through `data::start_import`).
@@ -14,11 +14,11 @@ use crate::i18n::tr;
 pub(crate) mod entry;
 pub(crate) mod words;
 
-use iptv_core::wizard::{
+use iptv_nav::Action;
+use iptv_presentation::wizard::{
     Field, Notice, Origin, PlaylistKind, Step, Target, Wizard, WizardEffect, WizardEvent,
     WizardExit,
 };
-use iptv_nav::Action;
 use nsh_core::picker::FilePickRequest;
 use nsh_core::prelude::*;
 

@@ -3,10 +3,10 @@
 //! program and the date with the time. Pure functions of the values the
 //! caller passes (no clock access here).
 
+use crate::tracks::{audio_layout, fps_label, resolution_class};
 use iptv_core::clock::Style;
 use iptv_core::guide::{Airing, Program};
 use iptv_core::i18n::{self, Language};
-use iptv_core::tracks::{audio_layout, fps_label, resolution_class};
 
 /// Timing data for a focused or playing program.
 #[derive(Clone, Copy, Debug, PartialEq)]

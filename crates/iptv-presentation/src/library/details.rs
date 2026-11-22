@@ -7,7 +7,7 @@
 //! shown (typing replaces them); links are put into the field only when
 //! they carry no account or token. Pure; unit-tested below.
 
-use iptv_core::wizard::{Field, FieldError, normalize_mac, validate_field};
+use crate::wizard::{Field, FieldError, normalize_mac, validate_field};
 use iptv_library::SourceId;
 use iptv_providers::model::{MacAddress, Source, SourceConfig, SourceKind};
 use iptv_providers::{Secret, SecretUrl};

@@ -1,10 +1,7 @@
 shipped iptv-core/src/guide.rs re-exports guide_state
 shipped iptv-core/src/guide/floor.rs re-exports guide_state
 shipped iptv-core/src/lists.rs re-exports lists_state
-shipped iptv-core/src/multiview.rs re-exports multiview_state
 shipped iptv-core/src/playback.rs re-exports zap
-shipped iptv-core/src/reorder.rs re-exports reorder_state
-shipped iptv-core/src/tracks.rs re-exports track_labels
 test iptv-core/src/lists.rs re-exports lists_state
 test iptv-guide/src/interaction_tests/combined.rs iptv_core::lists::ChannelList
 test iptv-guide/src/interaction_tests/combined.rs iptv_core::lists::Entry
