@@ -1,6 +1,6 @@
 //! The guide's moves along time beyond the program steps: a desktop
 //! keyboard's hour and day jumps and its key back to now, and the window a
-//! touch or wheel pan settled at ([`crate::timeline`]). None goes before
+//! touch or wheel pan settled at. None goes before
 //! the focused row's floor ([`Focus::floor`]).
 
 use super::{Focus, Pane, home_window};

@@ -1,7 +1,7 @@
 //! The guide's timeline under a finger or a mouse drag: the core's
 //! [`Timeline`] model, shown by sliding the rows' programs, the ruler's
 //! times and the now line with one animated offset, so a pan moves no cell
-//! and rebuilds them only when its [`Band`] moves (`iptv_core::timeline`).
+//! and rebuilds them only when its [`Band`] moves (`crate::timeline`).
 //!
 //! A horizontal drag over the grid pans (NSH's pan activation decides the
 //! axis on the platform's thread: past [`SLOP`] horizontally it is ours,
@@ -18,8 +18,8 @@
 
 use nsh_core::time::Instant;
 
+use crate::timeline::{Band, MARGIN, SLOP, Timeline};
 use iptv_core::guide::view_range;
-use iptv_core::timeline::{Band, MARGIN, SLOP, Timeline};
 use nsh_core::prelude::*;
 
 use crate::Ui;
