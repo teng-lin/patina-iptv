@@ -4,7 +4,7 @@
 //! Recently watched) numbered as in the guide, with what is on now. Left
 //! opens the guide's groups column beside it; moving over its entries
 //! changes the guide's list as the guide's own column does
-//! (`lists::preview`). State is `iptv_core::channel_list`; this draws it,
+//! (`lists::preview`). State is `iptv_presentation::channel_list`; this draws it,
 //! takes its keys and plays what it picks. The video stays the one
 //! persistent layer: preview mode only changes its rectangle
 //! ([`preview_rect`]).
@@ -13,9 +13,9 @@ use crate::i18n::tr;
 use crate::lists::entry_name;
 
 use crate::layout::ListPanel;
-use iptv_core::channel_list::{ChannelList, ListMode, ListPane, Outcome};
-use iptv_core::lists::{ChannelList as Rows, Entry, FAVORITES, entry_count};
 use iptv_nav::Action;
+use iptv_presentation::channel_list::{ChannelList, ListMode, ListPane, Outcome};
+use iptv_presentation::lists::{ChannelList as Rows, Entry, FAVORITES, entry_count};
 use nsh_core::prelude::*;
 
 use crate::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};

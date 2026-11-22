@@ -15,7 +15,7 @@
 
 use std::rc::Rc;
 
-use crate::guide::{GroupName, Listing, Program, Schedule};
+use iptv_core::guide::{GroupName, Listing, Program, Schedule};
 
 /// The groups column's fixed entries, before the playlist's groups.
 pub const FAVORITES: usize = 0;
@@ -293,9 +293,9 @@ impl Schedule for ListView {
         group == 0
             && matches!(Entry::at(self.list.entry()), Entry::Group(group) if self.catalog.group_blocked(group))
     }
-    fn channel_block(&self, row: usize) -> crate::organization::Block {
+    fn channel_block(&self, row: usize) -> iptv_core::organization::Block {
         self.channel(row)
-            .map_or(crate::organization::Block::None, |channel| {
+            .map_or(iptv_core::organization::Block::None, |channel| {
                 self.catalog.channel_block(channel)
             })
     }

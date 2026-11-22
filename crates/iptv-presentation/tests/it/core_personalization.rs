@@ -1,7 +1,5 @@
-use iptv_core::{
-    favorites::Favorites,
-    guide::{Focus, Move, Pane, SyntheticSchedule},
-};
+use iptv_core::{favorites::Favorites, guide::SyntheticSchedule};
+use iptv_presentation::guide::{Focus, Move, Pane};
 #[test]
 fn every_supported_time_span_keeps_keyboard_focus_in_view() {
     for span in (60..=360).step_by(30) {

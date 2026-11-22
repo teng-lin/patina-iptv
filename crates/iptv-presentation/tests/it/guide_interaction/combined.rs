@@ -1,14 +1,15 @@
 use std::rc::Rc;
 
-use crate::combined::tests::{NOW, part};
-use crate::combined::{CombinedSchedule, SourceSchedule};
-use crate::{EpgSchedule, GuideChannel};
 use iptv_core::guide::{GroupName, Schedule};
 use iptv_epg::{ChannelKey, GuideStore};
+use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
+use iptv_guide::test_support::combined::{NOW, part};
+use iptv_guide::{EpgSchedule, GuideChannel};
 
 #[test]
 fn collapsing_one_playlist_preserves_parent_channels_and_other_group_identity() {
-    use iptv_core::lists::{ChannelList, Entry, ListId, group_of};
+    use iptv_core::lists::group_of;
+    use iptv_presentation::lists::{ChannelList, Entry, ListId};
     let all = CombinedSchedule::new(vec![part(1, "Alpha", NOW), part(2, "Beta", NOW)], NOW);
     let beta_group = ListId::of(Entry::Group(3).index(), &all);
     let beta_channel = all.channel_key(1).unwrap();
@@ -35,7 +36,7 @@ fn collapsing_one_playlist_preserves_parent_channels_and_other_group_identity() 
 
 #[test]
 fn independent_browser_expansion_keeps_the_guides_selected_category_and_channel_indices() {
-    use iptv_core::lists::{ChannelList, Entry, ListId};
+    use iptv_presentation::lists::{ChannelList, Entry, ListId};
     let guide = CombinedSchedule::new(vec![part(1, "Alpha", NOW), part(2, "Beta", NOW)], NOW)
         .with_collapsed_sources([2]);
     let selected = Entry::Group(1).index();
@@ -73,7 +74,7 @@ fn independent_browser_expansion_keeps_the_guides_selected_category_and_channel_
 
 #[test]
 fn collapsing_playlist_sections_does_not_change_category_zapping() {
-    use iptv_core::playback::{group_range, zap_target};
+    use iptv_presentation::zap::{group_range, zap_target};
     let source = |id, name: &str| {
         let channel = |n| GuideChannel {
             key: ChannelKey::new(format!("generated-{n}")),

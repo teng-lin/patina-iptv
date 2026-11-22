@@ -370,12 +370,12 @@ fn library_shortcuts(ui: Ui) -> View {
     view().flex_row().gap(px(8.0)).children(
         [
             (
-                iptv_core::browse::RailItem::Movies,
+                iptv_presentation::browse::RailItem::Movies,
                 iptv_core::vod::Kind::Movie,
                 (|| tr("Movies")) as fn() -> &'static str,
             ),
             (
-                iptv_core::browse::RailItem::Shows,
+                iptv_presentation::browse::RailItem::Shows,
                 iptv_core::vod::Kind::Series,
                 || tr("Shows"),
             ),

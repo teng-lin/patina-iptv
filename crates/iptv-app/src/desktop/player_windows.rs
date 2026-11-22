@@ -73,9 +73,9 @@ fn admit_session(
 }
 
 fn follow_clock(
-    parent: Signal<iptv_core::guide::Focus>,
-    local: Signal<iptv_core::guide::Focus>,
-    view: impl Fn() -> iptv_core::lists::ListView + 'static,
+    parent: Signal<iptv_presentation::guide::Focus>,
+    local: Signal<iptv_presentation::guide::Focus>,
+    view: impl Fn() -> iptv_presentation::lists::ListView + 'static,
 ) {
     let now = computed(move || parent.with(|f| f.now));
     effect(move || {
@@ -104,8 +104,9 @@ fn follow_lists(local: Ui) {
                 local.description.set(None);
                 local.chooser.set(None);
             } else if matches!(
-                iptv_core::lists::Entry::at(local.focus.with_untracked(|f| f.group)),
-                iptv_core::lists::Entry::Favorites | iptv_core::lists::Entry::Recent
+                iptv_presentation::lists::Entry::at(local.focus.with_untracked(|f| f.group)),
+                iptv_presentation::lists::Entry::Favorites
+                    | iptv_presentation::lists::Entry::Recent
             ) {
                 crate::lists::rebuild(local, true);
             }
@@ -489,8 +490,9 @@ mod tests {
 
     #[component]
     fn LocalStateHarness() -> impl IntoElement {
-        use iptv_core::guide::{Focus, Schedule, SyntheticSchedule};
-        use iptv_core::lists::{ALL, ChannelList, ListView};
+        use iptv_core::guide::{Schedule, SyntheticSchedule};
+        use iptv_presentation::guide::Focus;
+        use iptv_presentation::lists::{ALL, ChannelList, ListView};
         use std::rc::Rc;
         let parent = signal(Focus::at(0));
         let mut focus = Focus::at(0);

@@ -1,9 +1,7 @@
-use iptv_core::{
-    guide::Schedule,
-    lists::{ChannelList, FIRST_GROUP, ListId},
-};
+use iptv_core::guide::Schedule;
 use iptv_epg::GuideStore;
 use iptv_guide::{EpgSchedule, Organization};
+use iptv_presentation::lists::{ChannelList, FIRST_GROUP, ListId};
 #[test]
 fn display_groups_share_catalog_identity_and_preserve_membership_order() {
     let m = iptv_providers::m3u::parse_m3u(
@@ -58,5 +56,5 @@ fn display_groups_share_catalog_identity_and_preserve_membership_order() {
     s.set_group_lists(vec![]);
     assert_eq!(s.group_count(), 0);
     assert!(s.group_channels(99).is_empty());
-    assert_eq!(identity.find(&s), iptv_core::lists::ALL);
+    assert_eq!(identity.find(&s), iptv_presentation::lists::ALL);
 }

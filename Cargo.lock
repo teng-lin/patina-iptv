@@ -2505,6 +2505,7 @@ version = "0.1.5"
 dependencies = [
  "iptv-core",
  "iptv-epg",
+ "iptv-guide",
  "iptv-library",
  "iptv-providers",
  "iptv-search",

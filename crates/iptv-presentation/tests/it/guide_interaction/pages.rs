@@ -1,16 +1,17 @@
 use iptv_core::guide::Listing;
 use std::rc::Rc;
 
-use crate::pages::PagedWindow;
-use crate::pages_tests::{
-    FIRST, NOW, Requests, deliver, minute_of, paged, store_between, title_at,
-};
-use crate::{EpgSchedule, GuideChannel};
-use iptv_core::guide::{Focus, Schedule};
+use iptv_core::guide::Schedule;
 use iptv_epg::{
     ChannelKey, DAY, EpgRef, FeedId, GuideStore, MatchKind, ProgramData, SourceBuilder,
     StoreOptions,
 };
+use iptv_guide::pages::PagedWindow;
+use iptv_guide::test_support::pages::{
+    FIRST, NOW, Requests, deliver, minute_of, paged, store_between, title_at,
+};
+use iptv_guide::{EpgSchedule, GuideChannel};
+use iptv_presentation::guide::Focus;
 
 #[test]
 fn browsing_back_in_the_guide_pages_in_the_previous_day() {
@@ -24,7 +25,7 @@ fn browsing_back_in_the_guide_pages_in_the_previous_day() {
         if f.cursor < edge {
             break;
         }
-        f.apply(iptv_core::guide::Move::Left, &s);
+        f.apply(iptv_presentation::guide::Move::Left, &s);
     }
     assert!(f.cursor < edge);
     assert_eq!(s.listing(0, f.program(&s)), Some(Listing::Loading));
@@ -44,8 +45,8 @@ fn browsing_back_in_the_guide_pages_in_the_previous_day() {
 
 #[test]
 fn retained_coverage_is_per_channel_and_inspectable_before_a_page_is_loaded() {
-    use iptv_core::guide::{Move, Pane, home_window, view_range};
-    use iptv_core::lists::{ChannelList, FIRST_GROUP, ListView};
+    use iptv_presentation::guide::{Move, Pane, home_window, view_range};
+    use iptv_presentation::lists::{ChannelList, FIRST_GROUP, ListView};
 
     let loaded_from = NOW - DAY;
     // The oldest retained minute is the first moment of a page. P0 began
@@ -196,7 +197,8 @@ fn a_day_back_by_key_or_pan_pages_that_day_in() {
 
 #[test]
 fn an_empty_schedule_keeps_the_default_padding_and_horizon() {
-    use iptv_core::guide::{HORIZON, home_window, view_range};
+    use iptv_core::guide::HORIZON;
+    use iptv_presentation::guide::{home_window, view_range};
     let schedule = EpgSchedule::new(Vec::new(), GuideStore::new(), NOW);
     assert_eq!(view_range(&schedule, 0), (home_window(0), HORIZON));
 }

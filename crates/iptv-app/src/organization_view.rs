@@ -6,10 +6,10 @@ use crate::runtime::{Error, commands::OrganizationItems, model::SourceId};
 use crate::scale::Scale;
 use crate::wizard_view::entry::{self, TextSheet};
 use crate::{Ui, data, ui_kit};
-use iptv_core::guide::Pane;
-use iptv_core::lists::ListId;
 use iptv_core::organization::{Block, BlockKind, Blocks, Sort};
 use iptv_nav::Action;
+use iptv_presentation::guide::Pane;
+use iptv_presentation::lists::ListId;
 use iptv_presentation::organization::{
     ACTIONS, Action as Edit, Editor, GROUP_SORTS, LEAVE_CHOICES, Mode, step_choice,
 };

@@ -1,7 +1,7 @@
 use super::super::moves::{DAY, HOUR};
 use super::super::{Move, Pane, home_window};
 use super::*;
-use crate::guide::{GroupName, HORIZON, Listing, SyntheticSchedule};
+use iptv_core::guide::{GroupName, HORIZON, Listing, SyntheticSchedule};
 
 const S: SyntheticSchedule = SyntheticSchedule;
 
