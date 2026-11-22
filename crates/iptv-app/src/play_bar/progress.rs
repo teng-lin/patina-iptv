@@ -3,7 +3,6 @@
 //! is; its times at both ends.
 
 use crate::i18n::tr;
-use iptv_core::play_bar::seek_target;
 use nsh_core::prelude::*;
 use nsh_core::{TouchEvent, TouchPhase};
 
@@ -164,4 +163,34 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                 ),
         )
         .child(time(Box::new(move || ends().1)))
+}
+
+/// Where a press `x` points into a progress bar `width` points wide seeks
+/// to, in seconds into a program `length` seconds long, no further than
+/// `limit` (what the archive holds so far).
+fn seek_target(x: f32, width: f32, length: i32, limit: i32) -> i32 {
+    // A NaN width seeks nowhere too.
+    if width.is_nan() || width <= 0.0 || length <= 0 {
+        return 0;
+    }
+    let fraction = (x / width).clamp(0.0, 1.0);
+    ((fraction * length as f32).round() as i32).clamp(0, limit.clamp(0, length))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seek_target;
+
+    #[test]
+    fn a_press_on_the_progress_bar_seeks_within_the_archive() {
+        // A 60-minute program, 600 px wide.
+        assert_eq!(seek_target(300.0, 600.0, 3_600, 3_600), 1_800);
+        assert_eq!(seek_target(-20.0, 600.0, 3_600, 3_600), 0);
+        assert_eq!(seek_target(900.0, 600.0, 3_600, 3_600), 3_600);
+        // Still airing: no further than what aired.
+        assert_eq!(seek_target(540.0, 600.0, 3_600, 1_200), 1_200);
+        // Nothing laid out yet, or no length.
+        assert_eq!(seek_target(10.0, 0.0, 3_600, 3_600), 0);
+        assert_eq!(seek_target(10.0, 600.0, 0, 0), 0);
+    }
 }

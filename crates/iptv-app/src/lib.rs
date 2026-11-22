@@ -46,6 +46,7 @@ mod guide_repair_view;
 mod header;
 mod host;
 pub mod layout;
+pub mod timeline;
 // A browser host exports nothing: the glob is empty there.
 #[allow(unused_imports)]
 #[doc(inline)]

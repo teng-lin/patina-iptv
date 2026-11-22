@@ -2,7 +2,6 @@ use super::super::moves::{DAY, HOUR};
 use super::super::{Move, Pane, home_window};
 use super::*;
 use crate::guide::{HORIZON, SyntheticSchedule};
-use crate::timeline::Timeline;
 
 const S: SyntheticSchedule = SyntheticSchedule;
 
@@ -178,10 +177,6 @@ fn panning_reaches_retained_listings_on_lists_without_catch_up() {
     };
     let (first, end) = view_range(&s, 0);
     assert_eq!((first, end), (-2 * DAY, HORIZON));
-    let mut timeline = Timeline::new(home_window(0), (first, end));
-    timeline.press();
-    timeline.drag(1.0e6, 0.0, 8.0);
-    assert_eq!(timeline.view(), first as f32);
     let mut f = on(0);
     f.pan_to(-10 * DAY, &s);
     assert_eq!(f.window, first);

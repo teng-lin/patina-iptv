@@ -1,5 +1,5 @@
 use super::*;
-use crate::guide::{HISTORY, HORIZON};
+use crate::guide::{DAY, HISTORY, HORIZON};
 
 /// 8 dp per minute: a 1200 dp program area shows [`VISIBLE`] minutes.
 const PPM: f32 = 8.0;
@@ -290,4 +290,26 @@ fn a_fling_travels_like_a_native_lists() {
     let from = t.view();
     t.drag(120.0, 0.0, PPM);
     assert_eq!(t.view(), from - 15.0);
+}
+
+#[test]
+fn a_long_drag_stops_at_the_first_retained_minute() {
+    let (first, end) = (-2 * DAY, HORIZON);
+    let mut timeline = Timeline::new(home_window(0), (first, end));
+    timeline.press();
+    timeline.drag(1.0e6, 0.0, 8.0);
+    assert_eq!(timeline.view(), first as f32);
+}
+
+#[test]
+fn every_supported_time_span_can_pan_to_the_end() {
+    for span in (60..=360).step_by(30) {
+        let mut t = Timeline::new(0, (0, 1000));
+        t.set_span(span);
+        t.set_bounds((0, 1000));
+        t.follow(9999);
+        assert_eq!(t.window(), 1000 - span);
+        t.set_bounds((0, 20));
+        assert_eq!(t.window(), 0);
+    }
 }

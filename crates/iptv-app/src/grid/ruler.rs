@@ -7,7 +7,7 @@
 use crate::i18n::tr;
 
 use super::BAND;
-use iptv_core::timeline::MARGIN;
+use crate::timeline::MARGIN;
 use nsh_core::prelude::*;
 
 use super::{NOW_W, Pan, fill};

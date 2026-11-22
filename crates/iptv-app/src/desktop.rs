@@ -15,6 +15,7 @@ use nsh_core::element::desktop::{MenuItem, WindowRef, current_window, set_applic
 
 use crate::Ui;
 
+mod display_bounds;
 pub mod pip_window;
 pub mod player_windows;
 /// The desktop backends, where the app owns the window and the sound:
@@ -79,7 +80,7 @@ const POSITIONS: bool = crate::host::MACOS || crate::host::WINDOWS;
 /// when it first reports its state (a saved place restored onto a display
 /// no longer there), and when it comes back from minimized or full screen:
 /// it moves onto the nearest remaining display by
-/// [`iptv_core::playback_windows::reachable`]. The viewer's own moves and
+/// [`display_bounds::reachable`]. The viewer's own moves and
 /// resizes do not run it, and a window the viewer can still grab is never
 /// moved. Presentation only: nothing plays or stops.
 pub(crate) fn keep_reachable(window: WindowRef) {
@@ -130,7 +131,7 @@ fn recovery(
         (b.origin.x.0, b.origin.y.0, b.size.width.0, b.size.height.0)
     };
     let areas: Vec<_> = displays.iter().map(|d| rect(d.visible_bounds)).collect();
-    let (x, y, w, h) = iptv_core::playback_windows::reachable(rect(state.bounds), &areas)?;
+    let (x, y, w, h) = display_bounds::reachable(rect(state.bounds), &areas)?;
     Some(nsh_core::desktop::WindowFrame {
         x: Some(px(x)),
         y: Some(px(y)),

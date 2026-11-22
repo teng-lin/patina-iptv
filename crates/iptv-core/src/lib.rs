@@ -41,7 +41,6 @@ pub mod recording;
 pub mod reorder;
 pub mod seek_hold;
 pub mod sound;
-pub mod timeline;
 pub mod tracks;
 pub mod wizard;
 
