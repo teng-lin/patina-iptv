@@ -77,6 +77,7 @@ const UNTRANSLATED: usize = 0;
 const ROOTS: &[&str] = &[
     "iptv-app/src",
     "iptv-core/src",
+    "iptv-presentation/src",
     "iptv-guide/src",
     "iptv-library/src",
     "iptv-runtime/src",
