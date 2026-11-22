@@ -390,6 +390,9 @@ fn message(source: &str) -> String {
 
 fn review(app: &mut Headless) {
     step(app.press(&message("Restore a backup")));
+    step(app.wait_for("id:settings-editor"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
     step(app.wait_for("id:restore-review"));
     step(app.wait_for("text:generated.patinabackup"));
     step(app.wait_for(&message("When you reopen Patina, this backup replaces any current playlists, settings, favorites, groups, and watch history.")));
