@@ -473,7 +473,7 @@ fn save_allowed(ui: Ui, draft: Draft) {
                     s.error = Some(
                         error
                             .unavailable_reason()
-                            .filter(|reason| iptv_core::i18n::is_cataloged(reason))
+                            .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
                             .unwrap_or("Recording action failed")
                             .into(),
                     )
@@ -1030,7 +1030,7 @@ fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
 fn translated_reason(message: &str) -> &str {
     if message.is_empty() {
         ""
-    } else if iptv_core::i18n::is_cataloged(message) {
+    } else if iptv_presentation::i18n::is_cataloged(message) {
         tr(message)
     } else {
         tr("Recording action failed")

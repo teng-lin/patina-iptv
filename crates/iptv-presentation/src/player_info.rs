@@ -3,10 +3,10 @@
 //! program and the date with the time. Pure functions of the values the
 //! caller passes (no clock access here).
 
+use crate::clock::Style;
+use crate::i18n::{self, Language};
 use crate::tracks::{audio_layout, fps_label, resolution_class};
-use iptv_core::clock::Style;
 use iptv_core::guide::{Airing, Program};
-use iptv_core::i18n::{self, Language};
 
 /// Timing data for a focused or playing program.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -99,7 +99,7 @@ pub fn minutes_left(language: &Language, start: i32, end: i32, now: i32) -> Opti
 /// "Tue 10 Nov  18:00": local date and time of `unix` at a UTC offset of
 /// `offset_minutes`, in the language and on the clock of `style`.
 pub fn date_time(unix: i64, offset_minutes: i32, style: Style) -> String {
-    iptv_core::clock::date_time(unix, offset_minutes, style)
+    crate::clock::date_time(unix, offset_minutes, style)
 }
 
 #[cfg(test)]
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn date_and_time_follow_the_style() {
-        use iptv_core::clock::HourCycle;
+        use crate::clock::HourCycle;
         assert_eq!(
             date_time(EPOCH, 0, Style::english_24()),
             "Tue 10 Nov  18:00"

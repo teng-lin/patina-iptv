@@ -192,7 +192,7 @@ impl Open {
         }
     }
 
-    fn track_labels_in(&self, language: &iptv_core::i18n::Language) -> Vec<String> {
+    fn track_labels_in(&self, language: &iptv_presentation::i18n::Language) -> Vec<String> {
         match (self.kind, self.tracks.as_ref()) {
             (Kind::Track(kind), Some(tracks)) => entries_in(tracks, kind, language),
             _ => Vec::new(),
@@ -506,7 +506,7 @@ mod snapshot_tests {
         }];
         live.selected_text = Some("late-text-track".into());
         for tag in ["es", "ja"] {
-            let language = iptv_core::i18n::resolve(tag, None);
+            let language = iptv_presentation::i18n::resolve(tag, None);
             let labels = open.track_labels_in(language);
             assert_eq!(
                 labels[1],

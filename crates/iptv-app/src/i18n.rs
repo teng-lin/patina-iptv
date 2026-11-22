@@ -7,8 +7,8 @@
 //! shown. `tests/app/catalog_lint.rs` checks that every literal in one
 //! of these calls has a catalog row, and that no user-facing literal
 //! goes around them.
-use iptv_core::clock::{HourCycle, Style};
-use iptv_core::i18n::{self, Args, Language};
+use iptv_presentation::clock::{HourCycle, Style};
+use iptv_presentation::i18n::{self, Args, Language};
 use iptv_settings::{Target, keys};
 
 #[cfg(feature = "test-support")]
@@ -97,7 +97,7 @@ pub fn tr(source: &str) -> &str {
 }
 
 /// As [`tr`], for a message with `{named}` placeholders and plural forms
-/// (`iptv_core::i18n::message`): `args` fills them, and a count selects
+/// (`iptv_presentation::i18n::message`): `args` fills them, and a count selects
 /// its form by the interface language's rules. Provider content may be a
 /// value; it is never the message.
 pub fn trf(source: &str, args: &Args<'_>) -> String {
@@ -152,7 +152,7 @@ pub(crate) fn in_language<R>(language: &str, run: impl FnOnce() -> R) -> R {
 #[cfg(test)]
 mod tests {
     use super::{clock_style, in_language, key, tr, trf, with_language};
-    use iptv_core::clock::HourCycle;
+    use iptv_presentation::clock::HourCycle;
 
     const CHANNELS: &str = "{count, plural, one {# channel} other {# channels}}";
 
@@ -166,7 +166,7 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let rows: std::collections::HashMap<_, _> =
-            include_str!("../../iptv-core/src/i18n/messages.tsv")
+            include_str!("../../iptv-presentation/src/i18n/messages.tsv")
                 .lines()
                 .map(|line| {
                     let mut cells = line.split('\t');
@@ -180,9 +180,9 @@ mod tests {
             let cells = rows
                 .get(source)
                 .unwrap_or_else(|| panic!("missing {source}"));
-            assert_eq!(cells.len(), iptv_core::i18n::LANGUAGES.len() - 1);
+            assert_eq!(cells.len(), iptv_presentation::i18n::LANGUAGES.len() - 1);
             let english = words(source);
-            for (cell, language) in cells.iter().zip(&iptv_core::i18n::LANGUAGES[1..]) {
+            for (cell, language) in cells.iter().zip(&iptv_presentation::i18n::LANGUAGES[1..]) {
                 assert!(!cell.trim().is_empty(), "{}: {source}", language.tag);
                 // Font family and license proper names intentionally keep English.
                 if source.starts_with("The version of this app.") {
@@ -275,12 +275,12 @@ mod tests {
         let style = with_language("de", "h12", clock_style);
         assert_eq!(style.language.tag, "de");
         assert_eq!(
-            iptv_core::clock::date_time(iptv_core::guide::SYNTHETIC_EPOCH_UNIX, 0, style),
+            iptv_presentation::clock::date_time(iptv_core::guide::SYNTHETIC_EPOCH_UNIX, 0, style),
             "Di., 10. Nov.  6:00 PM"
         );
         let style = in_language("ja", clock_style);
         assert_eq!(
-            iptv_core::clock::date_time(iptv_core::guide::SYNTHETIC_EPOCH_UNIX, 0, style),
+            iptv_presentation::clock::date_time(iptv_core::guide::SYNTHETIC_EPOCH_UNIX, 0, style),
             "11月10日(火)  18:00"
         );
     }
@@ -291,7 +291,7 @@ mod tests {
     /// reached `tr` without a row would stay English without a sign.
     #[test]
     fn accessibility_labels_are_in_the_catalog() {
-        use iptv_core::i18n::{LANGUAGES, resolve, translate};
+        use iptv_presentation::i18n::{LANGUAGES, resolve, translate};
         const LABELS: [&str; 29] = [
             // The play bar.
             "Mute",
@@ -347,7 +347,7 @@ mod tests {
         assert_eq!(choices[0], "system");
         assert_eq!(
             &choices[1..],
-            iptv_core::i18n::LANGUAGES
+            iptv_presentation::i18n::LANGUAGES
                 .iter()
                 .map(|l| l.tag)
                 .collect::<Vec<_>>()

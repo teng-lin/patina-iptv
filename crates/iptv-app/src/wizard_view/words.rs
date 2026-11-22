@@ -297,7 +297,7 @@ mod tests {
             PlaylistKind::Xtream,
         ] {
             let english = told(kind);
-            for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+            for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
                 let texts = in_language(language.tag, || told(kind));
                 let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
                 assert_eq!(distinct.len(), kinds.len(), "{}", language.tag);
@@ -320,7 +320,7 @@ mod tests {
             FieldError::InvalidPort,
             FieldError::InvalidMac,
         ];
-        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+        for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
             let texts: std::collections::BTreeSet<_> = in_language(language.tag, || {
                 errors.map(field_error).into_iter().collect()
             });
