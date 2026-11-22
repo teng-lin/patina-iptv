@@ -435,6 +435,15 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     let movie = sources(&seen);
     assert_eq!(movie.len(), 1, "{movie:?}");
     let token = seen.lock().unwrap().props["source"]["token"].clone();
+    // The headless player must report ready before the resize sequence.
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "state".into(),
+            data: json!({"token": token, "state": "ready"}),
+        },
+    );
     app.engine().control().dispatch_event(
         surface,
         EventKind::NativeEvent,
