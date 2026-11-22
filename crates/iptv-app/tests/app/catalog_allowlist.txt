@@ -67,7 +67,7 @@ iptv-app/src/host/native/platform_data.rs	synthetic database key was not install
 # Persisted locale token; shown by the picker as the translated System language label.
 iptv-settings/src/catalog/general.rs	system
 # CLDR territory codes used to choose the automatic clock.
-iptv-core/src/clock.rs	419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE
+iptv-presentation/src/clock.rs	419 AE AG AL AS AU BB BD BH BM BN BO BS BT CA CO CR CU CY DJ DM DO DZ EC EG EH ER ET FJ FM GD GH GM GR GT GU GY HK HN IN IQ JM JO KH KI KN KP KR KW KY LB LC LR LS LY MH MO MP MR MW MX MY NA NI NZ OM PA PE PG PH PK PR PS PW QA SA SB SD SG SL SO SS SV SY SZ TC TD TN TO TT TW UM US VC VE VG VI VU WS YE
 # Font families and measuring.
 iptv-app/src/fonts.rs	'Roboto Condensed', Roboto, sans-serif
 iptv-app/src/host.rs	Roboto

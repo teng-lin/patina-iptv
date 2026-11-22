@@ -7,6 +7,13 @@ rust-version.workspace = true
 publish.workspace = true
 license.workspace = true
 
+[features]
+# The interface languages' messages outside the module: read per language
+# from the host (`i18n::set_catalog_reader`), for a browser package, whose
+# module size is its launch time. Off by default; on wasm32 only, so native
+# builds (`--all-features` included) embed them.
+external-catalog = []
+
 [dependencies]
 iptv-core.workspace = true
 iptv-epg.workspace = true

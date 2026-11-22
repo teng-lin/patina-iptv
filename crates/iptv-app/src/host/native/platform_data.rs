@@ -324,9 +324,9 @@ mod tests {
             )))
             .unwrap();
             let locale = std::env::var("IPTV_RS_TEST_LOCALE").unwrap();
-            let language = iptv_core::i18n::resolve("system", Some(&locale));
+            let language = iptv_presentation::i18n::resolve("system", Some(&locale));
             let message =
-                iptv_core::i18n::translate(language, "Private app storage is unavailable");
+                iptv_presentation::i18n::translate(language, "Private app storage is unavailable");
             if locale == "de" {
                 assert_ne!(message, "Private app storage is unavailable");
             }

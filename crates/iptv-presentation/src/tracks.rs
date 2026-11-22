@@ -1,6 +1,6 @@
 //! Localized track choices and summaries for playback controls.
 
-use iptv_core::i18n::{self, Language, translate};
+use crate::i18n::{self, Language, translate};
 use iptv_core::tracks::{AUTO, AudioTrack, Kind, OFF, TextTrack, Tracks, VideoTrack};
 
 /// What the viewer chose for the open stream, as the host's props say it.

@@ -7,7 +7,7 @@
 //! formats it, so a reworded translation does not fail them and a message
 //! that stayed English does.
 use crate::personalization::{self, Fixture, step};
-use iptv_core::i18n::{self, Arg, Language};
+use iptv_presentation::i18n::{self, Arg, Language};
 use iptv_settings::{Settings, Target, Value, keys};
 use nsh_testing::{DialogAnswer, Headless};
 use std::sync::{

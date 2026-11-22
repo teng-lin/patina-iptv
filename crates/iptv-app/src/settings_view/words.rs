@@ -620,7 +620,7 @@ mod save_failure_tests {
         let unsaved = save_failure(SaveFailure::NotPublished).to_owned();
         let updated = save_failure(SaveFailure::DurabilityUnconfirmed).to_owned();
         assert_ne!(unsaved, updated);
-        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+        for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
             crate::i18n::in_language(language.tag, || {
                 let not_published = save_failure(SaveFailure::NotPublished);
                 let durability = save_failure(SaveFailure::DurabilityUnconfirmed);

@@ -620,7 +620,7 @@ mod tests {
             stored.chain(session).collect()
         };
         let english = told();
-        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+        for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
             let texts = in_language(language.tag, told);
             for (text, source) in texts.iter().zip(&english) {
                 assert_ne!(text, source, "{}: not translated", language.tag);

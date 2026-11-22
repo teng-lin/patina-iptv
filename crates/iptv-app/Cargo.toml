@@ -22,7 +22,7 @@ test-support = ["iptv-runtime/test-support"]
 # read per language from the package, the fonts are the page's (its
 # `fonts` option) and the splash is the package's `assets/banner.png`.
 # For the browser host only; native builds embed them.
-browser-package = ["iptv-core/external-catalog"]
+browser-package = ["iptv-presentation/external-catalog"]
 
 [dependencies]
 iptv-runtime.workspace = true

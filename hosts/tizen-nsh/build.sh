@@ -134,8 +134,8 @@ cp "$root/art/icon/play-512.png" "$stage/icon.png"
 mkdir -p "$stage/assets" "$stage/fonts"
 cp "$root/art/icon/banner.png" "$stage/assets/banner.png"
 cp "$root"/crates/iptv-app/fonts/*.woff2 "$stage/fonts/"
-python3 "$here/catalog.py" "$root/crates/iptv-core/src/i18n/messages.tsv" \
-    "$root/crates/iptv-core/src/i18n.rs" "$stage/i18n"
+python3 "$here/catalog.py" "$root/crates/iptv-presentation/src/i18n/messages.tsv" \
+    "$root/crates/iptv-presentation/src/i18n.rs" "$stage/i18n"
 cp "$module" "$stage/app.wasm"
 if [[ "${NSH_WASM_OPT:-1}" != 0 ]]; then
     # Binaryen (version_132 measured) keeps the module to MVP plus the two
