@@ -40,6 +40,5 @@ test iptv-guide/tests/it/personalization.rs iptv_core::lists::ALL
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::ChannelList
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::FIRST_GROUP
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::ListId
-test iptv-runtime/tests/it/vod_library.rs iptv_core::vod::Screen
 test iptv-settings/tests/it/main.rs iptv_settings::screen
 test iptv-settings/tests/it/screen.rs iptv_settings::screen

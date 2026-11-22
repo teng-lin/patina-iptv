@@ -464,10 +464,11 @@ fn an_out_of_order_episode_resumes_after_restart_and_a_stale_writer_cannot_resto
     let owner = make();
     let details = support::block_on(owner.vod_details(series.clone())).unwrap();
     assert_eq!(details.resume_episode, Some(fifth.clone()));
-    let mut screen = iptv_core::vod::Screen::default();
-    screen.show_details(details.clone());
-    assert_eq!(screen.episode, Some(fifth.clone()));
-    assert_eq!(screen.season, Some(2));
+    let preferred = details
+        .preferred_episode()
+        .expect("saved episode is in the series");
+    assert_eq!(preferred.key, fifth);
+    assert_eq!(preferred.season, 2);
     let (playing, _) = support::block_on(owner.vod_play(details, fifth.clone(), false)).unwrap();
     assert_eq!(playing.key, fifth);
     assert_eq!(playing.progress.resume_ms(), 37_000);
