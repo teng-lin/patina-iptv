@@ -44,7 +44,7 @@ pub use library::{
     Activity, Playlist, delete, edit_guides, playlists, refresh, refresh_all, rename, set_policy,
     set_user_agent, source_details, switch_to, try_details,
 };
-pub use wizard_map::{source_from_draft, source_from_draft_in};
+pub use wizard_map::source_from_draft;
 
 /// A development playlist the wizard's M3U form starts with, set when the
 /// app is built (`IPTV_RS_DEV_PLAYLIST=http://10.0.2.2:8089/iptv/playlist.m3u`

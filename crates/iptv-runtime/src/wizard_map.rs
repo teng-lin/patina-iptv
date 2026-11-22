@@ -13,15 +13,11 @@ use iptv_providers::model::{
 };
 use iptv_providers::{Secret, SecretUrl};
 
-/// The source to import for `draft`, and the guide URL the user typed.
-pub fn source_from_draft(draft: &PlaylistDraft) -> (Source, Option<SecretUrl>) {
-    source_from_draft_in(draft, &iptv_core::i18n::LANGUAGES[0])
-}
-
-/// An empty source name gets a localized generated default at creation time.
-pub fn source_from_draft_in(
+/// Builds the source and optional guide URL. The caller supplies the
+/// localized fallback name used when the draft has no name, host or file stem.
+pub fn source_from_draft(
     draft: &PlaylistDraft,
-    language: &iptv_core::i18n::Language,
+    fallback_name: &str,
 ) -> (Source, Option<SecretUrl>) {
     let m3u = |location: &str| {
         SourceConfig::M3u(M3uSourceConfig {
@@ -60,7 +56,7 @@ pub fn source_from_draft_in(
     let name = draft
         .name
         .clone()
-        .unwrap_or_else(|| default_name(&draft.source, language));
+        .unwrap_or_else(|| default_name(&draft.source, fallback_name));
     let epg = draft.epg_url.as_ref().map(|u| SecretUrl::new(u.expose()));
     (Source { name, config }, epg)
 }
@@ -76,7 +72,7 @@ fn with_scheme(address: &str) -> String {
 
 /// A name when the user gave none: the server's host, or the file's name.
 /// Never the path or query, which may carry credentials.
-fn default_name(source: &DraftSource, language: &iptv_core::i18n::Language) -> String {
+fn default_name(source: &DraftSource, fallback_name: &str) -> String {
     let host = |url: &str| {
         let rest = url.split_once("://").map_or(url, |(_, r)| r);
         let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
@@ -100,7 +96,7 @@ fn default_name(source: &DraftSource, language: &iptv_core::i18n::Language) -> S
             .to_owned(),
     };
     if name.is_empty() {
-        iptv_core::i18n::translate(language, "Playlist").to_owned()
+        fallback_name.to_owned()
     } else {
         name
     }
@@ -156,6 +152,7 @@ pub fn failure_of(error: &ImportError) -> ImportFailure {
 
 #[cfg(test)]
 mod tests {
+    use super::source_from_draft as source_with_fallback;
     use super::*;
     use iptv_core::add_playlist::{SecretText, UrlText};
     use iptv_epg::FeedId;
@@ -170,19 +167,31 @@ mod tests {
         }
     }
 
+    fn source_from_draft(
+        draft: &PlaylistDraft,
+    ) -> (
+        iptv_providers::model::Source,
+        Option<iptv_providers::SecretUrl>,
+    ) {
+        source_with_fallback(draft, "Playlist")
+    }
+
     #[test]
-    fn only_generated_fallback_names_use_the_interface_language() {
-        let ja = iptv_core::i18n::resolve("ja", None);
+    fn the_supplied_fallback_name_applies_only_without_a_name_or_location() {
+        let fallback = "プレイリスト";
         let empty = draft(DraftSource::M3uFile { path: "/".into() });
-        assert_eq!(source_from_draft_in(&empty, ja).0.name, "プレイリスト");
+        assert_eq!(
+            source_with_fallback(&empty, fallback).0.name,
+            "プレイリスト"
+        );
         let mut named = empty.clone();
         named.name = Some("Playlist".into());
-        assert_eq!(source_from_draft_in(&named, ja).0.name, "Playlist");
+        assert_eq!(source_with_fallback(&named, fallback).0.name, "Playlist");
         let host = draft(DraftSource::M3uUrl {
             url: UrlText::new("https://synthetic.example.test/catalog"),
         });
         assert_eq!(
-            source_from_draft_in(&host, ja).0.name,
+            source_with_fallback(&host, fallback).0.name,
             "synthetic.example.test"
         );
     }
