@@ -66,7 +66,9 @@ percent-encoding = "2.3"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 sha1_smol = "1"
 # Import pipeline (core, wasm-safe) and its native network adapter
-iptv-import = { path = "crates/iptv-import" }
+# Without Stalker portals unless a crate asks for them (`stalker`): a
+# browser TV package leaves them out.
+iptv-import = { path = "crates/iptv-import", default-features = false }
 iptv-net = { path = "crates/iptv-net" }
 # iptv-store-sqlite (SQLite on both targets; bundled SQLCipher natively, also
 # for Android via the NDK; sqlite-wasm-rs in the browser)

@@ -61,12 +61,15 @@ them; `tests/app/tv_feature_set.rs` checks it):
 
 - `guide-tools`: Inspect guide coverage (Guide sources), its repairs and
   Choose guide data… (the channel menu).
+- `stalker`: Stalker portals (the wizard does not offer them; a stored
+  Stalker playlist says it is not supported, and its refresh and
+  channels fail as unsupported without a request).
 
 ## What does not work yet
 
 - Recording, backup files and picture in picture (no workers, one
   decoder). Settings and favorites edits last for the session.
-- Stalker portals (a page cannot send their `Cookie` and `User-Agent`), and
-  sources whose streams need request headers.
+- Sources whose streams need request headers (a page cannot send a
+  Stalker portal's `Cookie` and `User-Agent` either).
 - Tracks, volume and the player's format events (the AVPlay component
   does not report them).

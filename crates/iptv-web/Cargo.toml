@@ -12,7 +12,7 @@ default = ["bridge"]
 # The Live TV bridge (the frozen JavaScript host's application: `app`,
 # `store` and the `command` export). An application on the real runtime
 # takes only the adapters and their delivery exports, without it.
-bridge = []
+bridge = ["iptv-import/stalker"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

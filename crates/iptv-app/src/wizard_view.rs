@@ -44,9 +44,20 @@ pub struct Open {
     prefilled: bool,
 }
 
+/// The playlist types this build offers: Stalker portals only with
+/// feature `stalker`.
+#[cfg(feature = "stalker")]
+const KINDS: &[PlaylistKind] = &PlaylistKind::ALL;
+#[cfg(not(feature = "stalker"))]
+const KINDS: &[PlaylistKind] = &[
+    PlaylistKind::M3uUrl,
+    PlaylistKind::M3uFile,
+    PlaylistKind::Xtream,
+];
+
 fn open_with(ui: Ui, wizard: Wizard) {
     ui.wizard.set(Some(Open {
-        wizard,
+        wizard: wizard.with_kinds(KINDS),
         editing: None,
         prefilled: false,
     }));
@@ -427,7 +438,7 @@ fn choose_type(ui: Ui) -> impl IntoElement {
                 .view()
                 .test_id("wizard-types-scroll")
                 .flex_1()
-                .child(view().children(PlaylistKind::ALL.map(row))),
+                .child(view().children(KINDS.iter().copied().map(row))),
         )
         .child(hint_or_back(ui, size, "▲▼ choose   OK next   Back back"))
 }

@@ -124,6 +124,9 @@ pub enum ImportErrorKind {
     /// Stalker device blocked or bound to another device id.
     Blocked,
     Canceled,
+    /// A source type this build leaves out (Stalker portals on a browser
+    /// TV).
+    Unsupported,
     Other,
 }
 
@@ -139,6 +142,7 @@ impl ImportErrorKind {
             Self::AuthFailed => "auth_failed",
             Self::Blocked => "blocked",
             Self::Canceled => "canceled",
+            Self::Unsupported => "unsupported",
             Self::Other => "other",
         }
     }
@@ -159,6 +163,7 @@ impl ImportErrorKind {
             Self::AuthFailed,
             Self::Blocked,
             Self::Canceled,
+            Self::Unsupported,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -183,6 +188,10 @@ mod import_error_kind_tests {
             ImportErrorKind::Canceled
         );
         assert_eq!(ImportErrorKind::from_slug("newer"), ImportErrorKind::Other);
+        assert_eq!(
+            ImportErrorKind::from_slug(ImportErrorKind::Unsupported.slug()),
+            ImportErrorKind::Unsupported
+        );
     }
 }
 

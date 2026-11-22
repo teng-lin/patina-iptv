@@ -672,6 +672,8 @@ pub struct Wizard {
     failure: Option<ImportFailure>,
     notice: Option<Notice>,
     next_id: u64,
+    /// The types offered, in list order ([`Wizard::with_kinds`]).
+    kinds: &'static [PlaylistKind],
 }
 
 impl Wizard {
@@ -701,7 +703,22 @@ impl Wizard {
             failure: None,
             notice: None,
             next_id: 1,
+            kinds: &PlaylistKind::ALL,
         }
+    }
+
+    /// Offers only `kinds` (in [`PlaylistKind::ALL`]'s order, M3U link
+    /// first), for a build without some source types. The type list then
+    /// neither shows nor chooses the others.
+    pub fn with_kinds(mut self, kinds: &'static [PlaylistKind]) -> Self {
+        debug_assert!(kinds.first() == Some(&PlaylistKind::M3uUrl));
+        self.kinds = kinds;
+        self
+    }
+
+    /// The types the type list offers, in order.
+    pub fn kinds(&self) -> &'static [PlaylistKind] {
+        self.kinds
     }
 
     pub fn origin(&self) -> Origin {
@@ -789,20 +806,21 @@ impl Wizard {
     }
 
     fn on_choose_type(&mut self, focus: PlaylistKind, event: WizardEvent) -> Option<WizardEffect> {
-        let at = PlaylistKind::ALL.iter().position(|k| *k == focus)?;
+        let kinds = self.kinds;
+        let at = kinds.iter().position(|k| *k == focus)?;
         match event {
             WizardEvent::Up => {
                 self.step = Step::ChooseType {
-                    focus: PlaylistKind::ALL[at.saturating_sub(1)],
+                    focus: kinds[at.saturating_sub(1)],
                 };
             }
             WizardEvent::Down => {
                 self.step = Step::ChooseType {
-                    focus: PlaylistKind::ALL[(at + 1).min(PlaylistKind::ALL.len() - 1)],
+                    focus: kinds[(at + 1).min(kinds.len() - 1)],
                 };
             }
             WizardEvent::Ok => self.choose(focus),
-            WizardEvent::Tap(Target::Kind(kind)) => self.choose(kind),
+            WizardEvent::Tap(Target::Kind(kind)) if kinds.contains(&kind) => self.choose(kind),
             WizardEvent::Back => match self.origin {
                 Origin::FirstRun => self.step = Step::Empty,
                 Origin::Settings => return self.close(),
@@ -1062,6 +1080,37 @@ mod tests {
     }
 
     // --- Navigation and focus restoration (AC01, AC13) ---
+
+    #[test]
+    fn a_wizard_with_fewer_kinds_neither_lists_nor_chooses_the_others() {
+        const KINDS: [PlaylistKind; 3] = [
+            PlaylistKind::M3uUrl,
+            PlaylistKind::M3uFile,
+            PlaylistKind::Xtream,
+        ];
+        let mut w = Wizard::add_playlist().with_kinds(&KINDS);
+        assert_eq!(w.kinds(), &KINDS);
+        for _ in 0..KINDS.len() + 1 {
+            w.handle(E::Down);
+        }
+        assert_eq!(
+            w.step(),
+            Step::ChooseType {
+                focus: PlaylistKind::Xtream
+            }
+        );
+        w.handle(E::Tap(Target::Kind(PlaylistKind::Stalker)));
+        assert_eq!(
+            w.step(),
+            Step::ChooseType {
+                focus: PlaylistKind::Xtream
+            },
+            "a type left out is not chosen"
+        );
+        w.handle(E::Ok);
+        assert_eq!((w.step(), w.kind()), (Step::Form, PlaylistKind::Xtream));
+        assert_eq!(Wizard::first_run().kinds(), &PlaylistKind::ALL);
+    }
 
     #[test]
     fn first_run_starts_on_the_empty_state_and_ok_opens_the_type_list() {

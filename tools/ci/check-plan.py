@@ -108,6 +108,11 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         steps.append(step("app-tv-feature-set", "cargo", "test", "--locked", "-p", "iptv-app",
                           "--no-default-features", "--features", "test-support", "--test", "app",
                           "tv_feature_set", "--", "--format=pretty"))
+        # The import pipeline without Stalker portals, as the TV builds it.
+        steps.append(step("import-without-stalker", "cargo", "test", "--locked", "-p", "iptv-import",
+                          "--no-default-features", "--test", "it", "--", "--format=pretty"))
+        steps.append(step("app-tv-lib-tests", "cargo", "test", "--locked", "-p", "iptv-app",
+                          "--no-default-features", "--lib", "--", "--format=pretty"))
         # The adapters the shell links, without the Live TV bridge.
         steps.append(step("web-adapters-wasm", *WASM_CLIPPY[:3], "-p", "iptv-web", "--no-default-features",
                           *WASM_CLIPPY[3:]))
@@ -118,7 +123,8 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
                           *WASM_CLIPPY[3:]))
         # The runtime's unit tests without its native services, on the host.
         steps.append(step("runtime-portable-tests", "cargo", "test", "--locked", "-p", "iptv-runtime",
-                          "--no-default-features", "--lib", "--", "--format=pretty"))
+                          "--no-default-features", "--features", "stalker", "--lib", "--",
+                          "--format=pretty"))
     steps.extend([
         step("guide-input-budget", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),

@@ -53,6 +53,9 @@ iptv-library/src/guides.rs	duplicate guide feed id {}
 iptv-library/src/guides.rs	duplicate provider guide index {index}
 iptv-library/src/guides.rs	guide feed identity space exhausted
 iptv-library/src/guides.rs	{count} provider guides exceed the limit of {MAX_PROVIDER_GUIDES}
+# The stream-address failure's kind name that ErrorKind::from_resolve reads
+# (a build without Stalker portals); playback shows its translated message.
+iptv-app/src/player.rs	Unsupported
 # Page-reader causes are logged; playback maps the completion to its translated notice.
 iptv-runtime/src/commands.rs	guide page has no source authority
 iptv-runtime/src/commands.rs	guide page source changed

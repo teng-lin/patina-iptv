@@ -1093,7 +1093,12 @@ fn resolve_link(
         let result = match client.await {
             Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
                 .await
-                .map_err(|e| format!("{:?}", e.kind())),
+                .map_err(|e| match e {
+                    // `ErrorKind::from_resolve`'s name for a build without
+                    // Stalker portals.
+                    iptv_import::ImportError::Unsupported(_) => "Unsupported".to_owned(),
+                    e => format!("{:?}", e.kind()),
+                }),
             Err(_) => Err("network".to_owned()),
         };
         (result, portal)

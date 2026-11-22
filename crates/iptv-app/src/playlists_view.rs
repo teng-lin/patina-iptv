@@ -437,7 +437,10 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
             tr("Each one downloads again; the one on screen updates in place").to_owned()
         }
         (None, Some(Item::AllPlaylists)) => tr("Browse enabled playlists together").to_owned(),
-        _ => tr("M3U link or file, Xtream Codes login, Stalker portal").to_owned(),
+        _ if cfg!(feature = "stalker") => {
+            tr("M3U link or file, Xtream Codes login, Stalker portal").to_owned()
+        }
+        _ => tr("M3U link or file, Xtream Codes login").to_owned(),
     };
     let mark = move || mark(ui, focused_index.get() == Some(index));
     list_rows::row(size, ROW_THREE, mark)

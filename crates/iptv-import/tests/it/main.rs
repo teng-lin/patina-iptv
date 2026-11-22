@@ -10,8 +10,12 @@ mod common;
 
 mod epg;
 mod m3u;
+#[cfg(feature = "stalker")]
 mod on_demand;
+#[cfg(feature = "stalker")]
 mod stalker;
+#[cfg(not(feature = "stalker"))]
+mod stalker_unsupported;
 mod xtream;
 
 mod limits;

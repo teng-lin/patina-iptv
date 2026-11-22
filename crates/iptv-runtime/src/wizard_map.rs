@@ -130,6 +130,8 @@ pub fn failure_of(error: &ImportError) -> ImportFailure {
             problem: ParseProblem::NotAPortal,
             ..
         } => FailureKind::Unsupported,
+        // A source type this build leaves out.
+        ImportError::Unsupported(_) => FailureKind::Unsupported,
         // 5xx and rate limits are the server's trouble; other statuses
         // mean nothing usable is at that address.
         ImportError::HttpStatus { .. } if error.is_transient() => FailureKind::Network,

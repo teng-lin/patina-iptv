@@ -8,7 +8,10 @@ publish.workspace = true
 license.workspace = true
 
 [features]
-default = ["native"]
+default = ["native", "stalker"]
+# Stalker/Ministra portals (iptv-import's). Without them a Stalker source
+# fails as unsupported.
+stalker = ["iptv-import/stalker"]
 # What only native hosts have: the iptv-net adapter, thread-based executors
 # and the native-only services (recording, backup files, the credential
 # store, staged probes). Without it the crate builds for wasm32.

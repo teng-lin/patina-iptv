@@ -676,6 +676,7 @@ pub(crate) async fn download_now(
 pub fn error_kind(error: &ImportError) -> ImportErrorKind {
     match error {
         ImportError::InvalidConfig(_) => ImportErrorKind::InvalidConfig,
+        ImportError::Unsupported(_) => ImportErrorKind::Unsupported,
         ImportError::Canceled => ImportErrorKind::Canceled,
         ImportError::Network { .. } => ImportErrorKind::Network,
         ImportError::HttpStatus { .. } => ImportErrorKind::HttpStatus,

@@ -30,6 +30,13 @@ fn the_tv_build_has_no_way_into_the_screens_it_leaves_out() {
     t.wait("text:No playlists yet", 5);
     t.press("text:Add playlist");
     t.wait("text:Playlist file", 5);
+    // Without Stalker portals, the type list does not offer them.
+    t.wait("text:Xtream Codes login", 5);
+    assert_eq!(
+        t.shows("text:Stalker portal"),
+        cfg!(feature = "stalker"),
+        "the setup wizard's Stalker portal"
+    );
     t.press("text:Playlist file");
     t.wait("text:Choose a file…", 5);
     t.press("text:Choose a file…");
@@ -39,12 +46,13 @@ fn the_tv_build_has_no_way_into_the_screens_it_leaves_out() {
     t.press("text:Watch");
     t.wait("text:Test Channel One", 30);
 
-    guide_tools(&mut t);
+    menu_and_settings(&mut t);
 }
 
 /// Without the guide tools, the channel menu has no "Choose guide
-/// data…" and the guide sources screen no "Inspect guide coverage".
-fn guide_tools(t: &mut T) {
+/// data…" and the guide sources screen no "Inspect guide coverage";
+/// without Stalker portals, the playlists screen does not name them.
+fn menu_and_settings(t: &mut T) {
     t.key("m");
     t.wait("text:Hide channel", 5);
     assert_eq!(
@@ -59,6 +67,12 @@ fn guide_tools(t: &mut T) {
     t.key("left");
     t.key("left");
     t.press("text:Playlists >> nth=0");
+    t.wait("text:+ Add playlist", 5);
+    assert_eq!(
+        t.shows("text:M3U link or file, Xtream Codes login, Stalker portal"),
+        cfg!(feature = "stalker"),
+        "the playlists screen's Stalker portal"
+    );
     t.press("text:synthetic");
     t.press("text:Guide sources");
     t.wait("text:Guide sources · synthetic", 5);

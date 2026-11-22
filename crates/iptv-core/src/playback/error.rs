@@ -20,6 +20,9 @@ pub enum ErrorKind {
     Account,
     /// Nothing to play: no stream address or no archive for this program.
     Unavailable,
+    /// The channel's source type is one this build leaves out (Stalker
+    /// portals on a browser TV).
+    Unsupported,
     Other,
 }
 
@@ -66,15 +69,18 @@ impl ErrorKind {
         match kind {
             "Auth" => Self::Account,
             "Network" => Self::Network,
+            "Unsupported" => Self::Unsupported,
             _ => Self::Resolve,
         }
     }
 
     pub fn cause(&self) -> Cause {
         match self {
-            Self::Http(404 | 410) | Self::Format | Self::Unavailable | Self::Account => {
-                Cause::Fatal
-            }
+            Self::Http(404 | 410)
+            | Self::Format
+            | Self::Unavailable
+            | Self::Unsupported
+            | Self::Account => Cause::Fatal,
             Self::Http(401 | 403 | 429 | 458 | 509) => Cause::Refused,
             Self::Network => Cause::Network,
             Self::Http(_) | Self::Ended | Self::Stalled | Self::Resolve | Self::Other => {

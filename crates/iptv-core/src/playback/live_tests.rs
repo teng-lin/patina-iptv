@@ -173,6 +173,9 @@ fn errors_are_classified_by_what_a_retry_can_do() {
     assert_eq!(K::from_resolve("Auth"), K::Account);
     assert_eq!(K::from_resolve("Network"), K::Network);
     assert_eq!(K::from_resolve("Server"), K::Resolve);
+    // A build without Stalker portals: retrying cannot help.
+    assert_eq!(K::from_resolve("Unsupported"), K::Unsupported);
+    assert_eq!(K::Unsupported.cause(), Cause::Fatal);
     assert_eq!(
         K::from_player_code("ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT", None),
         K::Network

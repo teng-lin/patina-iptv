@@ -42,6 +42,10 @@ mod m3u;
 mod progress;
 mod refresh;
 mod sink;
+#[cfg(feature = "stalker")]
+mod stalker;
+#[cfg(not(feature = "stalker"))]
+#[path = "stalker_unsupported.rs"]
 mod stalker;
 mod xtream;
 

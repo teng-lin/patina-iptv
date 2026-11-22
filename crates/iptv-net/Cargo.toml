@@ -37,6 +37,8 @@ subtle = "2.6"
 libc = "0.2"
 
 [dev-dependencies]
+# The pipeline tests import Stalker portals too.
+iptv-import = { workspace = true, features = ["stalker"] }
 # test-util: a paused clock for the retry wait (no real sleeping in tests).
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "test-util", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

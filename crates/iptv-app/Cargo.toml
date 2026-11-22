@@ -17,10 +17,13 @@ test = false
 [features]
 # Every screen; a browser TV package (hosts/tizen-nsh) leaves out the
 # ones listed below.
-default = ["guide-tools"]
+default = ["guide-tools", "stalker"]
 # The guide tools: Inspect guide coverage (Guide sources), its repairs,
 # and Choose guide data… (the channel menu).
 guide-tools = []
+# Stalker/Ministra portals: offered in the setup wizard, imported, played.
+# Without them a stored Stalker playlist shows as unsupported.
+stalker = ["iptv-import/stalker", "iptv-runtime/stalker"]
 # Synthetic fixture transport and key injection; never enabled in packages.
 test-support = ["iptv-runtime/test-support"]
 # A browser package (hosts/tizen-nsh) keeps its data out of the module,

@@ -64,6 +64,7 @@ pub(crate) fn failure_message(kind: &ErrorKind, catch_up: bool) -> String {
         ErrorKind::Ended => tr("The stream ended."),
         ErrorKind::Stalled => tr("The stream stopped sending video."),
         ErrorKind::Resolve => tr("The portal didn't give a stream address."),
+        ErrorKind::Unsupported => tr("This device doesn't support Stalker portals."),
         ErrorKind::Other => tr("Playback stopped with an error."),
     };
     fixed.to_owned()

@@ -107,6 +107,9 @@ pub enum ImportError {
         error: LimitExceeded,
     },
     InvalidConfig(String),
+    /// A source type this build leaves out (`what` names it, as in
+    /// "Stalker portals"): nothing was requested.
+    Unsupported(&'static str),
     Canceled,
     Network {
         step: Step,
@@ -141,7 +144,7 @@ pub enum ImportError {
 impl ImportError {
     pub fn kind(&self) -> FailureKind {
         match self {
-            Self::InvalidConfig(_) => FailureKind::Config,
+            Self::InvalidConfig(_) | Self::Unsupported(_) => FailureKind::Config,
             Self::Canceled => FailureKind::Canceled,
             Self::Network { .. } => FailureKind::Network,
             Self::HttpStatus { .. } | Self::Portal { .. } => FailureKind::Server,
@@ -155,7 +158,9 @@ impl ImportError {
     /// The step that failed, when there is one.
     pub fn step(&self) -> Option<Step> {
         match self {
-            Self::InvalidConfig(_) | Self::Canceled | Self::Storage(_) => None,
+            Self::InvalidConfig(_) | Self::Unsupported(_) | Self::Canceled | Self::Storage(_) => {
+                None
+            }
             Self::Limit { step, .. }
             | Self::Network { step, .. }
             | Self::HttpStatus { step, .. }
@@ -260,6 +265,7 @@ impl fmt::Display for ImportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidConfig(why) => write!(f, "invalid source settings: {why}"),
+            Self::Unsupported(what) => write!(f, "{what} are not supported in this build"),
             Self::Canceled => f.write_str("import canceled"),
             Self::Limit { step, error } => write!(f, "{step}: {error}"),
             Self::Network { step, error } => write!(f, "{step}: {error}"),

@@ -42,6 +42,7 @@ pub fn stored_failure(kind: ImportErrorKind) -> &'static str {
         ImportErrorKind::AuthFailed => tr("the portal ended the session"),
         ImportErrorKind::Blocked => tr("the portal does not accept this device"),
         ImportErrorKind::Canceled => tr("it was stopped"),
+        ImportErrorKind::Unsupported => tr("this device doesn't support Stalker portals"),
         _ => tr("something went wrong"),
     }
 }
@@ -64,6 +65,10 @@ pub fn failure(failure: ImportFailure) -> &'static str {
 /// The row's second line: type and channels.
 pub fn summary(p: &Playlist) -> String {
     let mut parts = vec![kind(p.kind).to_owned(), channels(p.channels)];
+    // A Stalker playlist kept from a build with them (feature `stalker`).
+    if !cfg!(feature = "stalker") && p.kind == SourceKind::Stalker {
+        parts.push(tr("Not supported on this device").to_owned());
+    }
     if !p.policy.enabled {
         parts.push(tr("Disabled").to_owned());
     }
@@ -331,6 +336,29 @@ mod tests {
         assert_eq!(
             masked_link("http://guide.example.test"),
             "http://guide.example.test"
+        );
+    }
+
+    /// A Stalker playlist kept from a build with Stalker portals says
+    /// it is not supported, and so does its failed refresh.
+    #[test]
+    fn a_stalker_playlist_without_stalker_portals_says_it_is_unsupported() {
+        let mut p = playlist();
+        p.kind = SourceKind::Stalker;
+        let unsupported = " · Not supported on this device";
+        assert_eq!(
+            summary(&p).ends_with(unsupported),
+            !cfg!(feature = "stalker"),
+            "{}",
+            summary(&p)
+        );
+        p.failed = Some((ImportErrorKind::Unsupported, None));
+        assert_eq!(
+            status(&p, None, 0),
+            (
+                "Last refresh failed: this device doesn't support Stalker portals".to_owned(),
+                true
+            )
         );
     }
 

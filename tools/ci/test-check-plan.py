@@ -177,17 +177,24 @@ class Plan(unittest.TestCase):
                          ["cargo", "test", "--locked", "-p", "iptv-app", "--no-default-features",
                           "--features", "test-support", "--test", "app", "tv_feature_set", "--",
                           "--format=pretty"])
+        self.assertEqual(self.by_name["import-without-stalker"],
+                         ["cargo", "test", "--locked", "-p", "iptv-import", "--no-default-features", "--test",
+                          "it", "--", "--format=pretty"])
+        self.assertEqual(self.by_name["app-tv-lib-tests"],
+                         ["cargo", "test", "--locked", "-p", "iptv-app", "--no-default-features", "--lib",
+                          "--", "--format=pretty"])
         self.assertEqual(self.by_name["web-adapters-wasm"],
                          ["cargo", "clippy", "--locked", "-p", "iptv-web", "--no-default-features", *wasm])
         self.assertEqual(self.by_name["runtime-portable-tests"],
-                         ["cargo", "test", "--locked", "-p", "iptv-runtime", "--no-default-features", "--lib",
-                          "--", "--format=pretty"])
+                         ["cargo", "test", "--locked", "-p", "iptv-runtime", "--no-default-features",
+                          "--features", "stalker", "--lib", "--", "--format=pretty"])
         self.assertEqual(self.by_name["tizen-nsh-wasm"],
                          ["cargo", "clippy", "--locked", "--manifest-path", "hosts/tizen-nsh/Cargo.toml", *wasm])
         self.assertTrue((checks.ROOT / "hosts/tizen-nsh/Cargo.lock").is_file())
         for host in ("macos", "windows"):
             names = {step["name"] for step in checks.plan(host=host)}
-            self.assertFalse({"runtime-wasm", "app-wasm", "app-wasm-tv", "app-tv-feature-set",
+            self.assertFalse({"runtime-wasm", "app-wasm", "app-wasm-tv", "app-tv-feature-set", "app-tv-lib-tests",
+                              "import-without-stalker",
                               "web-adapters-wasm", "runtime-portable-tests", "tizen-nsh-wasm"} & names)
 
     def test_release_only_changes_the_normal_app_build(self):
