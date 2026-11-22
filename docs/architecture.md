@@ -107,10 +107,9 @@ What each layer holds:
   `Action` for a `Context`. `iptv-presentation` has one module per feature,
   each around its state holder, with the functions that compute its display
   data, and the localization those functions use: the message catalog,
-  plural rules, calendar names and the clock's labels. The
-  [shared interaction plan](plans/2026-11-22-shared-interaction-layer.md)
-  was written before this split: where it says `iptv-core`, read
-  `iptv-presentation`.
+  plural rules, calendar names and the clock's labels. Both front ends
+  share these decisions as described in the
+  [shared interaction plan](plans/2026-11-22-shared-interaction-layer.md).
 - **View.** Views, geometry, type and color on one toolkit. A front end
   turns platform input into keys, keeps the navigation (each front end has
   its own set of features), routes each action to the holder on top, and
@@ -364,7 +363,6 @@ the migration to `iptv-presentation`. These departures remain.
 | Refusals as English sentences | `recording::Request::validate` returns sentences, which reach the screen through `iptv-store-sqlite`'s error and the runtime's admission | 7 | A typed reason. |
 | A lookup that reads a file | In a browser package the first lookup of a language reads a package file inside `translate`, and a failed read stays an empty catalog | 4 | The host loads a language's catalog and hands it in; `translate` only looks up. |
 | Untyped message IDs | `key` marks a string in `iptv_core::message`. Its type also admits unmarked sentences. | 7 | A typed message ID. |
-| Embedded catalog in the English-only bridge | The `iptv-web` bridge embeds the full catalog through `iptv-presentation`. | 7 | A catalog limited to the bridge's language. |
 | One crate in two layers | `iptv-web`: browser adapters, and behind `bridge` the bridge | 1 | Two crates, with one owner for the wasm entry points both workers call. It waits for the decision on the bridge's future. |
 
 Exceptions that stay, each with its reason:

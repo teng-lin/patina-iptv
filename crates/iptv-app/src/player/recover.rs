@@ -7,7 +7,8 @@
 
 use std::time::Duration;
 
-use iptv_core::playback::{ErrorKind, PlayerState, Retry};
+use iptv_core::playback::{ErrorKind, PlayerState};
+use iptv_presentation::playback_health::Retry;
 use nsh_core::prelude::*;
 
 use super::{later, open, target};

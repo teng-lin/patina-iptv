@@ -74,7 +74,7 @@ fn registration_permission_changes_update_capabilities_without_reopening_the_sto
         owner.recording_capabilities().wake,
         Some(WakeCapability::Denied)
     );
-    assert!(owner.recording_capabilities().notice().is_some());
+    assert!(!owner.recording_capabilities().exact_start());
     let key_calls = KEYS.load(Ordering::SeqCst);
     assert!(key_calls > 0);
     ALLOWED.store(true, Ordering::SeqCst);

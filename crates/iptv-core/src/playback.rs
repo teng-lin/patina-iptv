@@ -4,7 +4,7 @@ mod error;
 mod states;
 
 pub use error::{Cause, ErrorKind, Failure};
-pub use states::{Phase, PlayerState, Retry, RetryPolicy, Waiting};
+pub use states::PlayerState;
 
 /// What the player should open: a URL and the HTTP headers to send with it
 /// (User-Agent, Referer, provider identity). Header names keep their case;

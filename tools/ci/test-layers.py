@@ -75,25 +75,39 @@ def bridge_gates(package, dependency):
     )
 
 
-def adapters_only(package, dependency):
+def bridge_features(features):
+    blocked = {"bridge"}
+    while True:
+        aliases = {
+            feature for feature, effects in features.items()
+            if blocked.intersection(effects)
+        }
+        if aliases <= blocked:
+            return blocked
+        blocked.update(aliases)
+
+
+def adapters_only(package, dependency, blocked):
     name = dependency["rename"] or dependency["name"]
+    forwarded = {
+        f"{name}{weak}/{feature}" for weak in ("", "?") for feature in blocked
+    }
     return (
         not dependency["uses_default_features"]
-        and "bridge" not in dependency["features"]
+        and not blocked.intersection(dependency["features"])
         and not any(
-            effect in {f"{name}/bridge", f"{name}?/bridge"}
+            forwarded.intersection(effects)
             for effects in package["features"].values()
-            for effect in effects
         )
     )
 
 
-def allowed(package, dependency):
+def allowed(package, dependency, blocked):
     user, name = package["name"], dependency["name"]
     if name in BRIDGE_DEPENDENCIES and user == "iptv-web":
         return bridge_gates(package, dependency)
     if name == "iptv-web" and LAYERS[user] in {"adapters", "application"}:
-        return adapters_only(package, dependency)
+        return adapters_only(package, dependency, blocked)
     if name == "iptv-presentation":
         return user == "iptv-app"
     if name in LAYERS:
@@ -115,48 +129,60 @@ class LayerBoundaries(unittest.TestCase):
                 if package["id"] in members
             )
         self.assertEqual(set(packages), set(LAYERS))
+        blocked = bridge_features(packages["iptv-web"]["features"])
         for user, package in packages.items():
             for dependency in package["dependencies"]:
                 name = dependency["name"]
                 kind = dependency["kind"] or "normal"
                 target = dependency["target"] or "all targets"
                 with self.subTest(user=user, name=name, kind=kind, target=target):
-                    self.assertTrue(allowed(package, dependency),
+                    self.assertTrue(allowed(package, dependency, blocked),
                                     f"{user} cannot depend on {name} ({kind}, {target})")
 
     def test_bridge_dependency_requires_the_bridge_feature(self):
         package = {"name": "iptv-web", "features": {"bridge": ["dep:nav"]}}
         dependency = {"name": "iptv-nav", "rename": "nav", "optional": True, "kind": None}
-        self.assertTrue(allowed(package, dependency))
+        self.assertTrue(allowed(package, dependency, set()))
         for change in ({"optional": False}, {"kind": "dev"}, {"kind": "build"}):
-            self.assertFalse(allowed(package, {**dependency, **change}))
+            self.assertFalse(allowed(package, {**dependency, **change}, set()))
         for effect in ("dep:nav", "nav", "nav/some-feature"):
             package["features"]["other"] = [effect]
-            self.assertFalse(allowed(package, dependency))
+            self.assertFalse(allowed(package, dependency, set()))
 
     def test_lower_layer_cannot_enable_the_web_bridge(self):
+        blocked = bridge_features({
+            "default": ["bridge"],
+            "bridge": ["dep:nav"],
+            "combined": ["default", "adapters"],
+            "adapters": [],
+        })
+        self.assertEqual(blocked, {"default", "bridge", "combined"})
         package = {"name": "iptv-runtime", "features": {}}
         dependency = {"name": "iptv-web", "rename": "web",
-                      "uses_default_features": False, "features": []}
-        self.assertTrue(allowed(package, dependency))
-        self.assertFalse(allowed(package, {**dependency, "uses_default_features": True}))
-        self.assertFalse(allowed(package, {**dependency, "features": ["bridge"]}))
-        package["features"]["ui"] = ["web?/bridge"]
-        self.assertFalse(allowed(package, dependency))
+                      "uses_default_features": False, "features": ["adapters"]}
+        self.assertTrue(allowed(package, dependency, blocked))
+        self.assertFalse(allowed(package, {**dependency, "uses_default_features": True}, blocked))
+        for feature in blocked:
+            self.assertFalse(allowed(package, {**dependency, "features": [feature]}, blocked))
+            for weak in ("", "?"):
+                package["features"]["ui"] = [f"web{weak}/{feature}"]
+                self.assertFalse(allowed(package, dependency, blocked))
+        package["features"]["ui"] = ["web?/adapters"]
+        self.assertTrue(allowed(package, dependency, blocked))
 
     def test_only_front_ends_can_depend_on_presentation(self):
         dependency = {"name": "iptv-presentation", "rename": None, "optional": True, "kind": None}
         for user in set(LAYERS) - {"iptv-app", "iptv-web"}:
-            self.assertFalse(allowed({"name": user}, dependency))
-        self.assertTrue(allowed({"name": "iptv-app"}, dependency))
+            self.assertFalse(allowed({"name": user}, dependency, set()))
+        self.assertTrue(allowed({"name": "iptv-app"}, dependency, set()))
         bridge = {"name": "iptv-web", "features": {"bridge": ["dep:iptv-presentation"]}}
-        self.assertTrue(allowed(bridge, dependency))
+        self.assertTrue(allowed(bridge, dependency, set()))
 
     def test_renamed_target_dependency_cannot_cross_layers(self):
         runtime = {"name": "iptv-runtime"}
         dependency = {"name": "iptv-nav", "rename": "remote_keys",
                       "optional": True, "kind": "dev", "target": "cfg(windows)"}
-        self.assertFalse(allowed(runtime, dependency))
+        self.assertFalse(allowed(runtime, dependency, set()))
 
 
 if __name__ == "__main__":

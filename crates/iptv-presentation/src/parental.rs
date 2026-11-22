@@ -43,6 +43,11 @@ pub enum Submission {
     Done,
 }
 impl Dialog {
+    /// Display only the number of entered digits.
+    pub fn masked_input(&self) -> String {
+        "•".repeat(self.input.len())
+    }
+
     pub fn new(phase: Phase) -> Self {
         Self {
             phase,

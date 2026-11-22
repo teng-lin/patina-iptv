@@ -2,6 +2,27 @@
 
 use iptv_core::recording::{Job, JobId, MAX_DURATION, Repeat, Request, Status};
 
+pub fn status_label(status: Status) -> &'static str {
+    match status {
+        Status::Scheduled => "Scheduled",
+        Status::Recording => "Recording",
+        Status::Completed => "Completed",
+        Status::Partial => "Partial recording",
+        Status::Failed => "Failed",
+        Status::Canceled => "Canceled",
+        Status::Missed => "Missed",
+    }
+}
+
+fn advance_repeat(repeat: Repeat, step: i64) -> Repeat {
+    let values = [Repeat::Once, Repeat::Daily, Repeat::Weekly, Repeat::Series];
+    let index = values
+        .iter()
+        .position(|value| *value == repeat)
+        .unwrap_or(0) as i64;
+    values[(index + step).rem_euclid(values.len() as i64) as usize]
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Screen {
     pub open: bool,
@@ -105,7 +126,7 @@ impl Draft {
                     *end = end.saturating_add(self.request.end - previous);
                 }
             }
-            4 if self.editing.is_none() => self.repeat = self.repeat.advance(step),
+            4 if self.editing.is_none() => self.repeat = advance_repeat(self.repeat, step),
             5 => self.lead_minutes = (self.lead_minutes + step).clamp(0, 60),
             6 => self.trail_minutes = (self.trail_minutes + step).clamp(0, 60),
             _ => {}
