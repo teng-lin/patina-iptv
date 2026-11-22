@@ -612,9 +612,20 @@ fn the_generated_ungrouped_bucket_retains_its_identity_through_preparation() {
         None,
     ));
     assert_eq!(schedule.group_label(0), GroupName::Ungrouped);
-    schedule.set_organization(super::Organization {
-        groups: vec![("__other__".into(), "Renamed".into(), false)],
-        ..Default::default()
-    });
-    assert_eq!(schedule.group_label(0), GroupName::Named("Renamed".into()));
+    for name in ["Renamed", "Other"] {
+        schedule.set_organization(super::Organization {
+            groups: vec![("__other__".into(), name.into(), false)],
+            ..Default::default()
+        });
+        assert_eq!(schedule.group_label(0), GroupName::Named(name.into()));
+
+        schedule.set_group_lists(vec![(
+            "__other__".into(),
+            name.into(),
+            vec![parsed.channels.items[0].id.as_str().to_owned()],
+        )]);
+        assert_eq!(schedule.group_label(0), GroupName::Named(name.into()));
+    }
+    schedule.set_organization(super::Organization::default());
+    assert_eq!(schedule.group_label(0), GroupName::Ungrouped);
 }

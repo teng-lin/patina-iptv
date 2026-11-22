@@ -64,7 +64,7 @@ struct OrganizationState {
     channel_blocks: Vec<iptv_core::organization::Block>,
     blocked_groups: std::collections::HashSet<String>,
     order: Vec<usize>,
-    groups: Vec<(usize, String)>,
+    groups: Vec<(usize, GroupName)>,
     lists: Option<Vec<(String, String, Vec<usize>)>>,
 }
 #[derive(Clone)]
@@ -80,9 +80,7 @@ pub struct EpgSchedule {
     channels: std::sync::Arc<Vec<GuideChannel>>,
     /// The imported channel behind each guide channel (stream and catch-up).
     sources: std::sync::Arc<Vec<Option<Channel>>>,
-    group_names: std::sync::Arc<Vec<String>>,
-    /// Only the catalog adapter synthesizes the reserved ungrouped bucket.
-    generated_other: bool,
+    group_names: std::sync::Arc<Vec<GroupName>>,
     /// The index of each group's first channel; channels are stored grouped.
     group_starts: std::sync::Arc<Vec<usize>>,
     /// The channels in the playlist's order (empty: as stored).
@@ -147,7 +145,7 @@ impl EpgSchedule {
     pub fn new(groups: Vec<(String, Vec<GuideChannel>)>, store: GuideStore, now: UnixTime) -> Self {
         let keyed = groups
             .into_iter()
-            .map(|(name, members)| (name.clone(), name, members));
+            .map(|(name, members)| (name.clone(), GroupName::Named(name), members));
         Self::from_parts(Catalog::keyed(keyed, store, now))
     }
 
@@ -160,7 +158,6 @@ impl EpgSchedule {
             channels,
             sources,
             group_names,
-            generated_other,
             group_starts,
             playlist_order,
             store,
@@ -176,7 +173,6 @@ impl EpgSchedule {
             channels: std::sync::Arc::new(channels),
             sources: std::sync::Arc::new(sources),
             group_names: std::sync::Arc::new(group_names),
-            generated_other,
             group_starts: std::sync::Arc::new(group_starts),
             playlist_order: std::sync::Arc::new(playlist_order),
             store: std::sync::Arc::new(store),
@@ -583,8 +579,7 @@ struct Catalog {
     group_keys: Vec<String>,
     channels: Vec<GuideChannel>,
     sources: Vec<Option<Channel>>,
-    group_names: Vec<String>,
-    generated_other: bool,
+    group_names: Vec<GroupName>,
     group_starts: Vec<usize>,
     playlist_order: Vec<usize>,
     store: GuideStore,
@@ -608,7 +603,7 @@ impl Catalog {
     /// else, so the three lists always have one entry per group
     /// ([`Shape::organization`] indexes one by another's positions).
     fn keyed(
-        groups: impl IntoIterator<Item = (String, String, Vec<GuideChannel>)>,
+        groups: impl IntoIterator<Item = (String, GroupName, Vec<GuideChannel>)>,
         store: GuideStore,
         now: UnixTime,
     ) -> Self {
@@ -633,7 +628,6 @@ impl Catalog {
             group_keys,
             channels,
             group_names,
-            generated_other: false,
             group_starts,
             playlist_order: Vec::new(),
             store,
@@ -654,11 +648,11 @@ impl Catalog {
         for (slot, i) in group_slots(groups, channels) {
             buckets[slot].push((i as u32 + 1, &channels[i]));
         }
-        // One key and name per bucket: the catalog's groups, then "Other".
+        // Only the final bucket represents channels without a group.
         let labels = groups
             .iter()
-            .map(|g| (g.id.as_str().to_owned(), g.name.clone()))
-            .chain([("__other__".to_owned(), OTHER_NAME.to_owned())]);
+            .map(|g| (g.id.as_str().to_owned(), GroupName::Named(g.name.clone())))
+            .chain([("__other__".to_owned(), GroupName::Ungrouped)]);
         // Where each playlist position lands once grouped.
         let mut stored_at = vec![0; channels.len()];
         for (at, &(position, _)) in buckets.iter().flatten().enumerate() {
@@ -685,7 +679,6 @@ impl Catalog {
             })
             .collect();
         let mut catalog = Self::keyed(grouped, store, now);
-        catalog.generated_other = !groups.iter().any(|g| g.id.as_str() == "__other__");
         catalog.sources = ordered.into_iter().map(Some).collect();
         catalog.playlist_order = stored_at;
         catalog
@@ -708,7 +701,7 @@ struct Shape<'a> {
     sources: &'a [Option<Channel>],
     playlist_order: &'a [usize],
     group_keys: &'a [String],
-    group_names: &'a [String],
+    group_names: &'a [GroupName],
 }
 
 impl Shape<'_> {
@@ -776,7 +769,7 @@ impl Shape<'_> {
                     g,
                     group_prefs.get(self.group_keys[g].as_str()).map_or_else(
                         || self.group_names[g].clone(),
-                        |(_, name, _)| (*name).clone(),
+                        |(_, name, _)| GroupName::Named((*name).clone()),
                     ),
                 )
             })
@@ -808,28 +801,6 @@ impl Shape<'_> {
                 (key, name, members)
             })
             .collect()
-    }
-}
-
-const OTHER_NAME: &str = "Other";
-
-impl EpgSchedule {
-    fn stored_group_name(&self, group: usize) -> String {
-        if let Some(lists) = self
-            .organization
-            .borrow()
-            .as_ref()
-            .and_then(|s| s.lists.as_ref())
-        {
-            return lists.get(group).map_or_else(String::new, |l| l.1.clone());
-        }
-        if let Some(state) = self.organization.borrow().as_ref() {
-            return state
-                .groups
-                .get(group)
-                .map_or_else(String::new, |(_, name)| name.clone());
-        }
-        self.group_names.get(group).cloned().unwrap_or_default()
     }
 }
 
@@ -1007,13 +978,19 @@ impl Schedule for EpgSchedule {
             .unwrap_or_default()
     }
     fn group_label(&self, group: usize) -> GroupName {
-        let name = self.stored_group_name(group);
-        // A provider may supply the reserved key or the same text.
-        if self.generated_other && self.group_key(group) == "__other__" && name == OTHER_NAME {
-            GroupName::Ungrouped
+        let organization = self.organization.borrow();
+        let name = if let Some(state) = organization.as_ref() {
+            if let Some(lists) = &state.lists {
+                return GroupName::Named(
+                    lists.get(group).map_or_else(String::new, |l| l.1.clone()),
+                );
+            }
+            state.groups.get(group).map(|(_, name)| name)
         } else {
-            GroupName::Named(name)
-        }
+            self.group_names.get(group)
+        };
+        name.cloned()
+            .unwrap_or_else(|| GroupName::Named(String::new()))
     }
 
     fn group_channels(&self, group: usize) -> Vec<usize> {
@@ -1135,7 +1112,7 @@ pub struct OrganizationBuilder {
     sources: std::sync::Arc<Vec<Option<Channel>>>,
     playlist_order: std::sync::Arc<Vec<usize>>,
     group_keys: std::sync::Arc<Vec<String>>,
-    group_names: std::sync::Arc<Vec<String>>,
+    group_names: std::sync::Arc<Vec<GroupName>>,
 }
 pub struct PreparedOrganization(OrganizationState);
 impl OrganizationBuilder {
