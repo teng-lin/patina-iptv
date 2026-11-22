@@ -690,19 +690,23 @@ fn apply_edit(ui: Ui, edit: Edit) {
         });
         return;
     }
-    update(ui, |s| s.saving = true);
     if s.editor.sort != Sort::Manual && edit == Edit::ResetOrder {
         store_sort(ui, &s, generation, Sort::Provider);
         return;
     }
+    let Some(edit) = edit.edit() else {
+        return;
+    };
+    update(ui, |s| s.saving = true);
     let finished = s.clone();
     let result = crate::runtime::commands::edit_organization(
         &crate::runtime(),
         s.source,
         s.kind,
-        s.editor,
+        s.editor.items,
         item,
         edit,
+        s.editor.selected,
     );
     data::spawn_in_app(async move {
         finish(ui, &finished, generation, result.await);

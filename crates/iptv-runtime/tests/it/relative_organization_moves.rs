@@ -1,7 +1,7 @@
 use crate::common;
 use crate::support;
 
-use iptv_core::organization::{Action, Editor};
+use iptv_core::organization::Edit;
 use iptv_library::OrganizationScope;
 use iptv_runtime::{Ports, Runtime, commands};
 use std::rc::Rc;
@@ -34,22 +34,23 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
         ))
         .unwrap();
         let item = items[0].clone();
-        let editor = Editor::new(items, Some(item.id.clone()));
         let first = commands::edit_organization(
             &runtime,
             source,
             OrganizationScope::Channels,
-            editor.clone(),
+            items.clone(),
             item.clone(),
-            Action::Later,
+            Edit::Later,
+            Default::default(),
         );
         let second = commands::edit_organization(
             &runtime,
             source,
             OrganizationScope::Channels,
-            editor,
+            items,
             item.clone(),
-            Action::Later,
+            Edit::Later,
+            Default::default(),
         );
         block_on(first).unwrap();
         block_on(second).unwrap();
@@ -67,9 +68,10 @@ fn two_later_presses_from_one_view_snapshot_move_twice() {
             &runtime,
             source,
             OrganizationScope::Favorites,
-            Editor::new(changed, Some(item.id.clone())),
+            changed,
             item.clone(),
-            Action::Visibility,
+            Edit::Visibility,
+            Default::default(),
         ))
         .unwrap();
         let changed = block_on(commands::organization_items(

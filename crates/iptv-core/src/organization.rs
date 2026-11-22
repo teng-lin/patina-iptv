@@ -78,6 +78,22 @@ pub struct Item {
     pub name: String,
     pub hidden: bool,
 }
+/// An edit that can be applied to the stored channel or group organization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Visibility,
+    ResetName,
+    Earlier,
+    Later,
+    First,
+    Last,
+    ResetOrder,
+    HideSelected,
+    ShowSelected,
+    HideAll,
+    ShowAll,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Visibility,
@@ -100,6 +116,33 @@ pub enum Action {
     SortOptions,
     Sort(Sort),
 }
+impl Action {
+    /// The stored edit requested by an action handled by the library.
+    pub fn edit(self) -> Option<Edit> {
+        Some(match self {
+            Self::Visibility => Edit::Visibility,
+            Self::ResetName => Edit::ResetName,
+            Self::Earlier => Edit::Earlier,
+            Self::Later => Edit::Later,
+            Self::First => Edit::First,
+            Self::Last => Edit::Last,
+            Self::ResetOrder => Edit::ResetOrder,
+            Self::HideSelected => Edit::HideSelected,
+            Self::ShowSelected => Edit::ShowSelected,
+            Self::HideAll => Edit::HideAll,
+            Self::ShowAll => Edit::ShowAll,
+            Self::Rename
+            | Self::Select
+            | Self::Blocking
+            | Self::Channels
+            | Self::SortChannels
+            | Self::Reorder
+            | Self::SortOptions
+            | Self::Sort(_) => return None,
+        })
+    }
+}
+
 pub const ACTIONS: &[Action] = &[
     Action::Visibility,
     Action::Rename,

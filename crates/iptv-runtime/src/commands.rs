@@ -5,7 +5,7 @@ use iptv_core::membership::Member;
 use iptv_library::{CustomGroupId, SourceId};
 use iptv_providers::ContentId;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope, CustomGroup, Store, StoreError};
-use std::future::Future;
+use std::{collections::BTreeSet, future::Future};
 
 fn custom_groups_native(
     services: &Services,
@@ -155,7 +155,7 @@ fn save_search_history_native(
     services.call(move |store| store.set_search_history(&history))
 }
 
-use iptv_core::organization::{Action as Edit, BlockKind, Blocks, Editor, Item, Sort};
+use iptv_core::organization::{BlockKind, Blocks, Edit, Item, Sort};
 use iptv_guide::Organization;
 use iptv_library::OrganizationScope as Kind;
 use iptv_providers::GroupId;
@@ -232,9 +232,10 @@ fn edit_organization_native(
     services: &Services,
     source: SourceId,
     kind: Kind,
-    editor: Editor,
+    items: Vec<Item>,
     item: Item,
     edit: Edit,
+    selected: BTreeSet<String>,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
     #[derive(PartialEq)]
     enum StoredKind {
@@ -302,15 +303,13 @@ fn edit_organization_native(
             Edit::HideSelected | Edit::ShowSelected | Edit::HideAll | Edit::ShowAll => {
                 let all = matches!(edit, Edit::HideAll | Edit::ShowAll);
                 let hidden = matches!(edit, Edit::HideSelected | Edit::HideAll);
-                let ids: Vec<_> = editor
-                    .items
-                    .iter()
-                    .filter(|i| all || editor.selected.contains(&i.id))
-                    .map(|i| i.id.clone())
+                let ids: Vec<_> = items
+                    .into_iter()
+                    .filter(|i| all || selected.contains(&i.id))
+                    .map(|i| i.id)
                     .collect();
                 store.set_library_visibility(source, &ids, kind == StoredKind::Groups, hidden)?;
             }
-            _ => {}
         }
         Ok(())
     })
@@ -911,17 +910,19 @@ pub fn save_organization_order(
     async move { Ok(result.await?) }
 }
 
+/// Applies an edit using the items and selection from the caller's view.
 pub fn edit_organization(
     owner: &crate::Runtime,
     source: SourceId,
     kind: Kind,
-    editor: Editor,
+    items: Vec<Item>,
     item: Item,
     edit: Edit,
+    selected: BTreeSet<String>,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
     let services = owner.services();
     async move {
-        edit_organization_native(&services, source, kind, editor, item, edit)
+        edit_organization_native(&services, source, kind, items, item, edit, selected)
             .await
             .map_err(crate::Error::from)
     }
