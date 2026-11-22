@@ -241,11 +241,15 @@ fn load_history() -> SearchHistory {
 /// then deleted). A screen opened before the answer started empty and is
 /// given them unless a search was made meanwhile.
 pub(crate) fn load_saved_history(ui: Ui) {
+    crate::data::spawn_in_app(refresh_saved_history(ui));
+}
+
+pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
     let revision = ui.search_history_revision.get_untracked();
     crate::runtime().clear_loaded_search_history();
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
     let loaded = crate::runtime::commands::load_search_history(&crate::runtime(), legacy);
-    crate::data::spawn_in_app(async move {
+    async move {
         let list = match loaded.await {
             Ok(list) => list,
             Err(error) => {
@@ -267,7 +271,7 @@ pub(crate) fn load_saved_history(ui: Ui) {
             });
         }
         crate::runtime().install_search_history(list);
-    });
+    }
 }
 
 /// Clears saved searches immediately and invalidates pending startup loads.

@@ -1,9 +1,12 @@
 package com.hantekllc.iptvrs.host
 
 import android.app.Activity
+import android.content.ContentResolver
 import android.content.Intent
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.system.Os
 import android.system.OsConstants
 import android.view.View
@@ -13,6 +16,10 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -22,9 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * import streams a selected document into a new private file for Rust to
  * validate/stage, without loading the archive into memory. A successful import
  * leaves that file for Rust; export and all failed/canceled operations remove
- * their private temporary files. The `complete` event has only requestId,
- * success and canceled; neither paths, document URIs nor exception messages
- * cross the event/log boundary. After an explicit user confirmation, close
+ * their private temporary files. A successful import's `complete` event can
+ * include a display basename for review. Paths, document URIs and exception
+ * messages stay inside the bridge. After an explicit user confirmation, close
  * ends the activity and its process so staged restore activates on next launch.
  * No filesystem permission is needed.
  */
@@ -70,12 +77,18 @@ class BackupComponent(
         handler.post(launch)
     }
 
-    internal fun complete(id: String, success: Boolean, canceled: Boolean) {
+    internal fun complete(
+        id: String,
+        success: Boolean,
+        canceled: Boolean,
+        displayName: String? = null,
+    ) {
         if (!destroyed) {
             nsh.emit("complete", mapOf(
                 "requestId" to id,
                 "success" to success,
                 "canceled" to canceled,
+                "displayName" to displayName,
             ))
         }
     }
@@ -94,6 +107,9 @@ class BackupHost(private val activity: Activity) {
         const val TRANSFER_BACKUP = 0x5042
         const val SUFFIX = ".patinabackup"
         const val MAX_BYTES = 8L * 1024 * 1024 * 1024
+        // An unresponsive provider must not hold the completed copy or queue metadata
+        // requests behind a query that never returns.
+        val displayNames = ThreadPoolExecutor(0, 1, 30L, TimeUnit.SECONDS, SynchronousQueue())
     }
 
     private class Request(
@@ -178,6 +194,7 @@ class BackupHost(private val activity: Activity) {
         val resolver = activity.applicationContext.contentResolver
         Thread({
             var success = false
+            var displayName: String? = null
             try {
                 if (request.canceled.get()) throw java.io.IOException("Canceled")
                 // Recheck ownership after the chooser. Import requires an
@@ -196,6 +213,7 @@ class BackupHost(private val activity: Activity) {
                             output.fd.sync()
                         }
                     }
+                    displayName = tryDisplayName(resolver, uri)
                 } else {
                     archive.inputStream().use { input ->
                         val output = resolver.openOutputStream(uri, "wt")
@@ -212,10 +230,35 @@ class BackupHost(private val activity: Activity) {
                 // A provider may return an existing document for CREATE_DOCUMENT.
                 // Ownership is unknown, so never delete its URI on a failed copy.
                 if (!success || !request.importing) removePrivateArchive(request)
-                handler.post { finish(request, success, request.canceled.get()) }
+                handler.post { finish(request, success, request.canceled.get(), displayName) }
             }
         }, "patina-backup-transfer").start()
         return true
+    }
+
+    private fun tryDisplayName(resolver: ContentResolver, uri: Uri): String? {
+        val reply = try {
+            displayNames.submit<String?> {
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            cursor.getString(0)
+                                ?.substringAfterLast('/')
+                                ?.substringAfterLast('\\')
+                                ?.take(255)
+                                ?.trimEnd { it.isHighSurrogate() }
+                        } else null
+                    }
+            }
+        } catch (_: RejectedExecutionException) {
+            return null
+        }
+        return try {
+            reply.get(500, TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+            reply.cancel(true)
+            null
+        }
     }
 
     private fun copy(request: Request, input: InputStream, output: OutputStream) {
@@ -236,13 +279,22 @@ class BackupHost(private val activity: Activity) {
         if (request.ownsArchive.get()) request.archive.delete()
     }
 
-    private fun finish(request: Request, success: Boolean, canceled: Boolean) {
+    private fun finish(
+        request: Request,
+        success: Boolean,
+        canceled: Boolean,
+        displayName: String? = null,
+    ) {
         if (active !== request) return
         active = null
         val wasCanceled = canceled || request.canceled.get()
         val accepted = success && !wasCanceled && !destroyed
         if (!accepted || !request.importing) removePrivateArchive(request)
-        if (!destroyed) request.component.complete(request.id, accepted, wasCanceled)
+        if (!destroyed) {
+            request.component.complete(
+                request.id, accepted, wasCanceled, displayName.takeIf { accepted && request.importing },
+            )
+        }
     }
 
     internal fun componentDestroyed(component: BackupComponent) {

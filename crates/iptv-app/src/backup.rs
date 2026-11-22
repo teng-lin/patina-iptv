@@ -1,9 +1,10 @@
 //! Platform dialogs and document transport for runtime-owned backups.
-use crate::i18n::{key, tr};
+use crate::i18n::tr;
 use crate::runtime::backup::error::{Context, Result};
 #[cfg(target_os = "android")]
 use crate::runtime::backup::next_document_request;
 use crate::runtime::backup::{Busy, report};
+
 #[cfg(target_os = "android")]
 use serde_json::Value;
 #[cfg(target_os = "android")]
@@ -15,26 +16,23 @@ use std::fs::{self, File};
 use std::path::Path;
 use std::path::PathBuf;
 
+mod review;
+pub(crate) use review::{RestoreReview, back, is_open, key, layer};
+
 /// What a backup holds, before its file is chosen.
-const EXPORT_NOTE: &str = key(
+const EXPORT_NOTE: &str = crate::i18n::key(
     "The unencrypted backup includes playlist logins and passwords, settings, \
      channel arrangements, history and cached guide data. \
      Keep the file private.",
 );
 /// A restore is already scheduled: what happens to changes until then.
-const PENDING_NOTE: &str = key(
+const PENDING_NOTE: &str = crate::i18n::key(
     "The backup replaces current data when you next open Patina. \
      Changes made before then will be replaced.",
 );
-/// What scheduling a restore replaces, and how to call it off.
-const RESTORE_NOTE: &str = key(
-    "This backup will replace all playlists, settings, favorites, \
-     groups and history when you reopen Patina. You can cancel the \
-     scheduled restore from Settings before closing the app.",
-);
 /// Android: the app has to be closed and opened for the restore to apply.
 #[cfg(target_os = "android")]
-const RESTART_NOTE: &str = key(
+const RESTART_NOTE: &str = crate::i18n::key(
     "Close Patina, then open it again to apply the backup. Keep the \
      app open to cancel the scheduled restore from Settings first.",
 );
@@ -72,7 +70,23 @@ pub(crate) fn export_ui() {
     });
 }
 
-pub(crate) fn restore_ui(ui: crate::Ui) {
+/// Whether this host offers the backup document action.
+pub(crate) fn available() -> bool {
+    matches!(
+        crate::settings::offer("general.restore"),
+        iptv_settings::screen::Offer::Active
+    )
+}
+
+pub(crate) fn request_restore(ui: crate::Ui) {
+    if available() {
+        crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
+            restore_ui(ui)
+        });
+    }
+}
+
+fn restore_ui(ui: crate::Ui) {
     crate::data::spawn_in_app(async move {
         let Some(busy) = crate::runtime().begin_backup() else {
             return;
@@ -104,7 +118,7 @@ pub(crate) fn restore_ui(ui: crate::Ui) {
                 }
             }
         }
-        let file = match select_import(root.clone()).await {
+        let mut file = match select_import(root).await {
             Ok(Some(file)) => file,
             Ok(None) => return,
             Err(error) => {
@@ -112,14 +126,7 @@ pub(crate) fn restore_ui(ui: crate::Ui) {
                 return;
             }
         };
-        let answer = nsh_base::alert_dialog()
-            .title(tr("Replace data on next launch?"))
-            .description(tr(RESTORE_NOTE))
-            .cancel("cancel", tr("Cancel"))
-            .destructive("restore", tr("Schedule restore"))
-            .show()
-            .await;
-        if !answer.is_ok_and(|a| a.action.as_deref() == Some("restore")) {
+        if !review::confirm(ui, file.name.take()).await {
             return;
         }
         crate::settings_view::notify(tr("Checking backup…"));
@@ -165,9 +172,15 @@ mod android {
     use super::*;
     use nsh_core::prelude::*;
     use std::cell::RefCell;
+
+    enum Document {
+        Complete(Option<String>),
+        Canceled,
+    }
+
     thread_local! {
         static REQUEST: Cell<Option<Signal<Value>>> = const { Cell::new(None) };
-        static ANSWER: RefCell<Option<(String, futures_channel::oneshot::Sender<Result<bool>>)>> = const { RefCell::new(None) };
+        static ANSWER: RefCell<Option<(String, futures_channel::oneshot::Sender<Result<Document>>)>> = const { RefCell::new(None) };
     }
     pub fn layer() -> impl IntoElement {
         let request = signal(Value::Null);
@@ -190,9 +203,10 @@ mod android {
                     }) {
                         let (_, tx) = answer.take().unwrap();
                         let value = if event.data["success"].as_bool() == Some(true) {
-                            Ok(true)
+                            let name = event.data["displayName"].as_str().and_then(backup_name);
+                            Ok(Document::Complete(name))
                         } else if event.data["canceled"].as_bool() == Some(true) {
-                            Ok(false)
+                            Ok(Document::Canceled)
                         } else {
                             Err("Could not read or write the chosen backup document".into())
                         };
@@ -202,7 +216,7 @@ mod android {
                 });
             })
     }
-    async fn document(request_id: String, path: &Path, operation: &str) -> Result<bool> {
+    async fn document(request_id: String, path: &Path, operation: &str) -> Result<Document> {
         let Some(request) = REQUEST.with(Cell::get) else {
             return Err("The document service is unavailable".into());
         };
@@ -217,7 +231,9 @@ mod android {
         let prepared = path.clone();
         busy.worker(move |archive| archive.export(&prepared, &settings))
             .await?;
-        let result = document(request_id, &path, "export").await;
+        let result = document(request_id, &path, "export")
+            .await
+            .map(|result| matches!(result, Document::Complete(_)));
         let _ = fs::remove_file(path);
         result
     }
@@ -228,14 +244,17 @@ mod android {
     pub async fn select(root: PathBuf) -> Result<Option<ImportFile>> {
         let request_id = next_document_request();
         let path = root.join(format!("backup-import-{request_id}.patinabackup"));
-        let file = ImportFile {
+        let mut file = ImportFile {
             path,
+            name: None,
             temporary: true,
         };
-        if document(request_id, &file.path, "import").await? {
-            Ok(Some(file))
-        } else {
-            Ok(None)
+        match document(request_id, &file.path, "import").await? {
+            Document::Complete(name) => {
+                file.name = name;
+                Ok(Some(file))
+            }
+            Document::Canceled => Ok(None),
         }
     }
 }
@@ -259,7 +278,26 @@ pub(crate) fn service_layer() -> impl nsh_core::prelude::IntoElement {
 
 struct ImportFile {
     path: PathBuf,
+    name: Option<String>,
     temporary: bool,
+}
+
+/// A document's display label is a basename without hidden directional controls.
+fn backup_name(name: &str) -> Option<String> {
+    let name: String = name
+        .rsplit(['/', '\\'])
+        .next()?
+        .chars()
+        .filter(|ch| {
+            !ch.is_control()
+                && !matches!(ch, '\u{061c}' | '\u{200e}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .take(255)
+        .collect();
+    match name.trim() {
+        "" | "." | ".." => None,
+        name => Some(name.to_owned()),
+    }
 }
 impl Drop for ImportFile {
     fn drop(&mut self) {
@@ -277,6 +315,9 @@ async fn select_import(_root: PathBuf) -> Result<Option<ImportFile>> {
     .await
     {
         Ok(Some(paths)) => Ok(paths.into_iter().next().map(|path| ImportFile {
+            name: path
+                .file_name()
+                .and_then(|name| backup_name(&name.to_string_lossy())),
             path,
             temporary: false,
         })),
@@ -302,5 +343,24 @@ async fn offer_restart() {
         if answer.is_ok_and(|a| a.action.as_deref() == Some("close")) {
             android::close().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backup_name;
+
+    #[test]
+    fn backup_names_show_only_the_safe_basename() {
+        assert_eq!(
+            backup_name("/generated/path/家庭.patinabackup").as_deref(),
+            Some("家庭.patinabackup")
+        );
+        assert_eq!(
+            backup_name("C:\\generated\\archive\u{202e}\n.patinabackup").as_deref(),
+            Some("archive.patinabackup")
+        );
+        assert_eq!(backup_name(" /.. "), None);
+        assert_eq!(backup_name("\u{2067}\u{2069}"), None);
     }
 }

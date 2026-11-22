@@ -23,16 +23,15 @@ use nsh_core::picker::FilePickRequest;
 use nsh_core::prelude::*;
 
 use crate::data::{self, Job, Purpose, Update};
-use crate::list_rows::{self, Mark, ROW, ROW_TWO};
+use crate::list_rows::Mark;
+use crate::play_bar::icons::{self, Icon};
 use crate::scale::Scale;
+use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::ui_kit::{self, ERROR};
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
-const CARD_W: f32 = 720.0;
-/// A form row's label column (dp at full size).
-const LABEL_W: f32 = 150.0;
 
 /// The open wizard and what the screen adds to it.
 #[derive(Clone, PartialEq)]
@@ -50,6 +49,7 @@ fn open_with(ui: Ui, wizard: Wizard) {
         editing: None,
         prefilled: false,
     }));
+    prefill(ui);
 }
 
 /// Imports need blocking workers: without them the wizard is not offered,
@@ -62,15 +62,18 @@ fn imports_unavailable() -> bool {
     true
 }
 
-/// No playlists yet: the empty state.
+/// No playlists yet: offer library setup.
 pub fn open_first_run(ui: Ui) {
     if imports_unavailable() {
         return;
     }
-    open_with(ui, Wizard::first_run());
+    open_with(
+        ui,
+        Wizard::first_run().with_restore(crate::backup::available()),
+    );
 }
 
-/// "Add playlist" from the guide: the type list.
+/// "Add playlist" from the guide: the playlist form.
 pub fn open_add(ui: Ui) {
     if imports_unavailable() {
         return;
@@ -148,6 +151,7 @@ fn prefill(ui: Ui) {
 
 fn perform(ui: Ui, effect: WizardEffect) {
     match effect {
+        WizardEffect::RestoreBackup => crate::backup::request_restore(ui),
         WizardEffect::EditField { field } => entry::begin(ui, field),
         WizardEffect::ReadClipboard { field } => data::spawn_in_app(async move {
             let text = clipboard_string().await;
@@ -220,6 +224,8 @@ pub fn key(ui: Ui, action: Action) {
     match action {
         Action::MoveUp => send(ui, WizardEvent::Up),
         Action::MoveDown => send(ui, WizardEvent::Down),
+        Action::MoveLeft => send(ui, WizardEvent::Left),
+        Action::MoveRight => send(ui, WizardEvent::Right),
         Action::Select => send(ui, WizardEvent::Ok),
         Action::ShowMenu => send(ui, WizardEvent::Paste),
         Action::Back => {
@@ -297,10 +303,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             view()
                 .absolute()
                 .inset_0()
-                .pt_safe_area()
-                .items_center()
-                .justify_center()
+                .test_id("wizard-layer")
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
+                .accessibility_elements_hidden(move || {
+                    crate::overlays::Overlay::Wizard.accessibility_covered(ui)
+                })
                 .child(dynamic(move || {
                     let shown = screen.get();
                     // Built untracked: only a change of screen rebuilds it.
@@ -322,114 +329,183 @@ fn focused(ui: Ui, target: Target) -> bool {
     ui.keys_shown() && read(ui, |w| w.focus() == Some(target)) == Some(true)
 }
 
-/// A focusable row's mark: the pill while focused with the keys shown.
-fn mark(ui: Ui, target: Target) -> Mark {
-    Mark::of(focused(ui, target), false)
-}
-
-fn card(ui: Ui, size: Scale) -> View {
-    ui_kit::card(ui, size, CARD_W)
-        .max_h(percentage(0.95))
-        .gap(move || size.px(10.0))
-}
-
-/// Remote hints, shown only while keys drive the UI.
-fn hint(ui: Ui, size: Scale, keys: &'static str) -> impl IntoElement {
-    ui_kit::caption(size, move || if ui.keys_shown() { tr(keys) } else { "" })
-        .mt(move || size.px(6.0))
-}
-
-/// A step that Back leaves: the keys' hint and, on pointer and touch
-/// devices, a visible Back button.
-fn hint_or_back(ui: Ui, size: Scale, keys: &'static str) -> impl IntoElement {
-    view().child(hint(ui, size, keys)).child(when(
-        move || ui.back_controls(),
-        move || {
-            ui_kit::button(
-                ui,
-                size,
-                tr("‹ Back"),
-                || false,
-                move || send(ui, WizardEvent::Back),
-            )
-            .self_start()
-            .mt(move || size.px(4.0))
-        },
-    ))
-}
-
-/// A focusable button for `target`; a tap sends `Tap(target)`.
-fn button(ui: Ui, size: Scale, label: &'static str, target: Target) -> View {
-    ui_kit::button(
-        ui,
-        size,
-        move || tr(label),
-        move || focused(ui, target),
-        move || send(ui, WizardEvent::Tap(target)),
-    )
-    .self_start()
-    .mt(move || size.px(8.0))
-}
-
-fn empty(ui: Ui) -> impl IntoElement {
-    let size = Scale::new();
-    card(ui, size)
-        .child(ui_kit::title(size, move || tr("No playlists yet")))
-        .child(ui_kit::body(
+/// A button for `target`, revealed when the keys focus it.
+fn button(
+    ui: Ui,
+    size: Scale,
+    scrolling: ui_kit::FocusScroll,
+    label: &'static str,
+    target: Target,
+) -> View {
+    let has_focus = move || focused(ui, target);
+    scrolling.control(
+        ui_kit::button(
+            ui,
             size,
-            tr(
-                "Patina has no channels of its own. Add the playlist or account \
-                your TV provider gave you, and the guide fills with its channels.",
-            ),
-        ))
-        .child(button(ui, size, "Add playlist", Target::AddPlaylist))
-        .child(hint(ui, size, "OK add a playlist   Back leave"))
+            move || tr(label),
+            has_focus,
+            move || send(ui, WizardEvent::Tap(target)),
+        ),
+        has_focus,
+    )
 }
 
-fn choose_type(ui: Ui) -> impl IntoElement {
-    let size = Scale::new();
-    let scrolling = ui_kit::FocusScroll::new();
-    let row = move |kind: PlaylistKind| {
-        let target = Target::Kind(kind);
-        let mark = move || mark(ui, target);
-        scrolling
-            .control(
-                list_rows::row(size, ROW_TWO, mark)
-                    .role(AccessibilityRole::Button)
-                    .accessible(true)
-                    .label(move || words::kind_title(kind).to_owned())
-                    .hint(move || words::kind_detail(kind))
-                    .on_press(move || {
-                        ui.touched();
-                        send(ui, WizardEvent::Tap(target));
-                    })
+fn choice(
+    ui: Ui,
+    size: Scale,
+    scrolling: ui_kit::FocusScroll,
+    target: Target,
+    title: impl Fn() -> &'static str + Copy + 'static,
+    detail: impl Fn() -> &'static str + Copy + 'static,
+    icon: Option<Icon>,
+) -> View {
+    let has_focus = move || focused(ui, target);
+    let mark = move || Mark::of(has_focus(), false);
+    let background = move || {
+        if has_focus() {
+            mark().bg()
+        } else {
+            rgb(ui.app.theme.with(|theme| theme.background.alt))
+        }
+    };
+    scrolling.control(
+        view()
+            .role(AccessibilityRole::Button)
+            .accessible(true)
+            .label(move || title().to_owned())
+            .hint(detail)
+            .flex_row()
+            .items_center()
+            .gap(move || size.px(12.0))
+            .p(move || size.px(14.0))
+            .rounded(px(RADIUS))
+            .bg(background)
+            .on_press(move || {
+                ui.touched();
+                send(ui, WizardEvent::Tap(target));
+            })
+            .children(icon.map(|icon| {
+                svg(icons::src(icon))
+                    .size(move || size.px(24.0))
+                    .flex_shrink_0()
+                    .text_color(move || mark().text())
+            }))
+            .child(
+                view()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .gap(move || size.px(4.0))
                     .child(
-                        ui_kit::label(size, move || words::kind_title(kind))
+                        ui_kit::body(size, title)
+                            .font_weight(crate::fonts::MEDIUM)
                             .text_color(move || mark().text()),
-                    ),
-                move || focused(ui, target),
+                    )
+                    .child(ui_kit::caption(size, detail).text_color(move || mark().secondary())),
             )
             .child(
-                ui_kit::detail(size, move || words::kind_detail(kind))
-                    .text_color(move || mark().secondary()),
+                ui_kit::label(size, "›")
+                    .accessible(false)
+                    .text_color(move || mark().text()),
+            ),
+        has_focus,
+    )
+}
+
+fn empty(ui: Ui) -> View {
+    let size = Scale::new();
+    let scrolling = ui_kit::FocusScroll::new();
+    let can_restore = read(ui, Wizard::can_restore).unwrap_or(false);
+    let content = view()
+        .gap(move || size.px(10.0))
+        .child(
+            choice(
+                ui,
+                size,
+                scrolling,
+                Target::AddPlaylist,
+                || tr("Add a playlist"),
+                || tr("Use a link, a file, or a provider login"),
+                Some(Icon::ChannelList),
             )
-    };
-    card(ui, size)
-        .h(move || {
-            px((window().height.0 * 0.95)
-                .min(size.of(500.0) * crate::settings::text_factor().max(1.0)))
-        })
-        .child(ui_kit::title(size, move || {
-            tr("What did your provider give you?")
+            .test_id("wizard-welcome-add"),
+        )
+        .children(can_restore.then(|| {
+            choice(
+                ui,
+                size,
+                scrolling,
+                Target::RestoreBackup,
+                || tr("Restore a backup"),
+                || tr("Open a Patina backup file"),
+                Some(Icon::BackToApp),
+            )
+            .test_id("wizard-welcome-restore")
+        }));
+    setup_view::frame(
+        ui,
+        size,
+        || tr("Library setup"),
+        scrolling,
+        setup_view::columns(
+            size,
+            setup_view::intro(
+                size,
+                || tr("Set up your library"),
+                move || {
+                    if can_restore {
+                        tr("Add a playlist from your TV provider, or bring your library over from another Patina installation.")
+                    } else {
+                        tr("Add a playlist from your TV provider.")
+                    }
+                },
+            ),
+            content,
+        )
+        .test_id("wizard-welcome"),
+    )
+}
+
+fn choose_type(ui: Ui) -> View {
+    let size = Scale::new();
+    let scrolling = ui_kit::FocusScroll::new();
+    let content = view()
+        .gap(move || size.px(8.0))
+        .children(PlaylistKind::ALL.map(|kind| {
+            choice(
+                ui,
+                size,
+                scrolling,
+                Target::Kind(kind),
+                move || words::kind_title(kind),
+                move || words::kind_detail(kind),
+                None,
+            )
+            .accessibility_state(move || AccessibilityState {
+                selected: read(ui, Wizard::kind) == Some(kind),
+                ..AccessibilityState::default()
+            })
         }))
         .child(
-            scrolling
-                .view()
-                .test_id("wizard-types-scroll")
-                .flex_1()
-                .child(view().children(PlaylistKind::ALL.map(row))),
+            button(ui, size, scrolling, "Back", Target::Back)
+                .self_start()
+                .test_id("wizard-source-back"),
+        );
+    setup_view::frame(
+        ui,
+        size,
+        || tr("Library setup"),
+        scrolling,
+        setup_view::columns(
+            size,
+            setup_view::intro(
+                size,
+                || tr("Source type"),
+                || tr("What did your provider give you?"),
+            ),
+            content,
         )
-        .child(hint_or_back(ui, size, "▲▼ choose   OK next   Back back"))
+        .test_id("wizard-source-picker"),
+    )
 }
 
 fn shown_value(field: Field, value: &str) -> String {
@@ -444,35 +520,70 @@ fn shown_value(field: Field, value: &str) -> String {
     }
 }
 
-fn field_row(ui: Ui, size: Scale, field: Field) -> View {
+fn form_control(ui: Ui, size: Scale, target: Target) -> View {
+    let has_focus = move || focused(ui, target);
+    view()
+        .role(AccessibilityRole::Button)
+        .accessible(true)
+        .min_h(move || size.px(ui_kit::TOUCH))
+        .px(move || size.px(12.0))
+        .py(move || size.px(8.0))
+        .rounded(px(RADIUS))
+        .border_1()
+        .border_color(move || ui_kit::field_border(ui, has_focus()))
+        .bg(move || ui_kit::field_fill(ui, has_focus()))
+        .justify_center()
+        .on_press(move || {
+            ui.touched();
+            send(ui, WizardEvent::Tap(target));
+        })
+}
+
+fn source_type(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll, kind: PlaylistKind) -> View {
+    let target = Target::SourceType;
+    view()
+        .gap(move || size.px(4.0))
+        .child(ui_kit::caption(size, || tr("Source type")))
+        .child(
+            scrolling.control(
+                form_control(ui, size, target)
+                    .test_id("wizard-source-type")
+                    .label(move || format!("{} · {}", tr("Source type"), words::kind_title(kind)))
+                    .accessibility_state(AccessibilityState {
+                        expanded: Some(false),
+                        has_popup: true,
+                        ..AccessibilityState::default()
+                    })
+                    .child(
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(move || size.px(8.0))
+                            .child(
+                                ui_kit::body(size, move || words::kind_title(kind))
+                                    .flex_1()
+                                    .text_color(rgb(LIST_TEXT)),
+                            )
+                            .child(ui_kit::label(size, "⌄").accessible(false)),
+                    ),
+                move || focused(ui, target),
+            ),
+        )
+}
+
+fn field_row(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll, field: Field) -> View {
     let target = Target::Field(field);
     let value = move || read(ui, |w| w.value(field).to_owned()).unwrap_or_default();
     let error = move || read(ui, |w| w.error(field)).flatten();
-    let mark = move || mark(ui, target);
-    let guide = field == Field::EpgUrl;
-    let empty_guide = move || guide && value().is_empty();
-    let value_color = move || {
-        if value().is_empty() {
-            mark().secondary()
-        } else {
-            mark().text()
-        }
-    };
-    let paste = field.accepts_paste().then(|| {
-        ui_kit::row_button(
-            ui,
-            size,
-            move || tr("Paste"),
-            mark,
-            move || send(ui, WizardEvent::PasteInto(field)),
-        )
-        .label(move || format!("{} · {}", tr("Paste"), words::label(field)))
-    });
-    let control = view()
+    let field_control = form_control(ui, size, target)
+        .test_id(match field {
+            Field::PlaylistUrl => "wizard-field-PlaylistUrl",
+            Field::PlaylistFile => "wizard-field-PlaylistFile",
+            Field::EpgUrl => "wizard-field-EpgUrl",
+            _ => "wizard-field",
+        })
         .flex_1()
-        .style_when(move || !guide, |s| s.h_full())
-        .role(AccessibilityRole::Button)
-        .accessible(true)
+        .min_w(px(0.0))
         .label(move || {
             let label = words::label(field);
             let content = shown_value(field, &value());
@@ -487,70 +598,53 @@ fn field_row(ui: Ui, size: Scale, field: Field) -> View {
                 name
             }
         })
-        .hint(move || words::placeholder(field))
-        .flex_row()
-        .items_center()
-        .justify_start()
-        .gap(move || size.px(12.0))
-        .on_press(move || {
-            ui.touched();
-            send(ui, WizardEvent::Tap(target));
+        .accessibility_state(move || AccessibilityState {
+            invalid: error().is_some(),
+            ..AccessibilityState::default()
         })
         .child(
-            ui_kit::detail(size, move || words::label(field))
-                .w(move || size.px(LABEL_W))
-                .text_color(move || mark().secondary()),
-        )
+            ui_kit::body(size, move || {
+                let value = shown_value(field, &value());
+                if value.is_empty() {
+                    words::placeholder(field).to_owned()
+                } else {
+                    value
+                }
+            })
+            .number_of_lines(move || if value().is_empty() { 0_u32 } else { 1 })
+            .text_color(move || {
+                if value().is_empty() {
+                    ui_kit::secondary()
+                } else {
+                    rgb(LIST_TEXT)
+                }
+            }),
+        );
+    view()
+        .gap(move || size.px(4.0))
+        .child(ui_kit::caption(size, move || words::label(field)))
         .child(
             view()
-                .flex_1()
-                .child(
-                    when(empty_guide, move || {
-                        ui_kit::body(size, move || words::placeholder(field))
-                            .text_color(value_color)
-                    })
-                    .otherwise(move || {
-                        ui_kit::label(size, move || {
-                            let v = value();
-                            if v.is_empty() {
-                                words::placeholder(field).to_owned()
-                            } else {
-                                shown_value(field, &v)
-                            }
-                        })
-                        .text_color(value_color)
-                    }),
-                )
-                .child(
-                    ui_kit::caption(size, move || error().map_or("", words::field_error))
-                        .number_of_lines(1)
-                        .text_color(rgb(ERROR))
-                        .h(move || size.px(if error().is_some() { 18.0 } else { 0.0 })),
-                ),
-        );
-    list_rows::row(size, ROW, mark)
-        .style_when(
-            move || guide,
-            move |s| {
-                s.h(Length::Auto)
-                    .min_h(list_rows::pitch(size, ROW))
-                    .py(size.px(8.0))
-            },
+                .flex_row()
+                .gap(move || size.px(8.0))
+                .child(scrolling.control(field_control, move || focused(ui, target)))
+                .children((field == Field::PlaylistUrl).then(|| {
+                    button(ui, size, scrolling, "Paste", Target::PastePlaylistLink)
+                        .label(move || format!("{} · {}", tr("Paste"), words::label(field)))
+                        .test_id("wizard-paste")
+                        .flex_shrink_0()
+                })),
         )
-        .test_id(match field {
-            Field::EpgUrl => "wizard-field-EpgUrl",
-            _ => "wizard-field",
-        })
-        .role(AccessibilityRole::None)
-        .accessible(false)
-        .flex_row()
-        .items_center()
-        .gap(move || size.px(12.0))
-        .child(control)
-        .children(paste)
+        .child(when(
+            move || error().is_some(),
+            move || {
+                ui_kit::caption(size, move || error().map_or("", words::field_error))
+                    .text_color(rgb(ERROR))
+            },
+        ))
 }
 
-fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
+fn form(ui: Ui, kind: PlaylistKind) -> View {
     let banner = move || {
         read(ui, |w| match (w.notice(), w.failure()) {
             (Some(Notice::ClipboardEmpty), _) => Some(tr("There is no text to paste.")),
@@ -559,46 +653,67 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
         })
         .flatten()
     };
+    let expanded = move || read(ui, Wizard::optional_expanded).unwrap_or_default();
     let size = Scale::new();
     let scrolling = ui_kit::FocusScroll::new();
-    card(ui, size)
-        .test_id("wizard-form")
-        .h(move || {
-            px((window().height.0 * 0.95)
-                .min(size.of(500.0) * crate::settings::text_factor().max(1.0)))
-        })
-        .accessibility_elements_hidden(move || entry::is_editing(ui))
-        .gap(move || size.px(4.0))
-        .child(ui_kit::title(size, move || words::kind_title(kind)))
-        .child(
-            ui_kit::caption(size, move || banner().unwrap_or(""))
-                .text_color(rgb(ERROR))
-                .h(move || size.px(if banner().is_some() { 22.0 } else { 0.0 })),
+    let options = Target::OptionalDetails;
+    let submit = Target::Submit;
+    let content = view()
+        .gap(move || size.px(12.0))
+        .child(source_type(ui, size, scrolling, kind))
+        .children(
+            kind.fields()
+                .iter()
+                .copied()
+                .filter(|field| field.is_required())
+                .map(|field| field_row(ui, size, scrolling, field)),
         )
         .child(
-            scrolling
-                .view()
-                .test_id("wizard-fields-scroll")
-                .flex_1()
-                .child(view().children(kind.fields().iter().map(move |f| {
-                    let field = *f;
-                    scrolling.control(field_row(ui, size, field), move || {
-                        focused(ui, Target::Field(field))
+            scrolling.control(
+                form_control(ui, size, options)
+                    .test_id("wizard-options")
+                    .label(move || tr("Name and guide link (optional)").to_owned())
+                    .accessibility_state(move || AccessibilityState {
+                        expanded: Some(expanded()),
+                        ..AccessibilityState::default()
                     })
-                }))),
+                    .flex_row()
+                    .items_center()
+                    .justify_start()
+                    .gap(move || size.px(8.0))
+                    .child(
+                        ui_kit::label(size, move || if expanded() { "⌄" } else { "›" })
+                            .accessible(false),
+                    )
+                    .child(
+                        ui_kit::body(size, || tr("Name and guide link (optional)"))
+                            .text_color(rgb(LIST_TEXT)),
+                    ),
+                move || focused(ui, options),
+            ),
         )
+        .child(when(expanded, move || {
+            view().gap(move || size.px(12.0)).children(
+                kind.fields()
+                    .iter()
+                    .copied()
+                    .filter(|field| !field.is_required())
+                    .map(|field| field_row(ui, size, scrolling, field)),
+            )
+        }))
+        .child(when(
+            move || banner().is_some(),
+            move || ui_kit::caption(size, move || banner().unwrap_or("")).text_color(rgb(ERROR)),
+        ))
         .child(when(
             move || {
                 read(ui, |w| {
                     kind.fields().iter().any(|field| {
-                        matches!(
-                            field,
-                            Field::PlaylistUrl | Field::Server | Field::PortalUrl | Field::EpgUrl
-                        ) && w
-                            .value(*field)
-                            .trim()
-                            .to_ascii_lowercase()
-                            .starts_with("http://")
+                        field.is_url()
+                            && w.value(*field)
+                                .trim()
+                                .to_ascii_lowercase()
+                                .starts_with("http://")
                     })
                 })
                 .unwrap_or(false)
@@ -610,15 +725,51 @@ fn form(ui: Ui, kind: PlaylistKind) -> impl IntoElement {
                 )
             },
         ))
-        .child(button(ui, size, "Add playlist", Target::Submit).test_id("wizard-submit"))
-        .child(hint_or_back(
-            ui,
+        .child(
+            view()
+                .flex_row()
+                .flex_wrap()
+                .gap(move || size.px(10.0))
+                .child(
+                    scrolling.control(
+                        setup_view::primary(
+                            ui,
+                            size,
+                            || tr("Add playlist"),
+                            move || focused(ui, submit),
+                            move || send(ui, WizardEvent::Tap(submit)),
+                        )
+                        .test_id("wizard-submit"),
+                        move || focused(ui, submit),
+                    ),
+                )
+                .child(button(ui, size, scrolling, "Back", Target::Back)),
+        );
+    setup_view::frame(
+        ui,
+        size,
+        || tr("Library setup"),
+        scrolling,
+        setup_view::columns(
             size,
-            "▲▼ move   OK type   Menu paste   Back other types",
-        ))
+            setup_view::intro(
+                size,
+                || tr("Add a playlist"),
+                move || match kind {
+                    PlaylistKind::M3uUrl => {
+                        tr("Use the M3U or M3U8 link your TV provider gave you.")
+                    }
+                    _ => words::kind_detail(kind),
+                },
+            ),
+            content,
+        )
+        .accessibility_elements_hidden(move || entry::is_editing(ui))
+        .test_id("wizard-form"),
+    )
 }
 
-fn processing(ui: Ui) -> impl IntoElement {
+fn processing(ui: Ui) -> View {
     let progress = move || {
         read(ui, |w| match w.step() {
             Step::Processing { progress, .. } => progress,
@@ -629,34 +780,46 @@ fn processing(ui: Ui) -> impl IntoElement {
     let percent = move || progress().and_then(|p| p.percent());
     let kind = read(ui, Wizard::kind).unwrap_or(PlaylistKind::M3uUrl);
     let size = Scale::new();
-    card(ui, size)
-        .child(ui_kit::title(size, move || tr("Adding the playlist")))
-        .child(ui_kit::body(size, move || words::kind_title(kind)))
-        .child(
-            ui_kit::body(size, move || words::stage(progress()))
-                .text_color(rgb(LIST_TEXT))
-                .mt(move || size.px(8.0)),
-        )
-        .child(
-            view()
-                .h(px(4.0))
-                .rounded(px(2.0))
-                .bg(tint(WHITE, RESTING_ALPHA * 2))
-                .opacity(move || if percent().is_some() { 1.0_f32 } else { 0.0 })
-                .child(
-                    view()
-                        .h_full()
-                        .rounded(px(2.0))
-                        .w(move || percentage(f32::from(percent().unwrap_or(0)) / 100.0))
-                        .bg(move || rgb(ui.app.theme.with(|t| t.accent.light))),
-                ),
-        )
+    let scrolling = ui_kit::FocusScroll::new();
+    let content = view()
+        .gap(move || size.px(12.0))
+        .child(ui_kit::body(size, move || words::stage(progress())).text_color(rgb(LIST_TEXT)))
+        .child(when(
+            move || percent().is_some(),
+            move || {
+                view()
+                    .h(px(4.0))
+                    .rounded(px(2.0))
+                    .bg(tint(WHITE, RESTING_ALPHA * 2))
+                    .child(
+                        view()
+                            .h_full()
+                            .rounded(px(2.0))
+                            .w(move || percentage(f32::from(percent().unwrap_or(0)) / 100.0))
+                            .bg(move || rgb(ui.app.theme.with(|t| t.accent.light))),
+                    )
+            },
+        ))
         // OK does nothing here (no accidental cancel); Back or a tap cancels.
-        .child(button(ui, size, "Cancel", Target::CancelImport))
-        .child(hint(ui, size, "Back cancel"))
+        .child(button(ui, size, scrolling, "Cancel", Target::CancelImport).self_start());
+    setup_view::frame(
+        ui,
+        size,
+        || tr("Library setup"),
+        scrolling,
+        setup_view::columns(
+            size,
+            setup_view::intro(
+                size,
+                || tr("Adding the playlist"),
+                move || words::kind_title(kind),
+            ),
+            content,
+        ),
+    )
 }
 
-fn succeeded(ui: Ui) -> impl IntoElement {
+fn succeeded(ui: Ui) -> View {
     let counts = move || {
         read(ui, |w| match w.step() {
             Step::Succeeded { counts, .. } => words::counts(counts),
@@ -665,38 +828,70 @@ fn succeeded(ui: Ui) -> impl IntoElement {
         .unwrap_or_default()
     };
     let size = Scale::new();
-    card(ui, size)
-        .child(ui_kit::title(size, move || tr("Playlist added")))
-        .child(ui_kit::body(size, counts).text_color(rgb(LIST_TEXT)))
-        .child(ui_kit::body(size, move || {
-            tr("The guide now shows its channels.")
-        }))
-        .child(button(ui, size, "Watch", Target::Done))
-        .child(hint(ui, size, "OK continue"))
+    let scrolling = ui_kit::FocusScroll::new();
+    let done = Target::Done;
+    setup_view::frame(
+        ui,
+        size,
+        || tr("Library setup"),
+        scrolling,
+        setup_view::columns(
+            size,
+            setup_view::intro(
+                size,
+                || tr("Playlist added"),
+                || tr("The guide now shows its channels."),
+            ),
+            view()
+                .gap(move || size.px(12.0))
+                .child(ui_kit::body(size, counts).text_color(rgb(LIST_TEXT)))
+                .child(
+                    scrolling.control(
+                        setup_view::primary(
+                            ui,
+                            size,
+                            || tr("Watch"),
+                            move || focused(ui, done),
+                            move || send(ui, WizardEvent::Tap(done)),
+                        )
+                        .self_start(),
+                        move || focused(ui, done),
+                    ),
+                ),
+        ),
+    )
 }
 
-fn failed(ui: Ui) -> impl IntoElement {
+fn failed(ui: Ui) -> View {
     let message = move || {
         read(ui, |w| match w.step() {
             Step::Failed { failure } => words::failure(w.kind(), failure),
             _ => "",
         })
         .unwrap_or("")
-        .to_owned()
     };
     let size = Scale::new();
-    card(ui, size)
-        .child(ui_kit::title(size, move || {
-            tr("This source cannot be used")
-        }))
-        .child(ui_kit::body(size, message))
-        .child(button(
-            ui,
+    let scrolling = ui_kit::FocusScroll::new();
+    setup_view::frame(
+        ui,
+        size,
+        || tr("Library setup"),
+        scrolling,
+        setup_view::columns(
             size,
-            "Choose another type",
-            Target::ChooseAnotherType,
-        ))
-        .child(hint(ui, size, "OK choose another type"))
+            setup_view::intro(size, || tr("This source cannot be used"), message),
+            view().child(
+                button(
+                    ui,
+                    size,
+                    scrolling,
+                    "Choose another type",
+                    Target::ChooseAnotherType,
+                )
+                .self_start(),
+            ),
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -707,6 +902,8 @@ mod tests {
     fn screens_follow_steps() {
         let mut w = Wizard::first_run();
         assert!(screen_of(&w) == Some(Screen::Empty));
+        w.handle(WizardEvent::Ok);
+        assert!(screen_of(&w) == Some(Screen::Form(PlaylistKind::M3uUrl)));
         w.handle(WizardEvent::Ok);
         assert!(screen_of(&w) == Some(Screen::ChooseType));
         w.handle(WizardEvent::Tap(Target::Kind(PlaylistKind::Stalker)));

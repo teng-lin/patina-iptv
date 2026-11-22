@@ -1,8 +1,8 @@
 //! The settings screen drawn: the pages on the left, the chosen page's
 //! rows on the right (a label, the value beside it, a second line when
 //! the row says why it does nothing), the focused row's description
-//! below, the editors over it (`editors`), and the notice line. In the
-//! lists' type and pitch with their focus pill (`ui_kit`, `list_rows`).
+//! below and the editors over it (`editors`). The global notice is mounted above
+//! the screens so tasks started in setup can report their result.
 
 use crate::i18n::{tr, trf};
 
@@ -23,11 +23,8 @@ pub(super) fn secondary() -> Rgba {
     ui_kit::secondary()
 }
 
-/// The settings screen and the notice line.
+/// The settings screen.
 pub fn layer(ui: Ui) -> impl IntoElement {
-    let notice = Notice::new();
-    NOTICE.with(|n| n.set(Some(notice)));
-    let notice = notice.text;
     let size = Scale::new();
     view()
         .test_id("settings-layer")
@@ -38,27 +35,35 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .inset_0()
         .pointer_events(PointerEvents::BoxNone)
         .child(when(move || is_open(ui), move || screen(ui, size)))
-        .child(when(
-            move || notice.with(Option::is_some),
-            move || {
-                view()
-                    .role(AccessibilityRole::Alert)
-                    .absolute()
-                    .left(px(0.0))
-                    .w_full()
-                    .bottom(move || size.px(28.0))
-                    .items_center()
-                    .pointer_events(PointerEvents::None)
-                    .child(
-                        ui_kit::body(size, move || notice.get().unwrap_or_default())
-                            .px(move || size.px(18.0))
-                            .py(move || size.px(12.0))
-                            .rounded(px(RADIUS))
-                            .text_color(rgb(LIST_TEXT))
-                            .bg(tint(0x000000, 0xC0)),
-                    )
-            },
-        ))
+}
+
+pub(crate) fn notice_layer() -> impl IntoElement {
+    let notice = Notice::new();
+    NOTICE.with(|n| n.set(Some(notice)));
+    let text = notice.text;
+    let size = Scale::new();
+    when(
+        move || text.with(Option::is_some),
+        move || {
+            view()
+                .test_id("app-notice")
+                .role(AccessibilityRole::Alert)
+                .absolute()
+                .left(px(0.0))
+                .w_full()
+                .bottom(move || size.px(28.0))
+                .items_center()
+                .pointer_events(PointerEvents::None)
+                .child(
+                    ui_kit::body(size, move || text.get().unwrap_or_default())
+                        .px(move || size.px(18.0))
+                        .py(move || size.px(12.0))
+                        .rounded(px(RADIUS))
+                        .text_color(rgb(LIST_TEXT))
+                        .bg(tint(0x000000, 0xC0)),
+                )
+        },
+    )
 }
 
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {

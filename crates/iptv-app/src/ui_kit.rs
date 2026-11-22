@@ -15,7 +15,7 @@ use nsh_core::prelude::*;
 use crate::fonts::{CAPTION, LIST_ITEM, LIST_SECONDARY, MEDIUM, SANS, SECTION, TITLE};
 use crate::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
-use crate::theme::{FOCUS_ALPHA, FOCUSED_TEXT, LIST_TEXT, RADIUS, RADIUS_LARGE, RESTING_ALPHA};
+use crate::theme::{FOCUS_ALPHA, LIST_TEXT, RADIUS, RADIUS_LARGE, RESTING_ALPHA};
 use crate::{Ui, tint};
 
 /// A round ‹ for pointer and touch navigation: out of the
@@ -182,25 +182,24 @@ pub fn button(
     )
 }
 
-/// A button inside a list row (a form field's Paste): on the row's light
-/// pill while it is focused, the pill's dark text on a dark tint, so it
-/// still reads there; otherwise as [`button`].
-pub fn row_button(
+/// The main action in a setup or recovery screen.
+pub(crate) fn primary_button(
     ui: Ui,
     size: Scale,
     label: impl IntoReactive<SharedString>,
-    row: impl Fn() -> Mark + Copy + 'static,
+    focused: impl Fn() -> bool + Copy + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
+    let mark = move || Mark::of(focused() && ui.keys_shown(), false);
     pill(
         ui,
         size,
         label,
-        move || match row() {
-            Mark::Focused => tint(FOCUSED_TEXT, BUTTON_ALPHA),
-            _ => tint(WHITE, BUTTON_ALPHA),
+        move || match mark() {
+            Mark::Focused => Mark::Focused.bg(),
+            _ => rgb(ui.app.theme.with(|theme| theme.accent.main)),
         },
-        move || row().text(),
+        move || mark().text(),
         on_press,
     )
 }

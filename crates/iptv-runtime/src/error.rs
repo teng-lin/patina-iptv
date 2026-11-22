@@ -19,6 +19,11 @@ impl Error {
         }
     }
 
+    /// Whether opening the store could succeed after a device or storage change.
+    pub fn retryable_open(&self) -> bool {
+        self.0.retryable_open()
+    }
+
     pub fn unavailable(reason: &'static str) -> Self {
         Self(iptv_store_sqlite::StoreError::Unavailable(reason))
     }

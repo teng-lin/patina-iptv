@@ -1707,6 +1707,8 @@ fn movies_and_shows_stay_visible_with_an_empty_catalog_on_desktop_and_tv() {
     step(app.press_key("right"));
     step(app.press_key("enter"));
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
+    step(app.wait_for("id:wizard-form"));
+    step(app.press_key("enter"));
     step(app.wait_for("text:Xtream Codes login"));
 }
 

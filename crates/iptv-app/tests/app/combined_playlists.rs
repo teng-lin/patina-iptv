@@ -751,6 +751,7 @@ fn adding_second_playlist_opens_combined_browser_without_management_switch() {
     step(app.wait_for_within("text:Only Alpha", Duration::from_secs(20)));
     step(app.press("text:☰  All channels"));
     step(app.press_key("m"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
@@ -929,6 +930,7 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     .unwrap();
     step(app.wait_for_within("text:Alpha bulletin", Duration::from_secs(20)));
     step(app.press("text:+ Add playlist"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Xtream Codes login"));
     step(app.press("text:Xtream Codes login"));
     for (field, empty, value) in [
@@ -936,7 +938,7 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
         ("Username", "Required", "viewer"),
         ("Password", "Required", "secret"),
     ] {
-        step(app.press(&format!("text:{field}")));
+        step(app.press(&format!("role:button[/^{field}$/]")));
         step(app.type_text(&format!("text:{empty}"), value));
         step(app.submit(&format!("text:{value}")));
     }
@@ -1080,6 +1082,7 @@ fn automatic_join_reloads_previous_source_whose_account_refresh_is_still_pending
         1,
     );
     step(app.press("text:+ Add playlist"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
@@ -1276,6 +1279,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.press("text:Close"));
     }
     step(app.press("text:+ Add playlist"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));

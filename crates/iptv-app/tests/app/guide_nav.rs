@@ -83,8 +83,9 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
         )]
     });
     let gone = |app: &mut Headless, s: &str| app.wait_for_gone(s, Duration::from_secs(3));
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));

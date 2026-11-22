@@ -1,8 +1,5 @@
-//! The secondary screens in the lists' type, headless: the wizard's
-//! options, a settings row's label and the search field use the list item
-//! size (20 sp) in Roboto, titles the screen title size (22 sp), headings
-//! the section size (17 sp), all scaled in a smaller desktop window
-//! (`scale.rs`, `ui_kit.rs`).
+//! Headless checks for the shared type scale used by library setup,
+//! settings, and search, including window scaling for desktop.
 //!
 //! Synthetic data only: a playlist picked from a file.
 
@@ -36,16 +33,17 @@ fn secondary_screens_use_the_shared_type() {
     });
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
 
-    // The wizard: its title, its options as two-line rows, a form row.
-    step(app.wait_for("text:No playlists yet"));
-    assert!(has(&mut app, "No playlists yet", 22.0));
-    step(app.press("text:Add playlist"));
+    // The setup heading, a source choice and its supporting text, and a field control.
+    step(app.wait_for("text:Set up your library"));
+    assert!(has(&mut app, "Set up your library", 34.0));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
-    assert!(has(&mut app, "Playlist file", 20.0), "a wizard option");
-    assert!(has(&mut app, "An M3U file saved on this device", 16.0));
+    assert!(has(&mut app, "Playlist file", 16.0), "a wizard option");
+    assert!(has(&mut app, "An M3U file saved on this device", 15.0));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
-    assert!(has(&mut app, "Choose a file…", 20.0), "a form row's value");
+    assert!(has(&mut app, "Choose a file…", 16.0), "a form row's value");
     step(app.press("text:Choose a file…"));
     step(app.wait_for("text:synthetic.m3u"));
     step(app.press("text:Add playlist"));
@@ -93,27 +91,20 @@ fn secondary_screens_use_the_shared_type() {
         assert!(has(&mut app, "General", 20.0 * scale), "a page {w}x{h}");
     }
 
-    // A button in a row reads on the row's light pill: the wizard's link
-    // form by keys (the focus shows), its link row focused: that row's
-    // Paste in the pill's text color, another row's in the list's.
+    // Only the link has a dedicated Paste button. Its label follows the
+    // button's own focus, independently of the adjacent field.
     step(app.press("text:Close"));
     step(app.wait_for_gone("id:settings-screen", Duration::from_secs(2)));
     step(app.press("text:+ Add playlist"));
-    step(app.wait_for("text:Playlist link"));
-    step(app.press_key("down"));
-    step(app.press_key("up"));
-    step(app.press_key("enter"));
-    step(app.wait_for("text:Paste"));
-    let paste = |app: &mut Headless, nth: usize| {
-        app.screen()
-            .span_style(&format!("text:Paste >> nth={nth}"))
-            .unwrap()
-            .color
-    };
+    step(app.wait_for("id:wizard-paste"));
+    let paste = |app: &mut Headless| app.screen().span_style("text:Paste").unwrap().color;
     let dark = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
     let light = nsh_core::Color((iptv_app::theme::LIST_TEXT << 8) | 0xff);
-    assert_eq!(paste(&mut app, 0), dark, "Paste on the focused row");
-    assert_eq!(paste(&mut app, 1), light, "Paste on another row");
+    step(app.press_key("down"));
+    assert_eq!(paste(&mut app), light, "the link field has focus");
+    step(app.press_key("right"));
+    assert_eq!(paste(&mut app), dark, "Paste has focus");
+    assert_eq!(app.screen().count("id:wizard-paste").unwrap(), 1);
 }
 
 /// The groups, then the rail beside them (Left), its labels shown.

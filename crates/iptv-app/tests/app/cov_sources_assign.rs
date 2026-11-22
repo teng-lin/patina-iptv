@@ -59,9 +59,10 @@ fn choosing_a_channels_guide_data() {
     };
     let mut t = T::new(config);
     t.app.on_pick(move |_| support::picked(playlist.clone()));
-    t.wait("text:No playlists yet", 5);
-    t.press("text:Add playlist");
+    t.wait("id:wizard-welcome", 5);
+    t.press("id:wizard-welcome-add");
     // The wizard's options come on a later frame (slow on a loaded machine).
+    t.press("id:wizard-source-type");
     t.wait("text:Playlist file", 5);
     t.press("text:Playlist file");
     t.wait("text:Choose a file…", 5);

@@ -17,6 +17,7 @@ use crate::Ui;
 pub(crate) enum Overlay {
     StoreStartupFailure,
     Parental,
+    RestoreReview,
     Wizard,
     Recordings,
     Vod,
@@ -50,7 +51,10 @@ impl Overlay {
     pub(crate) fn key_context(self) -> iptv_nav::Context {
         use iptv_nav::Context;
         match self {
-            Self::Vod
+            Self::StoreStartupFailure
+            | Self::RestoreReview
+            | Self::Wizard
+            | Self::Vod
             | Self::Recordings
             | Self::GuideRepair
             | Self::GuideInspection
@@ -60,9 +64,7 @@ impl Overlay {
             | Self::RemoteEditor
             | Self::Settings
             | Self::FavoritesEditor => Context::Editor,
-            Self::StoreStartupFailure
-            | Self::Parental
-            | Self::Wizard
+            Self::Parental
             | Self::Playlists
             | Self::GuideAssign
             | Self::Chooser
@@ -74,9 +76,10 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 21] = [
+    pub(crate) const ALL: [Overlay; 22] = [
         Overlay::StoreStartupFailure,
         Overlay::Parental,
+        Overlay::RestoreReview,
         Overlay::Wizard,
         Overlay::Recordings,
         Overlay::Vod,
@@ -103,6 +106,7 @@ impl Overlay {
         match self {
             Overlay::StoreStartupFailure => ui.store_startup_failure.with(Option::is_some),
             Overlay::Parental => crate::parental_view::is_open(ui),
+            Overlay::RestoreReview => crate::backup::is_open(ui),
             Overlay::Wizard => crate::wizard_view::is_open(ui),
             Overlay::Vod => crate::vod_view::is_open(ui),
             Overlay::Recordings => crate::recordings_view::is_open(ui),
@@ -148,6 +152,7 @@ impl Overlay {
         match self {
             Overlay::StoreStartupFailure
             | Overlay::Parental
+            | Overlay::RestoreReview
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -181,6 +186,7 @@ impl Overlay {
             Overlay::Description => false,
             Overlay::StoreStartupFailure
             | Overlay::Parental
+            | Overlay::RestoreReview
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -261,6 +267,7 @@ mod tests {
         let listed = |overlay: Overlay| match overlay {
             Overlay::StoreStartupFailure
             | Overlay::Parental
+            | Overlay::RestoreReview
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -282,7 +289,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 21);
+        assert_eq!(Overlay::ALL.len(), 22);
     }
 
     #[test]

@@ -147,8 +147,9 @@ fn pointer_and_touch_drive_search_the_channel_list_and_multiview() {
             ImageData::new(playlist.as_bytes().to_vec()),
         )]
     });
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
@@ -253,6 +254,7 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
     step(app.press_key("f"));
     step(app.wait_for("text:+ Add playlist"));
     step(app.press("text:+ Add playlist"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Xtream Codes login"));
     step(app.press("text:Xtream Codes login"));
     for (field, empty, value) in [
@@ -260,7 +262,7 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
         ("Username", "Required", "viewer"),
         ("Password", "Required", "secret"),
     ] {
-        step(app.press(&format!("text:{field}")));
+        step(app.press(&format!("role:button[/^{field}$/]")));
         step(app.type_text(&format!("text:{empty}"), value));
         // Return in the sheet's field: Done.
         step(app.submit(&format!("text:{value}")));

@@ -166,27 +166,26 @@ fn the_wizard_and_the_choosers() {
         )]
     });
 
-    // The empty state: Back there is not the wizard's (the app would be
-    // left), so it stays. OK opens the type list, Back returns.
-    step(app.wait_for("text:No playlists yet"));
+    // Back on welcome is handed to the host. OK opens the default form,
+    // and backing out of it returns to welcome's add action.
+    step(app.wait_for("id:wizard-welcome"));
     step(app.press_key("backspace"));
     step(app.wait(Duration::from_millis(100)));
-    assert!(app.shows("No playlists yet"));
+    assert!(app.screen().matches("id:wizard-welcome").unwrap());
     step(app.press_key("enter"));
-    step(app.wait_for("text:What did your provider give you?"));
-    step(app.wait_for("text:▲▼ choose   OK next   Back back"));
+    step(app.wait_for("id:wizard-form"));
     step(app.press_key("backspace"));
-    step(app.wait_for("text:No playlists yet"));
-    step(app.wait_for("text:OK add a playlist   Back leave"));
+    step(app.wait_for("id:wizard-welcome"));
     step(app.press_key("enter"));
-    step(app.wait_for("text:What did your provider give you?"));
+    step(app.wait_for("id:wizard-form"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:wizard-source-picker"));
 
     // Keys choose the portal type: its form, focused on its first field.
     for key in ["down", "down", "down", "up", "down", "enter"] {
         step(app.press_key(key));
     }
     step(app.wait_for("text:MAC address"));
-    step(app.wait_for("text:▲▼ move   OK type   Menu paste   Back other types"));
 
     // Adding with nothing filled in: the required fields say so.
     step(app.press("text:Add playlist"));
@@ -219,6 +218,7 @@ fn the_wizard_and_the_choosers() {
 
     // The name: Cancel keeps the field as it was, Return keeps the text,
     // Back during entry keeps it too.
+    step(app.press("id:wizard-options"));
     let name = "Optional: how the playlist is listed";
     step(app.press(&format!("text:{name}")));
     let field = input(&mut app);
@@ -251,7 +251,9 @@ fn the_wizard_and_the_choosers() {
     step(app.press("text:Playlist link"));
     let placeholder = "http://…/playlist.m3u";
     step(app.wait_for(&format!("text:{placeholder}")));
-    enter(&mut app, placeholder, "nonsense");
+    app.set_clipboard(Some("nonsense".to_owned()));
+    step(app.press("id:wizard-paste"));
+    step(app.wait_for("text:nonsense"));
     step(app.press("text:Add playlist"));
     step(app.wait_for("text:Start with http:// or https://"));
     let mut url = "nonsense".to_owned();
@@ -284,23 +286,26 @@ fn the_wizard_and_the_choosers() {
     step(app.wait_for("text:Stopped. Your entries are kept; add the playlist again when ready."));
 
     // A login: the password is never shown.
-    step(app.back());
-    step(app.wait_for("text:What did your provider give you?"));
+    step(app.press("id:wizard-source-type"));
+    step(app.wait_for("id:wizard-source-picker"));
     step(app.press("text:Xtream Codes login"));
     step(app.wait_for("text:Password"));
-    step(app.press("text:Password"));
+    step(app.press("role:button[/^Password$/]"));
     let field = input(&mut app);
     step(app.type_text(&field, "pw\n"));
     step(app.wait_for(&format!("text:{}", "•".repeat(4))));
     assert!(!app.shows("pw"));
-    // A row's Paste fills that row (the server, the first).
+    // Menu still pastes into provider login fields via the remote.
+    assert_eq!(app.screen().count("id:wizard-paste").unwrap(), 0);
     app.set_clipboard(Some("http://server.example.test:8080".to_owned()));
-    step(app.press("text:Paste >> nth=0"));
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.press_key("m"));
     step(app.wait_for("text:http://server.example.test:8080"));
 
     // The file: picked, added, and Watch (OK) shows the guide.
-    step(app.back());
-    step(app.wait_for("text:What did your provider give you?"));
+    step(app.press("id:wizard-source-type"));
+    step(app.wait_for("id:wizard-source-picker"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
     step(app.press("text:Choose a file…"));

@@ -177,8 +177,9 @@ fn keys_drive_the_guide_search_the_channel_list_and_multiview() {
             ImageData::new(playlist.as_bytes().to_vec()),
         )]
     });
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
@@ -264,9 +265,9 @@ fn guide_keys(app: &mut Headless) {
     // Tab: the groups; Menu there adds a playlist (Back closes the wizard).
     step(app.press_key("tab"));
     step(app.press_key("m"));
-    step(app.wait_for("text:Playlist file"));
+    step(app.wait_for("id:wizard-form"));
     step(app.back());
-    gone(app, "text:Playlist file");
+    gone(app, "id:wizard-form");
     // Down: the News group shows; OK takes it, with the keys' hint card,
     // which goes by itself (6 s): then Back goes to the groups at once,
     // Back again to the rail on TV, Up to Search, OK searches.
