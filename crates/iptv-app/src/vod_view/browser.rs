@@ -1,8 +1,8 @@
 //! Poster browsing: navigation, category preview, focused metadata and a
 //! bounded, virtualized grid. No provider URL is passed to the image host.
 use super::*;
-use iptv_core::browse::RailItem;
 use iptv_core::vod::Card;
+use iptv_presentation::browse::RailItem;
 use iptv_presentation::vod::Destination;
 
 fn all_label(ui: Ui) -> &'static str {

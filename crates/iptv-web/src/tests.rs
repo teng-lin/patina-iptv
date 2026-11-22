@@ -1557,7 +1557,7 @@ fn a_page_keeps_the_time_past_rows_without_listings() {
 fn a_row_signature_includes_the_row_number() {
     use crate::grid::Grid;
     use iptv_core::guide::SyntheticSchedule;
-    use iptv_core::lists::{ALL, ChannelList};
+    use iptv_presentation::lists::{ALL, ChannelList};
     let open = |channels: Vec<usize>| {
         Grid::open(
             Rc::new(SyntheticSchedule),

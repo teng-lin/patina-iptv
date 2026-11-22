@@ -1,7 +1,7 @@
 //! Retained listings and windows for the focused guide row.
 
 use super::{Focus, home_window};
-use crate::guide::{Program, Schedule, VISIBLE, floor_of};
+use iptv_core::guide::{Program, Schedule, VISIBLE, floor_of};
 
 /// The minutes the guide can show at `now`, including its default window.
 pub fn view_range(s: &dyn Schedule, now: i32) -> (i32, i32) {

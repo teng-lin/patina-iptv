@@ -3,7 +3,7 @@
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
 use crate::layout::{GuideHeader, Shortcuts};
-use iptv_core::lists::entry_count;
+use iptv_presentation::lists::entry_count;
 use nsh_core::prelude::*;
 
 use crate::Ui;

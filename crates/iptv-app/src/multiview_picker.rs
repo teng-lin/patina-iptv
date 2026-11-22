@@ -5,11 +5,11 @@
 use crate::i18n::{tr, trf};
 use crate::lists::entry_name;
 
-use iptv_core::channel_picker::{ChannelPicker, Pane};
 use iptv_core::guide::Schedule;
-use iptv_core::lists::{Entry, ListId, entry_count};
 use iptv_guide::combined::CombinedSchedule;
 use iptv_nav::Action;
+use iptv_presentation::channel_picker::{ChannelPicker, Pane};
+use iptv_presentation::lists::{Entry, ListId, entry_count};
 use nsh_base::input;
 use nsh_core::prelude::*;
 use std::rc::Rc;

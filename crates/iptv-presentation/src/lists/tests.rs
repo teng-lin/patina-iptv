@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use super::*;
-use crate::guide::{Airing, SyntheticSchedule};
+use iptv_core::guide::{Airing, SyntheticSchedule};
 
 /// A small catalog: channels stored grouped (News 0..3, Sports 3..5, Kids
 /// 5..9) while the playlist interleaves them.

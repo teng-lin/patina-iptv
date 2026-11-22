@@ -37,3 +37,11 @@ pub mod reorder;
 pub mod sound;
 pub mod tracks;
 pub mod wizard;
+
+pub mod browse;
+pub mod channel_list;
+pub mod channel_picker;
+pub mod guide;
+pub mod listings;
+pub mod lists;
+pub mod zap;

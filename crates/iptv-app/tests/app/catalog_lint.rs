@@ -89,6 +89,7 @@ const ROOTS: &[&str] = &[
 const NOT_READ: &[&str] = &[
     "iptv-core/src/i18n.rs",
     "iptv-core/src/i18n/",
+    "iptv-guide/src/test_support/",
     // Declared only by opening.rs's #[cfg(test)] mod revocation; synthetic fixtures.
     "iptv-runtime/src/opening/revocation.rs",
     // Private unit modules declared only under #[cfg(test)]; synthetic fixtures.

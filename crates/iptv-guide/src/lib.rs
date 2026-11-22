@@ -1157,5 +1157,6 @@ impl OrganizationBuilder {
     }
 }
 
-#[cfg(test)]
-mod interaction_tests;
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_support;

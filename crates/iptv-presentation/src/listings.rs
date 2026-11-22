@@ -1,7 +1,7 @@
 //! Localized wording for guide listings and group names.
 
-use crate::guide::{GroupName, Listing};
-use crate::i18n::{Language, translate};
+use iptv_core::guide::{GroupName, Listing};
+use iptv_core::i18n::{Language, translate};
 
 /// Wording for the guide grid, program details and the recording draft.
 pub fn listing_text(listing: Option<Listing>, language: &Language) -> String {
@@ -28,7 +28,7 @@ pub fn group_text(group: GroupName, language: &Language) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::i18n::{LANGUAGES, resolve};
+    use iptv_core::i18n::{LANGUAGES, resolve};
 
     #[test]
     fn fixed_list_entries_use_the_catalog_in_every_language() {

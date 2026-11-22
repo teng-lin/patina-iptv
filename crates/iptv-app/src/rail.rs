@@ -1,14 +1,14 @@
 //! The navigation rail left of the groups column, on the panel color: icons while the groups
 //! have the focus, icons with labels while it has the focus itself. Items
 //! without a screen in this build are dimmed and never take the focus
-//! (`iptv_core::browse`); the focused one is the light pill the guide's
+//! (`iptv_presentation::browse`); the focused one is the light pill the guide's
 //! focused program is. Left from the groups lands on Search. The icons
 //! are our own simple line drawings.
 
 use crate::i18n::tr;
 
-use iptv_core::browse::RailItem;
-use iptv_core::guide::Pane;
+use iptv_presentation::browse::RailItem;
+use iptv_presentation::guide::Pane;
 use nsh_core::element::ImageSrc;
 use nsh_core::prelude::*;
 
@@ -186,7 +186,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
     });
     let part = move |bottom: bool| {
         view().children(
-            iptv_core::browse::rail_items(iptv_core::browse::VodAvailability {
+            iptv_presentation::browse::rail_items(iptv_presentation::browse::VodAvailability {
                 shown: true,
                 any: true,
             })

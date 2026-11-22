@@ -1,7 +1,7 @@
 //! Group and list navigation for live playback.
 
-use crate::guide::Schedule;
 use crate::lists::ChannelList;
+use iptv_core::guide::Schedule;
 use std::ops::Range;
 
 /// The channels of the group containing `channel` (channels are stored
@@ -16,7 +16,8 @@ pub fn group_range(schedule: &dyn Schedule, channel: usize) -> Range<usize> {
 pub fn zap_target(schedule: &dyn Schedule, channel: usize, step: isize) -> usize {
     let mut channels = schedule.channel_group_channels(channel);
     channels.retain(|&c| {
-        !schedule.channel_hidden(c) && schedule.channel_block(c) == crate::organization::Block::None
+        !schedule.channel_hidden(c)
+            && schedule.channel_block(c) == iptv_core::organization::Block::None
     });
     if channels.is_empty() {
         return channel;
@@ -74,7 +75,7 @@ pub fn zap_from_list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guide::{GROUPS, GroupName, Listing, SyntheticSchedule, group_start};
+    use iptv_core::guide::{GROUPS, GroupName, Listing, SyntheticSchedule, group_start};
 
     #[test]
     fn zapping_wraps_within_the_group() {
@@ -94,7 +95,7 @@ mod tests {
         );
         assert_eq!(zap_target(&s, g0, 1), g0 + 1);
         let last = group_start(GROUPS - 1);
-        let end = crate::guide::CHANNELS;
+        let end = iptv_core::guide::CHANNELS;
         assert_eq!(group_range(&s, end - 1), last..end);
         assert_eq!(zap_target(&s, end - 1, 1), last);
     }
@@ -112,13 +113,13 @@ mod tests {
         fn group_start(&self, group: usize) -> usize {
             self.0[group]
         }
-        fn program_at(&self, _: usize, minute: i32) -> crate::guide::Program {
-            crate::guide::Program {
+        fn program_at(&self, _: usize, minute: i32) -> iptv_core::guide::Program {
+            iptv_core::guide::Program {
                 start: minute,
                 end: minute + 1,
             }
         }
-        fn programs_between(&self, _: usize, _: i32, _: i32) -> Vec<crate::guide::Program> {
+        fn programs_between(&self, _: usize, _: i32, _: i32) -> Vec<iptv_core::guide::Program> {
             Vec::new()
         }
         fn catchup_days(&self, _: usize) -> u8 {
@@ -130,7 +131,7 @@ mod tests {
         fn group_label(&self, _: usize) -> GroupName {
             GroupName::Named(String::new())
         }
-        fn listing(&self, _: usize, _: crate::guide::Program) -> Option<Listing> {
+        fn listing(&self, _: usize, _: iptv_core::guide::Program) -> Option<Listing> {
             Some(Listing::Gap)
         }
     }

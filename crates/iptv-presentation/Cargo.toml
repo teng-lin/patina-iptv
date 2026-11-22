@@ -16,6 +16,9 @@ iptv-search.workspace = true
 iptv-settings.workspace = true
 zeroize = "1.8"
 
+[dev-dependencies]
+iptv-guide = { workspace = true, features = ["test-support"] }
+
 [lints]
 workspace = true
 

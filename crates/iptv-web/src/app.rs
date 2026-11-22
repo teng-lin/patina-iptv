@@ -11,9 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iptv_core::favorites::{Favorites, KeyIndex, Recent};
-use iptv_core::guide::{GroupName, Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
-use iptv_core::lists::{self, ChannelList as Rows, FAVORITES};
-use iptv_core::playback::{ZapOrigin, zap_from_list};
+use iptv_core::guide::{GroupName, Program, Schedule, now_minute, unix_of};
 use iptv_epg::{GuideStore, Overrides, StoreOptions};
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, PlaybackContext, Resolution};
@@ -22,12 +20,15 @@ use iptv_import::{
     Progress, RefreshPolicy, SourceMeta, Trigger, decide, matching_fingerprint, plan_startup,
 };
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
+use iptv_presentation::guide::{Pane, ProgramSelection};
+use iptv_presentation::lists::{self, ChannelList as Rows, FAVORITES};
 use iptv_presentation::play_bar::{Control, PlayBar};
 use iptv_presentation::reorder::{self, Exit, Reorder};
 use iptv_presentation::search::{
     ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchState, Tab,
     select_result,
 };
+use iptv_presentation::zap::{ZapOrigin, zap_from_list};
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};
@@ -1088,7 +1089,7 @@ impl App {
     }
 
     fn entry_name(s: &dyn Schedule, entry: usize) -> String {
-        match iptv_core::lists::entry_name(entry, s) {
+        match iptv_presentation::lists::entry_name(entry, s) {
             GroupName::Named(name) => name,
             GroupName::Ungrouped => "Other".into(),
             GroupName::Favorites => "Favorites".into(),
@@ -1750,7 +1751,8 @@ mod listing_tests {
             let current = schedule.program_at(0, 0);
             assert_eq!(schedule.listing(0, current), Some(listing));
             assert!(App::program_json(&schedule, 0, current, &presentation).is_none());
-            let rows = iptv_core::lists::ChannelList::new(iptv_core::lists::ALL, vec![0]);
+            let rows =
+                iptv_presentation::lists::ChannelList::new(iptv_presentation::lists::ALL, vec![0]);
             let grid = Grid::open(Rc::new(schedule), Rc::new(rows), 0);
             let json = grid.json(None, &|_| None, &|_| false, &presentation);
             let title = json["focused"]

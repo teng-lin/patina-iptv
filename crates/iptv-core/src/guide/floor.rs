@@ -10,5 +10,3 @@ pub fn floor_of(s: &dyn Schedule, channel: usize, now: i32) -> i32 {
     s.listing_start(channel)
         .map_or(now, |start| start.max(s.browsable(now).0).min(now))
 }
-
-pub use crate::guide_state::view_range;

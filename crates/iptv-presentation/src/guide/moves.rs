@@ -4,10 +4,10 @@
 //! the focused row's floor ([`Focus::floor`]).
 
 use super::{Focus, Pane, home_window};
-use crate::guide::Schedule;
+use iptv_core::guide::Schedule;
 #[cfg(test)]
-use crate::guide::VISIBLE;
-pub use crate::guide::{DAY, HOUR};
+use iptv_core::guide::VISIBLE;
+pub use iptv_core::guide::{DAY, HOUR};
 
 impl Focus {
     /// The time column and the window `minutes` later (earlier when
@@ -55,7 +55,7 @@ impl Focus {
 mod tests {
     use super::super::{Move, STEP};
     use super::*;
-    use crate::guide::{Airing, SyntheticSchedule};
+    use iptv_core::guide::{Airing, SyntheticSchedule};
 
     const S: SyntheticSchedule = SyntheticSchedule;
 

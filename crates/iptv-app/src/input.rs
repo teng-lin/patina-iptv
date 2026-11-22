@@ -914,7 +914,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            if (key == RemoteKey::Menu && entry == iptv_core::lists::ALL)
+            if (key == RemoteKey::Menu && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
                     && ui.app.library.shown.get_untracked().is_none())
             {
@@ -961,7 +961,7 @@ fn page(ui: Ui, dir: isize) {
     let rows = ui.visible_rows.get().map_or(8, |(a, b)| (b - a).max(1));
     let len = ui.list.with(|l| l.len());
     ui.focus.update(|f| {
-        f.channel = iptv_core::guide::page_row(f.channel, len, dir * rows as isize);
+        f.channel = iptv_presentation::guide::page_row(f.channel, len, dir * rows as isize);
     });
 }
 

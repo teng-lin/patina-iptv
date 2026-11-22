@@ -3,7 +3,7 @@
 use iptv_core::guide::{GroupName, Listing};
 
 pub fn listing(listing: Option<Listing>) -> String {
-    iptv_core::listings::listing_text(listing, crate::i18n::language())
+    iptv_presentation::listings::listing_text(listing, crate::i18n::language())
 }
 
 pub fn group(name: GroupName) -> String {
@@ -20,5 +20,5 @@ pub fn group(name: GroupName) -> String {
             GroupName::Named(_) | GroupName::Ungrouped => {}
         }
     }
-    iptv_core::listings::group_text(name, crate::i18n::language())
+    iptv_presentation::listings::group_text(name, crate::i18n::language())
 }
