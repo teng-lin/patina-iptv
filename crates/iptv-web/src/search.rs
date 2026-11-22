@@ -175,6 +175,24 @@ pub(crate) fn run(
     (channel_hits, program_hits)
 }
 
+/// The program `hits` found in a guide since replaced that `schedule` (the
+/// new guide of the same catalog) still lists: the same title at the same
+/// start on that channel.
+pub(crate) fn still_listed(schedule: &EpgSchedule, hits: &[ProgramHit]) -> Vec<ProgramHit> {
+    let store = schedule.store();
+    hits.iter()
+        .filter(|h| {
+            schedule
+                .channel(h.channel)
+                .filter(|_| !schedule.channel_hidden(h.channel))
+                .and_then(|c| store.schedule(&c.key))
+                .and_then(|programs| programs.at(h.start))
+                .is_some_and(|p| p.start() == h.start && p.title() == h.title)
+        })
+        .cloned()
+        .collect()
+}
+
 /// The catalog channel a result plays.
 pub(crate) fn channel_of(id: &ResultId, keys: &KeyIndex) -> Option<usize> {
     keys.get(&id.channel().content)

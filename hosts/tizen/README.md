@@ -21,6 +21,21 @@ Patina's own core in WebAssembly:
 | Worker | `app/worker.js` | Runs the core in a Web Worker and performs the HTTP requests it describes, so importing a large guide never blocks the remote. |
 | Page | `app/main.js`, `index.html`, `style.css` | Renders the views, sends remote keys, plays streams with the TV's native player (AVPlay) on the video plane under the page. |
 
+The page and the core exchange JSON messages. The page numbers every `key`
+and `settle` command (`seq`) and sends the next one when the view carrying
+that number arrives (or after a second without it), so a held key never
+queues work in the core; views also arrive for other reasons (the clock,
+search text, the guide) and release nothing. A held key is sent with
+`repeat: true`, and the core decides what holding it does: a Left pressed
+in the guide grid opens the groups column at its first repeat, one pressed
+in full screen does nothing more, anywhere else it is a Left like any
+other. When the held key is released (or the page loses the focus), its
+repeats still waiting are dropped and, if the core put off building a list
+(`pending`), `settle` asks for it. Each `play` event has an `id`, which the
+page returns in `playFailed`: the core ignores the failure of a stream it
+has replaced since. A `play` that arrives while the app is hidden is opened
+when it shows again.
+
 The core is built for the Wasm features Tizen 5.5 validates: MVP plus
 sign-extension and mutable globals. Stable Rust's standard library uses newer
 features (reference types, bulk memory) that this engine rejects, so
@@ -45,7 +60,7 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
 
 - First launch asks for the playlist. Up/Down move between fields, OK opens
   a field's keyboard (Done returns), Save loads it, Back closes it once a
-  playlist is saved. The red button opens it
+  playlist is saved. Holding OK or Back acts once. The red button opens it
   again later.
 - The remote's Exit key leaves the app from any screen. Back never does.
 - The guide screen: the preview of the playing channel at the top left
@@ -66,7 +81,8 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   not started, or one the archive no longer has, shows a notice.
 - Groups column: Up/Down move through the lists and show each in the grid
   (while a held key moves through them, the list shows once it is
-  released); Right or OK enters it (an empty Favorites cannot be entered);
+  released, and a held Up stops at the first list: press Up again there
+  for the preview); Right or OK enters it (an empty Favorites cannot be entered);
   Left goes to the rail (Search and TV). Back: a past or future program
   returns to now, then the groups, then the rail; on the rail Back does
   nothing.
@@ -75,7 +91,8 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   own group), Left or Back return to the guide on the playing channel
   (Back returns to the search that played the channel). The Guide key
   opens the guide. When a stream fails, full screen returns to where it
-  was played from.
+  was played from (not when you have zapped on to another channel
+  meanwhile).
 - Play bar: OK in full screen shows the channel, its program with start
   and end times, the next program, and the buttons Favorite, TV guide
   and Search, with Favorite focused. Left/Right move between the
@@ -95,7 +112,12 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   there (with at least two) starts moving it: Up/Down move it one place,
   Left/Right to the top or the end, OK, Back or Blue end the move and keep
   the order.
-- Green updates the TV guide now.
+- Green updates the TV guide now. Search results stay while it updates:
+  programs the new guide no longer lists are removed, and the Programs
+  tab and the focused result are kept where the new guide still has them.
+- Notices show at the bottom of the guide screen, at the top elsewhere.
+  When the core cannot start or stops, its message covers the screen and
+  only Exit works.
 
 ## Differences from the Android TV app
 

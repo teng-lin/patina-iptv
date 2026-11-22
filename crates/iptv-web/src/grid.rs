@@ -107,7 +107,8 @@ impl Grid {
     }
 
     /// The same screen on a new schedule of the same catalog (the guide
-    /// arrived): the focused channel is found again, the time stays. A
+    /// arrived): the focused channel is found again, the time stays where
+    /// the new guide still has listings. A
     /// schedule made in a later hour counts minutes from that hour: the
     /// focus's minutes are converted through Unix time first.
     pub(crate) fn rebase(&mut self, catalog: Rc<dyn Schedule>, rows: Rc<Rows>, now: i32) {
@@ -125,6 +126,14 @@ impl Grid {
         self.first = self.focus.channel.saturating_sub(offset);
         self.clamp_first();
         self.tick(now);
+        // The new guide may not reach as far back (or on) as the old one,
+        // and `tick` changes nothing while now is the same: the time is
+        // brought inside the row's listings and the guide's bounds as a tap
+        // there is, the window then to the focused program.
+        let (pane, row, cursor) = (self.focus.pane, self.focus.channel, self.focus.cursor);
+        self.focus.tap(row, cursor, &self.view);
+        self.focus.pane = pane;
+        self.focus.set_visible(self.focus.visible, &self.view);
     }
 
     /// Another list (a group previewed, Favorites reordered), with the
@@ -185,7 +194,8 @@ impl Grid {
         self.focus.preview_list(entry, &columns(entries))
     }
 
-    /// Shows the groups column with the focus on the selected entry.
+    /// Shows the groups column with the focus on the selected entry (an
+    /// empty Favorites; a Left held in the grid, as on Android TV).
     pub(crate) fn open_groups(&mut self) {
         self.focus.open_groups();
     }
@@ -197,20 +207,21 @@ impl Grid {
     }
 
     /// A key on the guide screen. `entries` is the groups column's length;
-    /// `playing` whether a video plays (the preview can take the focus).
+    /// `preview` whether Up may reach the preview (a video plays, and the
+    /// key is not a repeat moving through the groups column).
     pub(crate) fn key(
         &mut self,
         key: &str,
         now: i32,
         entries: usize,
-        playing: bool,
+        preview: bool,
     ) -> GridOutcome {
         self.tick(now);
         let cols = columns(entries);
         let pane = self.focus.pane;
         let empty = self.view.channel_count() == 0;
         let outcome = match key {
-            "up" if self.focus.focus_preview(playing) => browse::Outcome::Moved,
+            "up" if self.focus.focus_preview(preview) => browse::Outcome::Moved,
             "up" => self.focus.navigate(Move::Up, &cols, &self.view),
             "down" => self.focus.navigate(Move::Down, &cols, &self.view),
             "left" => self.focus.navigate(Move::Left, &cols, &self.view),
@@ -225,12 +236,6 @@ impl Grid {
             }
             "ok" => self.focus.ok(&cols, &self.view),
             "back" => self.focus.back(&cols, &self.view),
-            // A held Left (the page sends it once per hold): the groups
-            // column from anywhere in the grid, as on Android TV.
-            "groups" if pane == Pane::Guide => {
-                self.focus.open_groups();
-                browse::Outcome::Moved
-            }
             _ => browse::Outcome::None,
         };
         // No hint card here: Back would first dismiss what is not shown.

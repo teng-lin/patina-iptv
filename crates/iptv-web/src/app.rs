@@ -25,7 +25,7 @@ use iptv_import::{
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};
-use iptv_search::{SearchAction, SearchEffect, SearchHistory, SearchState};
+use iptv_search::{SearchAction, SearchEffect, SearchHistory, SearchState, Tab};
 use serde_json::{Value, json};
 
 use crate::exec::{HostFetch, spawn};
@@ -47,6 +47,21 @@ enum Mode {
     Full,
     /// The search screen beside the video.
     Search,
+}
+
+/// What a held Left does, decided by where its press (the key before its
+/// repeats) acted. The core decides, as the page's view may be a key behind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LeftHold {
+    /// Pressed in the guide grid: the first repeat opens the groups column
+    /// (Android TV's Long Left).
+    Grid,
+    /// The groups were opened by this hold, or the press was in full screen
+    /// without the play bar (it opened the guide, and holding it must not
+    /// go on through the guide): later repeats do nothing.
+    Done,
+    /// Anywhere else a repeat is a Left like any other.
+    Plain,
 }
 
 pub(crate) struct App {
@@ -87,6 +102,14 @@ pub(crate) struct App {
     reorder: Option<Reorder<String>>,
     /// The play bar over full-screen video, shown with `BAR[i]` focused.
     bar: Option<usize>,
+    /// What repeats of the Left being held do.
+    left_hold: LeftHold,
+    /// The `id` of the last `play` event: the host names it when that
+    /// stream fails, so a failure of a stream since replaced is ignored.
+    play_id: u64,
+    /// The search tab shown when the guide was replaced under the results,
+    /// shown again once the new program index has results for it.
+    search_tab: Option<Tab>,
     /// The import's progress for the status line.
     status: Value,
     guide_loaded: bool,
@@ -142,6 +165,9 @@ impl App {
             back_to_search: false,
             reorder: None,
             bar: None,
+            left_hold: LeftHold::Plain,
+            play_id: 0,
+            search_tab: None,
             status: json!({ "phase": "idle" }),
             guide_loaded: false,
             guide: None,
@@ -278,17 +304,14 @@ impl App {
             None => self.grid = Some(Grid::open(s, self.rows.clone(), now)),
         }
         self.indexes.reset();
-        if self.search.is_some() {
-            // Results of the old guide's program index are dropped (they
-            // may name programs it no longer has): the query runs again on
-            // channels now, and with programs once the new index is built.
-            let rerun = self
-                .search
-                .as_ref()
-                .filter(|state| state.phase() != iptv_search::Phase::Idle)
-                .map(|state| state.query().to_owned());
-            if let Some(query) = rerun {
-                self.run_search(&query);
+        if let Some(state) = &self.search {
+            // Program results the new guide no longer lists are dropped;
+            // the others stay (with the tab and the focused result) until
+            // the query runs again on the new index. Channels run now.
+            if state.phase() != iptv_search::Phase::Idle {
+                self.search_tab.get_or_insert(state.tab());
+                let query = state.query().to_owned();
+                self.run_search(&query, true);
             }
             self.start_program_index();
         }
@@ -328,9 +351,11 @@ impl App {
                     .iter()
                     .find(|(k, _)| k.eq_ignore_ascii_case("user-agent"))
                     .map(|(_, v)| v.clone());
+                self.play_id += 1;
                 host().emit(
                     &json!({
                         "type": "play",
+                        "id": self.play_id,
                         "url": source.url,
                         "userAgent": user_agent,
                         "archive": archive.map(|p| s.unix(p.start)),
@@ -408,11 +433,13 @@ impl App {
     fn guide_key(&mut self, key: &str, scrolling: bool) {
         let now = self.now();
         let entries = self.schedule().map_or(0, lists::entry_count);
-        let playing = self.playing.is_some();
+        // A key held in the groups column only moves through the groups: it
+        // stops at the first one, and a new press goes on to the preview.
+        let preview = self.playing.is_some() && !scrolling;
         let Some(grid) = self.grid.as_mut() else {
             return;
         };
-        match grid.key(key, now, entries, playing) {
+        match grid.key(key, now, entries, preview) {
             GridOutcome::Stay => {}
             GridOutcome::Preview if scrolling => {
                 let entry = grid.entry();
@@ -464,6 +491,7 @@ impl App {
     fn close_search(&mut self) {
         self.keep_history();
         self.search = None;
+        self.search_tab = None;
     }
 
     /// Stores the search screen's history when it changed (a query
@@ -509,34 +537,63 @@ impl App {
                     .map(|s| s.query().to_owned())
             });
             if let Some(query) = rerun {
-                with_app(|a| a.run_search(&query));
+                with_app(|a| {
+                    a.run_search(&query, false);
+                    a.restore_search_tab();
+                });
             }
             emit_view();
         });
     }
 
-    fn run_search(&mut self, query: &str) {
+    /// Runs `query` and shows its results. `keep_listed`: the guide was
+    /// replaced under the results of this query, so until its program index
+    /// is built the program results it still lists stay.
+    fn run_search(&mut self, query: &str, keep_listed: bool) {
         let Some(s) = self.schedule.clone() else {
             return;
         };
         let channels = self.indexes.channels(&*s);
         let favorites = self.favorites.set_of(&self.keys);
-        let (channel_hits, program_hits) = search::run(
+        let (channel_hits, mut program_hits) = search::run(
             &channels,
             self.indexes.programs(),
             query,
             &favorites,
             wall_secs(),
         );
+        if keep_listed
+            && self.indexes.programs().is_none()
+            && let Some(state) = &self.search
+        {
+            program_hits = search::still_listed(&s, state.programs());
+        }
         if let Some(state) = &mut self.search {
             state.set_results(query, channel_hits, program_hits);
+        }
+    }
+
+    /// The new program index answered: the tab shown before the guide was
+    /// replaced shows again when it was left only because its results were
+    /// gone, on the result focused there if the new guide still has it
+    /// (`SearchState` finds it by its identity).
+    fn restore_search_tab(&mut self) {
+        let (Some(tab), Some(state)) = (self.search_tab.take(), self.search.as_mut()) else {
+            return;
+        };
+        let on_results = matches!(
+            state.focus(),
+            iptv_search::Focus::Result(_) | iptv_search::Focus::Tabs
+        );
+        if state.tab() != tab && on_results {
+            state.apply(SearchAction::ShowTab(tab));
         }
     }
 
     fn search_effect(&mut self, effect: SearchEffect) {
         match effect {
             SearchEffect::None => {}
-            SearchEffect::Search(query) => self.run_search(&query),
+            SearchEffect::Search(query) => self.run_search(&query, false),
             SearchEffect::Close => {
                 self.close_search();
                 self.mode = Mode::Guide;
@@ -563,6 +620,8 @@ impl App {
     /// A remote key on the search screen; `done` and `cancel` are the
     /// on-screen keyboard's.
     fn search_key(&mut self, key: &str) {
+        // The viewer moved on: no tab is brought back under them.
+        self.search_tab = None;
         let Some(state) = self.search.as_mut() else {
             self.mode = Mode::Guide;
             return;
@@ -594,6 +653,7 @@ impl App {
         if self.mode != Mode::Search {
             return;
         }
+        self.search_tab = None;
         if let Some(state) = self.search.as_mut() {
             let effect = state.apply(SearchAction::Type(text.to_owned()));
             self.search_effect(effect);
@@ -759,10 +819,15 @@ impl App {
         }
     }
 
-    /// The player could not play the stream: nothing plays, and full
-    /// screen (black now, its bar over nothing) gives way to where it was
-    /// entered from.
-    fn play_failed(&mut self) {
+    /// The player could not play the stream of `play` event `id`: nothing
+    /// plays, and full screen (black now, its bar over nothing) gives way
+    /// to where it was entered from. A stream replaced since (the viewer
+    /// zapped on before it failed) is not what plays: its failure is
+    /// ignored.
+    fn play_failed(&mut self, id: Option<u64>) {
+        if id != Some(self.play_id) || self.playing.is_none() {
+            return;
+        }
         self.playing = None;
         self.playing_live = false;
         self.bar = None;
@@ -774,8 +839,47 @@ impl App {
         }
     }
 
+    /// Where a Left pressed now acts, for its repeats ([`LeftHold`]).
+    fn left_hold(&self) -> LeftHold {
+        let pane = self.grid.as_ref().map(Grid::pane);
+        match self.mode {
+            _ if self.schedule.is_none() => LeftHold::Plain,
+            Mode::Guide if self.reorder.is_none() && pane == Some(Pane::Guide) => LeftHold::Grid,
+            Mode::Full if self.bar.is_none() => LeftHold::Done,
+            _ => LeftHold::Plain,
+        }
+    }
+
+    /// A repeat of the held Left. Returns whether it is still to be
+    /// handled as a Left.
+    fn left_repeat(&mut self) -> bool {
+        match self.left_hold {
+            LeftHold::Grid => {
+                self.left_hold = LeftHold::Done;
+                // Still in the grid (the press may have left it already,
+                // from the earliest program).
+                if self.left_hold() == LeftHold::Grid
+                    && let Some(grid) = &mut self.grid
+                {
+                    grid.open_groups();
+                }
+                false
+            }
+            LeftHold::Done => false,
+            // The play bar hid meanwhile: Left would open the guide.
+            LeftHold::Plain => !(self.mode == Mode::Full && self.bar.is_none()),
+        }
+    }
+
     /// One remote key; `repeat` when the page saw it repeat (held).
     fn key(&mut self, key: &str, repeat: bool) {
+        if key == "left" {
+            if !repeat {
+                self.left_hold = self.left_hold();
+            } else if !self.left_repeat() {
+                return;
+            }
+        }
         let scrolling = repeat
             && matches!(key, "up" | "down")
             && self.mode == Mode::Guide
@@ -929,7 +1033,18 @@ impl App {
 }
 
 fn emit_view() {
-    let v = with_app(|a| a.view());
+    emit_reply(None);
+}
+
+/// The view after a command. The host numbers its `key` and `settle`
+/// commands (`seq`): the view each of them emits carries that number, so
+/// the host knows the command was handled (views are also emitted for
+/// other reasons).
+fn emit_reply(seq: Option<u64>) {
+    let mut v = with_app(|a| a.view());
+    if let Some(seq) = seq {
+        v["seq"] = seq.into();
+    }
     host().emit(&v.to_string());
 }
 
@@ -1327,6 +1442,9 @@ pub(crate) fn command(text: &str) {
                     a.generation += 1;
                     *a = App {
                         generation: a.generation,
+                        // Not reused: a failure of the old playlist's
+                        // stream never names a new one's.
+                        play_id: a.play_id,
                         cancel: a.cancel.clone(),
                         local_offset_secs: a.local_offset_secs,
                         config: Some(config.clone()),
@@ -1343,19 +1461,21 @@ pub(crate) fn command(text: &str) {
                 host().emit(&json!({ "type": "sourceRejected", "text": text }).to_string())
             }
         },
+        // Every key is answered with a view (also one that changed
+        // nothing), which carries the command's `seq`.
         "key" => {
             let key = cmd.get("key").and_then(Value::as_str).unwrap_or("");
             let repeat = cmd.get("repeat").and_then(Value::as_bool).unwrap_or(false);
             // Back with nowhere to go does nothing: only the remote's Exit
             // key leaves the app, and the page handles that key itself.
             with_app(|a| a.key(key, repeat));
-            emit_view();
+            emit_reply(cmd.get("seq").and_then(Value::as_u64));
         }
         // The page's repeating key was released: a list left pending while
         // the groups column scrolled is built now.
         "settle" => {
             with_app(App::settle_rows);
-            emit_view();
+            emit_reply(cmd.get("seq").and_then(Value::as_u64));
         }
         "view" => emit_view(),
         "searchText" => {
@@ -1378,7 +1498,8 @@ pub(crate) fn command(text: &str) {
             }
         }
         "playFailed" => {
-            with_app(App::play_failed);
+            let id = cmd.get("id").and_then(Value::as_u64);
+            with_app(|a| a.play_failed(id));
             emit_view();
         }
         other => host().emit(
