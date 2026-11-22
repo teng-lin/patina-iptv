@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use iptv_core::player_options::{Chooser, PictureSize, SLEEP_MINUTES};
 use iptv_core::sound::{audio_delays, delay_label};
-use iptv_core::tracks::Kind as Track;
+use iptv_core::tracks::{Kind as Track, entries_in};
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 
@@ -126,7 +126,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             (labels, Vec::new(), at)
         }
         Kind::Track(k) => ui.player.main().tracks.with_untracked(|t| {
-            let labels = t.entries_in(k, crate::i18n::language());
+            let labels = entries_in(t, k, crate::i18n::language());
             let values = (0..labels.len())
                 .map(|i| t.pick(k, i).unwrap_or_default())
                 .collect();
@@ -178,7 +178,7 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
 
 impl Open {
     fn for_tracks(kind: Track, tracks: iptv_core::tracks::Tracks) -> Self {
-        let labels = tracks.entries_in(kind, crate::i18n::language());
+        let labels = entries_in(&tracks, kind, crate::i18n::language());
         let values = (0..labels.len())
             .map(|i| tracks.pick(kind, i).unwrap_or_default())
             .collect();
@@ -193,7 +193,7 @@ impl Open {
 
     fn track_labels_in(&self, language: &iptv_core::i18n::Language) -> Vec<String> {
         match (self.kind, self.tracks.as_ref()) {
-            (Kind::Track(kind), Some(tracks)) => tracks.entries_in(kind, language),
+            (Kind::Track(kind), Some(tracks)) => entries_in(tracks, kind, language),
             _ => Vec::new(),
         }
     }
@@ -511,7 +511,7 @@ mod snapshot_tests {
                 labels[1],
                 iptv_core::tracks::language_name_in("eng", language).unwrap()
             );
-            assert_ne!(labels, live.entries_in(Track::Text, language));
+            assert_ne!(labels, entries_in(&live, Track::Text, language));
             assert_eq!(open.values[1], "original-text-track");
             assert_eq!(open.list.selected, 1);
             assert_eq!(open.list.len, labels.len());

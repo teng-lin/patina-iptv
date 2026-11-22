@@ -17,7 +17,7 @@ use std::time::Duration;
 use iptv_core::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
 use iptv_core::player_info::date_time;
 use iptv_core::sound::delay_label;
-use iptv_core::tracks::{Kind as Track, audio_layout_in};
+use iptv_core::tracks::{Kind as Track, audio_layout_in, summary_in};
 use nsh_core::prelude::*;
 
 use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};
@@ -72,7 +72,7 @@ fn label(ui: Ui, control: Control) -> String {
             with(
                 tr("Video"),
                 tracks
-                    .with(|t| t.summary_in(Track::Video, crate::i18n::language()))
+                    .with(|t| summary_in(t, Track::Video, crate::i18n::language()))
                     .or(playing),
             )
         }
@@ -82,7 +82,7 @@ fn label(ui: Ui, control: Control) -> String {
             with(
                 tr("Audio"),
                 tracks
-                    .with(|t| t.summary_in(Track::Audio, crate::i18n::language()))
+                    .with(|t| summary_in(t, Track::Audio, crate::i18n::language()))
                     .or(layout),
             )
         }
@@ -97,7 +97,7 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Subtitles"),
             Some(
                 tracks
-                    .with(|t| t.summary_in(Track::Text, crate::i18n::language()))
+                    .with(|t| summary_in(t, Track::Text, crate::i18n::language()))
                     .unwrap_or_else(|| tr("Off").to_owned()),
             ),
         ),
