@@ -15,6 +15,11 @@ is below 1.0, a minor release may change behavior.
   Favorites and Recently watched. The app talks to the provider directly,
   keeps the guide between launches and downloads it again on the same
   schedule as the other platforms. See `hosts/tizen/README.md`.
+- Samsung Tizen TVs: the full guide grid (Right in the channel list or the
+  Guide key), search of channels and of programs on now or later (the
+  Search row above the groups or the Search key, with the TV's keyboard),
+  and moving favorites (Blue on a favorite). Blue shows Favorites. An
+  existing install keeps its favorites.
 - Desktop: a visible ⋯ "More options" on recordings rows and on the shown
   group in the guide's and the channel list's groups columns, so every
   secondary action has a pointer entry point beside right-click. A second

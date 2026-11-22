@@ -1,10 +1,11 @@
 # Patina on Samsung Tizen TVs (experimental)
 
 Live TV on Samsung TVs from 2020 (Tizen 5.5) on: an Xtream Codes account or
-an M3U playlist, its TV guide, the channel list beside the playing channel,
-full-screen video and channel zapping, Favorites and Recently watched.
-Movies, series, recordings and the full guide grid are not part of this
-host yet.
+an M3U playlist, its TV guide as a list and as a full guide grid, the
+channel list beside the playing channel, full-screen video and channel
+zapping, search of channels and programs, Favorites (in your own order) and
+Recently watched. Movies, series and recordings are not part of this host
+yet.
 
 The TV app talks to your provider directly; no server is needed.
 
@@ -16,7 +17,7 @@ Patina's own core in WebAssembly:
 
 | Part | Where | What it does |
 | --- | --- | --- |
-| Core | `crates/iptv-web` | Imports the source and its guide with `iptv-import`, builds the schedule with `iptv-guide`, and owns the list and focus state (`iptv-core`). Emits views as JSON. |
+| Core | `crates/iptv-web` | Imports the source and its guide with `iptv-import`, builds the schedule with `iptv-guide`, and owns the list, guide focus and reorder state (`iptv-core`) and the search indexes and screen (`iptv-search`). Emits views as JSON: only what is on screen. |
 | Worker | `app/worker.js` | Runs the core in a Web Worker and performs the HTTP requests it describes, so importing a large guide never blocks the remote. |
 | Page | `app/main.js`, `index.html`, `style.css` | Renders the views, sends remote keys, plays streams with the TV's native player (AVPlay) on the video plane under the page. |
 
@@ -51,14 +52,32 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   channels goes full screen when a channel plays, and asks to exit when
   none does.
 - Full screen: Up/Down or Channel Up/Down zap within the list, OK or Left
-  opens the list, Back asks to exit.
-- Yellow adds or removes the focused (or playing) channel from Favorites;
-  green updates the TV guide now.
+  opens the list, Back asks to exit (or returns to the guide grid or the
+  search that played the channel).
+- Guide grid: Right in the channels, or the remote's Guide key, opens it for
+  the list shown. Up/Down move between channels, Left/Right between
+  programs (the time scrolls with them), Channel Up/Down turn a page of
+  channels. OK plays the channel; on an ended program its archive still
+  has, it plays that program from its start. Back first returns to now,
+  then to the list.
+- Search: the Search row above the groups (Left, then Up past Favorites),
+  or the remote's Search key. Type with the TV's keyboard; Done shows the
+  results, Cancel or Back closes the keyboard. Channels are found by name,
+  programs by title (on now or later). Down reaches the Channels/Programs
+  tabs, Left/Right switch them, OK plays the channel (of the program).
+  Before typing, recent searches are listed. Back on the field leaves.
+- Favorites: Yellow adds or removes the focused (or playing) channel; Blue
+  shows the Favorites list (the first group). Blue on a favorite starts
+  moving it: Up/Down move it one place, Left/Right to the top or the end,
+  OK, Back or Blue end the move and keep the order.
+- Green updates the TV guide now.
 
 ## What is kept on the TV
 
-Per playlist, in the app's IndexedDB: Favorites and Recently watched (by
-channel key, so they survive playlist refreshes), and the guide as an
+Per playlist, in the app's IndexedDB: Favorites in their order, Recently
+watched (both by channel key, so they survive playlist refreshes) and
+recent searches, in the same record as before search and reordering (an
+existing install keeps its favorites), and the guide as an
 `iptv_epg` snapshot with its refresh state. The guide is downloaded again
 when the native hosts would: by `iptv_import::plan_startup` / `decide`
 (every 24 hours, at start when stale, when the playlist's channels or guide
@@ -81,6 +100,18 @@ guide:
 - Remote input to rendered list while the guide imports: median 31 ms,
   worst 79 ms. When idle, a page jump that loads a screen of new logos can
   take about 0.2 s.
+- The guide grid, search and moving favorites are not yet measured on the
+  TV. On a desktop browser with a synthetic account of the same size
+  (7,300 channels, 242,000 programs): grid key to rendered page median
+  3 ms; search answer to rendered results 12 to 19 ms; the program index
+  takes 143 ms to build and 3.4 MB, and the core's memory grows from
+  25.4 MB to 28.4 MB with it.
+
+The page records its timings in local storage (`patina.metrics`, the last
+five launches): `keys`, `guideKeys` and `searchKeys` (remote key to
+rendered page, per screen), `search` (query to rendered results),
+`searchIndex` (its build) and, on request (`send({cmd: 'memory'})` in
+DevTools), `memory`.
 
 ## Known limits
 
@@ -94,6 +125,7 @@ guide:
   (`build.sh`, rebuilt std for MVP WebAssembly) is not built in CI.
 - The TV sends its own User-Agent: providers that require a specific one on
   API requests do not work. Stalker portals are not offered.
-- Favorites can be added and removed but not reordered.
+- Program descriptions are not kept (they are most of a guide's size), so
+  the grid shows a program's title and time only.
 - The playlist is downloaded at every launch (about 1–3 s); only the guide
   is stored.
