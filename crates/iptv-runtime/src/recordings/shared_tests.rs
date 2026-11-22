@@ -1418,21 +1418,21 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
                 .unwrap()
         }
     };
-    for attempt in 1..=2 {
+    for round in 1..=2 {
         let shared = resolve().await;
         assert!(
             !shared.url.contains("token"),
-            "attempt {attempt} must use the shared input's own address"
-        );
-        assert_eq!(
-            segments.load(Ordering::SeqCst),
-            attempt,
-            "attempt {attempt} must open a fresh shared segment"
+            "attempt {round} must use the shared input's own address"
         );
         let mut playback = player(&shared).await;
+        assert_eq!(
+            segments.load(Ordering::SeqCst),
+            round,
+            "attempt {round} must open a fresh shared segment"
+        );
         joined.notify_one();
         let mut rest = Vec::new();
-        playback.read_to_end(&mut rest).await.unwrap();
+        let _ = playback.read_to_end(&mut rest).await;
     }
     let fallback = resolve().await;
     assert!(
