@@ -1,4 +1,5 @@
-use iptv_core::membership::{Member, Membership};
+use iptv_core::membership::Member;
+use iptv_presentation::membership::Membership;
 
 #[test]
 fn reload_large_membership_retains_selection_and_focus_by_identity() {

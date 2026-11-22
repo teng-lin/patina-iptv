@@ -1,5 +1,5 @@
 //! The empty Movies and Shows catalog in a compact window (#130): its
-//! message and action are the one pane (`iptv_core::vod::Screen::one_pane`).
+//! message and action are the one pane (`iptv_presentation::vod::Screen::one_pane`).
 //! At 400×600 with an M3U-only library the categories give way, the
 //! message keeps a readable width, Add playlist and Close stay inside the
 //! window for a pointer or a finger, and the keyboard still moves between

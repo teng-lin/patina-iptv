@@ -84,7 +84,6 @@ impl ErrorKind {
     }
 
     /// Whether an automatic retry can help without playback context.
-    /// [`super::Health`] also retries 404/410 for a live stream that played.
     pub fn retryable(&self) -> bool {
         self.cause() != Cause::Fatal
     }

@@ -15,7 +15,7 @@
 //! restarts a stream, so a stream the viewer stopped stays stopped, and
 //! resuming opens no second provider connection.
 
-use crate::interruption::Interruption;
+use iptv_core::interruption::Interruption;
 
 /// What to do about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

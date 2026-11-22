@@ -13,7 +13,6 @@ use std::rc::Rc;
 use iptv_core::favorites::{Favorites, KeyIndex, Recent};
 use iptv_core::guide::{GroupName, Pane, Program, ProgramSelection, Schedule, now_minute, unix_of};
 use iptv_core::lists::{self, ChannelList as Rows, FAVORITES};
-use iptv_core::play_bar::{Control, PlayBar};
 use iptv_core::playback::{ZapOrigin, zap_from_list};
 use iptv_core::reorder::{self, Exit, Reorder};
 use iptv_epg::{GuideStore, Overrides, StoreOptions};
@@ -24,6 +23,7 @@ use iptv_import::{
     Progress, RefreshPolicy, SourceMeta, Trigger, decide, matching_fingerprint, plan_startup,
 };
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
+use iptv_presentation::play_bar::{Control, PlayBar};
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};

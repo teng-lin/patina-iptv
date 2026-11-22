@@ -1,5 +1,5 @@
 //! Picture in picture: the playing channel in a small window over other
-//! apps, video only. The state is `iptv_core::pip`.
+//! apps, video only. The state is `iptv_presentation::pip`.
 //!
 //! **Android**: a system window. It opens from the control strip's
 //! button, or by itself when the viewer leaves the app (Home) while a
@@ -38,9 +38,9 @@
 //! any chooser or menu close, and multiview leaves to its active tile,
 //! which plays on in the window (its other tiles stop).
 
-use iptv_core::pip::{Change, OnLeave};
 use iptv_core::pip_window::Exit;
 use iptv_player_mpv::PipAction;
+use iptv_presentation::pip::{Change, OnLeave};
 use iptv_settings::keys::PIP_ON_LEAVE;
 use nsh_core::prelude::*;
 
@@ -119,7 +119,7 @@ pub fn enter(ui: Ui) {
     if !asked {
         if let Some(reason) = ui
             .pip
-            .with_untracked(|p| iptv_core::capabilities::pip(p, playing).reason())
+            .with_untracked(|p| iptv_presentation::capabilities::pip(p, playing).reason())
         {
             crate::settings_view::notify(crate::capabilities::reason(reason));
         }
@@ -204,7 +204,8 @@ pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
 fn entered(ui: Ui) {
     log::info!("iptv pip: entered");
     ui.panels.update(|p| p.hide());
-    ui.play_bar.update(iptv_core::play_bar::PlayBar::hide);
+    ui.play_bar
+        .update(iptv_presentation::play_bar::PlayBar::hide);
     crate::chooser::close(ui);
     crate::menu_view::close(ui);
     if ui.channels.with_untracked(Option::is_some) {

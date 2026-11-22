@@ -1,7 +1,7 @@
 //! Which player is heard (#135): exactly one at a time, chosen with a
 //! visible Listen to this and never moved by focus. The state is the
 //! core's: multiview's heard tile (`iptv_core::multiview`) and the
-//! desktop's player windows (`iptv_core::playback_windows`); this says
+//! desktop's player windows (`iptv_presentation::playback_windows`); this says
 //! what a player shows and acts on its Listen to this.
 //!
 //! While several players play at once ([`choice`]) each shows whether it

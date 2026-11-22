@@ -1,7 +1,7 @@
 //! Desktop guide-menu prototype: auxiliary players belong to the app, independently
 //! of the main guide's navigation and the multiview layout.
 use crate::{Ui, i18n::tr};
-use iptv_core::playback_windows::SessionId;
+use iptv_presentation::playback_windows::SessionId;
 use nsh_core::prelude::*;
 
 pub fn mounted(ui: Ui, surface: usize) -> bool {
@@ -50,7 +50,7 @@ pub fn open(ui: Ui, channel: usize) {
 }
 
 fn admit_session(
-    workspace: Signal<iptv_core::playback_windows::Workspace<String>>,
+    workspace: Signal<iptv_presentation::playback_windows::Workspace<String>>,
     key: String,
     start: impl FnOnce(usize) -> bool,
 ) {
@@ -514,9 +514,11 @@ mod tests {
                     .on_press(move || parent.update(|f| f.now += 60)),
             )
             .child(text(move || {
-                workspace.with(|w: &iptv_core::playback_windows::Workspace<String>| {
-                    format!("sessions {}", w.sessions().len())
-                })
+                workspace.with(
+                    |w: &iptv_presentation::playback_windows::Workspace<String>| {
+                        format!("sessions {}", w.sessions().len())
+                    },
+                )
             }))
             .child(
                 view()

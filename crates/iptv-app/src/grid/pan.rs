@@ -200,7 +200,7 @@ impl Pan {
         }
         let next = focused(ui)
             .2
-            .then(|| iptv_core::browse_playback::PanAnchor::new(channel, &focus));
+            .then(|| iptv_presentation::browse_playback::PanAnchor::new(channel, &focus));
         if next.is_some() || ui.pan_anchor.with_untracked(Option::is_some) {
             ui.pan_anchor.set(next);
         }

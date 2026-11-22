@@ -1,6 +1,6 @@
 //! Seek state and acknowledgements for the on-demand player.
 
-use crate::on_demand::Progress;
+use iptv_core::on_demand::Progress;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seek {
     pub id: u64,
