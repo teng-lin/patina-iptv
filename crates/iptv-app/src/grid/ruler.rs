@@ -190,7 +190,7 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
         let unix = crate::guide::unix_of(&*crate::schedule(), shown);
         format!(
             "{}  {}",
-            iptv_core::clock::date(
+            iptv_presentation::clock::date(
                 unix,
                 crate::time::offset_minutes(unix),
                 crate::i18n::clock_style()

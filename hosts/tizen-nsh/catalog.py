@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Writes the interface languages' messages as one package file per language,
-for iptv-app's `browser-package` feature (iptv-core's `external-catalog`):
+for iptv-app's `browser-package` feature (iptv-presentation's `external-catalog`):
 `<tag>.tsv` with a line per message, its English source and its text
 separated by a tab, and `en.tsv` with the sources alone.
 
     catalog.py MESSAGES_TSV I18N_RS OUT_DIR
 
 The tags, in the catalog's column order, are read from `LANGUAGES` in
-iptv-core's i18n.rs; a catalog with another number of columns fails.
+iptv-presentation's i18n.rs; a catalog with another number of columns fails.
 """
 import os
 import re

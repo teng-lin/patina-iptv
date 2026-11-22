@@ -21,7 +21,7 @@ fn recording_capture_failures_have_translations() {
         Failure::Limit,
         Failure::Gap,
     ] {
-        assert!(iptv_core::i18n::is_cataloged(failure.message()));
+        assert!(iptv_presentation::i18n::is_cataloged(failure.message()));
     }
 }
 

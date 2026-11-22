@@ -263,7 +263,7 @@ pub fn date_time(unix: i64, offset_minutes: i32, style: Style) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guide::SYNTHETIC_EPOCH_UNIX as EPOCH;
+    use iptv_core::guide::SYNTHETIC_EPOCH_UNIX as EPOCH;
 
     fn english() -> Style {
         Style::english_24()

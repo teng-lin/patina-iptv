@@ -177,7 +177,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             send(ui, WizardEvent::FilePicked(path));
         }),
         WizardEffect::StartImport { id, draft } => {
-            let fallback = iptv_core::i18n::translate(crate::i18n::language(), "Playlist");
+            let fallback = iptv_presentation::i18n::translate(crate::i18n::language(), "Playlist");
             let (source, epg_url) = data::source_from_draft(&draft, fallback);
             log::info!("iptv wizard: import {id:?} of {:?}", source.kind());
             let job = Job {

@@ -370,7 +370,7 @@ mod tests {
             ImportErrorKind::Other,
         ];
         let english = kinds.map(failure);
-        for language in iptv_core::i18n::LANGUAGES.iter().skip(1) {
+        for language in iptv_presentation::i18n::LANGUAGES.iter().skip(1) {
             let texts = in_language(language.tag, || kinds.map(failure));
             let distinct: std::collections::BTreeSet<_> = texts.iter().collect();
             assert_eq!(distinct.len(), kinds.len(), "{}", language.tag);
