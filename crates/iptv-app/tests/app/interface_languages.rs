@@ -243,6 +243,8 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
         "text:{} >> nth=1",
         pattern_free(&de.t("+ Add playlist"))
     )));
+    shown(app, &de.t("Source type"));
+    step(app.press("id:wizard-source-type"));
     press(app, &de.t("Playlist file"));
     press(app, &de.t("Choose a file…"));
     // Distinguish answering the platform picker from the asynchronous private
