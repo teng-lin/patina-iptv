@@ -31,10 +31,16 @@ in the guide grid opens the groups column at its first repeat, one pressed
 in full screen does nothing more, anywhere else it is a Left like any
 other. When the held key is released (or the page loses the focus), its
 repeats still waiting are dropped and, if the core put off building a list
-(`pending`), `settle` asks for it. Each `play` event has an `id`, which the
-page returns in `playFailed`: the core ignores the failure of a stream it
-has replaced since. A `play` that arrives while the app is hidden is opened
-when it shows again.
+(`pending`), `settle` asks for it; repeats that go on after the page lost
+the focus or was hidden are not sent until the key is pressed again. A
+pressed key drops a play bar timeout (`barTimeout`) still waiting to be
+sent. Each `play` event has an `id`, which the page returns in
+`playFailed` with the player's reason: the core ignores the failure of a
+stream it has replaced since, and for the one that plays it emits the
+notice. The page numbers each `source` it sends (`session`), and every
+`play` carries the number of its source: a play of a source replaced since
+is dropped. A `play` that arrives while the app is hidden is opened when it
+shows again.
 
 The core is built for the Wasm features Tizen 5.5 validates: MVP plus
 sign-extension and mutable globals. Stable Rust's standard library uses newer

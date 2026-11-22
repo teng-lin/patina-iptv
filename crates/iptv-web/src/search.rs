@@ -177,19 +177,34 @@ pub(crate) fn run(
 
 /// The program `hits` found in a guide since replaced that `schedule` (the
 /// new guide of the same catalog) still lists: the same title at the same
-/// start on that channel.
-pub(crate) fn still_listed(schedule: &EpgSchedule, hits: &[ProgramHit]) -> Vec<ProgramHit> {
+/// start on that channel. Each keeps the new listing's end and where it
+/// airs at `now` (Unix seconds); one the new guide ended by then is gone,
+/// as a search at `now` finds none that ended.
+pub(crate) fn still_listed(
+    schedule: &EpgSchedule,
+    hits: &[ProgramHit],
+    now: i64,
+) -> Vec<ProgramHit> {
     let store = schedule.store();
     hits.iter()
-        .filter(|h| {
-            schedule
+        .filter_map(|h| {
+            let p = schedule
                 .channel(h.channel)
                 .filter(|_| !schedule.channel_hidden(h.channel))
                 .and_then(|c| store.schedule(&c.key))
                 .and_then(|programs| programs.at(h.start))
-                .is_some_and(|p| p.start() == h.start && p.title() == h.title)
+                .filter(|p| p.start() == h.start && p.title() == h.title && p.stop() > now)?;
+            let airing = if p.start() <= now {
+                Airing::Live
+            } else {
+                Airing::Upcoming
+            };
+            Some(ProgramHit {
+                end: p.stop(),
+                airing,
+                ..h.clone()
+            })
         })
-        .cloned()
         .collect()
 }
 

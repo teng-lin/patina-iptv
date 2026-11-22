@@ -24,6 +24,9 @@ struct Fake {
     urls: RefCell<Vec<String>>,
     /// Added to the wall clock (time passing).
     wall_offset_ms: Cell<f64>,
+    /// Timers of no delay are not delivered: the program index build
+    /// (which yields on them) stays unfinished.
+    hold_yields: Cell<bool>,
 }
 
 impl Host for Fake {
@@ -152,14 +155,11 @@ fn deliver_with(fake: &Fake, respond: &Responder) {
         let next: Vec<_> = fake.next.borrow_mut().drain(..).collect();
         let gets: Vec<_> = fake.gets.borrow_mut().drain(..).collect();
         // Retry delays pass at once; the guide's next check (hours) does not.
+        let held = |t: &(u32, f64)| t.1 >= 600_000.0 || (fake.hold_yields.get() && t.1 == 0.0);
         let due: Vec<u32> = {
             let mut timers = fake.timers.borrow_mut();
-            let due = timers
-                .iter()
-                .filter(|t| t.1 < 600_000.0)
-                .map(|t| t.0)
-                .collect();
-            timers.retain(|t| t.1 >= 600_000.0);
+            let due = timers.iter().filter(|t| !held(t)).map(|t| t.0).collect();
+            timers.retain(held);
             due
         };
         if requests.is_empty() && next.is_empty() && gets.is_empty() && due.is_empty() {
@@ -1941,4 +1941,165 @@ fn a_failure_of_a_stream_since_replaced_is_ignored() {
     m3u_launch(&fake);
     key("ok");
     assert!(last_of(&fake, "play")["id"].as_u64().unwrap() > third);
+}
+
+/// The search screen's focused result row.
+fn focused_result(fake: &Fake) -> Value {
+    let s = last_view(fake)["search"].clone();
+    let row = s["rows"]["focus"].as_u64().expect("a focused result")
+        - s["rows"]["start"].as_u64().unwrap();
+    s["rows"]["items"][row as usize].clone()
+}
+
+#[test]
+fn a_refresh_keeps_the_focused_result_until_the_new_index_answers() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    m3u_launch(&fake);
+    key("search");
+    send(serde_json::json!({ "cmd": "searchText", "text": "two" }));
+    deliver(&fake);
+    key("done");
+    key("right");
+    key("down");
+    let noon = focused_result(&fake);
+    assert_eq!(noon["title"], "two Noon");
+
+    // The focused program is renamed, the other one stays: while the index
+    // builds the focus is on the one left, and a key that does nothing
+    // there (Channel Up) keeps what is to return. Once the index answers,
+    // the focus is on the renamed program (its channel and start).
+    let renamed = serve(
+        playlist(),
+        guide_of(&["one", "two", "three"], &["Dawn", "Morning", "Late"]),
+    );
+    fake.hold_yields.set(true);
+    send(serde_json::json!({ "cmd": "refreshGuide" }));
+    deliver_with(&fake, &renamed);
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["preparing"], true, "{search}");
+    assert_eq!(search["counts"]["programs"], 1, "{search}");
+    assert_eq!(focused_result(&fake)["title"], "two Morning");
+    key("chup");
+    fake.hold_yields.set(false);
+    deliver_with(&fake, &renamed);
+    assert_eq!(last_view(&fake)["search"]["preparing"], false);
+    let late = focused_result(&fake);
+    assert_eq!(late["title"], "two Late");
+    assert_eq!(late["start"], noon["start"]);
+
+    // Every program renamed: the Channels tab shows while the index
+    // builds; Channel Up there keeps the Programs tab to return to.
+    let all = serve(
+        playlist(),
+        guide_of(&["one", "two", "three"], &["Early", "Mid", "Later"]),
+    );
+    fake.hold_yields.set(true);
+    send(serde_json::json!({ "cmd": "refreshGuide" }));
+    deliver_with(&fake, &all);
+    assert_eq!(last_view(&fake)["search"]["tab"], "channels");
+    key("chup");
+    fake.hold_yields.set(false);
+    deliver_with(&fake, &all);
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["tab"], "programs", "{search}");
+    assert_eq!(focused_result(&fake)["title"], "two Later");
+
+    // A key that moves does not get it back.
+    fake.hold_yields.set(true);
+    send(serde_json::json!({ "cmd": "refreshGuide" }));
+    deliver_with(&fake, &renamed);
+    assert_eq!(last_view(&fake)["search"]["tab"], "channels");
+    key("up");
+    fake.hold_yields.set(false);
+    deliver_with(&fake, &renamed);
+    assert_eq!(last_view(&fake)["search"]["tab"], "channels");
+}
+
+#[test]
+fn results_kept_while_the_index_builds_follow_the_new_listings() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    // Half past: Morning is on now, Noon next.
+    fake.wall_offset_ms.set(30.0 * 60_000.0);
+    m3u_launch(&fake);
+    key("search");
+    send(serde_json::json!({ "cmd": "searchText", "text": "two" }));
+    deliver(&fake);
+    key("done");
+    key("right");
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["tab"], "programs");
+    assert_eq!(search["rows"]["items"][0]["title"], "two Morning");
+    assert_eq!(search["rows"]["items"][0]["live"], true);
+
+    // The new guide ends Morning ten minutes after the hour (before now)
+    // and makes Noon longer: Morning is gone at once, Noon has its new end.
+    let hour = (NOW_MS / 1000.0) as i64;
+    let hour = hour - hour.rem_euclid(3600);
+    let mut xml = String::from("<tv>");
+    for id in ["one", "two", "three"] {
+        xml += &format!("<channel id=\"{id}.ex\"><display-name>Example</display-name></channel>");
+        for (name, start, stop) in [
+            ("Dawn", hour - 3600, hour),
+            ("Morning", hour, hour + 600),
+            ("Noon", hour + 3600, hour + 9000),
+        ] {
+            xml += &format!(
+                "<programme start=\"{}\" stop=\"{}\" channel=\"{id}.ex\"><title>{id} {name}</title></programme>",
+                xmltv_time(start),
+                xmltv_time(stop)
+            );
+        }
+    }
+    xml += "</tv>";
+    fake.hold_yields.set(true);
+    send(serde_json::json!({ "cmd": "refreshGuide" }));
+    deliver_with(&fake, &serve(playlist(), xml));
+    let search = last_view(&fake)["search"].clone();
+    assert_eq!(search["preparing"], true, "{search}");
+    assert_eq!(search["counts"]["programs"], 1, "{search}");
+    let noon = &search["rows"]["items"][0];
+    assert_eq!(noon["title"], "two Noon");
+    assert_eq!(noon["end"], hour + 9000);
+    assert_eq!(noon["live"], false);
+}
+
+#[test]
+fn plays_carry_their_source_and_only_a_current_failure_is_noticed() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    send(
+        serde_json::json!({ "cmd": "source", "session": 7, "source": { "kind": "m3u", "url": "http://lists.example.com/list.m3u" } }),
+    );
+    deliver(&fake);
+    key("ok");
+    let first = last_of(&fake, "play");
+    assert_eq!(first["session"], 7);
+    key("down");
+    let second = last_of(&fake, "play");
+    let notices = |fake: &Fake| {
+        fake.events
+            .borrow()
+            .iter()
+            .filter(|e| e["type"] == "notice")
+            .count()
+    };
+    let before = notices(&fake);
+    // The first stream fails after the viewer zapped on: no notice.
+    send(serde_json::json!({ "cmd": "playFailed", "id": first["id"], "why": "Gone." }));
+    assert_eq!(notices(&fake), before);
+    send(serde_json::json!({ "cmd": "playFailed", "id": second["id"], "why": "Gone." }));
+    assert_eq!(
+        last_of(&fake, "notice")["text"],
+        "This channel did not play. Gone."
+    );
+
+    // A source the core refuses still numbers what plays from then on.
+    send(
+        serde_json::json!({ "cmd": "source", "session": 8, "source": { "kind": "m3u", "url": " " } }),
+    );
+    assert_eq!(last_of(&fake, "sourceRejected")["type"], "sourceRejected");
+    key("ok");
+    assert_eq!(last_of(&fake, "play")["session"], 8);
 }

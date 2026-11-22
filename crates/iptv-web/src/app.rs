@@ -25,7 +25,7 @@ use iptv_import::{
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};
-use iptv_search::{SearchAction, SearchEffect, SearchHistory, SearchState, Tab};
+use iptv_search::{ResultId, SearchAction, SearchEffect, SearchHistory, SearchState, Tab};
 use serde_json::{Value, json};
 
 use crate::exec::{HostFetch, spawn};
@@ -107,9 +107,15 @@ pub(crate) struct App {
     /// The `id` of the last `play` event: the host names it when that
     /// stream fails, so a failure of a stream since replaced is ignored.
     play_id: u64,
-    /// The search tab shown when the guide was replaced under the results,
-    /// shown again once the new program index has results for it.
-    search_tab: Option<Tab>,
+    /// The host's number for the source it sent last (its `source`
+    /// command's `session`), carried by every `play` event: a play the old
+    /// source emitted before it was replaced, still on its way, is told
+    /// apart and dropped by the host.
+    session: u64,
+    /// The search tab and the result focused when the guide was replaced
+    /// under the results, shown again once the new program index answers
+    /// (unless the viewer moved meanwhile).
+    search_return: Option<(Tab, Option<ResultId>)>,
     /// The import's progress for the status line.
     status: Value,
     guide_loaded: bool,
@@ -167,7 +173,8 @@ impl App {
             bar: None,
             left_hold: LeftHold::Plain,
             play_id: 0,
-            search_tab: None,
+            session: 0,
+            search_return: None,
             status: json!({ "phase": "idle" }),
             guide_loaded: false,
             guide: None,
@@ -309,7 +316,13 @@ impl App {
             // the others stay (with the tab and the focused result) until
             // the query runs again on the new index. Channels run now.
             if state.phase() != iptv_search::Phase::Idle {
-                self.search_tab.get_or_insert(state.tab());
+                self.search_return.get_or_insert_with(|| {
+                    let result = match state.focus() {
+                        iptv_search::Focus::Result(id) => Some(id.clone()),
+                        _ => None,
+                    };
+                    (state.tab(), result)
+                });
                 let query = state.query().to_owned();
                 self.run_search(&query, true);
             }
@@ -356,6 +369,7 @@ impl App {
                     &json!({
                         "type": "play",
                         "id": self.play_id,
+                        "session": self.session,
                         "url": source.url,
                         "userAgent": user_agent,
                         "archive": archive.map(|p| s.unix(p.start)),
@@ -491,7 +505,7 @@ impl App {
     fn close_search(&mut self) {
         self.keep_history();
         self.search = None;
-        self.search_tab = None;
+        self.search_return = None;
     }
 
     /// Stores the search screen's history when it changed (a query
@@ -566,26 +580,31 @@ impl App {
             && self.indexes.programs().is_none()
             && let Some(state) = &self.search
         {
-            program_hits = search::still_listed(&s, state.programs());
+            program_hits = search::still_listed(&s, state.programs(), wall_secs());
         }
         if let Some(state) = &mut self.search {
             state.set_results(query, channel_hits, program_hits);
         }
     }
 
-    /// The new program index answered: the tab shown before the guide was
-    /// replaced shows again when it was left only because its results were
-    /// gone, on the result focused there if the new guide still has it
-    /// (`SearchState` finds it by its identity).
+    /// The new program index answered: the result focused before the guide
+    /// was replaced is focused again if the new guide still has it (by its
+    /// identity, whatever the temporary results focused meanwhile), else the
+    /// tab shown then shows again when it was left only because its results
+    /// were gone.
     fn restore_search_tab(&mut self) {
-        let (Some(tab), Some(state)) = (self.search_tab.take(), self.search.as_mut()) else {
+        let (Some((tab, result)), Some(state)) = (self.search_return.take(), self.search.as_mut())
+        else {
             return;
         };
         let on_results = matches!(
             state.focus(),
             iptv_search::Focus::Result(_) | iptv_search::Focus::Tabs
         );
-        if state.tab() != tab && on_results {
+        if !on_results || result.is_some_and(|id| state.focus_listed(&id)) {
+            return;
+        }
+        if state.tab() != tab {
             state.apply(SearchAction::ShowTab(tab));
         }
     }
@@ -620,8 +639,6 @@ impl App {
     /// A remote key on the search screen; `done` and `cancel` are the
     /// on-screen keyboard's.
     fn search_key(&mut self, key: &str) {
-        // The viewer moved on: no tab is brought back under them.
-        self.search_tab = None;
         let Some(state) = self.search.as_mut() else {
             self.mode = Mode::Guide;
             return;
@@ -643,7 +660,14 @@ impl App {
             "back" => SearchAction::Back,
             _ => return,
         };
+        let before = (state.focus().clone(), state.tab(), state.query().to_owned());
         let effect = state.apply(action);
+        // The viewer moved on (or played a result): nothing is brought back
+        // under them. A key that changed nothing keeps what is to return.
+        let moved = before != (state.focus().clone(), state.tab(), state.query().to_owned());
+        if moved || matches!(effect, SearchEffect::Play(_)) {
+            self.search_return = None;
+        }
         self.keep_history();
         self.search_effect(effect);
     }
@@ -653,7 +677,7 @@ impl App {
         if self.mode != Mode::Search {
             return;
         }
-        self.search_tab = None;
+        self.search_return = None;
         if let Some(state) = self.search.as_mut() {
             let effect = state.apply(SearchAction::Type(text.to_owned()));
             self.search_effect(effect);
@@ -823,10 +847,10 @@ impl App {
     /// plays, and full screen (black now, its bar over nothing) gives way
     /// to where it was entered from. A stream replaced since (the viewer
     /// zapped on before it failed) is not what plays: its failure is
-    /// ignored.
-    fn play_failed(&mut self, id: Option<u64>) {
+    /// ignored. Returns whether the failure was of the stream that plays.
+    fn play_failed(&mut self, id: Option<u64>) -> bool {
         if id != Some(self.play_id) || self.playing.is_none() {
-            return;
+            return false;
         }
         self.playing = None;
         self.playing_live = false;
@@ -837,6 +861,7 @@ impl App {
         if let Some(grid) = &mut self.grid {
             grid.preview_gone();
         }
+        true
     }
 
     /// Where a Left pressed now acts, for its repeats ([`LeftHold`]).
@@ -1430,37 +1455,47 @@ pub(crate) fn command(text: &str) {
         return;
     };
     match cmd.get("cmd").and_then(Value::as_str).unwrap_or("") {
-        "source" => match source_config(cmd.get("source").unwrap_or(&Value::Null)) {
-            Ok(config) => {
-                if let Some(offset) = cmd.get("utcOffsetSecs").and_then(Value::as_i64) {
-                    with_app(|a| a.local_offset_secs = offset as i32);
+        "source" => {
+            // A source sent without a number (a reload) keeps the current.
+            if let Some(session) = cmd.get("session").and_then(Value::as_u64) {
+                // Also when the source is refused: the host stopped the old
+                // source's stream, and the plays it emitted until now are
+                // told apart from those it emits from now on.
+                with_app(|a| a.session = session);
+            }
+            match source_config(cmd.get("source").unwrap_or(&Value::Null)) {
+                Ok(config) => {
+                    if let Some(offset) = cmd.get("utcOffsetSecs").and_then(Value::as_i64) {
+                        with_app(|a| a.local_offset_secs = offset as i32);
+                    }
+                    let (generation, cancel) = with_app(|a| {
+                        a.cancel.cancel();
+                        a.guide_cancel.cancel();
+                        a.cancel = CancelToken::new();
+                        a.generation += 1;
+                        *a = App {
+                            generation: a.generation,
+                            // Not reused: a failure of the old playlist's
+                            // stream never names a new one's.
+                            play_id: a.play_id,
+                            session: a.session,
+                            cancel: a.cancel.clone(),
+                            local_offset_secs: a.local_offset_secs,
+                            config: Some(config.clone()),
+                            status: json!({ "phase": "connecting" }),
+                            ..App::new()
+                        };
+                        (a.generation, a.cancel.clone())
+                    });
+                    emit_view();
+                    spawn(import(generation, config, cancel));
                 }
-                let (generation, cancel) = with_app(|a| {
-                    a.cancel.cancel();
-                    a.guide_cancel.cancel();
-                    a.cancel = CancelToken::new();
-                    a.generation += 1;
-                    *a = App {
-                        generation: a.generation,
-                        // Not reused: a failure of the old playlist's
-                        // stream never names a new one's.
-                        play_id: a.play_id,
-                        cancel: a.cancel.clone(),
-                        local_offset_secs: a.local_offset_secs,
-                        config: Some(config.clone()),
-                        status: json!({ "phase": "connecting" }),
-                        ..App::new()
-                    };
-                    (a.generation, a.cancel.clone())
-                });
-                emit_view();
-                spawn(import(generation, config, cancel));
+                // The host shows its setup again with the reason.
+                Err(text) => {
+                    host().emit(&json!({ "type": "sourceRejected", "text": text }).to_string())
+                }
             }
-            // The host shows its setup again with the reason.
-            Err(text) => {
-                host().emit(&json!({ "type": "sourceRejected", "text": text }).to_string())
-            }
-        },
+        }
         // Every key is answered with a view (also one that changed
         // nothing), which carries the command's `seq`.
         "key" => {
@@ -1499,7 +1534,13 @@ pub(crate) fn command(text: &str) {
         }
         "playFailed" => {
             let id = cmd.get("id").and_then(Value::as_u64);
-            with_app(|a| a.play_failed(id));
+            // Only the failure of what plays is shown: the host cannot tell
+            // whether a newer play is still on its way to it.
+            if with_app(|a| a.play_failed(id)) {
+                let why = cmd.get("why").and_then(Value::as_str).unwrap_or("");
+                let text = format!("This channel did not play. {why}");
+                host().emit(&json!({ "type": "notice", "text": text.trim_end() }).to_string());
+            }
             emit_view();
         }
         other => host().emit(

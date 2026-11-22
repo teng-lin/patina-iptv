@@ -211,15 +211,12 @@ var player = {
     },
     /* The stream of the core's play `id` failed. The core is told which
      * one: it ignores a failure of a stream it has replaced since, and a
-     * newer play waiting here (a zap) still opens. */
+     * newer play waiting here (a zap) still opens. The notice is the
+     * core's: only it knows whether a newer play is still on its way. */
     failed: function (id, why) {
-        if (this.wanted && this.wanted.id === id) {
-            this.stop();
-            notice('This channel did not play. ' + why);
-        } else {
-            this.close();
-        }
-        send({ cmd: 'playFailed', id: id });
+        if (this.wanted && this.wanted.id === id) this.stop();
+        else this.close();
+        send({ cmd: 'playFailed', id: id, why: why });
     }
 };
 
@@ -570,9 +567,12 @@ function scheduleRender() {
  * key: the core is told, as it owns the bar's state. */
 var BAR_TIMEOUT = 7000;
 var barTimer = null, barShown = false;
-/* Counts the 7 s again: from when the bar shows, and from every key. */
+/* Counts the 7 s again: from when the bar shows, and from every key. An
+ * expiry still waiting in the key queue (behind keys the core has not
+ * answered yet) is from before: it is dropped. */
 function armBar() {
     clearTimeout(barTimer);
+    keys.pending = keys.pending.filter(function (k) { return k.cmd.key !== 'barTimeout'; });
     if (barShown) barTimer = setTimeout(function () { sendKey({ cmd: 'key', key: 'barTimeout' }, null); }, BAR_TIMEOUT);
 }
 function renderBar(v) {
@@ -630,6 +630,9 @@ worker.onmessage = function (e) {
         if (view) { view.status = m.status; scheduleRender(); }
         break;
     case 'play':
+        /* From a source replaced since (sent before the core had the new
+         * one): the player stopped with it. */
+        if (m.session !== session) break;
         player.play({ id: m.id, url: m.url, userAgent: m.userAgent });
         if (view && view.mode === 'full') showBanner(m.channel);
         break;
@@ -689,11 +692,15 @@ function closeSetup() {
 function savedSource() {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
 }
+/* Numbers the sources sent to the core: its `play` events carry the
+ * number of the source they belong to. */
+var session = 0;
 function load(source) {
     player.stop();
     resetSearch();
     resetKeys();
-    send({ cmd: 'source', source: source, utcOffsetSecs: -new Date().getTimezoneOffset() * 60 });
+    session++;
+    send({ cmd: 'source', source: source, session: session, utcOffsetSecs: -new Date().getTimezoneOffset() * 60 });
 }
 /* Returns whether the key was the setup's own (so the page swallows it). */
 function setupKey(code, repeat) {
@@ -767,15 +774,16 @@ var EXIT = 10182;
  * queues work in the worker. While one is in flight, a repeat replaces a
  * repeat waiting behind it; other keys wait in order.
  *
- * `inFlight` and the entries of `pending` are { cmd, at, code }: `at` is
- * when the key was pressed (null for what no key press sent), `code` the
- * remote key that sent it. */
+ * `inFlight` and the entries of `pending` are { cmd, at, code, first }:
+ * `at` is when the key was pressed (null for what no key press sent),
+ * `code` the remote key that sent it, `first` whether it is a hold's first
+ * repeat (never replaced nor dropped). */
 var KEY_TIMEOUT = 1000;
 var keys = { seq: 0, inFlight: null, timer: null, pending: [] };
-function sendKey(cmd, code) {
-    var entry = { cmd: cmd, at: code === null ? null : performance.now(), code: code };
+function sendKey(cmd, code, first) {
+    var entry = { cmd: cmd, at: code === null ? null : performance.now(), code: code, first: !!first };
     var last = keys.pending[keys.pending.length - 1];
-    if (cmd.repeat && last && last.cmd.repeat) keys.pending[keys.pending.length - 1] = entry;
+    if (cmd.repeat && last && last.cmd.repeat && !last.first) keys.pending[keys.pending.length - 1] = entry;
     else keys.pending.push(entry);
     if (!keys.inFlight) nextKey();
 }
@@ -803,17 +811,26 @@ function resetKeys() {
     keys.pending = [];
     keyTimes.length = 0;
     held = null;
+    pressed = null;
 }
 
 /* The remote key that is repeating (held), by its code. */
 var held = null;
+/* The key last pressed (not a repeat), until it is released or the page
+ * can no longer tell (blur, hidden). Repeats of any other key are not
+ * sent: they would act on the context of a press the page has not seen. */
+var pressed = null;
+function keysLost() {
+    pressed = null;
+    releaseHeld();
+}
 /* The held key was released (or the page can no longer tell): its repeats
  * still waiting are dropped, so it stops at once. */
 function releaseHeld() {
     if (held === null) return;
     var code = held;
     held = null;
-    keys.pending = keys.pending.filter(function (k) { return !(k.cmd.repeat && k.code === code); });
+    keys.pending = keys.pending.filter(function (k) { return !(k.cmd.repeat && !k.first && k.code === code); });
     settleIfPending();
 }
 /* While a key held in the groups column moves through the lists, the core
@@ -840,7 +857,7 @@ document.addEventListener('keydown', function (e) {
     if (code === EXIT) { e.preventDefault(); if (!e.repeat) exit(); return; }
     if (stopped) { e.preventDefault(); return; }
     /* A new press: whatever was held is not any more (its keyup was lost). */
-    if (!e.repeat) releaseHeld();
+    if (!e.repeat) { releaseHeld(); pressed = code; }
     if (setup.open) { if (setupKey(code, e.repeat)) e.preventDefault(); return; }
     /* Any key, also a held one that acts only once, keeps the play bar. */
     armBar();
@@ -864,7 +881,9 @@ document.addEventListener('keydown', function (e) {
     var key = KEYS[code];
     if (!key) return;
     e.preventDefault();
-    if (e.repeat && ONCE[key]) return;
+    /* A repeat whose press was lost (blur, hidden) waits for a new press:
+     * the core would give it the meaning of the press before. */
+    if (e.repeat && (ONCE[key] || pressed !== code)) return;
     /* Keys that may start a stream: the zap timing starts here. */
     var full = view && view.mode === 'full';
     if (key === 'ok' || key === 'chup' || key === 'chdown' || (full && (key === 'up' || key === 'down'))) {
@@ -875,20 +894,24 @@ document.addEventListener('keydown', function (e) {
     /* Repeats go as they are, Left's too: the core knows where the press
      * acted and what holding it there does (in the guide grid, it opens
      * the groups column). */
+    /* The first repeat of a hold is kept: the core gives it its meaning
+     * (held Left in the grid opens the groups), however late it goes. */
+    var first = e.repeat && held !== code;
     if (e.repeat) held = code;
-    sendKey({ cmd: 'key', key: key, repeat: e.repeat }, code);
+    sendKey({ cmd: 'key', key: key, repeat: e.repeat }, code, first);
 });
 
 /* Only the release of the key that was repeating ends the hold. */
 document.addEventListener('keyup', function (e) {
+    if (e.keyCode === pressed) pressed = null;
     if (e.keyCode === held) releaseHeld();
 });
 /* No keyup reaches a page that lost the focus or is hidden. */
-window.addEventListener('blur', releaseHeld);
+window.addEventListener('blur', keysLost);
 
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
-        releaseHeld();
+        keysLost();
         player.suspend();
     } else if (!stopped) {
         player.resume();

@@ -310,20 +310,30 @@ impl SearchState {
                 self.ok()
             }
             Focus::Result(id) => {
-                let tab = match id {
-                    ResultId::Channel(_) => Tab::Channels,
-                    ResultId::Program { .. } => Tab::Programs,
-                };
-                if self.phase == Phase::Idle || self.position(tab, &id).is_none() {
+                if !self.focus_listed(&id) {
                     return SearchEffect::None;
                 }
-                self.tab = tab;
                 self.keyboard = false;
-                self.focus_result(id);
                 self.ok()
             }
             Focus::History(_) | Focus::Tabs => SearchEffect::None,
         }
+    }
+
+    /// Focuses result `id` on its tab, without acting on it, when the
+    /// results list it; returns whether they do. For an app that keeps a
+    /// focus across results it replaced itself (a guide rebuilt under them).
+    pub fn focus_listed(&mut self, id: &ResultId) -> bool {
+        let tab = match id {
+            ResultId::Channel(_) => Tab::Channels,
+            ResultId::Program { .. } => Tab::Programs,
+        };
+        if self.phase == Phase::Idle || self.position(tab, id).is_none() {
+            return false;
+        }
+        self.tab = tab;
+        self.focus_result(id.clone());
+        true
     }
 
     fn show_tab(&mut self, tab: Tab) {
