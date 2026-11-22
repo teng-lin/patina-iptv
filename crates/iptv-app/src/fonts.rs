@@ -56,7 +56,9 @@ pub const OSD_DETAIL: f32 = CAPTION;
 /// Badges over video (LIVE, FHD, 60 FPS) and a failure's detail line.
 pub const OSD_BADGE: f32 = 12.0;
 
-/// The font files, WOFF2 (NSH unpacks them when it registers them).
+/// The font files, WOFF2 (NSH unpacks them when it registers them). A
+/// browser package's page has them instead (feature `browser-package`).
+#[cfg(not(all(target_family = "wasm", feature = "browser-package")))]
 pub const FILES: [(&str, &[u8]); 3] = [
     (
         "Roboto",
@@ -79,7 +81,25 @@ pub const FILES: [(&str, &[u8]); 3] = [
 /// NSH would unpack
 /// each one twice on the UI thread (for its family name, then to register
 /// it), about 0.7 s of a cold start on a 32-bit TV box.
+///
+/// A browser package (feature `browser-package`) has them as the page's
+/// fonts instead, loaded in the Worker and on the page before the module
+/// starts: only Roboto becomes the default family.
 pub fn register() {
+    #[cfg(all(target_family = "wasm", feature = "browser-package"))]
+    {
+        FONTS_IN.store(true, std::sync::atomic::Ordering::Relaxed);
+        crate::startup::mark_with("fonts registered", format_args!("the page's"));
+    }
+    #[cfg(not(all(target_family = "wasm", feature = "browser-package")))]
+    register_files();
+    let mut tokens = (*tokens()).clone();
+    tokens.set_font(nsh_core::element::FONT_SANS, SANS);
+    set_tokens(tokens);
+}
+
+#[cfg(not(all(target_family = "wasm", feature = "browser-package")))]
+fn register_files() {
     let started = nsh_core::time::Instant::now();
     let (tx, rx) = futures_channel::oneshot::channel();
     let unpacking = crate::host::background("iptv-fonts", move || {
@@ -113,9 +133,6 @@ pub fn register() {
             format_args!("unpacked in {unpacked_ms} ms, registered {ms} ms after asking"),
         );
     }));
-    let mut tokens = (*tokens()).clone();
-    tokens.set_font(nsh_core::element::FONT_SANS, SANS);
-    set_tokens(tokens);
 }
 
 /// `name` cut to fit `width` with two dots ("Long chann.."), as measured by

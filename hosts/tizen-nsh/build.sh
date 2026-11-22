@@ -80,6 +80,14 @@ mkdir -p "$stage"
 rm -f "$stage/nsh-bench.js" "$stage/nsh-engine.js"
 cp "$here"/app/{index.html,page.css,patina-host.js,patina-worker.js} "$stage/"
 cp "$root/art/icon/play-512.png" "$stage/icon.png"
+# iptv-app's data as package files (its `browser-package` feature): the
+# splash, the fonts the page loads (patina-host.js) and one file of
+# messages per interface language, read when the language is shown.
+mkdir -p "$stage/assets" "$stage/fonts"
+cp "$root/art/icon/banner.png" "$stage/assets/banner.png"
+cp "$root"/crates/iptv-app/fonts/*.woff2 "$stage/fonts/"
+python3 "$here/catalog.py" "$root/crates/iptv-core/src/i18n/messages.tsv" \
+    "$root/crates/iptv-core/src/i18n.rs" "$stage/i18n"
 cp "$module" "$stage/app.wasm"
 if [[ "${NSH_WASM_OPT:-1}" != 0 ]]; then
     # Binaryen (version_132 measured) keeps the module to MVP plus the two

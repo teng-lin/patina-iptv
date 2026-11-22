@@ -14,6 +14,10 @@
  * engine's `instantiate` waits for them), so the store's open, which
  * cannot wait, finds them at hand (iptv-app's host/web/store.rs).
  *
+ * Package files the module reads (an interface language's messages,
+ * iptv-web's package.rs) are read synchronously: they are local, and the
+ * module asks only for paths inside the package.
+ *
  * Plain ES2017: the TV is Chromium 69.
  */
 'use strict';
@@ -199,6 +203,21 @@
         });
     }
 
+    /* The package file the module last asked for, until it copies it. */
+    var packageFile = null;
+    function readPackageFile(path) {
+        try {
+            var x = new XMLHttpRequest();
+            x.open('GET', path, false);
+            x.responseType = 'arraybuffer';
+            x.send();
+            /* A local package file has status 0 on the TV, 200 when served. */
+            return (x.status === 200 || x.status === 0) && x.response ? x.response : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
     NshTizenWorker.addImports('host', {
         fetch: function (id, ptr, len, stream) {
             var request = JSON.parse(text(ptr, len));
@@ -257,6 +276,17 @@
             try { crypto.getRandomValues(new Uint8Array(memory(), ptr, len)); return 1; } catch (e) { return 0; }
         },
         utc_offset_minutes: function (ms) { return -new Date(ms).getTimezoneOffset(); },
+        package_file_size: function (ptr, len) {
+            packageFile = readPackageFile(text(ptr, len));
+            return packageFile ? packageFile.byteLength : -1;
+        },
+        package_file_read: function (ptr, len) {
+            var file = packageFile;
+            packageFile = null;
+            if (!file || file.byteLength !== len) return 0;
+            new Uint8Array(memory(), ptr, len).set(new Uint8Array(file));
+            return len;
+        },
         chunks_stored_size: function () { return stored.size; },
         chunks_stored_read: function (index, ptr, len) {
             var chunk = stored.chunks[index];

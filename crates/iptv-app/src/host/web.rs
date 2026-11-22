@@ -268,8 +268,20 @@ pub(crate) fn resolve_data_dir() -> std::io::Result<PathBuf> {
 }
 
 /// As [`resolve_data_dir`]: there is no directory to create or protect.
+/// A package build (feature `browser-package`) reads the interface
+/// languages' messages from the package from here on.
 pub(crate) fn initialize() -> std::io::Result<PathBuf> {
+    #[cfg(feature = "browser-package")]
+    iptv_core::i18n::set_catalog_reader(package_catalog);
     resolve_data_dir()
+}
+
+/// Language `tag`'s messages, `i18n/<tag>.tsv` in the package
+/// (`hosts/tizen-nsh/build.sh` writes them from the catalog).
+#[cfg(feature = "browser-package")]
+fn package_catalog(tag: &str) -> Option<String> {
+    let bytes = iptv_web::adapters::package_file(&format!("i18n/{tag}.tsv"))?;
+    String::from_utf8(bytes).ok()
 }
 
 thread_local! {

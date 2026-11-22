@@ -7,8 +7,9 @@
 //!
 //! - `host`: the imports the module calls (fetch, chunks, timers, storage,
 //!   events, clocks).
-//! - `chunks`, `device`: for an application on the real runtime, the
-//!   browser store's chunks in IndexedDB, randomness and the time zone.
+//! - `chunks`, `device`, `package`: for an application on the real
+//!   runtime, the browser store's chunks in IndexedDB, randomness, the time
+//!   zone and the package's own files.
 //! - `exec`: a single-threaded executor polled after every delivery, and
 //!   the `iptv_import::Fetch` adapter over the host.
 //! - `store`: what is kept between launches: the stored guide (an
@@ -36,6 +37,7 @@ mod chunks;
 mod device;
 mod exec;
 mod host;
+mod package;
 #[cfg(feature = "bridge")]
 mod store;
 
@@ -54,6 +56,7 @@ pub mod adapters {
     }
 
     pub use crate::device::{fill_random, utc_offset_minutes};
+    pub use crate::package::package_file;
 
     /// Runs `task` from the executor's next poll on; outside a poll, one is
     /// asked of the host.
