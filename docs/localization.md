@@ -102,7 +102,7 @@ The portable lookup, formatting and language resolution live in
 `crates/iptv-presentation/src/i18n.rs` and `crates/iptv-presentation/src/i18n/`; platform
 locale discovery is confined to `crates/iptv-app/src/i18n.rs`. `sys-locale`
 supplies the native device locale. No network service is involved in
-translating messages, and the core takes no dependency for it.
+translating messages, and the portable catalog needs no dependency for it.
 
 `crates/iptv-presentation/src/i18n/messages.tsv` is UTF-8 with one message per line.
 Columns follow `LANGUAGES` in `i18n.rs`: English source, Spanish, French, German,
@@ -208,7 +208,7 @@ Adding a language also requires adding its tag to
 and its calendar to `calendar.rs`; tests check each of the three.
 The setting remains text-valued so older backups and unlisted locale tags survive.
 
-Run `cargo test -p iptv-core -p iptv-settings`, the core wasm build, the app
+Run `cargo test -p iptv-presentation -p iptv-settings`, the presentation wasm build, the app
 build, `cargo test -p iptv-app --features test-support --test app catalog_lint`
 and `cargo test -p iptv-app --features test-support --test app interface_languages`. The `interface_languages` headless
 scenarios check switching languages without remounting settings, persistence,

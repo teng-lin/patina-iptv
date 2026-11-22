@@ -442,7 +442,8 @@ directory and are never overwritten by restored recording identities.
 
 | Path | What |
 | --- | --- |
-| `crates/iptv-core` | UI-independent state: guide model, focus, lists, panels, menus |
+| `crates/iptv-core` | Domain types and rules for guide, playback, recording and user data |
+| `crates/iptv-presentation` | Shared feature state, display data and localization |
 | `crates/iptv-nav` | Remote keys, long presses, key-to-action map |
 | `crates/iptv-settings` | Settings schema, store and backup JSON |
 | `crates/iptv-providers` | M3U parser, Xtream and Stalker clients |

@@ -1,10 +1,8 @@
 #![forbid(unsafe_code)]
-//! The UI-independent core of iptv-rs. Everything here is plain Rust: no NSH,
-//! no platform APIs, no blocking I/O, and it must build for
+//! Portable Domain values and rules for Patina IPTV. The core defines the
+//! guide schedule contract, playlist requests, user data and the rules
+//! for playback, recording and parental access. It builds for
 //! `wasm32-unknown-unknown`.
-//!
-//! Today: the guide's synthetic schedule, the remote/touch focus model and
-//! its columns (rail, groups, lists), favorites, menus, panels, playback.
 
 pub mod add_playlist;
 pub mod capabilities;

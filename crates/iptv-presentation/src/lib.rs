@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
-//! Toolkit-free feature state and display data shared by Patina's front ends.
+//! Toolkit-free feature state, display data and localization for Patina's
+//! front ends. Feature holders act on content identities and return effects
+//! for their caller to perform.
 
 pub mod browse_playback;
 pub mod capabilities;
