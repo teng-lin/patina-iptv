@@ -4,11 +4,6 @@
 //! video was). The player is the same one: the window shows its picture,
 //! no stream opens for it.
 //!
-//! The window is titled exactly [`TITLE`], the title browsers give theirs,
-//! so the rules desktops keep for browsers' picture-in-picture windows
-//! (floating, pinned on every workspace, above the others) apply to it
-//! too. Its size follows the stream's shape ([`size_for`]).
-//!
 //! The pointer over it shows its controls for a while ([`Hover`]); a
 //! double click, Escape or its "back" control bring the video back to the
 //! main window ([`Exit::BackToApp`]); its close control, or the system
@@ -17,61 +12,11 @@
 //! a click, so that the second click of a double click reaches the app.
 //! Times are milliseconds on the caller's monotonic clock.
 
-/// The window's title: browsers' picture-in-picture title.
-pub const TITLE: &str = crate::message::key("Picture-in-Picture");
-
-/// The window's width when it opens (points).
-pub const WIDTH: f32 = 600.0;
-
 /// How long the controls stay after the pointer last moved over the window.
 pub const HIDE_AFTER_MS: u64 = 2_500;
 
 /// Two clicks this close together are a double click.
 pub const DOUBLE_CLICK_MS: u64 = 500;
-
-/// The window's size when it opens (points): [`WIDTH`] wide, the stream's
-/// shape (16:9 until it is known, kept between 4:3 and 21:9), rounded to
-/// whole points.
-pub fn size_for(video: Option<(u32, u32)>) -> (f32, f32) {
-    let aspect = video
-        .filter(|(w, h)| *w > 0 && *h > 0)
-        .map_or(16.0 / 9.0, |(w, h)| w as f32 / h as f32)
-        .clamp(4.0 / 3.0, 21.0 / 9.0);
-    (WIDTH, (WIDTH / aspect).round())
-}
-
-/// Initial slots for up to four compact players. Native adapters place only
-/// newly compact windows; existing user placements remain unchanged.
-/// Slots reserve the supported tallest shape (4:3); adapters fit each player's
-/// actual shape inside its slot without stretching it.
-pub fn popup_rects(area: (f32, f32, f32, f32), count: usize) -> Vec<(f32, f32, f32, f32)> {
-    let (x, y, width, height) = area;
-    let count = count.min(crate::multiview::MAX_SURFACES);
-    if count == 0
-        || width <= 0.0
-        || height <= 0.0
-        || ![x, y, width, height].into_iter().all(f32::is_finite)
-    {
-        return Vec::new();
-    }
-    let columns = count.min(2);
-    let rows = count.div_ceil(columns);
-    let gap = 16.0_f32.min(width / 8.0).min(height / 8.0);
-    let w = WIDTH
-        .min((width - gap * (columns + 1) as f32) / columns as f32)
-        .min((height - gap * (rows + 1) as f32) / rows as f32 * 4.0 / 3.0);
-    let h = w * 3.0 / 4.0;
-    (0..count)
-        .map(|i| {
-            (
-                x + width - gap - w - (i % columns) as f32 * (w + gap),
-                y + height - gap - h - (i / columns) as f32 * (h + gap),
-                w,
-                h,
-            )
-        })
-        .collect()
-}
 
 /// How the window closes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,48 +93,6 @@ impl Hover {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn compact_slots_are_separate_and_within_small_and_offset_displays() {
-        for area in [(220.0, -482.0, 2560.0, 1440.0), (0.0, 0.0, 800.0, 600.0)] {
-            for count in 1..=4 {
-                let rects = popup_rects(area, count);
-                assert_eq!(rects.len(), count);
-                for (i, &(x, y, w, h)) in rects.iter().enumerate() {
-                    assert!(x >= area.0 && y >= area.1);
-                    assert!(x + w <= area.0 + area.2 + 0.01 && y + h <= area.1 + area.3 + 0.01);
-                    for &(a, b, c, d) in &rects[..i] {
-                        assert!(x + w <= a || a + c <= x || y + h <= b || b + d <= y);
-                    }
-                }
-            }
-        }
-        assert!(popup_rects((0.0, 0.0, 0.0, 600.0), 4).is_empty());
-        assert!(popup_rects((0.0, 0.0, f32::NAN, 600.0), 4).is_empty());
-    }
-
-    #[test]
-    fn the_title_is_the_one_browsers_give_their_window() {
-        assert_eq!(TITLE, "Picture-in-Picture");
-    }
-
-    #[test]
-    fn it_opens_600_wide_in_the_shape_of_the_stream() {
-        assert_eq!(size_for(None), (600.0, 338.0), "16:9 until known");
-        assert_eq!(size_for(Some((1920, 1080))), (600.0, 338.0));
-        assert_eq!(
-            size_for(Some((720, 576))),
-            (600.0, 450.0),
-            "5:4 → 4:3 at most"
-        );
-        assert_eq!(size_for(Some((640, 480))), (600.0, 450.0));
-        assert_eq!(
-            size_for(Some((3840, 1080))),
-            (600.0, 257.0),
-            "21:9 at least"
-        );
-        assert_eq!(size_for(Some((0, 0))), (600.0, 338.0), "no size yet");
-    }
 
     #[test]
     fn the_controls_show_while_the_pointer_moves_over_it() {

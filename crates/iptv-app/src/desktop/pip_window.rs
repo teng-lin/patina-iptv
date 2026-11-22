@@ -26,6 +26,7 @@ use std::cell::Cell;
 use std::time::Duration;
 
 use iptv_core::pip_window::{self as pw, Exit, Hover};
+use iptv_player_mpv::pip_window::{TITLE, WIDTH};
 use nsh_core::desktop::{
     WindowAttributes, WindowCloseCause, WindowFrameStyle, WindowLevel, WindowPosition, Workspaces,
 };
@@ -53,10 +54,10 @@ pub fn window(ui: Ui) -> impl IntoElement {
 }
 
 fn open(ui: Ui) -> impl IntoElement {
-    let (w, h) = untracked(|| pw::size_for(ui.player.main().size.get()));
+    let (w, h) = untracked(|| size_for(ui.player.main().size.get()));
     let mut window = nsh_core::element::desktop::window()
         .id(ID)
-        .title(pw::TITLE)
+        .title(TITLE)
         .default_size(nsh_core::Size::new(px(w), px(h)))
         .attributes(attributes(w, h))
         .on_open_change(move |change: &OpenChange| closed(ui, change.reason))
@@ -374,4 +375,38 @@ pub fn placeholder(ui: Ui) -> impl IntoElement {
                 )
         },
     )
+}
+
+/// The window's size when it opens (points): [`WIDTH`] wide, the stream's
+/// shape (16:9 until it is known, kept between 4:3 and 21:9), rounded to
+/// whole points.
+pub fn size_for(video: Option<(u32, u32)>) -> (f32, f32) {
+    let aspect = video
+        .filter(|(w, h)| *w > 0 && *h > 0)
+        .map_or(16.0 / 9.0, |(w, h)| w as f32 / h as f32)
+        .clamp(4.0 / 3.0, 21.0 / 9.0);
+    (WIDTH, (WIDTH / aspect).round())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::size_for;
+
+    #[test]
+    fn it_opens_600_wide_in_the_shape_of_the_stream() {
+        assert_eq!(size_for(None), (600.0, 338.0), "16:9 until known");
+        assert_eq!(size_for(Some((1920, 1080))), (600.0, 338.0));
+        assert_eq!(
+            size_for(Some((720, 576))),
+            (600.0, 450.0),
+            "5:4 → 4:3 at most"
+        );
+        assert_eq!(size_for(Some((640, 480))), (600.0, 450.0));
+        assert_eq!(
+            size_for(Some((3840, 1080))),
+            (600.0, 257.0),
+            "21:9 at least"
+        );
+        assert_eq!(size_for(Some((0, 0))), (600.0, 338.0), "no size yet");
+    }
 }
