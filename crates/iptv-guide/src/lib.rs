@@ -15,7 +15,7 @@
 //! A stored guide can be held in part: the store passed in covers a recent
 //! window, and older days are paged in on demand ([`pages`],
 //! [`EpgSchedule::with_pages`]). Until a day arrives its cells are
-//! hour slots titled [`LOADING`]. A cold start's first schedule may hold
+//! hour slots titled [`Listing::Loading`]. A cold start's first schedule may hold
 //! even less, only the hours of its first screen
 //! ([`EpgSchedule::held_only`]): the rest shows as loading until a schedule
 //! with the whole window replaces it.
@@ -27,7 +27,7 @@ pub mod playback;
 
 use pages::{PageLoader, PageRequest, PagedWindow, Pages};
 
-use iptv_core::guide::{Program, Schedule};
+use iptv_core::guide::{GroupName, Listing, Program, Schedule};
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
 use iptv_providers::model::{Channel, Group};
 
@@ -35,10 +35,6 @@ use iptv_providers::model::{Channel, Group};
 const SLOT: i64 = 3600;
 /// Minutes the guide can be browsed past its last program.
 pub const PAST_END: i32 = 60;
-/// Title of a gap slot.
-pub const NO_INFORMATION: &str = iptv_core::message::key("No information");
-/// Title of a slot whose day is still being read from the store.
-pub const LOADING: &str = iptv_core::message::key("Loading…");
 /// A channel in no group (`EpgSchedule::group_index`).
 const NO_GROUP: u32 = u32::MAX;
 
@@ -68,7 +64,7 @@ struct OrganizationState {
     channel_blocks: Vec<iptv_core::organization::Block>,
     blocked_groups: std::collections::HashSet<String>,
     order: Vec<usize>,
-    groups: Vec<(usize, String)>,
+    groups: Vec<(usize, GroupName)>,
     lists: Option<Vec<(String, String, Vec<usize>)>>,
 }
 #[derive(Clone)]
@@ -84,9 +80,7 @@ pub struct EpgSchedule {
     channels: std::sync::Arc<Vec<GuideChannel>>,
     /// The imported channel behind each guide channel (stream and catch-up).
     sources: std::sync::Arc<Vec<Option<Channel>>>,
-    group_names: std::sync::Arc<Vec<String>>,
-    /// Only the catalog adapter synthesizes the reserved ungrouped bucket.
-    generated_other: bool,
+    group_names: std::sync::Arc<Vec<GroupName>>,
     /// The index of each group's first channel; channels are stored grouped.
     group_starts: std::sync::Arc<Vec<usize>>,
     /// The channels in the playlist's order (empty: as stored).
@@ -151,7 +145,7 @@ impl EpgSchedule {
     pub fn new(groups: Vec<(String, Vec<GuideChannel>)>, store: GuideStore, now: UnixTime) -> Self {
         let keyed = groups
             .into_iter()
-            .map(|(name, members)| (name.clone(), name, members));
+            .map(|(name, members)| (name.clone(), GroupName::Named(name), members));
         Self::from_parts(Catalog::keyed(keyed, store, now))
     }
 
@@ -164,7 +158,6 @@ impl EpgSchedule {
             channels,
             sources,
             group_names,
-            generated_other,
             group_starts,
             playlist_order,
             store,
@@ -180,7 +173,6 @@ impl EpgSchedule {
             channels: std::sync::Arc::new(channels),
             sources: std::sync::Arc::new(sources),
             group_names: std::sync::Arc::new(group_names),
-            generated_other,
             group_starts: std::sync::Arc::new(group_starts),
             playlist_order: std::sync::Arc::new(playlist_order),
             store: std::sync::Arc::new(store),
@@ -587,8 +579,7 @@ struct Catalog {
     group_keys: Vec<String>,
     channels: Vec<GuideChannel>,
     sources: Vec<Option<Channel>>,
-    group_names: Vec<String>,
-    generated_other: bool,
+    group_names: Vec<GroupName>,
     group_starts: Vec<usize>,
     playlist_order: Vec<usize>,
     store: GuideStore,
@@ -612,7 +603,7 @@ impl Catalog {
     /// else, so the three lists always have one entry per group
     /// ([`Shape::organization`] indexes one by another's positions).
     fn keyed(
-        groups: impl IntoIterator<Item = (String, String, Vec<GuideChannel>)>,
+        groups: impl IntoIterator<Item = (String, GroupName, Vec<GuideChannel>)>,
         store: GuideStore,
         now: UnixTime,
     ) -> Self {
@@ -637,7 +628,6 @@ impl Catalog {
             group_keys,
             channels,
             group_names,
-            generated_other: false,
             group_starts,
             playlist_order: Vec::new(),
             store,
@@ -658,14 +648,11 @@ impl Catalog {
         for (slot, i) in group_slots(groups, channels) {
             buckets[slot].push((i as u32 + 1, &channels[i]));
         }
-        // One key and name per bucket: the catalog's groups, then "Other".
+        // Only the final bucket represents channels without a group.
         let labels = groups
             .iter()
-            .map(|g| (g.id.as_str().to_owned(), g.name.clone()))
-            .chain([(
-                "__other__".to_owned(),
-                iptv_core::message::key("Other").to_owned(),
-            )]);
+            .map(|g| (g.id.as_str().to_owned(), GroupName::Named(g.name.clone())))
+            .chain([("__other__".to_owned(), GroupName::Ungrouped)]);
         // Where each playlist position lands once grouped.
         let mut stored_at = vec![0; channels.len()];
         for (at, &(position, _)) in buckets.iter().flatten().enumerate() {
@@ -692,7 +679,6 @@ impl Catalog {
             })
             .collect();
         let mut catalog = Self::keyed(grouped, store, now);
-        catalog.generated_other = !groups.iter().any(|g| g.id.as_str() == "__other__");
         catalog.sources = ordered.into_iter().map(Some).collect();
         catalog.playlist_order = stored_at;
         catalog
@@ -715,7 +701,7 @@ struct Shape<'a> {
     sources: &'a [Option<Channel>],
     playlist_order: &'a [usize],
     group_keys: &'a [String],
-    group_names: &'a [String],
+    group_names: &'a [GroupName],
 }
 
 impl Shape<'_> {
@@ -783,7 +769,7 @@ impl Shape<'_> {
                     g,
                     group_prefs.get(self.group_keys[g].as_str()).map_or_else(
                         || self.group_names[g].clone(),
-                        |(_, name, _)| (*name).clone(),
+                        |(_, name, _)| GroupName::Named((*name).clone()),
                     ),
                 )
             })
@@ -991,23 +977,22 @@ impl Schedule for EpgSchedule {
             .cloned()
             .unwrap_or_default()
     }
-    fn group_name(&self, group: usize) -> String {
-        if let Some(lists) = self
-            .organization
-            .borrow()
-            .as_ref()
-            .and_then(|s| s.lists.as_ref())
-        {
-            return lists.get(group).map_or_else(String::new, |l| l.1.clone());
-        }
-        if let Some(state) = self.organization.borrow().as_ref() {
-            return state
-                .groups
-                .get(group)
-                .map_or_else(String::new, |(_, name)| name.clone());
-        }
-        self.group_names.get(group).cloned().unwrap_or_default()
+    fn group_label(&self, group: usize) -> GroupName {
+        let organization = self.organization.borrow();
+        let name = if let Some(state) = organization.as_ref() {
+            if let Some(lists) = &state.lists {
+                return GroupName::Named(
+                    lists.get(group).map_or_else(String::new, |l| l.1.clone()),
+                );
+            }
+            state.groups.get(group).map(|(_, name)| name)
+        } else {
+            self.group_names.get(group)
+        };
+        name.cloned()
+            .unwrap_or_else(|| GroupName::Named(String::new()))
     }
+
     fn group_channels(&self, group: usize) -> Vec<usize> {
         if let Some(lists) = self
             .organization
@@ -1095,33 +1080,8 @@ impl Schedule for EpgSchedule {
         Some(self)
     }
 
-    fn group_name_in(&self, group: usize, language: &iptv_core::i18n::Language) -> String {
-        let name = self.group_name(group);
-        // This reserved bucket is synthesized for channels with no provider
-        // group. Provider/custom groups, including ones named Other, stay opaque.
-        if self.generated_other
-            && self.group_key(group) == "__other__"
-            && name == iptv_core::message::key("Other")
-        {
-            iptv_core::i18n::translate(language, "Other").to_owned()
-        } else {
-            name
-        }
-    }
-
-    fn title(&self, channel: usize, program: Program) -> String {
-        self.title_in(channel, program, &iptv_core::i18n::LANGUAGES[0])
-    }
-
-    fn title_in(
-        &self,
-        channel: usize,
-        program: Program,
-        language: &iptv_core::i18n::Language,
-    ) -> String {
-        let Some(key) = self.key(channel) else {
-            return iptv_core::i18n::translate(language, "No information").to_owned();
-        };
+    fn listing(&self, channel: usize, program: Program) -> Option<Listing> {
+        let key = self.key(channel)?;
         let t = self.probe(program);
         let found = self.channel_store(Some(key), t, |s| {
             s.program_at(key, t)
@@ -1129,12 +1089,11 @@ impl Schedule for EpgSchedule {
                 // A guide stored before badges were folded at import.
                 .map(|p| iptv_epg::fold_superscripts(p.title()).into_owned())
         });
-        match found {
-            None => iptv_core::i18n::translate(language, "Loading…").to_owned(),
-            Some(title) => title.unwrap_or_else(|| {
-                iptv_core::i18n::translate(language, "No information").to_owned()
-            }),
-        }
+        Some(match found {
+            None => Listing::Loading,
+            Some(None) => Listing::Gap,
+            Some(Some(title)) => Listing::Title(title),
+        })
     }
 }
 
@@ -1153,7 +1112,7 @@ pub struct OrganizationBuilder {
     sources: std::sync::Arc<Vec<Option<Channel>>>,
     playlist_order: std::sync::Arc<Vec<usize>>,
     group_keys: std::sync::Arc<Vec<String>>,
-    group_names: std::sync::Arc<Vec<String>>,
+    group_names: std::sync::Arc<Vec<GroupName>>,
 }
 pub struct PreparedOrganization(OrganizationState);
 impl OrganizationBuilder {

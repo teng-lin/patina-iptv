@@ -58,11 +58,11 @@ impl Schedule for Catalog {
     fn channel_logo(&self, channel: usize) -> Option<String> {
         (channel != 4).then(|| format!("logo{channel}"))
     }
-    fn group_name(&self, group: usize) -> String {
-        self.groups[group].0.to_owned()
+    fn group_label(&self, group: usize) -> GroupName {
+        GroupName::Named(self.groups[group].0.to_owned())
     }
-    fn title(&self, channel: usize, _program: Program) -> String {
-        format!("T{channel}")
+    fn listing(&self, channel: usize, _program: Program) -> Option<Listing> {
+        Some(Listing::Title(format!("T{channel}")))
     }
     fn channel_key(&self, channel: usize) -> Option<String> {
         self.keys.get(channel).cloned()
@@ -80,16 +80,16 @@ fn view(catalog: &Rc<dyn Schedule>, list: ChannelList) -> ListView {
 fn the_groups_column_starts_with_favorites_recent_and_all() {
     let c = Catalog::small();
     assert_eq!(entry_count(&c), 6);
-    let names: Vec<String> = (0..entry_count(&c)).map(|e| entry_name(e, &c)).collect();
+    let names: Vec<_> = (0..entry_count(&c)).map(|e| entry_name(e, &c)).collect();
     assert_eq!(
         names,
         [
-            "Favorites",
-            "Recently watched",
-            "All channels",
-            "News",
-            "Sports",
-            "Kids"
+            GroupName::Favorites,
+            GroupName::Recent,
+            GroupName::AllChannels,
+            GroupName::Named("News".into()),
+            GroupName::Named("Sports".into()),
+            GroupName::Named("Kids".into()),
         ]
     );
     for e in 0..entry_count(&c) {
@@ -168,12 +168,16 @@ fn a_list_view_reads_the_catalog_channel_behind_each_row() {
         fav.programs_between(1, 0, 90),
         catalog.programs_between(4, 0, 90)
     );
-    assert_eq!(fav.title(0, fav.program_at(0, 0)), "T7");
+    assert_eq!(
+        fav.listing(0, fav.program_at(0, 0)),
+        Some(Listing::Title("T7".into()))
+    );
     assert_eq!(fav.find_channel("k4"), Some(1));
     assert_eq!(fav.find_channel("k0"), None, "not in this list");
-    assert_eq!(fav.group_name(0), "Favorites");
+    assert_eq!(fav.group_label(0), GroupName::Favorites);
     // Rows the list does not have still answer (an empty list's cursor).
     assert_eq!(fav.channel_name(5), "");
+    assert_eq!(fav.listing(5, fav.program_at(5, 75)), None);
     assert_eq!(fav.program_at(5, 75).airing(75), Airing::Live);
 }
 
@@ -258,11 +262,11 @@ fn a_resumed_hidden_channel_keeps_all_channels() {
         fn channel_logo(&self, channel: usize) -> Option<String> {
             self.0.channel_logo(channel)
         }
-        fn group_name(&self, group: usize) -> String {
-            self.0.group_name(group)
+        fn group_label(&self, group: usize) -> GroupName {
+            self.0.group_label(group)
         }
-        fn title(&self, channel: usize, program: Program) -> String {
-            self.0.title(channel, program)
+        fn listing(&self, channel: usize, program: Program) -> Option<Listing> {
+            self.0.listing(channel, program)
         }
         fn channel_hidden(&self, channel: usize) -> bool {
             channel == 1

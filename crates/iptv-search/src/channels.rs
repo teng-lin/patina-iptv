@@ -283,7 +283,7 @@ mod tests {
 #[cfg(test)]
 mod visibility_tests {
     use super::*;
-    use iptv_core::guide::{Program, Schedule, SyntheticSchedule};
+    use iptv_core::guide::{GroupName, Listing, Program, Schedule, SyntheticSchedule};
     struct VisibleCatalog;
     impl Schedule for VisibleCatalog {
         fn channel_count(&self) -> usize {
@@ -295,8 +295,8 @@ mod visibility_tests {
         fn group_start(&self, _: usize) -> usize {
             0
         }
-        fn group_name(&self, _: usize) -> String {
-            "Local".into()
+        fn group_label(&self, _: usize) -> GroupName {
+            GroupName::Named("Local".into())
         }
         fn channel_name(&self, c: usize) -> String {
             ["Hidden news", "Visible news", "Visible sport"][c].into()
@@ -313,8 +313,8 @@ mod visibility_tests {
         fn programs_between(&self, c: usize, t: i32, m: i32) -> Vec<Program> {
             SyntheticSchedule.programs_between(c, t, m)
         }
-        fn title(&self, c: usize, p: Program) -> String {
-            SyntheticSchedule.title(c, p)
+        fn listing(&self, c: usize, p: Program) -> Option<Listing> {
+            SyntheticSchedule.listing(c, p)
         }
     }
     #[test]

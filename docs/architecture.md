@@ -373,7 +373,6 @@ a module that holds no Domain values, so that the move is a file move.
 | State holders in three other Domain crates | `iptv_library::{details, epg_sources, guide_assign, guide_inspect, guide_repair_screen, playlists}`, `iptv_search::{state, selection}`, `iptv_settings::screen` | 1 | `iptv-presentation` |
 | Domain crates' tests that drive a holder | `iptv-guide`'s unit tests build `Focus`, `ChannelList` and `ListView` over its schedule | 1 | They move beside the holders, in `iptv-presentation`'s tests, with `iptv-guide`'s fixtures exported for tests. |
 | A holder issues an operation's identity | Each `Wizard` numbers its imports from 1 (`ImportId`), so a wizard opened again can take a reply meant for the last one | 5 | The runtime issues the identity when it accepts the import. |
-| Placeholders in the same string as a title | `Schedule::{title, title_in, group_name, group_name_in, all_channels_name}`; `iptv-guide` translates "No information", "Loading…" and its own "Other" bucket into them, and `lists.rs` compares the all-channels name as a string. The bridge compares titles with those strings (`iptv-web/src/grid.rs`), so a program titled "Loading…" reads as a placeholder. | 7 | The schedule returns a listing (a stored title unchanged, no information, or loading) and a group's name (a stored name, the guide's ungrouped bucket, a fixed entry, or an all-channels kind). The presentation words them. |
 | Refusals as English sentences | `recording::Request::validate` returns sentences, which reach the screen through `iptv-store-sqlite`'s error and the runtime's admission | 7 | A typed reason. |
 | Localization in the Domain's crate | `iptv_core::{i18n, clock}` and the crate's `external-catalog` feature | 1 | `iptv-presentation`, once nothing below it translates. The `key` marker for message ids stays in `iptv-core`. |
 | A lookup that reads a file | In a browser package the first lookup of a language reads a package file inside `translate`, and a failed read stays an empty catalog | 4 | The host loads a language's catalog and hands it in; `translate` only looks up. |
@@ -386,8 +385,9 @@ these rows in three pull requests:
    keep their original paths through temporary re-exports. Layout and touch
    geometry live in `iptv-app`, and the platform adapter owns the desktop
    picture-in-picture window identity and placement.
-2. **Listings as values.** The placeholder row, which is the one change a
-   viewer can see.
+2. **Listings as values.** The guide exposes stored titles, gaps and
+   loading slots as distinct values. Both front ends preserve a stored
+   title even when it has the same wording as a placeholder.
 3. **`iptv-presentation`.** The presentation files move, dependents first,
    then the localization. Renames only; front-end paths change once.
 

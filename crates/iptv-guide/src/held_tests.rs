@@ -1,6 +1,7 @@
 //! A cold start's first screen (`EpgSchedule::held_only`): only its hours
 //! are held; other times show as loading and ask for nothing.
 
+use iptv_core::guide::Listing;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -11,7 +12,7 @@ use iptv_epg::{
 };
 
 use super::pages::{PageRequest, PagedWindow};
-use super::{EpgSchedule, GuideChannel, LOADING, NO_INFORMATION};
+use super::{EpgSchedule, GuideChannel};
 
 /// Hour-aligned "now".
 const NOW: i64 = 1_800_000_000;
@@ -78,9 +79,9 @@ fn first_screen() -> (EpgSchedule, Rc<RefCell<Vec<PageRequest>>>) {
     (s, requests)
 }
 
-fn title_at(s: &EpgSchedule, t: i64) -> String {
+fn listing_at(s: &EpgSchedule, t: i64) -> Option<Listing> {
     let p = s.program_at(0, s.minute(t));
-    s.title(0, p)
+    s.listing(0, p)
 }
 
 #[test]
@@ -88,12 +89,15 @@ fn only_the_first_screen_is_held_and_nothing_is_asked_for() {
     let (s, requests) = first_screen();
     assert_eq!(s.held(), Some((FROM, TO)));
     // Now and the next hours: real programs.
-    let now = title_at(&s, NOW);
-    assert_eq!(now, format!("P{}", (NOW - FIRST) / LEN));
-    assert_ne!(title_at(&s, NOW + 5 * 3600), LOADING);
+    let now = listing_at(&s, NOW);
+    assert_eq!(
+        now,
+        Some(Listing::Title(format!("P{}", (NOW - FIRST) / LEN)))
+    );
+    assert_ne!(listing_at(&s, NOW + 5 * 3600), Some(Listing::Loading));
     // Later, earlier today and older days: loading, with no page read.
     for t in [TO + 3600, NOW + DAY, NOW - 3 * 3600, NOW - DAY - 3600] {
-        assert_eq!(title_at(&s, t), LOADING, "{}", t - NOW);
+        assert_eq!(listing_at(&s, t), Some(Listing::Loading), "{}", t - NOW);
     }
     assert!(!s.ensure_loaded(NOW + DAY));
     assert!(s.ensure_loaded(NOW));
@@ -109,7 +113,7 @@ fn a_program_across_the_first_screens_end_is_held_whole() {
     assert!(start < TO && stop > TO);
     let p = s.program_at(0, s.minute(TO + 60));
     assert_eq!((s.unix(p.start), s.unix(p.end)), (start, stop));
-    assert_eq!(s.title(0, p), format!("P{across}"));
+    assert_eq!(s.listing(0, p), Some(Listing::Title(format!("P{across}"))));
     // Cells across the edge follow each other: the loading slot after it
     // starts where it ends.
     let cells = s.programs_between(0, s.minute(TO - 3600), 4 * 60);
@@ -118,7 +122,7 @@ fn a_program_across_the_first_screens_end_is_held_whole() {
     }
     let next = s.program_at(0, s.minute(stop));
     assert_eq!(s.unix(next.start), stop);
-    assert_eq!(s.title(0, next), LOADING);
+    assert_eq!(s.listing(0, next), Some(Listing::Loading));
 }
 
 #[test]
@@ -139,13 +143,19 @@ fn channels_off_the_first_screen_show_as_loading() {
     };
     // Every channel held: `b` has no guide.
     let all = make();
-    assert_eq!(title_at(&all, NOW), format!("P{}", (NOW - FIRST) / LEN));
+    assert_eq!(
+        listing_at(&all, NOW),
+        Some(Listing::Title(format!("P{}", (NOW - FIRST) / LEN)))
+    );
     let b = all.program_at(1, all.minute(NOW));
-    assert_eq!(all.title(1, b), NO_INFORMATION);
+    assert_eq!(all.listing(1, b), Some(Listing::Gap));
     // Only `a` held: `b` is still loading, in hour slots.
     let first = make().held_channels([ChannelKey::new("a")]);
-    assert_eq!(title_at(&first, NOW), format!("P{}", (NOW - FIRST) / LEN));
+    assert_eq!(
+        listing_at(&first, NOW),
+        Some(Listing::Title(format!("P{}", (NOW - FIRST) / LEN)))
+    );
     let b = first.program_at(1, first.minute(NOW + 60));
     assert_eq!((first.unix(b.start), first.unix(b.end)), (NOW, NOW + 3600));
-    assert_eq!(first.title(1, b), LOADING);
+    assert_eq!(first.listing(1, b), Some(Listing::Loading));
 }

@@ -10,6 +10,7 @@
 [untranslated]
 
 [not-shown]
+# The persisted fallback group name is also used to recognize the generated bucket.
 # CSS grid tracks for the wide and compact Search header.
 iptv-app/src/search_view/view.rs	auto minmax(0, 1fr) auto
 iptv-app/src/search_view/view.rs	minmax(0, 1fr) auto
