@@ -445,7 +445,7 @@ fn decode(s: &Setting, json: &Json) -> Decoded {
 /// or off their step.
 fn clamp(s: &Setting, mut value: Value) -> Value {
     if let (Value::Int(n) | Value::Duration(n), Some((min, max, step))) =
-        (&mut value, crate::screen::grid(&s.ty))
+        (&mut value, validate::grid(&s.ty))
     {
         *n = clamp_to_grid(*n, min, max, step).expect("setting grid was validated before clamping");
     }

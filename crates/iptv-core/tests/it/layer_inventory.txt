@@ -13,7 +13,6 @@ shipped iptv-library/src/lib.rs iptv_library::playlists
 shipped iptv-player-mpv/src/mpv/gtk_placement.rs iptv_core::pip_window
 shipped iptv-search/src/lib.rs iptv_search::selection
 shipped iptv-search/src/lib.rs iptv_search::state
-shipped iptv-settings/src/backup.rs iptv_settings::screen
 shipped iptv-settings/src/lib.rs iptv_settings::screen
 test iptv-guide/src/combined.rs iptv_core::lists::ChannelList
 test iptv-guide/src/combined.rs iptv_core::lists::Entry
