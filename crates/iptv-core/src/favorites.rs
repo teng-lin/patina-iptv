@@ -162,14 +162,6 @@ impl Recent {
     pub fn channels(&self, index: &KeyIndex) -> Vec<usize> {
         index.channels(&self.keys)
     }
-
-    /// The player's History: the same channels as the Recently watched
-    /// list, and the row of `playing` (catalog) among them.
-    pub fn history(&self, index: &KeyIndex, playing: Option<usize>) -> History {
-        let channels = self.channels(index);
-        let playing = playing.and_then(|p| channels.iter().position(|&c| c == p));
-        History { channels, playing }
-    }
 }
 
 /// The recently watched channels as the player's History lists them.
@@ -179,6 +171,12 @@ pub struct History {
     pub channels: Vec<usize>,
     /// The row of the playing channel, marked (and focused when it opens).
     pub playing: Option<usize>,
+}
+
+/// Build the history display from the ordered channels and the playing channel.
+pub fn history(channels: Vec<usize>, playing: Option<usize>) -> History {
+    let playing = playing.and_then(|playing| channels.iter().position(|&c| c == playing));
+    History { channels, playing }
 }
 
 /// What turned `before` into `after`: (added, removed) channels.
@@ -248,7 +246,7 @@ mod tests {
         r.played(&key(2));
         r.played(&key(30));
         let index = KeyIndex::build(&SyntheticSchedule);
-        let h = r.history(&index, Some(30));
+        let h = history(r.channels(&index), Some(30));
         assert_eq!(
             h.channels,
             [30, 2, 9, 4],
@@ -256,9 +254,12 @@ mod tests {
         );
         assert_eq!(h.playing, Some(0));
         // Replaying an older one (catch-up does not record) keeps the order.
-        assert_eq!(r.history(&index, Some(9)).playing, Some(2));
-        assert_eq!(r.history(&index, Some(500)).playing, None);
-        assert_eq!(r.history(&index, None).channels, r.channels(&index));
+        assert_eq!(history(r.channels(&index), Some(9)).playing, Some(2));
+        assert_eq!(history(r.channels(&index), Some(500)).playing, None);
+        assert_eq!(
+            history(r.channels(&index), None).channels,
+            r.channels(&index)
+        );
     }
 
     #[test]

@@ -16,13 +16,10 @@ shipped iptv-runtime/src/commands.rs iptv_core::organization::Action
 shipped iptv-runtime/src/commands.rs iptv_core::organization::Editor
 shipped iptv-runtime/src/data.rs iptv_core::wizard
 shipped iptv-runtime/src/data/library.rs iptv_core::wizard
-shipped iptv-runtime/src/favorites.rs iptv_core::favorites::History
 shipped iptv-runtime/src/imports.rs iptv_core::wizard
 shipped iptv-runtime/src/lib.rs iptv_core::wizard
 shipped iptv-runtime/src/library.rs iptv_core::wizard
 shipped iptv-runtime/src/opening.rs iptv_core::wizard
-shipped iptv-runtime/src/operations.rs favorites_history returns History
-shipped iptv-runtime/src/operations.rs iptv_core::favorites::History
 shipped iptv-runtime/src/operations.rs iptv_core::wizard
 shipped iptv-runtime/src/parental.rs iptv_core::wizard
 shipped iptv-runtime/src/wizard_map.rs iptv_core::i18n
