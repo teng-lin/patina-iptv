@@ -24,6 +24,7 @@ LAYERS = {
     "iptv-web": "adapters",
     "iptv-runtime": "application",
     "iptv-nav": "presentation",
+    "iptv-presentation": "presentation",
     "iptv-app": "view",
     "nsh-tv": "view",
     "iptv-tui": "host",
@@ -41,7 +42,7 @@ ALLOWED = {
 }
 # The old bridge shares iptv-web with the browser's adapters. Only the
 # bridge can use presentation, and only while its feature is enabled.
-BRIDGE_DEPENDENCIES = {"iptv-nav"}
+BRIDGE_DEPENDENCIES = {"iptv-nav", "iptv-presentation"}
 # The native player draws through NSH. The views and entry points reach NSH
 # directly to assemble a platform host, and nsh-tv decodes its input.
 NSH_USERS = {"iptv-player-mpv", "iptv-app", "nsh-tv", "iptv-tui", "patina-tizen"}
@@ -107,6 +108,8 @@ def allowed(package, dependency, blocked):
         return bridge_gates(package, dependency)
     if name == "iptv-web" and LAYERS[user] in {"adapters", "application"}:
         return adapters_only(package, dependency, blocked)
+    if name == "iptv-presentation":
+        return user == "iptv-app"
     if name in LAYERS:
         return LAYERS[name] in ALLOWED[LAYERS[user]]
     if name.startswith("nsh-"):
@@ -166,6 +169,14 @@ class LayerBoundaries(unittest.TestCase):
                 self.assertFalse(allowed(package, dependency, blocked))
         package["features"]["ui"] = ["web?/adapters"]
         self.assertTrue(allowed(package, dependency, blocked))
+
+    def test_only_front_ends_can_depend_on_presentation(self):
+        dependency = {"name": "iptv-presentation", "rename": None, "optional": True, "kind": None}
+        for user in set(LAYERS) - {"iptv-app", "iptv-web"}:
+            self.assertFalse(allowed({"name": user}, dependency, set()))
+        self.assertTrue(allowed({"name": "iptv-app"}, dependency, set()))
+        bridge = {"name": "iptv-web", "features": {"bridge": ["dep:iptv-presentation"]}}
+        self.assertTrue(allowed(bridge, dependency, set()))
 
     def test_renamed_target_dependency_cannot_cross_layers(self):
         runtime = {"name": "iptv-runtime"}
