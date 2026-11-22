@@ -215,7 +215,7 @@ visible entry point for touch and pointer users.
   right-click open program actions on a guide cell, channel actions on a
   channel header or player-list row, and group options on a group. In the
   guide grid, the program menu also includes actions for its channel and
-  group. The keyboard's M shortcut on the All channels group adds a
+  group. Menu or M on the single-playlist All channels group adds a
   playlist. During fullscreen playback, Menu and long OK open the playback bar
   ([TV controls](tv-controls.md)).
 - **Now:** while touch or a pointer drives the app, a visible "More options"

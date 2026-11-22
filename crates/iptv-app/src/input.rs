@@ -949,10 +949,11 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            if (key == RemoteKey::Menu && !long_press() && entry == iptv_presentation::lists::ALL)
+            let combined = crate::data::combined::active(&crate::runtime());
+            if (key == RemoteKey::Menu && !combined && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
                     && ui.app.library.shown.get_untracked().is_none()
-                    && !crate::data::combined::active(&crate::runtime()))
+                    && !combined)
             {
                 crate::wizard_view::open_add(ui);
             }

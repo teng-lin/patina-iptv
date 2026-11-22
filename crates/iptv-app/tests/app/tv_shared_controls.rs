@@ -465,7 +465,7 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
 /// The menu's heading names the channel; Back closes it.
 #[track_caller]
 fn menu_opens_for(app: &mut crate::Headless, channel: &str, program_menu: bool) {
-    let favorite = "id:menu-panel >> text:Add to favorites";
+    let favorite = "id:menu-panel >> text:/^(Add to favorites|Remove from favorites)$/";
     step(app.wait_for(favorite));
     assert!(
         app.screen()
@@ -474,11 +474,12 @@ fn menu_opens_for(app: &mut crate::Headless, channel: &str, program_menu: bool) 
         "the menu is for {channel}: {:?}",
         app.screen().texts()
     );
-    assert_eq!(
-        app.shows("id:menu-panel >> text:Manage favorites…"),
-        program_menu,
-        "bulk group actions belong to the program menu",
-    );
+    if program_menu {
+        step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+    } else {
+        assert!(!app.shows("id:menu-panel >> text:Search"));
+        assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
+    }
     step(app.back());
     step(app.wait_for_gone(favorite, Duration::from_secs(2)));
 }

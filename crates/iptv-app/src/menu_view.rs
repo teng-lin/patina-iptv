@@ -146,8 +146,8 @@ fn open_for(ui: Ui, channel: usize, minute: i32) {
             MenuItem::SortChannels => scope
                 .as_ref()
                 .is_some_and(|(_, kind)| *kind != Kind::Favorites),
-            MenuItem::CopyChannels => copy_scope(scope.as_ref()).is_some(),
-            MenuItem::CreateGroup => scope.is_some(),
+            MenuItem::CopyChannels => copy_scope(ui, &list, scope.as_ref()).is_some(),
+            MenuItem::CreateGroup => management_source(ui, &list, scope.as_ref()).is_some(),
             _ => implemented(item, ui.player_surface),
         }
     });
@@ -250,10 +250,12 @@ pub fn perform(ui: Ui, item: MenuItem) {
         return;
     };
     ui.menu.set(None);
-    if list.resolve(&*crate::schedule()).is_none() {
+    let scope = list
+        .resolve(&*crate::schedule())
+        .and_then(|_| channel_scope(ui, &list));
+    if target == Target::Group && scope.is_none() && !aggregate_options(&list) {
         return;
     }
-    let scope = channel_scope(ui, &list);
     let channel = menu_channel(&target);
     if channel.is_none() && target != Target::Group {
         return;
@@ -332,12 +334,12 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         MenuItem::CreateGroup => {
-            if let Some((source, _)) = scope {
+            if let Some(source) = management_source(ui, &list, scope.as_ref()) {
                 crate::custom_groups::open(ui, source);
             }
         }
         MenuItem::CopyChannels => {
-            if let Some((source, channels)) = copy_scope(scope.as_ref()) {
+            if let Some((source, channels)) = copy_scope(ui, &list, scope.as_ref()) {
                 crate::custom_groups::open_copy(ui, source, channels);
             }
         }
@@ -497,15 +499,28 @@ fn directly_blocked(list: &ListId, item: MenuItem, channel: Option<usize>) -> bo
     }
 }
 
-fn copy_scope(scope: Option<&(SourceId, Kind)>) -> Option<(SourceId, ChannelScope)> {
-    let (source, kind) = scope?;
-    let channels = match kind {
-        Kind::Channels => ChannelScope::All,
-        Kind::GroupChannels(id) => ChannelScope::Group(id.clone()),
-        Kind::CustomChannels(id) => ChannelScope::Custom(*id),
-        _ => return None,
+fn management_source(ui: Ui, list: &ListId, scope: Option<&(SourceId, Kind)>) -> Option<SourceId> {
+    if let Some((source, _)) = scope {
+        Some(*source)
+    } else if *list == ListId::Recent && !crate::data::combined::active(&crate::runtime()) {
+        ui.app.library.shown.get_untracked()
+    } else {
+        None
+    }
+}
+
+fn copy_scope(
+    ui: Ui,
+    list: &ListId,
+    scope: Option<&(SourceId, Kind)>,
+) -> Option<(SourceId, ChannelScope)> {
+    let source = management_source(ui, list, scope)?;
+    let channels = match scope.map(|(_, kind)| kind) {
+        Some(Kind::GroupChannels(id)) => ChannelScope::Group(id.clone()),
+        Some(Kind::CustomChannels(id)) => ChannelScope::Custom(*id),
+        _ => ChannelScope::All,
     };
-    Some((*source, channels))
+    Some((source, channels))
 }
 
 fn current_list(ui: Ui) -> ListId {

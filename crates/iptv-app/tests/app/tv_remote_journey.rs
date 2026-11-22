@@ -408,13 +408,18 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     hold(app, RemoteKey::Ok, 600, false);
     step(app.wait_for("id:menu-panel >> text:Channel order"));
     assert!(!shows(app, "id:menu-panel >> text:Rename group"));
-    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for_gone(
+        "id:menu-panel >> text:Channel order",
+        Duration::from_secs(2),
+    ));
     assert!(shows(app, "id:guide-groups >> text:Favorites"));
     step(app.remote_tap(RemoteKey::Down));
     hold(app, RemoteKey::Ok, 600, true);
     step(app.wait_for("id:menu-panel >> role:header[News]"));
     assert!(shows(app, "id:menu-panel >> text:Rename group"));
-    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for_gone("id:menu-panel >> text:Rename group", Duration::from_secs(2)));
     step(app.remote_tap(RemoteKey::Up));
     step(app.remote_tap(RemoteKey::Right));
     assert_eq!(iptv_app::player_opens(0), 0, "browsing never plays");
@@ -436,7 +441,7 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     step(app.wait_for("id:menu-panel >> role:header[Local B]"));
     step(app.wait_for("id:menu-panel >> text:Channel options…"));
     assert!(!menu_open(app), "the list opens channel actions");
-    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
     assert!(list_open(app), "Back closes only the channel menu");
     let row = "id:channel-list >> role:row >> text:2  Local B";
     let selected_text = app.screen().span_style(row).unwrap().color;
@@ -445,6 +450,16 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
         nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
         "Back leaves the same channel focused",
     );
+    hold(app, RemoteKey::Ok, 600, true);
+    step(app.wait_for("id:menu-panel >> text:Remove from favorites"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for_gone(
+        "id:menu-panel >> text:Remove from favorites",
+        Duration::from_secs(2),
+    ));
+    hold(app, RemoteKey::Ok, 600, false);
+    step(app.wait_for("id:menu-panel >> text:Add to favorites"));
+    step(app.back());
     // A touch that changes columns while OK is down cannot retarget its
     // pending channel gesture to the group underneath.
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
@@ -454,7 +469,7 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
     assert!(!shows(app, "id:menu-panel >> text:Channel order"));
     assert!(!shows(app, "id:menu-panel >> text:Channel options…"));
-    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
     step(app.run_for(Duration::from_secs(3)));
     assert_eq!(
         iptv_app::player_opens(0),

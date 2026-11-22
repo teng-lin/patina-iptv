@@ -119,13 +119,7 @@ impl Menu {
     }
 
     pub fn focused(&self) -> Option<MenuItem> {
-        match self.rows.get(self.focus) {
-            Some(Row::Action {
-                item,
-                enabled: true,
-            }) => Some(*item),
-            _ => None,
-        }
+        self.action_at(self.focus)
     }
 
     /// Moves to the next focusable row in `step`'s direction; stays at the

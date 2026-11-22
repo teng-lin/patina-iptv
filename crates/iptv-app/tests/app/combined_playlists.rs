@@ -256,7 +256,7 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     // The aggregate entry can manage favorites across sources. Copying
     // from either of the identically named News groups stays in its source.
     step(app.press("text:☰  All playlists"));
-    step(app.right_click("id:guide-groups >> text:All playlists"));
+    step(app.long_press("id:guide-groups >> text:All playlists"));
     step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
     step(app.back());
     step(app.press("id:guide-groups >> text:    News >> nth=1"));

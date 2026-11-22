@@ -23,12 +23,17 @@ pub fn open(ui: Ui, list: &ListId, channel: Option<usize>) {
     let Some(group) = list.resolve(&*catalog) else {
         return;
     };
-    let channels = ChannelList::build(
-        group,
-        &*catalog,
-        &crate::favorites::favorite_channels(),
-        &crate::favorites::recent_channels(),
-    );
+    let channels = ui.list.get_untracked();
+    let channels = if channels.entry() == group {
+        channels
+    } else {
+        std::rc::Rc::new(ChannelList::build(
+            group,
+            &*catalog,
+            &crate::favorites::favorite_channels(),
+            &crate::favorites::recent_channels(),
+        ))
+    };
     let mut editor = FavoritesEditor::new(group, channels.channels().to_vec());
     editor.focus = channel.and_then(|ch| channels.row_of(ch)).unwrap_or(0);
     ui.editor.set(Some(editor));
