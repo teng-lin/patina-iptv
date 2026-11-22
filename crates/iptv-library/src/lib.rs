@@ -253,11 +253,7 @@ pub struct Current {
     pub bound: Option<(iptv_epg::FeedId, String, MatchKind)>,
 }
 
-pub mod details;
-pub mod epg_sources;
-pub mod guide_assign;
 pub mod guides;
-pub mod playlists;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OrganizationScope {
@@ -284,9 +280,3 @@ pub mod inspection;
 
 /// Transactional guide repair contract values.
 pub mod guide_repair;
-
-/// Portable state for inspecting guide coverage and candidate schedules.
-pub mod guide_inspect;
-
-/// Portable batch guide repair editor state.
-pub mod guide_repair_screen;

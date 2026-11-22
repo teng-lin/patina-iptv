@@ -5,13 +5,13 @@
 //! Focus is kept by identity (a source's feed id), never by position.
 //! Pure: the view feeds it keys and taps and carries out its [`Effect`]s.
 
-use crate::SourceId;
 use iptv_core::wizard::{Field, FieldError, validate_field};
 use iptv_epg::FeedId as Feed;
+use iptv_library::SourceId;
 use iptv_providers::SecretUrl;
 
-use crate::SourceLine;
-use crate::guides::{Edit, MAX_SHIFT_MINUTES};
+use iptv_library::SourceLine;
+use iptv_library::guides::{Edit, MAX_SHIFT_MINUTES};
 
 /// The time shift's step.
 pub const SHIFT_STEP: i32 = 30;
@@ -341,7 +341,7 @@ impl Screen {
             Act::Relink => {
                 // A link with an account in it is never put in the field.
                 let shown = Some(line.source.url.expose().to_owned())
-                    .filter(|l| crate::playlists::plain_link(l));
+                    .filter(|l| super::playlists::plain_link(l));
                 let fresh = Editing {
                     kind: EditKind::Relink(feed),
                     text: shown.unwrap_or_default(),

@@ -20,14 +20,14 @@
 //! a text editor (OK keeps a valid text, Back cancels), a command runs
 //! (after a confirmation when the catalog asks for one).
 
-pub use crate::validate::grid;
+pub use iptv_settings::validate::grid;
 
-use crate::catalog::{self, Command};
-use crate::schema::{Section, Setting, ValueType};
-use crate::scope::Target;
-use crate::store::Settings;
-use crate::validate;
-use crate::value::Value;
+use iptv_settings::Settings;
+use iptv_settings::Target;
+use iptv_settings::Value;
+use iptv_settings::catalog::{self, Command};
+use iptv_settings::schema::{Section, Setting, ValueType};
+use iptv_settings::validate;
 
 /// Rows (or list entries) one Page key moves.
 const PAGE: usize = 5;

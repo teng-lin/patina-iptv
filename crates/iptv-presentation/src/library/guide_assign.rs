@@ -4,10 +4,10 @@
 //! identity. Pure: the view feeds it keys, taps and typed text and carries
 //! out its [`Effect`]s.
 
-use crate::{GuideChannel, SourceId};
 use iptv_epg::FeedId as Feed;
+use iptv_library::{GuideChannel, SourceId};
 
-use crate::{Choice, Current};
+use iptv_library::{Choice, Current};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Row {

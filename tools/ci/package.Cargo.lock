@@ -2959,7 +2959,6 @@ dependencies = [
 name = "iptv-library"
 version = "0.1.5"
 dependencies = [
- "iptv-core",
  "iptv-epg",
  "iptv-providers",
 ]

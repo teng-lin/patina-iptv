@@ -268,11 +268,11 @@ manifests say today.
 | Crate | Layer | Depends on (workspace crates) |
 | --- | --- | --- |
 | `iptv-core` | Domain and presentation, split into modules | none |
-| `iptv-settings` | Domain, with one feature's state holder | none |
+| `iptv-settings` | Domain | none |
 | `iptv-providers`, `iptv-epg` | Domain | `iptv-core` |
 | `iptv-guide` | Domain | `iptv-core`, `iptv-epg`, `iptv-providers` |
-| `iptv-search` | Domain, with one feature's state holder | `iptv-core`, `iptv-epg` |
-| `iptv-library` | Domain, with six features' state holders | `iptv-core`, `iptv-providers`, `iptv-epg` |
+| `iptv-search` | Domain | `iptv-core`, `iptv-epg` |
+| `iptv-library` | Domain | `iptv-providers`, `iptv-epg` |
 | `iptv-import` | Domain | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-settings`, `iptv-library` |
 | `iptv-nav` | Presentation state | none |
 | `iptv-net` | Adapters | `iptv-providers`, `iptv-import` |
@@ -370,7 +370,6 @@ a module that holds no Domain values, so that the move is a file move.
 | --- | --- | --- | --- |
 | Modules that are presentation state only | `iptv_core::{browse, browse_playback, channel_list, channel_number, channel_picker, editor, heard, library_recovery, menu, panels, pip, play_bar, player_info, player_options, seek_hold, sound}` and `playback_windows` | 1 | `iptv-presentation` |
 | Temporary re-exports | The split presentation holders still live under their original `iptv-core` paths. The `layer_inventory` test tracks those re-exports. | 1 | Move each holder to `iptv-presentation` and remove its re-export. |
-| State holders in three other Domain crates | `iptv_library::{details, epg_sources, guide_assign, guide_inspect, guide_repair_screen, playlists}`, `iptv_search::{state, selection}`, `iptv_settings::screen` | 1 | `iptv-presentation` |
 | Domain crates' tests that drive a holder | `iptv-guide`'s unit tests build `Focus`, `ChannelList` and `ListView` over its schedule | 1 | They move beside the holders, in `iptv-presentation`'s tests, with `iptv-guide`'s fixtures exported for tests. |
 | A holder issues an operation's identity | Each `Wizard` numbers its imports from 1 (`ImportId`), so a wizard opened again can take a reply meant for the last one | 5 | The runtime issues the identity when it accepts the import. |
 | Refusals as English sentences | `recording::Request::validate` returns sentences, which reach the screen through `iptv-store-sqlite`'s error and the runtime's admission | 7 | A typed reason. |

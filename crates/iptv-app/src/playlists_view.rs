@@ -16,9 +16,9 @@
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
 
-use iptv_library::details;
+use iptv_presentation::library::details;
 mod details_card;
-use iptv_library::playlists as state;
+use iptv_presentation::library::playlists as state;
 mod words;
 
 use crate::runtime::model::SourceId;

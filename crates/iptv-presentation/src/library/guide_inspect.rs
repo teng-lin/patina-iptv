@@ -1,5 +1,5 @@
 //! Guide inspection screen state. Focus and reply ownership use content identity.
-use crate::{SourceId, inspection::*};
+use iptv_library::{SourceId, inspection::*};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {

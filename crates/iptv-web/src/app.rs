@@ -24,13 +24,14 @@ use iptv_import::{
 };
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
 use iptv_presentation::play_bar::{Control, PlayBar};
+use iptv_presentation::search::{
+    ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchState, Tab,
+    select_result,
+};
 use iptv_providers::model::{M3uSourceConfig, SourceConfig, XtreamCredentials};
 use iptv_providers::xtream::StreamFormat;
 use iptv_providers::{Secret, SecretUrl};
-use iptv_search::{
-    ResultId, ResultPolicy, ResultSelection, SearchAction, SearchEffect, SearchHistory,
-    SearchState, Tab, select_result,
-};
+use iptv_search::SearchHistory;
 use serde_json::{Value, json};
 
 use crate::exec::{HostFetch, spawn};
@@ -334,10 +335,10 @@ impl App {
             // Program results the new guide no longer lists are dropped;
             // the others stay (with the tab and the focused result) until
             // the query runs again on the new index. Channels run now.
-            if state.phase() != iptv_search::Phase::Idle {
+            if state.phase() != iptv_presentation::search::Phase::Idle {
                 self.search_return.get_or_insert_with(|| {
                     let result = match state.focus() {
-                        iptv_search::Focus::Result(id) => Some(id.clone()),
+                        iptv_presentation::search::Focus::Result(id) => Some(id.clone()),
                         _ => None,
                     };
                     (state.tab(), result)
@@ -580,7 +581,7 @@ impl App {
                 }
                 a.search
                     .as_ref()
-                    .filter(|s| s.phase() != iptv_search::Phase::Idle)
+                    .filter(|s| s.phase() != iptv_presentation::search::Phase::Idle)
                     .map(|s| s.query().to_owned())
             });
             if let Some(query) = rerun {
@@ -632,7 +633,7 @@ impl App {
         };
         let on_results = matches!(
             state.focus(),
-            iptv_search::Focus::Result(_) | iptv_search::Focus::Tabs
+            iptv_presentation::search::Focus::Result(_) | iptv_presentation::search::Focus::Tabs
         );
         if !on_results || result.is_some_and(|id| state.focus_listed(&id)) {
             return;
@@ -683,7 +684,8 @@ impl App {
             Action::MoveLeft => SearchAction::Left,
             Action::MoveRight => SearchAction::Right,
             Action::Select
-                if *state.focus() == iptv_search::Focus::Input && !state.keyboard_visible() =>
+                if *state.focus() == iptv_presentation::search::Focus::Input
+                    && !state.keyboard_visible() =>
             {
                 SearchAction::ShowKeyboard
             }
@@ -699,7 +701,7 @@ impl App {
         if self.mode == Mode::Search
             && let Some(state) = &self.search
         {
-            let action = if complete && state.phase() != iptv_search::Phase::Idle {
+            let action = if complete && state.phase() != iptv_presentation::search::Phase::Idle {
                 SearchAction::Ok
             } else {
                 SearchAction::KeyboardHidden

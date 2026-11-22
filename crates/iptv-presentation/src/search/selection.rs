@@ -3,7 +3,8 @@
 use iptv_core::guide::Airing;
 use iptv_epg::UnixTime;
 
-use crate::{ProgramHit, ResultId};
+use super::ResultId;
+use iptv_search::ProgramHit;
 
 /// What a presenter supports when a search result is selected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
