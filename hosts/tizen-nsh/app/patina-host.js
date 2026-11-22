@@ -9,7 +9,9 @@
  * size, first render, position and timeline, behind one rule of Patina's
  * player contract it cannot keep: AVPlay sends no request headers of the
  * app's, so a source that needs them reports an error instead of playing
- * without them (iptv-player-mpv's `source.headers`).
+ * without them (iptv-player-mpv's `source.headers`). The User-Agent is the
+ * exception: no page can set it (a forbidden header), so AVPlay's own is
+ * sent, as for every request the app makes on this TV.
  *
  * Plain ES2017 (Chromium 69).
  */
@@ -24,6 +26,13 @@ function note(list, entry) {
     if (list.length > 50) list.shift();
 }
 
+/* Headers a page cannot send whatever it does: the TV's own go instead. */
+var BROWSER_OWNED = /^user-agent$/i;
+
+function required(headers) {
+    return Object.keys(headers || {}).filter(function (name) { return !BROWSER_OWNED.test(name); });
+}
+
 function PatinaPlayer(ctx) {
     var emit = ctx.emit;
     ctx.emit = function (name, data) {
@@ -34,7 +43,7 @@ function PatinaPlayer(ctx) {
     var refused = null;
     function filtered(props) {
         var source = props.source;
-        if (source && source.headers && Object.keys(source.headers).length) {
+        if (source && required(source.headers).length) {
             if (refused !== source.token) {
                 refused = source.token;
                 ctx.emit('error', { code: 'headersUnsupported' });
@@ -54,7 +63,7 @@ function PatinaPlayer(ctx) {
                 changed: Object.keys(changed),
                 source: !!source,
                 token: source ? source.token : null,
-                headers: source && source.headers ? Object.keys(source.headers).length : 0,
+                headers: source ? Object.keys(source.headers || {}) : [],
                 paused: all.paused
             });
             if (inner.props) inner.props(filtered(changed), filtered(all), removed);
