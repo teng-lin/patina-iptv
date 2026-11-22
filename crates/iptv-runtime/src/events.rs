@@ -40,6 +40,10 @@ pub enum RuntimeEvent {
     OpenPlaylists,
     ClosePlaylists,
     FirstRun,
+    StoreStartupFailed {
+        path: Option<std::path::PathBuf>,
+        error: super::Error,
+    },
     Notify(&'static str),
     ResumeFullscreen,
     GuideChanged,

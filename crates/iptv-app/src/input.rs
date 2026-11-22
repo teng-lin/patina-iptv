@@ -732,6 +732,9 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     use crate::overlays::Overlay;
     let top = ui.top_overlay();
     let mv = |m: Move| crate::lists::navigate(ui, m);
+    if top == Some(Overlay::StoreStartupFailure) {
+        return;
+    }
     if top == Some(Overlay::Vod) {
         crate::vod_view::key(ui, action);
         return;

@@ -15,6 +15,7 @@ use crate::Ui;
 /// A screen, popup or list that can be open above the guide and the video.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
+    StoreStartupFailure,
     Parental,
     Wizard,
     Recordings,
@@ -59,7 +60,8 @@ impl Overlay {
             | Self::RemoteEditor
             | Self::Settings
             | Self::FavoritesEditor => Context::Editor,
-            Self::Parental
+            Self::StoreStartupFailure
+            | Self::Parental
             | Self::Wizard
             | Self::Playlists
             | Self::GuideAssign
@@ -72,7 +74,8 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 20] = [
+    pub(crate) const ALL: [Overlay; 21] = [
+        Overlay::StoreStartupFailure,
         Overlay::Parental,
         Overlay::Wizard,
         Overlay::Recordings,
@@ -98,6 +101,7 @@ impl Overlay {
     /// Whether it is open (a tracked read, like each screen's `is_open`).
     pub(crate) fn is_open(self, ui: Ui) -> bool {
         match self {
+            Overlay::StoreStartupFailure => ui.store_startup_failure.with(Option::is_some),
             Overlay::Parental => crate::parental_view::is_open(ui),
             Overlay::Wizard => crate::wizard_view::is_open(ui),
             Overlay::Vod => crate::vod_view::is_open(ui),
@@ -142,7 +146,8 @@ impl Overlay {
     /// falls through such a screen's background is not a tap on the video.
     pub(crate) fn covers_video(self) -> bool {
         match self {
-            Overlay::Parental
+            Overlay::StoreStartupFailure
+            | Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -174,7 +179,8 @@ impl Overlay {
     pub(crate) fn keeps_pointer_from_play_bar(self) -> bool {
         match self {
             Overlay::Description => false,
-            Overlay::Parental
+            Overlay::StoreStartupFailure
+            | Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -253,7 +259,8 @@ mod tests {
         // A variant missing from `ALL` would not be asked about: the match
         // makes adding one without counting it here a compile error.
         let listed = |overlay: Overlay| match overlay {
-            Overlay::Parental
+            Overlay::StoreStartupFailure
+            | Overlay::Parental
             | Overlay::Wizard
             | Overlay::Vod
             | Overlay::Recordings
@@ -275,7 +282,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 20);
+        assert_eq!(Overlay::ALL.len(), 21);
     }
 
     #[test]

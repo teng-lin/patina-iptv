@@ -447,7 +447,7 @@ fn startup_library_native(
     >,
 > + use<> {
     let directory = services.directory().to_owned();
-    services.call(move |store| {
+    services.call_at_startup(move |store| {
         iptv_store_sqlite::EpgStage::remove_stale(&directory);
         iptv_store_sqlite::CatalogStage::remove_stale(&directory);
         let sources = store.sources()?;

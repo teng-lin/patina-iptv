@@ -84,10 +84,12 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 }
                 (source, combined, any)
             });
-            owner.services().mark(
-                "store opened",
-                format_args!("{} ms", started.elapsed().as_millis()),
-            );
+            if startup.is_ok() {
+                owner.services().mark(
+                    "store opened",
+                    format_args!("{} ms", started.elapsed().as_millis()),
+                );
+            }
             match startup {
                 Ok((_, true, _)) => combined::start(&owner),
                 Ok((Some(stored), false, _)) => {
@@ -100,11 +102,12 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 }
                 Ok((None, false, false)) => owner.emit(crate::RuntimeEvent::FirstRun),
                 Err(error) => {
-                    log::warn!("iptv data: store unavailable ({error}); opening the wizard");
-                    owner.emit(crate::RuntimeEvent::FirstRun);
-                    owner.emit(crate::RuntimeEvent::Notify(
-                    "The saved library could not be opened. Unlock the device and restart the app.",
-                ));
+                    log::warn!("iptv data: store unavailable ({error})");
+                    owner.emit(crate::RuntimeEvent::StoreStartupFailed {
+                        path: owner.services().file_database_path(),
+                        error,
+                    });
+                    return;
                 }
             }
             crate::library::start_scheduler(&owner);
@@ -192,12 +195,19 @@ fn start_import_with(
                 let authorization = owner.parental_snapshot();
                 let admission = job.clone();
                 let auth = authorization.clone();
-                if services
-                    .read(move |store| crate::parental::require_import(store, &admission, &auth))
-                    .await
-                    .is_err()
-                {
-                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Auth))));
+                let admission = services
+                    .read(move |store| crate::parental::import_allowed(store, &admission, &auth))
+                    .await;
+                let failure = match admission {
+                    Ok(true) => None,
+                    Ok(false) => Some(FailureKind::Auth),
+                    Err(error) => {
+                        log::warn!("iptv data: import admission could not read the store: {error}");
+                        Some(FailureKind::Storage)
+                    }
+                };
+                if let Some(kind) = failure {
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(kind))));
                     return;
                 }
                 if job.purpose.shows_stored_first()

@@ -120,6 +120,54 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
         )
 }
 
+pub(crate) struct StoreFailure {
+    pub path: Option<std::path::PathBuf>,
+    pub error: crate::runtime::Error,
+}
+
+pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::IntoElement {
+    use crate::i18n::{tr, trf};
+    use crate::{scale::Scale, ui_kit};
+    use nsh_core::prelude::*;
+
+    let size = Scale::new();
+    dynamic(move || {
+        ui.store_startup_failure.with(|failure| {
+            failure.as_ref().map(|failure| {
+                let (detail, guidance) = match (failure.error.newer_schema(), &failure.path) {
+                    (Some((found, supported)), Some(_)) => (
+                        trf(
+                            "Database schema version {found} is newer than this build supports ({supported}).",
+                            &[("found", found.into()), ("supported", supported.into())],
+                        ),
+                        Some(tr("Upgrade Patina to open this library. To start over, close Patina and move the database file to a safe location.")),
+                    ),
+                    (None, Some(_)) => (
+                        failure.error.to_string(),
+                        Some(tr("Unlock the device, check file permissions, then reopen Patina.")),
+                    ),
+                    (_, None) => (failure.error.to_string(), None),
+                };
+                ui_kit::screen(ui, size)
+                    .test_id("store-startup-failure")
+                    .child(
+                        ui_kit::heading(size, tr("The saved library could not be opened"))
+                            .role(AccessibilityRole::Header),
+                    )
+                    .child(
+                        scroll().flex_1().child(
+                            view()
+                                .gap(move || size.px(12.0))
+                                .child(ui_kit::body(size, detail))
+                                .children(failure.path.iter().map(|path| ui_kit::body(size, path.display().to_string())))
+                                .children(guidance.map(|words| ui_kit::body(size, words))),
+                        ),
+                    )
+            })
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

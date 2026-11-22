@@ -162,6 +162,7 @@ iptv-runtime/src/favorites.rs	the favorites list changed during editing
 iptv-runtime/src/favorites.rs	the favorites order was not saved
 iptv-runtime/src/imports.rs	cannot create document identity
 iptv-runtime/src/imports.rs	cannot create private document directory
+iptv-runtime/src/imports.rs	import blocked by parental controls
 iptv-runtime/src/imports.rs	import superseded
 iptv-runtime/src/imports.rs	private document cannot be saved
 # Probe errors become typed inspection failures before reaching the UI.

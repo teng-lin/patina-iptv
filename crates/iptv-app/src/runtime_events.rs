@@ -96,6 +96,9 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
         RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
+        RuntimeEvent::StoreStartupFailed { path, error } => ui
+            .store_startup_failure
+            .set(Some(crate::startup::StoreFailure { path, error })),
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
             if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_some() {
