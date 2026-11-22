@@ -57,6 +57,7 @@ python3 tools/ci/test-native-candidates.py
 python3 tools/mpv-runtime-ios/test_build.py
 python3 tools/ci/test-check-parity.py
 python3 tools/ci/test-check-plan.py
+python3 tools/ci/test-layers.py
 python3 tools/ci/test-validation-plan.py
 python3 tools/ci/test-fuzz-targets.py
 python3 tools/performance/test_journeys.py
