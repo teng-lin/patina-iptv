@@ -635,33 +635,40 @@ pub(crate) fn require_admin(
     store: &iptv_store_sqlite::Store,
     snapshot: &Snapshot,
 ) -> iptv_store_sqlite::Result<()> {
-    if store.parental_credential()?.is_some()
-        && (snapshot.epoch.load(Ordering::SeqCst) != snapshot.at
-            || !snapshot.access.granted(&Target::settings(), now_ms()))
-    {
+    if !admin_allowed(store, snapshot)? {
         return Err(iptv_store_sqlite::StoreError::Unavailable(
             "Unlock parental controls before changing settings",
         ));
     }
     Ok(())
 }
+fn admin_allowed(
+    store: &iptv_store_sqlite::Store,
+    snapshot: &Snapshot,
+) -> iptv_store_sqlite::Result<bool> {
+    Ok(store.parental_credential()?.is_none()
+        || (snapshot.epoch.load(Ordering::SeqCst) == snapshot.at
+            && snapshot.access.granted(&Target::settings(), now_ms())))
+}
+
 /// Only a refresh of the exact, durably authorized provider configuration is
 /// exempt. Caller-controlled purpose/edit flags never grant that exemption.
-pub(crate) fn require_import(
+pub(crate) fn import_allowed(
     store: &iptv_store_sqlite::Store,
     job: &crate::imports::Job,
     snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<()> {
+) -> iptv_store_sqlite::Result<bool> {
     let same = job
         .stored
         .map(|id| store.source(id))
         .transpose()?
         .flatten()
         .is_some_and(|stored| stored.source.config == job.source.config);
-    if !same || job.edit {
-        require_admin(store, snapshot)?;
+    if same && !job.edit {
+        Ok(true)
+    } else {
+        admin_allowed(store, snapshot)
     }
-    Ok(())
 }
 pub(crate) fn require_group_edit(
     store: &iptv_store_sqlite::Store,
