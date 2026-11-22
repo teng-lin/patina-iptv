@@ -54,6 +54,47 @@ pub(crate) const WINDOWS: bool = on(Platform::Windows);
 /// keyboard whose bindings NSH's keymap fires.
 pub(crate) const REMOTE_KEYS: bool = ANDROID || REMOTE_ONLY;
 
+/// The font files the app registers itself, WOFF2. A browser package's
+/// page loads them instead (feature `browser-package`, `hosts/tizen-nsh`),
+/// which keeps them out of the module.
+#[cfg(not(all(target_family = "wasm", feature = "browser-package")))]
+pub(crate) const FONT_FILES: &[(&str, &[u8])] = &[
+    (
+        "Roboto",
+        include_bytes!("../fonts/Roboto-Regular.woff2").as_slice(),
+    ),
+    (
+        "Roboto",
+        include_bytes!("../fonts/Roboto-Medium.woff2").as_slice(),
+    ),
+    (
+        "Roboto Condensed",
+        include_bytes!("../fonts/RobotoCondensed-Regular.woff2").as_slice(),
+    ),
+];
+/// The font files the app registers itself: none, the page loads them.
+#[cfg(all(target_family = "wasm", feature = "browser-package"))]
+pub(crate) const FONT_FILES: &[(&str, &[u8])] = &[];
+
+/// The startup splash's artwork: Patina's own, embedded so startup needs
+/// no file or network access; a browser package's own file
+/// (`assets/banner.png`), which keeps it out of the module.
+pub(crate) fn splash_artwork() -> String {
+    #[cfg(not(all(target_family = "wasm", feature = "browser-package")))]
+    {
+        use base64::Engine;
+        format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD
+                .encode(include_bytes!("../../../art/icon/banner.png")),
+        )
+    }
+    #[cfg(all(target_family = "wasm", feature = "browser-package"))]
+    {
+        "asset:/banner.png".to_owned()
+    }
+}
+
 /// The host's public entry points, re-exported at the crate root (a
 /// platform's native components).
 #[cfg(not(target_family = "wasm"))]

@@ -81,7 +81,13 @@ NshTizen.start({
     version: window.NSH_MODULE_VERSION,
     worker: 'nsh-worker.js',
     scripts: ['patina-worker.js'],
-    fonts: [],
+    /* iptv-app's fonts (its `browser-package` feature leaves them out of
+     * the module): loaded in the Worker and on the page before it starts. */
+    fonts: [
+        { family: 'Roboto', url: 'fonts/Roboto-Regular.woff2', weight: 400 },
+        { family: 'Roboto', url: 'fonts/Roboto-Medium.woff2', weight: 500 },
+        { family: 'Roboto Condensed', url: 'fonts/RobotoCondensed-Regular.woff2', weight: 400 }
+    ],
     onExit: function () {
         try { tizen.application.getCurrentApplication().exit(); } catch (e) { /* not a TV */ }
     },

@@ -16,6 +16,7 @@ build meets the gates in `docs/plans/2026-11-21-browser-tv-architecture.md`
 | Worker services | `app/patina-worker.js` | The imports iptv-web's adapters link: fetch and its streams, timers, clocks, randomness, the time zone, key-value storage, and the store's 64 KiB chunks in IndexedDB (read before the module starts, saved after each commit). |
 | Page | `app/index.html`, `app/patina-host.js` | Starts the platform, which draws the app's views on the page; `tv.player` is the platform's AVPlay component, refusing sources that need request headers (AVPlay cannot send them). |
 | Package | `app/config.xml`, `build.sh` | Its own application id (`PatinaNsh1.Patina` by default), CSP mode, the `tizen` profile. |
+| Package files | `build.sh`, `catalog.py` | iptv-app's data, kept out of the module (its `browser-package` feature): `i18n/<tag>.tsv`, one language's messages each, read by the Worker when the language is first shown; `fonts/`, the page's fonts (`patina-host.js`); `assets/banner.png`, the splash. |
 
 Decisions stay in Rust: the Worker script performs the requests and
 writes the chunks it is handed; the destination policy, the store and

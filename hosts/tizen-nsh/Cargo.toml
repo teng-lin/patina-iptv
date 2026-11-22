@@ -23,7 +23,9 @@ doctest = false
 test = false
 
 [dependencies]
-iptv-app = { path = "../../crates/iptv-app" }
+# `browser-package`: the messages, fonts and splash are package files
+# (build.sh stages them), not module data.
+iptv-app = { path = "../../crates/iptv-app", features = ["browser-package"] }
 nsh-core = { path = "../../../nsh-patina/crates/nsh-core" }
 # The platform, pinned by revision (docs/patina-integration.md there says
 # what a host supplies).
