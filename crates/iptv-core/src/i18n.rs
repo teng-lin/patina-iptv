@@ -222,11 +222,6 @@ pub fn is_cataloged(source: &str) -> bool {
     return external::column(0).contains_key(source);
 }
 
-/// Mark a message stored as data and translated by the consuming shell.
-pub const fn key(source: &'static str) -> &'static str {
-    source
-}
-
 #[cfg(all(test, feature = "external-catalog"))]
 mod external_tests {
     use super::*;

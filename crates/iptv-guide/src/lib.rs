@@ -36,9 +36,9 @@ const SLOT: i64 = 3600;
 /// Minutes the guide can be browsed past its last program.
 pub const PAST_END: i32 = 60;
 /// Title of a gap slot.
-pub const NO_INFORMATION: &str = iptv_core::i18n::key("No information");
+pub const NO_INFORMATION: &str = iptv_core::message::key("No information");
 /// Title of a slot whose day is still being read from the store.
-pub const LOADING: &str = iptv_core::i18n::key("Loading…");
+pub const LOADING: &str = iptv_core::message::key("Loading…");
 /// A channel in no group (`EpgSchedule::group_index`).
 const NO_GROUP: u32 = u32::MAX;
 
@@ -664,7 +664,7 @@ impl Catalog {
             .map(|g| (g.id.as_str().to_owned(), g.name.clone()))
             .chain([(
                 "__other__".to_owned(),
-                iptv_core::i18n::key("Other").to_owned(),
+                iptv_core::message::key("Other").to_owned(),
             )]);
         // Where each playlist position lands once grouped.
         let mut stored_at = vec![0; channels.len()];
@@ -1101,7 +1101,7 @@ impl Schedule for EpgSchedule {
         // group. Provider/custom groups, including ones named Other, stay opaque.
         if self.generated_other
             && self.group_key(group) == "__other__"
-            && name == iptv_core::i18n::key("Other")
+            && name == iptv_core::message::key("Other")
         {
             iptv_core::i18n::translate(language, "Other").to_owned()
         } else {
