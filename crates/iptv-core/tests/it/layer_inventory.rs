@@ -323,8 +323,10 @@ fn lower_layers_name_only_the_inventoried_presentation_items() {
                 .file_stem()
                 .expect("source file name")
                 .to_string_lossy();
-            let test_file =
-                path.contains("/tests/") || filename == "tests" || filename.ends_with("_tests");
+            let test_file = path.contains("/tests/")
+                || path.contains("/interaction_tests/")
+                || filename == "tests"
+                || filename.ends_with("_tests");
             let code: String = source
                 .lines()
                 .filter(|line| !line.trim_start().starts_with("//"))
