@@ -25,6 +25,7 @@ pub mod lists;
 pub mod live;
 pub mod membership;
 pub mod menu;
+pub mod message;
 pub mod multiview;
 pub mod panels;
 pub mod parental;

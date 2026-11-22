@@ -630,14 +630,16 @@ fn uses(file: &str, tokens: &[Token]) -> Uses {
             let end = (i..tokens.len())
                 .find(|j| punct(*j, ';'))
                 .unwrap_or(tokens.len());
-            let core = (i..end).any(|j| is(j, "i18n"));
+            let locale = (i..end).any(|j| is(j, "i18n"));
+            let message = (i..end).any(|j| is(j, "message"));
             for (j, token) in tokens.iter().enumerate().take(end).skip(i) {
                 let Token::Ident(word) = token else {
                     continue;
                 };
                 let word = word.as_str();
                 let translates = matches!(word, "tr" | "trf")
-                    || core && matches!(word, "key" | "translate" | "format")
+                    || locale && matches!(word, "key" | "translate" | "format")
+                    || message && word == "key"
                     || MESSAGE_TYPES.contains(&word);
                 if translates && is(j + 1, "as") && !is(j + 2, "_") {
                     uses.unproven
@@ -661,9 +663,12 @@ fn uses(file: &str, tokens: &[Token]) -> Uses {
         if !punct(i + 1, '(') {
             // `.map(tr)`, `let say = i18n::format;`: what the function
             // is given later is out of sight. A field (`x.tr`) is not it.
-            let core = i >= 3 && is(i - 3, "i18n") && punct(i - 2, ':') && punct(i - 1, ':');
+            let qualified = i >= 3 && punct(i - 2, ':') && punct(i - 1, ':');
+            let locale = qualified && is(i - 3, "i18n");
+            let message = qualified && is(i - 3, "message");
             let named = matches!(name, "tr" | "trf") && !(i > 0 && punct(i - 1, '.'))
-                || core && matches!(name, "key" | "translate" | "format");
+                || locale && matches!(name, "key" | "translate" | "format")
+                || message && name == "key";
             if named {
                 uses.unproven.push(format!(
                     "{name} without its arguments: call it where the message is"
@@ -772,7 +777,7 @@ fn message_position(
     match name.as_str() {
         "tr" => Some((Translator::Plain, 0)),
         "trf" => Some((Translator::Filled, 0)),
-        // `i18n::key` takes the message alone; a view's `key(ui, action)`
+        // A message `key` takes the message alone; a view's `key(ui, action)`
         // is a key press. The core's two take the language first.
         "key" if !method && given == 1 => Some((Translator::Plain, 0)),
         "translate" if !method && given == 2 => Some((Translator::Plain, 1)),
@@ -1824,6 +1829,7 @@ fn a_message_the_lint_cannot_follow_is_refused() {
         "let say = trf",
         "let say = crate::i18n::tr",
         "let say = iptv_core::i18n::format",
+        "let mark = iptv_core::message::key",
         "let say: fn(&Language, &str) -> &str = i18n::translate",
     ] {
         let (_, _, unproven) = followed(view, &format!("fn f() {{ {source}; }}"));
@@ -1839,6 +1845,7 @@ fn a_message_the_lint_cannot_follow_is_refused() {
             0,
         ),
         ("use crate::i18n::tr as say;", 1),
+        ("use iptv_core::message::key as mark;", 1),
         ("use crate::i18n::{key as mark, trf as fill};", 2),
         (
             "use iptv_core::i18n::{format as fill, translate as say};",

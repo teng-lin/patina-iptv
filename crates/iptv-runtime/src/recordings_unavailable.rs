@@ -13,7 +13,7 @@ use iptv_library::SourceId;
 use std::path::{Path, PathBuf};
 
 fn unavailable() -> Error {
-    Error::unavailable(iptv_core::i18n::key("Recording unavailable"))
+    Error::unavailable(iptv_core::message::key("Recording unavailable"))
 }
 
 /// The recording state of one owner: nothing to hold without capture.
@@ -43,7 +43,7 @@ pub mod host {
 
     /// There is no background host to start.
     pub fn start_background_host(_: crate::Ports) -> Result<(), Error> {
-        Err(Error::unavailable(iptv_core::i18n::key(
+        Err(Error::unavailable(iptv_core::message::key(
             "Background recording is unavailable",
         )))
     }

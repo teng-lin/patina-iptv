@@ -12,7 +12,7 @@ pub(crate) fn activate_storage(ports: &crate::Ports) -> Result<(), crate::backup
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if crate::backup::is_pending(&ports.directory) && !stop_background_host(&ports.directory) {
         return Err(crate::backup::StartupError {
-            error: iptv_core::i18n::key(
+            error: iptv_core::message::key(
                 "Recording host did not close; restart Patina before restoring",
             )
             .into(),

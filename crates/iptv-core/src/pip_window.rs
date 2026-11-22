@@ -18,7 +18,7 @@
 //! Times are milliseconds on the caller's monotonic clock.
 
 /// The window's title: browsers' picture-in-picture title.
-pub const TITLE: &str = crate::i18n::key("Picture-in-Picture");
+pub const TITLE: &str = crate::message::key("Picture-in-Picture");
 
 /// The window's width when it opens (points).
 pub const WIDTH: f32 = 600.0;

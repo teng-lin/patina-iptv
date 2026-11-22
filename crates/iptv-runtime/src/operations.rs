@@ -97,7 +97,7 @@ impl Runtime {
                 && !crate::recordings::host::stop_background_host(&ports.directory)
             {
                 return Err(crate::backup::StartupError {
-                    error: iptv_core::i18n::key(
+                    error: iptv_core::message::key(
                         "Recording host did not close; restart Patina before restoring",
                     )
                     .into(),

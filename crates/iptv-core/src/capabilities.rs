@@ -1,5 +1,5 @@
 //! Host facts and current feature availability. These values grant no content access.
-use crate::i18n::key;
+use crate::message::key;
 use crate::{pip::Pip, recording::WakeCapability};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

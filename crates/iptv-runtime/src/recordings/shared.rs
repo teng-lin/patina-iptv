@@ -2,7 +2,7 @@
 //! committed provider owner remains registered and budgeted until its upstream
 //! shutdown is acknowledged, independently of UI/capture lease removal.
 use super::*;
-use iptv_core::{i18n::key, live::Identity};
+use iptv_core::{live::Identity, message::key};
 use iptv_net::live::{LiveInput, Validated};
 use iptv_net::recording::Failure;
 use std::time::Instant;
