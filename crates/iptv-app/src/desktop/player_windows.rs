@@ -252,7 +252,7 @@ fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::des
     let was_compact = std::cell::Cell::new(false);
     let key_window = window.clone();
     on_key("escape", move |_| {
-        if crate::pip::exit(local, iptv_core::pip_window::Exit::BackToApp) {
+        if crate::pip::exit(local, iptv_presentation::pip_window::Exit::BackToApp) {
             return;
         }
         if local.top_overlay().is_some() {

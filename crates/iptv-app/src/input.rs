@@ -396,7 +396,9 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         if number::backspace(ui) {
             return;
         }
-        if ui.player_surface != 0 && crate::pip::exit(ui, iptv_core::pip_window::Exit::BackToApp) {
+        if ui.player_surface != 0
+            && crate::pip::exit(ui, iptv_presentation::pip_window::Exit::BackToApp)
+        {
             return;
         }
         crate::go_back(ui);

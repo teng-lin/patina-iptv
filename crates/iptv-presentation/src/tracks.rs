@@ -1,7 +1,7 @@
 //! Localized track choices and summaries for playback controls.
 
-use crate::i18n::{self, Language, translate};
-use crate::tracks::{AUTO, AudioTrack, Kind, OFF, TextTrack, Tracks, VideoTrack};
+use iptv_core::i18n::{self, Language, translate};
+use iptv_core::tracks::{AUTO, AudioTrack, Kind, OFF, TextTrack, Tracks, VideoTrack};
 
 /// What the viewer chose for the open stream, as the host's props say it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,8 +139,8 @@ pub fn codec_name(codec: &str) -> Option<String> {
         "eac3" | "e-ac-3" => "E-AC-3",
         "mpeg" | "mp3" | "mpeg-l3" => "MP3",
         "mp2" | "mpeg-l2" | "mp2a" => "MP2",
-        "opus" => crate::message::key("Opus"),
-        "vorbis" => crate::message::key("Vorbis"),
+        "opus" => iptv_core::message::key("Opus"),
+        "vorbis" => iptv_core::message::key("Vorbis"),
         "flac" => "FLAC",
         "dts" | "vnd.dts" => "DTS",
         other => return Some(other.to_ascii_uppercase()),

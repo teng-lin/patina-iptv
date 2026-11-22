@@ -19,7 +19,7 @@
 //! layer, [`ui_shown`]).
 //!
 //! **The desktops** (Linux, macOS) open a window of the app's own, as
-//! browsers do (`desktop/pip_window.rs`, `iptv_core::pip_window`), from
+//! browsers do (`desktop/pip_window.rs`, `iptv_presentation::pip_window`), from
 //! the same buttons (leaving the app opens nothing there): the full-screen
 //! player shows in it, the same player and stream (surface 0's `pip` prop
 //! says `{window: true}`, `mpv/pip.rs`), while the main window stays
@@ -38,9 +38,9 @@
 //! any chooser or menu close, and multiview leaves to its active tile,
 //! which plays on in the window (its other tiles stop).
 
-use iptv_core::pip_window::Exit;
 use iptv_player_mpv::PipAction;
 use iptv_presentation::pip::{Change, OnLeave};
+use iptv_presentation::pip_window::Exit;
 use iptv_settings::keys::PIP_ON_LEAVE;
 use nsh_core::prelude::*;
 

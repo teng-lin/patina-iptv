@@ -45,7 +45,7 @@ impl fmt::Debug for UrlText {
 }
 
 /// `scheme://host[:port]` with any userinfo, path, query and fragment gone.
-pub(crate) fn url_origin(url: &str) -> String {
+pub fn url_origin(url: &str) -> String {
     let (scheme, rest) = match url.find("://") {
         Some(at) => (&url[..at + 3], &url[at + 3..]),
         None => ("", url),

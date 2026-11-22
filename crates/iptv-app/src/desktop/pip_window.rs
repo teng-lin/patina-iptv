@@ -1,5 +1,5 @@
 //! The desktops' picture-in-picture window (`pip.rs`,
-//! `iptv_core::pip_window`): a window of the app's own titled as browsers
+//! `iptv_presentation::pip_window`): a window of the app's own titled as browsers
 //! title theirs, so the desktop's rules for those apply (Hyprland's
 //! Omarchy defaults float, pin and place a window titled so; GNOME and
 //! KDE users keep similar ones). It asks to float above the others on
@@ -25,8 +25,8 @@ use crate::i18n::tr;
 use std::cell::Cell;
 use std::time::Duration;
 
-use iptv_core::pip_window::{self as pw, Exit, Hover};
 use iptv_player_mpv::pip_window::{TITLE, WIDTH};
+use iptv_presentation::pip_window::{self as pw, Exit, Hover};
 use nsh_core::desktop::{
     WindowAttributes, WindowCloseCause, WindowFrameStyle, WindowLevel, WindowPosition, Workspaces,
 };

@@ -10,7 +10,7 @@ use crate::input::dismiss_keyboard;
 
 use std::rc::Rc;
 
-use iptv_core::wizard::{Field, WizardEvent};
+use iptv_presentation::wizard::{Field, WizardEvent};
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 

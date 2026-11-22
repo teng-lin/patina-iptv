@@ -14,10 +14,11 @@
 use crate::i18n::{tr, trf};
 use std::time::Duration;
 
-use iptv_core::sound::delay_label;
-use iptv_core::tracks::{Kind as Track, audio_layout_in, summary_in};
+use iptv_core::tracks::Kind as Track;
 use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
 use iptv_presentation::player_info::date_time;
+use iptv_presentation::sound::delay_label;
+use iptv_presentation::tracks::{audio_layout_in, summary_in};
 use nsh_core::prelude::*;
 
 use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TEXT};

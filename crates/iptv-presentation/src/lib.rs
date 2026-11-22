@@ -28,3 +28,12 @@ pub mod vod;
 pub mod library;
 pub mod search;
 pub mod settings;
+
+pub mod heard;
+pub mod menu;
+pub mod multiview;
+pub mod pip_window;
+pub mod reorder;
+pub mod sound;
+pub mod tracks;
+pub mod wizard;

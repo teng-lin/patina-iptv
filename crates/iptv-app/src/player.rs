@@ -26,12 +26,13 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use iptv_core::playback::{ErrorKind, PlaySource, Retry};
-use iptv_core::tracks::{Choice, Tracks};
+use iptv_core::tracks::Tracks;
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
 use iptv_presentation::playback::ChannelHistory;
 use iptv_presentation::playback_health::Health;
 use iptv_presentation::player_info::StreamFormat as Format;
+use iptv_presentation::tracks::Choice;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 

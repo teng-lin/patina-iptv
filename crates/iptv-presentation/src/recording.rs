@@ -22,7 +22,7 @@ pub struct Screen {
     pub read_generation: u64,
     /// The content selected when an action menu opened; catalog row indices
     /// may change while that menu remains visible.
-    pub context: Option<(iptv_core::menu::Origin, Request)>,
+    pub context: Option<(crate::menu::Origin, Request)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
