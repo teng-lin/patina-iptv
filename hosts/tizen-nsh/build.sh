@@ -27,7 +27,10 @@
 # (-Cpanic=immediate-abort: a panic is a trap without its message, which
 # the platform reports as the app's fatal error), and no panic locations.
 # -Zfmt-debug=none is not used: it would also empty `{:?}` output the app
-# shows (key labels) and its logs.
+# shows (key labels) and its logs. With them, when `clang` has rustc's
+# LLVM major version, SQLite's C code joins the module's link-time
+# optimization (-flto and -Clinker-plugin-lto: cross-language inlining
+# and dead code across the boundary); otherwise it is linked as objects.
 #   TIZEN_APP_ID        the application id (default PatinaNsh1.Patina; Tizen packages are 10 letters or digits)
 #
 # Signing uses a local Tizen Studio certificate profile named by
@@ -56,9 +59,18 @@ if [[ -n "${NSH_UNSTRIPPED:-}" ]]; then
 fi
 
 flags="-C target-cpu=mvp -C target-feature=+sign-ext,+mutable-globals"
+cflags="-mcpu=mvp -msign-ext -mmutable-globals"
 if [[ "${NSH_SIZE:-1}" != 0 ]]; then
     flags+=" -Zunstable-options -Cpanic=immediate-abort -Zlocation-detail=none"
     NSH_STD_FEATURES="${NSH_STD_FEATURES:-optimize_for_size}"
+    rust_llvm="$(rustc "+$nightly" -vV | sed -n 's/^LLVM version: \([0-9]*\).*/\1/p')"
+    clang_llvm="$(clang --version 2>/dev/null | sed -n 's/.*clang version \([0-9]*\).*/\1/p' | head -1)"
+    if [[ -n "$rust_llvm" && "$rust_llvm" == "$clang_llvm" ]]; then
+        flags+=" -Clinker-plugin-lto"
+        cflags+=" -flto"
+    else
+        echo "warning: clang's LLVM (${clang_llvm:-none}) is not rustc's ($rust_llvm): SQLite stays out of LTO" >&2
+    fi
 fi
 flags+="${NSH_RUSTFLAGS:+ $NSH_RUSTFLAGS}"
 std_features=()
@@ -88,9 +100,9 @@ if [[ -z "${SQLITE_WASM_RS_FLAGS+set}" ]]; then
     done
     export SQLITE_WASM_RS_FLAGS="${sqlite_flags# } -DSQLITE_DEFAULT_MEMSTATUS=0"
 fi
-echo "Building the module (profile tizen${NSH_OPT:+, opt-level $NSH_OPT}; $flags${NSH_STD_FEATURES:+; std features $NSH_STD_FEATURES})…"
+echo "Building the module (profile tizen${NSH_OPT:+, opt-level $NSH_OPT}; $flags${NSH_STD_FEATURES:+; std features $NSH_STD_FEATURES}; C $cflags)…"
 (cd "$here" && RUSTFLAGS="$flags" \
-    CFLAGS_wasm32_unknown_unknown="-mcpu=mvp -msign-ext -mmutable-globals" \
+    CFLAGS_wasm32_unknown_unknown="$cflags" \
     cargo "+$nightly" build -Zbuild-std=std,panic_abort "${std_features[@]}" --target wasm32-unknown-unknown \
     --profile tizen --locked --target-dir "$out/cargo" "${config[@]}")
 module="$out/cargo/wasm32-unknown-unknown/tizen/patina_tizen.wasm"
