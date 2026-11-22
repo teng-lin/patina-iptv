@@ -2,11 +2,11 @@ use iptv_core::guide::Airing;
 
 use super::SearchAction::*;
 use super::*;
-use crate::text::MatchQuality;
+use iptv_search::MatchQuality;
 
 fn ch(channel: usize) -> ChannelHit {
     ChannelHit {
-        identity: crate::ChannelId::new(None, format!("synthetic-{channel}")),
+        identity: iptv_search::ChannelId::new(None, format!("synthetic-{channel}")),
         channel,
         score: MatchQuality::Prefix,
     }
@@ -14,7 +14,7 @@ fn ch(channel: usize) -> ChannelHit {
 
 fn pr(channel: usize, start: UnixTime) -> ProgramHit {
     ProgramHit {
-        identity: crate::ChannelId::new(None, format!("synthetic-{channel}")),
+        identity: iptv_search::ChannelId::new(None, format!("synthetic-{channel}")),
         channel,
         start,
         end: start + 1800,
@@ -32,7 +32,7 @@ fn typed(q: &str) -> SearchState {
 }
 
 const P: fn(usize, UnixTime) -> ResultId = |channel, start| ResultId::Program {
-    channel: crate::ChannelId::new(None, format!("synthetic-{channel}")),
+    channel: iptv_search::ChannelId::new(None, format!("synthetic-{channel}")),
     start,
 };
 
@@ -59,7 +59,7 @@ fn idle_shows_history_and_picks_an_entry() {
     assert!(s.set_results("orchard", vec![ch(5)], vec![]));
     assert_eq!(
         s.focus(),
-        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+        &Focus::Result(ResultId::Channel(iptv_search::ChannelId::new(
             None,
             "synthetic-5"
         )))
@@ -87,7 +87,7 @@ fn typing_drops_stale_results_and_submit_moves_focus() {
     assert!(!s.keyboard_visible());
     assert_eq!(
         s.focus(),
-        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+        &Focus::Result(ResultId::Channel(iptv_search::ChannelId::new(
             None,
             "synthetic-1"
         )))
@@ -106,7 +106,7 @@ fn moves_between_input_tabs_and_results_keeping_focus_per_tab() {
     s.apply(Down);
     assert_eq!(
         s.focus(),
-        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+        &Focus::Result(ResultId::Channel(iptv_search::ChannelId::new(
             None,
             "synthetic-7"
         )))
@@ -118,7 +118,7 @@ fn moves_between_input_tabs_and_results_keeping_focus_per_tab() {
     s.apply(Left);
     assert_eq!(
         s.focus(),
-        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+        &Focus::Result(ResultId::Channel(iptv_search::ChannelId::new(
             None,
             "synthetic-7"
         ))),
@@ -237,7 +237,7 @@ fn taps_pick_history_results_and_tabs() {
     s.apply(ShowTab(Tab::Channels));
     assert_eq!(
         s.focus(),
-        &Focus::Result(ResultId::Channel(crate::ChannelId::new(
+        &Focus::Result(ResultId::Channel(iptv_search::ChannelId::new(
             None,
             "synthetic-1"
         )))
@@ -266,7 +266,7 @@ fn keyboard_hidden_by_the_platform_keeps_the_screen() {
     let mut s = SearchState::new(SearchHistory::default());
     assert_eq!(
         s.apply(Pick(Focus::Result(ResultId::Channel(
-            crate::ChannelId::new(None, "synthetic-0")
+            iptv_search::ChannelId::new(None, "synthetic-0")
         )))),
         SearchEffect::None
     );
@@ -302,7 +302,8 @@ fn program_fallback_stays_on_the_semantic_channel_after_positions_change() {
 #[test]
 fn program_fallback_never_follows_a_recreated_source_with_the_same_content_key() {
     let mut state = typed("synthetic");
-    let old_channel = crate::ChannelId::in_source(1, "generated-original", "shared-provider-key");
+    let old_channel =
+        iptv_search::ChannelId::in_source(1, "generated-original", "shared-provider-key");
     let mut original = pr(3, 100);
     original.identity = old_channel.clone();
     state.set_results("synthetic", Vec::new(), vec![original.clone()]);
@@ -328,7 +329,7 @@ fn program_fallback_never_follows_a_recreated_source_with_the_same_content_key()
     };
     let mut recreated = original;
     recreated.identity =
-        crate::ChannelId::in_source(1, "generated-recreated", "shared-provider-key");
+        iptv_search::ChannelId::in_source(1, "generated-recreated", "shared-provider-key");
     recreated.channel = 9;
     recreated.start = 300;
     state.set_results("synthetic", Vec::new(), vec![first, recreated]);
@@ -338,7 +339,7 @@ fn program_fallback_never_follows_a_recreated_source_with_the_same_content_key()
 
 #[test]
 fn duplicate_name_only_rows_have_distinct_index_scoped_navigation_identity() {
-    let mut index = crate::ChannelIndex::from_names(["Generated", "Generated"]);
+    let mut index = iptv_search::ChannelIndex::from_names(["Generated", "Generated"]);
     index.add_key(0, "first-extra");
     index.add_key(1, "second-extra");
     let hits = index.search_channels("generated", &Default::default(), Default::default());
@@ -362,11 +363,8 @@ fn duplicate_name_only_rows_have_distinct_index_scoped_navigation_identity() {
         index.search_channels("second-extra", &Default::default(), Default::default())[0].identity,
         hits[1].identity
     );
-    let replacement = crate::ChannelIndex::from_names(["Generated", "Generated"]).search_channels(
-        "generated",
-        &Default::default(),
-        Default::default(),
-    );
+    let replacement = iptv_search::ChannelIndex::from_names(["Generated", "Generated"])
+        .search_channels("generated", &Default::default(), Default::default());
     assert!(
         replacement
             .iter()

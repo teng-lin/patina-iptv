@@ -1,7 +1,7 @@
-use crate::{FeedResult, GuideSource};
+use iptv_library::{FeedResult, GuideSource};
 
 use super::*;
-use crate::guides;
+use iptv_library::guides;
 
 const P: SourceId = SourceId(7);
 const USER: Feed = guides::FIRST_USER_FEED;

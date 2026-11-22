@@ -11,10 +11,10 @@
 
 use iptv_epg::UnixTime;
 
-use crate::channels::ChannelHit;
-use crate::history::SearchHistory;
-use crate::programs::ProgramHit;
-use crate::text::Query;
+use iptv_search::ChannelHit;
+use iptv_search::ProgramHit;
+use iptv_search::Query;
+use iptv_search::SearchHistory;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
@@ -46,15 +46,15 @@ impl Tab {
 /// Identity of a result, stable across searches.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ResultId {
-    Channel(crate::ChannelId),
+    Channel(iptv_search::ChannelId),
     Program {
-        channel: crate::ChannelId,
+        channel: iptv_search::ChannelId,
         start: UnixTime,
     },
 }
 
 impl ResultId {
-    pub fn channel(&self) -> &crate::ChannelId {
+    pub fn channel(&self) -> &iptv_search::ChannelId {
         match self {
             ResultId::Channel(c) | ResultId::Program { channel: c, .. } => c,
         }

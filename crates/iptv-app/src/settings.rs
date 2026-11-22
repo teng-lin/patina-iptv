@@ -26,8 +26,8 @@
 use std::sync::Arc;
 
 use iptv_presentation::panels::Timeouts;
+use iptv_presentation::settings::screen::Offer;
 use iptv_settings::keys;
-use iptv_settings::screen::Offer;
 use iptv_settings::{Settings, Target, Value};
 
 use nsh_core::prelude::*;

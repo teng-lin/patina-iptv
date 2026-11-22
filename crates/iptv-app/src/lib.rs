@@ -287,15 +287,15 @@ pub struct Ui {
     /// A playlist's guide sources screen, when open (over the playlists
     /// and settings screens).
     pub guide_sources: Signal<Option<epg_sources_view::Open>>,
-    pub guide_inspect: Signal<Option<iptv_library::guide_inspect::Screen>>,
-    pub guide_repair: Signal<Option<iptv_library::guide_repair_screen::Screen>>,
+    pub guide_inspect: Signal<Option<iptv_presentation::library::guide_inspect::Screen>>,
+    pub guide_repair: Signal<Option<iptv_presentation::library::guide_repair_screen::Screen>>,
     pub guide_repair_cancel: Stored<Option<iptv_import::CancelToken>>,
     pub guide_inspect_cancel: Stored<Option<iptv_import::CancelToken>>,
     /// The guide data chooser of a channel, when open.
     pub guide_assign: Signal<Option<guide_assign_view::Open>>,
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
-    pub settings_screen: Signal<Option<iptv_settings::screen::Screen>>,
+    pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
@@ -1218,7 +1218,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::Search) => {
-                search_view::apply(ui, iptv_search::SearchAction::Back);
+                search_view::apply(ui, iptv_presentation::search::SearchAction::Back);
                 true
             }
             _ if top == Some(Overlay::ChannelList) => {

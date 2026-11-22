@@ -2,13 +2,13 @@
 //! a choice (colors with their swatch), a stepper for numbers and
 //! durations, the text sheet the wizard uses, and the confirmation of a
 //! command. Each says what it is about; the remote drives them through
-//! `iptv_settings::screen`, taps directly.
+//! `iptv_presentation::settings::screen`, taps directly.
 
 use crate::i18n::{tr, trf};
 
 use std::rc::Rc;
 
-use iptv_settings::screen::{Editor, Effect, grid};
+use iptv_presentation::settings::screen::{Editor, Effect, grid};
 use iptv_settings::{Setting, Value, ValueType};
 use nsh_core::Checked;
 use nsh_core::prelude::*;

@@ -1,5 +1,5 @@
 //! Pure batch repair editor state. Every actionable row carries content identity.
-use crate::{
+use iptv_library::{
     Choice, SourceId,
     guide_repair::*,
     inspection::{ChannelInfo, ChannelRef, TimeWindow},
@@ -225,7 +225,7 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::inspection::ChannelInfo;
+    use iptv_library::inspection::ChannelInfo;
     use iptv_providers::ContentId;
     fn channel(key: &str) -> ChannelInfo {
         ChannelInfo {
@@ -259,7 +259,7 @@ mod tests {
     }
     #[test]
     fn removing_or_replacing_last_staged_mapping_drops_its_unneeded_feed_addition() {
-        use crate::inspection::{ProbeEvidence, ProbeId};
+        use iptv_library::inspection::{ProbeEvidence, ProbeId};
         let mut editor = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });
         let evidence = |name: &str| ProbeEvidence {
             stage: ProbeId(name.into()),

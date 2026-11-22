@@ -2,7 +2,7 @@
 //! ([`PAGES`], in the reference's order), the chosen page's rows with
 //! their current values on the right, the focused row's description below,
 //! and the editors and dialogs (`editors`). State and rules live in
-//! `iptv_settings::screen`; this draws it, maps remote keys and taps to
+//! `iptv_presentation::settings::screen`; this draws it, maps remote keys and taps to
 //! it, stores what it answers through `crate::settings` (saved at once,
 //! applied where the app reads it) and runs its commands.
 //!
@@ -30,8 +30,10 @@ use std::cell::Cell;
 use std::time::Duration;
 
 use iptv_nav::Action;
+use iptv_presentation::settings::screen::{
+    Ctx, Editor, Effect, Key, Page, Pane, Part, Row, Screen, Status,
+};
 use iptv_settings::schema::ValueType;
-use iptv_settings::screen::{Ctx, Editor, Effect, Key, Page, Pane, Part, Row, Screen, Status};
 use iptv_settings::{Section, Settings, Target, Value, keys};
 use nsh_core::prelude::*;
 
@@ -380,7 +382,7 @@ fn note(settings: &Settings, row: &Row) -> String {
 /// How many rows of `page` the app acts on, of how many.
 fn counts(page: &Page) -> (usize, usize) {
     with_ctx(|ctx| {
-        let rows = iptv_settings::screen::rows(page, ctx);
+        let rows = iptv_presentation::settings::screen::rows(page, ctx);
         let keyed = rows.iter().filter(|r| r.key().is_some());
         let active = keyed
             .clone()
@@ -393,9 +395,11 @@ fn counts(page: &Page) -> (usize, usize) {
 /// Whether `page` has rows that show something (active or read-only).
 fn lit_page(page: &Page) -> bool {
     with_ctx(|ctx| {
-        iptv_settings::screen::rows(page, ctx).iter().any(|r| {
-            r.key().is_some() && matches!(ctx.status(r), Status::Active | Status::ReadOnly)
-        })
+        iptv_presentation::settings::screen::rows(page, ctx)
+            .iter()
+            .any(|r| {
+                r.key().is_some() && matches!(ctx.status(r), Status::Active | Status::ReadOnly)
+            })
     })
 }
 
@@ -532,7 +536,7 @@ mod tests {
 
     fn row(page: &str, key: &str, settings: &Settings) -> Row {
         let page = PAGES.iter().find(|p| p.key == page).unwrap();
-        iptv_settings::screen::rows(
+        iptv_presentation::settings::screen::rows(
             page,
             &Ctx {
                 settings,

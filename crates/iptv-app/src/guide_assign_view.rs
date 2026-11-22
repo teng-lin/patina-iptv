@@ -11,7 +11,7 @@
 //! tap a row, tap the field to type; a tap beside the panel closes it.
 //! State: `state.rs`.
 
-use iptv_library::guide_assign as state;
+use iptv_presentation::library::guide_assign as state;
 
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;

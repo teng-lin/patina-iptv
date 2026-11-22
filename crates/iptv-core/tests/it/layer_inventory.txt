@@ -5,19 +5,6 @@ shipped iptv-core/src/multiview.rs re-exports multiview_state
 shipped iptv-core/src/playback.rs re-exports zap
 shipped iptv-core/src/reorder.rs re-exports reorder_state
 shipped iptv-core/src/tracks.rs re-exports track_labels
-shipped iptv-library/src/details.rs iptv_core::wizard
-shipped iptv-library/src/details.rs iptv_library::playlists
-shipped iptv-library/src/epg_sources.rs iptv_core::wizard
-shipped iptv-library/src/epg_sources.rs iptv_library::playlists
-shipped iptv-library/src/lib.rs iptv_library::details
-shipped iptv-library/src/lib.rs iptv_library::epg_sources
-shipped iptv-library/src/lib.rs iptv_library::guide_assign
-shipped iptv-library/src/lib.rs iptv_library::guide_inspect
-shipped iptv-library/src/lib.rs iptv_library::guide_repair_screen
-shipped iptv-library/src/lib.rs iptv_library::playlists
-shipped iptv-search/src/lib.rs iptv_search::selection
-shipped iptv-search/src/lib.rs iptv_search::state
-shipped iptv-settings/src/lib.rs iptv_settings::screen
 test iptv-core/src/lists.rs re-exports lists_state
 test iptv-guide/src/interaction_tests/combined.rs iptv_core::lists::ChannelList
 test iptv-guide/src/interaction_tests/combined.rs iptv_core::lists::Entry
@@ -44,5 +31,3 @@ test iptv-guide/tests/it/personalization.rs iptv_core::lists::ALL
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::ChannelList
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::FIRST_GROUP
 test iptv-guide/tests/it/personalization.rs iptv_core::lists::ListId
-test iptv-settings/tests/it/main.rs iptv_settings::screen
-test iptv-settings/tests/it/screen.rs iptv_settings::screen

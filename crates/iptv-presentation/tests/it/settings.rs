@@ -1,6 +1,6 @@
 //! The settings screen's state machine.
 
-use iptv_settings::screen::{
+use iptv_presentation::settings::screen::{
     Ctx, Editor, Effect, Key, Offer, Page, Pane, Part, Row, Screen, Status, grid, rows,
 };
 use iptv_settings::{Section, Settings, Value};

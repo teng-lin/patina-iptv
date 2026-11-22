@@ -5,11 +5,11 @@
 //! playlist's id), never by list position. Pure: the view feeds it remote
 //! keys and taps and carries out the [`Effect`]s it returns.
 
-use crate::SourceId;
+use iptv_library::SourceId;
 use iptv_providers::model::{Source, SourceKind};
 
 use super::details::{Form, Param};
-use crate::Playlist;
+use iptv_library::Playlist;
 
 /// A focusable row of the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +103,7 @@ pub enum Effect {
     /// Open the add-playlist wizard.
     Add,
     Show(SourceId),
-    Policy(SourceId, crate::SourcePolicy),
+    Policy(SourceId, iptv_library::SourcePolicy),
     /// Switch the movie and series import of `id` (its own setting).
     ToggleOnDemand(SourceId),
     Organize(SourceId, bool),

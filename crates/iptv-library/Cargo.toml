@@ -8,7 +8,6 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
-iptv-core.workspace = true
 iptv-providers.workspace = true
 iptv-epg.workspace = true
 
