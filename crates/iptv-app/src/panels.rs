@@ -2,7 +2,7 @@
 //! layer, the groups column (shown with the rail while either has the
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
-use iptv_core::layout::{GuideHeader, Shortcuts};
+use crate::layout::{GuideHeader, Shortcuts};
 use iptv_core::lists::entry_count;
 use nsh_core::prelude::*;
 
@@ -23,8 +23,8 @@ pub fn groups_width(ui: Ui) -> f32 {
     }
 }
 /// The preview's margin and corner radius (dp); its geometry and the
-/// header's come from `iptv_core::layout::GuideHeader`.
-pub use iptv_core::layout::PREVIEW_MARGIN;
+/// header's come from `crate::layout::GuideHeader`.
+pub use crate::layout::PREVIEW_MARGIN;
 pub const PREVIEW_RADIUS: f32 = 10.0;
 
 /// The header in the window now (reactive): the guide's scale and the

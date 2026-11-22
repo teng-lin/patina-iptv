@@ -100,9 +100,9 @@ fn button(ui: Ui, size: Scale, label: &'static str, act: fn(Ui)) -> impl IntoEle
     ui_kit::button(ui, size, move || tr(label), || false, move || act(ui))
 }
 
-/// The query takes its own row in a compact window (`iptv_core::layout`).
+/// The query takes its own row in a compact window (`crate::layout`).
 fn compact_header(size: Scale) -> bool {
-    use iptv_core::layout::Class;
+    use crate::layout::Class;
     let text = size.of(1.0) * crate::settings::text_factor();
     Class::of(window().width.0, text) == Class::Compact
 }
