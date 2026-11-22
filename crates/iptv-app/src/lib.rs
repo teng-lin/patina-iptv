@@ -916,7 +916,13 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
 
     view()
         .flex_1()
-        .bg(move || rgb(ui.app.theme.with(|t| t.background.window)))
+        .bg(move || {
+            if video::backdrop_clear(ui) {
+                rgba(0)
+            } else {
+                rgb(ui.app.theme.with(|t| t.background.window))
+            }
+        })
         // A moving mouse over full-screen video shows the player panels.
         .on_mouse_move(move |e: &MouseEvent| pointer_moved(ui, e))
         .on_mouse_enter(move |e: &MouseEvent| {

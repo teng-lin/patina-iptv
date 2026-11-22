@@ -95,6 +95,7 @@ jobs:
           for script in tools/ci/test-*.py; do python3 "$script"; done
           python3 -m unittest discover -s tools -p test_version.py
           python3 tools/performance/test_journeys.py
+          python3 hosts/tizen-nsh/test_sections.py
           python3 tools/mpv-runtime-ios/test_build.py
           python3 tools/mpv-runtime/test_prepare.py
           python3 tools/mpv-runtime/test_package.py

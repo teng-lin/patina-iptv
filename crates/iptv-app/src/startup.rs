@@ -96,15 +96,10 @@ pub fn since_start() -> Duration {
     origin.get_or_insert_with(Instant::now).elapsed()
 }
 
-/// Original Patina artwork, embedded so startup needs no file or network access.
+/// Patina's startup splash over its artwork (`host::splash_artwork`).
 pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
-    use base64::Engine;
     use nsh_core::prelude::*;
-    let artwork = format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD
-            .encode(include_bytes!("../../../art/icon/banner.png")),
-    );
+    let artwork = crate::host::splash_artwork();
     view()
         .test_id("startup-splash")
         .absolute()

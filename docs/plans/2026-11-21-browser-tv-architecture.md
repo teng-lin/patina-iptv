@@ -1,6 +1,6 @@
 # Patina on browser TVs: target architecture, crates and boundaries
 
-Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a, 1b, 1d and 1e are implemented (see their status lines); 1c is the store's own change. This is the Patina integration plan that M7 of
+Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a to 1e are implemented (see their status lines); step 2 runs Patina on the TV (`hosts/tizen-nsh`); steps 3 and 4 are measured below ("Module size and launch"). Decided on 2026-11-21: on Tizen 5.5 the JavaScript bridge stays the supported app and the NSH package is opt-in (see "Decision on Tizen 5.5"). This is the Patina integration plan that M7 of
 [External NSH TV support](2026-11-15-nsh-tv-platform-support.md) asks for. It is
 based on the current code and on spikes run on a 2020 Samsung TV (Tizen 5.5).
 Sections marked **Today** describe the code as it is; everything else is a
@@ -244,13 +244,25 @@ together in one pull request (#195), each as its own commits; 1c is #193.
   before following, so such a source fails there where it redirects. The store driver (open, chunk persistence,
   a `Services` wrapper that pushes a publish on the writer lane as a
   `Sliced` job over the copy store, holding the lane's connection only per
-  step) follows #193.
+  step) follows #193: see 1c.
 - **1c. Store on wasm32.** `iptv-store-sqlite` builds with the
   `sqlite-wasm-rs` backend on an in-memory VFS that persists changed pages
   to IndexedDB; staging databases are in-memory files; publishes run in
   slices on a copy (see Decisions). Probe the VFS and sliced publishing
   first. *Gate*: the store's tests pass in a Wasm test run, and on the TV a
   guide publish never holds the app's thread for more than 50 ms at a time.
+  *Status*: the store's part is #193. The driver is `Ports::store_host`
+  (`iptv_runtime::store_host::StoreHost`: open, persist after each writer
+  job, the publish copy) and `publish.rs`, a `Sliced` job on the writer
+  lane (prepare on the live store, 200-row steps on the copy, the swap and
+  the writes that follow). The web host implements it on IndexedDB chunks
+  (`host/web/store.rs`) with the five SQLite hooks. Differs from the plan:
+  imports and guide downloads run in the browser as cooperative tasks, one
+  at a time (`Services::submit_import`), rather than staying unavailable;
+  their blocking store requests run the writer lane inline, which is safe
+  because only one import runs and it awaits its own publish. The 50 ms
+  gate is measured on the TV and missed: the longest guide step took
+  2,364 ms and the longest catalog step 665 ms ("With a real account").
 - **1d. Native-only services behind `native`.** Recording, backup, credential
   store, staged probes, with the capability model reporting them unavailable.
   *Gate*: `cargo check -p iptv-runtime --no-default-features --target
@@ -274,13 +286,26 @@ together in one pull request (#195), each as its own commits; 1c is #193.
 - **2. Tizen platform.** The spike becomes the extension's Tizen platform:
   native-component registry (for `tv.player`), text input, fonts, images,
   the remaining mount items. `hosts/tizen` gains the AVPlay player and host
-  services for the NSH build.
+  services for the NSH build. *Status*: done as a sibling host,
+  `hosts/tizen-nsh` (the bridge stays as it is), on nsh-platform-tizen at
+  32492c0. The player is the platform's AVPlay component behind a filter
+  that refuses sources needing headers. The app starts on the TV, draws its
+  screens and takes the remote's keys (the browser host uses the remote's
+  key phases: the platform has no NSH keymap).
 - **3. Measure and shrink.** Build Patina's real module. Link only the base
   components in use; record size, launch and key latency on the device.
+  *Status*: done for the 2020 set ("Module size and launch"): from 16.1 MB
+  to 7.5 MB (6.5 MB of code). The compiled module caches from the 11.5 MB
+  opt-level z build on, as timed on the TV down to the 8.9 MB default; the
+  7.5 MB build was not timed on the TV. Ended on Tizen 5.5 by the decision
+  below.
 - **4. Switch per TV generation.** *Gates*: module small enough to cache
   (about 6 MB on the 2020 set), first launch within 30 s behind a splash,
   cached launch within 8 s, key to frame within 80 ms. Generations that meet
-  them move to the NSH build; the others stay on the bridge.
+  them move to the NSH build; the others stay on the bridge. *Status*: the
+  2020 set (Tizen 5.5) meets none of the launch and responsiveness gates
+  and stays on the bridge, with the NSH package opt-in. A 2022 or later
+  set (Tizen 6.5+, Chromium 85+) is measured next.
 
 ## Decisions after the second round of spikes
 
@@ -390,6 +415,137 @@ Measured on the same TV on 2026-11-21.
    the 300–380 MB per-app limit Samsung documents for some models, but it
    has to be measured with Patina's whole app running.
 
+## Module size and launch (steps 3 and 4)
+
+Patina's real module (`hosts/tizen-nsh`), measured on the UN55TU7000 on
+2026-11-21. Every number comes from the `tizen` profile: release, fat LTO,
+one codegen unit, panic=abort, stripped, `-C target-cpu=mvp -C
+target-feature=+sign-ext,+mutable-globals`, std rebuilt on
+nightly-2026-10-24 (`-Zbuild-std=std,panic_abort`), SQLite with
+`-mcpu=mvp -msign-ext -mmutable-globals`. Each build was installed fresh
+(uninstalled first), then launched normally twice with `tizen run`; the
+timings are the platform's own record (`localStorage['nsh.metrics']`), read
+afterwards with DevTools. Code and Data are the module's sections
+(`hosts/tizen-nsh/sections.py`); compile time follows Code.
+
+Each row adds to the one above it (except the last, which is the default
+`build.sh` now makes). First launch is after a fresh install; the second
+launch reads the compiled module from IndexedDB when the first cached it.
+One run per row: launches of the same build varied by up to 9 s, so
+differences of a few seconds are noise.
+
+| Build | Total | Code | Data | First launch: compile | Cache write | Second launch: compile or load | App start | First paint (first / second) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| opt-level 3 | 16,147,460 | 13,606,508 | 2,500,633 | 49.6 s | fails (`QuotaExceededError`; earlier: transaction timeout) | compiles again, 54.2 s | 5.0–10.5 s | 69 / 76 s |
+| opt-level z | 11,540,123 | 8,914,666 | 2,547,233 | 32.1 s | 12.7 s | 13.4 s from the cache | 4.9–7.1 s | 47 / 22 s |
+| + `-Cpanic=immediate-abort` only | 11,230,223 | 8,741,068 | 2,412,249 | 32.2 s | 20.8 s | 12.0 s | 5.2–8.4 s | 58 / 20 s |
+| + std `optimize_for_size` (no panic change) | 11,244,692 | 8,625,338 | 2,542,281 | not installed | | | | |
+| + `-Zlocation-detail=none` | 11,033,182 | 8,595,706 | 2,361,073 | not installed | | | | |
+| + `-Zfmt-debug=none` | 10,894,852 | 8,496,019 | 2,325,545 | not installed | | | | |
+| all four (z, immediate-abort, optimize_for_size, location-detail, fmt-debug) | 10,745,497 | 8,372,047 | 2,301,121 | 25.4 s | 9.4 s | 11.1 s | 5.7–6.2 s | 37 / 19 s |
+| all four + `wasm-opt -Oz` (binaryen 132) | 8,790,469 | 6,487,536 | 2,260,113 | 24.4 s | 7.1 s | 10.1 s | 5.1–6.0 s | 39 / 18 s |
+| default: all but fmt-debug + wasm-opt | 8,891,118 | 6,552,697 | 2,292,907 | 26.0 s | 6.8 s | 9.1 s | 4.1–6.2 s | 41 / 16.7 s |
+| + translations, fonts and splash as package files; SQLite without unused options and inside LTO | 7,467,317 | 6,456,665 | 951,033 | not yet on the TV | | | | |
+
+`-Zfmt-debug=none` saves 0.1 MB but empties every `{:?}`, which the app
+also shows (remote key labels) and logs, so the default leaves it out.
+`-Cpanic=immediate-abort` turns a panic into a trap without its message:
+the platform still reports it as the app's fatal error (one trap, the
+components closed), with the stack but not the panic's text. Logs keep
+their text.
+
+Findings:
+
+- The cache limit is not a fixed 6 MB: the 11.5 MB module cached (the
+  quota was about 68 MB with no other data; the earlier failures were the
+  quota and a transaction timeout during the clone). Reading the cached
+  module back is slow on this set (13.4 s for 11.5 MB), so a cached launch
+  is still far from the 8 s gate.
+- "App start" is the engine's first pump, including opening the store
+  (empty here) and building the first screen: about 5 s on this set.
+- Where the bytes are (opt-level z, unstripped, `twiggy`, by the crate a
+  function's name starts with; generic code counts where it is
+  instantiated, so `core`, `alloc` and `hashbrown` are mostly Patina's and
+  NSH's types): `nsh_core` 2.5 MB, `core` 1.0 MB, `alloc` 0.9 MB, SQLite
+  (C) 0.73 MB, `iptv_runtime` 0.72 MB, `iptv_app` 0.65 MB,
+  `iptv_store_sqlite` 0.38 MB, `hashbrown` 0.36 MB. Data is 2.5 MB, of
+  which the translations (`messages.tsv`, 0.66 MB), the banner (0.40 MB)
+  and the three Roboto fonts (0.27 MB) are files.
+
+### With a real account (the default build, 8.9 MB)
+
+One Xtream account (7,257 live channels, a 248,000-program guide),
+entered through the app's own setup on the TV, development build
+(`NSH_INFO_LOGS=1`, the same module):
+
+| Step | Result | Gate |
+| --- | --- | --- |
+| Import to the channel list | 7,257 channels on screen about 13 s after submitting; no errors | |
+| Catalog publish | 111 steps, 2.3 s in steps, longest 665 ms | 50 ms: not met |
+| Guide download and publish | 247,813 programs stored about 82 s after the channels; 1,331 steps, 32.6 s in steps, longest 2,364 ms | 50 ms: not met |
+| Saves to IndexedDB | 301 chunks (the whole database after the guide's swap) in 8.0 s; 52 chunks in 5.0 s | |
+| Launch with the stored 23 MB | chunks read in 4.8 s (beside the module's load), store open 0.4 s, first paint 13–17 s | 8 s: not met |
+| Playback | a channel tuned by number: first frame 2.9 s after its source was set | |
+| Zap (CH+) | 0.7 s from the key to the new source, first frame 2.3 s after it | |
+| Key to frame on the guide | median about 148 ms (one move every 1.5 s); a move every 0.4 s queues and takes 0.3–2.9 s | 80 ms: not met |
+| Module memory | 61 MB at launch | |
+
+The app stopped twice while zapping, the second time on the third zap of
+a session. The platform recorded no fatal error and the page's DevTools
+went away, so the TV ended the app itself; memory (61 MB of module beside
+AVPlay) is the likely cause, not established. The TV also dropped off the
+network once during the first import. Memory during a guide refresh was
+not measured before that.
+
+The average guide step is 25 ms, so most 200-row slices are within the
+gate; which steps take longest is not recorded yet (the log keeps only
+the longest). The likely ones are the ends of a publish (taking the copy,
+then the swap with the writes that follow) and steps that create indexes;
+timing each phase is the next step for the 50 ms gate.
+
+## Decision on Tizen 5.5 (2026-11-21)
+
+On Tizen 5.5 the JavaScript bridge (`hosts/tizen`) stays the supported
+app, and Patina's NSH package (`hosts/tizen-nsh`) is opt-in: built and
+installable beside it, never the default package for that generation.
+No further shrinking or performance work targets Tizen 5.5.
+
+It rests on these measurements, against step 4's gates:
+
+| | Measured | Gate |
+| --- | --- | --- |
+| First launch after an install | about 41 s to first paint (26 s of it compiling) | 30 s |
+| Cached launch | first paint 13–17 s (real-account run); the channel list 23–25 s (comparison run, below) | 8 s |
+| Key to frame on the guide | median about 148 ms (real-account run); 147 ms (comparison run) | 80 ms |
+| A publish step | up to 2.4 s (catalog 665 ms) | 50 ms |
+| WebAssembly memory | 61 MB at launch; about 94 MB in use (comparison run) | |
+| Stability | the app was closed twice while zapping (real-account run); HLS streams dropped about every 37 s (comparison run) | |
+
+On the same TV and provider, three other Tizen IPTV players and the bridge
+(medians; zap is channel up to a moving picture, mostly the provider's
+cold start). Patina NSH played the provider's HLS streams where the bridge
+played MPEG-TS, so their zap and drop columns are not like for like:
+
+| App | Launch to channel list | Key to frame | Zap | Notes |
+| --- | --- | --- | --- | --- |
+| Patina NSH | 23–25 s | 147 ms | 3.16 s | HLS streams dropped about every 37 s |
+| Patina bridge | 5.0 s | 42–44 ms | 1.81 s | MPEG-TS, no drops |
+| OpenIPTV | 3.9 s | 36–41 ms | 3.06 s | |
+| APL TV | 5.2 s | 34–65 ms | 2.30 s | |
+| Xtivio | 20 s (to its home screen) | 55 ms | 3.87 s | HTML5 video at 720p; one 118 s freeze |
+
+Limits of the evidence: one 2020 set (UN55TU7000), one provider account,
+a few runs per build, release builds only.
+
+What carries forward from this work whatever the next generation shows:
+the store driver (`Ports::store_host`, sliced publishes), the browser host
+(IndexedDB chunks, the SQLite hooks, imports as cooperative tasks), the
+browser key names and remote key phases, and the size tooling
+(`sections.py`, the `tizen` profile, the size flags, package files).
+
+Next: measure the NSH package on a 2022 or later set (Tizen 6.5+,
+Chromium 85+) before deciding NSH on Tizen as a whole.
+
 ## Not goals
 
 - Recording, backup files, picture in picture, or multiview on TVs with one
@@ -405,6 +561,7 @@ Measured on the same TV on 2026-11-21.
 | --- | --- |
 | Bridge performance, limits and what it stores | `hosts/tizen/README.md`, PR #190 |
 | NSH engine on the TV, compile time and cache limit by module size, per-key cost | `../nsh-platform-tizen/README.md` |
+| Comparison with other Tizen players (Decision on Tizen 5.5) | Runs on 2026-11-21/22 on the same TV (UN55TU7000) and provider account: Patina NSH, the Patina bridge, OpenIPTV, APL TV and Xtivio; timings recorded with DevTools, and the player's state (AVPlay) |
 | Worker against page thread | `../nsh-platform-tizen` (`worker.html`, `bench-common.js`), runs on 2026-11-21 |
 | Real store size | Native import of one real account into a temporary unencrypted store (`dbstat` per table); the database was deleted after measuring |
 | SQLite persistence on the TV | In-memory database built, serialized, written to IndexedDB, read back and restored across launches (probe, 2026-11-21) |

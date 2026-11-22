@@ -175,9 +175,13 @@ class Plan(unittest.TestCase):
         self.assertEqual(self.by_name["runtime-portable-tests"],
                          ["cargo", "test", "--locked", "-p", "iptv-runtime", "--no-default-features", "--lib",
                           "--", "--format=pretty"])
+        self.assertEqual(self.by_name["tizen-nsh-wasm"],
+                         ["cargo", "clippy", "--locked", "--manifest-path", "hosts/tizen-nsh/Cargo.toml", *wasm])
+        self.assertTrue((checks.ROOT / "hosts/tizen-nsh/Cargo.lock").is_file())
         for host in ("macos", "windows"):
             names = {step["name"] for step in checks.plan(host=host)}
-            self.assertFalse({"runtime-wasm", "app-wasm", "web-adapters-wasm", "runtime-portable-tests"} & names)
+            self.assertFalse({"runtime-wasm", "app-wasm", "web-adapters-wasm", "runtime-portable-tests",
+                              "tizen-nsh-wasm"} & names)
 
     def test_release_only_changes_the_normal_app_build(self):
         release = {step["name"]: step["argv"] for step in checks.plan(release=True)}

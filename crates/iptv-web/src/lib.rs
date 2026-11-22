@@ -7,6 +7,9 @@
 //!
 //! - `host`: the imports the module calls (fetch, chunks, timers, storage,
 //!   events, clocks).
+//! - `chunks`, `device`, `package`: for an application on the real
+//!   runtime, the browser store's chunks in IndexedDB, randomness, the time
+//!   zone and the package's own files.
 //! - `exec`: a single-threaded executor polled after every delivery, and
 //!   the `iptv_import::Fetch` adapter over the host.
 //! - `store`: what is kept between launches: the stored guide (an
@@ -35,10 +38,13 @@
 
 #[cfg(feature = "bridge")]
 mod app;
+mod chunks;
+mod device;
 mod exec;
 #[cfg(feature = "bridge")]
 mod grid;
 mod host;
+mod package;
 #[cfg(feature = "bridge")]
 mod search;
 #[cfg(feature = "bridge")]
@@ -52,6 +58,14 @@ pub mod adapters {
     use std::time::Duration;
 
     pub use crate::exec::{HostBody, HostFetch};
+
+    /// A browser store's chunks in the host's IndexedDB.
+    pub mod chunks {
+        pub use crate::chunks::{Unreadable, read_stored, release_stored, save, stored_size};
+    }
+
+    pub use crate::device::{fill_random, utc_offset_minutes};
+    pub use crate::package::package_file;
 
     /// Runs `task` from the executor's next poll on; outside a poll, one is
     /// asked of the host.
@@ -189,6 +203,13 @@ pub extern "C" fn on_stored(id: u32, len: u32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn on_missing(id: u32) {
     exec::deliver_stored(id, None);
+    exec::poll();
+}
+
+/// Chunk save `id` committed (`ok` 1) or failed (`chunks::save`).
+#[unsafe(no_mangle)]
+pub extern "C" fn on_chunks_saved(id: u32, ok: u32) {
+    exec::deliver_saved(id, ok == 1);
     exec::poll();
 }
 

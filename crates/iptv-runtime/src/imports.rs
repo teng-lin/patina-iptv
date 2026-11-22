@@ -241,9 +241,8 @@ pub fn now_unix() -> i64 {
     crate::time::since_epoch().as_secs() as i64
 }
 
-/// The import itself, on its own thread with a small tokio runtime.
-/// `cancel` stops all of it; `revoked` its guide phase alone (a guide
-/// action replaced what it would download, `ImportWork::guide`).
+/// The import on the calling worker, to its end (tests drive it so).
+#[cfg(all(test, feature = "test-support"))]
 pub(crate) fn run(
     services: &Services,
     job: Job,
@@ -333,7 +332,8 @@ pub(crate) async fn guide_pipeline(
                                 matching,
                                 now,
                                 &[cancel],
-                            );
+                            )
+                            .await;
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
                                 channels: channels.clone(),
@@ -500,7 +500,8 @@ pub(crate) async fn pipeline(
                     {
                         Ok(import) => {
                             let guide =
-                                keep_guide(services, id, import, &guides, matching, now, &stops);
+                                keep_guide(services, id, import, &guides, matching, now, &stops)
+                                    .await;
                             let _ = tx.send(Msg::Guide(Box::new(Imported {
                                 groups,
                                 channels: channels.clone(),
@@ -697,7 +698,7 @@ pub(crate) async fn pipeline(
     #[cfg(feature = "test-support")]
     services.before_publication();
     let (id, counts, sources, authority) =
-        match save(services, &job, &catalog, &planned, stage, &publication) {
+        match save_published(services, &job, &catalog, &planned, stage, &publication).await {
             Ok(saved) => saved,
             Err(e) => {
                 log::warn!("iptv data: store: {e}");
@@ -739,9 +740,7 @@ pub(crate) async fn pipeline(
     };
     let guides = stored::configs_for(&services.settings(), &sources, &job.source.config);
     if let Some(import) = typed_guide {
-        report(keep_guide(
-            services, id, import, &guides, matching, now, &stops,
-        ));
+        report(keep_guide(services, id, import, &guides, matching, now, &stops).await);
         return send_next_check(services, tx, id, &guides, matching);
     }
     match stored::plan_with(
@@ -764,7 +763,8 @@ pub(crate) async fn pipeline(
             };
             match downloaded {
                 Ok(import) => {
-                    let guide = keep_guide(services, id, import, &guides, matching, now, &stops);
+                    let guide =
+                        keep_guide(services, id, import, &guides, matching, now, &stops).await;
                     let _ = tx.send(Msg::Guide(imported(guide)));
                 }
                 Err(ImportError::Canceled) => {}
@@ -812,7 +812,7 @@ pub(crate) struct Downloaded {
 /// Stores a downloaded guide and reads it back without descriptions (the
 /// stored one, if any, when the store fails or one of `stops` superseded
 /// the download: `stored::replace`).
-pub(crate) fn keep_guide(
+pub(crate) async fn keep_guide(
     services: &Services,
     id: SourceId,
     guide: Downloaded,
@@ -821,7 +821,9 @@ pub(crate) fn keep_guide(
     now: i64,
     stops: &[&CancelToken],
 ) -> GuideStore {
-    if let Err(e) = stored::replace(services, id, guide, guides, matching, now, stops) {
+    if let Err(e) =
+        stored::replace_published(services, id, guide, guides, matching, now, stops).await
+    {
         log::warn!("iptv data: could not store the guide: {e}");
     }
     stored::load_guide(services, id, now).unwrap_or_default()
@@ -922,6 +924,165 @@ pub(crate) fn save(
         )))
     })??;
     Ok(saved)
+}
+
+/// [`save`], where the host keeps the store: the catalog replacement runs
+/// in slices on a publish copy (`publish.rs`), with the same checks and
+/// writes before and after it. Natively it is [`save`] itself.
+pub(crate) async fn save_published(
+    services: &Services,
+    job: &Job,
+    catalog: &Catalog,
+    planned: &[GuideSource],
+    stage: CatalogStage,
+    publication: &Publication,
+) -> Result<SavedCatalog, PublicationError> {
+    if services.ports().store_host.is_none() {
+        return save(services, job, catalog, planned, stage, publication);
+    }
+    let failed = |kind| {
+        catalog
+            .on_demand_failures
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, e)| stored::error_kind(e))
+    };
+    let outcome = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let published = services
+        .publish(CatalogPublish {
+            job: job.clone(),
+            guide_urls: catalog.guide_urls(),
+            planned: planned.to_vec(),
+            stage: Some(stage),
+            on_demand: (failed(ContentKind::Movie), failed(ContentKind::Series)),
+            publication: publication.clone(),
+            outcome: outcome.clone(),
+            source: None,
+            running: crate::publish::Replacing::Idle,
+        })
+        .await;
+    match (
+        published,
+        outcome.load(std::sync::atomic::Ordering::Relaxed),
+    ) {
+        (Ok(saved), _) => saved,
+        (Err(_), SUPERSEDED) => Err(PublicationError::Superseded),
+        // Canceled between its slices ([`CatalogPublish::canceled`]).
+        (Err(_), _) if publication.cancel.is_canceled() => Err(PublicationError::Superseded),
+        (Err(_), DENIED) => Err(PublicationError::Denied),
+        (Err(error), _) => Err(PublicationError::Store(error)),
+    }
+}
+
+/// [`CatalogPublish::outcome`]: superseded before it was written.
+const SUPERSEDED: u8 = 1;
+/// [`CatalogPublish::outcome`]: parental controls refused it.
+const DENIED: u8 = 2;
+
+/// A catalog publish as a sliced job ([`save_published`]).
+struct CatalogPublish {
+    job: Job,
+    guide_urls: Vec<SecretUrl>,
+    planned: Vec<GuideSource>,
+    stage: Option<CatalogStage>,
+    on_demand: (Option<ImportErrorKind>, Option<ImportErrorKind>),
+    publication: Publication,
+    /// Why `prepare` refused it, when it did ([`SUPERSEDED`], [`DENIED`]).
+    outcome: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// The source written and whether `prepare` added it.
+    source: Option<(SourceId, bool)>,
+    running: crate::publish::Replacing<iptv_store_sqlite::CatalogReplacement<'static, Store>>,
+}
+
+impl crate::publish::Publish for CatalogPublish {
+    type Output = Result<SavedCatalog, PublicationError>;
+
+    fn prepare(&mut self, live: &mut Store) -> Result<(), StoreError> {
+        if !self.publication.current(live)? {
+            self.outcome
+                .store(SUPERSEDED, std::sync::atomic::Ordering::Relaxed);
+            return Err(StoreError::Unavailable("import superseded"));
+        }
+        if !crate::parental::import_allowed(live, &self.job, &self.publication.authorization)? {
+            self.outcome
+                .store(DENIED, std::sync::atomic::Ordering::Relaxed);
+            return Err(StoreError::Unavailable(
+                "import blocked by parental controls",
+            ));
+        }
+        let source = match self.job.stored {
+            Some(id) => (id, false),
+            None => (live.add_source(&self.job.source)?, true),
+        };
+        self.source = Some(source);
+        Ok(())
+    }
+
+    fn start(&mut self, copy: Store) -> Result<(), StoreError> {
+        let (id, added) = self.source.ok_or(StoreError::Unavailable(
+            "the catalog publish was not prepared",
+        ))?;
+        let mut stage = self
+            .stage
+            .take()
+            .ok_or(StoreError::Unavailable("the catalog publish started twice"))?;
+        stage.set_on_demand_errors(self.on_demand.0, self.on_demand.1);
+        let mut publication = iptv_store_sqlite::StagePublication::new().provider_guides(
+            std::mem::take(&mut self.guide_urls),
+            added.then(|| std::mem::take(&mut self.planned)),
+        );
+        if self.job.edit {
+            publication = publication.details(self.job.source.clone());
+        }
+        self.running = crate::publish::Replacing::Stepping(
+            iptv_store_sqlite::CatalogReplacement::from_stage(copy, id, stage, publication)?,
+        );
+        Ok(())
+    }
+
+    fn step(&mut self, rows: u32) -> Result<bool, StoreError> {
+        self.running.step(rows)
+    }
+
+    fn take_copy(&mut self) -> Option<Store> {
+        self.running.take_copy()
+    }
+
+    fn finish(self: Box<Self>, live: &mut Store) -> Result<Self::Output, StoreError> {
+        let (id, _) = self.source.ok_or(StoreError::Unavailable(
+            "the catalog publish was not prepared",
+        ))?;
+        let published = self.running.done().ok_or(StoreError::Unavailable(
+            "the catalog publish did not finish",
+        ))?;
+        log::info!(
+            "iptv data: saved {} channels for source {}",
+            published.counts.channels,
+            id.0
+        );
+        let stored = live.source(id)?.ok_or(StoreError::SourceNotFound(id))?;
+        if stored.source.config != self.job.source.config {
+            return Ok(Err(PublicationError::Superseded));
+        }
+        Ok(Ok((
+            id,
+            published.counts,
+            published.guides.unwrap_or_default(),
+            super::playback::source_authority(&stored),
+        )))
+    }
+
+    fn failed(&mut self, live: &mut Store) {
+        if let Some((id, true)) = self.source {
+            let _ = live.delete_source(id);
+        }
+    }
+
+    /// The user's Cancel during Saving: `prepare` looked at it once, and
+    /// the slices that follow run in later turns.
+    fn canceled(&self) -> bool {
+        self.publication.cancel.is_canceled()
+    }
 }
 
 pub(crate) fn save_in(

@@ -167,19 +167,40 @@ fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, source: Opt
     *last = now;
 }
 
-/// The stream as the host's `source` prop: `{url, headers, token, live,
-/// reconnect}`, or null when nothing plays.
-fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
-    let stream = ui.player.stream(surface);
-    let playing = if surface == 0 {
+/// Whether the backdrops under the video layer leave its rectangle
+/// transparent (`panels::backdrop`): on a platform whose video plane is
+/// under the page, while surface 0 shows a picture (reactive). That is
+/// while it plays a source whose first frame its player drew
+/// ([`Stream::rendered`](crate::player::Stream::rendered), for the open
+/// token): a source the host refused, one that failed, one being replaced
+/// and the time before the first frame show the backdrop, not a black plane.
+pub(crate) fn backdrop_clear(ui: Ui) -> bool {
+    if !crate::host::VIDEO_UNDER_PAGE {
+        return false;
+    }
+    let stream = ui.player.main();
+    plays(ui, 0)
+        && stream.source.with(Option::is_some)
+        && stream.rendered.get() == Some(stream.token.get())
+}
+
+/// Whether surface `surface` has something to play (reactive).
+fn plays(ui: Ui, surface: usize) -> bool {
+    if surface == 0 {
         ui.playing.get().is_some()
             || crate::player::resume::playing(ui)
             || ui.player.recorded.with(Option::is_some)
             || ui.player.vod.with(Option::is_some)
     } else {
-        stream.channel.get().is_some()
-    };
-    if !playing {
+        ui.player.stream(surface).channel.get().is_some()
+    }
+}
+
+/// The stream as the host's `source` prop: `{url, headers, token, live,
+/// reconnect}`, or null when nothing plays.
+fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
+    let stream = ui.player.stream(surface);
+    if !plays(ui, surface) {
         return None;
     }
     let token = stream.token.get();
@@ -366,8 +387,13 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         PlayerEvent::FirstRender { token } => {
             #[cfg(feature = "test-support")]
             crate::performance_probe::rendered(ui, surface, token);
-            if token == stream.token.get_untracked() && surface == 0 {
-                crate::startup::mark("video rendered");
+            if token == stream.token.get_untracked() {
+                if surface == 0 {
+                    crate::startup::mark("video rendered");
+                }
+                if crate::host::VIDEO_UNDER_PAGE {
+                    stream.rendered.set(Some(token));
+                }
             }
             return;
         }
@@ -383,6 +409,11 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
             format!("{width}×{height}")
         }
         PlayerEvent::Error { code, http } => {
+            // A refused source (`headersUnsupported`) or a failed one: no
+            // picture until a new open draws its first frame.
+            if crate::host::VIDEO_UNDER_PAGE {
+                stream.rendered.set(None);
+            }
             crate::player::on_error(ui, surface, &code, http);
             format!("error {code}")
         }

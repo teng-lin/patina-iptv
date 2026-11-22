@@ -51,11 +51,11 @@ pub fn open(ui: Ui, playlist: SourceId) {
     ui.guide_sources.set(Some(screen(playlist)));
 }
 
-/// The screen for `playlist`; without blocking workers it offers no guide
+/// The screen for `playlist`; a host that cannot import offers no guide
 /// to add or download.
 fn screen(playlist: SourceId) -> Screen {
     let screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
-    if crate::host::HAS_WORKERS {
+    if crate::host::IMPORTS {
         screen
     } else {
         screen.without_downloads()

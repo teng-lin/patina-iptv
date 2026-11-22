@@ -145,12 +145,25 @@ fn app_sources() -> (PathBuf, Vec<PathBuf>) {
     (root, files)
 }
 
+/// The one shell file that names the store adapter: the browser host keeps
+/// the store on its memory files (`Ports::store_host`), opening, persisting
+/// and publishing it; every query still goes through the runtime.
+const STORE_HOST: &str = "host/web/store.rs";
+
 #[test]
 fn only_runtime_can_use_the_store_adapter() {
-    let (_, files) = app_sources();
+    let (root, files) = app_sources();
     for file in files {
         let source = code(&file);
+        let name = file
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
         for forbidden in ["iptv_store_sqlite", "store_service::"] {
+            if forbidden == "iptv_store_sqlite" && name == STORE_HOST {
+                continue;
+            }
             assert!(
                 !source.contains(forbidden),
                 "{} uses {forbidden}",

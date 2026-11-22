@@ -415,6 +415,123 @@ pub(crate) fn replace(
     })
 }
 
+/// [`replace`], where the host keeps the store: the replacement runs in
+/// slices on a publish copy (`publish.rs`), the same writes before and
+/// after it in the same order. Natively it is [`replace`] itself.
+pub(crate) async fn replace_published(
+    services: &Services,
+    source: SourceId,
+    guide: Downloaded,
+    configs: &[EpgSourceConfig],
+    matching: Matching<'_>,
+    now: UnixTime,
+    stops: &[&CancelToken],
+) -> Result<EpgCounts, StoreError> {
+    if services.ports().store_host.is_none() {
+        return replace(services, source, guide, configs, matching, now, stops);
+    }
+    let Downloaded { import, stage } = guide;
+    let results: Vec<_> = import
+        .sources
+        .iter()
+        .map(|o| (o.id, o.result.as_ref().err().map(error_kind)))
+        .collect();
+    let first_error = import
+        .sources
+        .iter()
+        .find_map(|o| o.result.as_ref().err().map(error_kind));
+    services
+        .publish(GuidePublish {
+            source,
+            feeds: EpgFeedMeta::from_import(&import, configs, now),
+            fingerprint: matching.fingerprint(),
+            input: Some((import, stage)),
+            results,
+            first_error,
+            prune_before: now.saturating_sub(
+                i64::from(keep_past_days(&services.settings())).saturating_mul(DAY),
+            ),
+            stops: Stops::of(stops),
+            running: crate::publish::Replacing::Idle,
+        })
+        .await
+}
+
+/// A guide replacement as a sliced publish ([`replace_published`]).
+struct GuidePublish {
+    source: SourceId,
+    feeds: Vec<EpgFeedMeta>,
+    fingerprint: u64,
+    input: Option<(iptv_import::EpgImport, iptv_store_sqlite::EpgStage)>,
+    results: Vec<(iptv_epg::FeedId, Option<ImportErrorKind>)>,
+    first_error: Option<ImportErrorKind>,
+    prune_before: UnixTime,
+    stops: Stops,
+    running: crate::publish::Replacing<iptv_store_sqlite::EpgReplacement<'static, Store>>,
+}
+
+impl crate::publish::Publish for GuidePublish {
+    type Output = EpgCounts;
+
+    fn prepare(&mut self, _live: &mut Store) -> Result<(), StoreError> {
+        if self.stops.superseded() {
+            return Err(StoreError::Unavailable("the guide download was superseded"));
+        }
+        Ok(())
+    }
+
+    fn start(&mut self, copy: Store) -> Result<(), StoreError> {
+        let (import, stage) = self
+            .input
+            .take()
+            .ok_or(StoreError::Unavailable("the guide publish started twice"))?;
+        self.running =
+            crate::publish::Replacing::Stepping(iptv_store_sqlite::EpgReplacement::with_stage(
+                copy,
+                self.source,
+                stage,
+                std::borrow::Cow::Owned(import),
+                std::mem::take(&mut self.feeds),
+                self.fingerprint,
+            )?);
+        Ok(())
+    }
+
+    fn step(&mut self, rows: u32) -> Result<bool, StoreError> {
+        self.running.step(rows)
+    }
+
+    fn take_copy(&mut self) -> Option<Store> {
+        self.running.take_copy()
+    }
+
+    fn finish(self: Box<Self>, live: &mut Store) -> Result<EpgCounts, StoreError> {
+        let source = self.source;
+        let counts = self
+            .running
+            .done()
+            .ok_or(StoreError::Unavailable("the guide publish did not finish"))?;
+        live.record_epg_feed_results(source, &self.results)?;
+        let pruned = live.prune_epg(self.prune_before)?;
+        if let Some(kind) = self.first_error {
+            live.record_epg_failure(source, kind)?;
+        }
+        log::info!(
+            "iptv data: stored the guide of source {}: {} channels, {} programs ({pruned} old ones pruned)",
+            source.0,
+            counts.bindings,
+            counts.programs
+        );
+        Ok(counts)
+    }
+
+    /// A guide action or newer work superseded it after `prepare`
+    /// ([`Stops`]): the copy must not replace a guide decided since.
+    fn canceled(&self) -> bool {
+        self.stops.superseded()
+    }
+}
+
 /// What ends guide work's right to write its result: the tokens that stop
 /// it, looked at again on the store's writer. Work is superseded when a
 /// guide action revoked it or newer work replaced it; the writer runs its
@@ -534,7 +651,8 @@ pub(crate) async fn download_now(
                     let stops = [cancel];
                     let guide = super::imports::keep_guide(
                         services, source, import, &guides, matching, now, &stops,
-                    );
+                    )
+                    .await;
                     let _ = tx.send(Msg::Guide(Box::new(Imported {
                         groups,
                         channels: channels.clone(),

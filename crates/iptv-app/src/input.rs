@@ -23,8 +23,9 @@ pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
 
-/// The Android remote profile distinguishes a tap from a held key.
-const ANDROID_KEYS: bool = crate::host::ANDROID;
+/// A TV remote's profile (Android, a browser TV) distinguishes a tap from
+/// a held key.
+const REMOTE_KEYS: bool = crate::host::REMOTE_KEYS;
 
 /// Headless scenarios that drive a remote's raw Down/Repeat/Up phases
 /// (`use_remote_key_phases`), set before the app starts.
@@ -71,12 +72,12 @@ pub(crate) fn long_press() -> bool {
     if REMOTE_PHASES.load(std::sync::atomic::Ordering::Relaxed) {
         return true;
     }
-    ANDROID_KEYS
+    REMOTE_KEYS
 }
 
 /// Whose keys: a TV remote's on Android, a keyboard's on the desktops
 /// (`iptv_nav::Profile`: one map; the hints name their keys).
-pub(crate) const PROFILE: Profile = if ANDROID_KEYS {
+pub(crate) const PROFILE: Profile = if REMOTE_KEYS {
     Profile::Remote
 } else {
     Profile::Keyboard

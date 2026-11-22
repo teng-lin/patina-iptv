@@ -194,7 +194,7 @@ resolves to a LAN address is not detected, and the TV's player (AVPlay) and
 image loader follow redirects of streams and logos without these checks.
 Logos are not size-limited. The TV sends its own User-Agent on API requests.
 
-### The SQLite store in the browser (NSH build, in progress)
+### The SQLite store in the browser (NSH build)
 
 The NSH build for browser TVs runs the same SQLite store
 (`crates/iptv-store-sqlite`) compiled to WebAssembly, without SQLCipher. Its
@@ -218,12 +218,17 @@ take; the store gives out no other take until then, and a take dropped
 unacknowledged returns its chunks to the next one. Storage therefore always
 holds one commit's state: a crash or power loss can lose the last changes,
 never mix two commits. At launch the store refuses to open while a chunk the
-saved size calls for is missing.
+saved size calls for is missing. The Tizen host (`hosts/tizen-nsh`) loads
+the chunks and the size in one read transaction before the module starts;
+storage it could not read refuses the open rather than starting empty, which
+the first save would make permanent. A chunk with wrong bytes of the right
+length is still only caught by SQLite on use (no per-chunk checksum yet).
 
 ## Browser build of the app
 
-The NSH build for browser TVs (`iptv-app`'s `host/web`, not yet shipped)
-fetches through the page, like the Tizen host above, so the native transport's
+The NSH build for browser TVs (`iptv-app`'s `host/web`, packaged by
+`hosts/tizen-nsh`, experimental and not the default package) fetches
+through the page, like the Tizen host above, so the native transport's
 guarantees hold only in part:
 
 - **Destinations.** A content-supplied address is checked with
@@ -248,6 +253,16 @@ guarantees hold only in part:
   connection timeouts are the browser's own.
 - **Storage.** The browser store is unencrypted (no key store), and settings
   and favorites last for the session until a private-files port exists.
+- **Randomness and time.** Salts, recovery codes and SQLite's randomness
+  come from the Worker's `crypto.getRandomValues`; local time from the
+  page's time zone.
+- **Package policy.** `hosts/tizen-nsh/app/config.xml` declares a CSP
+  (Tizen's CSP mode): scripts only from the package, inline styles and
+  `blob:` images for the renderer, `object-src 'self'` for AVPlay, and
+  `connect-src`, `img-src` and `media-src` open, as providers are
+  user-chosen hosts; the destination checks above still apply to every
+  request the app makes. The player plays only sources without request
+  headers (AVPlay cannot send the app's).
 
 ## Native assumptions and dependency exceptions
 

@@ -167,18 +167,19 @@ pub fn text_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
-    // Recording, backups, imports and guide downloads run on blocking
-    // workers; a host without them offers none of them.
+    // Recording and backups run on blocking workers; a host without them
+    // offers neither. Imports and guide downloads run where the host can
+    // import (`host::IMPORTS`).
     if !crate::host::HAS_WORKERS
-        && (key.starts_with("recordings.")
-            || matches!(
-                key,
-                "general.backup"
-                    | "general.restore"
-                    | "playlists.manage"
-                    | "epg.add_source"
-                    | "epg.update_now"
-            ))
+        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+    {
+        return Offer::Hidden;
+    }
+    if !crate::host::IMPORTS
+        && matches!(
+            key,
+            "playlists.manage" | "epg.add_source" | "epg.update_now"
+        )
     {
         return Offer::Hidden;
     }

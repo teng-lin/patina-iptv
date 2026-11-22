@@ -100,12 +100,17 @@ impl RemoteKey {
             "MediaTrackNext" => RemoteKey::Next,
             "MediaTrackPrevious" => RemoteKey::Previous,
             "BrowserSearch" => RemoteKey::Search,
-            "PageUp" => RemoteKey::ChannelUp,
-            "PageDown" => RemoteKey::ChannelDown,
-            "F1" => RemoteKey::Red,
-            "F2" => RemoteKey::Green,
-            "F3" => RemoteKey::Yellow,
-            "F4" => RemoteKey::Blue,
+            // UI Events names, as browser TV platforms deliver them (Samsung
+            // Tizen: CH+/CH- 427/428, the colour keys 403-406, Info 457,
+            // Guide 458), beside a keyboard's stand-ins.
+            "ChannelUp" | "PageUp" => RemoteKey::ChannelUp,
+            "ChannelDown" | "PageDown" => RemoteKey::ChannelDown,
+            "ColorF0Red" | "F1" => RemoteKey::Red,
+            "ColorF1Green" | "F2" => RemoteKey::Green,
+            "ColorF2Yellow" | "F3" => RemoteKey::Yellow,
+            "ColorF3Blue" | "F4" => RemoteKey::Blue,
+            "Info" => RemoteKey::Info,
+            "Guide" => RemoteKey::Guide,
             digit if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => {
                 RemoteKey::Digit(digit.as_bytes()[0] - b'0')
             }
@@ -143,6 +148,27 @@ mod tests {
         assert_eq!(key("MediaPlayPause", ""), Some(RemoteKey::PlayPause));
         assert_eq!(key("ContextMenu", ""), Some(RemoteKey::Menu));
         assert_eq!(key("7", ""), Some(RemoteKey::Digit(7)));
+    }
+
+    #[test]
+    fn maps_what_browser_tvs_name() {
+        // UI Events key values (Samsung Tizen's remote, Chromium 69).
+        assert_eq!(key("GoBack", ""), Some(RemoteKey::Back));
+        assert_eq!(key("ChannelUp", ""), Some(RemoteKey::ChannelUp));
+        assert_eq!(key("ChannelDown", ""), Some(RemoteKey::ChannelDown));
+        assert_eq!(key("ColorF0Red", ""), Some(RemoteKey::Red));
+        assert_eq!(key("ColorF1Green", ""), Some(RemoteKey::Green));
+        assert_eq!(key("ColorF2Yellow", ""), Some(RemoteKey::Yellow));
+        assert_eq!(key("ColorF3Blue", ""), Some(RemoteKey::Blue));
+        assert_eq!(key("Info", ""), Some(RemoteKey::Info));
+        assert_eq!(key("Guide", ""), Some(RemoteKey::Guide));
+        assert_eq!(key("MediaPlayPause", ""), Some(RemoteKey::PlayPause));
+        assert_eq!(key("MediaFastForward", ""), Some(RemoteKey::FastForward));
+        assert_eq!(key("MediaStop", ""), Some(RemoteKey::Stop));
+        assert_eq!(key("0", "Digit0"), Some(RemoteKey::Digit(0)));
+        // A desktop keyboard's stand-ins keep their meaning.
+        assert_eq!(key("PageUp", "PageUp"), Some(RemoteKey::ChannelUp));
+        assert_eq!(key("F1", "F1"), Some(RemoteKey::Red));
     }
 
     #[test]

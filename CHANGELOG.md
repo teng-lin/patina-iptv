@@ -9,6 +9,11 @@ is below 1.0, a minor release may change behavior.
 
 ### Added
 
+- Patina's full interface on Samsung Tizen TVs, built on the NSH platform
+  for Tizen (`hosts/tizen-nsh`, experimental, not the default package): the
+  same screens, store and imports as on the other platforms. On 2020 sets it
+  takes about 30 s to start the first time and over 20 s after that, so the
+  Live TV package stays the one for them.
 - Samsung Tizen TVs (experimental, 2020 / Tizen 5.5 and later): Live TV
   from an Xtream Codes account or an M3U playlist with its TV guide,
   full screen, channel zapping,

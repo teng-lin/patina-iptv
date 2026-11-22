@@ -56,21 +56,10 @@ pub const OSD_DETAIL: f32 = CAPTION;
 /// Badges over video (LIVE, FHD, 60 FPS) and a failure's detail line.
 pub const OSD_BADGE: f32 = 12.0;
 
-/// The font files, WOFF2 (NSH unpacks them when it registers them).
-pub const FILES: [(&str, &[u8]); 3] = [
-    (
-        "Roboto",
-        include_bytes!("../fonts/Roboto-Regular.woff2").as_slice(),
-    ),
-    (
-        "Roboto",
-        include_bytes!("../fonts/Roboto-Medium.woff2").as_slice(),
-    ),
-    (
-        "Roboto Condensed",
-        include_bytes!("../fonts/RobotoCondensed-Regular.woff2").as_slice(),
-    ),
-];
+/// The font files the app registers itself, WOFF2 (NSH unpacks them when
+/// it registers them); none where the host's page loads them
+/// (`host::FONT_FILES`).
+pub const FILES: &[(&str, &[u8])] = crate::host::FONT_FILES;
 
 /// Registers the fonts and makes Roboto the default family. Text laid out
 /// before a font arrives is laid out again with it.
@@ -79,7 +68,23 @@ pub const FILES: [(&str, &[u8]); 3] = [
 /// NSH would unpack
 /// each one twice on the UI thread (for its family name, then to register
 /// it), about 0.7 s of a cold start on a 32-bit TV box.
+///
+/// A browser package (feature `browser-package`) has them as the page's
+/// fonts instead, loaded in the Worker and on the page before the module
+/// starts: only Roboto becomes the default family.
 pub fn register() {
+    if FILES.is_empty() {
+        FONTS_IN.store(true, std::sync::atomic::Ordering::Relaxed);
+        crate::startup::mark_with("fonts registered", format_args!("the page's"));
+    } else {
+        register_files();
+    }
+    let mut tokens = (*tokens()).clone();
+    tokens.set_font(nsh_core::element::FONT_SANS, SANS);
+    set_tokens(tokens);
+}
+
+fn register_files() {
     let started = nsh_core::time::Instant::now();
     let (tx, rx) = futures_channel::oneshot::channel();
     let unpacking = crate::host::background("iptv-fonts", move || {
@@ -113,9 +118,6 @@ pub fn register() {
             format_args!("unpacked in {unpacked_ms} ms, registered {ms} ms after asking"),
         );
     }));
-    let mut tokens = (*tokens()).clone();
-    tokens.set_font(nsh_core::element::FONT_SANS, SANS);
-    set_tokens(tokens);
 }
 
 /// `name` cut to fit `width` with two dots ("Long chann.."), as measured by
@@ -216,7 +218,7 @@ mod tests {
 
     #[test]
     fn bundled_files_are_the_families_the_app_names() {
-        for (family, data) in FILES {
+        for &(family, data) in FILES {
             assert_eq!(nsh_core::font_family(data).as_deref(), Ok(family));
             assert!(nsh_core::font_data(data).unwrap().len() > data.len());
         }
