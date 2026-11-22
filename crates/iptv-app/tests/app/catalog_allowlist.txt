@@ -27,7 +27,6 @@ iptv-core/src/wizard.rs	Failed
 iptv-core/src/wizard.rs	FilePicked
 iptv-core/src/wizard.rs	Ok
 iptv-core/src/wizard.rs	Paste
-iptv-core/src/wizard.rs	PasteInto
 iptv-core/src/wizard.rs	Progress
 iptv-core/src/wizard.rs	SetField
 iptv-core/src/wizard.rs	Succeeded
