@@ -100,42 +100,7 @@ impl Tracks {
         }
     }
 
-    /// The chooser's entries for `kind`, in order: "Automatic" then the
-    /// renditions for video, the tracks for audio, "Off" then the tracks
-    /// for subtitles.
-    pub fn entries(&self, kind: Kind) -> Vec<String> {
-        self.entries_in(kind, &i18n::LANGUAGES[0])
-    }
-
-    /// Localized app-owned names; provider track labels remain unchanged.
-    pub fn entries_in(&self, kind: Kind, language: &Language) -> Vec<String> {
-        match kind {
-            Kind::Video => std::iter::once(translate(language, "Automatic").to_owned())
-                .chain(
-                    self.video
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| video_label(t, i, language)),
-                )
-                .collect(),
-            Kind::Audio => self
-                .audio
-                .iter()
-                .enumerate()
-                .map(|(i, t)| audio_label(t, i, language))
-                .collect(),
-            Kind::Text => std::iter::once(translate(language, "Off").to_owned())
-                .chain(
-                    self.text
-                        .iter()
-                        .enumerate()
-                        .map(|(i, t)| text_label(t, i, language)),
-                )
-                .collect(),
-        }
-    }
-
-    /// The entry of `kind` in effect (an index into [`Self::entries`]).
+    /// The chooser entry currently in effect for `kind`.
     pub fn selected_entry(&self, kind: Kind) -> usize {
         let at = |list: Vec<&str>, id: &Option<String>| {
             id.as_deref()
@@ -171,40 +136,77 @@ impl Tracks {
             (Kind::Text, i) => self.text.get(i - 1).map(|t| t.id.clone()),
         }
     }
+}
 
-    /// The control row's short value for `kind`: the playing resolution,
-    /// audio layout or subtitle language.
-    pub fn summary(&self, kind: Kind) -> Option<String> {
-        self.summary_in(kind, &i18n::LANGUAGES[0])
+/// The chooser's entries for `kind`, in order: "Automatic" then the
+/// renditions for video, the tracks for audio, "Off" then the tracks
+/// for subtitles.
+pub fn entries(tracks: &Tracks, kind: Kind) -> Vec<String> {
+    entries_in(tracks, kind, &i18n::LANGUAGES[0])
+}
+
+/// Localized app-owned names; provider track labels remain unchanged.
+pub fn entries_in(tracks: &Tracks, kind: Kind, language: &Language) -> Vec<String> {
+    match kind {
+        Kind::Video => std::iter::once(translate(language, "Automatic").to_owned())
+            .chain(
+                tracks
+                    .video
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| video_label(t, i, language)),
+            )
+            .collect(),
+        Kind::Audio => tracks
+            .audio
+            .iter()
+            .enumerate()
+            .map(|(i, t)| audio_label(t, i, language))
+            .collect(),
+        Kind::Text => std::iter::once(translate(language, "Off").to_owned())
+            .chain(
+                tracks
+                    .text
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| text_label(t, i, language)),
+            )
+            .collect(),
     }
+}
 
-    /// A localized summary without translating provider-originated text.
-    pub fn summary_in(&self, kind: Kind, language: &Language) -> Option<String> {
-        match kind {
-            Kind::Video => {
-                let id = self.selected_video.as_deref()?;
-                let t = self.video.iter().find(|t| t.id == id)?;
-                (t.height > 0).then(|| format!("{}p", t.height))
+/// The control row's short value for `kind`: the playing resolution,
+/// audio layout or subtitle language.
+pub fn summary(tracks: &Tracks, kind: Kind) -> Option<String> {
+    summary_in(tracks, kind, &i18n::LANGUAGES[0])
+}
+
+/// A localized summary without translating provider-originated text.
+pub fn summary_in(tracks: &Tracks, kind: Kind, language: &Language) -> Option<String> {
+    match kind {
+        Kind::Video => {
+            let id = tracks.selected_video.as_deref()?;
+            let t = tracks.video.iter().find(|t| t.id == id)?;
+            (t.height > 0).then(|| format!("{}p", t.height))
+        }
+        Kind::Audio => {
+            let id = tracks.selected_audio.as_deref()?;
+            let t = tracks.audio.iter().find(|t| t.id == id)?;
+            let lang = language_name_in(&t.language, language);
+            match (lang, t.channels) {
+                (Some(l), 0) => Some(l),
+                (Some(l), n) => Some(format!("{l} {}", audio_layout_in(n, language))),
+                (None, 0) => None,
+                (None, n) => Some(audio_layout_in(n, language)),
             }
-            Kind::Audio => {
-                let id = self.selected_audio.as_deref()?;
-                let t = self.audio.iter().find(|t| t.id == id)?;
-                let lang = language_name_in(&t.language, language);
-                match (lang, t.channels) {
-                    (Some(l), 0) => Some(l),
-                    (Some(l), n) => Some(format!("{l} {}", audio_layout_in(n, language))),
-                    (None, 0) => None,
-                    (None, n) => Some(audio_layout_in(n, language)),
-                }
-            }
-            Kind::Text => {
-                let id = self.selected_text.as_deref()?;
-                let t = self.text.iter().find(|t| t.id == id)?;
-                Some(
-                    language_name_in(&t.language, language)
-                        .unwrap_or_else(|| translate(language, "On").to_owned()),
-                )
-            }
+        }
+        Kind::Text => {
+            let id = tracks.selected_text.as_deref()?;
+            let t = tracks.text.iter().find(|t| t.id == id)?;
+            Some(
+                language_name_in(&t.language, language)
+                    .unwrap_or_else(|| translate(language, "On").to_owned()),
+            )
         }
     }
 }
@@ -419,26 +421,26 @@ mod tests {
         let mut tracks = sample();
         let japanese = i18n::resolve("ja", None);
         assert_eq!(
-            tracks.entries_in(Kind::Audio, japanese)[0],
+            entries_in(&tracks, Kind::Audio, japanese)[0],
             "英語 · ステレオ · AAC"
         );
         tracks.selected_text = Some("t1".into());
         assert_eq!(
-            tracks.summary_in(Kind::Text, japanese).as_deref(),
+            summary_in(&tracks, Kind::Text, japanese).as_deref(),
             Some("ドイツ語")
         );
         tracks.text[0].language.clear();
         tracks.text[0].label = "French".into();
         assert_eq!(
-            tracks.entries_in(Kind::Text, japanese)[1],
+            entries_in(&tracks, Kind::Text, japanese)[1],
             "French",
             "provider labels that happen to match a catalog key stay unchanged"
         );
         tracks.text[0].label.clear();
-        assert_eq!(tracks.entries_in(Kind::Text, japanese)[1], "トラック1");
+        assert_eq!(entries_in(&tracks, Kind::Text, japanese)[1], "トラック1");
         assert_eq!(tracks.pick(Kind::Text, 1).as_deref(), Some("t1"));
         for language in i18n::LANGUAGES {
-            assert_eq!(tracks.entries_in(Kind::Text, language).len(), 2);
+            assert_eq!(entries_in(&tracks, Kind::Text, language).len(), 2);
             assert!(!audio_layout_in(1, language).is_empty());
             assert!(!language_name_in("eng", language).unwrap().is_empty());
         }
@@ -448,7 +450,7 @@ mod tests {
     fn choosers_list_automatic_tracks_and_off() {
         let t = sample();
         assert_eq!(
-            t.entries(Kind::Video),
+            entries(&t, Kind::Video),
             [
                 "Automatic",
                 "360p · 25 fps · 800 kb/s",
@@ -456,10 +458,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            t.entries(Kind::Audio),
+            entries(&t, Kind::Audio),
             ["English · Stereo · AAC", "French · 5.1 · AC-3"]
         );
-        assert_eq!(t.entries(Kind::Text), ["Off", "German · Forced"]);
+        assert_eq!(entries(&t, Kind::Text), ["Off", "German · Forced"]);
         assert_eq!(t.selected_entry(Kind::Video), 0, "automatic");
         assert_eq!(t.selected_entry(Kind::Audio), 1);
         assert_eq!(t.selected_entry(Kind::Text), 0, "off");
@@ -481,10 +483,10 @@ mod tests {
         };
         assert_eq!(chosen.selected_entry(Kind::Video), 2);
         assert_eq!(chosen.selected_entry(Kind::Text), 1);
-        assert_eq!(chosen.summary(Kind::Video).as_deref(), Some("720p"));
-        assert_eq!(chosen.summary(Kind::Audio).as_deref(), Some("French 5.1"));
-        assert_eq!(chosen.summary(Kind::Text).as_deref(), Some("German"));
-        assert_eq!(sample().summary(Kind::Text), None, "off");
+        assert_eq!(summary(&chosen, Kind::Video).as_deref(), Some("720p"));
+        assert_eq!(summary(&chosen, Kind::Audio).as_deref(), Some("French 5.1"));
+        assert_eq!(summary(&chosen, Kind::Text).as_deref(), Some("German"));
+        assert_eq!(summary(&sample(), Kind::Text), None, "off");
     }
 
     #[test]
@@ -522,9 +524,9 @@ mod tests {
             }],
             ..Tracks::default()
         };
-        assert_eq!(t.entries(Kind::Video)[1], "main");
-        assert_eq!(t.entries(Kind::Audio), ["Track 1"]);
-        assert_eq!(t.entries(Kind::Text)[1], "XX");
+        assert_eq!(entries(&t, Kind::Video)[1], "main");
+        assert_eq!(entries(&t, Kind::Audio), ["Track 1"]);
+        assert_eq!(entries(&t, Kind::Text)[1], "XX");
     }
 
     #[test]
