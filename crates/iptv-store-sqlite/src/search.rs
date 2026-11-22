@@ -12,6 +12,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 use crate::SourceId;
 use crate::error::Result;
+use crate::replacement::{ChannelCursor, channels_after};
 
 /// Bump to rebuild every file's index (tokenizer or column change).
 const FTS_VERSION: &str = "1";
@@ -108,6 +109,60 @@ pub(crate) fn index_source(conn: &Connection, fts: bool, source: SourceId) -> Re
         )?;
     }
     Ok(())
+}
+
+/// Drops the index rows of `source`'s channels after `after` up to and
+/// including `last`, in `channels_by_position` order (a slice of
+/// [`forget_source`]).
+pub(crate) fn forget_channels(
+    conn: &Connection,
+    source: SourceId,
+    after: Option<ChannelCursor>,
+    last: ChannelCursor,
+) -> Result<usize> {
+    let filter = channels_after("", after);
+    let mut stmt = conn.prepare_cached(&format!(
+        "DELETE FROM channel_fts WHERE rowid IN (SELECT rowid FROM channels
+         WHERE {filter} AND (position, rowid) <= (?5, ?6))"
+    ))?;
+    execute_slice(&mut stmt, source, after, last)
+}
+
+/// Indexes `source`'s channels after `after` up to and including `last`, in
+/// `channels_by_position` order (a slice of [`index_source`]).
+pub(crate) fn index_channels(
+    conn: &Connection,
+    source: SourceId,
+    after: Option<ChannelCursor>,
+    last: ChannelCursor,
+) -> Result<usize> {
+    let filter = channels_after("c.", after);
+    let mut stmt = conn.prepare_cached(&format!(
+        "INSERT INTO channel_fts (rowid, name, original) {INDEX_ROWS}
+         WHERE {filter} AND (c.position, c.rowid) <= (?5, ?6)"
+    ))?;
+    execute_slice(&mut stmt, source, after, last)
+}
+
+/// Runs a slice statement: `?1` the source, `?3, ?4` the cursor (when
+/// continuing), `?5, ?6` the slice's last channel.
+fn execute_slice(
+    stmt: &mut rusqlite::CachedStatement<'_>,
+    source: SourceId,
+    after: Option<ChannelCursor>,
+    (position, rowid): ChannelCursor,
+) -> Result<usize> {
+    // `?2` (the slice limit elsewhere) and, on a first slice, `?3, ?4` are
+    // not in the statement; binding them keeps one numbering.
+    let (after_position, after_rowid) = after.unzip();
+    Ok(stmt.execute(params![
+        source.0,
+        None::<i64>,
+        after_position,
+        after_rowid,
+        position,
+        rowid
+    ])?)
 }
 
 /// Re-indexes one channel after its custom name changed. A no-op for an

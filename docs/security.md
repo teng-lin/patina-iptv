@@ -2,6 +2,10 @@
 
 ## Catalog encryption
 
+This section describes the native platforms (desktop, iPad, Android). The
+browser build has no SQLCipher; see
+[the SQLite store in the browser](#the-sqlite-store-in-the-browser-nsh-build-in-progress).
+
 Production opens the catalog through the store worker and `credential_key::open_database`.
 SQLCipher encrypts the complete database, including source credentials, stream and guide
 URLs, headers, cached catalog rows, search indexes and WAL pages. The app's guide and
@@ -38,7 +42,7 @@ interruption is discarded before retry. No plaintext rollback copy is retained a
 successful migration. This cannot erase plaintext copies in pre-existing backups,
 filesystem snapshots or storage-device remapping; it protects newly copied live files.
 
-App-owned picked playlist copies also use SQLCipher, with document bytes stored in
+On native platforms, app-owned picked playlist copies also use SQLCipher, with document bytes stored in
 64 KiB chunks. The importer reads these through a bounded decrypted stream; no
 plaintext replacement file is needed. Existing copies are sealed atomically during a one-time migration recorded inside
 the encrypted catalog, including compressed files and prior failed-import leftovers.
@@ -188,6 +192,32 @@ hop is refused. The browser resolves names itself, so a public name that
 resolves to a LAN address is not detected, and the TV's player (AVPlay) and
 image loader follow redirects of streams and logos without these checks.
 Logos are not size-limited. The TV sends its own User-Agent on API requests.
+
+### The SQLite store in the browser (NSH build, in progress)
+
+The NSH build for browser TVs runs the same SQLite store
+(`crates/iptv-store-sqlite`) compiled to WebAssembly, without SQLCipher. Its
+database (sources with their credentials, the catalog with stream and logo
+addresses, the guide, favorites and history) is kept in clear: in the app's
+memory and, written by the host in 64 KiB chunks, in the app's IndexedDB,
+readable by anyone who can debug the app on that TV. A browser app has no
+keystore, so a key the app held itself would only obscure the data; the
+store does not pretend to encrypt it. Freed pages are zeroed
+(`secure_delete`), so a deleted source's credentials are not in the chunks
+saved after the deletion. That cannot erase the superseded chunks the
+browser's IndexedDB storage (LevelDB, and separate files for large values)
+may keep on its flash until it compacts or deletes them, just as it cannot erase copies in backups or storage-device
+remapping natively. Staging databases and a publish's copy of the database exist only in
+memory, and only the store's own connection can open its database.
+
+The host saves after a commit: it takes the changed chunks, which are a
+snapshot of that commit (chunk bytes and the file's size) that later commits
+do not change, writes them in one IndexedDB transaction and acknowledges the
+take; the store gives out no other take until then, and a take dropped
+unacknowledged returns its chunks to the next one. Storage therefore always
+holds one commit's state: a crash or power loss can lose the last changes,
+never mix two commits. At launch the store refuses to open while a chunk the
+saved size calls for is missing.
 
 ## Native assumptions and dependency exceptions
 

@@ -3082,9 +3082,12 @@ dependencies = [
  "iptv-library",
  "iptv-providers",
  "iptv-sqlcipher-init",
+ "log",
+ "rsqlite-vfs",
  "rusqlite",
  "serde_json",
  "sha2 0.10.9",
+ "sqlite-wasm-rs",
  "zeroize",
 ]
 

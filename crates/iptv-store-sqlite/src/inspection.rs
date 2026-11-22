@@ -1,4 +1,5 @@
 //! Bounded semantic query reads. Physical import row IDs never enter cursors.
+#[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
 
 use iptv_epg::{ChannelKey, FeedId};
@@ -325,6 +326,9 @@ impl Store {
 
     /// Install an effective SQLite instruction deadline/cancellation handler for
     /// this one analysis job, including sorts and semantic-fingerprint scans.
+    /// Native only: `Instant` panics in the browser build, where
+    /// [`Self::inspection_read_until`] takes the host clock's expiry instead.
+    #[cfg(not(target_family = "wasm"))]
     pub fn inspection_read<T>(
         &mut self,
         cancel: CancelToken,
@@ -335,29 +339,49 @@ impl Store {
     }
 
     /// Adapter instrumentation for an actual SQLite scan, not a queued-lane barrier.
+    #[cfg(not(target_family = "wasm"))]
     #[doc(hidden)]
     pub fn inspection_read_observed<T>(
         &mut self,
         cancel: CancelToken,
         deadline: Instant,
+        progress: impl FnMut() + Send + 'static,
+        operation: impl FnOnce(&Self) -> crate::Result<InspectionResult<T>>,
+    ) -> crate::Result<InspectionResult<T>> {
+        self.inspection_read_until(
+            cancel,
+            move || Instant::now() >= deadline,
+            progress,
+            operation,
+        )
+    }
+
+    /// `inspection_read` (native) with the deadline as `expired`, which says
+    /// whether it has passed: the browser build gives it its host clock.
+    pub fn inspection_read_until<T>(
+        &mut self,
+        cancel: CancelToken,
+        expired: impl Fn() -> bool + Send + Sync + 'static,
         mut progress: impl FnMut() + Send + 'static,
         operation: impl FnOnce(&Self) -> crate::Result<InspectionResult<T>>,
     ) -> crate::Result<InspectionResult<T>> {
         if cancel.is_canceled() {
             return Ok(Err(InspectionError::Canceled));
         }
-        if Instant::now() >= deadline {
+        if expired() {
             return Ok(Err(InspectionError::Deadline));
         }
         let flag = cancel.clone();
+        let expired = std::sync::Arc::new(expired);
+        let handler_expired = expired.clone();
         self.conn.progress_handler(
             1000,
             Some(move || {
-                if flag.is_canceled() || Instant::now() >= deadline {
+                if flag.is_canceled() || handler_expired() {
                     return true;
                 }
                 progress();
-                flag.is_canceled() || Instant::now() >= deadline
+                flag.is_canceled() || handler_expired()
             }),
         )?;
         let result = operation(self);
@@ -365,7 +389,7 @@ impl Store {
         if cancel.is_canceled() {
             return Ok(Err(InspectionError::Canceled));
         }
-        if Instant::now() >= deadline {
+        if expired() {
             return Ok(Err(InspectionError::Deadline));
         }
         result

@@ -220,11 +220,13 @@ mod allocation_tests {
         (store, source, key)
     }
 
-    fn incoming_stage(directory: &std::path::Path) -> CatalogStage {
+    fn incoming_stage(store: &Store, directory: &std::path::Path) -> CatalogStage {
         let parsed = iptv_providers::m3u::parse_m3u(
             "#EXTM3U\n#EXTINF:-1,Generated incoming channel\nhttps://media.example.test/incoming.ts\n",
         );
-        let mut stage = CatalogStage::create_in(directory).unwrap();
+        let mut stage =
+            CatalogStage::create_in_with(directory, |path| store.open_staging_connection(path))
+                .unwrap();
         stage.begin_step().unwrap();
         stage
             .push(CatalogRow::Channel(parsed.channels.items[0].clone()))
@@ -332,7 +334,7 @@ mod allocation_tests {
         let (counts, published) = store
             .publish_catalog_stage_with_provider_guides(
                 source,
-                incoming_stage(directory.path()),
+                incoming_stage(&store, directory.path()),
                 None,
                 &urls,
                 Some(&initial),
@@ -368,7 +370,7 @@ mod allocation_tests {
         let (_, published) = store
             .publish_catalog_stage_with_provider_guides(
                 source,
-                incoming_stage(directory.path()),
+                incoming_stage(&store, directory.path()),
                 None,
                 &urls,
                 Some(&initial),
@@ -406,7 +408,7 @@ mod allocation_tests {
         let (_, published) = store
             .publish_catalog_stage_with_provider_guides(
                 source,
-                incoming_stage(directory.path()),
+                incoming_stage(&store, directory.path()),
                 None,
                 &urls,
                 Some(&initial),
@@ -446,7 +448,7 @@ mod allocation_tests {
         assert!(matches!(
             store.publish_catalog_stage_with_provider_guides(
                 source,
-                incoming_stage(directory.path()),
+                incoming_stage(&store, directory.path()),
                 Some(&details),
                 &[url("new")],
                 None,
@@ -468,10 +470,14 @@ mod allocation_tests {
             store.guide_repair_feed_high_water(source).unwrap(),
             u32::MAX
         );
+        // The browser's stage is a memory file, gone with its connection.
+        #[cfg(not(target_family = "wasm"))]
         assert_eq!(
             std::fs::read_dir(directory.path()).unwrap().count(),
             0,
             "failed stage must be removed"
         );
+        #[cfg(target_family = "wasm")]
+        assert_eq!(store.browser_files().unwrap().scratch_files(), 0);
     }
 }

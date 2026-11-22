@@ -61,6 +61,7 @@ impl Store {
     /// never replaced. The destination has no dependency on the live
     /// database's WAL or on any still-open connection.
     pub fn snapshot_to(&self, path: &Path) -> Result<()> {
+        crate::files_available()?;
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -73,7 +74,7 @@ impl Store {
             .map_err(|_| invalid("cannot create snapshot file"))?;
         drop(file);
         let result = (|| {
-            iptv_sqlcipher_init::initialize()?;
+            crate::initialize_sqlite()?;
             let mut destination = Connection::open_with_flags(
                 path,
                 OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -144,7 +145,8 @@ impl Store {
     /// unknown schema objects as well as damaged, foreign-key-invalid and newer
     /// files. Migrations run only after the caller accepts the validated file.
     pub fn validate_snapshot(path: &Path) -> Result<()> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::files_available()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -153,7 +155,8 @@ impl Store {
     }
 
     pub fn validate_encrypted_snapshot(path: &Path, key: &crate::DatabaseKey) -> Result<()> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::files_available()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -165,6 +168,7 @@ impl Store {
     /// Converts validated portable restore content to the live key before it
     /// becomes a persistent pending restore. Plaintext stores are test-only.
     pub fn seal_snapshot(&self, path: &Path) -> Result<()> {
+        crate::files_available()?;
         if let Some(key) = &self.key {
             drop(Self::open_encrypted(path, key)?);
             Self::validate_encrypted_snapshot(path, key)
@@ -189,7 +193,7 @@ impl Store {
         if user_version != version {
             return Err(invalid("snapshot schema version mismatch"));
         }
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let mut expected = Connection::open_in_memory()?;
         migrate::migrate_to(&mut expected, version, 0)?;
         if migrate::schema_dump(conn)? != migrate::schema_dump(&expected)? {

@@ -131,3 +131,75 @@ fn replace_50k_channel_catalog() {
 fn group_id(i: usize) -> iptv_providers::GroupId {
     group(i).id
 }
+
+/// A guide of about 250,000 programs replacing one of the same size, in
+/// one call and in 400-row slices (the browser's), with the longest slice.
+#[test]
+#[ignore = "benchmark: run with --release -- --ignored --nocapture"]
+fn replace_250k_program_guide() {
+    use crate::{epg_synth, staged};
+    use iptv_epg::StoreOptions;
+    use iptv_import::EpgSourceConfig;
+    use iptv_store_sqlite::{EpgFeedMeta, EpgReplacement, Step};
+
+    let shape = epg_synth::Shape {
+        channels: 3000,
+        days_back: 2,
+        days_ahead: 1,
+    };
+    let options = StoreOptions {
+        store_descriptions: false,
+        past_days_to_keep: None,
+    };
+    let (guide, programs) = epg_synth::import(shape, options);
+    let feeds = [EpgFeedMeta {
+        config: EpgSourceConfig::new(
+            iptv_epg::FeedId(1),
+            iptv_providers::SecretUrl::new("http://epg.example.com/bench.xml"),
+        ),
+        fetched_at: epg_synth::NOW,
+        etag: None,
+        last_modified: None,
+        bytes: 0,
+    }];
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Store::open(dir.path().join("bench.db")).unwrap();
+    let src = s.add_source(&xtream_source("Bench")).unwrap();
+    println!("{programs} programs on {} channels", shape.channels);
+    timed("replace_epg (empty store)", || {
+        staged::replace_epg(&mut s, src, &guide, &feeds, 1).unwrap()
+    });
+    let (mut stage, import, _stage_dir) = staged::stage(&s, &guide);
+    timed("replace_epg (refresh, one call)", || {
+        s.replace_epg(src, &mut stage, &import, &feeds, 2).unwrap()
+    });
+    let (mut stage, import, _stage_dir) = staged::stage(&s, &guide);
+    let (mut slices, mut longest) = (0, Duration::ZERO);
+    // The total includes making the job (flushing the stage), as the
+    // one-call timing does.
+    let (_, sliced) = timed("EpgReplacement in 400-row slices", || {
+        let mut job = EpgReplacement::new(
+            &mut s,
+            src,
+            &mut stage,
+            std::borrow::Cow::Borrowed(&import),
+            &feeds[..],
+            3,
+        )
+        .unwrap();
+        loop {
+            slices += 1;
+            let start = Instant::now();
+            let step = job.step(400).unwrap();
+            longest = longest.max(start.elapsed());
+            if let Step::Done(counts) = step {
+                break counts;
+            }
+        }
+    });
+    println!(
+        "{slices} slices, longest {:.2} ms, {:.0} ms in all",
+        longest.as_secs_f64() * 1000.0,
+        sliced.as_secs_f64() * 1000.0
+    );
+}

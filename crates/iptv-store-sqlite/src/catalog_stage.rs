@@ -1,9 +1,12 @@
 //! Private, bounded catalog staging. Downloads never hold the live writer lock.
 //! A stage is published in one transaction only after the complete import passes.
-use crate::{CatalogCounts, Result, SourceId, Store, StoreError, catalog, codec, search, sources};
+use crate::{
+    CatalogCounts, CatalogReplacement, Result, SourceId, StagePublication, Store, StoreError,
+    catalog, codec, sources,
+};
 use iptv_import::{CatalogRow, CatalogSink, SinkError};
 use iptv_providers::model::{Channel, Group, Series, VodItem};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::Connection;
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU32, Ordering},
@@ -12,7 +15,8 @@ use std::{
 const ROWS: usize = 512;
 const TEXT: usize = 1 << 20;
 const SOURCE: SourceId = SourceId(1);
-const TABLES: &[&str] = &[
+/// The stage tables a publication copies, in order.
+pub(crate) const STAGE_TABLES: &[&str] = &[
     "groups",
     "channels",
     "channel_groups",
@@ -36,14 +40,17 @@ impl Batch {
 }
 
 pub struct CatalogStage {
-    path: PathBuf,
+    pub(crate) path: PathBuf,
+    /// The file SQLite opened for it: in the browser, which store's files
+    /// it belongs to.
+    pub(crate) file: Option<String>,
     conn: Option<Connection>,
     batch: Batch,
     positions: [i64; 4],
     checkpoint: Option<[i64; 4]>,
-    ready: bool,
-    counts: CatalogCounts,
-    on_demand_errors: sources::OnDemandErrors,
+    pub(crate) ready: bool,
+    pub(crate) counts: CatalogCounts,
+    pub(crate) on_demand_errors: sources::OnDemandErrors,
 }
 fn invalid(s: &str) -> StoreError {
     StoreError::InvalidData(s.into())
@@ -59,7 +66,18 @@ const STAGED_CHANNELS: &str = "SELECT source_id,id,provider_id,name,number,logo,
      FROM channels ORDER BY position";
 
 impl CatalogStage {
+    /// A plain stage file in `dir`. The browser has no files: there a stage
+    /// is made through its store ([`Self::create_in_with`] with
+    /// `Store::open_staging_connection`), and this refuses.
     pub fn create_in(dir: impl AsRef<Path>) -> Result<Self> {
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = dir;
+            Err(StoreError::Unavailable(
+                "the browser build stages through its store (create_in_with)",
+            ))
+        }
+        #[cfg(not(target_family = "wasm"))]
         Self::create_in_with(dir, |path| Ok(Connection::open(path)?))
     }
     /// The connection factory may apply the live store's encryption key.
@@ -67,35 +85,48 @@ impl CatalogStage {
         dir: impl AsRef<Path>,
         open: impl FnOnce(&Path) -> Result<Connection>,
     ) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         static NEXT: AtomicU32 = AtomicU32::new(0);
-        let path = loop {
+        // The browser has no files to reserve the name with: `open` makes
+        // the stage among the store's memory files.
+        #[cfg(target_family = "wasm")]
+        {
             let path = dir.as_ref().join(format!(
-                "catalog-stage-{}-{}.sqlite",
-                std::process::id(),
+                "catalog-stage-{}.sqlite",
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            let mut options = std::fs::OpenOptions::new();
-            options.write(true).create_new(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            match options.open(&path) {
-                Ok(file) => {
-                    drop(file);
-                    break path;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(_) => return Err(invalid("cannot create catalog stage")),
-            }
-        };
-        let result = open(&path).and_then(|conn| Self::from_connection(path.clone(), conn));
-        if result.is_err() {
-            let _ = std::fs::remove_file(path);
+            open(&path).and_then(|conn| Self::from_connection(path, conn))
         }
-        result
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let path = loop {
+                let path = dir.as_ref().join(format!(
+                    "catalog-stage-{}-{}.sqlite",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                let mut options = std::fs::OpenOptions::new();
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    options.mode(0o600);
+                }
+                match options.open(&path) {
+                    Ok(file) => {
+                        drop(file);
+                        break path;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(_) => return Err(invalid("cannot create catalog stage")),
+                }
+            };
+            let result = open(&path).and_then(|conn| Self::from_connection(path.clone(), conn));
+            if result.is_err() {
+                let _ = std::fs::remove_file(path);
+            }
+            result
+        }
     }
     /// Call once at startup, before import workers start. A killed process
     /// cannot run Drop; remove its stages and SQLite sidecars here.
@@ -125,6 +156,7 @@ impl CatalogStage {
         )?;
         Ok(Self {
             path,
+            file: conn.path().map(str::to_owned),
             conn: Some(conn),
             batch: Batch::default(),
             positions: [0; 4],
@@ -348,8 +380,9 @@ impl Store {
         source: SourceId,
         stage: CatalogStage,
     ) -> Result<CatalogCounts> {
-        self.publish_stage(source, stage, None, None, None)
-            .map(|(counts, _)| counts)
+        CatalogReplacement::from_stage(self, source, stage, StagePublication::new())?
+            .finish()
+            .map(|published| published.counts)
     }
 
     /// Publish edited source details, guide sources and catalog in one commit.
@@ -361,8 +394,13 @@ impl Store {
         details: Option<&iptv_providers::model::Source>,
         guides: &[crate::GuideSource],
     ) -> Result<CatalogCounts> {
-        self.publish_stage(source, stage, details, Some(guides), None)
-            .map(|(counts, _)| counts)
+        let mut publication = StagePublication::new().guides(guides.to_vec());
+        if let Some(details) = details {
+            publication = publication.details(details.clone());
+        }
+        CatalogReplacement::from_stage(self, source, stage, publication)?
+            .finish()
+            .map(|published| published.counts)
     }
 
     /// Replan guide identities under the same write reservation as catalog publication.
@@ -377,76 +415,13 @@ impl Store {
         urls: &[iptv_providers::SecretUrl],
         initial: Option<&[crate::GuideSource]>,
     ) -> Result<(CatalogCounts, Vec<crate::GuideSource>)> {
-        self.publish_stage(source, stage, details, initial, Some(urls))
-            .map(|(counts, guides)| (counts, guides.unwrap_or_default()))
-    }
-
-    fn publish_stage(
-        &mut self,
-        source: SourceId,
-        stage: CatalogStage,
-        details: Option<&iptv_providers::model::Source>,
-        guides: Option<&[crate::GuideSource]>,
-        provider_urls: Option<&[iptv_providers::SecretUrl]>,
-    ) -> Result<(CatalogCounts, Option<Vec<crate::GuideSource>>)> {
-        if !stage.ready {
-            return Err(invalid("cannot publish an incomplete catalog stage"));
+        let mut publication =
+            StagePublication::new().provider_guides(urls.to_vec(), initial.map(<[_]>::to_vec));
+        if let Some(details) = details {
+            publication = publication.details(details.clone());
         }
-        self.attach_staging_database(&stage.path, "catalog_import")?;
-        let result: Result<(CatalogCounts, Option<Vec<crate::GuideSource>>)> = (|| {
-            let now = self.now();
-            let fts = self.fts_index;
-            let tx = self
-                .conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            sources::ensure_source(&tx, source)?;
-            let replanned = provider_urls
-                .map(|urls| {
-                    crate::guide_sources::plan_provider_guides_in(&tx, source, urls, guides, now)
-                })
-                .transpose()?;
-            let guides = replanned.as_deref().or(guides);
-            if let Some(details) = details {
-                sources::update_source_in(&tx, source, details, now)?;
-            }
-            if let Some(guides) = guides {
-                crate::guide_sources::set_guide_sources_in(&tx, source, guides, now)?;
-            }
-            search::forget_source(&tx, fts, source)?;
-            for sql in catalog::DELETE_CATALOG {
-                tx.execute(sql, [source.0])?;
-            }
-            for table in TABLES {
-                let mut stmt = tx.prepare(&format!("PRAGMA catalog_import.table_info({table})"))?;
-                let columns = stmt
-                    .query_map([], |r| r.get::<_, String>(1))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                let columns = columns
-                    .into_iter()
-                    .filter(|c| c != "source_id")
-                    .map(|c| format!("\"{c}\""))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                tx.execute(&format!("INSERT INTO main.{table}(source_id,{columns}) SELECT ?1,{columns} FROM catalog_import.{table}"),[source.0])?;
-            }
-            search::index_source(&tx, fts, source)?;
-            sources::record_import_success(
-                &tx,
-                source,
-                &stage.counts,
-                stage.on_demand_errors,
-                now,
-            )?;
-            let published_guides = guides.map(<[crate::GuideSource]>::to_vec);
-            tx.commit()?;
-            Ok((stage.counts, published_guides))
-        })();
-        let detached = self
-            .conn
-            .execute_batch("DETACH DATABASE catalog_import")
-            .map_err(StoreError::from);
-        let counts = result?;
-        detached?;
-        Ok(counts)
+        CatalogReplacement::from_stage(self, source, stage, publication)?
+            .finish()
+            .map(|published| (published.counts, published.guides.unwrap_or_default()))
     }
 }

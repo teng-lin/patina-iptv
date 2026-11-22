@@ -101,7 +101,13 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("epg.update_on_start", boolean(true), GL, ""),
         ("epg.update_on_playlist_change", boolean(true), GL, ""),
         ("epg.keep_past", days(0, 14, 1, 7), GL, ""),
-        ("epg.store_descriptions", boolean(true), GL, ""),
+        // Off in browser builds (see the catalog).
+        (
+            "epg.store_descriptions",
+            boolean(!cfg!(target_family = "wasm")),
+            GL,
+            "",
+        ),
         ("epg.full_scan", boolean(false), GL, "a"),
         ("epg.time_offset", offset_hm(-720, 840, 15, 0), PL, ""),
         // Appearance.

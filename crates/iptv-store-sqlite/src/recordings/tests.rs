@@ -331,6 +331,7 @@ fn deleting_and_reusing_a_source_id_cannot_retarget_recording_intent() {
     );
 }
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "backups are files")]
 fn portable_backups_exclude_host_jobs_without_changing_live_intent() {
     let (mut store, request) = fixture();
     store
@@ -765,7 +766,9 @@ fn completion_intent_is_idempotent_and_cannot_replace_a_different_receipt() {
         .conn
         .pragma_query_value(None, "synchronous", |r| r.get(0))
         .unwrap();
-    assert_eq!(sync, 1, "receipt must restore connection policy");
+    // NORMAL natively; OFF on the browser's memory files.
+    let policy = if cfg!(target_family = "wasm") { 0 } else { 1 };
+    assert_eq!(sync, policy, "receipt must restore connection policy");
 }
 
 #[test]
@@ -827,6 +830,7 @@ fn failed_terminal_update_retains_receipt_for_retry() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "backups are files")]
 fn portable_backups_drop_recording_children_and_still_validate() {
     use iptv_core::on_demand::Progress;
     use iptv_core::recording::{Repeat, Rule, RuleId};

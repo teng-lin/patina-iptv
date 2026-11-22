@@ -73,10 +73,12 @@ custom groups and history.
   without dropping to an error screen.
 - **Interface languages:** 11 language options with system-language detection
   and a live language picker; [coverage and translation guide](docs/localization.md).
-- **Private by default:** the local catalog, including credentials, is
-  encrypted with SQLCipher; HTTPS is the default transport. Whole-app
-  backup and restore to a `.patinabackup` file. Backups keep the TV guide's
-  setup but not its downloaded programs, which download again after a restore.
+- **Private by default:** on desktop, iPad and Android the local catalog,
+  including credentials, is encrypted with SQLCipher (browser TVs have no
+  keystore; see [security](docs/security.md#samsung-tizen-host)); HTTPS is
+  the default transport. On those platforms, whole-app backup and restore
+  to a `.patinabackup` file; backups keep the TV guide's setup but not its
+  downloaded programs, which download again after a restore.
 
 ## Install
 
@@ -452,7 +454,7 @@ directory and are never overwritten by restored recording identities.
 | `crates/iptv-player-mpv` | libmpv playback adapter for desktop and iPad |
 | `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and scheduler |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
-| `crates/iptv-store-sqlite` | Encrypted SQLite store |
+| `crates/iptv-store-sqlite` | SQLite store: encrypted natively, in-memory chunk files in the browser |
 | `crates/iptv-sqlcipher-init` | Native SQLCipher initialization barrier |
 | `crates/iptv-app` | NSH app: screens, theme, video layer (libmpv on desktop and iPad) |
 | `hosts/android` | Kotlin host with the Media3 player |
@@ -460,7 +462,8 @@ directory and are never overwritten by restored recording identities.
 
 All crates except `iptv-app`, `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init`,
 `iptv-player-mpv` and `iptv-runtime` are
-sans-IO and build for `wasm32-unknown-unknown`.
+sans-IO and build for `wasm32-unknown-unknown`. `iptv-store-sqlite` builds
+for it too, with SQLite compiled in through `sqlite-wasm-rs` and no SQLCipher.
 
 Run every check before committing:
 

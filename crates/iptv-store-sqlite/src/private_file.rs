@@ -90,6 +90,7 @@ impl Store {
     /// Writes a new encrypted document; callers atomically replace old copies
     /// only after this succeeds. No plaintext intermediate is created.
     pub fn write_private_file(&self, path: &Path, input: &mut impl Read) -> Result<()> {
+        crate::files_available()?;
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -145,7 +146,8 @@ impl Store {
         result
     }
     pub fn read_private_file(&self, path: &Path) -> Result<PrivateFileReader> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::files_available()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -167,7 +169,8 @@ impl Store {
         })
     }
 }
-#[cfg(test)]
+// Files, keys and child processes: native only.
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     #[test]

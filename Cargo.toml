@@ -66,10 +66,16 @@ sha1_smol = "1"
 # Import pipeline (core, wasm-safe) and its native network adapter
 iptv-import = { path = "crates/iptv-import" }
 iptv-net = { path = "crates/iptv-net" }
-# iptv-store-sqlite (native adapter; bundled SQLite builds for Android via the NDK)
+# iptv-store-sqlite (SQLite on both targets; bundled SQLCipher natively, also
+# for Android via the NDK; sqlite-wasm-rs in the browser)
 iptv-store-sqlite = { path = "crates/iptv-store-sqlite" }
 iptv-sqlcipher-init = { path = "crates/iptv-sqlcipher-init" }
-rusqlite = { version = "0.42", default-features = false, features = ["bundled-sqlcipher", "cache"] }
+# The SQLite build is chosen per target by the crates that open databases:
+# native targets add `bundled-sqlcipher` (iptv-store-sqlite,
+# iptv-sqlcipher-init); wasm32 adds `bundled` with the `sqlite-wasm-rs`
+# backend (iptv-store-sqlite). Features of target-specific dependencies are
+# resolved per target, so a browser build never sees SQLCipher.
+rusqlite = { version = "0.42", default-features = false, features = ["cache"] }
 tempfile = "3"
 
 # Debug info is most of what a test binary links: with full debug info an

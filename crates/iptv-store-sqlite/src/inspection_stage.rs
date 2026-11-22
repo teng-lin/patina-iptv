@@ -29,7 +29,8 @@ pub struct InspectionStage {
 }
 impl InspectionStage {
     pub fn create(path: &Path, key: &DatabaseKey) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::files_available()?;
+        crate::initialize_sqlite()?;
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true).create_new(true);
         #[cfg(unix)]
@@ -63,7 +64,8 @@ impl InspectionStage {
         })
     }
     pub fn open(path: &Path, key: &DatabaseKey) -> Result<Self> {
-        iptv_sqlcipher_init::initialize()?;
+        crate::files_available()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         key.apply(&conn)?;
         Ok(Self {
@@ -106,16 +108,33 @@ impl InspectionStage {
         self.conn.execute_batch("COMMIT; PRAGMA optimize;")?;
         Ok(())
     }
+    /// Native only, like the stage itself (a file; the browser build has
+    /// none, so `create`/`open` refuse there): browser callers bound their
+    /// reads with `Store::inspection_read_until`.
+    #[cfg(not(target_family = "wasm"))]
     pub fn bounded<T>(
         &mut self,
         cancel: iptv_import::CancelToken,
         deadline: std::time::Instant,
         operation: impl FnOnce(&Self) -> Result<T>,
     ) -> Result<T> {
-        self.conn.progress_handler(
-            1000,
-            Some(move || cancel.is_canceled() || std::time::Instant::now() >= deadline),
-        )?;
+        self.bounded_until(
+            cancel,
+            move || std::time::Instant::now() >= deadline,
+            operation,
+        )
+    }
+    /// [`Self::bounded`] with the deadline as `expired`, which says whether
+    /// it has passed. Native only, as above.
+    #[cfg(not(target_family = "wasm"))]
+    pub fn bounded_until<T>(
+        &mut self,
+        cancel: iptv_import::CancelToken,
+        expired: impl Fn() -> bool + Send + Sync + 'static,
+        operation: impl FnOnce(&Self) -> Result<T>,
+    ) -> Result<T> {
+        self.conn
+            .progress_handler(1000, Some(move || cancel.is_canceled() || expired()))?;
         let result = operation(self);
         self.conn.progress_handler(0, None::<fn() -> bool>)?;
         result
@@ -162,7 +181,8 @@ impl InspectionStage {
     }
 }
 
-#[cfg(test)]
+// Files, keys and child processes: native only.
+#[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
     use crate::encryption::initialization_support;

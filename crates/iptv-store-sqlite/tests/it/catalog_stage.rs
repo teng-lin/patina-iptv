@@ -6,14 +6,14 @@ use iptv_store_sqlite::{CatalogStage, ChannelQuery, Store};
 #[test]
 fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(dir.path().join("store.sqlite")).unwrap();
+    let mut store = common::open(dir.path().join("store.sqlite"));
     let source = store.add_source(&common::m3u_source("Synthetic")).unwrap();
     let old = common::m3u_channel(1, 2, common::XT_PASSWORD);
     store
         .replace_catalog(source, &[], std::slice::from_ref(&old), &[], &[])
         .unwrap();
     store.set_favorite(source, &old.id, true).unwrap();
-    let mut incomplete = CatalogStage::create_in(dir.path()).unwrap();
+    let mut incomplete = common::catalog_stage(&store, dir.path());
     incomplete
         .push(CatalogRow::Channel(common::m3u_channel(
             2,
@@ -30,7 +30,7 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
         old
     );
 
-    let mut stage = CatalogStage::create_in(dir.path()).unwrap();
+    let mut stage = common::catalog_stage(&store, dir.path());
     stage.begin_step().unwrap();
     // Cross multiple flush boundaries, then roll back the entire failed step.
     for i in 2..1300 {
@@ -61,6 +61,8 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].channel, old);
     assert!(rows[0].favorite);
+    // The browser's stage is a memory file, gone with its connection.
+    #[cfg(not(target_family = "wasm"))]
     assert_eq!(
         std::fs::read_dir(dir.path())
             .unwrap()
@@ -69,9 +71,12 @@ fn incomplete_and_failed_steps_preserve_saved_rows_and_overlays() {
             .count(),
         0
     );
+    #[cfg(target_family = "wasm")]
+    assert_eq!(store.browser_files().unwrap().scratch_files(), 0);
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a file system")]
 fn startup_removes_only_abandoned_catalog_stage_files() {
     let dir = tempfile::tempdir().unwrap();
     for name in [
@@ -96,13 +101,14 @@ fn startup_removes_only_abandoned_catalog_stage_files() {
 /// A failure after credentials and guide rows are written must roll back the
 /// entire edit, including a failure late in the catalog copy itself.
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn edited_details_guides_and_catalog_publish_as_one_transaction() {
     use iptv_epg::FeedId;
     use iptv_providers::SecretUrl;
     use iptv_store_sqlite::GuideSource;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("synthetic.sqlite");
-    let mut store = Store::open(&path).unwrap();
+    let mut store = common::open(&path);
     let source = store.add_source(&common::m3u_source("Original")).unwrap();
     let old_channel = common::m3u_channel(1, 2, common::XT_PASSWORD);
     store
@@ -132,8 +138,8 @@ fn edited_details_guides_and_catalog_publish_as_one_transaction() {
         url: SecretUrl::new("https://guide.example.test/edited.xml"),
         ..old_guide.clone()
     };
-    let stage = || {
-        let mut stage = CatalogStage::create_in(dir.path()).unwrap();
+    let stage = |store: &Store| {
+        let mut stage = common::catalog_stage(store, dir.path());
         stage
             .push(CatalogRow::Channel(new_channel.clone()))
             .unwrap();
@@ -145,7 +151,7 @@ fn edited_details_guides_and_catalog_publish_as_one_transaction() {
         store
             .publish_catalog_stage(
                 source,
-                stage(),
+                stage(&store),
                 Some(&edited),
                 &[new_guide.clone(), new_guide.clone()]
             )
@@ -177,7 +183,7 @@ fn edited_details_guides_and_catalog_publish_as_one_transaction() {
         store
             .publish_catalog_stage(
                 source,
-                stage(),
+                stage(&store),
                 Some(&edited),
                 std::slice::from_ref(&new_guide)
             )
@@ -199,7 +205,7 @@ fn edited_details_guides_and_catalog_publish_as_one_transaction() {
     store
         .publish_catalog_stage(
             source,
-            stage(),
+            stage(&store),
             Some(&edited),
             std::slice::from_ref(&new_guide),
         )

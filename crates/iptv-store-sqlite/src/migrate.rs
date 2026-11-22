@@ -298,6 +298,7 @@ mod tests {
     /// A shipped migration must never change: migrating a fresh file to
     /// version N must reproduce the committed snapshot of version N.
     #[test]
+    #[cfg_attr(target_family = "wasm", ignore = "reads the snapshots from files")]
     fn historical_snapshots_match_migrations() {
         for version in 1..=SCHEMA_VERSION {
             let path = snapshot_path(version);

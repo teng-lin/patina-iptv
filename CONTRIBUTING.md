@@ -31,6 +31,9 @@ You need:
   `cargo install cargo-deny --version 0.20.2 --locked`.
 - `python3` (3.11 or newer) and `ffmpeg` for the scripts and the synthetic
   test streams.
+- For the SQLite store's browser build and its tests: a `clang` with the
+  `wasm32` target (it compiles SQLite) and Node.js (it runs the tests,
+  `tools/wasm-test.mjs`).
 
 Run the app against the synthetic fixtures as the README's
 [Try it with synthetic data](README.md#try-it-with-synthetic-data) shows.

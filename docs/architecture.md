@@ -34,7 +34,7 @@ down: a crate may depend on crates in its own layer or below, never above.
 | `iptv-library` | `iptv-core`, `iptv-providers`, `iptv-epg` |
 | `iptv-import` | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-settings`, `iptv-library` |
 | `iptv-net` | `iptv-providers`, `iptv-import` |
-| `iptv-store-sqlite` | `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` |
+| `iptv-store-sqlite` | `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` (native only) |
 | `iptv-sqlcipher-init` | none |
 | `iptv-player-mpv` | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-net`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite` |
@@ -44,7 +44,7 @@ down: a crate may depend on crates in its own layer or below, never above.
 | Layer | Crates | May use |
 | --- | --- | --- |
 | Portable core | `iptv-core`, `iptv-nav`, `iptv-settings`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library` | Plain Rust only. No NSH, no platform APIs, no blocking I/O, no clock, no async runtime. |
-| Native adapters | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init` | Tokio and reqwest; SQLite. No NSH. |
+| Native adapters | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init` | Tokio and reqwest; SQLite. No NSH. `iptv-store-sqlite` also builds for `wasm32-unknown-unknown` (SQLite through `sqlite-wasm-rs` on in-memory files the host persists in chunks, no SQLCipher); its tests run there with `tools/wasm-test.mjs`. |
 | Native application | `iptv-runtime` | Native services, Tokio, filesystem I/O and adapter value types. No NSH. Host JNI and credential brokers stay in the shell. |
 | Player adapter | `iptv-player-mpv` | NSH native components, platform APIs, libmpv. The Android build contains only the wire contract and track parser. |
 | Shell | `iptv-app` | NSH, the adapters, platform APIs. |

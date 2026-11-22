@@ -465,6 +465,7 @@ fn a_window_read_seeks_to_the_program_reaching_into_it() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn title_iteration_keeps_one_snapshot_across_concurrent_guide_publication() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("synthetic.db");

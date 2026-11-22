@@ -7,10 +7,13 @@
 //! store's write lock, and so a failed or canceled download leaves the
 //! stored guide untouched: dropping the stage deletes its file. The file
 //! is scratch space (no journal, no fsync): a crash leaves a stale file
-//! that [`EpgStage::remove_stale`] deletes at the next start.
+//! that [`EpgStage::remove_stale`] deletes at the next start. A browser
+//! store's stage ([`EpgStage::create_in_store`]) is a scratch file among
+//! its memory files instead, gone with its last connection.
 //!
-//! A writer thread owns the stage connection, so parsing and writing
-//! overlap. Memory stays bounded: SQLite's page cache ([`CACHE_KIB`]), at
+//! Natively a writer thread owns the stage connection, so parsing and
+//! writing overlap; the browser's one thread writes in place. Memory stays
+//! bounded: SQLite's page cache ([`CACHE_KIB`]), at
 //! most [`IN_FLIGHT`] batches of at most [`BATCH`] programs or
 //! [`BATCH_TEXT`] bytes of text on their way, and per feed a map of its
 //! staged EPG channel ids; the guide itself is never held.
@@ -28,15 +31,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::thread::JoinHandle;
+use std::sync::mpsc;
 
 use iptv_epg::{FeedId, IngestReport, ProgramData, ScheduleRules, StoreOptions, UnixTime};
 use iptv_import::{GuideSink, SinkError};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
+#[cfg(not(target_family = "wasm"))]
+use rusqlite::OpenFlags;
 
 use crate::error::{Result, StoreError};
-use writer::{Batch, Cmd};
+use writer::{Batch, Cmd, Writer};
 
 /// Page cache of the stage connection.
 const CACHE_KIB: i64 = 4096;
@@ -45,10 +49,11 @@ const BATCH: usize = 4096;
 /// ...or fewer when their texts reach this many bytes.
 const BATCH_TEXT: usize = 1 << 20;
 /// Batches queued for the writer before the import waits for it.
+#[cfg(not(target_family = "wasm"))]
 const IN_FLIGHT: usize = 2;
 const PREFIX: &str = "epg-stage-";
 
-const SCHEMA: &str = "
+pub(crate) const SCHEMA: &str = "
     CREATE TABLE programs (
         ch INTEGER NOT NULL,
         start INTEGER NOT NULL,
@@ -73,6 +78,9 @@ pub(crate) struct StagedChannel {
     pub kept: u64,
     /// Latest kept stop.
     pub last_stop: Option<UnixTime>,
+    /// Some staged program of it has a description: without one, a sliced
+    /// copy skips the description pass.
+    pub described: bool,
 }
 
 /// The feed being received.
@@ -80,8 +88,9 @@ struct Current {
     feed: FeedId,
     rules: ScheduleRules,
     descriptions: bool,
-    /// EPG channel id -> (stage channel id, programs admitted).
-    channels: HashMap<Box<str>, (i64, u64)>,
+    /// EPG channel id -> (stage channel id, programs admitted, any of them
+    /// described).
+    channels: HashMap<Box<str>, (i64, u64, bool)>,
     first: i64,
     report: IngestReport,
 }
@@ -93,12 +102,27 @@ struct Loaded {
     end: i64,
 }
 
-/// A guide download staged on disk; see the module docs. Implements
-/// [`GuideSink`]. Dropping it deletes the file.
+/// Where the stage's commands go.
+enum Lane {
+    /// The writer's own thread (native), behind a bounded queue.
+    #[cfg(not(target_family = "wasm"))]
+    Thread {
+        tx: mpsc::SyncSender<Cmd>,
+        thread: std::thread::JoinHandle<()>,
+    },
+    /// In place, on the caller's thread (the browser has one thread).
+    #[cfg(target_family = "wasm")]
+    Inline(std::sync::Mutex<Writer>),
+}
+
+/// A guide download staged in its own database; see the module docs.
+/// Implements [`GuideSink`]. Dropping it deletes the file.
 pub struct EpgStage {
     path: PathBuf,
-    tx: Option<SyncSender<Cmd>>,
-    thread: Option<JoinHandle<()>>,
+    /// The file SQLite opened for it: in the browser, which store's files
+    /// it belongs to.
+    file: Option<String>,
+    lane: Option<Lane>,
     /// The writer failed; the next request returns its error.
     failed: Arc<AtomicBool>,
     batch: Batch,
@@ -133,23 +157,43 @@ impl EpgStage {
     fn next_path(dir: &Path) -> PathBuf {
         static NEXT: AtomicU32 = AtomicU32::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        // Natively the process id keeps names of concurrent processes apart;
+        // a browser store's memory files belong to one instance.
+        #[cfg(not(target_family = "wasm"))]
         let name = format!("{PREFIX}{}-{n}.sqlite", std::process::id());
+        #[cfg(target_family = "wasm")]
+        let name = format!("{PREFIX}{n}.sqlite");
         dir.join(name)
     }
 
-    /// A new stage at `path` (an existing file there is replaced).
+    /// A new stage at `path` (an existing file there is replaced). The
+    /// browser has no files: [`Self::create_in_store`] makes the stage among
+    /// a browser store's memory files there, and this refuses.
     pub fn create(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = path.into();
+            Err(StoreError::Unavailable(
+                "the browser build stages through its store (create_in_store)",
+            ))
+        }
+        #[cfg(not(target_family = "wasm"))]
+        Self::create_file(path.into())
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    fn create_file(path: PathBuf) -> Result<Self> {
         remove(&path);
         let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        iptv_sqlcipher_init::initialize()?;
+        crate::initialize_sqlite()?;
         let conn = Connection::open_with_flags(&path, flags)?;
         Self::create_with_connection(path, conn)
     }
 
     fn create_with_connection(path: PathBuf, conn: Connection) -> Result<Self> {
+        let file = conn.path().map(str::to_owned);
         let opened = (|| -> Result<()> {
             // Scratch data: a crash deletes the file anyway.
             let _mode: String =
@@ -164,19 +208,23 @@ impl EpgStage {
             remove(&path);
             return Err(e);
         }
-        let (tx, rx): (SyncSender<Cmd>, Receiver<Cmd>) = mpsc::sync_channel(IN_FLIGHT);
         let failed = Arc::new(AtomicBool::new(false));
-        let thread = {
-            let failed = failed.clone();
-            std::thread::Builder::new()
+        let writer = Writer::new(conn, failed.clone());
+        #[cfg(not(target_family = "wasm"))]
+        let lane = {
+            let (tx, rx) = mpsc::sync_channel(IN_FLIGHT);
+            let thread = std::thread::Builder::new()
                 .name("epg-stage".into())
-                .spawn(move || writer::run(conn, rx, failed))
-                .map_err(|e| StoreError::InvalidData(format!("guide stage thread: {e}")))?
+                .spawn(move || writer::run(writer, rx))
+                .map_err(|e| StoreError::InvalidData(format!("guide stage thread: {e}")))?;
+            Lane::Thread { tx, thread }
         };
+        #[cfg(target_family = "wasm")]
+        let lane = Lane::Inline(std::sync::Mutex::new(writer));
         Ok(Self {
             path,
-            tx: Some(tx),
-            thread: Some(thread),
+            file,
+            lane: Some(lane),
             failed,
             batch: Batch::default(),
             current: None,
@@ -202,16 +250,27 @@ impl EpgStage {
         &self.path
     }
 
+    /// The file SQLite opened for the stage.
+    pub(crate) fn file(&self) -> Option<&str> {
+        self.file.as_deref()
+    }
+
     /// The staged channel `epg_id` of loaded feed `feed`.
     pub(crate) fn channel(&self, feed: FeedId, epg_id: &str) -> Option<StagedChannel> {
         self.loaded.get(&feed)?.channels.get(epg_id).copied()
     }
 
     fn send(&self, cmd: Cmd) -> Result<()> {
-        self.tx
-            .as_ref()
-            .and_then(|tx| tx.send(cmd).ok())
-            .ok_or_else(|| StoreError::InvalidData("guide stage writer stopped".into()))
+        let stopped = || StoreError::InvalidData("guide stage writer stopped".into());
+        match self.lane.as_ref().ok_or_else(stopped)? {
+            #[cfg(not(target_family = "wasm"))]
+            Lane::Thread { tx, .. } => tx.send(cmd).map_err(|_| stopped()),
+            #[cfg(target_family = "wasm")]
+            Lane::Inline(writer) => {
+                writer.lock().map_err(|_| stopped())?.handle(cmd);
+                Ok(())
+            }
+        }
     }
 
     /// Sends `cmd` built around a reply channel and waits for the answer.
@@ -249,15 +308,17 @@ impl EpgStage {
             return Ok(());
         }
         let p = p.as_stored(cur.descriptions);
+        let described = p.desc.is_some();
         let ch = match cur.channels.get_mut(channel) {
-            Some((ch, admitted)) => {
+            Some((ch, admitted, any)) => {
                 *admitted += 1;
+                *any |= described;
                 *ch
             }
             None => {
                 let ch = self.next_channel;
                 self.next_channel += 1;
-                cur.channels.insert(channel.into(), (ch, 1));
+                cur.channels.insert(channel.into(), (ch, 1, described));
                 ch
             }
         };
@@ -273,19 +334,28 @@ impl EpgStage {
         let Some(mut cur) = self.current.take() else {
             return Err(StoreError::InvalidData("no guide feed started".into()));
         };
+        let mut described = std::collections::HashSet::new();
         let mut channels: Vec<_> = cur
             .channels
             .drain()
-            .map(|(id, (ch, admitted))| (id, ch, admitted))
+            .map(|(id, (ch, admitted, any))| {
+                if any {
+                    described.insert(ch);
+                }
+                (id, ch, admitted)
+            })
             .collect();
         // In stage order: one pass through the file.
         channels.sort_by_key(|&(_, ch, _)| ch);
         let rules = cur.rules;
-        let (staged, settled) = self.request(|reply| Cmd::Settle {
+        let (mut staged, settled) = self.request(|reply| Cmd::Settle {
             channels,
             rules,
             reply,
         })?;
+        for channel in staged.values_mut() {
+            channel.described = described.contains(&channel.id);
+        }
         let r = &mut cur.report;
         r.kept += settled.kept;
         r.channels_with_programs += settled.channels_with_programs;
@@ -329,9 +399,15 @@ impl EpgStage {
 impl Drop for EpgStage {
     fn drop(&mut self) {
         // Ends the writer, which closes the connection.
-        self.tx = None;
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        match self.lane.take() {
+            #[cfg(not(target_family = "wasm"))]
+            Some(Lane::Thread { tx, thread }) => {
+                drop(tx);
+                let _ = thread.join();
+            }
+            #[cfg(target_family = "wasm")]
+            Some(Lane::Inline(writer)) => drop(writer),
+            None => {}
         }
         remove(&self.path);
     }

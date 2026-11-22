@@ -193,3 +193,41 @@ pub fn stalker_stream(cmd: &str) -> StreamLocator {
         link: StalkerLinkFlags::default(),
     }
 }
+
+/// The store at `path`: a file natively. In the browser build there are no
+/// files: the memory files kept for `path` in this test thread, so dropping
+/// the store and opening `path` again reopens the same database.
+pub fn open(path: impl AsRef<std::path::Path>) -> Store {
+    open_with(path, &iptv_store_sqlite::OpenOptions::default())
+}
+
+pub fn open_with(
+    path: impl AsRef<std::path::Path>,
+    options: &iptv_store_sqlite::OpenOptions,
+) -> Store {
+    #[cfg(not(target_family = "wasm"))]
+    return Store::open_with(path, options).unwrap();
+    #[cfg(target_family = "wasm")]
+    {
+        use std::collections::HashMap;
+        thread_local! {
+            static FILES: std::cell::RefCell<HashMap<std::path::PathBuf, iptv_store_sqlite::BrowserFiles>> =
+                Default::default();
+        }
+        let files = FILES.with(|files| {
+            files
+                .borrow_mut()
+                .entry(path.as_ref().to_owned())
+                .or_insert_with(|| iptv_store_sqlite::BrowserFiles::new().unwrap())
+                .clone()
+        });
+        Store::open_browser_with(&files, options).unwrap()
+    }
+}
+
+/// A catalog stage in `dir` made by `store` (a file with its key natively,
+/// among its memory files in the browser).
+pub fn catalog_stage(store: &Store, dir: &std::path::Path) -> iptv_store_sqlite::CatalogStage {
+    iptv_store_sqlite::CatalogStage::create_in_with(dir, |path| store.open_staging_connection(path))
+        .unwrap()
+}

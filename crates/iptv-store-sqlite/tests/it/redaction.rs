@@ -40,10 +40,11 @@ fn debug_of_sources_and_rows_redacts() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn secrets_live_only_in_the_credentials_table() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("s.db");
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     for source in [
         xtream_source("Xt"),
         m3u_source("List"),
@@ -71,10 +72,11 @@ fn secrets_live_only_in_the_credentials_table() {
 }
 
 #[test]
+#[cfg_attr(target_family = "wasm", ignore = "needs a second connection")]
 fn decode_errors_name_the_column_not_the_value() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("s.db");
-    let mut s = Store::open(&path).unwrap();
+    let mut s = common::open(&path);
     let src = s.add_source(&xtream_source("Xt")).unwrap();
     replace(&mut s, src, &catalog(2, 1, XT_PASSWORD));
     let raw = rusqlite::Connection::open(&path).unwrap();

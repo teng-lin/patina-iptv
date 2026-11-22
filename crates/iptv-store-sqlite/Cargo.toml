@@ -1,6 +1,6 @@
 [package]
 name = "iptv-store-sqlite"
-description = "Native SQLite store of iptv-rs: sources, provider catalog replaced on refresh, user overlays keyed by stable ids. Bundled SQLite (builds for Android via the NDK); not wasm."
+description = "SQLite store of iptv-rs: sources, provider catalog replaced on refresh, user overlays keyed by stable ids. Bundled SQLCipher natively (also Android via the NDK); sqlite-wasm-rs on an in-memory chunk VFS in the browser."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,6 @@ license.workspace = true
 [dependencies]
 iptv-core.workspace = true
 iptv-library.workspace = true
-iptv-sqlcipher-init.workspace = true
 iptv-providers.workspace = true
 iptv-epg.workspace = true
 iptv-import.workspace = true
@@ -20,16 +19,32 @@ serde_json.workspace = true
 zeroize = "1.8"
 sha2 = "0.10"
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+iptv-sqlcipher-init.workspace = true
+rusqlite = { workspace = true, features = ["bundled-sqlcipher"] }
+
+# Apple uses SQLCipher's CommonCrypto backend; avoid a second OpenSSL beside MPVKit.
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
+rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
+
+# The browser: plain SQLite compiled to wasm32 (no encryption, see
+# docs/security.md), the host services it links against
+# (`rust_sqlite_wasm_host_*`, supplied by the app), and the VFS layer the
+# chunk-tracking memory files are built on.
+[target.'cfg(target_family = "wasm")'.dependencies]
+rusqlite = { workspace = true, features = ["bundled", "ffi-sqlite-wasm-rs"] }
+rsqlite-vfs = "0.2"
+log.workspace = true
+sqlite-wasm-rs = { version = "0.6.3", default-features = false }
+
 [dev-dependencies]
-tempfile.workspace = true
 iptv-guide.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+tempfile.workspace = true
 # examples/epg_import_bench.rs: the app's guide import over HTTP.
 iptv-net.workspace = true
 tokio = { version = "1", default-features = false, features = ["macros", "rt"] }
 
 [lints]
 workspace = true
-
-# Apple uses SQLCipher's CommonCrypto backend; avoid a second OpenSSL beside MPVKit.
-[target.'cfg(not(target_vendor = "apple"))'.dependencies]
-rusqlite = { workspace = true, features = ["bundled-sqlcipher-vendored-openssl"] }
