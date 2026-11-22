@@ -2,8 +2,8 @@
 use super::private_files::Client as NetClient;
 use super::store_service::Services;
 use super::{guides, opening, stored, wizard_map};
-use iptv_core::wizard::{
-    FailureKind, Field, ImportCounts, ImportFailure, ImportProgress, ImportStage,
+use iptv_core::add_playlist::{
+    FailureKind, ImportCounts, ImportFailure, ImportInput, ImportProgress, ImportStage,
 };
 use iptv_epg::GuideStore;
 use iptv_guide::playback::PlaybackContext;
@@ -679,7 +679,7 @@ pub(crate) async fn pipeline(
                     log::warn!("iptv data: the typed guide failed: {e}");
                     let mut failure = wizard_map::failure_of(&e);
                     if failure.kind != FailureKind::Canceled {
-                        failure.field = Some(Field::EpgUrl);
+                        failure.input = Some(ImportInput::GuideAddress);
                     }
                     return fail(failure);
                 }

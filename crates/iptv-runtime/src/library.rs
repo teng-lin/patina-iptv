@@ -1,5 +1,5 @@
 //! Library snapshots, refresh tickets and named persistence commands.
-use iptv_core::wizard::{ImportCounts, ImportFailure, ImportProgress};
+use iptv_core::add_playlist::{ImportCounts, ImportFailure, ImportProgress};
 use iptv_import::CancelToken;
 use iptv_library::Playlist;
 use iptv_providers::model::{Source, SourceConfig};

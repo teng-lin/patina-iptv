@@ -3,8 +3,9 @@
 //! failures become the wizard's [`ImportProgress`] and [`ImportFailure`].
 //! Pure functions, unit-tested below.
 
-use iptv_core::wizard::{
-    DraftSource, FailureKind, Field, ImportFailure, ImportProgress, ImportStage, PlaylistDraft,
+use iptv_core::add_playlist::{
+    DraftSource, FailureKind, ImportFailure, ImportInput, ImportProgress, ImportStage,
+    PlaylistDraft,
 };
 use iptv_import::{FailureKind as Kind, ImportError, ParseProblem, Phase, Progress, Step};
 use iptv_providers::model::{
@@ -149,14 +150,14 @@ pub fn failure_of(error: &ImportError) -> ImportFailure {
     };
     ImportFailure {
         kind,
-        field: matches!(error.step(), Some(Step::Guide(_))).then_some(Field::EpgUrl),
+        input: matches!(error.step(), Some(Step::Guide(_))).then_some(ImportInput::GuideAddress),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iptv_core::wizard::{SecretText, UrlText};
+    use iptv_core::add_playlist::{SecretText, UrlText};
     use iptv_epg::FeedId;
     use iptv_import::{AuthProblem, FetchError, FetchErrorKind};
     use iptv_providers::model::ContentKind;
@@ -344,12 +345,12 @@ mod tests {
 
     #[test]
     fn only_guide_failures_point_at_a_field() {
-        assert_eq!(failure_of(&net(Step::Playlist)).field, None);
+        assert_eq!(failure_of(&net(Step::Playlist)).input, None);
         assert_eq!(
             failure_of(&net(Step::Guide(FeedId(1)))),
             ImportFailure {
                 kind: FailureKind::Network,
-                field: Some(Field::EpgUrl)
+                input: Some(ImportInput::GuideAddress)
             }
         );
     }
