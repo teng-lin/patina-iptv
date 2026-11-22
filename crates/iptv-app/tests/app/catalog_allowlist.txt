@@ -215,8 +215,13 @@ iptv-app/src/fonts.rs	the page's
 iptv-app/src/performance_probe.rs	guide frame
 iptv-core/src/import_limits.rs	decoded byte budget exceeded
 iptv-core/src/import_limits.rs	import {:?} limit exceeded ({})
-iptv-core/src/wizard.rs	SecretText(***)
-iptv-core/src/wizard.rs	UrlText({})
+iptv-core/src/add_playlist.rs	SecretText(***)
+iptv-core/src/add_playlist.rs	UrlText({})
+iptv-core/src/add_playlist.rs	address contains whitespace
+iptv-core/src/add_playlist.rs	address has an invalid host
+iptv-core/src/add_playlist.rs	address has an invalid port
+iptv-core/src/add_playlist.rs	address is missing its scheme
+iptv-core/src/add_playlist.rs	address uses an unsupported scheme
 # The debug overlay (IPTV_DEBUG).
 iptv-app/src/header.rs	keys {} · {} µs (max {})
 # The product's name and its files.

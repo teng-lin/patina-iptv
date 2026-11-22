@@ -6,6 +6,7 @@
 //! Today: the guide's synthetic schedule, the remote/touch focus model and
 //! its columns (rail, groups, lists), favorites, menus, panels, playback.
 
+pub mod add_playlist;
 pub mod browse;
 pub mod browse_playback;
 pub mod capabilities;

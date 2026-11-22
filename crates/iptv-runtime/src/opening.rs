@@ -282,7 +282,7 @@ async fn send_stored_after(
                         None => Msg::NoCheck { source: id },
                     },
                 );
-                let counts = iptv_core::wizard::ImportCounts {
+                let counts = iptv_core::add_playlist::ImportCounts {
                     channels: channels.len() as u32,
                     groups: groups.len() as u32,
                     movies: 0,

@@ -1,6 +1,6 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use iptv_core::wizard::ImportId;
+use iptv_core::add_playlist::ImportId;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};

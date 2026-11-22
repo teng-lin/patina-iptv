@@ -155,7 +155,7 @@ fn startup_retry_reopens_the_reader_and_loads_parental_controls_before_reporting
 
 #[test]
 fn newer_schema_and_unavailable_store_are_reported_at_startup_and_block_import() {
-    use iptv_core::wizard::{FailureKind, ImportFailure};
+    use iptv_core::add_playlist::{FailureKind, ImportFailure};
     use iptv_runtime::data::{self, Job, Purpose, Update};
     use iptv_store_sqlite::{DatabaseKey, SCHEMA_VERSION, Store};
 

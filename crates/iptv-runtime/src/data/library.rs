@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use crate::model::{SourceId, StoreError, StoredSource};
-use iptv_core::wizard::FailureKind;
+use iptv_core::add_playlist::FailureKind;
 use iptv_import::CancelToken;
 use iptv_providers::model::{Source, SourceConfig};
 

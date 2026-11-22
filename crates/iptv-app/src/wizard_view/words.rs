@@ -3,7 +3,8 @@
 use crate::i18n::{tr, trf};
 
 use iptv_core::wizard::{
-    FailureKind, Field, FieldError, ImportFailure, ImportProgress, ImportStage, PlaylistKind,
+    FailureKind, Field, FieldError, ImportFailure, ImportInput, ImportProgress, ImportStage,
+    PlaylistKind,
 };
 
 pub fn kind_title(kind: PlaylistKind) -> &'static str {
@@ -66,7 +67,7 @@ pub fn field_error(error: FieldError) -> &'static str {
 
 /// Why the last import did not add the playlist.
 pub fn failure(kind: PlaylistKind, failure: ImportFailure) -> &'static str {
-    if failure.field == Some(Field::EpgUrl) && failure.kind != FailureKind::Canceled {
+    if failure.input == Some(ImportInput::GuideAddress) && failure.kind != FailureKind::Canceled {
         return tr(
             "The guide link did not load. Correct it, or clear it to use the provider's guide.",
         );
@@ -170,7 +171,7 @@ mod tests {
         assert_eq!(texts.len(), kinds.len());
         let epg = ImportFailure {
             kind: FailureKind::Network,
-            field: Some(Field::EpgUrl),
+            input: Some(ImportInput::GuideAddress),
         };
         assert!(failure(PlaylistKind::M3uUrl, epg).contains("guide link"));
     }

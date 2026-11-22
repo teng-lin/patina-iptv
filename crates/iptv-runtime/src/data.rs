@@ -34,7 +34,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::unbounded_channel;
 
-use iptv_core::wizard::{FailureKind, ImportFailure};
+use iptv_core::add_playlist::{FailureKind, ImportFailure};
 use iptv_epg::GuideStore;
 use iptv_guide::EpgSchedule;
 use iptv_import::CancelToken;

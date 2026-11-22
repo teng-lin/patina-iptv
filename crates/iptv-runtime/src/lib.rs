@@ -116,7 +116,7 @@ pub struct Runtime {
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
     resolving: Slot<Resolves>,
-    wizard_import: Slot<RefCell<Option<(iptv_core::wizard::ImportId, CancelToken)>>>,
+    wizard_import: Slot<RefCell<Option<(iptv_core::add_playlist::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
     inspection: inspection::Vault,
     #[cfg(feature = "test-support")]
