@@ -1,8 +1,9 @@
 //! Disposable encrypted snapshots with leases that pin evidence during repair.
 use super::{InspectionControl, guarded};
+use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_epg::{FeedId, ParseOptions, StrictXmltvParser, TimePolicy, XmltvItem};
-use iptv_import::{BodyStream, CancelToken};
+use iptv_import::{BodyStream, CancelToken, Fetch};
 use iptv_library::inspection::*;
 use iptv_providers::{HttpRequest, SecretUrl};
 use iptv_store_sqlite::{DatabaseKey, InspectionStage};
@@ -16,7 +17,7 @@ use std::{
         Arc, Condvar, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub const PROBE_BYTES: u64 = 32 << 20;
@@ -40,14 +41,39 @@ pub struct ProbeRequest {
 fn now() -> i64 {
     crate::imports::now_unix()
 }
-fn random<const N: usize>() -> InspectionResult<[u8; N]> {
+fn random<const N: usize>(entropy: crate::ports::Entropy) -> InspectionResult<[u8; N]> {
     let mut bytes = [0; N];
-    getrandom::fill(&mut bytes).map_err(|_| InspectionError::Storage)?;
+    entropy(&mut bytes).map_err(|_| InspectionError::Storage)?;
     Ok(bytes)
 }
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+/// `operation` on a probe's stage, within `deadline` and `cancel`. Stages
+/// are files of the native store; a browser build has none (its staged
+/// probes are refused before they start).
+#[cfg(feature = "native")]
+fn bounded<T>(
+    stage: &mut InspectionStage,
+    cancel: CancelToken,
+    deadline: Instant,
+    operation: impl FnOnce(&InspectionStage) -> iptv_store_sqlite::Result<T>,
+) -> iptv_store_sqlite::Result<T> {
+    stage.bounded_until(cancel, crate::time::expiry(deadline), operation)
+}
+
+#[cfg(not(feature = "native"))]
+fn bounded<T>(
+    _: &mut InspectionStage,
+    _: CancelToken,
+    _: Instant,
+    _: impl FnOnce(&InspectionStage) -> iptv_store_sqlite::Result<T>,
+) -> iptv_store_sqlite::Result<T> {
+    Err(iptv_store_sqlite::StoreError::Unavailable(
+        "staged probes need a native store",
+    ))
+}
+
 fn storage<T>(result: iptv_store_sqlite::Result<T>) -> InspectionResult<T> {
     result.map_err(|_| InspectionError::Storage)
 }
@@ -65,6 +91,7 @@ fn check(services: &Services, cancel: &CancelToken, deadline: Instant) -> Inspec
 }
 
 pub(crate) struct Vault {
+    entropy: crate::ports::Entropy,
     nonce: Mutex<String>,
     key: Mutex<Option<DatabaseKey>>,
     stages: Arc<Mutex<Space>>,
@@ -78,10 +105,11 @@ pub(crate) struct Vault {
     stage_hook: Arc<Mutex<Option<Arc<crate::testing::GateState>>>>,
 }
 impl Vault {
-    pub(crate) fn new() -> Self {
-        let key = random().ok().map(DatabaseKey::from_bytes);
+    pub(crate) fn new(entropy: crate::ports::Entropy) -> Self {
+        let key = random(entropy).ok().map(DatabaseKey::from_bytes);
         Self {
-            nonce: Mutex::new(random::<16>().map(|b| hex(&b)).unwrap_or_default()),
+            entropy,
+            nonce: Mutex::new(random::<16>(entropy).map(|b| hex(&b)).unwrap_or_default()),
             key: Mutex::new(key),
             stages: Arc::new(Mutex::new(Space::default())),
             directory: Arc::new(Mutex::new(None)),
@@ -137,10 +165,11 @@ impl Vault {
     }
     pub(crate) fn renew(&self) {
         self.clear();
-        *self.nonce.lock().unwrap_or_else(|e| e.into_inner()) =
-            random::<16>().map(|b| hex(&b)).unwrap_or_default();
+        *self.nonce.lock().unwrap_or_else(|e| e.into_inner()) = random::<16>(self.entropy)
+            .map(|b| hex(&b))
+            .unwrap_or_default();
         *self.key.lock().unwrap_or_else(|e| e.into_inner()) =
-            random().ok().map(DatabaseKey::from_bytes);
+            random(self.entropy).ok().map(DatabaseKey::from_bytes);
         self.workers
             .state
             .lock()
@@ -425,7 +454,7 @@ impl ProbeLease {
         check(&self.0.services, cancel, deadline)?;
         self.check()?;
         let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
-        let result = stage.bounded(cancel.clone(), deadline, |stage| {
+        let result = bounded(&mut stage, cancel.clone(), deadline, |stage| {
             let mut channels = Vec::new();
             let mut after = String::new();
             loop {
@@ -491,24 +520,30 @@ impl ProbeLease {
         let incarnation = self.0.evidence.incarnation.clone();
         let query_cancel = cancel.clone();
         let current = self.0.services.analyze(move |store| {
-            store.inspection_read(query_cancel, deadline, |store| {
-                store
-                    .read_snapshot(|store| {
-                        if store.source(source)?.is_none() || !store.source_policy(source)?.enabled
-                        {
-                            return Ok(false);
-                        }
-                        Ok(store.source_incarnation(source)? == source_incarnation
-                            && match feed {
-                                Some(feed) => {
-                                    store.feed_incarnation(source, feed)?.as_ref()
-                                        == Some(&incarnation)
-                                }
-                                None => true,
-                            })
-                    })
-                    .map(Ok)
-            })
+            store.inspection_read_until(
+                query_cancel,
+                crate::time::expiry(deadline),
+                || {},
+                |store| {
+                    store
+                        .read_snapshot(|store| {
+                            if store.source(source)?.is_none()
+                                || !store.source_policy(source)?.enabled
+                            {
+                                return Ok(false);
+                            }
+                            Ok(store.source_incarnation(source)? == source_incarnation
+                                && match feed {
+                                    Some(feed) => {
+                                        store.feed_incarnation(source, feed)?.as_ref()
+                                            == Some(&incarnation)
+                                    }
+                                    None => true,
+                                })
+                        })
+                        .map(Ok)
+                },
+            )
         });
         let control = InspectionControl {
             cancel: cancel.clone(),
@@ -559,7 +594,7 @@ impl ProbeLease {
         }
         let mut stage = storage(InspectionStage::open(&self.0.path, &self.0.key))?;
         let mut failure = None;
-        let result = stage.bounded(cancel.clone(), deadline, |stage| {
+        let result = bounded(&mut stage, cancel.clone(), deadline, |stage| {
             self.integrity(stage, cancel, deadline).map_err(|error| {
                 failure = Some(error);
                 iptv_store_sqlite::StoreError::Unavailable("probe integrity failed")
@@ -595,7 +630,7 @@ struct Configuration {
     incarnation: String,
     source_incarnation: String,
     time: TimePolicy,
-    net: iptv_net::NetConfig,
+    net: crate::network::NetworkConfig,
     user_agent: Option<String>,
     public_only: bool,
 }
@@ -604,7 +639,8 @@ fn configuration(
     request: ProbeRequest,
 ) -> impl Future<Output = InspectionResult<Configuration>> + use<> {
     let services = owner.services();
-    let net = crate::settings::net_config(&services.settings());
+    let net = crate::settings::network_config(&services.settings());
+    let entropy = services.ports().entropy;
     let read = services.analyze(move |store| {
         store.read_snapshot(|store| {
             let Some(source) = store.source(request.source)? else {
@@ -643,7 +679,7 @@ fn configuration(
                     {
                         return Ok(Err(InspectionError::AddressPolicy));
                     }
-                    let incarnation = hex(&random::<16>().map_err(|_| {
+                    let incarnation = hex(&random::<16>(entropy).map_err(|_| {
                         iptv_store_sqlite::StoreError::Unavailable("probe identity unavailable")
                     })?);
                     (url, None, incarnation, TimePolicy::UTC, true)
@@ -708,7 +744,7 @@ fn await_worker<T: Send + 'static>(
     services: Services,
     control: InspectionControl,
     deadline: Instant,
-    task: tokio::task::JoinHandle<InspectionResult<T>>,
+    task: crate::execution::Join<InspectionResult<T>>,
     cancel: CancelToken,
     guard: CallGuard,
 ) -> impl Future<Output = InspectionResult<T>> + use<T> {
@@ -736,7 +772,7 @@ fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
     workers: &Arc<Workers>,
     admission: Option<Permit>,
     operation: impl FnOnce() -> InspectionResult<T> + Send + 'static,
-) -> tokio::task::JoinHandle<InspectionResult<T>> {
+) -> crate::execution::Join<InspectionResult<T>> {
     match workers.enter() {
         Some(completion) => {
             let work = WorkerOperation {
@@ -744,7 +780,9 @@ fn admitted_worker<T: Send + 'static, Permit: Send + 'static>(
                 _permit: admission,
                 _completion: completion,
             };
-            if work._permit.is_some() {
+            // Probe workers block on their downloads: a host whose tasks
+            // cannot block has no capacity for them.
+            if work._permit.is_some() && services.has_workers() {
                 services.spawn_blocking(move || work.run())
             } else {
                 drop(work);
@@ -792,6 +830,25 @@ impl Runtime {
         request: ProbeRequest,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<ProbeSummary>> + use<> {
+        // Staged probes need blocking workers: a host without them refuses
+        // before any clock is read or store work is queued.
+        let admitted = self
+            .services()
+            .has_workers()
+            .then(|| self.probe_feed_admitted(request, control));
+        async move {
+            match admitted {
+                Some(admitted) => admitted.await,
+                None => Err(InspectionError::Busy),
+            }
+        }
+    }
+
+    fn probe_feed_admitted(
+        &self,
+        request: ProbeRequest,
+        control: InspectionControl,
+    ) -> impl Future<Output = InspectionResult<ProbeSummary>> + use<> {
         let source = request.source;
         let admission = Running::acquire(self.inspection.running.clone());
         let config = admission.as_ref().map(|_| configuration(self, request));
@@ -830,7 +887,7 @@ impl Runtime {
             if configuration.url.expose().len() > 4096 {
                 return Err(InspectionError::InvalidRequest);
             }
-            let id = ProbeId(hex(&random::<16>()?));
+            let id = ProbeId(hex(&random::<16>(accepted.ports().entropy)?));
             let directory = {
                 let mut directory = directory.lock().unwrap_or_else(|e| e.into_inner());
                 // A timed-out worker may resume after shutdown or a restart.
@@ -875,7 +932,11 @@ impl Runtime {
             net.max_streamed_bytes = PROBE_BYTES;
             net.allow_files = false;
             net.read_timeout = Duration::from_secs(15);
-            let client = iptv_net::NetClient::new(net).map_err(network_error)?;
+            let client = accepted
+                .ports()
+                .network
+                .client(&net)
+                .map_err(network_error)?;
             let mut request = HttpRequest::get(configuration.url.expose());
             request.public_only = configuration.public_only;
             request.preserve_gzip = true;
@@ -1026,6 +1087,28 @@ impl Runtime {
         limit: u32,
         control: InspectionControl,
     ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
+        // Staged probes need blocking workers: a host without them refuses
+        // before any clock is read or store work is queued.
+        let admitted = self
+            .services()
+            .has_workers()
+            .then(|| self.probe_candidates_admitted(evidence, text, after, limit, control));
+        async move {
+            match admitted {
+                Some(admitted) => admitted.await,
+                None => Err(InspectionError::Busy),
+            }
+        }
+    }
+
+    fn probe_candidates_admitted(
+        &self,
+        evidence: ProbeEvidence,
+        text: String,
+        after: Option<Cursor>,
+        limit: u32,
+        control: InspectionControl,
+    ) -> impl Future<Output = InspectionResult<Page<Candidate>>> + use<> {
         let lease = self.lease_probe(&evidence);
         let services = self.services();
         let deadline = Instant::now() + control.timeout.min(super::QUERY_DEADLINE);
@@ -1055,16 +1138,18 @@ impl Runtime {
                 return Err(InspectionError::StaleCursor);
             }
             let mut stage = storage(InspectionStage::open(&lease.0.path, &lease.0.key))?;
-            let mut channels =
-                storage(
-                    stage.bounded(worker_control.cancel.clone(), deadline, |stage| {
-                        stage.channels(
-                            after.as_ref().map(|c| c.after[0].as_str()).unwrap_or(""),
-                            &text,
-                            limit + 1,
-                        )
-                    }),
-                )?;
+            let mut channels = storage(bounded(
+                &mut stage,
+                worker_control.cancel.clone(),
+                deadline,
+                |stage| {
+                    stage.channels(
+                        after.as_ref().map(|c| c.after[0].as_str()).unwrap_or(""),
+                        &text,
+                        limit + 1,
+                    )
+                },
+            ))?;
             check(&lease.0.services, &worker_control.cancel, deadline)?;
             let more = channels.len() > limit as usize;
             channels.truncate(limit as usize);
@@ -1098,6 +1183,27 @@ impl Runtime {
     }
 
     pub fn probe_schedule(
+        &self,
+        evidence: ProbeEvidence,
+        candidate: CandidateRef,
+        window: TimeWindow,
+        control: InspectionControl,
+    ) -> impl Future<Output = InspectionResult<Vec<CandidateProgram>>> + use<> {
+        // Staged probes need blocking workers: a host without them refuses
+        // before any clock is read or store work is queued.
+        let admitted = self
+            .services()
+            .has_workers()
+            .then(|| self.probe_schedule_admitted(evidence, candidate, window, control));
+        async move {
+            match admitted {
+                Some(admitted) => admitted.await,
+                None => Err(InspectionError::Busy),
+            }
+        }
+    }
+
+    fn probe_schedule_admitted(
         &self,
         evidence: ProbeEvidence,
         candidate: CandidateRef,
@@ -1269,7 +1375,7 @@ mod worker_tests {
     #[test]
     fn completion_follows_capture_cleanup_for_run_panic_and_queued_drop() {
         for mode in 0..3 {
-            let vault = Vault::new();
+            let vault = Vault::new(crate::native::entropy);
             vault.renew();
             let gate = crate::TestGate::new();
             let cleanup = Cleanup(crate::TestGate(gate.0.clone()));
@@ -1344,5 +1450,54 @@ mod worker_tests {
         );
         owner.store.hooks.set_drain_limit(None);
         assert!(owner.drain_services());
+    }
+}
+
+#[cfg(all(test, feature = "test-support", feature = "native"))]
+mod host_tests {
+    use super::*;
+
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn a_host_without_workers_refuses_a_probe_before_queueing_anything() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(DatabaseKey::from_bytes([0x75; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+        );
+        let owner = Runtime::new(ports);
+        owner.start_services();
+        let refused = owner.probe_feed(
+            ProbeRequest {
+                source: iptv_library::SourceId(1),
+                target: ProbeTarget::Configured(FeedId(1)),
+            },
+            InspectionControl::default(),
+        );
+        let mut refused = std::pin::pin!(refused);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(matches!(
+            refused.as_mut().poll(&mut context),
+            std::task::Poll::Ready(Err(InspectionError::Busy))
+        ));
+        assert!(
+            owner
+                .store_queue_stats()
+                .iter()
+                .all(|lane| lane.pending == 0)
+        );
+        assert_eq!(owner.active_inspection_workers(), 0);
     }
 }

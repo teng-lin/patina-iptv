@@ -26,15 +26,12 @@ pub use iptv_core::guide;
 mod guide_window_walkthrough;
 pub mod theme;
 
-#[cfg(target_os = "android")]
-mod android_transport;
 mod backup;
 mod browse_playback;
 mod capabilities;
 mod channels_view;
 mod chooser;
 mod content_image;
-mod credential_key;
 mod custom_groups;
 mod data;
 mod desktop;
@@ -47,6 +44,11 @@ mod guide_assign_view;
 mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
+mod host;
+// A browser host exports nothing: the glob is empty there.
+#[allow(unused_imports)]
+#[doc(inline)]
+pub use host::exports::*;
 mod i18n;
 #[cfg(feature = "test-support")]
 pub use i18n::pseudo_fixed_for_test;
@@ -70,9 +72,6 @@ mod performance_probe;
 mod recordings_view;
 mod vod_view;
 use iptv_runtime as runtime;
-mod runtime_events;
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", windows))]
-use iptv_player_mpv as mpv;
 mod multiview;
 mod multiview_picker;
 mod multiview_view;
@@ -82,25 +81,21 @@ mod organization_view;
 mod overlays;
 mod panels;
 mod pip;
-mod platform_data;
 mod play_bar;
 mod player;
 mod player_keys;
 mod player_panels;
 mod playlists_view;
 mod rail;
-mod recording_host;
 mod remote_editor;
+mod runtime_events;
 mod scale;
 mod search_view;
 mod seek;
 mod settings;
 mod settings_view;
-#[cfg(all(target_os = "ios", target_abi = "sim"))]
-mod simulator_entitlements;
 pub mod startup;
 pub mod time;
-mod transport;
 mod ui_kit;
 mod video;
 mod wizard_view;
@@ -113,9 +108,10 @@ pub use video::has_source as player_has_source;
 pub use video::opens as player_opens;
 
 /// iOS (an iPad): a tap beside the open columns or list closes them.
-pub(crate) const IOS: bool = cfg!(target_os = "ios");
+pub(crate) const IOS: bool = crate::host::IPAD;
 
-use std::time::{Duration, Instant};
+use nsh_core::time::Instant;
+use std::time::Duration;
 
 use guide::{Airing, Focus, Pane, Program, Schedule};
 use std::cell::RefCell;
@@ -133,36 +129,6 @@ use theme::Theme;
 #[native_module("iptv-rs/native")]
 fn native_module(registry: &mut Registry) {
     registry.register::<App>();
-}
-
-#[cfg(windows)]
-#[native_components(windows)]
-pub fn components(components: &nsh_platform_windows::Components) {
-    mpv::register(components, transport::policy);
-}
-
-/// The Linux desktop's native components: `tv.player` on libmpv (the
-/// Android host registers its own in Kotlin).
-#[cfg(target_os = "linux")]
-#[native_components(linux)]
-pub fn components(components: &nsh_platform_linux::Components) {
-    mpv::register(components, transport::policy);
-}
-
-/// The macOS desktop's native components: `tv.player` on libmpv, as on
-/// Linux.
-#[cfg(target_os = "macos")]
-#[native_components(macos)]
-pub fn components(components: &nsh_platform_macos::Components) {
-    mpv::register(components, transport::policy);
-}
-
-/// iOS and iPadOS's native components: `tv.player` on libmpv (MPVKit's,
-/// OpenGL ES), as on the desktops.
-#[cfg(target_os = "ios")]
-#[native_components(ios)]
-pub fn components(components: &nsh_platform_ios::Components) {
-    mpv::register(components, transport::policy);
 }
 
 /// The last kind of input (`iptv_core::layout`): the focus fill and key
@@ -383,7 +349,7 @@ impl Ui {
             playing: signal(None),
             // Until a press reports its pointer: a finger on phones and
             // tablets, the mouse on desktops.
-            last_press: signal(if cfg!(any(target_os = "android", target_os = "ios")) {
+            last_press: signal(if crate::host::ANDROID || crate::host::IPAD {
                 Input::Touch
             } else {
                 Input::Pointer
@@ -661,7 +627,7 @@ pub(crate) fn runtime() -> Rc<runtime::Runtime> {
                     !ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire),
                     "the application handle was requested off the application thread"
                 );
-                let directory = platform_data::resolve_data_dir()
+                let directory = host::resolve_data_dir()
                     .expect("private storage must be resolved before using runtime services");
                 Rc::new(new_runtime(directory))
             })
@@ -692,12 +658,7 @@ pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() ->
 }
 
 pub(crate) fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
-    let mut ports = runtime::Ports::new(directory, credential_key::database_key);
-    ports.background_recordings = capabilities::HOST.background_recordings();
-    ports.recording_schedule = recording_host::schedule;
-    ports.exclude_from_backup = platform_data::exclude_from_backup;
-    ports.startup_mark = |phase, detail| startup::mark_with(phase, detail);
-    runtime::Runtime::new(ports)
+    runtime::Runtime::new(host::ports(directory))
 }
 
 /// A local task always polls with the owner that accepted it, also after
@@ -762,9 +723,9 @@ pub fn channel_name(ch: usize) -> String {
 #[component]
 pub fn App() -> impl IntoElement {
     startup::mark("rust root");
-    startup::log_library_base();
+    host::log_library_base();
     fonts::register();
-    let directory = match platform_data::initialize() {
+    let directory = match host::initialize() {
         Ok(directory) => directory,
         Err(error) => {
             log::error!("iptv storage initialization failed: {error}");
@@ -782,7 +743,7 @@ pub fn App() -> impl IntoElement {
     // stop callback flushes. Only a root does this: constructing a runtime
     // elsewhere changes neither.
     let owner = Rc::new(new_runtime(directory));
-    platform_data::flush_on_host_stop(owner.host_handle());
+    host::flush_on_host_stop(owner.host_handle());
     RUNTIME.set(Some(owner));
     ROOT_STARTED.store(true, std::sync::atomic::Ordering::Release);
     if let Err(error) = runtime().lock_storage() {
@@ -797,25 +758,23 @@ pub fn App() -> impl IntoElement {
     // must finish off the UI thread before settings or the live store open.
     let outcome = signal(None::<Result<(), &'static str>>);
     let (tx, rx) = futures_channel::oneshot::channel();
-    let started = std::thread::Builder::new()
-        .name("iptv-bootstrap".into())
-        .spawn({
-            let activate = runtime().restore_activation();
-            move || {
-                let result = match activate() {
-                    Ok(()) => Ok(()),
-                    Err(error) => {
-                        log::warn!("iptv backup: {}", error.error);
-                        if error.fatal {
-                            Err(error.error.message())
-                        } else {
-                            Ok(())
-                        }
+    let started = host::background("iptv-bootstrap", {
+        let activate = runtime().restore_activation();
+        move || {
+            let result = match activate() {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    log::warn!("iptv backup: {}", error.error);
+                    if error.fatal {
+                        Err(error.error.message())
+                    } else {
+                        Ok(())
                     }
-                };
-                let _ = tx.send(result);
-            }
-        });
+                }
+            };
+            let _ = tx.send(result);
+        }
+    });
     if started.is_err() {
         outcome.set(Some(Err(i18n::key(
             "The startup task could not be started",
@@ -1283,33 +1242,27 @@ pub(crate) fn go_back(ui: Ui) -> bool {
     })
 }
 
-/// Explicit synthetic-key injection for the headless test binary only.
-#[cfg(feature = "test-support")]
-pub use credential_key::install_test_key;
-/// Use a fresh explicit synthetic profile without changing the process home.
-#[cfg(feature = "test-support")]
-pub use platform_data::install_test_data_dir;
 /// Whether a stored source has a guide timer or an in-flight guide read,
 /// for the headless tests of what keeps its periodic checks alive.
 #[cfg(feature = "test-support")]
 pub fn guide_check_pending(source: runtime::model::SourceId) -> bool {
-    platform_data::host_handle().is_some_and(|owner| owner.guide_check_registered(source))
+    host::host_handle().is_some_and(|owner| owner.guide_check_registered(source))
 }
 #[cfg(feature = "test-support")]
 pub fn refuse_work(count: usize) {
-    platform_data::host_handle()
+    host::host_handle()
         .expect("refuse_work needs a started app")
         .refuse_work(count);
 }
 #[cfg(feature = "test-support")]
 pub fn hold_reports(held: bool) {
-    platform_data::host_handle()
+    host::host_handle()
         .expect("hold_reports needs a started app")
         .hold_reports(held);
 }
 #[cfg(feature = "test-support")]
 pub fn reports_waiting() -> usize {
-    platform_data::host_handle().map_or(0, |owner| owner.reports_waiting())
+    host::host_handle().map_or(0, |owner| owner.reports_waiting())
 }
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
@@ -1318,7 +1271,7 @@ pub fn occupy_writer(duration: Duration) {
     // The headless tests drive the app from another thread: this reaches the
     // running root's owner, never one made for the occasion (a test must not
     // pass by occupying an unused store).
-    platform_data::host_handle()
+    host::host_handle()
         .expect("occupy_writer needs a started app")
         .occupy_writer(duration);
 }
@@ -1326,7 +1279,7 @@ pub fn occupy_writer(duration: Duration) {
 /// Reader-lane job count for the running synthetic app owner.
 #[cfg(feature = "test-support")]
 pub fn store_reads() -> u64 {
-    platform_data::host_handle()
+    host::host_handle()
         .expect("store_reads needs a started app")
         .store_reads()
 }
@@ -1334,7 +1287,7 @@ pub fn store_reads() -> u64 {
 /// Pauses queued writes; the gate acknowledges entry and releases on drop.
 #[cfg(feature = "test-support")]
 pub fn hold_writer() -> runtime::TestGate {
-    platform_data::host_handle()
+    host::host_handle()
         .and_then(|owner| owner.hold_writer())
         .expect("hold_writer needs a started app")
 }
@@ -1342,7 +1295,7 @@ pub fn hold_writer() -> runtime::TestGate {
 /// Hold the next source preparation for deterministic old-native-event tests.
 #[cfg(feature = "test-support")]
 pub fn hold_source_preparation() -> runtime::TestGate {
-    platform_data::host_handle()
+    host::host_handle()
         .and_then(|owner| owner.hold_source_preparation())
         .expect("source preparation gate needs a started app")
 }
@@ -1350,7 +1303,7 @@ pub fn hold_source_preparation() -> runtime::TestGate {
 /// Read-only synthetic-source observation keyed by the actually published URL.
 #[cfg(feature = "test-support")]
 pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySource> {
-    platform_data::host_handle().and_then(|owner| owner.original_player_source(url))
+    host::host_handle().and_then(|owner| owner.original_player_source(url))
 }
 
 /// The guide header a desktop window `width` × `height` gets at the default

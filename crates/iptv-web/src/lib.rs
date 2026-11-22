@@ -28,12 +28,62 @@
 //! The exports are a C ABI: bytes cross through [`input`] (a buffer the host
 //! fills before an export that reads it) and the host's `emit` import.
 
+#[cfg(feature = "bridge")]
 mod app;
 mod exec;
 mod host;
+#[cfg(feature = "bridge")]
 mod store;
 
-#[cfg(test)]
+/// The adapters an application on the real runtime builds its ports from
+/// (`iptv-app`'s web host): the host's fetch, its timer and clock, and the
+/// executor polled after every delivery.
+pub mod adapters {
+    use std::future::Future;
+    use std::time::Duration;
+
+    pub use crate::exec::{HostBody, HostFetch};
+
+    /// Runs `task` from the executor's next poll on; outside a poll, one is
+    /// asked of the host.
+    pub fn spawn(task: impl Future<Output = ()> + 'static) {
+        crate::exec::spawn(task);
+    }
+
+    /// Polls the executor until no task can progress. iptv-web's own exports
+    /// poll after every delivery; a host that delivers through another
+    /// door (an NSH event) calls this after it.
+    pub fn poll() {
+        crate::exec::poll();
+    }
+
+    /// Ends after `duration`, on the host's timer.
+    pub async fn sleep(duration: Duration) {
+        crate::exec::sleep_while(duration, || true).await;
+    }
+
+    /// The host's monotonic clock.
+    pub fn monotonic() -> Duration {
+        Duration::from_secs_f64((crate::host::host().monotonic_ms() / 1000.0).max(0.0))
+    }
+
+    /// The value stored under `key` in the host's key-value storage.
+    pub async fn storage_get(key: &str) -> Option<Vec<u8>> {
+        crate::exec::storage_get(key).await
+    }
+
+    /// Stores `value` under `key`; writes keep their order. Empty deletes.
+    pub fn storage_put(key: &str, value: &[u8]) {
+        crate::exec::storage_put(key, value);
+    }
+
+    /// The host's wall clock: time since the Unix epoch.
+    pub fn wall() -> Duration {
+        Duration::from_secs_f64((crate::host::host().wall_ms() / 1000.0).max(0.0))
+    }
+}
+
+#[cfg(all(test, feature = "bridge"))]
 mod tests;
 
 use std::cell::RefCell;
@@ -62,6 +112,7 @@ pub extern "C" fn input(len: u32) -> *mut u8 {
 }
 
 /// A command (JSON, `len` bytes in [`input`]).
+#[cfg(feature = "bridge")]
 #[unsafe(no_mangle)]
 pub extern "C" fn command(len: u32) {
     let bytes = take_input(len);

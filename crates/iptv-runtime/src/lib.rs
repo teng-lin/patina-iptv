@@ -1,3 +1,6 @@
+// The browser's `std::fs` is a stub whose `File` has no destructor; the
+// file paths that drop one early only fail there.
+#![cfg_attr(target_family = "wasm", allow(clippy::drop_non_drop))]
 //! Application-owned state and events. This module has no UI toolkit imports.
 //!
 //! The supported query/inspection/repair facade is specified in
@@ -34,6 +37,10 @@ pub mod guide_repair;
 pub mod inspection;
 mod operations;
 pub mod parental;
+#[cfg(feature = "native")]
+pub mod recordings;
+#[cfg(not(feature = "native"))]
+#[path = "recordings_unavailable.rs"]
 pub mod recordings;
 pub mod vod;
 pub use error::Error;
@@ -118,8 +125,10 @@ pub struct Runtime {
     settings_changed: Slot<Cell<u64>>,
     settings_read_only: Cell<Option<std::io::ErrorKind>>,
     link_client:
-        std::sync::Arc<std::sync::Mutex<Option<(iptv_net::NetConfig, iptv_net::NetClient)>>>,
+        std::sync::Arc<std::sync::Mutex<Option<(network::NetworkConfig, network::Client)>>>,
     backup_busy: Cell<bool>,
+    /// The user was told that changes last for the session.
+    session_only_noted: Cell<bool>,
     backup_progress: Cell<backup::Progress>,
     search: search::State,
     favorites: Slot<RefCell<favorites::State>>,
@@ -165,6 +174,7 @@ impl Runtime {
     /// [`Runtime::start_services`].
     pub fn new(ports: Ports) -> Self {
         let recordings = recordings::host::acquire(&ports);
+        let entropy = ports.entropy;
         let store = std::sync::Arc::new(store_service::Service::new(ports));
         #[cfg(feature = "test-support")]
         let guide_checks = guide_checks::GuideChecks::mirrored(store.guide_checks.clone());
@@ -181,7 +191,7 @@ impl Runtime {
             resolving: Slot::default(),
             wizard_import: Slot::default(),
             store,
-            inspection: inspection::Vault::new(),
+            inspection: inspection::Vault::new(entropy),
             #[cfg(feature = "test-support")]
             inspection_scan: RefCell::default(),
             settings_saved: Slot::default(),
@@ -189,6 +199,7 @@ impl Runtime {
             settings_read_only: Cell::new(None),
             link_client: Default::default(),
             backup_busy: Cell::new(false),
+            session_only_noted: Cell::new(false),
             backup_progress: Cell::new(backup::Progress::Idle),
             search: search::State::default(),
             favorites: Slot::default(),
@@ -290,7 +301,7 @@ impl Runtime {
         self.inspection.renew();
     }
     pub fn drain_services(&self) -> bool {
-        let deadline = std::time::Instant::now() + self.store.drain_limit();
+        let deadline = crate::time::Instant::now() + self.store.drain_limit();
         self.inspection.close_workers();
         self.parental_lock();
         if !self.recordings_detached.replace(true) {
@@ -306,7 +317,7 @@ impl Runtime {
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());
         let probes_drained = self
             .inspection
-            .drain_workers(deadline.saturating_duration_since(std::time::Instant::now()));
+            .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
@@ -531,7 +542,7 @@ impl HostHandle {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 
@@ -558,6 +569,55 @@ mod tests {
         store.hooks.set_drain_limit(None);
         assert!(store.drain_on_shutdown_with(|| {}));
         assert!(!retried, "Drop repeated an explicit shutdown attempt");
+    }
+
+    #[test]
+    fn the_worker_capability_is_the_executions_and_asking_starts_nothing() {
+        use iptv_library::guide_repair::CapabilityState;
+        let native = Runtime::default();
+        assert!(native.has_workers());
+        let probe = |owner: &Runtime| {
+            owner
+                .foundation_capabilities()
+                .into_iter()
+                .find(|capability| capability.name == "epg_probe")
+                .unwrap()
+                .state
+        };
+        assert_eq!(probe(&native), CapabilityState::Implemented);
+        assert!(
+            native.store.tasks.get().is_none(),
+            "no runtime was made to ask"
+        );
+
+        struct Unpolled;
+        impl execution::CooperativeHost for Unpolled {
+            fn spawn(&self, _: execution::Task) {}
+            fn delay(&self, _: std::time::Duration) -> execution::Task {
+                Box::pin(std::future::pending())
+            }
+            fn now(&self) -> std::time::Duration {
+                std::time::Duration::ZERO
+            }
+        }
+        let mut ports = Ports::for_tests();
+        ports.execution =
+            std::sync::Arc::new(execution::Cooperative::new(std::sync::Arc::new(Unpolled)));
+        let browser = Runtime::new(ports);
+        assert!(!browser.has_workers());
+        assert_eq!(probe(&browser), CapabilityState::UnsupportedHost);
+    }
+
+    #[test]
+    fn storage_without_files_is_neither_locked_nor_restored() {
+        // A directory no process could create: the browser host's storage
+        // has no file system under it.
+        let mut ports = Ports::for_tests();
+        ports.directory = std::path::PathBuf::from("/proc/patina-synthetic/storage");
+        ports.file_storage = false;
+        let owner = Runtime::new(ports);
+        assert!(owner.lock_storage().is_ok());
+        assert!(owner.restore_activation()().is_ok());
     }
 
     #[test]
@@ -656,7 +716,7 @@ mod tests {
 
 mod store_service;
 
-mod executor;
+pub mod execution;
 
 pub(crate) mod file_writer;
 
@@ -695,11 +755,15 @@ pub mod model;
 
 pub mod settings;
 
+#[cfg(feature = "native")]
+mod native;
+pub mod network;
 mod ports;
-pub use ports::Ports;
+pub use ports::{MaybeSend, MaybeSync, Ports};
 pub mod storage;
+pub mod time;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 impl Default for Runtime {
     fn default() -> Self {
         Self::new(Ports::for_tests())

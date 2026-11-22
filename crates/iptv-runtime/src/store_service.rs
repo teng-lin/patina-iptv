@@ -1,6 +1,7 @@
-//! The app's two store connections, each on its own long-lived worker
-//! thread. UI callers await replies; import workers may wait, but cannot
-//! open competing app connections.
+//! The app's two store connections, each on its own lane of the owner's
+//! execution port (natively a long-lived thread; see
+//! [`crate::execution`]). UI callers await replies; import workers may
+//! wait, but cannot open competing app connections.
 //!
 //! Every owner ([`Service`]) has its own pair; work reaches them through the
 //! [`Services`] handle its owner gave out, never through a process-wide or
@@ -21,16 +22,18 @@
 //! The reader's connection is made by the writer ([`Store::open_reader`]):
 //! the platform key is fetched, and the file migrated, only there.
 
+use crate::time::Instant;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::Path;
+#[cfg(feature = "test-support")]
+use std::sync::mpsc;
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicU64, Ordering},
-    mpsc,
 };
 use std::thread::ThreadId;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_channel::oneshot;
 use iptv_import::CancelToken;
@@ -41,7 +44,7 @@ use iptv_store_sqlite::{Store, StoreError};
 #[derive(Default)]
 struct Connection {
     store: Option<Store>,
-    retry_open_at: Option<std::time::Instant>,
+    retry_open_at: Option<crate::time::Instant>,
 }
 
 /// Numeric-only observations for one store lane; no query, path or provider data.
@@ -130,14 +133,40 @@ impl crate::Runtime {
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 
-/// One connection's worker: a thread that owns the connection and runs
-/// jobs in order.
+/// One connection's worker: a lane of the owner's execution port (natively
+/// a thread) that runs jobs in order, each with the connection.
 struct Lane {
     name: &'static str,
-    /// The job queue and its thread: a job may not queue on its own lane
-    /// and wait for itself.
-    jobs: OnceLock<(mpsc::Sender<Job>, ThreadId)>,
+    /// The execution lane, started on first use: a job may not queue on
+    /// its own lane and wait for itself.
+    jobs: OnceLock<Box<dyn crate::execution::Lane>>,
+    execution: Arc<dyn crate::execution::Execution>,
+    /// The lane's connection; only its jobs, one at a time, lock it.
+    connection: Arc<Mutex<Connection>>,
     metrics: Arc<Mutex<QueueMetrics>>,
+}
+impl Lane {
+    fn new(name: &'static str, execution: Arc<dyn crate::execution::Execution>) -> Self {
+        Self {
+            name,
+            jobs: OnceLock::new(),
+            execution,
+            connection: Arc::default(),
+            metrics: Arc::default(),
+        }
+    }
+
+    /// A lane on `connection`, another lane's (a browser store has one).
+    fn sharing(
+        name: &'static str,
+        execution: Arc<dyn crate::execution::Execution>,
+        connection: Arc<Mutex<Connection>>,
+    ) -> Self {
+        Self {
+            connection,
+            ..Self::new(name, execution)
+        }
+    }
 }
 
 #[derive(Default)]
@@ -178,16 +207,20 @@ impl Epochs {
     }
 }
 
-/// The native services of one application owner: its two store lanes, file
-/// writer, network executor, refresh pool, settings and platform ports.
+/// The services of one application owner: its two store lanes, file
+/// writer, task executor, refresh pool, settings and platform ports.
 /// Nothing here is process-wide: a second owner has its own.
 pub(crate) struct Service {
     ports: crate::Ports,
+    /// The lanes share the writer's connection (`Execution::shares_connection`):
+    /// reads open the store itself, not a reader connection.
+    shared: bool,
     writer: Lane,
     reader: Lane,
     analysis: Lane,
     epochs: Epochs,
-    executor: super::executor::Executor,
+    /// The owner's task executor from its execution port, made on first use.
+    pub(crate) tasks: OnceLock<Box<dyn crate::execution::Tasks>>,
     files: super::file_writer::Files,
     pool: OnceLock<super::workers::Pool>,
     settings: super::settings::Shared,
@@ -202,26 +235,26 @@ pub(crate) struct Service {
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
+        let execution = ports.execution.clone();
+        let shared = execution.shares_connection();
+        let writer = Lane::new("iptv-store", execution.clone());
+        let lane = |name| {
+            if shared {
+                Lane::sharing(name, execution.clone(), writer.connection.clone())
+            } else {
+                Lane::new(name, execution.clone())
+            }
+        };
+        let (reader, analysis) = (lane("iptv-store-read"), lane("iptv-store-analysis"));
         Self {
+            shared,
+            writer,
+            reader,
+            analysis,
+            files: super::file_writer::Files::new(execution),
             ports,
-            writer: Lane {
-                name: "iptv-store",
-                jobs: OnceLock::new(),
-                metrics: Arc::default(),
-            },
-            reader: Lane {
-                name: "iptv-store-read",
-                jobs: OnceLock::new(),
-                metrics: Arc::default(),
-            },
-            analysis: Lane {
-                name: "iptv-store-analysis",
-                jobs: OnceLock::new(),
-                metrics: Arc::default(),
-            },
             epochs: Epochs::default(),
-            executor: Default::default(),
-            files: Default::default(),
+            tasks: OnceLock::new(),
             pool: OnceLock::new(),
             settings: Default::default(),
             ui_thread: OnceLock::new(),
@@ -269,6 +302,10 @@ impl Service {
         &self.files
     }
 
+    fn tasks(&self) -> &dyn crate::execution::Tasks {
+        &**self.tasks.get_or_init(|| self.ports.execution.tasks())
+    }
+
     fn open_store(&self) -> Result<Store, StoreError> {
         let directory = self.directory();
         std::fs::create_dir_all(directory)
@@ -286,7 +323,7 @@ impl Service {
     /// Root teardown only, after the favorites writer has submitted its last
     /// work. Accepted requests already belong to their workers, independent
     /// of UI futures.
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native"))]
     pub(crate) fn drain_on_shutdown(self: &Arc<Self>) -> bool {
         self.drain_on_shutdown_with(|| {})
     }
@@ -313,12 +350,22 @@ impl Service {
         self.epochs.close_admission(epoch);
         #[cfg(feature = "test-support")]
         self.hooks.admission_closed();
-        if self.writer.jobs.get().is_none() {
+        // Natively a reader opens only through the writer; where lanes share
+        // the writer's connection, a read alone may have opened it.
+        if [&self.writer, &self.reader, &self.analysis]
+            .iter()
+            .all(|lane| lane.jobs.get().is_none())
+        {
             self.epochs.close(epoch);
             after_writer();
             #[cfg(feature = "test-support")]
             self.hooks.drained();
             return true;
+        }
+        // A publish still in slices is abandoned, not finished: the owner is
+        // closing (natively a publish runs as one job and is never pending).
+        if let Some(lane) = self.writer.jobs.get() {
+            lane.cancel_sliced();
         }
         // The writer first: once it closed the epoch, a late read cannot open
         // the reader's connection again.
@@ -331,6 +378,10 @@ impl Service {
             // FIFO barrier still retires the connection held by preceding work.
             *connection = Connection::default();
         });
+        if self.writer.jobs.get().is_none() {
+            // Shared lanes that only read: no writer job closes the epoch.
+            self.epochs.close(epoch);
+        }
         // Queued writes have acknowledged before transient read/probe cancellation.
         after_writer();
         let reader = self.reader.barrier(limit, |connection| {
@@ -363,6 +414,7 @@ fn stale() -> StoreError {
 }
 
 impl Services {
+    #[cfg(feature = "native")]
     pub(crate) fn service_retire(&self) -> bool {
         let drained = self.service.drain_on_shutdown_with(|| {});
         self.service.retire();
@@ -415,30 +467,53 @@ impl Services {
         &self.service.files
     }
 
-    /// Runs `future` on the owner's network runtime; await the handle for
-    /// its output. Dropping the handle detaches the task (cancel it with its
-    /// `CancelToken`).
-    pub(crate) fn spawn<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
-    where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
-    {
-        self.service.executor.spawn(future)
+    /// A network client with this owner's settings of now.
+    pub(crate) fn network_client(&self) -> Result<crate::network::Client, iptv_import::FetchError> {
+        self.service
+            .ports
+            .network
+            .client(&super::settings::network_config(&self.settings()))
     }
 
-    /// Runs CPU-bound `work` on the network runtime's blocking threads
-    /// (building a large schedule); await the handle for its output.
+    /// Runs `future` on the owner's task executor; await the handle for
+    /// its output. Dropping the handle detaches the task (cancel it with its
+    /// `CancelToken`).
+    pub(crate) fn spawn<F>(&self, future: F) -> crate::execution::Join<F::Output>
+    where
+        F: Future + crate::MaybeSend + 'static,
+        F::Output: crate::MaybeSend + 'static,
+    {
+        crate::execution::spawn(self.service.tasks(), future)
+    }
+
+    /// Runs CPU-bound `work` on the task executor's blocking side (building
+    /// a large schedule); await the handle for its output.
     pub(crate) fn spawn_blocking<R: Send + 'static>(
         &self,
         work: impl FnOnce() -> R + Send + 'static,
-    ) -> tokio::task::JoinHandle<R> {
-        self.service.executor.spawn_blocking(work)
+    ) -> crate::execution::Join<R> {
+        crate::execution::spawn_blocking(self.service.tasks(), work)
+    }
+
+    /// The host has blocking workers ([`crate::execution::Execution::has_workers`]).
+    pub(crate) fn has_workers(&self) -> bool {
+        self.service.ports.execution.has_workers()
     }
 
     /// Drive a non-Send import on its bounded blocking worker, sharing the
     /// IO executor.
     pub(crate) fn block_on<F: Future>(&self, future: F) -> F::Output {
-        self.service.executor.block_on(future)
+        crate::execution::block_on(self.service.tasks(), future)
+    }
+
+    /// `future`, unless `deadline` passes first on the owner's timer.
+    pub(crate) async fn timeout_at<F: Future>(
+        &self,
+        deadline: Instant,
+        future: F,
+    ) -> Result<F::Output, crate::execution::Elapsed> {
+        let limit = deadline.saturating_duration_since(Instant::now());
+        crate::execution::timeout(self.service.tasks(), limit, future).await
     }
 
     /// Queues refresh `work` on the owner's bounded pool; false when it is
@@ -451,7 +526,7 @@ impl Services {
         let accepted = self.clone();
         self.service
             .pool
-            .get_or_init(super::workers::Pool::standard)
+            .get_or_init(|| super::workers::Pool::standard(&*self.service.ports.execution))
             .submit(
                 visible,
                 Box::new(move || {
@@ -562,7 +637,7 @@ impl Services {
                     &owner.epochs,
                     epoch,
                     connection,
-                    || owner.open_reader(epoch),
+                    || owner.open_lane(epoch),
                     operation,
                 ));
             }))
@@ -582,14 +657,10 @@ impl Services {
     ) -> Result<R, StoreError> {
         self.service.assert_off_ui_thread("blocking store request");
         let epoch = self.affinity()?;
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.service.clone();
-        self.service.writer.queue(Box::new(move |connection| {
-            let _ = sender.send(owner.write(epoch, connection, operation));
-        }))?;
-        receiver
-            .recv()
-            .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        self.service
+            .writer
+            .wait(move |connection| owner.write(epoch, connection, operation))?
     }
 
     /// For import/background workers only: a read of the last commit that runs
@@ -600,16 +671,16 @@ impl Services {
     ) -> Result<R, StoreError> {
         self.service.assert_off_ui_thread("blocking store read");
         let epoch = self.affinity()?;
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.service.clone();
-        self.service.reader.queue(Box::new(move |connection| {
-            let _ = sender.send(owner.read(epoch, connection, operation));
-        }))?;
         #[cfg(feature = "test-support")]
-        self.service.reads.fetch_add(1, Ordering::Relaxed);
-        receiver
-            .recv()
-            .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        let reads = self.service.clone();
+        self.service.reader.wait_counted(
+            move |connection| owner.read(epoch, connection, operation),
+            move || {
+                #[cfg(feature = "test-support")]
+                reads.reads.fetch_add(1, Ordering::Relaxed);
+            },
+        )?
     }
 
     /// Occupies the writer for `duration` after the work queued before it.
@@ -625,7 +696,7 @@ impl Services {
     pub(crate) fn hold_source_preparation(&self) -> crate::TestGate {
         self.service.hooks.hold_source_preparation()
     }
-    #[cfg(feature = "test-support")]
+    #[cfg(all(feature = "test-support", feature = "native"))]
     pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
         self.service.hooks.take_source_preparation()
     }
@@ -685,23 +756,28 @@ impl Service {
             &self.epochs,
             epoch,
             connection,
-            || self.open_reader(epoch),
+            || self.open_lane(epoch),
             |store| operation(store),
         )
+    }
+
+    /// A reading lane's connection: the writer's own store where the lanes
+    /// share one, else a reader connection ([`Service::open_reader`]).
+    fn open_lane(self: &Arc<Self>, epoch: u64) -> Result<Store, StoreError> {
+        if self.shared {
+            self.open_store()
+        } else {
+            self.open_reader(epoch)
+        }
     }
 
     /// The reader's connection, made by the writer from its own open store
     /// (the key and the migration stay there). Runs on the reader's thread,
     /// which may wait for the writer; the writer never waits for the reader.
     fn open_reader(self: &Arc<Self>, epoch: u64) -> Result<Store, StoreError> {
-        let (sender, receiver) = mpsc::sync_channel(1);
         let owner = self.clone();
-        self.writer.queue(Box::new(move |connection| {
-            let _ = sender.send(owner.write(epoch, connection, |store| store.open_reader()));
-        }))?;
-        receiver
-            .recv()
-            .map_err(|_| StoreError::Unavailable("store reply lost"))?
+        self.writer
+            .wait(move |connection| owner.write(epoch, connection, |store| store.open_reader()))?
     }
 }
 
@@ -726,35 +802,71 @@ fn with_epoch<R>(
 }
 
 impl Lane {
-    fn sender(&self) -> Result<mpsc::Sender<Job>, StoreError> {
-        let (sender, thread) = self.jobs.get_or_init(|| {
-            let (sender, receiver) = mpsc::channel::<Job>();
-            let thread = std::thread::Builder::new()
-                .name(self.name.into())
-                .spawn(move || {
-                    let mut connection = Connection::default();
-                    while let Ok(job) = receiver.recv() {
-                        run_job(&mut connection, job);
-                    }
-                })
-                .expect("start store service");
-            (sender, thread.thread().id())
-        });
-        if *thread == std::thread::current().id() {
+    fn lane(&self) -> Result<&dyn crate::execution::Lane, StoreError> {
+        let lane = self
+            .jobs
+            .get_or_init(|| self.execution.lane(self.name).expect("start store service"));
+        if lane.is_current() {
             return Err(StoreError::Unavailable("recursive store request"));
         }
-        Ok(sender.clone())
+        Ok(&**lane)
+    }
+
+    /// Wraps `job` with its queue ticket and the lane's connection.
+    fn job(&self, job: Job) -> crate::execution::Job {
+        let ticket = QueueTicket::new(self.metrics.clone());
+        let connection = self.connection.clone();
+        Box::new(move || {
+            ticket.start();
+            let mut connection = connection
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            run_job(&mut connection, job);
+        })
     }
 
     fn queue(&self, job: Job) -> Result<(), StoreError> {
-        let sender = self.sender()?;
-        let ticket = QueueTicket::new(self.metrics.clone());
-        sender
-            .send(Box::new(move |connection| {
-                ticket.start();
-                job(connection);
-            }))
-            .map_err(|_| StoreError::Unavailable("store worker stopped"))
+        let lane = self.lane()?;
+        if lane.push(self.job(job)) {
+            Ok(())
+        } else {
+            Err(StoreError::Unavailable("store worker stopped"))
+        }
+    }
+
+    /// Runs `operation` after everything queued before it and waits for its
+    /// reply (workers only; a cooperative lane runs its queue inline).
+    fn wait<R: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> R + Send + 'static,
+    ) -> Result<R, StoreError> {
+        self.wait_counted(operation, || {})
+    }
+
+    /// [`Lane::wait`], calling `queued` once the request is queued.
+    fn wait_counted<R: Send + 'static>(
+        &self,
+        operation: impl FnOnce(&mut Connection) -> R + Send + 'static,
+        queued: impl FnOnce(),
+    ) -> Result<R, StoreError> {
+        let lane = self.lane()?;
+        let reply = Arc::new(Mutex::new(None));
+        let slot = reply.clone();
+        let job = self.job(Box::new(move |connection| {
+            let result = operation(connection);
+            *slot
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(result);
+        }));
+        queued();
+        if !lane.run(job, None) {
+            return Err(StoreError::Unavailable("store reply lost"));
+        }
+        reply
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .ok_or(StoreError::Unavailable("store reply lost"))
     }
 
     fn skipped_read(&self) {
@@ -784,20 +896,13 @@ impl Lane {
         limit: std::time::Duration,
         job: impl FnOnce(&mut Connection) + Send + 'static,
     ) -> bool {
-        if self.jobs.get().is_none() {
+        let Some(lane) = self.jobs.get() else {
             return true;
-        }
-        let (done, reply) = mpsc::channel();
-        if self
-            .queue(Box::new(move |connection| {
-                job(connection);
-                let _ = done.send(());
-            }))
-            .is_err()
-        {
+        };
+        if lane.is_current() {
             return false;
         }
-        reply.recv_timeout(limit).is_ok()
+        lane.run(self.job(Box::new(job)), Some(limit))
     }
 }
 
@@ -818,7 +923,7 @@ fn with_store<R>(
     if connection.store.is_none() {
         if connection
             .retry_open_at
-            .is_some_and(|at| std::time::Instant::now() < at)
+            .is_some_and(|at| crate::time::Instant::now() < at)
         {
             return Err(StoreError::Unavailable(
                 "credential storage is temporarily unavailable",
@@ -831,7 +936,7 @@ fn with_store<R>(
             }
             Err(error) => {
                 connection.retry_open_at =
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+                    Some(crate::time::Instant::now() + std::time::Duration::from_secs(1));
                 return Err(error);
             }
         }
@@ -839,14 +944,14 @@ fn with_store<R>(
     operation(connection.store.as_mut().expect("opened store"))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 impl Default for Service {
     fn default() -> Self {
         Self::new(crate::Ports::for_tests())
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 impl Services {
     /// An owner of its own in `directory`, started on a thread that never
     /// blocks (tests call the blocking requests from their own thread).
@@ -859,7 +964,7 @@ impl Services {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::{Connection, Service};
     use std::sync::Arc;
@@ -957,18 +1062,105 @@ mod tests {
         assert!(owner.drain_on_shutdown());
     }
 
+    /// A lane whose worker has stopped.
+    struct Stopped;
+    impl crate::execution::Lane for Stopped {
+        fn push(&self, _: crate::execution::Job) -> bool {
+            false
+        }
+        fn run(&self, _: crate::execution::Job, _: Option<std::time::Duration>) -> bool {
+            false
+        }
+        fn is_current(&self) -> bool {
+            false
+        }
+    }
+
+    /// A host loop that is never polled: blocking requests run inline.
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn cooperative_lanes_read_on_the_writers_store() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x73; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+        );
+        let owner = Arc::new(Service::new(ports));
+        assert!(Arc::ptr_eq(
+            &owner.reader.connection,
+            &owner.writer.connection
+        ));
+        assert!(Arc::ptr_eq(
+            &owner.analysis.connection,
+            &owner.writer.connection
+        ));
+        owner.epochs.begin();
+        let services = owner.accept();
+        services
+            .blocking(|store| store.set_combined_last_channel("synthetic-shared"))
+            .unwrap();
+        assert_eq!(
+            services
+                .blocking_read(|store| store.combined_last_channel())
+                .unwrap()
+                .as_deref(),
+            Some("synthetic-shared")
+        );
+        assert!(owner.drain_on_shutdown());
+    }
+
+    #[test]
+    fn closing_shared_lanes_closes_a_connection_only_a_read_opened() {
+        let directory = tempfile::tempdir().unwrap();
+        let ports = crate::Ports::with_adapters(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x74; 32])),
+            Arc::new(crate::native::network::NativeNetwork),
+            Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+        );
+        let owner = Arc::new(Service::new(ports));
+        owner.epochs.begin();
+        owner
+            .accept()
+            .blocking_read(|store| store.combined_last_channel())
+            .unwrap();
+        assert!(owner.writer.jobs.get().is_none());
+        assert!(owner.drain_on_shutdown());
+        assert!(owner.writer.connection.lock().unwrap().store.is_none());
+        assert!(
+            !owner.accept().is_current(),
+            "the closed owner accepts nothing"
+        );
+    }
+
+    #[test]
+    fn a_thread_lane_whose_worker_stopped_refuses_work() {
+        let (sender, receiver) = std::sync::mpsc::channel::<crate::execution::Job>();
+        drop(receiver);
+        let lane = crate::native::execution::ThreadLane::for_tests(sender);
+        assert!(!crate::execution::Lane::push(&lane, Box::new(|| {})));
+        assert!(!crate::execution::Lane::run(&lane, Box::new(|| {}), None));
+    }
+
     #[test]
     fn failed_lane_send_reclaims_its_queue_ticket() {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        drop(receiver);
-        let other = std::thread::spawn(|| std::thread::current().id())
-            .join()
-            .unwrap();
-        let lane = super::Lane {
-            name: "synthetic-disconnected",
-            jobs: std::sync::OnceLock::from((sender, other)),
-            metrics: Arc::default(),
-        };
+        let lane = super::Lane::new(
+            "synthetic-disconnected",
+            Arc::new(crate::native::execution::NativeExecution),
+        );
+        assert!(lane.jobs.set(Box::new(Stopped)).is_ok());
         assert!(
             lane.queue(Box::new(|_| panic!("disconnected work")))
                 .is_err()

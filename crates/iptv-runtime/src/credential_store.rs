@@ -13,7 +13,7 @@ pub(crate) fn open_database(ports: &crate::Ports, path: &Path) -> Result<Store, 
     seal_documents(store, path)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod test_support_tests {
     #[test]
     fn absent_synthetic_key_never_reaches_the_platform_broker() {
@@ -134,7 +134,7 @@ mod recovery_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod concurrent_services {
     use super::*;
     use std::io::{self, Read};

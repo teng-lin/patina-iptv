@@ -30,16 +30,9 @@
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ORIGIN, REFERER};
 
-/// Headers another origin may receive unchanged: content negotiation and
-/// range requests, which say nothing about the account.
-pub(crate) const KEEP: &[&str] = &[
-    "user-agent",
-    "accept",
-    "accept-encoding",
-    "accept-language",
-    "range",
-    "if-range",
-];
+/// Headers another origin may receive unchanged (the browser adapter uses
+/// the same list).
+pub(crate) const KEEP: &[&str] = iptv_providers::http::CROSS_ORIGIN_HEADERS;
 
 /// Reduces `headers`, configured for `from`, to what `to` (another origin)
 /// may receive. Callers decide that the origin changed.

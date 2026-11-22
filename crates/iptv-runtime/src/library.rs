@@ -477,5 +477,5 @@ mod policy_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod guide_work_supersession;

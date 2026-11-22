@@ -19,7 +19,7 @@
 //! (the library, the organization, the favorites), on the same reader
 //! lane, and those reads would otherwise queue behind the window's.
 
-use std::time::Instant;
+use crate::time::Instant;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 use iptv_epg::{ChannelKey, GuideStore, UnixTime};
@@ -303,7 +303,7 @@ async fn send_stored_after(
 #[cfg(test)]
 #[path = "../../iptv-store-sqlite/tests/common/mod.rs"]
 mod common;
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod revocation;
 
 #[cfg(test)]

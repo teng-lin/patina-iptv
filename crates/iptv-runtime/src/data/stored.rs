@@ -292,6 +292,16 @@ fn start_update(
                     drop(tx);
                     false
                 }
+                Ok(_) if !owner.services().has_workers() => {
+                    // Downloads run on blocking workers, which this host has
+                    // none of (the shell hides the command there); a caller
+                    // that asks anyway hears why nothing happens.
+                    owner.emit(crate::RuntimeEvent::Notify(
+                        "This device cannot download guides yet.",
+                    ));
+                    drop(tx);
+                    false
+                }
                 Ok(guides) => {
                     let visible = super::source_is_visible(&owner, source);
                     let services = owner.services();

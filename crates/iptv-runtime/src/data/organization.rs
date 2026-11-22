@@ -35,11 +35,11 @@ pub async fn build(
         }
     };
     let count = channels.len();
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let prepared = owner
         .services()
         .spawn_blocking(move || {
-            let started = std::time::Instant::now();
+            let started = crate::time::Instant::now();
             let prepared = EpgSchedule::prepare(&groups, &channels, guide, now, organization);
             (prepared, started.elapsed())
         })

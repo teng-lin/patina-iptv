@@ -30,11 +30,10 @@ iptv-guide.workspace = true
 iptv-epg.workspace = true
 iptv-providers.workspace = true
 iptv-import.workspace = true
-iptv-net.workspace = true
 iptv-search.workspace = true
 iptv-settings.workspace = true
 futures-channel = "0.3"
-tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "sync"] }
+tokio = { version = "1", default-features = false, features = ["sync"] }
 nsh-tv = { path = "../../vendor/nsh-tv" }
 nsh-core.workspace = true
 nsh-base.workspace = true
@@ -42,7 +41,21 @@ env_logger.workspace = true
 log.workspace = true
 serde_json.workspace = true
 zeroize = "1.8"
+
+# The native hosts (host/native): the runtime's native services, iptv-net,
+# threads and Tokio.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+iptv-runtime = { workspace = true, features = ["native"] }
+iptv-net.workspace = true
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "sync"] }
 getrandom = "0.4"
+
+# The browser host (host/web): iptv-web's adapters.
+[target.'cfg(target_family = "wasm")'.dependencies]
+# The adapters only, without the Live TV bridge.
+iptv-web = { path = "../iptv-web", default-features = false }
+# Artwork headers (NSH's own probe is native only).
+imagesize = "0.15"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"

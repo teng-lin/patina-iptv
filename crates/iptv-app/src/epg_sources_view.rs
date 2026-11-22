@@ -48,13 +48,23 @@ const CARD_W: f32 = 660.0;
 
 /// Opens the screen for `playlist`.
 pub fn open(ui: Ui, playlist: SourceId) {
+    ui.guide_sources.set(Some(screen(playlist)));
+}
+
+/// The screen for `playlist`; without blocking workers it offers no guide
+/// to add or download.
+fn screen(playlist: SourceId) -> Screen {
     let screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
-    ui.guide_sources.set(Some(screen));
+    if crate::host::HAS_WORKERS {
+        screen
+    } else {
+        screen.without_downloads()
+    }
 }
 
 /// Opens it on entering a new source's link.
 pub fn open_add(ui: Ui, playlist: SourceId) {
-    let mut screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
+    let mut screen = screen(playlist);
     screen.start_add();
     ui.guide_sources.set(Some(screen));
 }

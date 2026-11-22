@@ -28,6 +28,12 @@ const SHELL_MAY_NAME: &[&str] = &[
     "guides",
     // Value types of the commands and events.
     "model",
+    // The network port: the configuration of a client and the client a
+    // host's adapter makes.
+    "network",
+    // The execution port, named only by the browser host, which supplies
+    // the cooperative executor in its Ports.
+    "execution",
     // A stored source's playback context before its refresh (pure).
     "playback",
     // Typed parental errors, on-demand identities, and native recorder lifecycle
@@ -39,6 +45,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "settings",
     // Private-directory protection, before any owner exists.
     "storage",
+    // The browser host installs its clocks (the Worker has no other).
+    "time",
     // The guide status and the lines of the guide sources screen.
     "stored",
 ];

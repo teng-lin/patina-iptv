@@ -56,7 +56,7 @@ HELPER_INPUTS = ("docs/contributing.md",)
 IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
        "tools/check-ios-simulator-entitlements.sh",
        "tools/mpv-runtime-ios/**", "hosts/ios/**")
-CREDENTIALS = (*BUILD, "crates/iptv-app/src/credential_key*", "crates/iptv-app/src/credential_key/**",
+CREDENTIALS = (*BUILD, "crates/iptv-app/src/host/native/credential_key*", "crates/iptv-app/src/host/native/credential_key/**",
                "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",
                "tools/ci/isolated-credentials.py")
 DOCS = ("docs/**", ".gitignore", ".editorconfig")

@@ -112,6 +112,9 @@ pub struct Screen {
     retry: Option<Editing>,
 
     notice: Option<Notice>,
+    /// Adding and downloading guides are offered: false where the host
+    /// cannot download them.
+    downloads: bool,
 }
 
 impl Screen {
@@ -127,6 +130,25 @@ impl Screen {
             editing: None,
             retry: None,
             notice: None,
+            downloads: true,
+        }
+    }
+
+    /// Without guide downloads: no Add and no Update row.
+    pub fn without_downloads(mut self) -> Self {
+        self.downloads = false;
+        if !self.items().contains(&self.focus) {
+            self.focus = self.items()[0];
+        }
+        self
+    }
+
+    /// The row the list falls back to when its focus is gone.
+    fn first_action(&self) -> Item {
+        if self.downloads {
+            Item::Add
+        } else {
+            Item::Inspect
         }
     }
 
@@ -161,7 +183,10 @@ impl Screen {
             .iter()
             .map(|l| Item::Source(l.source.feed))
             .collect();
-        items.extend([Item::Add, Item::Update, Item::Inspect]);
+        if self.downloads {
+            items.extend([Item::Add, Item::Update]);
+        }
+        items.push(Item::Inspect);
         items
     }
 
@@ -184,7 +209,7 @@ impl Screen {
         self.lines = lines;
         if !self.items().contains(&self.focus) {
             self.focus = match self.lines.len() {
-                0 => Item::Add,
+                0 => self.first_action(),
                 n => Item::Source(self.lines[at.unwrap_or(0).min(n - 1)].source.feed),
             };
         }
@@ -200,6 +225,9 @@ impl Screen {
 
     /// Opens on entering a new source's link ("Add a guide source").
     pub fn start_add(&mut self) {
+        if !self.downloads {
+            return;
+        }
         self.focus = Item::Add;
         self.layer = Layer::List;
         let fresh = Editing {

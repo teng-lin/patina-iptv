@@ -151,7 +151,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             }
         },
     );
-    if cfg!(any(target_os = "linux", target_os = "macos"))
+    if (crate::host::LINUX || crate::host::MACOS)
         && program.airing(now) == crate::guide::Airing::Live
     {
         rows.insert(

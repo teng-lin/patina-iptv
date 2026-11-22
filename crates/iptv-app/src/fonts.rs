@@ -75,19 +75,23 @@ pub const FILES: [(&str, &[u8]); 3] = [
 /// Registers the fonts and makes Roboto the default family. Text laid out
 /// before a font arrives is laid out again with it.
 ///
-/// The WOFF2 files are unpacked on their own thread first: NSH would unpack
+/// The WOFF2 files are unpacked off the UI thread first (`host::background`):
+/// NSH would unpack
 /// each one twice on the UI thread (for its family name, then to register
 /// it), about 0.7 s of a cold start on a 32-bit TV box.
 pub fn register() {
-    let started = std::time::Instant::now();
+    let started = nsh_core::time::Instant::now();
     let (tx, rx) = futures_channel::oneshot::channel();
-    std::thread::spawn(move || {
+    let unpacking = crate::host::background("iptv-fonts", move || {
         let unpacked: Vec<_> = FILES
             .iter()
             .map(|&(family, data)| (family, nsh_core::font_data(data).map(|d| d.into_owned())))
             .collect();
         let _ = tx.send(unpacked);
     });
+    if let Err(error) = unpacking {
+        log::error!("iptv fonts: cannot unpack the fonts: {error}");
+    }
     drop(spawn(async move {
         let Ok(unpacked) = rx.await else {
             return;

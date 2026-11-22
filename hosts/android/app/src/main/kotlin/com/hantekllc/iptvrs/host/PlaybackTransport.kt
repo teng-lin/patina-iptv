@@ -8,7 +8,7 @@ import java.io.IOException
  * `relay` stands in for the Rust side in JVM tests; null: the native one.
  */
 internal class PlaybackTransport(relay: Relay? = null) {
-    /** The Rust relay's lifetime calls (`crates/iptv-app/src/android_transport.rs`). */
+    /** The Rust relay's lifetime calls (`crates/iptv-app/src/host/native/android_transport.rs`). */
     internal interface Relay {
         /** A new relay for `url`; its local address. Throws [IOException]. */
         fun create(url: String, headers: Map<String, String>, publicOnly: Boolean): String

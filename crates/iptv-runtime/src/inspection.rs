@@ -2,6 +2,7 @@
 //! All expensive reads run on a bounded analysis lane; probes use the owner's
 //! bounded worker pool and existing transport policy. No browser state is read.
 mod probe;
+use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
 use iptv_import::CancelToken;
 pub use iptv_library::inspection::*;
@@ -11,7 +12,7 @@ use std::{
     future::{Future, poll_fn},
     pin::pin,
     task::Poll,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
@@ -59,7 +60,8 @@ pub(crate) async fn guarded<T>(
         }
         Poll::Pending
     });
-    let result = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), race)
+    let result = services
+        .timeout_at(deadline, race)
         .await
         .unwrap_or(Err(InspectionError::Deadline));
     if !services.is_current() {
@@ -94,9 +96,9 @@ where
             let _slot = slot;
             #[cfg(feature = "test-support")]
             {
-                store.inspection_read_observed(
+                store.inspection_read_until(
                     token,
-                    deadline,
+                    crate::time::expiry(deadline),
                     move || {
                         if let Some(mut hook) = scan.take() {
                             hook();
@@ -107,7 +109,7 @@ where
             }
             #[cfg(not(feature = "test-support"))]
             {
-                store.inspection_read(token, deadline, operation)
+                store.inspection_read_until(token, crate::time::expiry(deadline), || {}, operation)
             }
         })),
         None => Box::pin(async { Ok(Err(InspectionError::Busy)) }),

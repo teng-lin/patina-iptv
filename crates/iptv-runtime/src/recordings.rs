@@ -612,7 +612,7 @@ impl Runtime {
             ));
         }
         let mut random = [0u8; 8];
-        getrandom::fill(&mut random)
+        (self.services().ports().entropy)(&mut random)
             .map_err(|_| Error::unavailable("Recording identity unavailable"))?;
         let id = JobId((i64::from_ne_bytes(random) & i64::MAX).max(1));
         let id = self
@@ -1388,7 +1388,8 @@ async fn resolve(
     if context.is_none()
         && let SourceConfig::Stalker(credentials) = &source.source.config
     {
-        let client = iptv_net::NetClient::new(crate::settings::net_config(&services.settings()))
+        let client = services
+            .network_client()
             .map_err(|_| "Network unavailable")?;
         let session = iptv_import::stalker_session(&client, credentials, stop)
             .await
@@ -1409,9 +1410,9 @@ async fn resolve(
                 cmd,
                 channel_headers,
             } = *link;
-            let client =
-                iptv_net::NetClient::new(crate::settings::net_config(&services.settings()))
-                    .map_err(|_| "Network unavailable")?;
+            let client = services
+                .network_client()
+                .map_err(|_| "Network unavailable")?;
             let url = iptv_import::stalker_link(&client, &mut portal, &cmd, false, stop)
                 .await
                 .map_err(|_| "Portal stream unavailable")?;
@@ -1419,7 +1420,7 @@ async fn resolve(
         }
         _ => return Err("Refresh the playlist before recording this channel"),
     };
-    let config = crate::settings::net_config(&services.settings());
+    let config = crate::settings::network_config(&services.settings());
     stream.default_header("User-Agent", &config.user_agent);
     let config = source.source.config;
     let expected_config = config.clone();

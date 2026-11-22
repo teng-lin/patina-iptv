@@ -26,7 +26,7 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["helpers_full"], path)
 
     def test_platform_and_production_key_inputs_have_required_lanes(self):
-        for path in ("crates/iptv-app/src/credential_key.rs", "crates/iptv-app/src/credential_key/linux.rs",
+        for path in ("crates/iptv-app/src/host/native/credential_key.rs", "crates/iptv-app/src/host/native/credential_key/linux.rs",
                      "tools/ci/isolated-credentials.py", "crates/iptv-store-sqlite/src/lib.rs"):
             self.assertTrue(v.select([path])["credentials"], path)
         for path in ("tools/fetch-mpvkit.sh", "tools/mpv-runtime-ios/runtime-ios.json",

@@ -1,7 +1,10 @@
 //! Bounded refresh execution. Work for the visible source precedes background work.
+//!
+//! The workers come from the owner's execution port. A host without workers
+//! (a cooperative browser executor) gets a pool that refuses work, which
+//! imports report as busy.
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::JoinHandle;
 
 pub(crate) type Work = Box<dyn FnOnce() + Send>;
 const PARALLEL: usize = 2;
@@ -15,51 +18,24 @@ struct State {
 }
 pub(crate) struct Pool {
     shared: Arc<(Mutex<State>, Condvar)>,
-    workers: Vec<JoinHandle<()>>,
+    /// Workers that started; with none, work is refused.
+    workers: usize,
     capacity: usize,
 }
 impl Pool {
-    fn new(parallel: usize, capacity: usize) -> Self {
+    fn new(execution: &dyn crate::execution::Execution, parallel: usize, capacity: usize) -> Self {
         let shared = Arc::new((Mutex::new(State::default()), Condvar::new()));
-        let workers = (0..parallel)
-            .map(|index| {
-                let shared = shared.clone();
-                std::thread::Builder::new()
-                    .name(format!("iptv-refresh-{index}"))
-                    .spawn(move || {
-                        loop {
-                            let work = {
-                                let (lock, ready) = &*shared;
-                                let mut state = lock
-                                    .lock()
-                                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                loop {
-                                    if state.closed {
-                                        return;
-                                    }
-                                    if let Some(work) = state
-                                        .visible
-                                        .pop_front()
-                                        .or_else(|| state.background.pop_front())
-                                    {
-                                        break work;
-                                    }
-                                    state = ready
-                                        .wait(state)
-                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                                }
-                            };
-                            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).is_err()
-                            {
-                                log::error!(
-                                    "iptv refresh: task panicked; worker remains available"
-                                );
-                            }
-                        }
-                    })
-                    .expect("start refresh worker")
-            })
-            .collect();
+        let mut workers = 0;
+        for index in 0..parallel {
+            let shared = shared.clone();
+            match execution.worker(
+                format!("iptv-refresh-{index}"),
+                Box::new(move || work(&shared)),
+            ) {
+                Ok(()) => workers += 1,
+                Err(error) => log::error!("iptv refresh: cannot start a worker: {error}"),
+            }
+        }
         Self {
             shared,
             workers,
@@ -67,15 +43,18 @@ impl Pool {
         }
     }
     /// The production pool: two refreshes at once, a bounded queue behind.
-    pub(crate) fn standard() -> Self {
-        Self::new(PARALLEL, WAITING)
+    pub(crate) fn standard(execution: &dyn crate::execution::Execution) -> Self {
+        Self::new(execution, PARALLEL, WAITING)
     }
     pub(crate) fn submit(&self, visible: bool, work: Work) -> bool {
         let (lock, ready) = &*self.shared;
         let mut state = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if state.closed || state.visible.len() + state.background.len() >= self.capacity {
+        if self.workers == 0
+            || state.closed
+            || state.visible.len() + state.background.len() >= self.capacity
+        {
             return false;
         }
         if visible {
@@ -102,7 +81,37 @@ impl Pool {
 impl Drop for Pool {
     fn drop(&mut self) {
         self.close();
-        self.workers.clear();
+    }
+}
+
+/// One worker: runs queued work, the visible source's first, until the
+/// pool closes.
+fn work(shared: &(Mutex<State>, Condvar)) {
+    loop {
+        let work = {
+            let (lock, ready) = shared;
+            let mut state = lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            loop {
+                if state.closed {
+                    return;
+                }
+                if let Some(work) = state
+                    .visible
+                    .pop_front()
+                    .or_else(|| state.background.pop_front())
+                {
+                    break work;
+                }
+                state = ready
+                    .wait(state)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+            }
+        };
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).is_err() {
+            log::error!("iptv refresh: task panicked; worker remains available");
+        }
     }
 }
 
@@ -127,6 +136,7 @@ impl Hooks {
         *self.source_preparation.lock().unwrap() = Some(gate.0.clone());
         gate
     }
+    #[cfg(feature = "native")]
     pub(crate) fn take_source_preparation(&self) -> Option<Arc<crate::testing::GateState>> {
         self.source_preparation.lock().unwrap().take()
     }
@@ -210,15 +220,40 @@ impl Hooks {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
 
+    fn pool(parallel: usize, capacity: usize) -> Pool {
+        Pool::new(
+            &crate::native::execution::NativeExecution,
+            parallel,
+            capacity,
+        )
+    }
+
+    #[test]
+    fn a_host_without_workers_refuses_refresh_work() {
+        struct Idle;
+        impl crate::execution::CooperativeHost for Idle {
+            fn spawn(&self, _: crate::execution::Task) {}
+            fn delay(&self, _: Duration) -> crate::execution::Task {
+                Box::pin(std::future::pending())
+            }
+            fn now(&self) -> Duration {
+                Duration::ZERO
+            }
+        }
+        let execution = crate::execution::Cooperative::new(Arc::new(Idle));
+        let pool = Pool::standard(&execution);
+        assert!(!pool.submit(true, Box::new(|| panic!("no worker runs refused work"))));
+    }
+
     #[test]
     fn a_panicking_source_does_not_remove_a_worker() {
-        let pool = Pool::new(1, 2);
+        let pool = pool(1, 2);
         let (tx, rx) = mpsc::channel();
         assert!(pool.submit(false, Box::new(|| panic!("synthetic refresh failure"))));
         assert!(pool.submit(
@@ -232,7 +267,7 @@ mod tests {
 
     #[test]
     fn visible_source_runs_before_queued_background_and_queue_is_bounded() {
-        let pool = Pool::new(1, 2);
+        let pool = pool(1, 2);
         let (started, running) = mpsc::channel();
         let (release, blocked) = mpsc::channel();
         assert!(pool.submit(
@@ -264,7 +299,7 @@ mod tests {
 
     #[test]
     fn many_sources_share_two_workers() {
-        let pool = Pool::new(2, 32);
+        let pool = pool(2, 32);
         let (started, received) = mpsc::channel();
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
         for source in 0..20 {

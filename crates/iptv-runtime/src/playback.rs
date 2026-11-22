@@ -92,10 +92,12 @@ pub(crate) fn forget_source(services: &Services, source: SourceId) {
 /// Reuse connections across Stalker zaps; settings changes replace the client.
 pub(crate) fn link_client(
     owner: &crate::Runtime,
-    config: iptv_net::NetConfig,
-) -> impl std::future::Future<Output = Result<iptv_net::NetClient, iptv_net::FetchError>> + Send + use<>
-{
+    config: crate::network::NetworkConfig,
+) -> impl std::future::Future<Output = Result<crate::network::Client, iptv_import::FetchError>>
++ crate::MaybeSend
++ use<> {
     let cache = owner.link_client.clone();
+    let network = owner.services().ports().network.clone();
     async move {
         let mut cached = cache
             .lock()
@@ -105,7 +107,7 @@ pub(crate) fn link_client(
         {
             return Ok(client.clone());
         }
-        let client = iptv_net::NetClient::new(config.clone())?;
+        let client = network.client(&config)?;
         *cached = Some((config, client.clone()));
         Ok(client)
     }

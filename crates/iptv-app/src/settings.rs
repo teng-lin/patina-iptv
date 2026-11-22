@@ -19,7 +19,7 @@
 //! ones it acts on ([`WIRED`], [`COMMANDS`]), what it shows read-only,
 //! what comes later, and what it does not offer at all (device-level
 //! features of TV boxes). Some settings apply here ([`bind`]: colors,
-//! panel timeouts, [`net_config`]); the others are read where they act
+//! panel timeouts, [`network_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
 //! leaving, channel-change info).
 
@@ -167,6 +167,21 @@ pub fn text_factor() -> f32 {
 /// time matters only where keys report their release (Android), and
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
+    // Recording, backups, imports and guide downloads run on blocking
+    // workers; a host without them offers none of them.
+    if !crate::host::HAS_WORKERS
+        && (key.starts_with("recordings.")
+            || matches!(
+                key,
+                "general.backup"
+                    | "general.restore"
+                    | "playlists.manage"
+                    | "epg.add_source"
+                    | "epg.update_now"
+            ))
+    {
+        return Offer::Hidden;
+    }
     if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
         return Offer::Hidden;
     }
@@ -182,7 +197,7 @@ pub fn offer(key: &str) -> Offer {
     }
     // Leaving the app into a picture-in-picture window: Android only.
     let android = crate::capabilities::HOST.automatic_pip();
-    if matches!(key, "general.backup" | "general.restore") && cfg!(target_os = "ios") {
+    if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
         return Offer::NotYet;
     }
     if NOT_OFFERED.contains(&key) {
@@ -242,8 +257,8 @@ pub fn user_agent() -> Option<String> {
 }
 
 /// The network settings of provider requests.
-pub fn net_config() -> iptv_net::NetConfig {
-    crate::runtime::settings::net_config(&get())
+pub fn network_config() -> crate::runtime::network::NetworkConfig {
+    crate::runtime::settings::network_config(&get())
 }
 
 pub fn browse_mode() -> crate::ViewMode {
@@ -300,8 +315,9 @@ pub fn overlay_alpha(s: &Settings) -> u8 {
 /// timeouts, now and after every change.
 pub fn bind(ui: Ui) {
     REVISION.with(|r| r.set(Some(ui.app.settings)));
-    #[cfg(target_os = "android")]
-    effect(move || crate::recording_host::set_language(crate::i18n::language().tag));
+    if crate::host::NOTIFICATIONS_FOLLOW_LANGUAGE {
+        effect(move || crate::host::language_changed(crate::i18n::language().tag));
+    }
     let last_mode = std::cell::Cell::new(None);
     effect(move || {
         let s = read(ui);
@@ -378,7 +394,7 @@ mod tests {
         assert_eq!(offer("parental.change_pin"), Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::Hidden);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
-        let pip = if cfg!(target_os = "android") {
+        let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
             Offer::Hidden

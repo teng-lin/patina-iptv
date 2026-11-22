@@ -52,13 +52,29 @@ fn open_with(ui: Ui, wizard: Wizard) {
     }));
 }
 
+/// Imports need blocking workers: without them the wizard is not offered,
+/// and the user hears why.
+fn imports_unavailable() -> bool {
+    if crate::host::HAS_WORKERS {
+        return false;
+    }
+    crate::settings_view::notify(crate::i18n::tr("This device cannot import playlists yet."));
+    true
+}
+
 /// No playlists yet: the empty state.
 pub fn open_first_run(ui: Ui) {
+    if imports_unavailable() {
+        return;
+    }
     open_with(ui, Wizard::first_run());
 }
 
 /// "Add playlist" from the guide: the type list.
 pub fn open_add(ui: Ui) {
+    if imports_unavailable() {
+        return;
+    }
     if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed() {
         crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
             open_add(ui)

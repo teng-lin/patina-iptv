@@ -20,7 +20,10 @@ pub(crate) trait Host {
     fn fetch_next(&self, id: u32);
     /// The body of `id` is no longer wanted.
     fn fetch_close(&self, id: u32);
-    /// Calls `on_wake(id)` after `ms` milliseconds.
+    /// Calls `on_wake(id)` after `ms` milliseconds (at most `i32::MAX`).
+    /// There is no cancel: a wait that ended early (a deadline met, a task
+    /// dropped) frees its slot, and the later `on_wake` for that id finds
+    /// none and is ignored.
     fn sleep(&self, id: u32, ms: f64);
     /// Reads `key` from the app's storage: `on_stored(id, len)` with the
     /// value in the input buffer, or `on_missing(id)`.
@@ -28,6 +31,7 @@ pub(crate) trait Host {
     /// Writes `value` under `key`, in call order; an empty value deletes it.
     fn store_put(&self, key: &str, value: &[u8]);
     /// One JSON event for the UI: a view, a request to play, progress.
+    #[cfg_attr(not(feature = "bridge"), allow(dead_code))]
     fn emit(&self, event: &str);
     /// A monotonic clock in milliseconds.
     fn monotonic_ms(&self) -> f64;
@@ -39,7 +43,7 @@ thread_local! {
     static HOST: RefCell<Option<Rc<dyn Host>>> = const { RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bridge"))]
 pub(crate) fn install(host: Rc<dyn Host>) {
     HOST.with(|h| *h.borrow_mut() = Some(host));
 }
@@ -48,6 +52,21 @@ pub(crate) fn install(host: Rc<dyn Host>) {
 /// of tasks dropped with the thread must not touch destroyed state).
 pub(crate) fn host_if_alive() -> Option<Rc<dyn Host>> {
     HOST.try_with(|h| h.borrow().clone()).ok().flatten()
+}
+
+/// The host to ask for a wake-up poll: installed on first use in
+/// WebAssembly, as [`host`] does; `None` while the thread shuts down, or
+/// natively before one is installed (tests).
+pub(crate) fn host_for_wake() -> Option<Rc<dyn Host>> {
+    HOST.try_with(|h| {
+        #[cfg(target_arch = "wasm32")]
+        if h.borrow().is_none() {
+            *h.borrow_mut() = Some(default_host());
+        }
+        h.borrow().clone()
+    })
+    .ok()
+    .flatten()
 }
 
 pub(crate) fn host() -> Rc<dyn Host> {
@@ -79,6 +98,7 @@ mod wasm {
         fn sleep(id: u32, ms: f64);
         fn store_get(id: u32, key: *const u8, key_len: usize);
         fn store_put(key: *const u8, key_len: usize, value: *const u8, value_len: usize);
+        #[cfg_attr(not(feature = "bridge"), allow(dead_code))]
         fn emit(ptr: *const u8, len: usize);
         fn monotonic_ms() -> f64;
         fn wall_ms() -> f64;

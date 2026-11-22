@@ -181,7 +181,7 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     ("iptv-runtime/src/recordings.rs", "notice"),
     // The typed capability notice returns key-marked messages in core
     // capabilities.rs, or the existing checked recording wake messages.
-    ("iptv-app/src/recording_host.rs", "message"),
+    ("iptv-app/src/host/native/recording_host.rs", "message"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport
     // failure keys are additionally enumerated by the recording transport test.
     ("iptv-app/src/recordings_view.rs", "job"),

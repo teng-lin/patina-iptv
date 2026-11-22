@@ -81,8 +81,8 @@ pub(crate) fn key_name(key: RemoteKey) -> String {
         RemoteKey::ShiftTab => tr("Shift+Tab"),
         RemoteKey::ShiftLeft => tr("Shift+Left"),
         RemoteKey::ShiftRight => tr("Shift+Right"),
-        RemoteKey::CtrlLeft if cfg!(target_os = "macos") => tr("Cmd+Left"),
-        RemoteKey::CtrlRight if cfg!(target_os = "macos") => tr("Cmd+Right"),
+        RemoteKey::CtrlLeft if crate::host::MACOS => tr("Cmd+Left"),
+        RemoteKey::CtrlRight if crate::host::MACOS => tr("Cmd+Right"),
         RemoteKey::CtrlLeft => tr("Ctrl+Left"),
         RemoteKey::CtrlRight => tr("Ctrl+Right"),
     };
@@ -98,11 +98,11 @@ pub(crate) fn key_name(key: RemoteKey) -> String {
         RemoteKey::PlayPause => tr("Space"),
         RemoteKey::Next => "N",
         RemoteKey::Previous => "P",
-        RemoteKey::Search if cfg!(target_os = "macos") => tr("/ or Cmd+F"),
+        RemoteKey::Search if crate::host::MACOS => tr("/ or Cmd+F"),
         RemoteKey::Search => tr("/ or Ctrl+F"),
         _ => "",
     };
-    if cfg!(target_os = "android") || keyboard.is_empty() {
+    if crate::host::ANDROID || keyboard.is_empty() {
         name.to_owned()
     } else {
         trf(

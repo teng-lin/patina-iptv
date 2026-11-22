@@ -30,6 +30,12 @@ const DEPENDENCIES: &[&str] = &[
     "tokio",
     "zeroize", // Short-lived native credential material.
 ];
+/// The modules only a native build has (the `native` feature): the native
+/// ports and the recording services. Only these may name the native
+/// network adapter or start threads and Tokio runtimes; everything else
+/// reaches them through the network and execution ports.
+const NATIVE_ONLY: &[&str] = &["native.rs", "native/", "recordings.rs", "recordings/"];
+
 /// Test-only additions.
 const DEV_DEPENDENCIES: &[&str] = &["rusqlite", "tempfile"];
 
@@ -87,6 +93,10 @@ const STATICS: &[(&str, &str)] = &[
     ("backup.rs", "STARTED"),
     // The operating-system lock this process holds on each storage root.
     ("backup/instance.rs", "HELD"),
+    // A browser host's clocks (no OS clock there), installed once.
+    ("time.rs", "CLOCK"),
+    // The standard clock's origin for unit tests of a browser build (`cfg(test)`).
+    ("time.rs", "ORIGIN"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
     ("ports.rs", "NEXT"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
@@ -287,6 +297,124 @@ fn runtime_keeps_no_ambient_ui_owner() {
             found.contains(&(file.to_owned(), item.to_owned())),
             "{file}: {item} was removed; shrink STATICS too"
         );
+    }
+}
+
+fn native_only(name: &str) -> bool {
+    NATIVE_ONLY.iter().any(|prefix| {
+        if prefix.ends_with('/') {
+            name.starts_with(prefix)
+        } else {
+            name == *prefix
+        }
+    })
+}
+
+/// The source files of modules declared `#[cfg(test)] mod name;`.
+fn test_modules(sources: &[(String, String)]) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for (name, code) in sources {
+        let parent = match name.as_str() {
+            "lib.rs" => String::new(),
+            other => format!("{}/", other.trim_end_matches(".rs")),
+        };
+        let mut lines = code.lines().map(str::trim).peekable();
+        while let Some(line) = lines.next() {
+            if (line == "#[cfg(test)]" || line.starts_with("#[cfg(all(test,"))
+                && let Some(module) = lines
+                    .peek()
+                    .and_then(|next| next.strip_prefix("mod "))
+                    .and_then(|rest| rest.strip_suffix(';'))
+            {
+                found.insert(format!("{parent}{module}.rs"));
+            }
+        }
+    }
+    found
+}
+
+/// `code` without its inline unit-test modules (`#[cfg(test)] mod name {`
+/// to its closing brace).
+fn shipped(code: &str) -> String {
+    let mut shipped = Vec::new();
+    let mut lines = code.lines().peekable();
+    while let Some(line) = lines.next() {
+        let attribute = line.trim();
+        let test_only = attribute == "#[cfg(test)]" || attribute.starts_with("#[cfg(all(test,");
+        if test_only
+            && lines
+                .peek()
+                .is_some_and(|next| next.trim_start().starts_with("mod ") && next.contains('{'))
+        {
+            let mut depth = 0i64;
+            for body in lines.by_ref() {
+                depth += body.matches('{').count() as i64 - body.matches('}').count() as i64;
+                if depth <= 0 {
+                    break;
+                }
+            }
+            continue;
+        }
+        shipped.push(line);
+    }
+    shipped.join("\n")
+}
+
+#[test]
+fn the_native_modules_are_compiled_only_with_the_native_feature() {
+    let lib = runtime_sources()
+        .into_iter()
+        .find(|(name, _)| name == "lib.rs")
+        .unwrap()
+        .1;
+    for declaration in ["mod native;", "pub mod recordings;"] {
+        let at = lib.find(declaration).unwrap();
+        assert!(
+            lib[..at]
+                .trim_end()
+                .ends_with("#[cfg(feature = \"native\")]"),
+            "{declaration} must be gated by the native feature"
+        );
+    }
+}
+
+#[test]
+fn only_native_modules_name_the_native_adapter_or_start_threads() {
+    const THREADS: &[&str] = &[
+        "thread::spawn",
+        "thread::Builder",
+        "tokio::runtime",
+        "new_multi_thread",
+        "new_current_thread",
+        "Handle::current",
+        // The clocks: std's panic in a browser build (`time.rs` holds them).
+        "std::time::Instant",
+        "SystemTime",
+        "UNIX_EPOCH",
+        "tokio::time",
+    ];
+    let sources = runtime_sources();
+    let tests = test_modules(&sources);
+    for (name, code) in &sources {
+        // Unit-test files carry their test fixtures (threads included).
+        if native_only(name)
+            || tests.contains(name)
+            || name.ends_with("tests.rs")
+            || name == "time.rs"
+        {
+            continue;
+        }
+        let code = shipped(code);
+        assert!(
+            !identifiers(&code, "iptv_").contains("iptv_net"),
+            "{name} names iptv_net outside the native modules; use the network port"
+        );
+        for thread in THREADS {
+            assert!(
+                !code.contains(thread),
+                "{name} uses {thread} outside the native modules; use the execution port or crate::time"
+            );
+        }
     }
 }
 

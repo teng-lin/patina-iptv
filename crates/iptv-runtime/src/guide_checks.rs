@@ -346,8 +346,8 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod refresh_tickets;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod retry;

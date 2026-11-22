@@ -294,7 +294,7 @@ impl crate::Runtime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod identity_tests {
     use super::*;
     use iptv_core::guide::Schedule;

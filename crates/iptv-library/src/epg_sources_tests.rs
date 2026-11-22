@@ -263,3 +263,15 @@ fn a_source_removed_elsewhere_closes_its_sheet() {
     assert_eq!(s.focus(), Item::Add);
     assert_eq!(s.dismiss(), None);
 }
+
+#[test]
+fn without_downloads_no_guide_is_added_or_updated() {
+    let mut s = screen().without_downloads();
+    assert!(!s.items().contains(&Item::Add));
+    assert!(!s.items().contains(&Item::Update));
+    assert!(s.items().contains(&Item::Inspect));
+    s.start_add();
+    assert_ne!(s.focus(), Item::Add);
+    let empty = Screen::new(P, Vec::new()).without_downloads();
+    assert_eq!(empty.focus(), Item::Inspect);
+}

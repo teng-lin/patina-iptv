@@ -1088,7 +1088,7 @@ fn resolve_link(
         channel_headers,
     } = *link;
     let cancel = crate::runtime().begin_link_resolution(surface, session);
-    let client = crate::runtime().link_client(crate::settings::net_config());
+    let client = crate::runtime().link_client(crate::settings::network_config());
     let request = crate::runtime().spawn_network(async move {
         let result = match client.await {
             Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
@@ -1248,7 +1248,7 @@ pub fn bind(ui: Ui) {
 /// reopens them after, and so does iOS's (`mpv/ios.rs`), so waiting then
 /// is no stall. Desktop players play on in a minimized window.
 fn stopped_in_background(lifecycle: Lifecycle) -> bool {
-    cfg!(any(target_os = "android", target_os = "ios")) && lifecycle == Lifecycle::Background
+    (crate::host::ANDROID || crate::host::IPAD) && lifecycle == Lifecycle::Background
 }
 
 fn follow_playing(ui: Ui) {

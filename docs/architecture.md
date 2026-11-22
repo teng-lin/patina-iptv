@@ -37,21 +37,33 @@ down: a crate may depend on crates in its own layer or below, never above.
 | `iptv-store-sqlite` | `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` (native only) |
 | `iptv-sqlcipher-init` | none |
 | `iptv-player-mpv` | `iptv-core`, `iptv-net`, platform NSH components |
-| `iptv-runtime` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-net`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite` |
-| `iptv-app` | portable crates, `iptv-runtime`, `iptv-net`, `iptv-player-mpv`, NSH |
+| `iptv-runtime` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite`; `iptv-net` with its `native` feature |
+| `iptv-app` | portable crates, `iptv-runtime`, `iptv-player-mpv`, NSH; natively `iptv-net`, in the browser `iptv-web` |
 | `iptv-web` | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers` |
 
 | Layer | Crates | May use |
 | --- | --- | --- |
 | Portable core | `iptv-core`, `iptv-nav`, `iptv-settings`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library` | Plain Rust only. No NSH, no platform APIs, no blocking I/O, no clock, no async runtime. |
 | Native adapters | `iptv-net`, `iptv-store-sqlite`, `iptv-sqlcipher-init` | Tokio and reqwest; SQLite. No NSH. `iptv-store-sqlite` also builds for `wasm32-unknown-unknown` (SQLite through `sqlite-wasm-rs` on in-memory files the host persists in chunks, no SQLCipher); its tests run there with `tools/wasm-test.mjs`. |
-| Native application | `iptv-runtime` | Native services, Tokio, filesystem I/O and adapter value types. No NSH. Host JNI and credential brokers stay in the shell. |
+| Application | `iptv-runtime` | All I/O through `Ports`. Its default `native` feature holds the native ports (`iptv-net`, threads and Tokio) and the native-only services (recording, the playback relay); without it the crate builds for wasm32. No NSH. Host JNI and credential brokers stay in the shell. |
 | Player adapter | `iptv-player-mpv` | NSH native components, platform APIs, libmpv. The Android build contains only the wire contract and track parser. |
-| Shell | `iptv-app` | NSH, the adapters, platform APIs. |
+| Shell | `iptv-app` | NSH, the runtime and the player wire contract; platform APIs and adapters in `src/host` (`host/native`, `host/web`), with five files outside it still holding a platform `cfg` (listed in `tests/app/architecture.rs`). |
 | Web application | `iptv-web` | The portable crates and a JavaScript host. No NSH, no Tokio, no native adapters. |
 
 `tools/check.sh` builds every portable crate for `wasm32-unknown-unknown`.
-That build is what keeps platform code out of them.
+That build is what keeps platform code out of them. For the browser build of
+the application stack ([browser TV plan](plans/2026-11-21-browser-tv-architecture.md))
+it also runs the runtime's unit tests without its `native` feature and lints
+for wasm32 the runtime without it, the shell with its web host, and
+iptv-web's adapters.
+
+The shell's platform code lives in `iptv-app/src/host`: `host/native`
+(desktops, iPad, Android: key stores, private directories, OS recording
+schedulers, the libmpv components, the local time zone) and `host/web` (a
+browser TV, over `iptv-web`'s adapters; a stub until the NSH TV platform runs
+the shell). Screens ask the host's facade (`crate::host`) for platform facts
+instead of using `cfg`; `iptv-app/tests/app/architecture.rs` keeps the short
+list of files that still have one.
 
 `iptv-web` is the application layer for TV web runtimes, where NSH's web
 runtime cannot run (Samsung Tizen; see [hosts/tizen](../hosts/tizen/README.md)).
@@ -276,7 +288,7 @@ downloaded again is decided by `iptv_import::plan_startup` from the
 
 ## Application runtime and commands
 
-`iptv-runtime` is the native application layer. It builds and tests without
+`iptv-runtime` is the application layer. It builds and tests without
 NSH or the player. The shell holds one `Rc<Runtime>` and installs a task host, timers
 and an event sink. Runtime events enter the shell at
 `runtime_events::apply`; views issue named commands rather than closures
@@ -323,7 +335,8 @@ The private store service owns two long-lived connections to the encrypted
 catalog. The writer serializes mutations, staging and reads that must
 follow queued writes. The read-only connection serves guide, search and
 organization queries without waiting behind a publish transaction. Both
-live on dedicated threads; no SQLite operation runs on the UI thread.
+are lanes of the owner's execution port, natively dedicated threads; no
+SQLite operation runs on the UI thread there.
 Each owner has its own pair. Each request carries its application epoch.
 Recursive requests to the same worker and requests from a retired owner are
 rejected.
@@ -337,6 +350,23 @@ is needed for that work to leave the UI thread.
 
 The shell constructs `Runtime::new(Ports)` with its private directory,
 credential-key callback, OS backup-exclusion hook and startup instrumentation.
+`Ports` is also the runtime's whole I/O boundary: `network` makes the
+clients (`network::Client`, an `iptv_import::Fetch`) for imports, browsing,
+link resolves, staged probes and artwork; `execution` supplies the store
+lanes, long-lived workers (the refresh pool, the file and favorites writers)
+and each owner's task executor; `entropy` gives random bytes. The runtime
+reads time through `iptv_runtime::time` (the system's clocks natively, the
+host's in a browser build). `Ports::new`
+fills them with the native implementations (`iptv-net`, threads and a
+two-worker Tokio runtime per owner, the OS random source).
+`execution::Cooperative` is the browser's: one thread, lanes run in turns of
+the host's event loop, a blocking request runs its lane's queue inline, and a
+`Sliced` job (a resumable publish) runs at most one step per turn, the rest of
+the turn going to the other lanes' reads. It has no workers,
+so the services built on them report themselves unavailable, and staged
+probes, whose workers block, are refused. Only `native` modules may name
+`iptv-net` or start threads and Tokio runtimes
+(`iptv-runtime/tests/it/architecture.rs`).
 Native workers capture those inputs with their accepting service. JNI entry
 points and credential-broker implementations remain in the shell. The host's
 local task executor and timers are installed separately through `bind_tasks`.

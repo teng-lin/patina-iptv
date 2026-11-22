@@ -55,6 +55,9 @@ pub struct Screen {
     pub stage: Option<ProbeSummary>,
     pub retained_stage: Option<ProbeSummary>,
     pub next: Option<Cursor>,
+    /// Staged probes (inspecting a link) are offered: false where the host
+    /// cannot run them.
+    pub probes: bool,
     parents: Vec<ParentPage>,
 }
 impl Screen {
@@ -81,8 +84,16 @@ impl Screen {
             stage: None,
             retained_stage: None,
             next: None,
+            probes: true,
             parents: Vec::new(),
         }
+    }
+
+    /// Without staged probes: no link is offered for inspection.
+    pub fn without_probes(mut self) -> Self {
+        self.probes = false;
+        self.focus = Row::Search;
+        self
     }
     pub fn enter(&mut self, mode: Mode) {
         self.parents.push(ParentPage {
@@ -131,11 +142,11 @@ impl Screen {
         if self.next.is_some() {
             rows.push(Row::Next);
         }
-        if matches!(self.mode, Mode::Audit | Mode::Candidates) {
+        if self.probes && matches!(self.mode, Mode::Audit | Mode::Candidates) {
             rows.push(Row::NewLink);
         }
         if self.mode == Mode::Candidates && self.subject.is_some() {
-            if self.retained_stage.is_some() {
+            if self.probes && self.retained_stage.is_some() {
                 rows.push(Row::ReuseInspected);
             }
             rows.extend([Row::AutomaticRepair, Row::NoGuideRepair]);
@@ -199,6 +210,18 @@ impl std::fmt::Debug for Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn without_probes_no_link_is_offered() {
+        let window = TimeWindow { from: 1, to: 2 };
+        assert!(
+            Screen::new(SourceId(1), window)
+                .rows()
+                .contains(&Row::NewLink)
+        );
+        let screen = Screen::new(SourceId(1), window).without_probes();
+        assert!(!screen.rows().contains(&Row::NewLink));
+        assert!(screen.rows().contains(&screen.focus));
+    }
     #[test]
     fn inspection_link_entry_is_redacted_in_leaf_and_containing_debug() {
         let mut screen = Screen::new(SourceId(1), TimeWindow { from: 1, to: 2 });

@@ -25,6 +25,7 @@ LATENCY = "store_latency::guide_input_stays_under_budget_while_the_database_writ
 BUSY_READER = "store_latency::a_store_read_does_not_wait_for_a_busy_writer"
 GTK_LIFECYCLE = "native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss"
 COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
+WASM_CLIPPY = ("cargo", "clippy", "--locked", "--target", "wasm32-unknown-unknown", "--", "-D", "warnings")
 
 
 def workspace_crates(root=ROOT):
@@ -93,6 +94,18 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
                           "--target", "wasm32-unknown-unknown", "--lib", "--tests", "--", "-D", "warnings"))
         steps.append(step("store-wasm-tests", "node", "tools/wasm-test.mjs", "--cargo", "--locked",
                           "-p", "iptv-store-sqlite", "--lib", "--test", "it"))
+        # The application stack's browser build: the runtime without its
+        # native services, and the shell with its web host, over the store's
+        # browser build. Clippy, so what only that build compiles is linted.
+        steps.append(step("runtime-wasm", *WASM_CLIPPY[:3], "-p", "iptv-runtime", "--no-default-features",
+                          *WASM_CLIPPY[3:]))
+        steps.append(step("app-wasm", *WASM_CLIPPY[:3], "-p", "iptv-app", *WASM_CLIPPY[3:]))
+        # The adapters the shell links, without the Live TV bridge.
+        steps.append(step("web-adapters-wasm", *WASM_CLIPPY[:3], "-p", "iptv-web", "--no-default-features",
+                          *WASM_CLIPPY[3:]))
+        # The runtime's unit tests without its native services, on the host.
+        steps.append(step("runtime-portable-tests", "cargo", "test", "--locked", "-p", "iptv-runtime",
+                          "--no-default-features", "--lib", "--", "--format=pretty"))
     steps.extend([
         step("guide-input-budget", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),

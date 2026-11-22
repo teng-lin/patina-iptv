@@ -1,9 +1,10 @@
 //! Explicit synthetic native journey driver; compiled only with test-support.
 //! Owned by the real root; normal builds have neither a probe nor file writes.
+use nsh_core::time::Instant;
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use nsh_core::prelude::*;
 use serde_json::{Value, json};

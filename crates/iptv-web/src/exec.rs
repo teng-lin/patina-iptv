@@ -1,8 +1,9 @@
 //! A single-threaded executor and the [`Fetch`] adapter over the host.
 //!
 //! Tasks are polled whenever the host delivers something (`poll` after each
-//! export call), so no waker has to schedule anything: a pending future
-//! simply waits for the next delivery.
+//! export call) and whenever one is woken. A future waiting on the host
+//! registers its waker with its slot, and each delivery wakes it, so the
+//! adapter's futures also run under another executor (NSH's).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -23,36 +24,93 @@ thread_local! {
     static TASKS: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
     static SPAWNED: RefCell<Vec<Task>> = const { RefCell::new(Vec::new()) };
     static POLLING: Cell<bool> = const { Cell::new(false) };
+    /// A task was woken, or one spawned, since the current round began.
+    static WOKEN: Cell<bool> = const { Cell::new(false) };
+    /// A wake-up poll is already asked of the host.
+    static SCHEDULED: Cell<bool> = const { Cell::new(false) };
+    /// A delivery is being applied: the export that applies it polls next.
+    static DELIVERING: Cell<bool> = const { Cell::new(false) };
     static SLOTS: RefCell<HashMap<u32, Slot>> = RefCell::new(HashMap::new());
     static NEXT_ID: Cell<u32> = const { Cell::new(1) };
 }
 
-/// Runs `task` from the next [`poll`] on.
+/// Rounds one [`poll`] runs at most before it leaves the rest to the next
+/// one: a task that wakes itself on every poll must not hold the thread.
+const ROUNDS: usize = 64;
+
+/// The waker of every task: it marks work as runnable and, outside a
+/// poll, asks the host for one (a zero-length timer, whose delivery polls).
+struct Wake;
+
+impl std::task::Wake for Wake {
+    fn wake(self: std::sync::Arc<Self>) {
+        woken();
+    }
+}
+
+fn woken() {
+    WOKEN.with(|w| w.set(true));
+    // A poll follows a delivery (the export polls after it) and ends one:
+    // only a wake from elsewhere asks the host for one.
+    if !POLLING.with(Cell::get) && !DELIVERING.with(Cell::get) {
+        schedule();
+    }
+}
+
+/// Asks the host to call back soon, which polls.
+fn schedule() {
+    if SCHEDULED.with(Cell::get) {
+        return;
+    }
+    // Only a timer actually asked for counts: without a host yet, the next
+    // wake asks again.
+    if let Some(host) = crate::host::host_for_wake() {
+        SCHEDULED.with(|s| s.set(true));
+        host.sleep(next_id(), 0.0);
+    }
+}
+
+/// Runs `task` from the next [`poll`] on (one is asked of the host when
+/// none is running).
 pub(crate) fn spawn(task: impl Future<Output = ()> + 'static) {
     SPAWNED.with(|s| s.borrow_mut().push(Box::pin(task)));
+    woken();
 }
 
 /// Polls every task until none makes progress without a new delivery.
 pub(crate) fn poll() {
     if POLLING.with(|p| p.replace(true)) {
-        return; // A task's host call answered synchronously: the outer poll continues.
+        // A task's host call answered synchronously: the outer poll runs
+        // another round for what this delivery woke.
+        WOKEN.with(|w| w.set(true));
+        return;
     }
-    let mut cx = Context::from_waker(Waker::noop());
-    // Every task runs until it waits on the host; a task spawned meanwhile
-    // gets its first poll in the next round.
+    SCHEDULED.with(|s| s.set(false));
+    let waker = Waker::from(std::sync::Arc::new(Wake));
+    let mut cx = Context::from_waker(&waker);
+    // Every task runs until it waits; while a task was woken or spawned
+    // during a round, another round follows.
+    let mut rounds = 0;
     loop {
+        WOKEN.with(|w| w.set(false));
         let mut tasks = TASKS.with(|t| std::mem::take(&mut *t.borrow_mut()));
         tasks.extend(SPAWNED.with(|s| std::mem::take(&mut *s.borrow_mut())));
         tasks.retain_mut(|t| t.as_mut().poll(&mut cx).is_pending());
-        TASKS.with(|t| *t.borrow_mut() = tasks);
-        if SPAWNED.with(|s| s.borrow().is_empty()) {
+        TASKS.with(|t| t.borrow_mut().extend(tasks));
+        rounds += 1;
+        if !WOKEN.with(Cell::get) {
             break;
+        }
+        if rounds == ROUNDS {
+            POLLING.with(|p| p.set(false));
+            schedule();
+            return;
         }
     }
     POLLING.with(|p| p.set(false));
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "bridge"))]
 pub(crate) fn pending_tasks() -> usize {
     TASKS.with(|t| t.borrow().len()) + SPAWNED.with(|s| s.borrow().len())
 }
@@ -60,6 +118,8 @@ pub(crate) fn pending_tasks() -> usize {
 /// What the host has delivered for one request.
 #[derive(Default)]
 struct Slot {
+    /// The task waiting on this slot, woken by its next delivery.
+    waker: Option<Waker>,
     status: Option<(u16, Option<u64>)>,
     body: Option<Vec<u8>>,
     /// `Some(None)`: the stream ended.
@@ -71,6 +131,9 @@ struct Slot {
     https: bool,
     /// Content-supplied: every hop must be a public address.
     public_only: bool,
+    /// The origin the request was configured for: a hop to another one
+    /// must be public, as natively.
+    origin: Option<String>,
 }
 
 fn next_id() -> u32 {
@@ -83,6 +146,30 @@ fn next_id() -> u32 {
 
 fn with_slot<R>(id: u32, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
     SLOTS.with(|s| s.borrow_mut().get_mut(&id).map(f))
+}
+
+/// Applies a delivery to slot `id` and wakes the task waiting on it.
+fn deliver<R>(id: u32, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
+    let (result, waker) = SLOTS.with(|s| {
+        let mut slots = s.borrow_mut();
+        let slot = slots.get_mut(&id)?;
+        let result = f(slot);
+        Some((result, slot.waker.take()))
+    })?;
+    if let Some(waker) = waker {
+        let was = DELIVERING.with(|d| d.replace(true));
+        waker.wake();
+        DELIVERING.with(|d| d.set(was));
+    }
+    Some(result)
+}
+
+/// Remembers `cx`'s waker for slot `id`'s next delivery.
+fn register(id: u32, cx: &Context<'_>) {
+    with_slot(id, |s| match &s.waker {
+        Some(waker) if waker.will_wake(cx.waker()) => {}
+        _ => s.waker = Some(cx.waker().clone()),
+    });
 }
 
 fn open_slot(id: u32) {
@@ -135,15 +222,15 @@ fn close_slot(id: u32) {
 // Deliveries from the host (the exports call these).
 
 pub(crate) fn deliver_status(id: u32, status: u16, length: Option<u64>) {
-    with_slot(id, |s| s.status = Some((status, length)));
+    deliver(id, |s| s.status = Some((status, length)));
 }
 
 pub(crate) fn deliver_body(id: u32, bytes: Vec<u8>) {
-    with_slot(id, |s| s.body = Some(bytes));
+    deliver(id, |s| s.body = Some(bytes));
 }
 
 pub(crate) fn deliver_chunk(id: u32, bytes: Option<Vec<u8>>) {
-    with_slot(id, |s| {
+    deliver(id, |s| {
         s.chunk = Some(bytes);
         s.waiting_chunk = false;
     });
@@ -159,16 +246,18 @@ pub(crate) fn deliver_error(id: u32, kind: u32, detail: String) {
         7 => FetchErrorKind::Deadline,
         _ => FetchErrorKind::Other,
     };
-    with_slot(id, |s| s.error = Some(FetchError::new(kind, detail)));
+    deliver(id, |s| s.error = Some(FetchError::new(kind, detail)));
 }
 
 /// The browser followed a redirect to `url` before answering request `id`.
 /// A downgrade to HTTP, or a non-public hop of a content-supplied request,
 /// fails the request and aborts it.
 pub(crate) fn deliver_redirect(id: u32, url: &str) {
-    let refused = with_slot(id, |s| {
+    let refused = deliver(id, |s| {
         let downgrade = s.https && !url.trim_start().to_ascii_lowercase().starts_with("https:");
-        let private = s.public_only && iptv_providers::content_url::validate(url).is_err();
+        let elsewhere = origin(url) != s.origin;
+        let private =
+            (s.public_only || elsewhere) && iptv_providers::content_url::validate(url).is_err();
         if downgrade || private {
             let why = if downgrade {
                 "redirect to plain HTTP refused"
@@ -187,12 +276,12 @@ pub(crate) fn deliver_redirect(id: u32, url: &str) {
 }
 
 pub(crate) fn deliver_wake(id: u32) {
-    with_slot(id, |s| s.woke = true);
+    deliver(id, |s| s.woke = true);
 }
 
 /// A stored value arrived (`None`: there is none).
 pub(crate) fn deliver_stored(id: u32, value: Option<Vec<u8>>) {
-    with_slot(id, |s| {
+    deliver(id, |s| {
         s.chunk = Some(value);
     });
 }
@@ -202,10 +291,13 @@ pub(crate) async fn storage_get(key: &str) -> Option<Vec<u8>> {
     let pending = Pending::new(next_id(), false);
     let id = pending.id;
     host().store_get(id, key);
-    std::future::poll_fn(|_| match with_slot(id, |s| s.chunk.take()) {
-        Some(Some(v)) => Poll::Ready(v),
-        Some(None) => Poll::Pending,
-        None => Poll::Ready(None),
+    std::future::poll_fn(|cx| {
+        register(id, cx);
+        match with_slot(id, |s| s.chunk.take()) {
+            Some(Some(v)) => Poll::Ready(v),
+            Some(None) => Poll::Pending,
+            None => Poll::Ready(None),
+        }
     })
     .await
 }
@@ -216,7 +308,17 @@ pub(crate) fn storage_put(key: &str, value: &[u8]) {
 }
 
 /// The request as the host reads it.
-fn request_json(request: &HttpRequest) -> String {
+///
+/// `redirect` is `error` for a request that carries a header another origin
+/// must not receive (anything outside
+/// [`iptv_providers::http::CROSS_ORIGIN_HEADERS`]): the page's fetch would
+/// forward it to wherever a redirect leads, where the native adapter drops
+/// it. Every other request follows; the final address is then checked
+/// (`deliver_redirect`): public when the request was content-supplied or
+/// the origin changed, never a downgrade. Hops before the last reach their
+/// address before Rust sees them (`docs/security.md`). The Live TV
+/// bridge's worker always follows.
+fn request_json(request: &HttpRequest, idle_ms: u64) -> String {
     let headers: Vec<serde_json::Value> = request
         .headers
         .iter()
@@ -228,9 +330,25 @@ fn request_json(request: &HttpRequest) -> String {
         "headers": headers,
         "body": request.body,
         "timeoutMs": request.timeout.map(|t| t.as_millis() as u64),
-        "idleMs": IDLE_TIMEOUT_MS,
+        "idleMs": idle_ms,
+        "redirect": if origin_bound(request) { "error" } else { "follow" },
     })
     .to_string()
+}
+
+/// `request` carries a header that belongs to its origin.
+fn origin_bound(request: &HttpRequest) -> bool {
+    request.headers.iter().any(|(name, _)| {
+        !iptv_providers::http::CROSS_ORIGIN_HEADERS
+            .iter()
+            .any(|kept| name.eq_ignore_ascii_case(kept))
+    })
+}
+
+/// `scheme://host:port` of `address`, when it is one.
+fn origin(address: &str) -> Option<String> {
+    let url = url::Url::parse(address.trim()).ok()?;
+    Some(url.origin().ascii_serialization())
 }
 
 /// A download that receives nothing for this long fails (the native
@@ -268,15 +386,28 @@ pub(crate) fn check_destination(request: &HttpRequest) -> Result<(), FetchError>
 
 /// [`Fetch`] through the JavaScript host.
 #[derive(Clone)]
-pub(crate) struct HostFetch {
+pub struct HostFetch {
     started_ms: f64,
+    idle_ms: u64,
+}
+
+impl Default for HostFetch {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HostFetch {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             started_ms: host().monotonic_ms(),
+            idle_ms: IDLE_TIMEOUT_MS,
         }
+    }
+    /// A download that receives nothing for `idle` fails.
+    pub fn with_idle_timeout(mut self, idle: Duration) -> Self {
+        self.idle_ms = u64::try_from(idle.as_millis()).unwrap_or(u64::MAX);
+        self
     }
 
     async fn status(
@@ -294,9 +425,11 @@ impl HostFetch {
                 .to_ascii_lowercase()
                 .starts_with("https:");
             s.public_only = request.public_only;
+            s.origin = origin(&request.url);
         });
-        host().fetch(id, &request_json(request), stream);
-        let (status, length) = std::future::poll_fn(|_| {
+        host().fetch(id, &request_json(request, self.idle_ms), stream);
+        let (status, length) = std::future::poll_fn(|cx| {
+            register(id, cx);
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))
@@ -328,7 +461,8 @@ impl Fetch for HostFetch {
     async fn fetch(&self, request: HttpRequest) -> Result<HttpResponse, FetchError> {
         let (mut pending, status, _) = self.status(&request, false).await?;
         let id = pending.id;
-        let body = std::future::poll_fn(|_| {
+        let body = std::future::poll_fn(|cx| {
+            register(id, cx);
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))
@@ -372,8 +506,13 @@ impl Fetch for HostFetch {
 pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
     let pending = Pending::new(next_id(), false);
     let id = pending.id;
-    host().sleep(id, duration.as_secs_f64() * 1000.0);
-    std::future::poll_fn(|_| {
+    // setTimeout holds a signed 32-bit count of milliseconds.
+    host().sleep(
+        id,
+        (duration.as_secs_f64() * 1000.0).min(f64::from(i32::MAX)),
+    );
+    std::future::poll_fn(|cx| {
+        register(id, cx);
         if !keep() || with_slot(id, |s| s.woke).unwrap_or(true) {
             Poll::Ready(())
         } else {
@@ -384,7 +523,7 @@ pub(crate) async fn sleep_while(duration: Duration, keep: impl Fn() -> bool) {
 }
 
 /// The body of a streamed response, read chunk by chunk from the host.
-pub(crate) struct HostBody {
+pub struct HostBody {
     id: u32,
     done: Rc<Cell<bool>>,
 }
@@ -406,7 +545,8 @@ impl BodyStream for HostBody {
         if ask == Some(true) {
             host().fetch_next(id);
         }
-        let got = std::future::poll_fn(|_| {
+        let got = std::future::poll_fn(|cx| {
+            register(id, cx);
             match with_slot(id, |s| {
                 if let Some(e) = s.error.take() {
                     Some(Err(e))
@@ -442,5 +582,30 @@ impl Drop for HostBody {
             host.fetch_close(self.id);
         }
         close_slot(self.id);
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    #[test]
+    fn a_request_with_origin_headers_refuses_redirects_the_page_would_follow() {
+        let redirect = |request: &HttpRequest| {
+            let json: serde_json::Value =
+                serde_json::from_str(&request_json(request, 15_000)).unwrap();
+            assert_eq!(json["idleMs"], 15_000);
+            json["redirect"].as_str().unwrap().to_owned()
+        };
+        let mut logo = HttpRequest::get("https://example.test/logo.png");
+        logo.public_only = true;
+        assert_eq!(redirect(&logo), "follow", "a redirected logo still loads");
+        let negotiated = HttpRequest::get("https://example.test/list.m3u")
+            .with_header("User-Agent", "Synthetic/1")
+            .with_header("Range", "bytes=0-");
+        assert_eq!(redirect(&negotiated), "follow");
+        let keyed =
+            HttpRequest::get("https://example.test/list.m3u").with_header("X-Api-Key", "synthetic");
+        assert_eq!(redirect(&keyed), "error");
     }
 }

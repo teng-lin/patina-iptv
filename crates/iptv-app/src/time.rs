@@ -2,7 +2,8 @@
 //! from when the schedule was shown for synthetic data), local-time labels
 //! and the minute tick that advances [`iptv_core::guide::Focus::now`].
 //!
-//! Local time comes from the C library's `localtime_r` (`tm_gmtoff`), per
+//! Local time comes from the host (`crate::host::offset_minutes`); natively
+//! from the C library's `localtime_r` (`tm_gmtoff`), per
 //! instant so labels across a daylight saving change are right. On Android
 //! bionic resolves the device's time zone itself (the `persist.sys.timezone`
 //! setting, with the system tzdata) and notices changes; on desktop Linux
@@ -10,8 +11,11 @@
 //! `tzset`. Windows uses chrono's per-instant system local-time conversion.
 //! Other non-Unix targets fall back to UTC.
 
+pub(crate) use crate::host::offset_minutes;
+use crate::host::reload_time_zone;
+use nsh_core::time::Instant;
 use std::cell::Cell;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use iptv_core::guide;
 use nsh_core::prelude::*;
@@ -25,9 +29,7 @@ thread_local! {
 
 /// Unix seconds now.
 pub fn wall_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs() as i64)
+    crate::host::since_epoch().map_or(0, |d| d.as_secs() as i64)
 }
 
 /// The current schedule was just shown.
@@ -51,54 +53,6 @@ fn shown_secs() -> u64 {
 pub fn now_minute() -> i32 {
     guide::now_minute(&*schedule(), wall_unix(), shown_secs())
 }
-
-/// The local UTC offset at `unix`, in minutes.
-#[cfg(unix)]
-pub fn offset_minutes(unix: i64) -> i32 {
-    let t = unix as libc::time_t;
-    // SAFETY: an all-zero `tm` is valid; localtime_r only writes into it.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    // SAFETY: both pointers are valid for the call; localtime_r is reentrant.
-    let ok = unsafe { !libc::localtime_r(&t, &mut tm).is_null() };
-    if ok { (tm.tm_gmtoff / 60) as i32 } else { 0 }
-}
-
-#[cfg(windows)]
-pub fn offset_minutes(unix: i64) -> i32 {
-    // Windows system time does not follow POSIX TZ. Isolated scenarios supply
-    // an explicit fixed offset; release builds never read this test override.
-    #[cfg(feature = "test-support")]
-    if let Some(offset) = std::env::var("IPTV_TEST_UTC_OFFSET_MINUTES")
-        .ok()
-        .and_then(|s| s.parse::<i32>().ok())
-        .filter(|n| (-720..=720).contains(n))
-    {
-        return offset;
-    }
-    use chrono::{Local, TimeZone};
-    Local
-        .timestamp_opt(unix, 0)
-        .single()
-        .map_or(0, |time| time.offset().local_minus_utc() / 60)
-}
-
-#[cfg(not(any(unix, windows)))]
-pub fn offset_minutes(_unix: i64) -> i32 {
-    0
-}
-
-#[cfg(unix)]
-fn reload_time_zone() {
-    unsafe extern "C" {
-        fn tzset();
-    }
-    // SAFETY: tzset takes no arguments; it re-reads the zone for later
-    // localtime_r calls (glibc caches it; bionic checks on its own).
-    unsafe { tzset() }
-}
-
-#[cfg(not(unix))]
-fn reload_time_zone() {}
 
 /// Guide `minute` as local wall-clock time on the current schedule, with
 /// the weekday and date when it is not today.

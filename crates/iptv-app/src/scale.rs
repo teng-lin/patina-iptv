@@ -29,7 +29,7 @@ pub const MAX: f32 = 1.0;
 /// The scale moves in these steps.
 pub const STEP: f32 = 0.025;
 /// Whether this build scales the guide with its window (desktops).
-const SCALES: bool = !cfg!(any(target_os = "android", target_os = "ios"));
+const SCALES: bool = !(crate::host::ANDROID || crate::host::IPAD);
 
 /// Whether the guide scales with its window: on desktops, not on a tablet
 /// or a phone, whose windows (an Android tablet's or phone's screen, an
@@ -183,6 +183,6 @@ mod tests {
         // A tablet (1280 × 800 dp) and a TV (960 × 540 dp).
         assert_eq!(scale_for(1280.0, 800.0, false), 1.0);
         assert_eq!(scale_for(960.0, 540.0, false), 1.0);
-        assert_eq!(SCALES, !cfg!(any(target_os = "android", target_os = "ios")));
+        assert_eq!(SCALES, !(crate::host::ANDROID || crate::host::IPAD));
     }
 }

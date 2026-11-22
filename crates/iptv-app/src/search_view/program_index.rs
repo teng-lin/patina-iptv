@@ -4,7 +4,7 @@
 //! back as far as the store does. A guide that is not stored (none on
 //! screen) is indexed from memory.
 
-use std::time::Instant;
+use nsh_core::time::Instant;
 
 use iptv_core::guide::Schedule;
 use iptv_epg::{ChannelKey, DAY, UnixTime};

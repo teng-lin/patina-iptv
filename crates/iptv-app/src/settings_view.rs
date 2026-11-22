@@ -24,8 +24,9 @@ mod words;
 
 pub use view::layer;
 
+use nsh_core::time::Instant;
 use std::cell::Cell;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use iptv_nav::Action;
 use iptv_settings::schema::ValueType;
@@ -302,7 +303,7 @@ fn run(ui: Ui, key: &'static str) {
         "recordings.background_status"
         | "recordings.enable_startup"
         | "recordings.disable_startup"
-        | "recordings.alarm_access" => crate::recording_host::command(key),
+        | "recordings.alarm_access" => crate::host::recording_command(key),
         "general.backup" => crate::parental_view::request(
             ui,
             iptv_core::parental::Target::settings(),

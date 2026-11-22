@@ -1,5 +1,5 @@
 //! On-demand catalog and playback. Credentials and ephemeral provider links stay here.
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod recovery_tests;
 use crate::{Error, Runtime};
 use iptv_core::{
@@ -366,9 +366,7 @@ impl Runtime {
         let key2 = key.clone();
         let result = services
             .spawn(async move {
-                let client =
-                    iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
-                        .map_err(|_| unavailable())?;
+                let client = work.network_client().map_err(|_| unavailable())?;
                 if cancel.is_canceled() {
                     return Err(unavailable());
                 }
@@ -721,9 +719,7 @@ url,
                         source
                     }
                     (SourceConfig::Stalker(c), StreamLocator::Stalker { cmd, .. }) => {
-                        let client =
-                            iptv_net::NetClient::new(crate::settings::net_config(&work.settings()))
-                                .map_err(|_| unavailable())?;
+                        let client = work.network_client().map_err(|_| unavailable())?;
                         let cancel = iptv_import::CancelToken::new();
                         let mut session = match existing_session {
                             Some(s) => s,
@@ -776,7 +772,7 @@ url,
                 }
                 source.default_header(
                     "User-Agent",
-                    &crate::settings::net_config(&work.settings()).user_agent,
+                    &crate::settings::network_config(&work.settings()).user_agent,
                 );
                 Ok::<_, Error>(source)
             })
@@ -876,13 +872,13 @@ fn save_progress(
 }
 
 async fn stalker_episodes(
-    client: &iptv_net::NetClient,
+    client: &crate::network::Client,
     session: &mut iptv_providers::stalker::StalkerSession,
     id: &str,
     parent_cmd: Option<&str>,
     cancel: &iptv_import::CancelToken,
 ) -> Result<Vec<(iptv_providers::model::Episode, StreamLocator, Option<u32>)>, Error> {
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let mut requests = 0;
     let mut out = Vec::new();
     let native = parent_cmd.is_none();
@@ -1087,7 +1083,7 @@ impl Runtime {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     #[tokio::test(flavor = "current_thread")]

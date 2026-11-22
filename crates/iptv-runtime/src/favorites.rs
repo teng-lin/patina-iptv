@@ -539,19 +539,45 @@ pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, 
 
 fn send(owner: &super::Runtime, write: Write) {
     let counted = !matches!(write, Write::Barrier(_) | Write::Shutdown(_));
-    if counted {
-        unsaved(owner).fetch_add(1, Ordering::AcqRel);
+    if !owner.services().has_workers() {
+        // No writer can run here: changes last for the session. They are
+        // kept in memory, and what waits for them hears that they are done.
+        match write {
+            Write::Barrier(done) => drop(done.send(true)),
+            Write::Shutdown(done) => drop(done.send(true)),
+            // Watching is recorded automatically; only an edit of the
+            // user's own lists is worth telling them about.
+            Write::Watched { .. } | Write::WatchTime { .. } => {}
+            Write::SaveOrder(_) => unreachable!("a session-only reorder never builds a writer job"),
+            Write::ClearHistory | Write::MoveFavorite { .. } | Write::Favorite { .. } => {
+                owner.note_session_only()
+            }
+        }
+        return;
     }
     owner.favorite_writer.with(|w| {
         let mut w = w.borrow_mut();
-        let tx = w.get_or_insert_with(|| {
+        if w.is_none() {
             let (tx, rx) = mpsc::channel();
             let unsaved = unsaved(owner);
             // The writer belongs to this owner's application epoch.
             let services = owner.services();
-            std::thread::spawn(move || write_all(&services, rx, unsaved));
-            tx
-        });
+            let execution = services.ports().execution.clone();
+            if let Err(error) = execution.worker(
+                "iptv-favorites".into(),
+                Box::new(move || write_all(&services, rx, unsaved)),
+            ) {
+                // Nothing is cached or counted: the next change tries again,
+                // and reads do not wait for a write no writer has.
+                log::error!("iptv favorites: cannot start the writer: {error}");
+                return;
+            }
+            *w = Some(tx);
+        }
+        let tx = w.as_ref().expect("the writer was started");
+        if counted {
+            unsaved(owner).fetch_add(1, Ordering::AcqRel);
+        }
         if tx.send(write).is_err() {
             log::warn!("iptv favorites: the writer stopped");
         }
@@ -591,15 +617,15 @@ pub fn flush_on_shutdown(owner: &super::Runtime) -> bool {
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
     let Some(writer) = writer else { return true };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = crate::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let (tx, rx) = mpsc::channel();
         if writer.send(Write::Shutdown(tx)).is_err() {
             return false;
         }
-        match rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now())) {
+        match rx.recv_timeout(deadline.saturating_duration_since(crate::time::Instant::now())) {
             Ok(true) => return true,
-            Ok(false) if std::time::Instant::now() < deadline => {
+            Ok(false) if crate::time::Instant::now() < deadline => {
                 // A busy database retains the head edit. Keep the engine alive
                 // for bounded retries instead of treating a failed attempt as
                 // a completed shutdown barrier.
@@ -794,26 +820,34 @@ pub(crate) async fn save_order(
     })?;
     updated.apply_order(&order);
 
-    let (done, result) = futures_channel::oneshot::channel();
-    let services = owner.services();
-    let pending = unsaved(owner);
-    send(
-        owner,
-        Write::SaveOrder(Box::new(move |prior_saved| {
-            let result = if prior_saved {
-                services.blocking(move |store| store.save_favorite_order(source, &original, &order))
-            } else {
-                Err(StoreError::Unavailable(
-                    "recent favorite edits are not saved",
-                ))
-            };
-            pending.fetch_sub(1, Ordering::AcqRel);
-            let _ = done.send(result);
-        })),
-    );
-    result
-        .await
-        .map_err(|_| StoreError::Unavailable("the favorites order was not saved"))??;
+    if owner.services().has_workers() {
+        let (done, result) = futures_channel::oneshot::channel();
+        let services = owner.services();
+        let pending = unsaved(owner);
+        send(
+            owner,
+            Write::SaveOrder(Box::new(move |prior_saved| {
+                let result = if prior_saved {
+                    services
+                        .blocking(move |store| store.save_favorite_order(source, &original, &order))
+                } else {
+                    Err(StoreError::Unavailable(
+                        "recent favorite edits are not saved",
+                    ))
+                };
+                pending.fetch_sub(1, Ordering::AcqRel);
+                let _ = done.send(result);
+            })),
+        );
+        result
+            .await
+            .map_err(|_| StoreError::Unavailable("the favorites order was not saved"))??;
+    } else {
+        // No writer saves the order here: it applies for the session, as
+        // every other change does, and nothing is counted as unsaved.
+        drop((original, order));
+        owner.note_session_only();
+    }
     let changed = owner.favorites.with(|state| {
         let mut state = state.borrow_mut();
         if !state.pending_order.ptr_eq(&Rc::downgrade(&changes)) {
@@ -896,7 +930,7 @@ fn move_write(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod reorder_tests {
     use super::*;
     use iptv_guide::combined::qualified_key;
@@ -1129,7 +1163,7 @@ mod writer_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod vod_availability_tests {
     use super::*;
     use crate::{Ports, Runtime};
@@ -1315,6 +1349,102 @@ mod vod_availability_tests {
             .with(|state| state.borrow_mut().any_vod = true);
         owner.services().block_on(refresh_vod_availability(&owner));
         assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(owner.drain_services());
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod start_tests {
+    use super::*;
+    use crate::execution::{Execution, Job, Lane, Tasks};
+
+    /// Native lanes and tasks whose workers cannot start (a thread-spawn
+    /// failure).
+    struct NoThreads;
+    impl Execution for NoThreads {
+        fn lane(&self, name: &'static str) -> std::io::Result<Box<dyn Lane>> {
+            crate::native::execution::NativeExecution.lane(name)
+        }
+        fn worker(&self, _: String, _: Job) -> std::io::Result<()> {
+            Err(std::io::Error::other("synthetic: no threads left"))
+        }
+        fn tasks(&self) -> Box<dyn Tasks> {
+            crate::native::execution::NativeExecution.tasks()
+        }
+    }
+
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn without_workers_changes_are_session_only_and_said_so_once() {
+        let mut ports = crate::Ports::for_tests();
+        ports.execution = std::sync::Arc::new(crate::execution::Cooperative::new(
+            std::sync::Arc::new(Unpolled),
+        ));
+        let owner = crate::Runtime::new(ports);
+        let notices = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = notices.clone();
+        owner.bind(move |event| {
+            if matches!(event, crate::RuntimeEvent::Notify(_)) {
+                seen.set(seen.get() + 1);
+            }
+        });
+        owner.start_services();
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        let cleared = clear_history(&owner);
+        let mut cleared = std::pin::pin!(cleared);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert_eq!(
+            cleared.as_mut().poll(&mut context),
+            std::task::Poll::Ready(true),
+            "a session-only change is done"
+        );
+        assert_eq!(notices.get(), 1, "the user hears it once");
+    }
+
+    #[test]
+    fn without_workers_a_reorder_applies_in_memory_on_the_ui_thread() {
+        let mut ports = crate::Ports::for_tests();
+        ports.execution = std::sync::Arc::new(crate::execution::Cooperative::new(
+            std::sync::Arc::new(Unpolled),
+        ));
+        let owner = crate::Runtime::new(ports);
+        // The UI thread starts the services: a blocking store call here
+        // would assert.
+        owner.start_services();
+        owner
+            .favorites
+            .with(|state| state.borrow_mut().source = Some(SourceId(1)));
+        let saved = save_order(&owner, SourceId(1), Vec::new(), Vec::new());
+        let mut saved = std::pin::pin!(saved);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(matches!(
+            saved.as_mut().poll(&mut context),
+            std::task::Poll::Ready(Ok(()))
+        ));
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn a_writer_that_cannot_start_is_not_kept_and_its_writes_are_not_owed() {
+        let mut ports = crate::Ports::for_tests();
+        ports.execution = std::sync::Arc::new(NoThreads);
+        let owner = crate::Runtime::new(ports);
+        owner.start_services();
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
+        assert!(owner.favorite_writer.with(|w| w.borrow().is_none()));
         assert!(owner.drain_services());
     }
 }

@@ -69,7 +69,7 @@ pub use crate::imports::{Job, Purpose, Update};
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     combined::reset_single(owner);
     library::reset_imports(owner);
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let startup = crate::commands::startup_library(owner);
     owner.spawn({
         let owner = owner.clone();
@@ -180,6 +180,15 @@ fn start_import_with(
             let owner = owner.clone();
             async move {
                 let services = owner.services();
+                let opens_stored = job.purpose.shows_stored_first() && job.stored.is_some();
+                if !services.has_workers() && !opens_stored {
+                    // A new import runs on blocking workers, which this host
+                    // has none of; nothing is read for it.
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Unavailable,
+                    ))));
+                    return;
+                }
                 let authorization = owner.parental_snapshot();
                 let admission = job.clone();
                 let auth = authorization.clone();
@@ -199,6 +208,14 @@ fn start_import_with(
                     return;
                 }
                 if cancel.is_canceled() {
+                    return;
+                }
+                if !services.has_workers() {
+                    // Imports run on blocking workers, which this host has
+                    // none of: not a passing condition to retry.
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Unavailable,
+                    ))));
                     return;
                 }
                 let failed = tx.clone();
@@ -468,7 +485,7 @@ async fn show_part(
     }
     stored::note_shown(owner, Some(imported.source));
     let channels = imported.channels.len();
-    let started = std::time::Instant::now();
+    let started = crate::time::Instant::now();
     let Imported {
         groups,
         channels: catalog,
@@ -806,6 +823,12 @@ async fn read_guide(
     };
     let (tx, mut rx) = unbounded_channel();
     let services = owner.services();
+    if !services.has_workers() {
+        // Guide reads run on blocking workers, which this host has none of:
+        // no check is owed and none is retried.
+        owner.end_guide_check(source);
+        return;
+    }
     let worker = services.clone();
     if !services.submit(source_is_visible(owner, source), move || {
         worker.block_on(guide_pipeline(&worker, source, &tx, read, &cancel));

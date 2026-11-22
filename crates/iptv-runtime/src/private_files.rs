@@ -194,7 +194,7 @@ fn write_unlocked(store: &Store, path: &Path, input: &mut impl Read) -> Result<(
     Ok(())
 }
 
-fn local_allowed(config: &iptv_net::NetConfig, request: &HttpRequest) -> bool {
+fn local_allowed(config: &crate::network::NetworkConfig, request: &HttpRequest) -> bool {
     #[cfg(debug_assertions)]
     let fixture = config.allow_private_fixture;
     #[cfg(not(debug_assertions))]
@@ -204,7 +204,7 @@ fn local_allowed(config: &iptv_net::NetConfig, request: &HttpRequest) -> bool {
 
 #[derive(Clone)]
 pub(crate) struct Client {
-    net: iptv_net::NetClient,
+    net: crate::network::Client,
     /// The owner whose private documents and network settings this reads.
     services: super::store_service::Services,
 }
@@ -212,7 +212,7 @@ impl Client {
     /// A client with the owner's network settings of now.
     pub(crate) fn new(services: &super::store_service::Services) -> Result<Self, FetchError> {
         Ok(Self {
-            net: iptv_net::NetClient::new(super::settings::net_config(&services.settings()))?,
+            net: services.network_client()?,
             services: services.clone(),
         })
     }
@@ -224,12 +224,13 @@ impl Client {
         &self,
         request: HttpRequest,
     ) -> Result<StreamingResponse<Body>, FetchError> {
-        let deadline = tokio::time::Instant::now()
+        let deadline = crate::time::Instant::now()
             + request
                 .timeout
                 .unwrap_or(self.net.config().request_timeout)
                 .min(self.net.config().request_timeout);
-        tokio::time::timeout_at(deadline, self.fetch_stream_inner(request, deadline))
+        self.services
+            .timeout_at(deadline, self.fetch_stream_inner(request, deadline))
             .await
             .map_err(|_| {
                 FetchError::new(FetchErrorKind::Deadline, "total document deadline exceeded")
@@ -238,7 +239,7 @@ impl Client {
     async fn fetch_stream_inner(
         &self,
         mut request: HttpRequest,
-        deadline: tokio::time::Instant,
+        deadline: crate::time::Instant,
     ) -> Result<StreamingResponse<Body>, FetchError> {
         let path = iptv_providers::content_url::local_path(&request.url).map_err(|_| failure())?;
         if let Some(path) = path {
@@ -272,11 +273,12 @@ impl Client {
                         reader: Some(reader),
                         remaining,
                         deadline,
+                        services: self.services.clone(),
                     },
                 });
             }
         }
-        request.timeout = Some(deadline.saturating_duration_since(tokio::time::Instant::now()));
+        request.timeout = Some(deadline.saturating_duration_since(crate::time::Instant::now()));
         let response = self.net.fetch_stream(request).await?;
         Ok(StreamingResponse {
             status: response.status,
@@ -300,11 +302,13 @@ impl Client {
     }
 }
 pub(crate) enum Body {
-    Network(iptv_net::NetBody),
+    Network(crate::network::Body),
     Private {
         reader: Option<PrivateFileReader>,
         remaining: u64,
-        deadline: tokio::time::Instant,
+        deadline: crate::time::Instant,
+        /// Reads run on the owner's blocking side, within its timer.
+        services: super::store_service::Services,
     },
 }
 impl BodyStream for Body {
@@ -315,26 +319,31 @@ impl BodyStream for Body {
                 reader,
                 remaining,
                 deadline,
+                services,
             } => {
                 let Some(mut owned) = reader.take() else {
                     return Ok(None);
                 };
-                let (owned, result) = tokio::time::timeout_at(
-                    *deadline,
-                    tokio::task::spawn_blocking(move || {
-                        let mut bytes = vec![0; 64 * 1024];
-                        let result = owned.read(&mut bytes).map(|count| {
-                            bytes.truncate(count);
-                            (count > 0).then_some(bytes)
-                        });
-                        (owned, result)
-                    }),
-                )
-                .await
-                .map_err(|_| {
-                    FetchError::new(FetchErrorKind::Deadline, "total document deadline exceeded")
-                })?
-                .map_err(|_| failure())?;
+                let (owned, result) = services
+                    .timeout_at(
+                        *deadline,
+                        services.spawn_blocking(move || {
+                            let mut bytes = vec![0; 64 * 1024];
+                            let result = owned.read(&mut bytes).map(|count| {
+                                bytes.truncate(count);
+                                (count > 0).then_some(bytes)
+                            });
+                            (owned, result)
+                        }),
+                    )
+                    .await
+                    .map_err(|_| {
+                        FetchError::new(
+                            FetchErrorKind::Deadline,
+                            "total document deadline exceeded",
+                        )
+                    })?
+                    .map_err(|_| failure())?;
                 let chunk = result.map_err(|_| failure())?;
                 if let Some(bytes) = &chunk {
                     *remaining = remaining.checked_sub(bytes.len() as u64).ok_or_else(|| {
@@ -441,7 +450,7 @@ mod tests {
 
     #[test]
     fn local_documents_require_explicit_pick_and_never_content_provenance() {
-        let config = iptv_net::NetConfig::default();
+        let config = crate::network::NetworkConfig::default();
         let mut request = HttpRequest::get("file:/synthetic/private.m3u");
         assert!(!local_allowed(&config, &request));
         request.picked_file = true;
@@ -450,7 +459,7 @@ mod tests {
         assert!(!local_allowed(&config, &request));
         request.public_only = false;
         assert!(!local_allowed(
-            &iptv_net::NetConfig {
+            &crate::network::NetworkConfig {
                 allow_files: false,
                 ..config
             },

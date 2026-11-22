@@ -74,10 +74,13 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_start(
         if !directory.is_absolute() {
             return None;
         }
-        let mut ports = crate::runtime::Ports::new(directory, crate::credential_key::database_key);
+        let mut ports = crate::runtime::Ports::new(
+            directory,
+            crate::host::native::credential_key::database_key,
+        );
         ports.background_recordings = true;
         ports.recording_schedule = schedule;
-        ports.exclude_from_backup = crate::platform_data::exclude_from_backup;
+        ports.exclude_from_backup = crate::host::native::platform_data::exclude_from_backup;
         crate::runtime::recordings::host::start_background_host(ports).ok()?;
         Some(1)
     }));

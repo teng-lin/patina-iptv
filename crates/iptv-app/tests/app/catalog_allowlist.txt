@@ -61,9 +61,9 @@ iptv-runtime/src/data/pages.rs	guide page read failed
 iptv-guide/src/playback.rs	ResolutionAuthority
 iptv-guide/src/playback.rs	SourceAuthority
 # Explicit synthetic profile injection diagnostics, absent from production builds.
-iptv-app/src/platform_data.rs	test storage was already installed or resolved
-iptv-app/src/platform_data.rs	test storage directory must be absolute
-iptv-app/src/platform_data.rs	synthetic database key was not installed
+iptv-app/src/host/native/platform_data.rs	test storage was already installed or resolved
+iptv-app/src/host/native/platform_data.rs	test storage directory must be absolute
+iptv-app/src/host/native/platform_data.rs	synthetic database key was not installed
 # Persisted locale token; shown by the picker as the translated System language label.
 iptv-settings/src/catalog/general.rs	system
 # CLDR territory codes used to choose the automatic clock.
@@ -81,6 +81,7 @@ iptv-core/src/guide.rs	Channel {}
 iptv-core/src/guide.rs	Group {:02}
 iptv-core/src/guide.rs	Show {}
 # HTTP header names.
+iptv-runtime/src/network.rs	User-Agent
 iptv-runtime/src/settings.rs	User-Agent
 iptv-runtime/src/recordings/shared.rs	User-Agent
 iptv-guide/src/playback.rs	Referer
@@ -128,31 +129,32 @@ iptv-runtime/src/file_writer.rs	written, but not synced ({kind})
 iptv-runtime/src/settings.rs	Could not save settings ({kind})
 iptv-runtime/src/settings.rs	Settings updated, but saving safely could not be confirmed ({kind})
 # Reasons and marks kept for the log, and messages for the platform.
-iptv-app/src/android_transport.rs	Playback transport unavailable
-iptv-app/src/credential_key.rs	cannot inspect existing database
-iptv-app/src/credential_key.rs	cannot lock the credential broker
-iptv-app/src/credential_key.rs	database key is missing from the platform credential broker
-iptv-app/src/credential_key.rs	no platform credential broker for this target
-iptv-app/src/credential_key.rs	platform credential broker could not be opened
-iptv-app/src/credential_key.rs	platform credential broker could not save the database key
-iptv-app/src/credential_key.rs	platform credential broker is locked or unavailable
-iptv-app/src/credential_key.rs	platform database key has an invalid encoding
-iptv-app/src/credential_key.rs	platform database key has an invalid length
-iptv-app/src/credential_key.rs	secure random generator failed
-iptv-app/src/credential_key.rs	synthetic database key was not installed
-iptv-app/src/credential_key/android.rs	Android Keystore is unavailable
-iptv-app/src/credential_key/linux.rs	Patina catalog key
+iptv-app/src/host/native/android_transport.rs	Playback transport unavailable
+iptv-app/src/host/native/credential_key.rs	cannot inspect existing database
+iptv-app/src/host/native/credential_key.rs	cannot lock the credential broker
+iptv-app/src/host/native/credential_key.rs	database key is missing from the platform credential broker
+iptv-app/src/host/native/credential_key.rs	no platform credential broker for this target
+iptv-app/src/host/native/credential_key.rs	platform credential broker could not be opened
+iptv-app/src/host/native/credential_key.rs	platform credential broker could not save the database key
+iptv-app/src/host/native/credential_key.rs	platform credential broker is locked or unavailable
+iptv-app/src/host/native/credential_key.rs	platform database key has an invalid encoding
+iptv-app/src/host/native/credential_key.rs	platform database key has an invalid length
+iptv-app/src/host/native/credential_key.rs	secure random generator failed
+iptv-app/src/host/native/credential_key.rs	synthetic database key was not installed
+iptv-app/src/host/native/credential_key/android.rs	Android Keystore is unavailable
+iptv-app/src/host/native/credential_key/linux.rs	Patina catalog key
+iptv-app/src/host/web.rs	this device has no key store
 # Startup logs the cause and shows the localized generic storage notice.
-iptv-app/src/platform_data.rs	Android host has not initialized private storage
-iptv-app/src/platform_data.rs	App data base must be an absolute directory; refusing temporary storage
+iptv-app/src/host/native/platform_data.rs	Android host has not initialized private storage
+iptv-app/src/host/native/platform_data.rs	App data base must be an absolute directory; refusing temporary storage
 iptv-runtime/src/storage.rs	App storage contains a reparse point
 iptv-runtime/src/storage.rs	App storage contains a symbolic link
-iptv-app/src/platform_data.rs	Could not exclude private storage from OS backup
-iptv-app/src/platform_data.rs	Expected absolute files directory
-iptv-app/src/platform_data.rs	Files directory changed in one process
-iptv-app/src/platform_data.rs	Library/Application Support/iptv-rs
-iptv-app/src/platform_data.rs	Patina
-iptv-app/src/platform_data.rs	Storage path is not UTF-8
+iptv-app/src/host/native/platform_data.rs	Could not exclude private storage from OS backup
+iptv-app/src/host/native/platform_data.rs	Expected absolute files directory
+iptv-app/src/host/native/platform_data.rs	Files directory changed in one process
+iptv-app/src/host/native/platform_data.rs	Library/Application Support/iptv-rs
+iptv-app/src/host/native/platform_data.rs	Patina
+iptv-app/src/host/native/platform_data.rs	Storage path is not UTF-8
 iptv-runtime/src/backup/error.rs	{} (library: {class})
 iptv-runtime/src/credential_store.rs	pending restore cannot be read
 iptv-runtime/src/favorites.rs	recent favorite edits are not saved
@@ -239,13 +241,13 @@ iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded
 iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
 
 # Native login integration: task/launch-agent identities and serialization.
-iptv-app/src/recording_host/startup.rs	\n$ErrorActionPreference = 'Stop'\ntry {\n    $scheduler = New-Object -ComObject 'Schedule.Service'\n    $scheduler.Connect()\n    $folder = $scheduler.GetFolder('\\')\n    try {\n        $folder.DeleteTask($env:PATINA_RECORDING_TASK, 0)\n    } catch {\n        $failure = $_.Exception\n        while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }\n        if ($failure.HResult -ne -2147024894) { throw }\n    }\n    exit 0\n} catch { exit 1 }\n
-iptv-app/src/recording_host/startup.rs	<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string><key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array><key>RunAtLoad</key><true/></dict></plist>
-iptv-app/src/recording_host/startup.rs	Library/LaunchAgents/com.hantekllc.patina.recorder.plist
-iptv-app/src/recording_host/startup.rs	Patina Recorder
-iptv-app/src/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
-iptv-app/src/recording_host/windows.rs	Patina Recorder
-iptv-app/src/recording_host/windows.rs	Patina
+iptv-app/src/host/native/recording_host/startup.rs	\n$ErrorActionPreference = 'Stop'\ntry {\n    $scheduler = New-Object -ComObject 'Schedule.Service'\n    $scheduler.Connect()\n    $folder = $scheduler.GetFolder('\\')\n    try {\n        $folder.DeleteTask($env:PATINA_RECORDING_TASK, 0)\n    } catch {\n        $failure = $_.Exception\n        while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }\n        if ($failure.HResult -ne -2147024894) { throw }\n    }\n    exit 0\n} catch { exit 1 }\n
+iptv-app/src/host/native/recording_host/startup.rs	<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string><key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array><key>RunAtLoad</key><true/></dict></plist>
+iptv-app/src/host/native/recording_host/startup.rs	Library/LaunchAgents/com.hantekllc.patina.recorder.plist
+iptv-app/src/host/native/recording_host/startup.rs	Patina Recorder
+iptv-app/src/host/native/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
+iptv-app/src/host/native/recording_host/windows.rs	Patina Recorder
+iptv-app/src/host/native/recording_host/windows.rs	Patina
 # VOD native reasons are replaced with shell-owned translated messages; headers are wire names.
 iptv-runtime/src/vod.rs	On-demand content unavailable; refresh the playlist and try again
 iptv-runtime/src/vod.rs	Playlist changed
@@ -274,3 +276,13 @@ iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 6v6l4
 iptv-app/src/play_bar/icons.rs	<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy='17.5' r='1' fill='currentColor'/>
 iptv-app/src/play_bar/icons.rs	<path d='M4 12l5 5L20 6'/>
 iptv-app/src/play_bar/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
+# Execution and entropy port failures are diagnostics; operations report typed errors.
+iptv-runtime/src/execution.rs	the task ended without an output
+iptv-runtime/src/execution/cooperative.rs	a cooperative executor has no workers
+iptv-runtime/src/ports.rs	the host supplied no entropy
+iptv-runtime/src/inspection/probe.rs	staged probes need a native store
+# Byte-budget refusals become typed TooLarge failures; the text is for the log.
+iptv-app/src/host/web.rs	response exceeds its byte budget
+iptv-app/src/host/web.rs	total request time exceeded
+iptv-runtime/src/network.rs	declared body
+iptv-runtime/src/network.rs	{what} exceeds its byte budget

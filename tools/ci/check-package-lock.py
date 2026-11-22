@@ -28,8 +28,8 @@ def validate_source_identities(packaged, source):
 # Workspace binaries built in CI that are not packaged into NSH runners, and
 # transitive feature-unified deps only pulled in by those unpackaged members
 # (`iptv-tui` -> `nsh-platform-tui` -> `nsh-base` enables `time/local-offset`).
-# `iptv-web` is the Tizen host's WebAssembly core, built by hosts/tizen/build.sh.
-UNPACKAGED_MEMBERS = {"iptv-tui", "iptv-web"}
+# (`iptv-web` is in the runner lock: the shell's browser build depends on it.)
+UNPACKAGED_MEMBERS = {"iptv-tui"}
 UNPACKAGED_FEATURE_DEPS = {"num_threads"}
 
 

@@ -21,7 +21,7 @@ class Selection(unittest.TestCase):
         return changes.select("pull_request", list(paths))
 
     def test_android_only_rust_source_selects_the_compile_job(self):
-        for path in ("crates/iptv-app/src/android_transport.rs", "crates/iptv-core/src/guide/moves.rs",
+        for path in ("crates/iptv-app/src/host/native/android_transport.rs", "crates/iptv-core/src/guide/moves.rs",
                      "crates/iptv-store-sqlite/tests/it/main.rs"):
             with self.subTest(path=path):
                 self.assertEqual(self.pull_request(path), {"package": False, "compile": True})
@@ -147,7 +147,7 @@ class CommandLine(unittest.TestCase):
                                   check=True, capture_output=True, text=True).stdout.splitlines()
 
     def test_outputs_for_a_rust_only_pull_request(self):
-        self.assertEqual(self.run_script(["crates/iptv-app/src/android_transport.rs"]),
+        self.assertEqual(self.run_script(["crates/iptv-app/src/host/native/android_transport.rs"]),
                          ["package=false", "compile=true"])
 
     def test_outputs_for_an_android_host_pull_request(self):

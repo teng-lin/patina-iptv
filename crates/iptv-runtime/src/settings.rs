@@ -1,6 +1,6 @@
 //! Settings persistence and effective values, owned by the application runtime.
 use super::file_writer::WriteError;
-use iptv_net::NetConfig;
+use crate::network::NetworkConfig;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
 use std::path::{Path, PathBuf};
@@ -289,6 +289,12 @@ fn apply(
     }
     let revision = owner.settings_changed.get() + 1;
     owner.settings_changed.set(revision);
+    if !services.has_workers() {
+        // No file writer runs here (a browser host keeps its files through
+        // a port still to come): the settings apply for this session.
+        owner.note_session_only();
+        return Ok(());
+    }
     let saved = services
         .files()
         .write(path(services.directory()), json.into_bytes());
@@ -340,12 +346,11 @@ pub fn user_agent(settings: &Settings) -> Option<String> {
 }
 
 /// The part of the provider network configuration that no setting changes
-/// (trust anchors, limits, the development fixture override). Playback
-/// transport reads its trust anchors from it on player threads, which act
-/// for no owner.
-pub fn base_net_config() -> NetConfig {
+/// (limits, the development fixture override). Playback transport reads it
+/// on player threads, which act for no owner.
+pub fn base_network_config() -> NetworkConfig {
     #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-    let mut config = NetConfig::default();
+    let mut config = NetworkConfig::default();
     #[cfg(debug_assertions)]
     {
         config.allow_private_fixture =
@@ -354,15 +359,18 @@ pub fn base_net_config() -> NetConfig {
     config
 }
 
-/// The network settings of provider requests: [`base_net_config`] with
+/// The network settings of provider requests: [`base_network_config`] with
 /// `general.user_agent` for requests that do not name their own.
-pub fn net_config(settings: &Settings) -> NetConfig {
-    let mut config = base_net_config();
+pub fn network_config(settings: &Settings) -> NetworkConfig {
+    let mut config = base_network_config();
     if let Some(ua) = user_agent(settings) {
         config.user_agent = ua;
     }
     config
 }
+
+#[cfg(feature = "native")]
+pub use crate::native::network::{base_net_config, net_config};
 
 /// Adds `general.user_agent` to a stream's headers unless the stream
 /// names its own (a playlist's per-channel agent wins).
@@ -380,12 +388,18 @@ pub fn long_press_ms(settings: &Settings) -> u64 {
     u64::try_from(duration_ms(settings, keys::LONG_PRESS)).unwrap_or(0)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod persistence_tests {
     use super::*;
     /// What a restart reads, with no write queued.
     fn read_file(path: &Path) -> Settings {
-        super::read_file(&Default::default(), path).0
+        super::read_file(
+            &crate::file_writer::Files::new(std::sync::Arc::new(
+                crate::native::execution::NativeExecution,
+            )),
+            path,
+        )
+        .0
     }
     /// What the background writer does with a settings save.
     fn write_file(path: &Path, settings: &Settings) -> Result<(), WriteError> {
@@ -501,5 +515,43 @@ mod persistence_tests {
         assert_eq!(read_file(&dir), Settings::new());
         assert!(dir.exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod host_tests {
+    use super::*;
+
+    struct Unpolled;
+    impl crate::execution::CooperativeHost for Unpolled {
+        fn spawn(&self, _: crate::execution::Task) {}
+        fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
+            Box::pin(std::future::pending())
+        }
+        fn now(&self) -> std::time::Duration {
+            std::time::Duration::ZERO
+        }
+    }
+
+    #[test]
+    fn without_a_file_writer_settings_apply_for_the_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut ports = crate::Ports::for_tests();
+        ports.directory = directory.path().to_owned();
+        ports.execution = Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled)));
+        let owner = std::rc::Rc::new(crate::Runtime::new(ports));
+        owner.start_services();
+        owner.load_settings();
+        owner
+            .set_setting(
+                keys::USER_AGENT.as_str(),
+                Value::Text("SyntheticAgent/2".into()),
+            )
+            .unwrap();
+        assert_eq!(
+            owner.settings().text(keys::USER_AGENT, &Target::Global),
+            "SyntheticAgent/2"
+        );
+        assert!(!path(directory.path()).exists());
     }
 }

@@ -51,6 +51,7 @@ pub(super) async fn wait(
         phase,
         child,
     } = command;
+    let timer = services.clone();
     let task = services.spawn(async move {
         let mut reply = pin!(reply);
         let mut canceled = pin!(control.cancel.canceled());
@@ -64,7 +65,7 @@ pub(super) async fn wait(
             }
             Poll::Pending
         });
-        match tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), race).await {
+        match timer.timeout_at(deadline, race).await {
             Ok(Some(value)) => value.map_err(|_| {
                 if phase.load(Ordering::SeqCst) == 1 {
                     Error::CompletionUnknown {

@@ -57,6 +57,7 @@ pub fn failure(failure: ImportFailure) -> &'static str {
         FailureKind::Unsupported => tr("the server is not a service of this type"),
         FailureKind::Busy => tr("too many playlists are updating; try again shortly"),
         FailureKind::Canceled => tr("it was stopped"),
+        FailureKind::Unavailable => tr("this device cannot import playlists yet"),
     }
 }
 
@@ -415,6 +416,7 @@ mod tests {
             FailureKind::EmptyPlaylist,
             FailureKind::Unsupported,
             FailureKind::Canceled,
+            FailureKind::Unavailable,
         ]
         .into_iter()
         .map(|k| failure(ImportFailure::new(k)))
@@ -608,6 +610,7 @@ mod tests {
             FailureKind::Unsupported,
             FailureKind::Busy,
             FailureKind::Canceled,
+            FailureKind::Unavailable,
         ];
         let told = || -> Vec<&'static str> {
             let stored = stored.iter().map(|kind| stored_failure(*kind));

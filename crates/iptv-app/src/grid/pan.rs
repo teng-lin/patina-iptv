@@ -16,7 +16,7 @@
 //! tablet), the same unit as the program area's laid-out width, so
 //! `delta / ppm` follows the finger 1:1 and nothing is scaled twice.
 
-use std::time::Instant;
+use nsh_core::time::Instant;
 
 use iptv_core::guide::view_range;
 use iptv_core::timeline::{Band, MARGIN, SLOP, Timeline};

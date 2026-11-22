@@ -295,7 +295,7 @@ fn hint_lines() -> [&'static str; 4] {
             tr("Hold ◀  ·  groups      Search  ·  search"),
             tr("Hold OK  ·  menu"),
         ],
-        iptv_nav::Profile::Keyboard if cfg!(target_os = "macos") => [
+        iptv_nav::Profile::Keyboard if crate::host::MACOS => [
             tr("◀  ·  earlier programs, then groups"),
             tr("Tab  ·  groups      / or ⌘F  ·  search"),
             tr("Home  ·  now      Shift ◀ ▶  ·  hours      ⌘ ◀ ▶  ·  days"),

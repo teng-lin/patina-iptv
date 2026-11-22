@@ -606,3 +606,186 @@ fn a_redirect_may_not_downgrade_or_leave_public_addresses() {
     let view = last_view(&fake);
     assert_eq!(view["status"]["phase"], "failed", "{view}");
 }
+
+#[test]
+fn a_task_woken_by_a_later_task_of_the_same_poll_runs_in_that_poll() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let (send, receive) = futures_like::channel();
+    let done = Rc::new(std::cell::Cell::new(false));
+    let seen = done.clone();
+    crate::exec::spawn(async move {
+        receive.await;
+        seen.set(true);
+    });
+    crate::exec::spawn(async move { send.send() });
+    crate::exec::poll();
+    assert!(done.get(), "the waiting task ran once its reply arrived");
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+#[test]
+fn a_task_spawned_outside_a_poll_asks_the_host_for_one() {
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    crate::exec::poll();
+    let before = fake.timers.borrow().len();
+    crate::exec::spawn(async {});
+    assert_eq!(fake.timers.borrow().len(), before + 1);
+    crate::exec::poll();
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+/// A one-shot that registers its waker, as a real channel does.
+mod futures_like {
+    use std::cell::RefCell;
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll, Waker};
+
+    #[derive(Default)]
+    struct Shared {
+        sent: bool,
+        waker: Option<Waker>,
+    }
+    pub struct Sender(Rc<RefCell<Shared>>);
+    pub struct Receiver(Rc<RefCell<Shared>>);
+    pub fn channel() -> (Sender, Receiver) {
+        let shared = Rc::default();
+        (Sender(Rc::clone(&shared)), Receiver(shared))
+    }
+    impl Sender {
+        pub fn send(self) {
+            let mut shared = self.0.borrow_mut();
+            shared.sent = true;
+            if let Some(waker) = shared.waker.take() {
+                waker.wake();
+            }
+        }
+    }
+    impl Future for Receiver {
+        type Output = ();
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+            let mut shared = self.0.borrow_mut();
+            if shared.sent {
+                Poll::Ready(())
+            } else {
+                shared.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        }
+    }
+}
+
+#[test]
+fn a_spawn_before_any_host_does_not_silence_later_wakes() {
+    // No host on this thread yet: nothing can be asked for.
+    crate::exec::spawn(async {});
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    crate::exec::spawn(async {});
+    assert_eq!(
+        fake.timers.borrow().len(),
+        1,
+        "the second spawn asks for a poll"
+    );
+    crate::exec::poll();
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}
+
+#[test]
+fn a_request_wakes_its_task_under_another_executor() {
+    use iptv_import::Fetch;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Wake, Waker};
+    struct Count(AtomicUsize);
+    impl Wake for Count {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let count = std::sync::Arc::new(Count(AtomicUsize::new(0)));
+    let waker = Waker::from(count.clone());
+    let mut cx = Context::from_waker(&waker);
+    let fetch = crate::exec::HostFetch::new();
+    let mut request = std::pin::pin!(fetch.fetch_stream(iptv_providers::HttpRequest::get(
+        "https://example.test/list.m3u"
+    )));
+    assert!(request.as_mut().poll(&mut cx).is_pending());
+    let id = fake.requests.borrow()[0].0;
+    crate::exec::deliver_status(id, 200, None);
+    assert_eq!(
+        count.0.load(Ordering::SeqCst),
+        1,
+        "the delivery woke the task"
+    );
+    assert!(request.as_mut().poll(&mut cx).is_ready());
+}
+
+#[test]
+fn a_chosen_address_may_not_redirect_to_a_private_origin() {
+    use iptv_import::Fetch;
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::exec::HostFetch::new();
+    let request = |url: &str| {
+        let fetch = fetch.clone();
+        let url = url.to_owned();
+        async move {
+            fetch
+                .fetch_stream(iptv_providers::HttpRequest::get(url))
+                .await
+        }
+    };
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    let mut elsewhere = std::pin::pin!(request("https://example.test/list.m3u"));
+    assert!(elsewhere.as_mut().poll(&mut cx).is_pending());
+    let id = fake.requests.borrow().last().unwrap().0;
+    crate::exec::deliver_redirect(id, "https://192.168.1.20/list.m3u");
+    match elsewhere.as_mut().poll(&mut cx) {
+        std::task::Poll::Ready(Err(error)) => {
+            assert_eq!(error.kind, iptv_import::FetchErrorKind::Redirect)
+        }
+        _ => panic!("a private origin after a redirect is refused"),
+    }
+    // A chosen LAN address keeps its own origin.
+    let mut home = std::pin::pin!(request("https://192.168.1.20/list.m3u"));
+    assert!(home.as_mut().poll(&mut cx).is_pending());
+    let id = fake.requests.borrow().last().unwrap().0;
+    crate::exec::deliver_redirect(id, "https://192.168.1.20/other.m3u");
+    crate::exec::deliver_status(id, 200, None);
+    assert!(matches!(
+        home.as_mut().poll(&mut cx),
+        std::task::Poll::Ready(Ok(_))
+    ));
+}
+
+#[test]
+fn a_delivery_asks_for_no_extra_poll() {
+    use iptv_import::Fetch;
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::exec::HostFetch::new();
+    crate::exec::spawn(async move {
+        let _ = fetch
+            .fetch_stream(iptv_providers::HttpRequest::get(
+                "https://example.test/list.m3u",
+            ))
+            .await;
+    });
+    crate::exec::poll();
+    let timers = fake.timers.borrow().len();
+    let id = fake.requests.borrow()[0].0;
+    // As an export does: deliver, then poll.
+    crate::exec::deliver_status(id, 200, None);
+    crate::exec::poll();
+    assert_eq!(
+        fake.timers.borrow().len(),
+        timers,
+        "the export's own poll suffices"
+    );
+    assert_eq!(crate::exec::pending_tasks(), 0);
+}

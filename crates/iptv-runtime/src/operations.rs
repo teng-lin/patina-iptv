@@ -74,6 +74,10 @@ impl Runtime {
     /// Holds this owner's storage for the life of the process. Call before
     /// settings, restore activation or any storage worker starts.
     pub fn lock_storage(&self) -> Result<(), crate::backup::error::Error> {
+        if !self.services().ports().file_storage {
+            // One Worker owns a browser host's storage; there is no file to lock.
+            return Ok(());
+        }
         crate::backup::lock(self.data_dir())
     }
 
@@ -85,6 +89,10 @@ impl Runtime {
     ) -> impl FnOnce() -> Result<(), crate::backup::StartupError> + Send + 'static + use<> {
         let ports = self.services().ports().clone();
         move || {
+            if !ports.file_storage {
+                // No files, so no restore can be pending (backups need them).
+                return Ok(());
+            }
             if crate::backup::is_pending(&ports.directory)
                 && !crate::recordings::host::stop_background_host(&ports.directory)
             {
@@ -104,18 +112,43 @@ impl Runtime {
     /// the client.
     pub fn link_client(
         &self,
-        config: iptv_net::NetConfig,
-    ) -> impl Future<Output = Result<iptv_net::NetClient, iptv_net::FetchError>> + Send + use<>
-    {
+        config: crate::network::NetworkConfig,
+    ) -> impl Future<Output = Result<crate::network::Client, iptv_import::FetchError>>
+    + crate::MaybeSend
+    + use<> {
         crate::playback::link_client(self, config)
+    }
+
+    /// Tells the user, once per owner, that changes last for the session:
+    /// this host has no writer to save them.
+    pub(crate) fn note_session_only(&self) {
+        if !self.session_only_noted.replace(true) {
+            self.emit(crate::RuntimeEvent::Notify(
+                "Changes are not saved on this device: they last until you show another playlist or close Patina.",
+            ));
+        }
+    }
+
+    /// The host has blocking workers: imports, guide downloads, staged
+    /// probes, backups and the file and favorites writers need them. A
+    /// cooperative browser host has none, and its shell offers none of
+    /// those services.
+    pub fn has_workers(&self) -> bool {
+        self.services().has_workers()
+    }
+
+    /// This owner's network port (artwork makes its own client with its own
+    /// limits, off the UI thread).
+    pub fn network(&self) -> std::sync::Arc<dyn crate::network::Network> {
+        self.services().ports().network.clone()
     }
 
     /// Runs `future` on this owner's network runtime (link resolves,
     /// artwork); await the handle for its output.
-    pub fn spawn_network<F>(&self, future: F) -> tokio::task::JoinHandle<F::Output>
+    pub fn spawn_network<F>(&self, future: F) -> crate::execution::Join<F::Output>
     where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
+        F: Future + crate::MaybeSend + 'static,
+        F::Output: crate::MaybeSend + 'static,
     {
         self.services().spawn(future)
     }

@@ -32,7 +32,9 @@ license = "AGPL-3.0-only"
 publish = false
 
 [workspace.dependencies]
-iptv-runtime = { path = "crates/iptv-runtime" }
+# Members that run natively enable its `native` feature (the shell does so
+# per target); a browser build leaves it off.
+iptv-runtime = { path = "crates/iptv-runtime", default-features = false }
 iptv-library = { path = "crates/iptv-library" }
 iptv-player-mpv = { path = "crates/iptv-player-mpv" }
 iptv-core = { path = "crates/iptv-core" }

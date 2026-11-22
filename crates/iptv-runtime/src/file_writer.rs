@@ -1,6 +1,8 @@
 //! The app's small files (settings, each playlist's last channel) are
-//! written by one background thread, never on the UI thread: a zap or a
-//! settings change only queues the new content.
+//! written by one background worker of the execution port, never on the UI
+//! thread: a zap or a settings change only queues the new content. A host
+//! without workers (a cooperative browser executor) has no file writer:
+//! writes answer that nothing was published.
 //!
 //! - **Latest wins.** A file with a write still queued takes the newer
 //!   content in its place; the older one is never written. Every caller
@@ -15,12 +17,13 @@
 //!
 //! Logs name neither paths nor content.
 
+use crate::time::Instant;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use futures_channel::oneshot;
 
@@ -72,12 +75,20 @@ struct Writer {
     pause: Mutex<Option<Arc<crate::testing::GateState>>>,
 }
 
-#[derive(Default)]
 pub(crate) struct Files {
     closed: std::sync::atomic::AtomicBool,
     writer: OnceLock<Arc<Writer>>,
+    execution: Arc<dyn crate::execution::Execution>,
 }
 impl Files {
+    pub(crate) fn new(execution: Arc<dyn crate::execution::Execution>) -> Self {
+        Self {
+            closed: Default::default(),
+            writer: OnceLock::new(),
+            execution,
+        }
+    }
+
     fn writer(&self) -> Arc<Writer> {
         let writer = self
             .writer
@@ -90,10 +101,14 @@ impl Files {
                     pause: Mutex::default(),
                 });
                 let work = writer.clone();
-                std::thread::Builder::new()
-                    .name("iptv-files".into())
-                    .spawn(move || run(&work))
-                    .expect("start the file writer");
+                if let Err(error) = self
+                    .execution
+                    .worker("iptv-files".into(), Box::new(move || run(&work)))
+                {
+                    // Every write answers that nothing was published.
+                    log::error!("iptv files: cannot start the file writer: {error}");
+                    lock(&writer).closed = true;
+                }
                 writer
             })
             .clone();
@@ -333,7 +348,7 @@ fn temporary(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
 
@@ -347,7 +362,7 @@ mod tests {
     #[test]
     fn the_latest_content_wins_and_reads_see_it_before_the_disk() {
         let dir = tempfile::tempdir().unwrap();
-        let files = Files::default();
+        let files = Files::new(Arc::new(crate::native::execution::NativeExecution));
         let path = dir.path().join("nested").join("last_channel-1");
         let first = files.write(path.clone(), b"synthetic:1".to_vec());
         let second = files.write(path.clone(), b"synthetic:2".to_vec());
@@ -375,7 +390,7 @@ mod tests {
     #[test]
     fn a_failed_write_keeps_the_previous_file() {
         let dir = tempfile::tempdir().unwrap();
-        let files = Files::default();
+        let files = Files::new(Arc::new(crate::native::execution::NativeExecution));
         let path = dir.path().join("settings.json");
         assert_eq!(block_on(files.write(path.clone(), b"{}".to_vec())), Ok(()));
         // A directory where the temporary file goes: nothing is published.
@@ -406,7 +421,7 @@ mod tests {
     #[test]
     fn many_queued_writes_flush_in_order_per_file() {
         let dir = tempfile::tempdir().unwrap();
-        let files = Files::default();
+        let files = Files::new(Arc::new(crate::native::execution::NativeExecution));
         for round in 0..50 {
             for file in 0..4 {
                 drop(files.write(
