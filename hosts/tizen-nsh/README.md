@@ -32,7 +32,7 @@ TV in Developer Mode.
 ```sh
 hosts/tizen-nsh/build.sh --stage                                  # target/tizen-nsh/stage
 TIZEN_SIGNING_PROFILE='<profile>' hosts/tizen-nsh/build.sh --install <tv-ip>:26101
-NSH_OPT=z hosts/tizen-nsh/build.sh --stage                        # another opt-level
+NSH_OPT=3 NSH_SIZE=0 hosts/tizen-nsh/build.sh --stage             # the ladder's first row
 ```
 
 Every build uses the `tizen` profile (release, opt-level z: fat LTO, one

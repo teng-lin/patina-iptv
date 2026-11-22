@@ -276,5 +276,17 @@
     NshTizenWorker.onInstance(function (exports, e) {
         ex = exports;
         engine = e;
+        /* The module's memory, current and peak, for DevTools on the page
+         * (`diag.memory`): the Worker's heap is not visible there. */
+        var peak = 0;
+        setInterval(function () {
+            var bytes = ex.memory.buffer.byteLength;
+            if (bytes <= peak) return;
+            peak = bytes;
+            withDb(function () {
+                if (!db) return;
+                try { db.transaction('kv', 'readwrite').objectStore('kv').put({ at: Date.now(), peak: peak }, 'diag.memory'); } catch (err) { /* optional */ }
+            });
+        }, 2000);
     });
 })();

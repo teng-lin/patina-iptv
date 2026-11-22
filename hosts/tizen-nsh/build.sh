@@ -15,6 +15,8 @@
 #                       which runs by default when wasm-opt is on PATH
 #   NSH_SIZE=0          build without the size flags below (for comparisons)
 #   NSH_UNSTRIPPED=1    keep the names section (for twiggy; never installed)
+#   NSH_INFO_LOGS=1     forward the app's info logs to the page (development only)
+#   NSH_PACKAGE_VERSION a higher package version, to reinstall over a development install
 #   NSH_STD_FEATURES    -Zbuild-std-features for the rebuilt std
 #   NSH_RUSTFLAGS       more rustc flags
 #
@@ -79,6 +81,9 @@ mkdir -p "$stage"
 "$runtime/bundle.sh" "$stage"
 rm -f "$stage/nsh-bench.js" "$stage/nsh-engine.js"
 cp "$here"/app/{index.html,page.css,patina-host.js,patina-worker.js} "$stage/"
+if [[ -n "${NSH_INFO_LOGS:-}" ]]; then
+    cat "$here/app/patina-info-logs.js" >>"$stage/patina-worker.js"
+fi
 cp "$root/art/icon/play-512.png" "$stage/icon.png"
 cp "$module" "$stage/app.wasm"
 if [[ "${NSH_WASM_OPT:-1}" != 0 ]]; then
@@ -92,6 +97,9 @@ if [[ "${NSH_WASM_OPT:-1}" != 0 ]]; then
     fi
 fi
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
+# The TV refuses a package over the same version; a development build can
+# name a higher one to keep the installed app's data.
+version="${NSH_PACKAGE_VERSION:-$version}"
 sed -e "s/__VERSION__/$version/" -e "s/__APP_ID__/$app_id/" -e "s/__PACKAGE__/${app_id%%.*}/" \
     "$here/app/config.xml" >"$stage/config.xml"
 # The module's SHA-256 keys the compiled-module cache: an update never
