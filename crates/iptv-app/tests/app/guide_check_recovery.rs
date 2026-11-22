@@ -187,27 +187,28 @@ impl Scenario {
                 ImageData::new(channels().into_bytes()),
             )]
         });
-        step(app.wait_for("text:No playlists yet"));
-        step(app.press("text:Add playlist"));
-        step(app.wait_for("text:Playlist file"));
+        step(app.wait_for("id:wizard-welcome"));
+        step(app.press("id:wizard-welcome-add"));
         match &playlist {
             Some(playlist) => {
                 let placeholder = "text:http://…/playlist.m3u";
-                step(app.press("text:Playlist link"));
                 step(app.wait_for(placeholder));
                 step(app.press(placeholder));
                 enter_text(&mut app, &playlist.link);
+                step(app.press("id:wizard-options"));
                 step(app.press("text:Optional: how the playlist is listed"));
                 enter_text(&mut app, "first");
             }
             None => {
+                step(app.press("id:wizard-source-type"));
                 step(app.press("text:Playlist file"));
                 step(app.wait_for("text:Choose a file…"));
                 step(app.press("text:Choose a file…"));
                 step(app.wait_for("text:first.m3u"));
+                step(app.press("id:wizard-options"));
             }
         }
-        step(app.press("text:Guide link"));
+        step(app.press("id:wizard-field-EpgUrl"));
         enter_text(&mut app, &server.link);
         step(app.press("text:Add playlist"));
         step(app.wait_for_within("text:Playlist added", IMPORT));
@@ -294,7 +295,6 @@ impl Scenario {
         step(self.app.press("text:+ Add playlist >> nth=1"));
         let placeholder = "text:http://…/playlist.m3u";
         step(self.app.wait_for("text:Playlist link"));
-        step(self.app.press("text:Playlist link"));
         step(self.app.wait_for(placeholder));
         step(self.app.press(placeholder));
         enter_text(&mut self.app, link);
@@ -487,7 +487,6 @@ fn a_failed_add_keeps_the_guide_timer_of_the_playlist_on_screen() {
     step(s.app.press("text:+ Add playlist >> nth=1"));
     let placeholder = "text:http://…/playlist.m3u";
     step(s.app.wait_for("text:Playlist link"));
-    step(s.app.press("text:Playlist link"));
     step(s.app.wait_for(placeholder));
     step(s.app.press(placeholder));
     enter_text(&mut s.app, &second.link);

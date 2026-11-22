@@ -115,7 +115,7 @@ fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseu
         .unwrap();
     let mut fixture = crate::personalization::start(home, settings, true);
     let app = &mut fixture.app;
-    let wizard = format!("text:{}", t(pseudo, "Xtream Codes login"));
+    let wizard = format!("id:wizard-form >> text:{}", t(pseudo, "Source type"));
     resize(app, WINDOW);
     // Movies by pointer. Left puts the remote on the rail, which stays
     // narrow; a wider window keeps the rail, now beside the categories;

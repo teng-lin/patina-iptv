@@ -20,6 +20,7 @@ pub mod i18n;
 pub mod import_limits;
 pub mod interruption;
 pub mod layout;
+pub mod library_recovery;
 pub mod lists;
 pub mod live;
 pub mod membership;

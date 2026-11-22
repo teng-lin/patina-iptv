@@ -271,23 +271,22 @@ shot 01-first-run
 
 step "add the synthetic playlist"
 mark
-# Add playlist, the first-run screen's only button. A slow emulator can
-# still miss the first keys while the screen settles; pressing again is
-# harmless there.
+# Add a playlist has initial focus on welcome. A slow emulator may
+# still miss the first OK while the screen settles.
 for attempt in 1 2 3 4; do
-  keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+  keys KEYCODE_DPAD_CENTER
   for _ in $(seq 1 10); do
-    applog | grep -E 'key=ok .*ctx=Menu' >/dev/null && break 2
+    applog | grep -E 'key=ok .*ctx=Editor' >/dev/null && break 2
     pause 0.5
   done
   echo "  no response to Add playlist (attempt $attempt)"
 done
-expect 'key=ok .*ctx=Menu' 10
-pause 2
-keys KEYCODE_DPAD_CENTER                            # Playlist link (prefilled)
+expect 'key=ok .*ctx=Editor' 10
 pause 2
 shot 02-playlist-link
 mark
+# The development link is prefilled and focused. Move through Paste and
+# the optional details control to Add playlist.
 keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 expect 'iptv wizard: import' 10
 expect 'iptv data: guide switched to [0-9]+ imported channels' 180

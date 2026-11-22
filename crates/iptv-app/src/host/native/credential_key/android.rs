@@ -13,7 +13,7 @@ static KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
 pub(super) fn database_key() -> Result<DatabaseKey, Error> {
     KEY.get()
         .map(|key| DatabaseKey::from_bytes(**key))
-        .ok_or(Error::unavailable("Android Keystore is unavailable"))
+        .ok_or(Error::restart_required("Android Keystore is unavailable"))
 }
 
 // SAFETY: Android calls this symbol using the matching static JNI declaration;

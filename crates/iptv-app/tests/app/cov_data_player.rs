@@ -411,8 +411,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         )]
     });
 
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));

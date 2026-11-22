@@ -115,8 +115,9 @@ fn native_pip_reports_revoke_and_restore_controls_without_reopening_playback() {
             ImageData::new(PLAYLIST.as_bytes().to_vec()),
         )]
     });
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.press("text:Playlist file"));
     step(app.press("text:Choose a file…"));
     step(app.wait_for("text:synthetic.m3u"));
@@ -197,8 +198,9 @@ fn picture_in_picture_opens_a_window_of_its_own_on_the_same_player() {
         )]
     });
 
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));

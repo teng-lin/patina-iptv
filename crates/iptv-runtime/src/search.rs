@@ -70,6 +70,10 @@ impl crate::Runtime {
     pub fn search_history(&self) -> Vec<String> {
         self.search.history.borrow().clone().unwrap_or_default()
     }
+    /// An empty saved history is distinct from one that could not be loaded.
+    pub fn search_history_loaded(&self) -> bool {
+        self.search.history.borrow().is_some()
+    }
     pub fn clear_loaded_search_history(&self) {
         *self.search.history.borrow_mut() = None;
     }

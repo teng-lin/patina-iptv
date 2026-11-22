@@ -241,11 +241,15 @@ fn load_history() -> SearchHistory {
 /// then deleted). A screen opened before the answer started empty and is
 /// given them unless a search was made meanwhile.
 pub(crate) fn load_saved_history(ui: Ui) {
+    crate::data::spawn_in_app(refresh_saved_history(ui));
+}
+
+pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
     let revision = ui.search_history_revision.get_untracked();
     crate::runtime().clear_loaded_search_history();
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
     let loaded = crate::runtime::commands::load_search_history(&crate::runtime(), legacy);
-    crate::data::spawn_in_app(async move {
+    async move {
         let list = match loaded.await {
             Ok(list) => list,
             Err(error) => {
@@ -267,7 +271,7 @@ pub(crate) fn load_saved_history(ui: Ui) {
             });
         }
         crate::runtime().install_search_history(list);
-    });
+    }
 }
 
 /// Clears saved searches immediately and invalidates pending startup loads.
@@ -293,6 +297,12 @@ pub(crate) fn clear_history(ui: Ui) {
 }
 
 fn save_history(ui: Ui) {
+    let owner = crate::runtime();
+    // An initial or recovery read can fail independently of later writes.
+    // Keep the saved entries if the screen could not load them.
+    if !owner.search_history_loaded() {
+        return;
+    }
     let Some(session) = ui
         .search
         .with_untracked(|s| s.as_ref().map(|s| s.state.history().clone()))
@@ -301,11 +311,11 @@ fn save_history(ui: Ui) {
     };
     let shown = options(&crate::settings::get()).show_history;
     let list = to_save(shown, load_history(), &session);
-    if crate::runtime().search_history_matches(&list) {
+    if owner.search_history_matches(&list) {
         return;
     }
-    crate::runtime().install_search_history(list.clone());
-    let saved = crate::runtime::commands::save_search_history(&crate::runtime(), list);
+    owner.install_search_history(list.clone());
+    let saved = crate::runtime::commands::save_search_history(&owner, list);
     crate::data::spawn_in_app(async move {
         if let Err(error) = saved.await {
             log::warn!("iptv search: could not save the recent searches: {error}");

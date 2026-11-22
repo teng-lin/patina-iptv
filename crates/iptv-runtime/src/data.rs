@@ -67,6 +67,15 @@ use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, now_unix
 pub use crate::imports::{Job, Purpose, Update};
 
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
+    start_library(owner, false);
+}
+
+/// Retry the startup library read after a user has addressed a storage failure.
+pub fn retry_startup(owner: &std::rc::Rc<crate::Runtime>) {
+    start_library(owner, true);
+}
+
+fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
     combined::reset_single(owner);
     library::reset_imports(owner);
     let started = crate::time::Instant::now();
@@ -75,7 +84,23 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     owner.spawn({
         let owner = owner.clone();
         async move {
-            let startup = startup.await;
+            let startup = match startup.await {
+                Ok(snapshot) if recovering => {
+                    async {
+                        // The startup writer and the parental reader have separate
+                        // backoffs. Prepare the reader before resuming library work.
+                        services.read_at_startup(|_| Ok(())).await?;
+                        owner.parental_refresh().await.map_err(|_| {
+                            crate::Error::unavailable(iptv_core::i18n::key(
+                                "Parental settings are unavailable",
+                            ))
+                        })?;
+                        Ok(snapshot)
+                    }
+                    .await
+                }
+                result => result,
+            };
             if !services.is_current() {
                 return;
             }
@@ -94,6 +119,9 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                     "store opened",
                     format_args!("{} ms", started.elapsed().as_millis()),
                 );
+                if recovering {
+                    owner.emit(crate::RuntimeEvent::StoreStartupRecovered);
+                }
             }
             match startup {
                 Ok((_, true, _)) => combined::start(&owner),

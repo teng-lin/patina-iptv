@@ -27,7 +27,6 @@ iptv-core/src/wizard.rs	Failed
 iptv-core/src/wizard.rs	FilePicked
 iptv-core/src/wizard.rs	Ok
 iptv-core/src/wizard.rs	Paste
-iptv-core/src/wizard.rs	PasteInto
 iptv-core/src/wizard.rs	Progress
 iptv-core/src/wizard.rs	SetField
 iptv-core/src/wizard.rs	Succeeded
@@ -91,6 +90,7 @@ iptv-app/src/grid/channel.rs	data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 11v6'/><circle fill='currentColor' stroke='none' cx='12' cy='7.5' r='1.3'/>
 iptv-app/src/play_bar/icons.rs	<circle fill='currentColor' stroke='none' cx='5' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='12' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='19' cy='12' r='2'/>
 iptv-app/src/play_bar/icons.rs	<path d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
+iptv-app/src/play_bar/icons.rs	<path d='M3 4h18v5H3zM5 9v11h14V9m-9 5h4'/>
 iptv-app/src/play_bar/icons.rs	<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/>
 iptv-app/src/play_bar/icons.rs	<path d='M6 6l12 12M18 6L6 18'/>
 iptv-app/src/play_bar/icons.rs	<path d='M8 6.5h13M8 12h13M8 17.5h13'/><circle fill='currentColor' stroke='none' cx='4' cy='6.5' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='12' r='1.3'/><circle fill='currentColor' stroke='none' cx='4' cy='17.5' r='1.3'/>

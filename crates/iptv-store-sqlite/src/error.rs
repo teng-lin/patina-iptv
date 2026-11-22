@@ -13,6 +13,8 @@ use crate::SourceId;
 pub enum StoreError {
     /// The service or platform key broker is unavailable; contains no secrets.
     Unavailable(&'static str),
+    /// The host must initialize storage again before the library can be opened.
+    RestartRequired(&'static str),
     /// SQLite failed (I/O, constraint, busy, corrupt file).
     Sqlite(rusqlite::Error),
     /// Applying a numbered migration failed; the database stays at the
@@ -46,6 +48,36 @@ impl StoreError {
                 | rusqlite::ErrorCode::SystemIoFailure))
     }
 
+    /// An unavailable key or device may recover after the user acts.
+    pub fn retryable_open(&self) -> bool {
+        match self {
+            Self::Unavailable(reason) => !matches!(
+                *reason,
+                "SQLCipher is not available"
+                    | "database path is not UTF-8"
+                    | "could not initialize database encryption"
+                    | "refusing plaintext database in place of encrypted installation"
+                    | "store worker stopped"
+                    | "request belongs to a closed application"
+            ),
+            Self::Sqlite(error) | Self::Migration { source: error, .. } => matches!(
+                error,
+                rusqlite::Error::SqliteFailure(error, _)
+                    if matches!(
+                        error.code,
+                        rusqlite::ErrorCode::CannotOpen
+                            | rusqlite::ErrorCode::PermissionDenied
+                            | rusqlite::ErrorCode::ReadOnly
+                            | rusqlite::ErrorCode::DatabaseBusy
+                            | rusqlite::ErrorCode::DatabaseLocked
+                            | rusqlite::ErrorCode::DiskFull
+                            | rusqlite::ErrorCode::SystemIoFailure
+                    )
+            ),
+            _ => false,
+        }
+    }
+
     /// The bytes could not be interpreted as a database with the supplied key.
     /// I/O, locking and schema errors deliberately do not match this class.
     pub fn is_not_database(&self) -> bool {
@@ -57,7 +89,9 @@ impl StoreError {
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unavailable(reason) => write!(f, "store unavailable: {reason}"),
+            Self::Unavailable(reason) | Self::RestartRequired(reason) => {
+                write!(f, "store unavailable: {reason}")
+            }
             Self::Sqlite(err) => write!(f, "database error: {err}"),
             Self::Migration { version, source } => {
                 write!(f, "schema migration {version} failed: {source}")

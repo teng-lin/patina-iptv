@@ -96,6 +96,64 @@ fn a_retired_startup_does_not_report_to_a_restarted_owner() {
 }
 
 #[test]
+fn startup_retry_reopens_the_reader_and_loads_parental_controls_before_reporting_success() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let directory = tempfile::tempdir().unwrap();
+        let key_ready = Arc::new(AtomicBool::new(false));
+        let broker = key_ready.clone();
+        let owner = Rc::new(Runtime::new(Ports::new(
+            directory.path().to_owned(),
+            move |_| {
+                if broker.load(Ordering::SeqCst) {
+                    Ok(iptv_runtime::model::DatabaseKey::from_bytes([0x63; 32]))
+                } else {
+                    Err(iptv_runtime::Error::unavailable(
+                        "synthetic key is unavailable",
+                    ))
+                }
+            },
+        )));
+        owner.bind_tasks(
+            |task| drop(tokio::task::spawn_local(task)),
+            |duration| Box::pin(tokio::time::sleep(duration)),
+        );
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let observer = Rc::downgrade(&owner);
+        owner.bind(move |event| match event {
+            RuntimeEvent::StoreStartupFailed { .. } => sender.send("failed").unwrap(),
+            RuntimeEvent::StoreStartupRecovered => {
+                assert!(observer.upgrade().unwrap().parental_is_ready());
+                sender.send("recovered").unwrap();
+            }
+            RuntimeEvent::FirstRun => sender.send("welcome").unwrap(),
+            _ => {}
+        });
+        owner.start_services();
+        assert!(owner.parental_refresh().await.is_err());
+        iptv_runtime::data::start(&owner);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            assert_eq!(events.recv().await, Some("failed"));
+            key_ready.store(true, Ordering::SeqCst);
+            iptv_runtime::data::retry_startup(&owner);
+            assert_eq!(events.recv().await, Some("recovered"));
+            assert_eq!(events.recv().await, Some("welcome"));
+        })
+        .await
+        .unwrap();
+        assert!(owner.drain_services());
+    });
+}
+
+#[test]
 fn newer_schema_and_unavailable_store_are_reported_at_startup_and_block_import() {
     use iptv_core::wizard::{FailureKind, ImportFailure};
     use iptv_runtime::data::{self, Job, Purpose, Update};

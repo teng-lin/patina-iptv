@@ -6,25 +6,16 @@
 //! clipboard, start or cancel an import, close the wizard). Nothing here
 //! does I/O or reads a clock.
 //!
-//! Flow, as observed in the reference UX's playlist setup, onboarding and
-//! dialog lifecycle (acceptance criteria AC01, AC02, AC11, AC13):
+//! First run opens on welcome with an add action and, where supported, a
+//! restore action. The form starts with the M3U link source and offers a
+//! source picker for other formats.
 //!
-//! ```text
-//! Empty ──OK──▶ ChooseType ──OK──▶ Form ──Submit──▶ Processing ──▶ Succeeded
-//!   ▲   ◀─Back─            ◀─Back─      ◀─Cancel/Back─    │
-//!   │                                   ◀─recoverable─────┤
-//!   │                      ◀─Back/OK── Failed ◀─unsupported┘
-//! ```
-//!
-//! - The empty state is the shell's explanation that the app brings no
-//!   content of its own, with one action: add a playlist (AC01).
 //! - A recoverable failure returns to the form with the chosen type and
 //!   every entered value kept, focus on the field most likely at fault
 //!   (AC02). Provider failures are typed so they never look like an empty
 //!   playlist (AC11).
-//! - Every Back lands on a defined focus target: the form returns to the
-//!   type list on the chosen type, the type list to the empty state's add
-//!   action (AC13).
+//! - Back from the source picker returns to the form's source control.
+//!   Back from the form returns to welcome or closes the settings wizard.
 //! - Submitting while an import runs does nothing; results for a canceled
 //!   or superseded import are ignored by [`ImportId`].
 //!
@@ -493,13 +484,13 @@ impl ImportFailure {
     }
 }
 
-/// Where the wizard was opened from: decides where Back from the type list
+/// Where the wizard was opened from: decides where Back from the form
 /// goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Origin {
     /// No playlists yet: the empty state is the root.
     FirstRun,
-    /// "Add playlist" from settings: Back from the type list closes.
+    /// "Add playlist" from settings: Back from the form closes.
     Settings,
 }
 
@@ -508,7 +499,7 @@ pub enum Origin {
 pub enum Step {
     Empty,
     ChooseType {
-        focus: PlaylistKind,
+        focus: Target,
     },
     Form,
     /// The form is locked; Back or [`WizardEvent::Cancel`] stops it.
@@ -531,9 +522,14 @@ pub enum Step {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     AddPlaylist,
+    RestoreBackup,
+    SourceType,
     Kind(PlaylistKind),
     Field(Field),
+    PastePlaylistLink,
+    OptionalDetails,
     Submit,
+    Back,
     CancelImport,
     Done,
     ChooseAnotherType,
@@ -543,6 +539,8 @@ pub enum Target {
 pub enum WizardEvent {
     Up,
     Down,
+    Left,
+    Right,
     Ok,
     Back,
     /// Touch: focus this control and activate it.
@@ -554,8 +552,6 @@ pub enum WizardEvent {
     },
     /// Paste into the focused field.
     Paste,
-    /// Touch: the paste button beside `field`.
-    PasteInto(Field),
     /// The clipboard read requested by [`WizardEffect::ReadClipboard`].
     ClipboardText {
         field: Field,
@@ -584,6 +580,8 @@ impl std::fmt::Debug for WizardEvent {
         match self {
             Self::Up => f.write_str("Up"),
             Self::Down => f.write_str("Down"),
+            Self::Left => f.write_str(stringify!(Left)),
+            Self::Right => f.write_str(stringify!(Right)),
             Self::Ok => f.write_str("Ok"),
             Self::Back => f.write_str("Back"),
             Self::Tap(target) => f.debug_tuple("Tap").field(target).finish(),
@@ -593,7 +591,6 @@ impl std::fmt::Debug for WizardEvent {
                 .field("value", &"[redacted]")
                 .finish(),
             Self::Paste => f.write_str("Paste"),
-            Self::PasteInto(field) => f.debug_tuple("PasteInto").field(field).finish(),
             Self::ClipboardText { field, .. } => f
                 .debug_struct("ClipboardText")
                 .field("field", field)
@@ -622,6 +619,8 @@ impl std::fmt::Debug for WizardEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WizardEffect {
+    /// Open a backup picker while leaving welcome mounted underneath.
+    RestoreBackup,
     /// Open text entry for `field`, prefilled with [`Wizard::value`];
     /// answer with [`WizardEvent::SetField`].
     EditField {
@@ -665,6 +664,9 @@ pub struct Wizard {
     step: Step,
     kind: PlaylistKind,
     values: FormValues,
+    restore_available: bool,
+    welcome_focus: Target,
+    optional_expanded: bool,
     /// The form's focus, kept while the type list or processing is shown.
     form_focus: Target,
     errors: BTreeMap<Field, FieldError>,
@@ -680,14 +682,15 @@ impl Wizard {
         Self::new(Origin::FirstRun, Step::Empty)
     }
 
-    /// From settings: start on the type list.
+    /// Enables the welcome screen's restore action for a capable host.
+    pub fn with_restore(mut self, available: bool) -> Self {
+        self.restore_available = available;
+        self
+    }
+
+    /// From settings: start on the M3U link form.
     pub fn add_playlist() -> Self {
-        Self::new(
-            Origin::Settings,
-            Step::ChooseType {
-                focus: PlaylistKind::M3uUrl,
-            },
-        )
+        Self::new(Origin::Settings, Step::Form)
     }
 
     fn new(origin: Origin, step: Step) -> Self {
@@ -696,7 +699,10 @@ impl Wizard {
             step,
             kind: PlaylistKind::M3uUrl,
             values: FormValues::default(),
-            form_focus: Target::Field(PlaylistKind::M3uUrl.fields()[0]),
+            restore_available: false,
+            welcome_focus: Target::AddPlaylist,
+            optional_expanded: false,
+            form_focus: Target::SourceType,
             errors: BTreeMap::new(),
             failure: None,
             notice: None,
@@ -715,6 +721,14 @@ impl Wizard {
     /// The chosen (or last chosen) type.
     pub fn kind(&self) -> PlaylistKind {
         self.kind
+    }
+
+    pub fn can_restore(&self) -> bool {
+        self.restore_available
+    }
+
+    pub fn optional_expanded(&self) -> bool {
+        self.optional_expanded
     }
 
     pub fn value(&self, field: Field) -> &str {
@@ -741,8 +755,8 @@ impl Wizard {
     /// accident) and once closed.
     pub fn focus(&self) -> Option<Target> {
         match self.step {
-            Step::Empty => Some(Target::AddPlaylist),
-            Step::ChooseType { focus } => Some(Target::Kind(focus)),
+            Step::Empty => Some(self.welcome_focus),
+            Step::ChooseType { focus } => Some(focus),
             Step::Form => Some(self.form_focus),
             Step::Succeeded { .. } => Some(Target::Done),
             Step::Failed { .. } => Some(Target::ChooseAnotherType),
@@ -768,7 +782,7 @@ impl Wizard {
                 WizardEvent::Ok
                 | WizardEvent::Back
                 | WizardEvent::Tap(Target::ChooseAnotherType) => {
-                    self.step = Step::ChooseType { focus: self.kind };
+                    self.open_source_picker();
                     None
                 }
                 _ => None,
@@ -779,48 +793,83 @@ impl Wizard {
 
     fn on_empty(&mut self, event: WizardEvent) -> Option<WizardEffect> {
         match event {
-            WizardEvent::Ok | WizardEvent::Tap(Target::AddPlaylist) => {
-                self.step = Step::ChooseType { focus: self.kind };
+            WizardEvent::Back => self.close(),
+            WizardEvent::Up => {
+                self.welcome_focus = Target::AddPlaylist;
                 None
             }
-            WizardEvent::Back => self.close(),
+            WizardEvent::Down if self.restore_available => {
+                self.welcome_focus = Target::RestoreBackup;
+                None
+            }
+            WizardEvent::Ok => self.activate_welcome(self.welcome_focus),
+            WizardEvent::Tap(target) => self.activate_welcome(target),
             _ => None,
         }
     }
 
-    fn on_choose_type(&mut self, focus: PlaylistKind, event: WizardEvent) -> Option<WizardEffect> {
-        let at = PlaylistKind::ALL.iter().position(|k| *k == focus)?;
-        match event {
-            WizardEvent::Up => {
-                self.step = Step::ChooseType {
-                    focus: PlaylistKind::ALL[at.saturating_sub(1)],
-                };
+    fn activate_welcome(&mut self, target: Target) -> Option<WizardEffect> {
+        match target {
+            Target::AddPlaylist => {
+                self.form_focus = Target::SourceType;
+                self.step = Step::Form;
+                None
             }
-            WizardEvent::Down => {
-                self.step = Step::ChooseType {
-                    focus: PlaylistKind::ALL[(at + 1).min(PlaylistKind::ALL.len() - 1)],
-                };
+            Target::RestoreBackup if self.restore_available => {
+                self.welcome_focus = target;
+                Some(WizardEffect::RestoreBackup)
             }
-            WizardEvent::Ok => self.choose(focus),
-            WizardEvent::Tap(Target::Kind(kind)) => self.choose(kind),
-            WizardEvent::Back => match self.origin {
-                Origin::FirstRun => self.step = Step::Empty,
-                Origin::Settings => return self.close(),
-            },
+            _ => None,
+        }
+    }
+
+    fn open_source_picker(&mut self) {
+        self.form_focus = Target::SourceType;
+        self.step = Step::ChooseType {
+            focus: Target::Kind(self.kind),
+        };
+    }
+
+    fn on_choose_type(&mut self, focus: Target, event: WizardEvent) -> Option<WizardEffect> {
+        let target = match event {
+            WizardEvent::Up | WizardEvent::Down => {
+                let mut targets = PlaylistKind::ALL
+                    .map(Target::Kind)
+                    .into_iter()
+                    .chain([Target::Back]);
+                let at = targets.clone().position(|target| target == focus)?;
+                let next = if event == WizardEvent::Up {
+                    at.saturating_sub(1)
+                } else {
+                    at + 1
+                };
+                if let Some(focus) = targets.nth(next) {
+                    self.step = Step::ChooseType { focus };
+                }
+                return None;
+            }
+            WizardEvent::Ok => focus,
+            WizardEvent::Tap(target) => target,
+            WizardEvent::Back => Target::Back,
+            _ => return None,
+        };
+        match target {
+            Target::Kind(kind) => self.choose(kind),
+            Target::Back => self.step = Step::Form,
             _ => {}
         }
         None
     }
 
-    /// Opening the same type again restores the form's focus; another type
-    /// starts on its first field with no stale errors.
+    /// A source selection moves to its first field. Switching sources
+    /// keeps entered values and clears errors from the previous source.
     fn choose(&mut self, kind: PlaylistKind) {
         if kind != self.kind {
             self.kind = kind;
-            self.form_focus = Target::Field(kind.fields()[0]);
             self.errors.clear();
             self.failure = None;
         }
+        self.form_focus = Target::Field(kind.source_field());
         self.step = Step::Form;
     }
 
@@ -828,12 +877,20 @@ impl Wizard {
         match event {
             WizardEvent::Up => self.move_form_focus(-1),
             WizardEvent::Down => self.move_form_focus(1),
+            WizardEvent::Left => match self.form_focus {
+                Target::PastePlaylistLink => self.form_focus = Target::Field(Field::PlaylistUrl),
+                Target::Back => self.form_focus = Target::Submit,
+                _ => {}
+            },
+            WizardEvent::Right => match self.form_focus {
+                Target::Field(Field::PlaylistUrl) => self.form_focus = Target::PastePlaylistLink,
+                Target::Submit => self.form_focus = Target::Back,
+                _ => {}
+            },
             WizardEvent::Ok => return self.activate(self.form_focus),
-            WizardEvent::Tap(target @ (Target::Field(_) | Target::Submit)) => {
-                if self.in_form(target) {
-                    self.form_focus = target;
-                    return self.activate(target);
-                }
+            WizardEvent::Tap(target) if self.form_targets().any(|visible| visible == target) => {
+                self.form_focus = target;
+                return self.activate(target);
             }
             WizardEvent::SetField { field, value } => self.set_field(field, value),
             WizardEvent::Paste => {
@@ -841,7 +898,6 @@ impl Wizard {
                     return self.request_paste(field);
                 }
             }
-            WizardEvent::PasteInto(field) => return self.request_paste(field),
             WizardEvent::ClipboardText { field, text } => {
                 match text.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
                     Some(text) => {
@@ -852,37 +908,77 @@ impl Wizard {
                 }
             }
             WizardEvent::FilePicked(Some(path)) => self.set_field(Field::PlaylistFile, path),
-            WizardEvent::Back => self.step = Step::ChooseType { focus: self.kind },
+            WizardEvent::Back => return self.back_from_form(),
             _ => {}
         }
         None
     }
 
-    fn in_form(&self, target: Target) -> bool {
-        match target {
-            Target::Field(field) => self.kind.has_field(field),
-            Target::Submit => true,
-            _ => false,
-        }
+    fn form_targets(&self) -> impl Iterator<Item = Target> + use<> {
+        let optional_expanded = self.optional_expanded;
+        let fields = self.kind.fields().iter().copied();
+        std::iter::once(Target::SourceType)
+            .chain(
+                fields
+                    .clone()
+                    .filter(|field| field.is_required())
+                    .map(Target::Field),
+            )
+            .chain((self.kind == PlaylistKind::M3uUrl).then_some(Target::PastePlaylistLink))
+            .chain(std::iter::once(Target::OptionalDetails))
+            .chain(
+                fields
+                    .filter(move |field| optional_expanded && !field.is_required())
+                    .map(Target::Field),
+            )
+            .chain([Target::Submit, Target::Back])
     }
 
     fn move_form_focus(&mut self, step: isize) {
-        let fields = self.kind.fields();
-        let at = match self.form_focus {
-            Target::Field(f) => fields.iter().position(|x| *x == f).unwrap_or(0),
-            _ => fields.len(),
+        let Some(at) = self
+            .form_targets()
+            .position(|target| target == self.form_focus)
+        else {
+            return;
         };
-        let to = (at as isize + step).clamp(0, fields.len() as isize) as usize;
-        self.form_focus = fields.get(to).map_or(Target::Submit, |f| Target::Field(*f));
+        if let Some(target) = self.form_targets().nth(at.saturating_add_signed(step)) {
+            self.form_focus = target;
+        }
     }
 
     fn activate(&mut self, target: Target) -> Option<WizardEffect> {
         match target {
+            Target::SourceType => {
+                self.open_source_picker();
+                None
+            }
             Target::Field(Field::PlaylistFile) => Some(WizardEffect::PickFile),
             Target::Field(field) => Some(WizardEffect::EditField { field }),
+            Target::PastePlaylistLink => self.request_paste(Field::PlaylistUrl),
+            Target::OptionalDetails => {
+                self.optional_expanded = !self.optional_expanded;
+                None
+            }
             Target::Submit => self.submit(),
+            Target::Back => self.back_from_form(),
             _ => None,
         }
+    }
+
+    fn back_from_form(&mut self) -> Option<WizardEffect> {
+        match self.origin {
+            Origin::FirstRun => {
+                self.welcome_focus = Target::AddPlaylist;
+                self.step = Step::Empty;
+                None
+            }
+            Origin::Settings => self.close(),
+        }
+    }
+
+    fn focus_field(&mut self, field: Field) {
+        self.optional_expanded |= !field.is_required();
+        self.form_focus = Target::Field(field);
     }
 
     fn set_field(&mut self, field: Field, value: String) {
@@ -899,12 +995,12 @@ impl Wizard {
             }
         }
         self.values.set(field, value);
-        self.form_focus = Target::Field(field);
+        self.focus_field(field);
     }
 
     fn request_paste(&mut self, field: Field) -> Option<WizardEffect> {
         (self.kind.has_field(field) && field.accepts_paste()).then(|| {
-            self.form_focus = Target::Field(field);
+            self.focus_field(field);
             WizardEffect::ReadClipboard { field }
         })
     }
@@ -926,7 +1022,7 @@ impl Wizard {
             .iter()
             .find(|f| self.errors.contains_key(f))
         {
-            self.form_focus = Target::Field(*first);
+            self.focus_field(*first);
             return None;
         }
         let id = ImportId(self.next_id);
@@ -1003,12 +1099,12 @@ impl Wizard {
             self.step = Step::Failed { failure };
             return;
         }
-        self.form_focus = match (failure.field, failure.kind) {
-            (Some(field), _) if self.kind.has_field(field) => Target::Field(field),
-            (_, FailureKind::Canceled) => Target::Submit,
-            (_, FailureKind::Auth) => Target::Field(self.kind.auth_field()),
-            _ => Target::Field(self.kind.source_field()),
-        };
+        match (failure.field, failure.kind) {
+            (Some(field), _) if self.kind.has_field(field) => self.focus_field(field),
+            (_, FailureKind::Canceled) => self.form_focus = Target::Submit,
+            (_, FailureKind::Auth) => self.focus_field(self.kind.auth_field()),
+            _ => self.focus_field(self.kind.source_field()),
+        }
         self.step = Step::Form;
     }
 
@@ -1035,6 +1131,7 @@ mod tests {
     /// A wizard on `kind`'s form, every required field valid.
     fn filled(kind: PlaylistKind) -> Wizard {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Tap(Target::Kind(kind)));
         match kind {
             PlaylistKind::M3uUrl => set(&mut w, PlaylistUrl, "http://iptv.example.test/list.m3u"),
@@ -1064,26 +1161,39 @@ mod tests {
     // --- Navigation and focus restoration (AC01, AC13) ---
 
     #[test]
-    fn first_run_starts_on_the_empty_state_and_ok_opens_the_type_list() {
+    fn first_run_opens_the_default_form_from_welcome() {
         let mut w = Wizard::first_run();
         assert_eq!(w.step(), Step::Empty);
         assert_eq!(w.focus(), Some(Target::AddPlaylist));
         assert_eq!(w.handle(E::Up), None);
         assert_eq!(w.step(), Step::Empty);
         assert_eq!(w.handle(E::Ok), None);
-        assert_eq!(
-            w.step(),
-            Step::ChooseType {
-                focus: PlaylistKind::M3uUrl
-            }
-        );
+        assert_eq!(w.step(), Step::Form);
+        assert_eq!(w.kind(), PlaylistKind::M3uUrl);
+        assert_eq!(w.focus(), Some(Target::SourceType));
     }
 
     #[test]
-    fn tap_on_add_opens_the_type_list() {
+    fn restore_is_offered_only_on_hosts_with_the_capability() {
         let mut w = Wizard::first_run();
-        w.handle(E::Tap(Target::AddPlaylist));
-        assert_eq!(w.focus(), Some(Target::Kind(PlaylistKind::M3uUrl)));
+        assert_eq!(w.handle(E::Tap(Target::RestoreBackup)), None);
+        w.handle(E::Down);
+        assert_eq!(w.focus(), Some(Target::AddPlaylist));
+
+        let mut w = Wizard::first_run().with_restore(true);
+        w.handle(E::Down);
+        assert_eq!(w.focus(), Some(Target::RestoreBackup));
+        assert_eq!(w.handle(E::Ok), Some(WizardEffect::RestoreBackup));
+        assert_eq!(w.step(), Step::Empty);
+        assert_eq!(w.focus(), Some(Target::RestoreBackup));
+        w.handle(E::Up);
+        assert_eq!(
+            w.handle(E::Tap(Target::RestoreBackup)),
+            Some(WizardEffect::RestoreBackup)
+        );
+        assert_eq!(w.focus(), Some(Target::RestoreBackup));
+        assert_eq!(w.handle(E::Tap(Target::AddPlaylist)), None);
+        assert_eq!(w.focus(), Some(Target::SourceType));
     }
 
     #[test]
@@ -1098,20 +1208,27 @@ mod tests {
     }
 
     #[test]
-    fn back_from_the_type_list_returns_to_the_empty_state_on_first_run() {
+    fn back_from_picker_returns_to_source_type_then_to_welcome() {
         let mut w = Wizard::first_run();
         w.handle(E::Ok);
-        w.handle(E::Down);
+        w.handle(E::Ok);
+        for _ in PlaylistKind::ALL {
+            w.handle(E::Down);
+        }
+        assert_eq!(w.focus(), Some(Target::Back));
+        assert_eq!(w.handle(E::Ok), None);
+        assert_eq!(w.step(), Step::Form);
+        assert_eq!(w.focus(), Some(Target::SourceType));
         assert_eq!(w.handle(E::Back), None);
         assert_eq!(w.step(), Step::Empty);
         assert_eq!(w.focus(), Some(Target::AddPlaylist));
     }
 
     #[test]
-    fn settings_entry_starts_on_the_type_list_and_back_dismisses() {
+    fn settings_entry_starts_on_the_default_form_and_back_dismisses() {
         let mut w = Wizard::add_playlist();
         assert_eq!(w.origin(), Origin::Settings);
-        assert_eq!(w.focus(), Some(Target::Kind(PlaylistKind::M3uUrl)));
+        assert_eq!(w.focus(), Some(Target::SourceType));
         assert_eq!(
             w.handle(E::Back),
             Some(WizardEffect::Close(WizardExit::Dismissed))
@@ -1121,11 +1238,14 @@ mod tests {
     #[test]
     fn type_list_focus_moves_and_clamps() {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Ok);
         w.handle(E::Up);
         assert_eq!(w.focus(), Some(Target::Kind(PlaylistKind::M3uUrl)));
         for _ in 0..6 {
             w.handle(E::Down);
         }
+        assert_eq!(w.focus(), Some(Target::Back));
+        w.handle(E::Up);
         assert_eq!(w.focus(), Some(Target::Kind(PlaylistKind::Stalker)));
         w.handle(E::Up);
         assert_eq!(w.focus(), Some(Target::Kind(PlaylistKind::Xtream)));
@@ -1149,56 +1269,69 @@ mod tests {
         for (kind, fields) in expected {
             assert_eq!(kind.fields(), fields);
             let mut w = Wizard::add_playlist();
+            w.handle(E::Tap(Target::SourceType));
             w.handle(E::Tap(Target::Kind(kind)));
             assert_eq!(w.focus(), Some(Target::Field(fields[0])), "{kind:?}");
         }
     }
 
     #[test]
-    fn form_focus_walks_the_fields_then_submit_and_clamps() {
+    fn form_focus_includes_only_disclosed_fields() {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Tap(Target::Kind(PlaylistKind::Stalker)));
         w.handle(E::Up);
-        assert_eq!(w.focus(), Some(Target::Field(PortalUrl)));
-        let mut seen = vec![];
-        for _ in 0..6 {
+        assert_eq!(w.focus(), Some(Target::SourceType));
+        for target in [
+            Target::Field(PortalUrl),
+            Target::Field(Mac),
+            Target::OptionalDetails,
+        ] {
             w.handle(E::Down);
-            seen.push(w.focus().unwrap());
+            assert_eq!(w.focus(), Some(target));
         }
-        assert_eq!(
-            seen,
-            [
-                Target::Field(Mac),
-                Target::Field(Name),
-                Target::Field(EpgUrl),
-                Target::Submit,
-                Target::Submit,
-                Target::Submit
-            ]
-        );
+        assert!(!w.optional_expanded());
+        assert_eq!(w.handle(E::Tap(Target::Field(Name))), None);
+        w.handle(E::Down);
+        assert_eq!(w.focus(), Some(Target::Submit));
+
         w.handle(E::Up);
-        assert_eq!(w.focus(), Some(Target::Field(EpgUrl)));
+        w.handle(E::Ok);
+        assert!(w.optional_expanded());
+        for target in [
+            Target::Field(Name),
+            Target::Field(EpgUrl),
+            Target::Submit,
+            Target::Back,
+        ] {
+            w.handle(E::Down);
+            assert_eq!(w.focus(), Some(target));
+        }
+        w.handle(E::Down);
+        assert_eq!(w.focus(), Some(Target::Back));
+        w.handle(E::Left);
+        assert_eq!(w.focus(), Some(Target::Submit));
     }
 
     #[test]
-    fn back_from_the_form_focuses_the_chosen_type_and_reopening_restores_focus() {
+    fn choosing_the_same_source_keeps_entered_values() {
         let mut w = filled(PlaylistKind::Xtream);
-        w.handle(E::Tap(Target::Field(Password)));
-        assert_eq!(w.handle(E::Back), None);
+        w.handle(E::Tap(Target::SourceType));
         assert_eq!(w.focus(), Some(Target::Kind(PlaylistKind::Xtream)));
         w.handle(E::Ok);
-        assert_eq!(w.focus(), Some(Target::Field(Password)));
+        assert_eq!(w.focus(), Some(Target::Field(Server)));
         assert_eq!(w.value(Username), "synthetic-user");
     }
 
     #[test]
     fn another_type_starts_fresh_focus_and_errors_but_keeps_shared_values() {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Tap(Target::Kind(PlaylistKind::Xtream)));
         set(&mut w, Name, "Synthetic TV");
         submit(&mut w);
         assert!(w.error(Server).is_some());
-        w.handle(E::Back);
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Up);
         w.handle(E::Ok);
         assert_eq!(w.kind(), PlaylistKind::M3uFile);
@@ -1212,7 +1345,7 @@ mod tests {
     #[test]
     fn ok_on_a_text_field_requests_text_entry_and_set_field_fills_it() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Ok);
+        w.handle(E::Down);
         assert_eq!(
             w.handle(E::Ok),
             Some(WizardEffect::EditField { field: PlaylistUrl })
@@ -1224,13 +1357,13 @@ mod tests {
     #[test]
     fn set_field_moves_focus_there_and_ignores_foreign_fields() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Ok);
         set(&mut w, EpgUrl, "http://epg.example.test/guide.xml");
+        assert!(w.optional_expanded());
         assert_eq!(w.focus(), Some(Target::Field(EpgUrl)));
         set(&mut w, Password, "nope");
         assert_eq!(w.value(Password), "");
         assert_eq!(w.focus(), Some(Target::Field(EpgUrl)));
-        let mut fresh = Wizard::add_playlist();
+        let mut fresh = Wizard::first_run();
         set(&mut fresh, PlaylistUrl, "http://a.example.test");
         assert_eq!(fresh.value(PlaylistUrl), "", "not on the form yet");
     }
@@ -1238,6 +1371,7 @@ mod tests {
     #[test]
     fn the_file_field_opens_the_picker_and_a_dismissed_picker_changes_nothing() {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Tap(Target::Kind(PlaylistKind::M3uFile)));
         assert_eq!(w.handle(E::Ok), Some(WizardEffect::PickFile));
         w.handle(E::FilePicked(None));
@@ -1251,7 +1385,6 @@ mod tests {
     #[test]
     fn a_picked_file_outside_the_file_form_is_ignored() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Ok);
         w.handle(E::FilePicked(Some("/x.m3u".into())));
         assert_eq!(w.value(PlaylistFile), "");
     }
@@ -1259,7 +1392,7 @@ mod tests {
     #[test]
     fn paste_reads_the_clipboard_for_the_focused_field_and_trims() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Ok);
+        w.handle(E::Down);
         assert_eq!(
             w.handle(E::Paste),
             Some(WizardEffect::ReadClipboard { field: PlaylistUrl })
@@ -1273,21 +1406,30 @@ mod tests {
     }
 
     #[test]
-    fn paste_button_targets_its_own_field() {
+    fn explicit_paste_is_only_for_playlist_links() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Tap(Target::Kind(PlaylistKind::Stalker)));
+        w.handle(E::Down);
+        w.handle(E::Right);
+        assert_eq!(w.focus(), Some(Target::PastePlaylistLink));
         assert_eq!(
-            w.handle(E::PasteInto(Mac)),
+            w.handle(E::Ok),
+            Some(WizardEffect::ReadClipboard { field: PlaylistUrl })
+        );
+        assert_eq!(w.focus(), Some(Target::Field(PlaylistUrl)));
+
+        w.handle(E::Tap(Target::SourceType));
+        w.handle(E::Tap(Target::Kind(PlaylistKind::Stalker)));
+        assert_eq!(w.handle(E::Tap(Target::PastePlaylistLink)), None);
+        w.handle(E::Down);
+        assert_eq!(
+            w.handle(E::Paste),
             Some(WizardEffect::ReadClipboard { field: Mac })
         );
-        assert_eq!(w.focus(), Some(Target::Field(Mac)));
-        assert_eq!(w.handle(E::PasteInto(Password)), None, "not on this form");
     }
 
     #[test]
     fn an_empty_clipboard_leaves_the_value_and_shows_a_notice_once() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Ok);
         set(&mut w, PlaylistUrl, "http://kept.example.test");
         for text in [None, Some(" \n ".to_owned())] {
             w.handle(E::ClipboardText {
@@ -1304,8 +1446,7 @@ mod tests {
     #[test]
     fn paste_on_submit_does_nothing() {
         let mut w = Wizard::add_playlist();
-        w.handle(E::Ok);
-        for _ in 0..3 {
+        for _ in 0..4 {
             w.handle(E::Down);
         }
         assert_eq!(w.focus(), Some(Target::Submit));
@@ -1318,6 +1459,7 @@ mod tests {
     fn required_fields_per_type() {
         for kind in PlaylistKind::ALL {
             let mut w = Wizard::add_playlist();
+            w.handle(E::Tap(Target::SourceType));
             w.handle(E::Tap(Target::Kind(kind)));
             assert_eq!(submit(&mut w), None);
             for field in kind.fields() {
@@ -1424,7 +1566,10 @@ mod tests {
         );
         let mut w = filled(PlaylistKind::M3uUrl);
         set(&mut w, EpgUrl, "nonsense");
+        w.handle(E::Tap(Target::OptionalDetails));
+        assert!(!w.optional_expanded());
         assert_eq!(submit(&mut w), None);
+        assert!(w.optional_expanded());
         assert_eq!(w.error(EpgUrl), Some(FieldError::MissingScheme));
         assert_eq!(w.focus(), Some(Target::Field(EpgUrl)));
     }
@@ -1439,6 +1584,7 @@ mod tests {
     #[test]
     fn submit_with_errors_focuses_the_first_invalid_field() {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Tap(Target::Kind(PlaylistKind::Xtream)));
         set(&mut w, Server, "http://panel.example.test");
         set(&mut w, EpgUrl, "bad");
@@ -1453,6 +1599,7 @@ mod tests {
     #[test]
     fn editing_a_field_with_an_error_revalidates_it() {
         let mut w = Wizard::add_playlist();
+        w.handle(E::Tap(Target::SourceType));
         w.handle(E::Tap(Target::Kind(PlaylistKind::Stalker)));
         submit(&mut w);
         set(&mut w, Mac, "00:1A");

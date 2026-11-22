@@ -143,7 +143,7 @@ fn setup_block_remote_unlock_change_and_recovery() {
     wait(&mut app, "Enter parental PIN");
     digits(&mut app, "2468");
     continue_entry(&mut app);
-    step(app.wait_for("text:What did your provider give you?"));
+    step(app.wait_for("id:wizard-form"));
     step(app.back());
     step(app.press_key("enter"));
     wait(&mut app, "Enter parental PIN");

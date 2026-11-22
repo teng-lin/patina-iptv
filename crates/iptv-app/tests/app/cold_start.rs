@@ -123,8 +123,9 @@ fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
     // First run: the playlist is added; nothing plays.
     let mut first = app();
     first.answer_picks_myself();
-    step(first.wait_for("text:No playlists yet"));
-    step(first.press("text:Add playlist"));
+    step(first.wait_for("id:wizard-welcome"));
+    step(first.press("id:wizard-welcome-add"));
+    step(first.press("id:wizard-source-type"));
     step(first.wait_for("text:Playlist file"));
     step(first.press("text:Playlist file"));
     step(first.wait_for("text:Choose a file…"));
@@ -297,17 +298,26 @@ fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
 
     let mut app = app();
     app.wait_for("id:store-startup-failure").unwrap();
+    app.wait_for("text:Update Patina to open your library")
+        .unwrap();
+    assert!(!app.screen().matches("id:store-recovery-details").unwrap());
+    assert!(!app.screen().matches("id:store-recovery-retry").unwrap());
+    app.press_key("enter").unwrap();
     app.wait_for(&format!(
         "text:Database schema version {found} is newer than this build supports ({supported})."
     ))
     .unwrap();
     assert!(app.screen().shows(&path.to_string_lossy()));
-    app.wait_for("text:Upgrade Patina to open this library. To start over, close Patina and move the database file to a safe location.")
-        .unwrap();
+    app.wait_for(
+        "text:Install the same version you last used, or a newer one, then reopen Patina.",
+    )
+    .unwrap();
+    app.back().unwrap();
+    assert!(!app.screen().matches("id:store-recovery-details").unwrap());
     app.press_remote(nsh_tv::RemoteKey::Menu).unwrap();
     app.wait(Duration::from_secs(3)).unwrap();
     let screen = app.screen();
     assert!(screen.matches("id:store-startup-failure").unwrap());
-    assert!(!screen.shows("No playlists yet"));
-    assert!(!screen.shows("Choose playlist type"));
+    assert!(!screen.shows("Set up your library"));
+    assert!(!screen.matches("id:wizard-source-picker").unwrap());
 }

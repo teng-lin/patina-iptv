@@ -64,10 +64,8 @@ fn a_tablet_first_run_shows_whole_numbers_and_no_development_defaults() {
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
 
     // The playlist link starts empty: its placeholder, no address.
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
-    step(app.wait_for("text:Playlist link"));
-    step(app.press("text:Playlist link"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
     if option_env!("IPTV_RS_DEV_PLAYLIST").is_none() {
         step(app.wait_for("text:http://…/playlist.m3u"));
         let texts = app.screen().texts().join("\n");
@@ -76,8 +74,7 @@ fn a_tablet_first_run_shows_whole_numbers_and_no_development_defaults() {
             "no development address: {texts}"
         );
     }
-    step(app.back());
-
+    step(app.press("id:wizard-source-type"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
     step(app.press("text:Choose a file…"));

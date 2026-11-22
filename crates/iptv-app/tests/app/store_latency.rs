@@ -47,8 +47,9 @@ fn ten_thousand_channels(home: &crate::isolated::Home) -> Headless {
             ImageData::new(playlist.as_bytes().to_vec()),
         )]
     });
-    app.wait_for("text:No playlists yet").unwrap();
-    app.press("text:Add playlist").unwrap();
+    app.wait_for("id:wizard-welcome").unwrap();
+    app.press("id:wizard-welcome-add").unwrap();
+    app.press("id:wizard-source-type").unwrap();
     app.wait_for("text:Playlist file").unwrap();
     app.press("text:Playlist file").unwrap();
     app.wait_for("text:Choose a file…").unwrap();

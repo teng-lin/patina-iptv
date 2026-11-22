@@ -171,8 +171,9 @@ fn a_down_press_mounts_little_and_the_guide_draws_no_empty_cells_or_layers() {
         )]
     });
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
-    step(app.wait_for("text:No playlists yet"));
-    step(app.press("text:Add playlist"));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
