@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/iptv-core",
+    "crates/iptv-presentation",
     "crates/iptv-nav",
     "crates/iptv-settings",
     "crates/iptv-epg",
@@ -38,6 +39,7 @@ iptv-runtime = { path = "crates/iptv-runtime", default-features = false }
 iptv-library = { path = "crates/iptv-library" }
 iptv-player-mpv = { path = "crates/iptv-player-mpv" }
 iptv-core = { path = "crates/iptv-core" }
+iptv-presentation = { path = "crates/iptv-presentation" }
 iptv-nav = { path = "crates/iptv-nav" }
 iptv-settings = { path = "crates/iptv-settings" }
 iptv-epg = { path = "crates/iptv-epg" }

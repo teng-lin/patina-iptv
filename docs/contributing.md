@@ -143,7 +143,7 @@ selected fuzz lane as well as ordinary tests.
 The portable crates built by the full check are:
 
 <!-- portable-crates:start -->
-`iptv-core`, `iptv-nav`, `iptv-settings`, `iptv-epg`, `iptv-providers`,
+`iptv-core`, `iptv-presentation`, `iptv-nav`, `iptv-settings`, `iptv-epg`, `iptv-providers`,
 `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library`.
 <!-- portable-crates:end -->
 

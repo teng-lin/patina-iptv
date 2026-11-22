@@ -1,0 +1,20 @@
+[package]
+name = "iptv-presentation"
+description = "Platform-independent IPTV interaction state and localized display data."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+iptv-core.workspace = true
+iptv-epg.workspace = true
+iptv-providers.workspace = true
+iptv-library.workspace = true
+iptv-search.workspace = true
+iptv-settings.workspace = true
+zeroize = "1.8"
+
+[lints]
+workspace = true

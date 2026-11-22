@@ -2367,6 +2367,7 @@ dependencies = [
  "iptv-nav",
  "iptv-net",
  "iptv-player-mpv",
+ "iptv-presentation",
  "iptv-providers",
  "iptv-runtime",
  "iptv-search",
@@ -2500,6 +2501,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptv-presentation"
+version = "0.1.5"
+dependencies = [
+ "iptv-core",
+ "iptv-epg",
+ "iptv-library",
+ "iptv-providers",
+ "iptv-search",
+ "iptv-settings",
+ "zeroize",
+]
+
+[[package]]
 name = "iptv-providers"
 version = "0.1.5"
 dependencies = [
@@ -2622,6 +2636,7 @@ dependencies = [
  "iptv-guide",
  "iptv-import",
  "iptv-nav",
+ "iptv-presentation",
  "iptv-providers",
  "iptv-search",
  "log",

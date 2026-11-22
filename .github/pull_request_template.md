@@ -6,7 +6,7 @@
 
 - [ ] **Synthetic data only:** Confirmed that tests, fixtures, docs, logs, screenshots, and commit messages contain only synthetic/mock data. No real provider URLs, names, channel lists, or credentials.
 - [ ] **Checks pass:** Ran `tools/check.sh` locally (formats, Clippy without warnings, deny, library tests, wasm builds, app tests, and CI test parity).
-- [ ] **Portable core:** Portable crates (`iptv-core`, `iptv-nav`, `iptv-settings`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library`) do not depend on NSH or platform APIs and build for `wasm32-unknown-unknown`.
+- [ ] **Portable core:** Portable crates (`iptv-core`, `iptv-presentation`, `iptv-nav`, `iptv-settings`, `iptv-providers`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-search`, `iptv-library`) do not depend on NSH or platform APIs and build for `wasm32-unknown-unknown`.
 - [ ] **Independent design:** No code, artwork, icons, fonts, layouts, or wording copied from reference APKs. The original Patina palette and UX design are preserved.
 
 ### Device verification (if applicable)
