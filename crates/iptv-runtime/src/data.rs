@@ -63,7 +63,7 @@ const MAX_WAIT: Duration = Duration::from_secs(6 * 3600);
 const MIN_WAIT: Duration = Duration::from_secs(60);
 
 use crate::GuideWork;
-use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, now_unix, run};
+use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, now_unix, pipeline};
 pub use crate::imports::{Job, Purpose, Update};
 
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
@@ -181,9 +181,9 @@ fn start_import_with(
             async move {
                 let services = owner.services();
                 let opens_stored = job.purpose.shows_stored_first() && job.stored.is_some();
-                if !services.has_workers() && !opens_stored {
-                    // A new import runs on blocking workers, which this host
-                    // has none of; nothing is read for it.
+                if !services.can_import() && !opens_stored {
+                    // A new import cannot run on this host; nothing is read
+                    // for it.
                     let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
                         FailureKind::Unavailable,
                     ))));
@@ -210,18 +210,17 @@ fn start_import_with(
                 if cancel.is_canceled() {
                     return;
                 }
-                if !services.has_workers() {
-                    // Imports run on blocking workers, which this host has
-                    // none of: not a passing condition to retry.
+                if !services.can_import() {
+                    // Imports cannot run on this host: not a passing
+                    // condition to retry.
                     let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
                         FailureKind::Unavailable,
                     ))));
                     return;
                 }
                 let failed = tx.clone();
-                let worker = services.clone();
-                if !services.submit(visible, move || {
-                    run(&worker, job, &tx, &cancel, &revoked, authorization)
+                if !services.submit_import(visible, move |worker| async move {
+                    pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
                 }) {
                     let _ = failed.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Busy))));
                 }
@@ -823,15 +822,14 @@ async fn read_guide(
     };
     let (tx, mut rx) = unbounded_channel();
     let services = owner.services();
-    if !services.has_workers() {
-        // Guide reads run on blocking workers, which this host has none of:
-        // no check is owed and none is retried.
+    if !services.can_import() {
+        // Guide reads cannot run on this host: no check is owed and none
+        // is retried.
         owner.end_guide_check(source);
         return;
     }
-    let worker = services.clone();
-    if !services.submit(source_is_visible(owner, source), move || {
-        worker.block_on(guide_pipeline(&worker, source, &tx, read, &cancel));
+    if !services.submit_import(source_is_visible(owner, source), move |worker| async move {
+        guide_pipeline(&worker, source, &tx, read, &cancel).await;
     }) {
         owner.end_guide_check(source);
         // What the caller asked for decides, not what running work reduced

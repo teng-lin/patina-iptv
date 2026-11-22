@@ -69,6 +69,10 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "paging.rs",
     "parental.rs",
     "private_files.rs",
+    // The sliced publish where the host keeps the store, and that host's
+    // port (opening, persistence, the publish copy).
+    "publish.rs",
+    "store_host.rs",
     "recordings.rs",
     "recordings/completion.rs",
     "recordings/shared.rs", // Owned transport preparation queues durable authority reads.

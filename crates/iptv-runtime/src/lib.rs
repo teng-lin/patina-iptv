@@ -759,6 +759,8 @@ pub mod settings;
 mod native;
 pub mod network;
 mod ports;
+mod publish;
+pub mod store_host;
 pub use ports::{MaybeSend, MaybeSync, Ports};
 pub mod storage;
 pub mod time;

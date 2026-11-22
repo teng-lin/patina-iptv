@@ -292,7 +292,7 @@ fn start_update(
                     drop(tx);
                     false
                 }
-                Ok(_) if !owner.services().has_workers() => {
+                Ok(_) if !owner.services().can_import() => {
                     // Downloads run on blocking workers, which this host has
                     // none of (the shell hides the command there); a caller
                     // that asks anyway hears why nothing happens.
@@ -305,9 +305,8 @@ fn start_update(
                 Ok(guides) => {
                     let visible = super::source_is_visible(&owner, source);
                     let services = owner.services();
-                    let worker = services.clone();
-                    let accepted = services.submit(visible, move || {
-                        worker.block_on(download_now(&worker, source, guides, &tx, &cancel));
+                    let accepted = services.submit_import(visible, move |worker| async move {
+                        download_now(&worker, source, guides, &tx, &cancel).await;
                     });
                     if !accepted {
                         owner.emit(crate::RuntimeEvent::Notify(

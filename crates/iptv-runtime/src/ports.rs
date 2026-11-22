@@ -62,6 +62,10 @@ pub struct Ports {
     /// restore is activated in it at startup. A browser host keeps its
     /// storage in one Worker and has neither, so it sets this false.
     pub file_storage: bool,
+    /// Opens and persists the store in place of the encrypted file in
+    /// `directory` (a browser's memory files), and publishes on a copy
+    /// in slices. `None` natively.
+    pub store_host: Option<Arc<dyn crate::store_host::StoreHost>>,
 }
 
 impl Ports {
@@ -107,6 +111,7 @@ impl Ports {
                 ))
             },
             file_storage: true,
+            store_host: None,
         }
     }
 

@@ -42,7 +42,7 @@ use iptv_store_sqlite::{Store, StoreError};
 /// What a lane's thread keeps between jobs: its connection, and when a
 /// failed open may be tried again.
 #[derive(Default)]
-struct Connection {
+pub(crate) struct Connection {
     store: Option<Store>,
     retry_open_at: Option<crate::time::Instant>,
 }
@@ -226,6 +226,13 @@ pub(crate) struct Service {
     settings: super::settings::Shared,
     /// The thread that started the services; it may not block on the store.
     ui_thread: OnceLock<ThreadId>,
+    /// This service, for work it queues on itself (a host's persistence).
+    me: OnceLock<std::sync::Weak<Service>>,
+    /// Imports and guide work where there are no workers (a cooperative
+    /// host) run one at a time: a blocking store request made by one
+    /// would otherwise step another's publish to its end inline.
+    #[cfg(not(feature = "native"))]
+    cooperative_imports: tokio::sync::Mutex<()>,
     #[cfg(feature = "test-support")]
     pub(crate) guide_checks: super::guide_checks::Mirror,
     #[cfg(feature = "test-support")]
@@ -258,6 +265,9 @@ impl Service {
             pool: OnceLock::new(),
             settings: Default::default(),
             ui_thread: OnceLock::new(),
+            me: OnceLock::new(),
+            #[cfg(not(feature = "native"))]
+            cooperative_imports: tokio::sync::Mutex::new(()),
             #[cfg(feature = "test-support")]
             guide_checks: Default::default(),
             #[cfg(feature = "test-support")]
@@ -280,6 +290,7 @@ impl Service {
     /// A handle for work accepted now. It stays bound to this owner and to
     /// the application epoch of this moment, on whichever thread it runs.
     pub(crate) fn accept(self: &Arc<Self>) -> Services {
+        let _ = self.me.set(Arc::downgrade(self));
         let closed = self.epochs.closed.lock().unwrap_or_else(|e| e.into_inner());
         Services {
             service: self.clone(),
@@ -307,6 +318,9 @@ impl Service {
     }
 
     fn open_store(&self) -> Result<Store, StoreError> {
+        if let Some(host) = &self.ports.store_host {
+            return host.open();
+        }
         let directory = self.directory();
         std::fs::create_dir_all(directory)
             .map_err(|_| StoreError::Unavailable("cannot create data directory"))?;
@@ -314,6 +328,11 @@ impl Service {
     }
 
     fn assert_off_ui_thread(&self, what: &str) {
+        // A cooperative host has one thread: its blocking requests run the
+        // lane's queue inline (`execution::Cooperative`).
+        if !self.ports.execution.has_workers() {
+            return;
+        }
         assert!(
             self.ui_thread.get() != Some(&std::thread::current().id()),
             "{what} on the UI thread"
@@ -414,6 +433,10 @@ fn stale() -> StoreError {
 }
 
 impl Services {
+    pub(crate) fn service(&self) -> &Arc<Service> {
+        &self.service
+    }
+
     #[cfg(feature = "native")]
     pub(crate) fn service_retire(&self) -> bool {
         let drained = self.service.drain_on_shutdown_with(|| {});
@@ -538,6 +561,49 @@ impl Services {
                     }
                 }),
             )
+    }
+
+    /// Imports and guide downloads can run here: on the refresh pool's
+    /// workers, or, on a host without workers whose store is its own
+    /// (a browser), as tasks one at a time whose publishes run in slices
+    /// (`publish.rs`).
+    pub(crate) fn can_import(&self) -> bool {
+        self.has_workers()
+            || (cfg!(not(feature = "native")) && self.service.ports.store_host.is_some())
+    }
+
+    /// Queues import or guide `work` ([`Self::can_import`]): natively on
+    /// the bounded pool, driven there to its end (false when the pool is
+    /// full); on a host without workers as a task, after the one running.
+    pub(crate) fn submit_import<F>(
+        &self,
+        visible: bool,
+        work: impl FnOnce(Services) -> F + Send + 'static,
+    ) -> bool
+    where
+        F: Future<Output = ()> + 'static,
+    {
+        if self.has_workers() {
+            let worker = self.clone();
+            return self.submit(visible, move || {
+                let services = worker.clone();
+                worker.block_on(work(services))
+            });
+        }
+        #[cfg(not(feature = "native"))]
+        if self.can_import() {
+            let accepted = self.clone();
+            drop(self.spawn(async move {
+                let service = accepted.service.clone();
+                let _turn = service.cooperative_imports.lock().await;
+                if accepted.is_current() {
+                    work(accepted).await;
+                }
+            }));
+            return true;
+        }
+        let _ = (visible, work);
+        false
     }
 
     #[cfg(feature = "test-support")]
@@ -731,6 +797,71 @@ impl Services {
 impl Service {
     /// A writer job: on the writer's thread, with its connection.
     fn write<R>(
+        &self,
+        epoch: u64,
+        connection: &mut Connection,
+        operation: impl FnOnce(&mut Store) -> Result<R, StoreError>,
+    ) -> Result<R, StoreError> {
+        let result = with_epoch(
+            &self.epochs,
+            epoch,
+            connection,
+            || self.open_store(),
+            operation,
+        );
+        if let Some(store) = &connection.store {
+            self.persist(store);
+        }
+        result
+    }
+
+    /// A host that keeps the store persists what the last writer job
+    /// committed (natively the file is the persistence: nothing to do).
+    pub(crate) fn persist(&self, store: &Store) {
+        let Some(host) = &self.ports.store_host else {
+            return;
+        };
+        let me = self.me.get().cloned().unwrap_or_default();
+        host.committed(
+            store,
+            Arc::new(move || {
+                if let Some(service) = me.upgrade() {
+                    service.queue_persist();
+                }
+            }),
+        );
+    }
+
+    /// Persists again on the writer, after what is queued there.
+    fn queue_persist(self: &Arc<Self>) {
+        let owner = self.clone();
+        let _ = self.writer.queue(Box::new(move |connection| {
+            if let Some(store) = &connection.store {
+                owner.persist(store);
+            }
+        }));
+    }
+
+    /// Queues a sliced job on the writer lane (a publish, `publish.rs`).
+    pub(crate) fn push_sliced(
+        &self,
+        job: Box<dyn crate::execution::Sliced>,
+    ) -> Result<(), StoreError> {
+        if self.writer.lane()?.push_sliced(job) {
+            Ok(())
+        } else {
+            Err(StoreError::Unavailable("store worker stopped"))
+        }
+    }
+
+    /// The writer's connection, which a sliced job takes for each step.
+    pub(crate) fn writer_connection(&self) -> Arc<Mutex<Connection>> {
+        self.writer.connection.clone()
+    }
+
+    /// Runs `operation` on `connection`'s store, opening it if needed, for
+    /// work accepted in `epoch` (a step of a sliced job).
+    pub(crate) fn with_writer_store<R>(
         &self,
         epoch: u64,
         connection: &mut Connection,
@@ -948,6 +1079,16 @@ fn with_store<R>(
 impl Default for Service {
     fn default() -> Self {
         Self::new(crate::Ports::for_tests())
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+impl Service {
+    /// A started owner on `ports` (tests of other modules).
+    pub(crate) fn started_for_tests(ports: crate::Ports) -> Arc<Self> {
+        let service = Arc::new(Self::new(ports));
+        service.epochs.begin();
+        service
     }
 }
 
