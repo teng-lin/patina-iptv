@@ -49,6 +49,11 @@ pub(crate) const MACOS: bool = on(Platform::Macos);
 /// The Windows desktop.
 pub(crate) const WINDOWS: bool = on(Platform::Windows);
 
+/// Keys come from a TV remote that reports each key's press and release
+/// (Android's, and a browser TV's through its NSH platform), not from a
+/// keyboard whose bindings NSH's keymap fires.
+pub(crate) const REMOTE_KEYS: bool = ANDROID || REMOTE_ONLY;
+
 /// The host's public entry points, re-exported at the crate root (a
 /// platform's native components).
 #[cfg(not(target_family = "wasm"))]

@@ -43,6 +43,9 @@ pub(crate) use recording_host::command as recording_command;
 /// (`Runtime::has_workers`).
 pub(crate) const HAS_WORKERS: bool = true;
 
+/// Native hosts with a remote say so by platform (`host::ANDROID`).
+pub(crate) const REMOTE_ONLY: bool = false;
+
 /// Imports and guide downloads run on the refresh pool's workers.
 pub(crate) const IMPORTS: bool = true;
 

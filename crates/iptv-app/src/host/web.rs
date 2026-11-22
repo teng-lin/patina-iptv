@@ -42,6 +42,11 @@ pub(crate) const PLATFORM: iptv_core::capabilities::Platform =
 /// (`Runtime::has_workers`): no imports, recording or backups yet.
 pub(crate) const HAS_WORKERS: bool = false;
 
+/// A browser TV is driven by its remote, whose keys arrive with their
+/// press and release (`input.rs`); its platform has no keyboard bindings
+/// (NSH's keymap mount item is not shown there).
+pub(crate) const REMOTE_ONLY: bool = true;
+
 /// Imports and guide downloads run here as cooperative tasks over the
 /// browser store's sliced publishes.
 pub(crate) const IMPORTS: bool = true;
