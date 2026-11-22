@@ -462,6 +462,36 @@ Findings:
   which the translations (`messages.tsv`, 0.66 MB), the banner (0.40 MB)
   and the three Roboto fonts (0.27 MB) are files.
 
+### With a real account (the default build, 8.9 MB)
+
+One Xtream account (7,257 live channels, a 248,000-program guide),
+entered through the app's own setup on the TV, development build
+(`NSH_INFO_LOGS=1`, the same module):
+
+| Step | Result | Gate |
+| --- | --- | --- |
+| Import to the channel list | 7,257 channels on screen about 13 s after submitting; no errors | |
+| Catalog publish | 111 steps, 2.3 s in steps, longest 665 ms | 50 ms: not met |
+| Guide download and publish | 247,813 programs stored about 82 s after the channels; 1,331 steps, 32.6 s in steps, longest 2,364 ms | 50 ms: not met |
+| Saves to IndexedDB | 301 chunks (the whole database after the guide's swap) in 8.0 s; 52 chunks in 5.0 s | |
+| Launch with the stored 23 MB | chunks read in 4.8 s (beside the module's load), store open 0.4 s, first paint 13–17 s | 8 s: not met |
+| Playback | a channel tuned by number: first frame 2.9 s after its source was set | |
+| Zap (CH+) | 0.7 s from the key to the new source, first frame 2.3 s after it | |
+| Key to frame on the guide | median about 148 ms (one move every 1.5 s); a move every 0.4 s queues and takes 0.3–2.9 s | 80 ms: not met |
+| Module memory | 61 MB at launch | |
+
+The app stopped twice while zapping, the second time on the third zap of
+a session. The platform recorded no fatal error and the page's DevTools
+went away, so the TV ended the app itself; memory (61 MB of module beside
+AVPlay) is the likely cause, not established. The TV also dropped off the
+network once during the first import. Memory during a guide refresh was
+not measured before that.
+
+The longest publish steps are the ends of a publish (taking the copy,
+then the swap with the writes that follow), not the 200-row slices: the
+average guide step is 25 ms. Splitting those ends is the next step for the
+50 ms gate.
+
 ## Not goals
 
 - Recording, backup files, picture in picture, or multiview on TVs with one
