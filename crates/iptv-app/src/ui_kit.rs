@@ -260,6 +260,11 @@ impl FocusScroll {
             })
     }
 
+    pub(crate) fn scroll_by(self, delta: f32) {
+        let offset = (self.offset.get_untracked() + delta).max(0.0);
+        self.handle.scroll_to_offset(px(offset), false);
+    }
+
     pub(crate) fn reset(self) {
         self.offset.set(0.0);
         self.handle.scroll_to_offset(px(0.0), false);

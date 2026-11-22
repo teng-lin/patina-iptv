@@ -70,11 +70,16 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     combined::reset_single(owner);
     library::reset_imports(owner);
     let started = crate::time::Instant::now();
-    let startup = crate::commands::startup_library(owner);
+    let services = owner.services();
+    let startup = crate::commands::startup_library(&services);
     owner.spawn({
         let owner = owner.clone();
         async move {
-            let startup = startup.await.map(|(source, combined, any, snapshot)| {
+            let startup = startup.await;
+            if !services.is_current() {
+                return;
+            }
+            let startup = startup.map(|(source, combined, any, snapshot)| {
                 let stored: Vec<_> = snapshot.playlists.iter().map(|p| p.id).collect();
                 library::install(&owner, snapshot);
                 // A deletion whose settings save was lost must not hand its
@@ -85,7 +90,7 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 (source, combined, any)
             });
             if startup.is_ok() {
-                owner.services().mark(
+                services.mark(
                     "store opened",
                     format_args!("{} ms", started.elapsed().as_millis()),
                 );
@@ -104,7 +109,7 @@ pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
                 Err(error) => {
                     log::warn!("iptv data: store unavailable ({error})");
                     owner.emit(crate::RuntimeEvent::StoreStartupFailed {
-                        path: owner.services().file_database_path(),
+                        path: services.file_database_path(),
                         error,
                     });
                     return;
@@ -179,10 +184,10 @@ fn start_import_with(
                 purpose,
                 Purpose::Add | Purpose::Startup | Purpose::Switch | Purpose::Refresh
             );
+        let services = owner.services();
         owner.spawn({
             let owner = owner.clone();
             async move {
-                let services = owner.services();
                 let opens_stored = job.purpose.shows_stored_first() && job.stored.is_some();
                 if !services.has_workers() && !opens_stored {
                     // A new import runs on blocking workers, which this host
@@ -199,6 +204,9 @@ fn start_import_with(
                     .read(move |store| crate::parental::import_allowed(store, &admission, &auth))
                     .await;
                 let failure = match admission {
+                    _ if cancel.is_canceled() || !services.is_current() => {
+                        Some(FailureKind::Canceled)
+                    }
                     Ok(true) => None,
                     Ok(false) => Some(FailureKind::Auth),
                     Err(error) => {

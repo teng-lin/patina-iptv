@@ -125,6 +125,16 @@ pub(crate) struct StoreFailure {
     pub error: crate::runtime::Error,
 }
 
+pub(crate) fn store_failure_key(ui: crate::Ui, action: iptv_nav::Action) {
+    use iptv_nav::Action;
+    let distance = crate::scale::now() * 96.0;
+    match action {
+        Action::MoveUp => ui.store_failure_scroll.scroll_by(-distance),
+        Action::MoveDown => ui.store_failure_scroll.scroll_by(distance),
+        _ => {}
+    }
+}
+
 pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::IntoElement {
     use crate::i18n::{tr, trf};
     use crate::{scale::Scale, ui_kit};
@@ -134,19 +144,29 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
     dynamic(move || {
         ui.store_startup_failure.with(|failure| {
             failure.as_ref().map(|failure| {
-                let (detail, guidance) = match (failure.error.newer_schema(), &failure.path) {
-                    (Some((found, supported)), Some(_)) => (
+                let (detail, guidance) = match failure.error.newer_schema() {
+                    Some((found, supported)) => (
                         trf(
                             "Database schema version {found} is newer than this build supports ({supported}).",
                             &[("found", found.into()), ("supported", supported.into())],
                         ),
-                        Some(tr("Upgrade Patina to open this library. To start over, close Patina and move the database file to a safe location.")),
+                        if failure.path.is_some() {
+                            tr("Upgrade Patina to open this library. To start over, close Patina and move the database file to a safe location.")
+                        } else {
+                            tr("Upgrade Patina to open this library.")
+                        },
                     ),
-                    (None, Some(_)) => (
-                        failure.error.to_string(),
-                        Some(tr("Unlock the device, check file permissions, then reopen Patina.")),
+                    None => (
+                        failure.error.unavailable_reason().map_or_else(
+                            || failure.error.to_string(),
+                            str::to_owned,
+                        ),
+                        if failure.path.is_some() {
+                            tr("Unlock the device, check file permissions, then reopen Patina.")
+                        } else {
+                            tr("Close Patina and try opening it again.")
+                        },
                     ),
-                    (_, None) => (failure.error.to_string(), None),
                 };
                 ui_kit::screen(ui, size)
                     .test_id("store-startup-failure")
@@ -155,12 +175,12 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
                             .role(AccessibilityRole::Header),
                     )
                     .child(
-                        scroll().flex_1().child(
+                        ui.store_failure_scroll.view().flex_1().child(
                             view()
                                 .gap(move || size.px(12.0))
                                 .child(ui_kit::body(size, detail))
                                 .children(failure.path.iter().map(|path| ui_kit::body(size, path.display().to_string())))
-                                .children(guidance.map(|words| ui_kit::body(size, words))),
+                                .child(ui_kit::body(size, guidance)),
                         ),
                     )
             })

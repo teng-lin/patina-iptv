@@ -66,6 +66,36 @@ fn empty_library_startup_finishes_on_its_accepting_owner_without_a_ui() {
 }
 
 #[test]
+fn a_retired_startup_does_not_report_to_a_restarted_owner() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = Rc::new(Runtime::new(Ports::new(
+        directory.path().to_owned(),
+        |_| {
+            Err(iptv_runtime::Error::unavailable(
+                "synthetic database key is unavailable",
+            ))
+        },
+    )));
+    let tasks = Rc::new(RefCell::new(Vec::<LocalTask>::new()));
+    let queue = tasks.clone();
+    owner.bind_tasks(
+        move |task| queue.borrow_mut().push(task),
+        |_| Box::pin(std::future::pending()),
+    );
+    owner.bind(|_| panic!("the retired startup published a result"));
+    owner.start_services();
+    iptv_runtime::data::start(&owner);
+    let mut startup = tasks.borrow_mut().pop().unwrap();
+    assert!(owner.drain_services());
+    owner.start_services();
+
+    // Draining the writer completed the old read before its UI task ran.
+    let mut context = Context::from_waker(Waker::noop());
+    assert!(startup.as_mut().poll(&mut context).is_ready());
+    assert!(owner.drain_services());
+}
+
+#[test]
 fn newer_schema_and_unavailable_store_are_reported_at_startup_and_block_import() {
     use iptv_core::wizard::{FailureKind, ImportFailure};
     use iptv_runtime::data::{self, Job, Purpose, Update};
@@ -126,28 +156,33 @@ fn newer_schema_and_unavailable_store_are_reported_at_startup_and_block_import()
                 assert_eq!(error.unavailable_reason(), Some(reason));
             }
 
-            let (sender, mut import) = tokio::sync::mpsc::unbounded_channel();
-            data::start_import(
-                &owner,
-                Job {
-                    source: crate::common::m3u_source("Generated playlist"),
-                    epg_url: None,
-                    stored: None,
-                    purpose: Purpose::Add,
-                    edit: false,
-                },
-                move |update| {
-                    if let Update::Done(result) = update {
-                        sender.send(result).unwrap();
-                    }
-                },
-            );
-            assert_eq!(
-                tokio::time::timeout(Duration::from_secs(10), import.recv())
-                    .await
-                    .expect("import did not report the storage failure"),
-                Some(Err(ImportFailure::new(FailureKind::Storage)))
-            );
+            for expected in [FailureKind::Storage, FailureKind::Canceled] {
+                let (sender, mut import) = tokio::sync::mpsc::unbounded_channel();
+                let cancel = data::start_import(
+                    &owner,
+                    Job {
+                        source: crate::common::m3u_source("Generated playlist"),
+                        epg_url: None,
+                        stored: None,
+                        purpose: Purpose::Add,
+                        edit: false,
+                    },
+                    move |update| {
+                        if let Update::Done(result) = update {
+                            sender.send(result).unwrap();
+                        }
+                    },
+                );
+                if expected == FailureKind::Canceled {
+                    cancel.cancel();
+                }
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(10), import.recv())
+                        .await
+                        .expect("import did not report the outcome"),
+                    Some(Err(ImportFailure::new(expected)))
+                );
+            }
             assert!(owner.drain_services());
         }
     });

@@ -977,7 +977,7 @@ pub(crate) fn load_organization(
 }
 
 pub(crate) fn startup_library(
-    owner: &crate::Runtime,
+    services: &Services,
 ) -> impl std::future::Future<
     Output = Result<
         (
@@ -989,12 +989,8 @@ pub(crate) fn startup_library(
         crate::Error,
     >,
 > + use<> {
-    let services = owner.services();
-    async move {
-        startup_library_native(&services)
-            .await
-            .map_err(crate::Error::from)
-    }
+    let startup = startup_library_native(services);
+    async move { startup.await.map_err(crate::Error::from) }
 }
 
 pub(crate) fn source_policies(

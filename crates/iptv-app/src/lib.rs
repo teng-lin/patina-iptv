@@ -275,6 +275,7 @@ pub struct Ui {
     /// The add-playlist wizard, when open.
     pub wizard: Signal<Option<wizard_view::Open>>,
     store_startup_failure: Signal<Option<startup::StoreFailure>>,
+    store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
     pub playlists: Signal<Option<playlists_view::Open>>,
     /// A playlist's guide sources screen, when open (over the playlists
@@ -400,6 +401,7 @@ impl Ui {
                 None,
                 nsh_core::element::SignalEquals::Never,
             ),
+            store_failure_scroll: ui_kit::FocusScroll::new(),
             playlists: signal(None),
             guide_sources: signal(None),
             guide_inspect: signal(None),
