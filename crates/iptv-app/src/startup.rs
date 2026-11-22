@@ -94,12 +94,13 @@ pub fn since_start() -> Duration {
 }
 
 /// Original Patina artwork, embedded so startup needs no file or network
-/// access; a browser package's own file (`assets/banner.png`), which keeps
-/// it out of the module.
+/// access; a browser package's own file (`host::PACKAGE_ASSETS`:
+/// `assets/banner.png`), which keeps it out of the module.
 pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
     use nsh_core::prelude::*;
-    #[cfg(not(all(target_family = "wasm", feature = "browser-package")))]
-    let artwork = {
+    let artwork = if crate::host::PACKAGE_ASSETS {
+        crate::host::SPLASH_ASSET.to_owned()
+    } else {
         use base64::Engine;
         format!(
             "data:image/png;base64,{}",
@@ -107,8 +108,6 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
                 .encode(include_bytes!("../../../art/icon/banner.png")),
         )
     };
-    #[cfg(all(target_family = "wasm", feature = "browser-package"))]
-    let artwork = "asset:/banner.png";
     view()
         .test_id("startup-splash")
         .absolute()

@@ -49,6 +49,12 @@ pub(crate) const REMOTE_ONLY: bool = false;
 /// Imports and guide downloads run on the refresh pool's workers.
 pub(crate) const IMPORTS: bool = true;
 
+/// The module embeds its fonts and splash (`host::web`'s package build
+/// does not).
+pub(crate) const PACKAGE_ASSETS: bool = false;
+/// Unused: [`PACKAGE_ASSETS`] is false.
+pub(crate) const SPLASH_ASSET: &str = "";
+
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);

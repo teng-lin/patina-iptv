@@ -51,6 +51,13 @@ pub(crate) const REMOTE_ONLY: bool = true;
 /// browser store's sliced publishes.
 pub(crate) const IMPORTS: bool = true;
 
+/// A package build (feature `browser-package`) keeps the fonts and the
+/// splash out of the module: the page loads the fonts (its `fonts`
+/// option) before the module starts, and the splash is a package file.
+pub(crate) const PACKAGE_ASSETS: bool = cfg!(feature = "browser-package");
+/// The splash's package file (`hosts/tizen-nsh/build.sh` stages it).
+pub(crate) const SPLASH_ASSET: &str = "asset:/banner.png";
+
 /// The name the store's memory files are kept under.
 const DIRECTORY: &str = "/patina";
 
