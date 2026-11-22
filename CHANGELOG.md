@@ -10,11 +10,20 @@ is below 1.0, a minor release may change behavior.
 ### Added
 
 - Samsung Tizen TVs (experimental, 2020 / Tizen 5.5 and later): Live TV
-  from an Xtream Codes account or an M3U playlist with its TV guide, the
-  channel list beside the playing channel, full screen, channel zapping,
+  from an Xtream Codes account or an M3U playlist with its TV guide,
+  full screen, channel zapping,
   Favorites and Recently watched. The app talks to the provider directly,
   keeps the guide between launches and downloads it again on the same
   schedule as the other platforms. See `hosts/tizen/README.md`.
+- Samsung Tizen TVs: the Android TV guide screen (the playing channel's
+  preview at the top left, the focused program beside it, the groups
+  column beside the guide grid; OK on a live program watches it full
+  screen, on an archived one plays it from its start), a play bar in full
+  screen (Favorite, TV guide, Search), search of channels and of programs
+  on now or later (the rail's Search or the Search key, with the TV's
+  keyboard), and moving favorites (Blue on a favorite). Blue shows
+  Favorites. The remote's Exit key leaves the app; Back never does. An
+  existing install keeps its favorites.
 - Desktop: a visible ⋯ "More options" on recordings rows and on the shown
   group in the guide's and the channel list's groups columns, so every
   secondary action has a pointer entry point beside right-click. A second
