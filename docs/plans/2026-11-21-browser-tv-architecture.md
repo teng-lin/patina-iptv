@@ -435,7 +435,8 @@ differences of a few seconds are noise.
 | + `-Zfmt-debug=none` | 10,894,852 | 8,496,019 | 2,325,545 | not installed | | | | |
 | all four (z, immediate-abort, optimize_for_size, location-detail, fmt-debug) | 10,745,497 | 8,372,047 | 2,301,121 | 25.4 s | 9.4 s | 11.1 s | 5.7–6.2 s | 37 / 19 s |
 | all four + `wasm-opt -Oz` (binaryen 132) | 8,790,469 | 6,487,536 | 2,260,113 | 24.4 s | 7.1 s | 10.1 s | 5.1–6.0 s | 39 / 18 s |
-| default: all but fmt-debug + wasm-opt | 8,891,118 | 6,552,697 | 2,292,907 | see below | | | | |
+| default: all but fmt-debug + wasm-opt | 8,891,118 | 6,552,697 | 2,292,907 | 26.0 s | 6.8 s | 9.1 s | 4.1–6.2 s | 41 / 16.7 s |
+| + translations, fonts and splash as package files; SQLite without unused options and inside LTO | 7,467,317 | 6,456,665 | 951,033 | not yet on the TV | | | | |
 
 `-Zfmt-debug=none` saves 0.1 MB but empties every `{:?}`, which the app
 also shows (remote key labels) and logs, so the default leaves it out.
