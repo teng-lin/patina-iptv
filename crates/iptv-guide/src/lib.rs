@@ -1174,3 +1174,6 @@ impl OrganizationBuilder {
         PreparedOrganization(state)
     }
 }
+
+#[cfg(test)]
+mod interaction_tests;
