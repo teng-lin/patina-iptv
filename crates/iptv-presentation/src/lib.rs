@@ -24,3 +24,7 @@ pub mod player_options;
 pub mod recording;
 pub mod seek_hold;
 pub mod vod;
+
+pub mod library;
+pub mod search;
+pub mod settings;

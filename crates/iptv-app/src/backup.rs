@@ -74,7 +74,7 @@ pub(crate) fn export_ui() {
 pub(crate) fn available() -> bool {
     matches!(
         crate::settings::offer("general.restore"),
-        iptv_settings::screen::Offer::Active
+        iptv_presentation::settings::screen::Offer::Active
     )
 }
 

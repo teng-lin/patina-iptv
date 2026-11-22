@@ -22,7 +22,7 @@
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
 
-use iptv_library::epg_sources as state;
+use iptv_presentation::library::epg_sources as state;
 mod words;
 
 use crate::runtime::model::SourceId;

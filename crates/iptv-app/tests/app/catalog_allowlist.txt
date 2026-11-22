@@ -36,13 +36,13 @@ iptv-core/src/wizard.rs	Up
 iptv-guide/src/playback.rs	Stalker
 iptv-guide/src/playback.rs	StalkerLink
 iptv-guide/src/playback.rs	Xtream
-iptv-library/src/epg_sources.rs	AddLink
-iptv-library/src/epg_sources.rs	AddName
-iptv-library/src/epg_sources.rs	Editing
-iptv-library/src/epg_sources.rs	Relink
-iptv-library/src/epg_sources.rs	Rename
-iptv-library/src/guide_inspect.rs	Screen
-iptv-library/src/playlists.rs	Editing
+iptv-presentation/src/library/epg_sources.rs	AddLink
+iptv-presentation/src/library/epg_sources.rs	AddName
+iptv-presentation/src/library/epg_sources.rs	Editing
+iptv-presentation/src/library/epg_sources.rs	Relink
+iptv-presentation/src/library/epg_sources.rs	Rename
+iptv-presentation/src/library/guide_inspect.rs	Screen
+iptv-presentation/src/library/playlists.rs	Editing
 # Search build errors are logged; the screen uses translated Programs status labels.
 iptv-app/src/search_view/program_index.rs	Search guide is unavailable
 iptv-app/src/search_view/program_index.rs	Search source is unavailable

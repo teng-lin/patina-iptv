@@ -19,9 +19,10 @@ use std::time::Duration;
 use iptv_core::favorites::KeyIndex;
 use iptv_core::guide::{Airing, Schedule};
 use iptv_guide::EpgSchedule;
+use iptv_presentation::search::{Focus, Phase, ResultId, SearchState, Tab};
 use iptv_search::{
-    ChannelHit, ChannelId, ChannelIndex, ChannelSearchOptions, Focus, Phase, ProgramHit,
-    ProgramIndex, ProgramIndexBuilder, ProgramSearchOptions, ResultId, SearchState, Tab,
+    ChannelHit, ChannelId, ChannelIndex, ChannelSearchOptions, ProgramHit, ProgramIndex,
+    ProgramIndexBuilder, ProgramSearchOptions,
 };
 use serde_json::{Value, json};
 

@@ -8,12 +8,9 @@ use crate::{
     scale::Scale,
     ui_kit,
 };
-use iptv_library::{
-    SourceId,
-    guide_inspect::{Mode, Row, Screen},
-    inspection::*,
-};
+use iptv_library::{SourceId, inspection::*};
 use iptv_nav::Action;
+use iptv_presentation::library::guide_inspect::{Mode, Row, Screen};
 use nsh_core::{element::input, prelude::*};
 use std::time::Duration;
 
