@@ -663,7 +663,7 @@ fn stored_playlists_switch_refresh_and_go() {
     assert!(!data.join(format!("last_channel-{}", first_id.0)).exists());
     drop(app);
 
-    // A store that cannot be opened: the first-run wizard all the same.
+    // A store that cannot be opened shows the recovery screen.
     // Closing a desktop window retains the independent recording host. This
     // fixture replaces its database, so simulate a full quit before doing so;
     // Windows cannot unlink SQLite files while the native host owns them.
@@ -675,7 +675,14 @@ fn stored_playlists_switch_refresh_and_go() {
             Err(error) => panic!("could not replace synthetic database {f}: {error}"),
         }
     }
-    std::fs::create_dir_all(data.join("iptv.sqlite")).unwrap();
+    let path = data.join("iptv.sqlite");
+    std::fs::create_dir_all(&path).unwrap();
     let mut app = start();
-    step(app.wait_for_within("text:No playlists yet", IMPORT));
+    step(app.wait_for_within("id:store-startup-failure", IMPORT));
+    step(app.wait_for("text:The saved library could not be opened"));
+    step(app.wait_for("text:encrypted database filesystem operation failed"));
+    step(app.wait_for("text:Unlock the device, check file permissions, then reopen Patina."));
+    let screen = app.screen();
+    assert!(screen.shows(&path.to_string_lossy()));
+    assert!(!screen.shows("No playlists yet"));
 }
