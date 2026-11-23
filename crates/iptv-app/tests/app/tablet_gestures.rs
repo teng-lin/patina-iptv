@@ -93,6 +93,7 @@ fn on_screen(app: &Headless) -> Vec<usize> {
         .screen()
         .layout_nodes()
         .into_iter()
+        .filter(|n| n.test_id.as_deref() == Some("guide-channel-name"))
         .filter_map(|n| {
             let t = n.text.as_ref()?;
             let k: usize = t.text.text.strip_prefix("Tab Channel ")?.parse().ok()?;
@@ -111,7 +112,10 @@ fn row_y(app: &Headless, row: usize) -> f32 {
     app.screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.text.as_ref().is_some_and(|t| t.text.text == name))
+        .find(|n| {
+            n.test_id.as_deref() == Some("guide-channel-name")
+                && n.text.as_ref().is_some_and(|t| t.text.text == name)
+        })
         .map(|n| n.bounds.origin.y.0)
         .unwrap_or_else(|| panic!("{name} is mounted"))
 }
@@ -305,7 +309,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     // a horizontal drag: it pans to later programs and nothing plays.
     step(app.press_key("down"));
     step(app.drag(
-        &format!("text:{}", name(2)),
+        &format!("id:guide-row >> text:{}", name(2)),
         Point::new(px(-420.0), px(8.0)),
     ));
     step(app.wait(SETTLE));
@@ -333,7 +337,10 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     // view may report no drag then), yet it crosses the threshold: the
     // preview a key started waiting for is canceled.
     step(app.press_key("down"));
-    step(app.drag(&format!("text:{}", name(2)), Point::new(px(4.0), px(300.0))));
+    step(app.drag(
+        &format!("id:guide-row >> text:{}", name(2)),
+        Point::new(px(4.0), px(300.0)),
+    ));
     step(app.wait(SETTLE));
     nothing_activated(&app, &tuned, &db, "a drag down at the top");
     assert_eq!(row_y(&app, ANCHOR), top, "nothing to scroll above the top");
@@ -343,7 +350,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     // the key started waiting for is canceled too.
     step(app.press_key("down"));
     step(app.drag(
-        &format!("text:{}", name(3)),
+        &format!("id:guide-row >> text:{}", name(3)),
         Point::new(px(6.0), px(-300.0)),
     ));
     step(app.wait(SETTLE));
@@ -362,7 +369,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     let rows = on_screen(&app);
     let before = row_y(&app, ANCHOR);
     step(app.drag(
-        &format!("text:{}", name(rows[2])),
+        &format!("id:guide-row >> text:{}", name(rows[2])),
         Point::new(px(-260.0), px(120.0)),
     ));
     step(app.wait(SETTLE));
@@ -380,7 +387,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     // offset: the iPad simulator's list taking such diagonals is not
     // reproduced here.)
     step(app.drag(
-        &format!("text:{}", name(rows[3])),
+        &format!("id:guide-row >> text:{}", name(rows[3])),
         Point::new(px(-300.0), px(200.0)),
     ));
     step(app.wait(SETTLE));
@@ -390,7 +397,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     step(app.press("text:Now"));
     step(app.wait_for_gone("text:Now", Duration::from_secs(3)));
     step(app.drag(
-        &format!("text:{}", name(rows[4])),
+        &format!("id:guide-row >> text:{}", name(rows[4])),
         Point::new(px(90.0), px(-200.0)),
     ));
     step(app.wait(SETTLE));
@@ -408,7 +415,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     for _ in 0..4 {
         let row = on_screen(&app)[1];
         step(app.drag(
-            &format!("text:{}", name(row)),
+            &format!("id:guide-row >> text:{}", name(row)),
             Point::new(px(4.0), px(400.0)),
         ));
     }
@@ -466,7 +473,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     // starts nothing (only a focus on a program on air would).
     step(app.press_key("down"));
     step(app.drag(
-        &format!("text:{}", name(2)),
+        &format!("id:guide-row >> text:{}", name(2)),
         Point::new(px(-420.0), px(8.0)),
     ));
     step(app.wait(SETTLE));
@@ -480,7 +487,10 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
     // Under the threshold a drag is still a tap, an 8 dp sideways wobble
     // included: it chooses the live program. A pan right after it,
     // before the switch delay, keeps that choice in the preview.
-    step(app.drag(&format!("text:{}", name(5)), Point::new(px(8.0), px(1.0))));
+    step(app.drag(
+        &format!("id:guide-row >> text:{}", name(5)),
+        Point::new(px(8.0), px(1.0)),
+    ));
     step(app.drag(
         "id:guide-timeline >> text:C5 P0",
         Point::new(px(-420.0), px(4.0)),

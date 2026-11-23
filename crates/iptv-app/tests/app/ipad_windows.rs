@@ -238,7 +238,14 @@ pub(crate) fn header_fits_as(
             && n.bounds.origin.x.0 >= details[0] - 0.5
     })
     .unwrap_or_else(|| panic!("the program's times shown: {what}"));
-    for (part, b) in [("times", times), ("minutes left", left)] {
+    let channel = bounds(app, "guide-header-channel", &what);
+    let source = bounds(app, "guide-header-source", &what);
+    for (part, b) in [
+        ("channel", channel),
+        ("source", source),
+        ("times", times),
+        ("minutes left", left),
+    ] {
         assert!(
             b[1] >= details[1] - 0.5 && b[1] + b[3] <= details[1] + details[3] + 0.5,
             "{part} {b:?} whole inside the details {details:?}: {what}"
@@ -276,6 +283,8 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
             present(app, size, text);
             let what = format!("{size:?} at text {text:.2}");
             assert!(channel_selected(app, "Local C"), "focus kept: {what}");
+            step(app.wait_for("id:guide-header-details >> text:Local C"));
+            step(app.wait_for("id:guide-header-details >> text:Synthetic personalization · Sport"));
             assert!(!channel_selected(app, "Local B"), "one focus: {what}");
             assert!(iptv_app::player_has_source(0), "B plays on: {what}");
             assert_eq!(iptv_app::player_opens(0), opens, "no open: {what}");

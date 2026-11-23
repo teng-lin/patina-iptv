@@ -1,13 +1,12 @@
 //! The guide's header: the preview at the top left (the video layer is laid
 //! out under it in guide mode, `panels::preview_rect`) and, to its right,
-//! the focused program: its title (Roboto Medium) with the favorite star
-//! at the right, its times with a progress bar and the minutes left (the
-//! group's name at the right), and its description in gray. At the right
-//! the list on screen (a tap opens the groups).
+//! the focused channel and its source, then the program's title, timing
+//! and description. The list selector opens the groups.
 
 use crate::i18n::{tr, trf};
 
-use iptv_core::lists::group_of;
+use iptv_core::{guide::Schedule, lists::group_of};
+use iptv_guide::combined::CombinedSchedule;
 use std::time::Duration;
 
 use nsh_core::prelude::*;
@@ -167,6 +166,36 @@ fn settled(ui: Ui, program: Memo<Focused>) -> Signal<Focused> {
     shown
 }
 
+fn channel_labels(
+    catalog: &dyn Schedule,
+    channel: usize,
+    single_playlist: Option<&str>,
+) -> (String, String) {
+    let (catalog, channel, playlist) = if let Some(combined) = catalog
+        .as_any()
+        .and_then(|catalog| catalog.downcast_ref::<CombinedSchedule>())
+    {
+        let Some((source, local)) = combined.channel_source(channel) else {
+            return (String::new(), String::new());
+        };
+        (
+            &*source.schedule as &dyn Schedule,
+            local,
+            Some(source.name.as_str()),
+        )
+    } else {
+        (catalog, channel, single_playlist)
+    };
+    let group =
+        group_of(catalog, channel).map(|g| crate::listing_labels::group(catalog.group_label(g)));
+    let source = match (playlist.filter(|name| !name.is_empty()), group) {
+        (Some(playlist), Some(group)) if !group.is_empty() => format!("{playlist} · {group}"),
+        (Some(playlist), _) => playlist.to_owned(),
+        (None, group) => group.unwrap_or_default(),
+    };
+    (catalog.channel_name(channel), source)
+}
+
 fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let settled = settled(ui, program);
     // Read once per focused program (a stored guide reads it from disk).
@@ -185,20 +214,62 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     };
     let live =
         move || program.with(|p| p.is_some_and(|(_, now, _, _, p)| p.airing(now) == Airing::Live));
-    let group = move || {
-        program.with(|p| {
-            let (_, _, _, ch, _) = (*p)?;
-            let catalog = crate::schedule();
-            group_of(&*catalog, ch).map(|g| crate::listing_labels::group(catalog.group_label(g)))
-        })
-    };
+    let single_playlist = computed(move || {
+        ui.app.library.version.get();
+        let shown = ui.app.library.shown.get()?;
+        crate::runtime::data::library::playlists(&crate::runtime())
+            .ok()?
+            .into_iter()
+            .find(|playlist| playlist.id == shown)
+            .map(|playlist| playlist.name)
+    });
+    let channel = computed(move || program.with(|p| p.map(|p| p.3)));
+    let labels = computed(move || {
+        ui.app.data_version.get();
+        channel.get().map_or_else(
+            || (String::new(), String::new()),
+            |channel| {
+                single_playlist.with(|playlist| {
+                    channel_labels(&*crate::schedule(), channel, playlist.as_deref())
+                })
+            },
+        )
+    });
     view()
         .test_id("guide-header-details")
         .flex_1()
         // A compact header gives it less room than its lines want: clip them
-        // (the header grows for the title and times: `GuideHeader`).
+        // (the header grows for the channel, title and times).
         .overflow_hidden()
         .gap(move || size.px(DETAILS_GAP))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap(move || size.px(TIMES_GAP))
+                .child(
+                    text(move || labels.with(|labels| labels.0.clone()))
+                        .test_id("guide-header-channel")
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .number_of_lines(1)
+                        .font_family(SANS)
+                        .font_weight(MEDIUM)
+                        .text_size(move || size.text_px(HEADER_TIMES))
+                        .text_color(rgb(BRIGHT_TEXT)),
+                )
+                .child(
+                    text(move || labels.with(|labels| labels.1.clone()))
+                        .test_id("guide-header-source")
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .number_of_lines(1)
+                        .text_right()
+                        .font_family(SANS)
+                        .text_size(move || size.text_px(HEADER_TIMES))
+                        .text_color(secondary()),
+                ),
+        )
         .child(
             view()
                 .flex_row()
@@ -242,10 +313,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 )),
         )
         .child(
-            // Times, progress and minutes left; the group at the right. A
-            // narrow header wraps them onto a second line rather than clip,
-            // and a part wider than the column (large text in a Split View
-            // window) wraps within it.
+            // Times, progress and minutes left wrap in compact windows.
             view()
                 .flex_row()
                 .flex_wrap()
@@ -303,15 +371,6 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .font_family(SANS)
                     .text_size(move || size.text_px(HEADER_TIMES))
                     .text_color(secondary()),
-                )
-                .child(
-                    text(move || group().unwrap_or_default())
-                        .flex_1()
-                        .number_of_lines(1)
-                        .text_right()
-                        .font_family(SANS)
-                        .text_size(move || size.text_px(HEADER_TIMES))
-                        .text_color(secondary()),
                 ),
         )
         .child(

@@ -148,15 +148,15 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             }
         }
     });
-    step(app.wait_for("text:Local A"));
-    step(app.press("text:Local A"));
+    step(app.wait_for("id:guide-row >> text:Local A"));
+    step(app.press("id:guide-row >> text:Local A"));
     step(
         app.wait_until("main preview plays", Duration::from_secs(5), |_| {
             iptv_app::player_has_source(0)
         }),
     );
     // A context-click must select B without watching it in the main player.
-    step(app.right_click("id:guide-ui >> text:Local B"));
+    step(app.right_click("id:guide-row >> text:Local B"));
     step(app.wait_for("text:Watch in new window"));
     let main_opens = iptv_app::player_opens(0);
     step(app.press("text:Watch in new window"));
@@ -415,7 +415,9 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.press("id:auxiliary-player-1 >> id:channel-list >> text:/^◂/"));
     step(app.press("id:auxiliary-player-1 >> id:channel-list-groups >> text:Sport"));
     assert!(
-        app.screen().matches("id:guide-ui >> text:Local B").unwrap(),
+        app.screen()
+            .matches("id:guide-row >> text:Local B")
+            .unwrap(),
         "browsing Sport in B must preserve the main guide's All channels list"
     );
     assert!(
@@ -445,7 +447,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         "opening B must not retune A"
     );
     assert!(!app.screen().matches("id:multiview-tile").unwrap());
-    step(app.right_click("id:guide-ui >> text:Local C"));
+    step(app.right_click("id:guide-row >> text:Local C"));
     step(app.wait_for("text:Watch in new window"));
     step(app.press("text:Watch in new window"));
     step(app.wait_until(
@@ -584,7 +586,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
 
     // Opening an existing auxiliary channel must not start another player.
     let second_opens = iptv_app::player_opens(1);
-    step(app.right_click("id:guide-ui >> text:Local B"));
+    step(app.right_click("id:guide-row >> text:Local B"));
     step(app.wait_for("text:Watch in new window"));
     step(app.press("text:Watch in new window"));
     assert_eq!(iptv_app::player_opens(1), second_opens);
@@ -605,7 +607,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert_eq!(compact_prop(&props, 2), json!(true));
 
     // Reopen B: reuse its free surface with a fresh session/window identity.
-    step(app.right_click("id:guide-ui >> text:Local B"));
+    step(app.right_click("id:guide-row >> text:Local B"));
     step(app.wait_for("text:Watch in new window"));
     step(app.press("text:Watch in new window"));
     app.idle(Duration::from_millis(300)).unwrap();
@@ -623,7 +625,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     // Keyboard close actions dispose their local signals during key dispatch.
     for session in [4, 5] {
         let root = format!("auxiliary-player-{session}");
-        step(app.right_click("id:guide-ui >> text:Local B"));
+        step(app.right_click("id:guide-row >> text:Local B"));
         step(app.press("text:Watch in new window"));
         step(app.wait_for(&format!("id:auxiliary-player-{session} >> label:Video")));
         step(app.press(&format!("id:auxiliary-player-{session} >> label:Video")));

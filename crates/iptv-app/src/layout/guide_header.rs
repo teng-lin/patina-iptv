@@ -1,10 +1,6 @@
-//! The guide's header: the preview at the top left, the focused program
-//! beside it, and the shortcuts (the list on screen, Movies, Shows, Add
-//! playlist) at the right or, where the window has no room for three
-//! columns, on a row of their own under the other two. A compact portrait
-//! window (a phone held upright) stacks them instead: the preview across
-//! the window's width, the program under it, then the shortcuts' row,
-//! where beside the program the preview would be a thumbnail.
+//! The guide header puts the channel and program details beside the
+//! preview, with the group selector to the right or below them. Compact
+//! portrait windows stack the preview, details and selector.
 //!
 //! The preview keeps its place at the top left in every arrangement: the
 //! player under it is only resized, never hidden or moved elsewhere, and it
@@ -32,21 +28,17 @@ pub const LARGE_TEXT: f32 = 1.5;
 pub const LARGE_TEXT_MAX_SHARE: f32 = 0.7;
 /// The gap between the header's columns (points at scale 1).
 pub const COLUMN_GAP: f32 = 24.0;
-/// The shortcuts' row under the preview: its height and the gap above it
-/// (points at scale 1; the row also grows with larger text).
+/// The group selector's row height and gap below the preview at scale 1.
+/// The selector uses a fixed text size and fits at the base row height.
 pub const SHORTCUTS_ROW: f32 = 48.0;
 pub const SHORTCUTS_GAP: f32 = 8.0;
-/// The room the shortcuts' column and the focused program need beside
-/// the preview (points at a text factor of 1): Movies and Shows side by
-/// side, and a program's title and times.
+/// The width budget for the group selector and program details beside
+/// the preview, in points at a text factor of 1.
 pub const SHORTCUTS_W: f32 = 260.0;
 pub const DETAILS_MIN_W: f32 = 240.0;
-/// The focused program's lines beside the preview, as the app draws
-/// them (points at a text factor of 1): the title's and the times' type,
-/// their line height, and the widths of the times row's parts (the span
-/// "12:40 PM – 1:00 PM", the progress bar, "15 min left") and the gaps.
-/// [`details_height`] estimates from them the room the title and the
-/// times take, before the description, which gives way.
+/// Line height and timing widths at a text factor of 1.
+/// [`details_height`] uses them to reserve enough room for the channel,
+/// title and times before the description.
 pub const LINE_HEIGHT: f32 = 1.2;
 pub const TIMES_SPAN_W: f32 = 187.0;
 pub const TIMES_PROGRESS_W: f32 = 64.0;
@@ -154,7 +146,7 @@ fn stack(width: f32, height: f32, scale: f32, font: f32) -> Option<GuideHeader> 
     if h < PREVIEW_MIN_H {
         return None;
     }
-    let row = (SHORTCUTS_ROW * scale * font.max(1.0)).round();
+    let row = (SHORTCUTS_ROW * scale).round();
     let row_gap = (SHORTCUTS_GAP * scale).round();
     let stack_gap = (STACK_GAP * scale).round().max(1.0);
     let details = details_height(w, scale, text).ceil();
@@ -187,7 +179,7 @@ fn arrange(
     let (row, row_gap) = match shortcuts {
         Shortcuts::Beside => (0.0, 0.0),
         Shortcuts::Below => (
-            (SHORTCUTS_ROW * scale * font.max(1.0)).round(),
+            (SHORTCUTS_ROW * scale).round(),
             (SHORTCUTS_GAP * scale).round(),
         ),
     };
@@ -211,9 +203,9 @@ fn arrange(
     )
 }
 
-/// The height (points) the focused program's title and times take in a
-/// column `column` points wide at `scale` and text factor `text`: the title
-/// on one line, then the times row, whose parts wrap onto further lines
+/// The height (points) of the channel metadata, title and times in a
+/// column `column` points wide at `scale` and text factor `text`. The channel
+/// metadata and title each take a line. The times row wraps onto further lines
 /// where the column is narrower than they are (the span over at most two
 /// lines of its own).
 pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
@@ -246,7 +238,7 @@ pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
         }
     }
     let times: f32 = rows.iter().sum::<f32>() + gap * (rows.len().saturating_sub(1)) as f32;
-    line(HEADER_TITLE) + DETAILS_GAP * scale + times
+    times_line + line(HEADER_TITLE) + 2.0 * DETAILS_GAP * scale + times
 }
 
 /// The header's height and the preview's width in a window `width` ×
@@ -346,7 +338,7 @@ mod tests {
             assert!(16.0 + 48.0 <= PREVIEW_MARGIN + ph, "{w}x{h}: {g:?}");
             assert!(g.height >= (h * HEADER_SHARE).round());
             if g.shortcuts == Shortcuts::Below {
-                assert!(g.row >= (SHORTCUTS_ROW * scale * font).round() - 0.5);
+                assert!(g.row >= (SHORTCUTS_ROW * scale).round() - 0.5);
             }
         }
         // A roomy window keeps its share: the minimum only grows short ones.
@@ -419,19 +411,25 @@ mod tests {
                 "{w}x{h} at {font}: {g:?}, room {room}"
             );
         }
-        // At the default text the title and the times take one line each.
-        assert_eq!(details_height(400.0, 1.0, 1.0), 27.0 + 6.0 + 21.0);
+        // At the default text the channel, title and times take one line each.
+        assert_eq!(
+            details_height(400.0, 1.0, 1.0),
+            21.0 + 6.0 + 27.0 + 6.0 + 21.0
+        );
         // A narrow column wraps the minutes left onto a line of their own.
         assert_eq!(
             details_height(200.0, 1.0, 1.0),
-            27.0 + 6.0 + 21.0 + 12.0 + 21.0
+            21.0 + 6.0 + 27.0 + 6.0 + 21.0 + 12.0 + 21.0
         );
         // A part exactly as wide as the row's rest stays; a hair wider wraps.
         let exact = TIMES_SPAN_W + TIMES_GAP + TIMES_PROGRESS_W + TIMES_GAP + TIMES_LEFT_W;
-        assert_eq!(details_height(exact, 1.0, 1.0), 27.0 + 6.0 + 21.0);
+        assert_eq!(
+            details_height(exact, 1.0, 1.0),
+            21.0 + 6.0 + 27.0 + 6.0 + 21.0
+        );
         assert_eq!(
             details_height(exact - 0.25, 1.0, 1.0),
-            27.0 + 6.0 + 21.0 + 12.0 + 21.0
+            21.0 + 6.0 + 27.0 + 6.0 + 21.0 + 12.0 + 21.0
         );
         // At AX3 in a 214-point column the span (440 points) would need
         // three lines; the app ellipsizes it after two, so two are budgeted,
@@ -440,7 +438,8 @@ mod tests {
         let line = (HEADER_TIMES * ax3 * LINE_HEIGHT).ceil();
         assert_eq!(
             details_height(214.0, 1.0, ax3),
-            (HEADER_TITLE * ax3 * LINE_HEIGHT).ceil()
+            line + 6.0
+                + (HEADER_TITLE * ax3 * LINE_HEIGHT).ceil()
                 + 6.0
                 + 2.0 * line
                 + 12.0
@@ -477,9 +476,9 @@ mod tests {
         // Phones at full size: the preview spans the window inside its
         // margins, the program and the shortcuts' row under it.
         for (w, h, want) in [
-            (412.0, 915.0, (364.0, 388.0, 218.0)),
-            (390.0, 844.0, (385.0, 366.0, 206.0)),
-            (360.0, 800.0, (368.0, 336.0, 189.0)),
+            (412.0, 915.0, (391.0, 388.0, 218.0)),
+            (390.0, 844.0, (412.0, 366.0, 206.0)),
+            (360.0, 800.0, (395.0, 336.0, 189.0)),
         ] {
             let g = GuideHeader::of(w, h, 1.0, 1.0);
             assert!(g.stacked(), "{w}x{h}: {g:?}");
@@ -501,11 +500,11 @@ mod tests {
 
     #[test]
     fn only_tall_compact_windows_stack() {
-        // A phone on its side keeps the preview beside the program, with
-        // the guide's rows under a third of the height.
+        // A phone on its side keeps the preview beside the program.
+        // The header grows for the channel metadata and wrapped times.
         for (w, h, want) in [
-            (915.0, 412.0, (136.0, 199.0, 112.0)),
-            (780.0, 360.0, (119.0, 169.0, 95.0)),
+            (915.0, 412.0, (138.0, 203.0, 114.0)),
+            (780.0, 360.0, (138.0, 203.0, 114.0)),
         ] {
             let g = GuideHeader::of(w, h, 1.0, 1.0);
             assert!(!g.stacked(), "{w}x{h}: {g:?}");
