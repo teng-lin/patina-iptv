@@ -10,11 +10,12 @@
 //! Synthetic data only: a playlist "picked" from a file, with a local
 //! XMLTV guide.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::headless::Headless;
 use iptv_epg::format_xmltv_time;
+use iptv_settings::Value;
 use nsh_core::Checked;
 use nsh_core::picker::PickedFile;
 use nsh_core::{ImageData, Size, element::Root, prelude::*};
@@ -45,34 +46,12 @@ fn guide(now: i64) -> String {
     xml + "</tv>"
 }
 
-/// The saved settings file under `home`.
-fn settings_file(home: &Path) -> Option<PathBuf> {
-    let mut dirs = vec![home.to_path_buf()];
-    while let Some(dir) = dirs.pop() {
-        for entry in std::fs::read_dir(&dir).ok()?.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                dirs.push(path);
-            } else if path.file_name().is_some_and(|n| n == "settings.json") {
-                return Some(path);
-            }
-        }
-    }
-    None
-}
-
-/// The saved settings, once they hold `want`.
-fn saved(app: &mut Headless, home: &Path, want: &str) {
-    let read = || {
-        settings_file(home)
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .unwrap_or_default()
-    };
-    let found =
-        crate::isolated::wait_outside(app, "settings saved", Duration::from_secs(5), || {
-            read().contains(want)
-        });
-    assert!(found.is_ok(), "{want} in {}", read());
+#[track_caller]
+fn saved(app: &mut Headless, home: &Path, key: &str, expected: Value) {
+    let path = crate::isolated::data_dir(home).join("settings.json");
+    crate::personalization::saved_settings(app, &path, |settings| {
+        settings.stored(key, &iptv_settings::Target::Global) == Some(&expected)
+    });
 }
 
 #[test]
@@ -95,13 +74,7 @@ fn menus_favorites_and_settings() {
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     let mut app = Headless::start(config).unwrap();
-    app.on_pick(move |_| {
-        vec![PickedFile::new(
-            "synthetic.m3u",
-            "audio/x-mpegurl",
-            ImageData::new(playlist.as_bytes().to_vec()),
-        )]
-    });
+    app.answer_picks_myself();
     step(app.wait_for("id:wizard-welcome"));
     step(app.press("id:wizard-welcome-add"));
     step(app.press("id:wizard-source-type"));
@@ -109,6 +82,17 @@ fn menus_favorites_and_settings() {
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
     step(app.press("text:Choose a file…"));
+    // The request can arrive after the tap settles.
+    step(
+        app.wait_until("the playlist file picker", nsh_testing::WAIT, |screen| {
+            !screen.picks().is_empty()
+        }),
+    );
+    step(app.answer_pick(vec![PickedFile::new(
+        "synthetic.m3u",
+        "audio/x-mpegurl",
+        ImageData::new(playlist.into_bytes()),
+    )]));
     step(app.wait_for("text:synthetic.m3u"));
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", IMPORT));
@@ -383,7 +367,7 @@ fn settings(app: &mut Headless, home: &Path) {
     // Retrying persists the setting once the write failure is removed.
     step(app.press_key("enter"));
     row_value(app, "Play the last channel on start", "Off");
-    saved(app, home, "general.resume_last_channel");
+    saved(app, home, "general.resume_last_channel", Value::Bool(false));
     // Unimplemented settings are absent on test and production configurations alike.
     assert!(!app.screen().matches("text:On-screen keyboard").unwrap());
     assert!(!app.screen().matches("text:Not available yet").unwrap());
@@ -399,7 +383,12 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.type_text(&field, "SyntheticPlayer/1.0\n"));
     sheet_closed(app);
     row_value(app, "User-Agent", "SyntheticPlayer/1.0");
-    saved(app, home, "SyntheticPlayer/1.0");
+    saved(
+        app,
+        home,
+        "general.user_agent",
+        Value::text("SyntheticPlayer/1.0"),
+    );
     // Cancel and Back leave it as it was.
     step(app.press("text:User-Agent"));
     let field = input(app);
@@ -446,7 +435,7 @@ fn appearance(app: &mut Headless, home: &Path) {
     step(app.press("text:Red"));
     step(app.wait_for_gone("text:✓  Blue", GONE));
     row_value(app, "Accent color", "Red");
-    saved(app, home, "\"red\"");
+    saved(app, home, "appearance.accent", Value::color("red"));
     // By keys: OK opens, Down moves, OK picks; Back cancels.
     step(app.press("text:Background color"));
     step(app.wait_for("text:✓  Dark"));
@@ -482,6 +471,7 @@ fn appearance(app: &mut Headless, home: &Path) {
     step(app.wait_for("text:◀  15 %  ▶"));
     step(app.press("text:Keep"));
     row_value(app, label, "15 %");
+    saved(app, home, "appearance.ui_transparency", Value::Int(15));
     step(app.press(&format!("text:{label}")));
     step(app.press_key("right"));
     step(app.wait_for("text:◀  20 %  ▶"));
@@ -490,7 +480,7 @@ fn appearance(app: &mut Headless, home: &Path) {
     step(app.wait_for("text:◀  70 %  ▶"));
     step(app.press_key("enter"));
     row_value(app, label, "70 %");
-    saved(app, home, "appearance.ui_transparency");
+    saved(app, home, "appearance.ui_transparency", Value::Int(70));
 }
 
 fn guide_data(app: &mut Headless, home: &Path) {

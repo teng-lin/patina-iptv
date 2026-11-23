@@ -158,13 +158,7 @@ fn the_wizard_and_the_choosers() {
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     let mut app = Headless::start(config).unwrap();
-    app.on_pick(|_| {
-        vec![PickedFile::new(
-            "synthetic.m3u",
-            "audio/x-mpegurl",
-            ImageData::new(PLAYLIST.as_bytes().to_vec()),
-        )]
-    });
+    app.answer_picks_myself();
 
     // Back on welcome is handed to the host. OK opens the default form,
     // and backing out of it returns to welcome's add action.
@@ -309,6 +303,17 @@ fn the_wizard_and_the_choosers() {
     step(app.press("text:Playlist file"));
     step(app.wait_for("text:Choose a file…"));
     step(app.press("text:Choose a file…"));
+    // Waiting for the filename alone leaves a late picker unanswered.
+    step(
+        app.wait_until("the playlist file picker", nsh_testing::WAIT, |screen| {
+            !screen.picks().is_empty()
+        }),
+    );
+    step(app.answer_pick(vec![PickedFile::new(
+        "synthetic.m3u",
+        "audio/x-mpegurl",
+        ImageData::new(PLAYLIST.as_bytes().to_vec()),
+    )]));
     step(app.wait_for("text:synthetic.m3u"));
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", IMPORT));
