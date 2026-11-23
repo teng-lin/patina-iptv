@@ -7,8 +7,8 @@
 # can cache them. RESTORED=true tries the restored snapshot offline,
 # including on a newer image of the same Ubuntu release. Any missing package
 # or version conflict falls through to the refreshed retry. Package
-# downloads are bounded independently of dpkg. A failed mirror fetch is
-# retried once using Canonical's archive when the runner uses a cloud mirror.
+# downloads are bounded independently of dpkg. GitHub's cloud mirrors use
+# Canonical's archive first and the original configuration as a fallback.
 set -euo pipefail
 if [ "$#" -lt 3 ]; then
   echo "usage: $0 STATE_DIR RESTORED PACKAGE..." >&2
@@ -36,6 +36,8 @@ bounded() {
   as_root timeout --kill-after=15 "$seconds" "$@"
 }
 
+archive_sources=()
+original_sources=()
 switch_mirror() {
   local source
   # Keep the distro, pockets and Signed-By from the image's original entries.
@@ -43,12 +45,23 @@ switch_mirror() {
   local mirrorlist='mirror\+file:/{1,3}etc/apt/apt-mirrors\.txt([[:space:]]|$)'
   for source in "$sources/sources.list" "$sources/sources.list.d/"*.list "$sources/sources.list.d/"*.sources; do
     if [ -f "$source" ] && grep -Eq "$mirror|$mirrorlist" "$source"; then
+      archive_sources+=("$source")
+      original_sources+=("$(cat "$source")")
       as_root sed -i -E \
         -e "s@${mirror}@https://archive.ubuntu.com/ubuntu\\4@g" \
         -e "s@${mirrorlist}@https://archive.ubuntu.com/ubuntu\\1@g" "$source"
       echo "Using archive.ubuntu.com for $source"
     fi
   done
+}
+
+restore_mirror() {
+  local i
+  for i in "${!archive_sources[@]}"; do
+    printf '%s\n' "${original_sources[i]}" | as_root tee "${archive_sources[i]}" > /dev/null
+  done
+  archive_sources=()
+  original_sources=()
 }
 
 fetch_packages() {
@@ -97,21 +110,39 @@ fi
 as_root rm -f "$man_db_trigger"
 
 refreshed=false
+# Apt names the cached indexes after their source. Restore the source that a
+# previous job used before asking apt to read those indexes offline.
+if [ "$restored" = true ] && [ -f "$state/ubuntu-archive" ]; then
+  switch_mirror
+fi
 if [ "$restored" != true ] || ! install_packages; then
   refreshed=true
   if [ "$restored" = true ]; then
     echo "::warning::cached apt install failed; refreshing the package lists and downloads"
     repair_packages
   fi
-  if ! fetch_packages; then
-    echo "::warning::apt fetch failed or timed out; trying the Ubuntu archive"
+  if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${#archive_sources[@]}" = 0 ]; then
     switch_mirror
+  fi
+  if ! fetch_packages; then
+    if [ "${#archive_sources[@]}" -gt 0 ]; then
+      echo "::warning::apt fetch failed or timed out; trying the configured Ubuntu mirror"
+      restore_mirror
+    else
+      echo "::warning::apt fetch failed or timed out; trying the Ubuntu archive"
+      switch_mirror
+    fi
     fetch_packages || { status=$?; echo "::error::apt downloads failed after mirror retry ($status)"; exit "$status"; }
   fi
   if ! install_packages; then
     echo "::warning::offline apt install failed; repairing dpkg and retrying"
     repair_packages
     install_packages --fix-broken
+  fi
+  if [ "${#archive_sources[@]}" -gt 0 ]; then
+    as_root touch "$state/ubuntu-archive"
+  else
+    as_root rm -f "$state/ubuntu-archive"
   fi
 fi
 # Leave no truncated downloads in the cache, and give its save step (run as

@@ -52,7 +52,7 @@ def step(name, *argv):
     return {"name": name, "argv": list(argv)}
 
 
-def plan(root=ROOT, release=False, tier="full", host="linux"):
+def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None):
     if tier not in ("pr", "full", "native") or host not in ("linux", "macos", "windows"):
         raise ValueError("unsupported validation tier or host")
     workspace = package_args(workspace_crates(root))
@@ -69,11 +69,14 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         ]
     memory = [argument for module in ("catalog_stream_memory::", "epg_memory::", "epg_stream_memory::")
               for argument in ("--skip", module)] if tier == "pr" else []
+    workspace_test_options = ["--format=pretty", *memory]
+    if test_threads is not None:
+        workspace_test_options.extend(("--test-threads", str(test_threads)))
     steps = [
         step("workspace-clippy", "cargo", "clippy", "--locked", "--workspace", "--all-targets",
              "--features", COVERAGE_FEATURES, "--", "-D", "warnings"),
         # One feature-unified graph, without linking the examples Clippy checks.
-        step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", "--format=pretty", *memory),
+        step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", *workspace_test_options),
         step("repair-display-independence", "cargo", "test", *test_args,
              "--lib", REPAIR, "--", "--ignored", "--exact", "--format=pretty"),
         step("inspection-display-budget", "cargo", "test", *test_args,
@@ -210,6 +213,8 @@ def main(argv=None):
     running.add_argument("--harness-output", type=Path, default=os.environ.get("IPTV_CI_HARNESSES") or None,
                          help="record workspace test executables for performance journeys")
     for action in (listing, running):
+        action.add_argument("--test-threads", type=int, default=os.environ.get("IPTV_CI_TEST_THREADS") or None,
+                            help="override the Rust test threads for the workspace test step")
         action.add_argument("--tier", choices=("pr", "full", "native"), default="full")
         action.add_argument("--host", choices=("linux", "macos", "windows"), default="linux")
     actions.add_parser("format", help="check formatting of workspace packages only")
@@ -218,6 +223,8 @@ def main(argv=None):
     inventory.add_argument("--cargo-args", action="store_true")
     actions.add_parser("coverage-args", help="print default coverage package/feature arguments")
     options = parser.parse_args(argv)
+    if getattr(options, "test_threads", None) is not None and options.test_threads < 1:
+        parser.error("--test-threads must be positive")
     if options.action == "inventory":
         crates = PORTABLE if options.kind == "portable" else workspace_crates()
         if options.kind == "libraries":
@@ -230,10 +237,10 @@ def main(argv=None):
     elif options.action == "run":
         if options.harness_output and options.tier == "native":
             parser.error("the native tier does not build the performance harnesses")
-        return run(plan(release=options.release, tier=options.tier, host=options.host),
+        return run(plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads),
                    harness_output=options.harness_output)
     else:
-        checks = plan(release=options.release, tier=options.tier, host=options.host)
+        checks = plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads)
         if options.json:
             print(json.dumps(checks, indent=2))
         else:

@@ -53,18 +53,19 @@ jobs:
         run: |
           compiler=$(rustc -vV)
           clang=$(clang --version)
+          host_compiler=$(cc --version)
           if [[ "$RUNNER_OS" == macOS ]]; then
             libraries=$(brew list --versions)
             sdk=$(xcrun --sdk macosx --show-sdk-build-version)
           else
-            libraries=$(dpkg-query -W libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev)
+            libraries=$(dpkg-query -W libc6-dev libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev)
             sdk=''
           fi
-          identity=$(printf '%s\n' "$compiler" "$clang" "$libraries" "$sdk" "${ImageVersion:-}" | shasum -a 256 | cut -c1-16)
+          identity=$(printf '%s\n' "$compiler" "$clang" "$host_compiler" "$libraries" "$sdk" "${ImageOS:-}" | shasum -a 256 | cut -c1-16)
           echo "key=$identity" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: desktop-package-v1-${{ matrix.platform }}-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', '.github/workflows/package-check.yml', '.github/actions/setup/action.yml', 'tools/ci/locked-cargo.py', 'tools/ci/package-linux.sh', 'tools/package-macos.sh', 'tools/mpv-runtime-unix/runtime-*.json') }}
+          key: desktop-package-v2-${{ matrix.platform }}-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', 'tools/ci/locked-cargo.py', 'tools/ci/package-linux.sh', 'tools/package-macos.sh', 'tools/mpv-runtime-unix/runtime-*.json') }}
           # The lock above supplies the identity before NSH writes its workspace.
           add-rust-environment-hash-key: 'false'
           save-if: ${{ github.ref == 'refs/heads/master' }}

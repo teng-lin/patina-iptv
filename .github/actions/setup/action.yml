@@ -78,9 +78,10 @@ runs:
         esac
         # One package per line, whatever block style the caller used.
         packages=$(tr -s '[:space:]' '\n' <<< "$packages $EXTRA_PACKAGES" | sed '/^$/d' | sort -u | paste -sd ' ' -)
-        identity=$({ echo "$packages"; cat tools/ci/apt-install.sh; } | sha256sum | cut -c1-16)
+        identity=$(printf '%s\n' "$packages" | sha256sum | cut -c1-16)
         distribution=$(. /etc/os-release && echo "$ID$VERSION_ID")
-        prefix="apt-v2-$distribution-$(dpkg --print-architecture)-$identity-"
+        # Bump the format only when the saved snapshot layout changes.
+        prefix="apt-v3-$distribution-$(dpkg --print-architecture)-$identity-"
         {
           echo "state=$RUNNER_TEMP/patina-apt"
           echo "packages=$packages"
@@ -134,7 +135,7 @@ runs:
       if: inputs.cache == 'true' && inputs.cargo-cache == 'true'
       with:
         cache-on-failure: ${{ inputs.cache-on-failure }}
-        key: ${{ inputs.cache-key }}-${{ hashFiles('nsh.rev', 'tools/ci/check-plan.py', '.github/actions/setup/action.yml') }}
+        key: ${{ inputs.cache-key }}-${{ hashFiles('nsh.rev', 'tools/ci/locked-build-env.sh') }}
         # Finished tools have smaller, independently keyed caches.
         cache-bin: 'false'
         # Per-PR copies of these gigabyte-sized caches evict the reusable tools.

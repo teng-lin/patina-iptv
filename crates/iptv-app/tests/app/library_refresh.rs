@@ -9,7 +9,7 @@ use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use std::{
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::{Duration, SystemTime},
 };
 #[track_caller]
 fn step(result: Result<(), String>) {
@@ -47,12 +47,9 @@ fn add(store: &mut Store, dir: &Path, label: &str, policy: SourcePolicy) -> (Sou
     store.set_source_policy(id, policy).unwrap();
     (id, file)
 }
-fn until(app: &mut Headless, what: &str, timeout: Duration, mut ready: impl FnMut() -> bool) {
-    let end = Instant::now() + crate::isolated::scaled_duration(timeout);
-    while !ready() {
-        assert!(Instant::now() < end, "timed out: {what}");
-        step(app.wait(Duration::from_millis(50)));
-    }
+#[track_caller]
+fn until(app: &mut Headless, what: &str, timeout: Duration, ready: impl Fn() -> bool) {
+    step(crate::isolated::wait_outside(app, what, timeout, ready));
 }
 #[test]
 fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cache() {
@@ -61,6 +58,9 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("iptv.sqlite");
     let mut store = crate::isolated::open_database(&path).unwrap();
+    // The native store uses real wall time to decide whether an import is due.
+    // Seed old attempts so the manual app clock only has to drive the timer.
+    store.set_clock(|| 1);
     let (a, file_a) = add(
         &mut store,
         home.path(),
@@ -87,6 +87,7 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
     std::fs::write(&file_b, playlist("B", 2)).unwrap();
     std::fs::write(&file_c, playlist("C", 2)).unwrap();
     let mut app = Headless::start(EngineConfig {
+        clock: nsh_core::time::Clock::manual(SystemTime::now()),
         viewport: Size::new(px(1920.0), px(1080.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     })
@@ -139,11 +140,12 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
         )
         .unwrap();
     drop(store);
-    // Exercise the production 60-second foreground timer, not a copied scheduling formula.
+    // Exercise the production foreground timer with the app's manual clock.
+    step(app.fast_forward(Duration::from_secs(60)));
     until(
         &mut app,
         "periodic refresh",
-        Duration::from_secs(75),
+        Duration::from_secs(10),
         || {
             crate::isolated::open_database(&path)
                 .unwrap()

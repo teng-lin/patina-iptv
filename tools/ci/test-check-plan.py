@@ -86,6 +86,19 @@ class Plan(unittest.TestCase):
         self.assertIn("--timings", self.by_name["workspace-tests"])
         self.assertIn("--timings", self.by_name["app-build"])
 
+    def test_test_thread_override_only_applies_to_parallel_workspace_tests(self):
+        self.assertNotIn("--test-threads", self.by_name["workspace-tests"])
+        for tier in ("full", "pr"):
+            for threads in (4, 6, 8):
+                for check in checks.plan(tier=tier, test_threads=threads):
+                    argv = check["argv"]
+                    with self.subTest(tier=tier, threads=threads, check=check["name"]):
+                        if check["name"] == "workspace-tests":
+                            self.assertEqual(argv[argv.index("--test-threads") + 1], str(threads))
+                            self.assertGreater(argv.index("--test-threads"), argv.index("--"))
+                        else:
+                            self.assertNotIn("--test-threads", argv)
+
     def test_integration_scenarios_share_at_most_two_executables_per_crate(self):
         metadata = json.loads(subprocess.check_output(
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],

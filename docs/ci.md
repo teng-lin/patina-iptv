@@ -43,8 +43,10 @@ It reports maximum key-to-frame latency. On a controlled performance host, run
 `IPTV_STRICT_GUIDE_LATENCY=1 bash tools/check.sh pr` to also enforce the 50 ms limit.
 The Linux job reuses the app and native player test executables that Cargo
 reported during workspace testing. Its scenario timing artifact records
-individual child process durations in milliseconds. A manual Tests run can
-compare four, six, or eight concurrent app scenarios.
+individual child process durations in milliseconds. The manual **Tests**
+workflow's `app-test-jobs` input compares four, six, or eight Rust test threads
+and sets the same cap on Linux app scenario subprocesses. The dedicated timing
+checks run separately.
 
 Fuzz targets run in one job, sharing the pinned tool, sanitizer dependencies
 and full corpus cache. Five-minute runs build the instrumented targets before
@@ -206,10 +208,10 @@ not steady-state measurements.
 Hosted runner setup must fail fast, not consume a job's whole timeout (#159).
 `.github/actions/setup` installs Linux packages through `tools/ci/apt-install.sh`.
 Each download attempt is bounded to four minutes, each list refresh or dpkg
-repair to 90 seconds, and each offline install to three minutes. After a
-failed fetch, CI replaces known cloud archive URLs with Canonical's HTTPS
-archive, refreshes the signed indexes, and retries once. apt can reuse
-completed downloads across attempts. The install starts after the download
+repair to 90 seconds, and each offline install to three minutes. On GitHub's
+Ubuntu runners, known cloud archive URLs use Canonical's HTTPS archive first.
+A failed fetch retries once with the configured mirror. apt refreshes signed
+indexes and can reuse completed downloads across attempts. The install starts after the download
 finishes, and a failed install gets one offline retry after dpkg repair.
 apt gives up on a connection that sends nothing for 30 seconds.
 The script skips the image's initramfs and
@@ -219,9 +221,11 @@ needing further Linux packages names them in the action's `apt-packages`
 input, or calls the script, rather than running its own `apt-get install`.
 
 Package lists and downloaded `.deb` files are cached under a key naming the
-runner image (`ImageOS`/`ImageVersion`), the architecture, the package list and
-the install script, so most runs install without contacting the mirror; a gap
-in a restored cache goes straight to the refreshed retry. Master and nightly
+runner image (`ImageOS`/`ImageVersion`), the Ubuntu release, the architecture,
+the package list and the snapshot format version. A new runner image can reuse
+the archives for the same Ubuntu release and package list. Each snapshot
+records when to use the Canonical archive's indexes. A gap in a restored cache
+triggers a refreshed download. Master and nightly
 populate shared entries for each runner image and package list. Shipping
 builds install the mirror's current packages. Linux packaging
 keeps recommended packages because it bundles runtime modules and copyright

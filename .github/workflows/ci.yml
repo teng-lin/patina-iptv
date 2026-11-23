@@ -28,7 +28,7 @@ on:
         default: full
         options: [full, pr]
       app-test-jobs:
-        description: Maximum simultaneous Linux app scenarios
+        description: Rust test threads and simultaneous Linux app scenarios
         type: choice
         default: '6'
         options: ['4', '6', '8']
@@ -97,6 +97,7 @@ jobs:
           IPTV_REQUIRE_LINTERS: ${{ matrix.os == 'ubuntu-24.04' && '1' || '0' }}
           IPTV_CI_HARNESSES: ${{ matrix.os == 'ubuntu-24.04' && format('{0}/patina-harnesses.json', runner.temp) || '' }}
           IPTV_RS_TEST_JOBS: ${{ inputs.app-test-jobs || '6' }}
+          IPTV_CI_TEST_THREADS: ${{ matrix.os == 'ubuntu-24.04' && inputs.app-test-jobs || '' }}
       - name: Reproducible performance journeys
         if: matrix.os == 'ubuntu-24.04'
         run: python3 tools/performance/journeys.py run --harness-manifest "$RUNNER_TEMP/patina-harnesses.json"

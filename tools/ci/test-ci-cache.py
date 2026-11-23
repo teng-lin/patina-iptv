@@ -223,8 +223,8 @@ class AptInstall(unittest.TestCase):
             "PATINA_APT_REFRESH_SECONDS": "5", "PATINA_APT_DOWNLOAD_SECONDS": "11", "PATINA_APT_SOURCES": str(sources),
         }
 
-    def install(self, restored, fail=""):
-        environment = os.environ | self.environment | {"FAKE_FAIL": fail}
+    def install(self, restored, fail="", github_actions="false"):
+        environment = os.environ | self.environment | {"FAKE_FAIL": fail, "GITHUB_ACTIONS": github_actions}
         result = subprocess.run(["bash", str(APT), str(self.root / "state"), restored, "generated-a", "generated-b"],
                                 env=environment, capture_output=True, text=True)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
@@ -237,6 +237,33 @@ class AptInstall(unittest.TestCase):
                                  "apt-get install -q --no-download generated-a generated-b"])
         self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 5", "bound 11", "bound 7"])
         self.assertEqual((self.root / "install-output").read_text(), "refreshed=true\n")
+
+    def test_hosted_cold_install_uses_the_canonical_archive_first(self):
+        result, calls, _ = self.install("false", github_actions="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sum("--download-only" in call for call in calls), 1)
+        self.assertIn("URIs: https://archive.ubuntu.com/ubuntu\n", self.ubuntu.read_text())
+        self.assertIn("Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n", self.ubuntu.read_text())
+        self.assertTrue((self.root / "state/ubuntu-archive").exists())
+
+    def test_hosted_cold_install_restores_the_configured_mirror_on_failure(self):
+        original = self.ubuntu.read_text()
+        result, calls, _ = self.install("false", fail="2", github_actions="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("trying the configured Ubuntu mirror", result.stdout)
+        self.assertEqual(sum("--download-only" in call for call in calls), 2)
+        self.assertEqual(self.ubuntu.read_text(), original)
+        self.assertFalse((self.root / "state/ubuntu-archive").exists())
+
+    def test_an_archive_cache_reuses_its_source_and_installs_offline(self):
+        marker = self.root / "state/ubuntu-archive"
+        marker.parent.mkdir()
+        marker.touch()
+        result, calls, _ = self.install("true", github_actions="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b"])
+        self.assertIn("URIs: https://archive.ubuntu.com/ubuntu\n", self.ubuntu.read_text())
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=false\n")
 
     def test_cache_hit_installs_without_contacting_the_mirror(self):
         result, calls, _ = self.install("true")
@@ -306,7 +333,8 @@ class AptInstall(unittest.TestCase):
     def test_setup_caches_packages_per_runner_image_and_package_list(self):
         self.assertIn("bash tools/ci/apt-install.sh", SETUP)
         self.assertIn("ImageVersion", SETUP)
-        self.assertIn('cat tools/ci/apt-install.sh', SETUP)
+        self.assertIn('prefix="apt-v3-', SETUP)
+        self.assertNotIn('cat tools/ci/apt-install.sh', SETUP)
         self.assertIn("${{ inputs.apt-packages }}", SETUP)
         # Android native builds can reuse host packages with fresh Cargo outputs.
         self.assertEqual(SETUP.count("steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true')"), 2)

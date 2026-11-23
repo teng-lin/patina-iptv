@@ -55,17 +55,18 @@ jobs:
         run: |
           case "$PATINA_SMOKE_LTO" in off|thin) ;; *) echo 'Expected off or thin LTO' >&2; exit 2 ;; esac
           compiler=$(rustc -vV)
+          host_compiler=$(cc --version)
           ndk=$(cat "$ANDROID_NDK_HOME/source.properties")
-          libraries=$(dpkg-query -W libgtk-4-dev libssl-dev libgstreamer1.0-dev libmpv2)
+          libraries=$(dpkg-query -W libc6-dev libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libmpv2)
           identity=$({
-            printf '%s\n' "$compiler" "$ndk" "$libraries" "$PATINA_SMOKE_LTO" "${ImageOS:-}"
+            printf '%s\n' "$compiler" "$host_compiler" "$ndk" "$libraries" "$PATINA_SMOKE_LTO" "${ImageOS:-}"
             printf '%s\n' "$PATINA_SMOKE_CODEGEN_UNITS" "$PATINA_SMOKE_DEBUG_ASSERTIONS"
           } | sha256sum | cut -c1-16)
           echo "key=$identity" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: inputs.cold != true
         with:
-          key: android-smoke-x86_64-v4-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/setup/action.yml', '.github/actions/android/action.yml', '.cargo/config.toml') }}
+          key: android-smoke-x86_64-v5-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', 'tools/sync-host.sh', 'tools/ci/locked-cargo.py', 'tools/ci/android-ndk-env.sh', '.cargo/config.toml') }}
           # The checked-in runner lock supplies the identity before NSH generates
           # the workspace. At save time its graph retains Android-only crates.
           add-rust-environment-hash-key: 'false'
