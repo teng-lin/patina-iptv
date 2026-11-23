@@ -2,6 +2,9 @@ name: Package checks
 on:
   workflow_call:
     inputs:
+      prepared-linux-tools:
+        type: boolean
+        default: false
       matrix:
         type: string
         default: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
@@ -48,6 +51,8 @@ jobs:
           version: 0.9.3
           features: cli
       - uses: ./.github/actions/nsh-cli
+        with:
+          prepared: ${{ inputs.prepared-linux-tools && matrix.platform == 'linux' }}
       - uses: ./.github/actions/desktop-cargo-cache
         with:
           platform: ${{ matrix.platform }}

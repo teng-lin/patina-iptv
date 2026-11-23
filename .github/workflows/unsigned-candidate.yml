@@ -10,6 +10,9 @@ on:
         default: true
   workflow_call:
     inputs:
+      prepared-linux-tools:
+        type: boolean
+        default: false
       desktop-matrix:
         type: string
         required: true
@@ -110,6 +113,7 @@ jobs:
           policy-tool: ${{ matrix.abi == 'arm64-v8a' && 'true' || 'false' }}
       - uses: ./.github/actions/android
         with:
+          prepared: ${{ inputs.prepared-linux-tools && 'true' || 'false' }}
           abi: ${{ matrix.abi }}
       - name: Build and stage the Android native library
         env:
@@ -221,6 +225,7 @@ jobs:
       - uses: ./.github/actions/nsh-cli
         with:
           stage-release: 'true'
+          prepared: ${{ inputs.prepared-linux-tools && matrix.platform == 'linux' }}
       - uses: ./.github/actions/desktop-cargo-cache
         if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'
         with:

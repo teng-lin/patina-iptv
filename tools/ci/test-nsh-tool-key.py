@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import tarfile
 from pathlib import Path
 import tempfile
 import unittest
@@ -154,7 +155,7 @@ class IdentityStepTests(unittest.TestCase):
                 end += 1
             script = "\n".join(line[8:] for line in lines[start:end])
             self.assertEqual(
-                [line.strip() for line in lines if line.strip().startswith("path:")],
+                [line.strip() for line in lines if line.strip().startswith("path: ${{ steps.identity")],
                 ["path: ${{ steps.identity.outputs.path }}"] * (3 if action == "nsh-cli" else 2),
             )
             for fake_python in ("exit 1", "echo invalid-key", "exit 0", "echo " + "0" * 64):
@@ -280,6 +281,7 @@ class ReleaseTests(unittest.TestCase):
         with (patch.dict(os.environ, GITHUB_REPOSITORY=releases.REPOSITORY, GITHUB_REF="refs/heads/master",
                          GITHUB_EVENT_NAME="workflow_run", GITHUB_EVENT_PATH=str(event)),
               patch.object(releases, "publish") as publish,
+              patch.object(releases, "lookup", return_value=None),
               patch.object(releases, "upstream_license", return_value=self.license.read_bytes()) as license_fetch):
             for incorrect in ({"event": "pull_request"}, {"head_repository": {"full_name": "fork/patina-iptv"}}):
                 event.write_text(json.dumps({"workflow_run": run | incorrect}))
@@ -292,6 +294,34 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()), json.loads(self.manifest.read_text()))
             releases.publish_staged(self.root)
             publish.assert_called_once_with(self.tag, artifact, run["head_sha"])
+
+
+class AndroidBundleTests(unittest.TestCase):
+    def test_bundle_only_installs_the_requested_abi_and_rejects_other_entries(self):
+        bundle_spec = importlib.util.spec_from_file_location(
+            'bundle', Path(__file__).with_name('nsh-android-bundle.py'))
+        bundle = importlib.util.module_from_spec(bundle_spec)
+        bundle_spec.loader.exec_module(bundle)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source'
+            for name in bundle.entries('x86_64'):
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(f'synthetic {name}'.encode())
+            archive = root / 'runtime.tar.gz'
+            bundle.pack(source, 'x86_64', archive)
+            output = root / 'restored'
+            with self.assertRaisesRegex(ValueError, 'requested ABI'):
+                bundle.unpack(output, 'arm64-v8a', archive)
+            bundle.unpack(output, 'x86_64', archive)
+            for name in bundle.entries('x86_64'):
+                self.assertEqual((source / name).read_bytes(), (output / name).read_bytes())
+            with tarfile.open(archive, 'w:gz') as staged:
+                staged.add(source / 'classes.jar', arcname='../outside')
+            with self.assertRaisesRegex(ValueError, 'requested ABI'):
+                bundle.unpack(output, 'x86_64', archive)
+            self.assertFalse((root / 'outside').exists())
 
 
 if __name__ == "__main__":

@@ -54,14 +54,22 @@ runs:
         print(f'root={root}')
         print(f'path={root / "bin" / executable}')
         PY
+    - name: Restore an upstream executable with a pinned checksum
+      id: upstream
+      if: inputs.cache == 'true' && github.workflow != 'Release'
+      shell: bash
+      env:
+        TOOL_KEY: ${{ inputs.name }}:${{ inputs.version }}:${{ inputs.features }}:${{ runner.os }}-${{ runner.arch }}
+        TOOL_PATH: ${{ steps.identity.outputs.path }}
+      run: python3 tools/ci/restore-cargo-tool.py "$TOOL_KEY" "$TOOL_PATH"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true'
       id: tool
       with:
         path: ${{ steps.identity.outputs.path }}
         key: cargo-tool-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
     - name: Restore the retained macOS tool
-      if: inputs.cache == 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && steps.tool.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && steps.tool.outputs.cache-hit != 'true'
       id: retained
       shell: bash
       env:
@@ -70,7 +78,7 @@ runs:
         TOOL_PATH: ${{ steps.identity.outputs.path }}
       run: python3 tools/ci/restore-macos-tool.py "$TOOL_ARTIFACT" "$TOOL_PATH"
     - name: Build the pinned tool
-      if: steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
+      if: steps.upstream.outputs.restored != 'true' && steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
       shell: bash
       env:
         TOOL_NAME: ${{ inputs.name }}
@@ -85,7 +93,7 @@ runs:
         if [ -n "$TOOL_FEATURES" ]; then args+=(--features "$TOOL_FEATURES"); fi
         cargo install "$TOOL_NAME" --version "$TOOL_VERSION" --locked --root "$TOOL_ROOT" "${args[@]}"
     - name: Retain the macOS tool independently of the dependency cache
-      if: inputs.cache == 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
       continue-on-error: true
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
@@ -95,7 +103,7 @@ runs:
         retention-days: 30
     # A later test/package failure must not discard a successful tool build.
     - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-      if: inputs.cache == 'true' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true'
       with:
         path: ${{ steps.identity.outputs.path }}
         key: cargo-tool-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}

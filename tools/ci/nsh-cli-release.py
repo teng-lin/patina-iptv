@@ -14,11 +14,13 @@ from urllib.request import urlopen
 REPOSITORY = "teng-lin/patina-iptv"
 SIGNER = f"{REPOSITORY}/.github/workflows/nsh-cli-releases.yml"
 PLATFORMS = {"Linux-X64": "linux-x64", "macOS-ARM64": "macos-arm64"}
-ARTIFACT = re.compile(r"patina-nsh-cli-release-(Linux-X64|macOS-ARM64)-([a-f0-9]{64})")
+KINDS = {'nsh-cli', 'nsh-android-arm64-v8a', 'nsh-android-armeabi-v7a', 'nsh-android-x86_64'}
+ARTIFACT = re.compile(r"patina-(nsh-cli|nsh-android-(?:arm64-v8a|armeabi-v7a|x86_64))-release-(Linux-X64|macOS-ARM64)-([a-f0-9]{64})")
 ASSET_LIMIT = 128 * 1024 * 1024
 MANIFEST = "nsh-cli.json"
 LICENSE = "LICENSE-APACHE"
 ASSETS = {"nsh": ASSET_LIMIT, MANIFEST: 4096, LICENSE: 64 * 1024}
+RUNTIME = "runtime.tar.gz"
 FIELDS = "tagName,isDraft,isImmutable,isPrerelease,assets"
 
 
@@ -34,10 +36,18 @@ def lookup(tag):
     return json.loads(result.stdout)
 
 
-def tag_for(platform, key):
-    if not re.fullmatch(r"[a-f0-9]{64}", key):
+def tag_for(platform, key, kind='nsh-cli'):
+    if kind not in KINDS or not re.fullmatch(r"[a-f0-9]{64}", key):
         raise ValueError("Invalid NSH CLI build key")
-    return f"ci-nsh-cli-{PLATFORMS[platform]}-{key}"
+    return f"ci-{kind}-{PLATFORMS[platform]}-{key}"
+
+
+def payload(tag):
+    return RUNTIME if tag.startswith('ci-nsh-android-') else 'nsh'
+
+
+def asset_limits(tag):
+    return {payload(tag): ASSET_LIMIT, MANIFEST: ASSETS[MANIFEST], LICENSE: ASSETS[LICENSE]}
 
 
 def asset_digests(release, tag, *, draft=False):
@@ -45,13 +55,14 @@ def asset_digests(release, tag, *, draft=False):
             or not release["isPrerelease"] or (not draft and not release["isImmutable"])):
         raise ValueError("NSH CLI release metadata does not match the expected immutable release")
     digests = {}
+    limits = asset_limits(tag)
     for asset in release["assets"]:
         name, digest = asset["name"], asset.get("digest") or ""
-        if (name not in ASSETS or name in digests or asset["state"] != "uploaded"
-                or not 0 < asset["size"] <= ASSETS[name] or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest)):
+        if (name not in limits or name in digests or asset["state"] != "uploaded"
+                or not 0 < asset["size"] <= limits[name] or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest)):
             raise ValueError("NSH CLI asset metadata is invalid")
         digests[name] = digest
-    if not draft and digests.keys() != ASSETS.keys():
+    if not draft and digests.keys() != limits.keys():
         raise ValueError("NSH CLI release is missing an executable or manifest")
     return digests
 
@@ -61,24 +72,25 @@ def digest_file(path):
         return "sha256:" + hashlib.file_digest(data, "sha256").hexdigest()
 
 
-def restore(platform, key, path):
+def restore(platform, key, path, kind='nsh-cli'):
     if platform not in PLATFORMS:
         return False
-    tag = tag_for(platform, key)
+    tag = tag_for(platform, key, kind)
+    executable = payload(tag)
     release = lookup(tag)
     if not release or release["isDraft"]:
         return False
     expected = asset_digests(release, tag)
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=path.parent) as directory:
-        gh("release", "download", tag, "--pattern", "nsh", "--pattern", MANIFEST, "--pattern", LICENSE,
+        gh("release", "download", tag, "--pattern", executable, "--pattern", MANIFEST, "--pattern", LICENSE,
            "--dir", directory).check_returncode()
         directory = Path(directory)
-        downloaded = directory / "nsh"
+        downloaded = directory / executable
         manifest = directory / MANIFEST
-        if {name: digest_file(directory / name) for name in ASSETS} != expected:
+        if {name: digest_file(directory / name) for name in expected} != expected:
             raise ValueError("NSH CLI release checksum mismatch")
-        if json.loads(manifest.read_text()) != {"tag": tag, "digest": expected["nsh"]}:
+        if json.loads(manifest.read_text()) != {"tag": tag, "digest": expected[executable]}:
             raise ValueError("NSH CLI manifest does not match the expected build key and executable")
         gh("attestation", "verify", str(manifest), "--signer-workflow", SIGNER,
            "--source-ref", "refs/heads/master", "--deny-self-hosted-runners").check_returncode()
@@ -89,7 +101,7 @@ def restore(platform, key, path):
 
 
 def publish(tag, directory, commit):
-    expected = {name: digest_file(directory / name) for name in ASSETS}
+    expected = {name: digest_file(directory / name) for name in asset_limits(tag)}
     release = lookup(tag)
     if release and not release["isDraft"]:
         asset_digests(release, tag)
@@ -125,11 +137,12 @@ def trusted_commit():
 
 
 def staged(root):
-    for artifact in sorted(root.glob("patina-nsh-cli-release-*")):
+    for artifact in sorted(root.glob("patina-nsh-*-release-*")):
         match = ARTIFACT.fullmatch(artifact.name)
         if not match or not artifact.is_dir():
             raise ValueError(f"Invalid staged NSH CLI artifact: {artifact.name}")
-        yield tag_for(*match.groups()), artifact
+        kind, platform, key = match.groups()
+        yield tag_for(platform, key, kind), artifact
 
 
 def upstream_license(commit):
@@ -146,12 +159,18 @@ def upstream_license(commit):
 
 def prepare(root):
     commit = trusted_commit()
-    artifacts = list(staged(root))
+    artifacts = []
+    for tag, directory in staged(root):
+        release = lookup(tag)
+        if release and not release["isDraft"]:
+            asset_digests(release, tag)
+            continue
+        artifacts.append((tag, directory))
     if not artifacts:
         return False
     license_data = upstream_license(commit)
     for tag, directory in artifacts:
-        binary = directory / "nsh"
+        binary = directory / payload(tag)
         if not binary.is_file() or not 0 < binary.stat().st_size <= ASSET_LIMIT:
             raise ValueError("Invalid staged NSH executable")
         (directory / LICENSE).write_bytes(license_data)
@@ -162,7 +181,8 @@ def prepare(root):
 def publish_staged(root):
     commit = trusted_commit()
     for tag, directory in staged(root):
-        publish(tag, directory, commit)
+        if (directory / MANIFEST).is_file():
+            publish(tag, directory, commit)
 
 
 def main():
@@ -172,6 +192,7 @@ def main():
     download.add_argument("platform")
     download.add_argument("key")
     download.add_argument("path", type=Path)
+    download.add_argument("--kind", choices=KINDS, default='nsh-cli')
     for command in ("prepare", "publish"):
         commands.add_parser(command).add_argument("root", type=Path)
     options = parser.parse_args()
@@ -185,7 +206,7 @@ def main():
         return
     restored = False
     try:
-        restored = restore(options.platform, options.key, options.path)
+        restored = restore(options.platform, options.key, options.path, options.kind)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"::warning::NSH CLI release restore failed ({type(error).__name__}); trying the cache")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

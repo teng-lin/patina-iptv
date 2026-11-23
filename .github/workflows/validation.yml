@@ -62,6 +62,14 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"
+  tools:
+    needs: plan
+    if: >-
+      inputs.tier != 'release' && (needs.plan.outputs.candidate_build == 'true' ||
+      needs.plan.outputs.smoke == 'true' || contains(fromJSON(needs.plan.outputs.package_matrix).include.*.platform, 'linux'))
+    uses: ./.github/workflows/ci-tools.yml
+    with:
+      android-abis: ${{ needs.plan.outputs.candidate_build == 'true' && 'arm64-v8a,armeabi-v7a,x86_64' || (needs.plan.outputs.smoke == 'true' && 'x86_64') || '' }}
   helpers:
     needs: plan
     runs-on: ubuntu-24.04
@@ -136,10 +144,11 @@ jobs:
     with:
       package: ${{ needs.plan.outputs.android_package == 'true' }}
   packages:
-    needs: plan
-    if: needs.plan.outputs.packages == 'true'
+    needs: [plan, tools]
+    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
     uses: ./.github/workflows/package-check.yml
     with:
+      prepared-linux-tools: ${{ needs.tools.result == 'success' }}
       matrix: ${{ needs.plan.outputs.package_matrix }}
   windows-package:
     needs: plan
@@ -158,15 +167,17 @@ jobs:
       seconds: ${{ needs.plan.outputs.tier == 'full' && 300 || 30 }}
       save-corpus: ${{ github.ref == 'refs/heads/master' && needs.plan.outputs.tier == 'full' }}
   smoke:
-    needs: plan
-    if: needs.plan.outputs.smoke == 'true'
+    needs: [plan, tools]
+    if: ${{ !cancelled() && needs.plan.outputs.smoke == 'true' && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
     uses: ./.github/workflows/android-smoke.yml
+    with:
+      prepared-linux-tools: ${{ needs.tools.result == 'success' }}
   stress:
     needs: plan
     if: needs.plan.outputs.stress == 'true'
     uses: ./.github/workflows/import-stress.yml
   validation:
-    needs: [plan, helpers, host, windows, android, packages, windows-package, coverage, fuzz, smoke, stress, ios, credentials, candidate]
+    needs: [plan, tools, helpers, host, windows, android, packages, windows-package, coverage, fuzz, smoke, stress, ios, credentials, candidate]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -194,11 +205,12 @@ jobs:
           RESULT: ${{ needs.validation.result }}
         run: test "$RESULT" = success
   candidate:
-    needs: plan
-    if: needs.plan.outputs.candidate_build == 'true'
+    needs: [plan, tools]
+    if: ${{ !cancelled() && needs.plan.outputs.candidate_build == 'true' && needs.tools.result == 'success' }}
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
       android: true
+      prepared-linux-tools: true
       desktop-matrix: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
   seal-candidate:
     needs: [plan, validation, candidate]

@@ -7,12 +7,18 @@ inputs:
   stage-release:
     description: Stage the executable for immutable publication from a master candidate
     default: 'false'
+  prepared:
+    description: Retrieve the CLI from this run's Linux tool builder
+    default: 'false'
+  share:
+    description: Share the Linux CLI with the other jobs in this run
+    default: 'false'
 runs:
   using: composite
   steps:
     - name: Identify NSH CLI inputs
       id: identity
-      if: inputs.cache == 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release'
       shell: bash
       run: |
         key=$(python3 tools/ci/nsh-tool-key.py cli)
@@ -20,9 +26,18 @@ runs:
         root=$(cd ../nsh-patina && pwd)
         echo "key=$key" >> "$GITHUB_OUTPUT"
         echo "path=$root/target/release/nsh" >> "$GITHUB_OUTPUT"
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      if: inputs.prepared == 'true'
+      with:
+        name: patina-nsh-cli-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+        path: '../nsh-patina/target/release'
+    - name: Set executable permission on the prepared CLI
+      if: inputs.prepared == 'true'
+      shell: bash
+      run: chmod +x ../nsh-patina/target/release/nsh
     - name: Restore immutable NSH CLI release
       id: release
-      if: inputs.cache == 'true'
+      if: inputs.cache == 'true' && inputs.prepared != 'true' && github.workflow != 'Release'
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -31,13 +46,13 @@ runs:
         TOOL_PATH: ${{ steps.identity.outputs.path }}
       run: python3 tools/ci/nsh-cli-release.py restore "$TOOL_PLATFORM" "$TOOL_KEY" "$TOOL_PATH"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true' && steps.release.outputs.restored != 'true'
+      if: inputs.cache == 'true' && inputs.prepared != 'true' && github.workflow != 'Release' && steps.release.outputs.restored != 'true'
       id: cli
       with:
         path: ${{ steps.identity.outputs.path }}
         key: nsh-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
     - name: Restore the retained macOS tool
-      if: inputs.cache == 'true' && runner.os == 'macOS' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && inputs.prepared != 'true' && github.workflow != 'Release' && runner.os == 'macOS' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true'
       id: retained
       shell: bash
       env:
@@ -46,7 +61,7 @@ runs:
         TOOL_PATH: ${{ steps.identity.outputs.path }}
       run: python3 tools/ci/restore-macos-tool.py "$TOOL_ARTIFACT" "$TOOL_PATH"
     - name: Build NSH CLI
-      if: steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
+      if: inputs.prepared != 'true' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
       shell: bash
       # Bootstrap tools are not shipped. Keep their profile identical on all hosts.
       env:
@@ -59,18 +74,19 @@ runs:
       run: ../nsh-patina/target/release/nsh --version
     - name: Stage the pinned CLI for publication
       if: >-
-        inputs.stage-release == 'true' && inputs.cache == 'true' && steps.release.outputs.restored != 'true' &&
-        github.repository == 'teng-lin/patina-iptv' && github.event_name == 'push' && github.ref == 'refs/heads/master'
-      continue-on-error: true
+        inputs.share == 'true' || (inputs.prepared != 'true' && inputs.stage-release == 'true' && inputs.cache == 'true' &&
+        steps.release.outputs.restored != 'true' && github.repository == 'teng-lin/patina-iptv' &&
+        github.event_name == 'push' && github.ref == 'refs/heads/master')
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: patina-nsh-cli-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
         path: ${{ steps.identity.outputs.path }}
         if-no-files-found: error
         retention-days: 30
+        overwrite: true
     # Save now: a later app failure must not discard a successful tool build.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && inputs.prepared != 'true' && github.workflow != 'Release' && github.ref == 'refs/heads/master' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true'
       with:
         path: ${{ steps.identity.outputs.path }}
         key: nsh-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}

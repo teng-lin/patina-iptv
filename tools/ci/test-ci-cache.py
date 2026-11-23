@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check finished-tool cache identities without installing or downloading tools."""
 from contextlib import redirect_stdout
+import hashlib
 import importlib.util
 import io
 import json
@@ -10,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import textwrap
 import unittest
@@ -96,6 +98,29 @@ class ToolCache(unittest.TestCase):
     def test_invalid_executable_names_are_rejected(self):
         with self.assertRaisesRegex(SystemExit, "invalid Cargo tool name"):
             self.identity(TOOL_NAME="../generated")
+
+    def test_upstream_tool_verifies_checksum_before_extracting(self):
+        spec = importlib.util.spec_from_file_location('upstream_tool', ROOT / 'tools/ci/restore-cargo-tool.py')
+        upstream = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(upstream)
+        name = 'cargo-synthetic'
+        archive = io.BytesIO()
+        content = b'synthetic executable'
+        with tarfile.open(fileobj=archive, mode='w:gz') as bundle:
+            member = tarfile.TarInfo(f'synthetic-release/{name}')
+            member.size = len(content)
+            bundle.addfile(member, io.BytesIO(content))
+        data = archive.getvalue()
+        pin = self.root / 'synthetic-pins.json'
+        destination = self.root / 'bin' / name
+        with patch.object(upstream, 'PINS', pin), patch.object(upstream, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(data)):
+            pin.write_text(json.dumps({'synthetic': {'url': 'https://example.test/tool', 'sha256': '0' * 64}}))
+            with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                upstream.restore('synthetic', destination)
+            self.assertFalse(destination.exists())
+            pin.write_text(json.dumps({'synthetic': {'url': 'https://example.test/tool', 'sha256': hashlib.sha256(data).hexdigest()}}))
+            self.assertTrue(upstream.restore('synthetic', destination))
+        self.assertEqual(destination.read_bytes(), content)
 
     def test_clean_shipping_builds_can_reuse_exact_tools_without_bulk_cargo_cache(self):
         setup = (ROOT / ".github/actions/setup/action.yml").read_text(encoding="utf-8")

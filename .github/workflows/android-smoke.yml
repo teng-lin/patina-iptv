@@ -2,6 +2,9 @@ name: Android smoke
 on:
   workflow_call:
     inputs:
+      prepared-linux-tools:
+        type: boolean
+        default: false
       lto:
         description: LTO setting for the x86_64 smoke APK
         type: string
@@ -47,6 +50,7 @@ jobs:
           cargo-cache: 'false'
       - uses: ./.github/actions/android
         with:
+          prepared: ${{ inputs.prepared-linux-tools && 'true' || 'false' }}
           abi: x86_64
           cache: ${{ !inputs.cold && 'gradle' || '' }}
       - name: Identify the Android compiler and host libraries
