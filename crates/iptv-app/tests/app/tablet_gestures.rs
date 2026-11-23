@@ -545,10 +545,9 @@ fn bounds_of(app: &Headless, test_id: &str) -> Option<f32> {
         .map(|n| n.bounds.size.width.0)
 }
 
-/// #156: a long press on another channel, or on one of its programs,
-/// focuses it and opens its menu. Dismissed (Back), or left for the
-/// program's details, it tunes nothing until a key moves the focus,
-/// which autoplays as before. A menu action that plays still plays.
+/// #156: a channel or timeline long press opens the channel menu without
+/// tuning. Program details also leave playback alone. Moving the focus
+/// resumes autoplay, and choosing replay opens the selected program.
 #[test]
 fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
     let Some(home) = isolated!() else { return };
@@ -565,16 +564,23 @@ fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
     step(app.wait(SETTLE));
     nothing_activated(&app, &tuned, &db, "a channel's menu dismissed");
 
-    let menu = "id:menu-panel >> text:Details";
     step(app.long_press("text:C5 P0"));
-    step(app.wait_for(menu));
+    step(app.wait_for(channel_menu));
+    assert!(!app.shows("id:menu-panel >> text:Details"));
     step(app.back());
-    step(app.wait_for_gone(menu, Duration::from_secs(3)));
+    step(app.wait_for_gone(channel_menu, Duration::from_secs(3)));
     step(app.wait(SETTLE));
-    nothing_activated(&app, &tuned, &db, "a program's menu dismissed");
+    nothing_activated(&app, &tuned, &db, "the timeline's channel menu dismissed");
 
-    // Its details, from the menu, then Back: the same.
-    step(app.long_press("text:C7 P0"));
+    let open_program_menu = |app: &mut Headless, title: &str| {
+        step(app.long_press(title));
+        step(app.wait_for(channel_menu));
+        step(app.back());
+        step(app.wait_for_gone(channel_menu, Duration::from_secs(3)));
+        step(app.press("id:guide-more"));
+    };
+    let menu = "id:menu-panel >> text:Details";
+    open_program_menu(&mut app, "text:C7 P0");
     step(app.wait_for(menu));
     step(app.press(menu));
     let details = "id:description-layer >> text:C7 P0";
@@ -596,7 +602,7 @@ fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
 
     // Channel 1 replays: its menu's Play from the beginning plays.
     let before = tuned.lock().unwrap().len();
-    step(app.long_press("text:C1 P0"));
+    open_program_menu(&mut app, "text:C1 P0");
     step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
     step(app.press("id:menu-panel >> text:Play from the beginning"));
     let seen = tuned.clone();

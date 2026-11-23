@@ -216,8 +216,13 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     }
 
     // A main-window editor is not an invisible overlay in this player.
+    let channel_menu = "id:menu-panel >> text:Open in new window";
     step(app.right_click("id:guide-ui >> role:cell[No information] >> nth=1"));
-    step(app.press("text:Manage favorites…"));
+    step(app.wait_for(channel_menu));
+    step(app.back());
+    step(app.wait_for_gone(channel_menu, Duration::from_secs(3)));
+    step(app.press("id:guide-ui >> id:guide-more"));
+    step(app.press("id:menu-panel >> text:Manage favorites…"));
     step(app.wait_for("text:Tap a channel to add or remove it"));
     step(app.hover("text:Tap a channel to add or remove it"));
     app.idle(Duration::from_secs(3)).unwrap();
