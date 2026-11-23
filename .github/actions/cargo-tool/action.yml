@@ -112,16 +112,25 @@ runs:
         name: patina-cargo-about-${{ runner.arch }}-${{ steps.identity.outputs.key }}
         path: ${{ steps.identity.outputs.path }}
         if-no-files-found: error
-        retention-days: 30
+        retention-days: 7
+        overwrite: true0
+    - name: Check the Windows executable before staging it
+      id: stage
+      if: inputs.cache == 'true' && inputs.stage-release == 'true' && github.workflow != 'Release' && github.event_name == 'push' && github.ref == 'refs/heads/master' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli' && steps.durable.outputs.restored != 'true'
+      shell: bash
+      env:
+        TOOL_BIN: ${{ steps.identity.outputs.path }}
+      run: '"$TOOL_BIN" --version'
     - name: Stage Windows cargo-about for trusted publication
-      if: inputs.stage-release == 'true' && github.workflow != 'Release' && github.event_name == 'push' && github.ref == 'refs/heads/master' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli' && steps.durable.outputs.restored != 'true'
+      if: steps.stage.outcome == 'success'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       continue-on-error: true
       with:
         name: patina-cargo-about-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
         path: ${{ steps.identity.outputs.path }}
         if-no-files-found: error
-        retention-days: 3
+        retention-days: 7
+        overwrite: true
     # A later test/package failure must not discard a successful tool build.
     - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true'

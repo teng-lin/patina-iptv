@@ -104,7 +104,7 @@ class ToolCache(unittest.TestCase):
         candidate = workflow.split("  windows-package:", 1)[1].split("  android-native:", 1)[0]
         self.assertIn("stage-release: 'true'", candidate)
         self.assertIn("github.workflow != 'Release'", next(
-            line for line in RECIPE.splitlines() if "if: inputs.stage-release" in line))
+            line for line in RECIPE.splitlines() if "inputs.stage-release ==" in line))
         self.assertIn("github.event_name == 'push'", RECIPE)
         self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
 

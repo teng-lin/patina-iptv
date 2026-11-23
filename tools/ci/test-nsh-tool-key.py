@@ -152,6 +152,11 @@ class IdentityStepTests(unittest.TestCase):
             download = restore.split("    - name: ", 1)[0]
             self.assertIn("github.workflow != 'Release'", download)
             self.assertIn("continue-on-error: true", download)
+            self.assertIn("digest-mismatch: error", download)
+            install = restore.split("    - name: ", 2)[1]
+            self.assertIn("id: prepared\n", install)
+            self.assertIn("steps.prepared-download.outcome == 'success'", install)
+            self.assertIn("continue-on-error: true", install)
             self.assertIn("steps.prepared.outcome != 'success'", restore)
         smoke = (root / ".github/workflows/android-smoke.yml").read_text()
         self.assertIn("inputs.prepared-linux-tools && !inputs.cold", smoke)
@@ -310,6 +315,12 @@ class ReleaseTests(unittest.TestCase):
         read_license.assert_called_once_with(releases.CARGO_ABOUT_LICENSE)
         self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()),
                          {"tag": tag, "digest": releases.digest_file(executable)})
+
+    def test_publisher_requires_archive_checksums_before_attestation(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/nsh-cli-releases.yml").read_text()
+        self.assertEqual(workflow.count("uses: actions/download-artifact@"), 2)
+        self.assertEqual(workflow.count("digest-mismatch: error"), 2)
 
     def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
         artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
