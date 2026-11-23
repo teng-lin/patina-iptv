@@ -1,11 +1,29 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use crate::commands::{ExternalPlaybackAuthorization, external_playback_check};
+use crate::commands::external_playback_check;
 use iptv_core::add_playlist::ImportId;
+use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
+
+/// Parental policy verified against committed storage for external playback.
+pub struct ExternalPlaybackAuthorization {
+    access: crate::parental::Snapshot,
+    grants: Vec<Target>,
+}
+
+impl ExternalPlaybackAuthorization {
+    pub(crate) fn new(access: crate::parental::Snapshot, grants: Vec<Target>) -> Self {
+        Self { access, grants }
+    }
+
+    /// Check immediately before granting the relay admission, without yielding.
+    pub fn is_current(&self) -> bool {
+        self.access.inspection_current(&self.grants)
+    }
+}
 
 impl Runtime {
     pub fn browser_generation(&self) -> u64 {

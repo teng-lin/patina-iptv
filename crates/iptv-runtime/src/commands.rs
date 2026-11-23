@@ -1,6 +1,7 @@
 //! Named library operations. Views send values and await results; only this
 //! module creates database work items.
 use super::store_service::Services;
+use crate::operations::ExternalPlaybackAuthorization;
 use iptv_core::membership::Member;
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
@@ -150,19 +151,6 @@ fn channel_native(
     })
 }
 
-/// Parental policy verified against committed storage for external playback.
-pub struct ExternalPlaybackAuthorization {
-    access: crate::parental::Snapshot,
-    grants: Vec<Target>,
-}
-
-impl ExternalPlaybackAuthorization {
-    /// Check immediately before granting the relay admission, without yielding.
-    pub fn is_current(&self) -> bool {
-        self.access.inspection_current(&self.grants)
-    }
-}
-
 pub(crate) fn external_playback_check(
     store: &Store,
     authority: &ResolutionAuthority,
@@ -198,12 +186,12 @@ pub(crate) fn external_playback_check(
         let Some(row) = store.channel(source, channel)? else {
             return Ok(None);
         };
-        Ok((!row.blocked
+        let allowed = !row.blocked
             && stored.incarnation == authority.incarnation()
             && &stored.source.config == authority.config()
             && &row.channel == authority.channel()
-            && access.inspection_current(&grants))
-        .then_some(ExternalPlaybackAuthorization { access, grants }))
+            && access.inspection_current(&grants);
+        Ok(allowed.then(|| ExternalPlaybackAuthorization::new(access, grants)))
     })
 }
 

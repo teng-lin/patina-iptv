@@ -43,8 +43,8 @@ pub mod recordings;
 #[path = "recordings_unavailable.rs"]
 pub mod recordings;
 pub mod vod;
-pub use commands::ExternalPlaybackAuthorization;
 pub use error::Error;
+pub use operations::ExternalPlaybackAuthorization;
 pub use store_service::StoreQueueStats;
 #[cfg(feature = "test-support")]
 mod testing;
