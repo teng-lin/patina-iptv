@@ -238,6 +238,19 @@ class Workflows(unittest.TestCase):
         self.assertIn('needs: dispatch-plan', desktop)
         self.assertIn('fromJSON(inputs.desktop-matrix || needs.dispatch-plan.outputs.desktop', desktop)
 
+    def test_candidate_android_assembly_uses_the_native_matrix_result(self):
+        expressions = module('test-release-workflow')
+        workflow = ROOT / '.github/workflows/unsigned-candidate.yml'
+        assembly = expressions.jobs(workflow)['android-package']
+        condition = re.search(r'if: \$\{\{(.*?)\}\}', assembly)[1]
+        for result, cancelled, expected in (
+                ('success', False, True), ('failure', False, False), ('skipped', False, False),
+                ('cancelled', True, False), ('success', True, False)):
+            with self.subTest(result=result, cancelled=cancelled):
+                self.assertEqual(expressions.evaluate(condition, {
+                    'needs': {'android-native': {'result': result}}, 'workflow_cancelled': cancelled,
+                }), expected)
+
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()
         self.assertIn("--release", script)
