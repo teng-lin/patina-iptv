@@ -63,6 +63,7 @@ jobs:
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-about
+          cache: 'false'
           version: 0.9.3
           features: cli
           stage-release: 'true'
@@ -114,6 +115,7 @@ jobs:
           policy-tool: ${{ matrix.abi == 'arm64-v8a' && 'true' || 'false' }}
       - uses: ./.github/actions/android
         with:
+          stage-release: 'true'
           prepared: ${{ inputs.prepared-linux-tools && 'true' || 'false' }}
           abi: ${{ matrix.abi }}
       - name: Build and stage the Android native library
@@ -129,6 +131,7 @@ jobs:
         if: matrix.abi == 'arm64-v8a'
         with:
           name: cargo-about
+          cache: 'false'
           version: 0.9.3
           features: cli
       - name: Generate Rust and NSH notices
@@ -216,6 +219,7 @@ jobs:
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-about
+          cache: 'false'
           version: 0.9.3
           features: cli
       - name: Set release metadata
@@ -343,6 +347,7 @@ jobs:
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-cyclonedx
+          cache: 'false'
           version: 0.5.10
       - name: Write the CycloneDX SBOM for the locked Rust graph
         run: python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"

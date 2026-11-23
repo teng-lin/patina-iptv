@@ -13,6 +13,10 @@ inputs:
   share:
     description: Share the Linux CLI with the other jobs in this run
     default: 'false'
+outputs:
+  artifact-ready:
+    description: The verified CLI has been staged for jobs in this run
+    value: ${{ steps.stage.outcome == 'success' }}
 runs:
   using: composite
   steps:
@@ -80,6 +84,7 @@ runs:
       shell: bash
       run: ../nsh-patina/target/release/nsh --version
     - name: Stage the pinned CLI for publication
+      id: stage
       if: >-
         inputs.share == 'true' || (steps.prepared.outcome != 'success' && inputs.stage-release == 'true' && inputs.cache == 'true' &&
         steps.release.outputs.restored != 'true' && github.repository == 'teng-lin/patina-iptv' &&

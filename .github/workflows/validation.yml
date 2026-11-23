@@ -48,6 +48,7 @@ jobs:
       fuzz: ${{ steps.select.outputs.fuzz }}
       smoke: ${{ steps.select.outputs.smoke }}
       stress: ${{ steps.select.outputs.stress }}
+      linux-cli-ready: ${{ steps.cli.outputs.ready }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -62,14 +63,35 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"
+      - name: Read the tool pins for shared CLI lookup
+        if: >-
+          inputs.tier != 'release' && (steps.select.outputs.candidate_build == 'true' ||
+          (steps.select.outputs.smoke == 'true' && contains(fromJSON(steps.select.outputs.package_matrix).include.*.platform, 'linux')))
+        id: tool-pins
+        run: python3 tools/ci/pins.py >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        if: steps.tool-pins.outcome == 'success'
+        continue-on-error: true
+        id: lookup-rust
+        with:
+          toolchain: ${{ steps.tool-pins.outputs.toolchain }}
+      - name: Look up the immutable Linux CLI without downloading it
+        if: steps.lookup-rust.outcome == 'success'
+        id: cli
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NSH_REVISION: ${{ steps.tool-pins.outputs.nsh }}
+        run: |
+          key=$(python3 tools/ci/nsh-tool-key.py cli --nsh-revision "$NSH_REVISION")
+          python3 tools/ci/nsh-cli-release.py check Linux-X64 "$key"
   tools:
     needs: plan
     if: >-
-      inputs.tier != 'release' && (needs.plan.outputs.candidate_build == 'true' ||
+      inputs.tier != 'release' && needs.plan.outputs.linux-cli-ready != 'true' &&
+      (needs.plan.outputs.candidate_build == 'true' ||
       (needs.plan.outputs.smoke == 'true' && contains(fromJSON(needs.plan.outputs.package_matrix).include.*.platform, 'linux')))
     uses: ./.github/workflows/ci-tools.yml
-    with:
-      android-abis: ${{ needs.plan.outputs.candidate_build == 'true' && 'arm64-v8a,armeabi-v7a,x86_64' || (needs.plan.outputs.smoke == 'true' && 'x86_64') || '' }}
   helpers:
     needs: plan
     runs-on: ubuntu-24.04
@@ -145,10 +167,10 @@ jobs:
       package: ${{ needs.plan.outputs.android_package == 'true' }}
   packages:
     needs: [plan, tools]
-    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.plan.outputs.packages == 'true' }}
     uses: ./.github/workflows/package-check.yml
     with:
-      prepared-linux-tools: ${{ needs.tools.result == 'success' }}
+      prepared-linux-tools: ${{ needs.tools.outputs.cli-ready == 'true' }}
       matrix: ${{ needs.plan.outputs.package_matrix }}
   windows-package:
     needs: plan
@@ -168,10 +190,10 @@ jobs:
       save-corpus: ${{ github.ref == 'refs/heads/master' && needs.plan.outputs.tier == 'full' }}
   smoke:
     needs: [plan, tools]
-    if: ${{ !cancelled() && needs.plan.outputs.smoke == 'true' && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.plan.outputs.smoke == 'true' }}
     uses: ./.github/workflows/android-smoke.yml
     with:
-      prepared-linux-tools: ${{ needs.tools.result == 'success' }}
+      prepared-linux-tools: ${{ needs.tools.outputs.cli-ready == 'true' }}
   stress:
     needs: plan
     if: needs.plan.outputs.stress == 'true'
@@ -206,11 +228,11 @@ jobs:
         run: test "$RESULT" = success
   candidate:
     needs: [plan, tools]
-    if: ${{ !cancelled() && needs.plan.outputs.candidate_build == 'true' && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.plan.outputs.candidate_build == 'true' }}
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
       android: true
-      prepared-linux-tools: ${{ needs.tools.result == 'success' }}
+      prepared-linux-tools: ${{ needs.tools.outputs.cli-ready == 'true' }}
       desktop-matrix: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
   seal-candidate:
     needs: [plan, validation, candidate]

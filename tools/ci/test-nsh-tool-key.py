@@ -55,6 +55,12 @@ class ToolIdentityTests(unittest.TestCase):
         self.command_mock = self.commands.start()
         self.addCleanup(self.commands.stop)
 
+    def test_plan_can_find_the_cli_by_the_same_key_without_checking_out_nsh(self):
+        self.versions["git"] = "a" * 40
+        self.assertEqual(module.identity("cli"), module.identity("cli", self.versions["git"]))
+        with self.assertRaisesRegex(ValueError, "Invalid revision"):
+            module.identity("android", self.versions["git"])
+
     def test_application_changes_do_not_invalidate_tools(self):
         before = [module.identity(kind) for kind in ("cli", "android")]
         Path("Cargo.lock").write_text("different application dependencies\n")
@@ -145,19 +151,18 @@ class ToolIdentityTests(unittest.TestCase):
 class IdentityStepTests(unittest.TestCase):
     def test_prepared_tools_can_fall_back_on_a_runner_image_mismatch(self):
         root = Path(__file__).resolve().parents[2]
-        for action in ("nsh-cli", "android"):
-            text = (root / f".github/actions/{action}/action.yml").read_text()
-            identity, restore = text.split("    - uses: actions/download-artifact", 1)
-            self.assertIn("inputs.prepared == 'true' || inputs.share == 'true'", identity)
-            download = restore.split("    - name: ", 1)[0]
-            self.assertIn("github.workflow != 'Release'", download)
-            self.assertIn("continue-on-error: true", download)
-            self.assertIn("digest-mismatch: error", download)
-            install = restore.split("    - name: ", 2)[1]
-            self.assertIn("id: prepared\n", install)
-            self.assertIn("steps.prepared-download.outcome == 'success'", install)
-            self.assertIn("continue-on-error: true", install)
-            self.assertIn("steps.prepared.outcome != 'success'", restore)
+        text = (root / ".github/actions/nsh-cli/action.yml").read_text()
+        identity, restore = text.split("    - uses: actions/download-artifact", 1)
+        self.assertIn("inputs.prepared == 'true' || inputs.share == 'true'", identity)
+        download = restore.split("    - name: ", 1)[0]
+        self.assertIn("github.workflow != 'Release'", download)
+        self.assertIn("continue-on-error: true", download)
+        self.assertIn("digest-mismatch: error", download)
+        install = restore.split("    - name: ", 2)[1]
+        self.assertIn("id: prepared\n", install)
+        self.assertIn("steps.prepared-download.outcome == 'success'", install)
+        self.assertIn("continue-on-error: true", install)
+        self.assertIn("steps.prepared.outcome != 'success'", restore)
         smoke = (root / ".github/workflows/android-smoke.yml").read_text()
         self.assertIn("inputs.prepared-linux-tools && !inputs.cold", smoke)
 

@@ -217,6 +217,9 @@ def publish_staged(root):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    check = commands.add_parser("check")
+    check.add_argument("platform")
+    check.add_argument("key")
     download = commands.add_parser("restore")
     download.add_argument("platform")
     download.add_argument("key")
@@ -225,6 +228,13 @@ def main():
     for command in ("prepare", "publish"):
         commands.add_parser(command).add_argument("root", type=Path)
     options = parser.parse_args()
+    if options.command == "check":
+        tag = tag_for(options.platform, options.key)
+        release = lookup(tag)
+        ready = release is not None and not release["isDraft"] and bool(asset_digests(release, tag))
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            print(f"ready={str(ready).lower()}", file=output)
+        return
     if options.command == "publish":
         publish_staged(options.root)
         return

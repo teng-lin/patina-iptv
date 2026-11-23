@@ -115,7 +115,7 @@ runs:
         retention-days: 30
     - name: Check the Windows executable before staging it
       id: stage
-      if: inputs.cache == 'true' && inputs.stage-release == 'true' && github.workflow != 'Release' && github.event_name == 'push' && github.ref == 'refs/heads/master' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli' && steps.durable.outputs.restored != 'true'
+      if: inputs.stage-release == 'true' && github.workflow != 'Release' && github.event_name == 'push' && github.ref == 'refs/heads/master' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli' && steps.durable.outputs.restored != 'true'
       shell: bash
       env:
         TOOL_BIN: ${{ steps.identity.outputs.path }}

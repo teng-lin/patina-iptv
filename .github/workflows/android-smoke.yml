@@ -51,6 +51,7 @@ jobs:
           cargo-cache: 'false'
       - uses: ./.github/actions/android
         with:
+          stage-release: ${{ !inputs.cold && 'true' || 'false' }}
           prepared: ${{ inputs.prepared-linux-tools && !inputs.cold && 'true' || 'false' }}
           abi: x86_64
           cache: ${{ !inputs.cold && 'gradle' || '' }}

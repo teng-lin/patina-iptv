@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
 """Exact tool identities, deliberately independent of IPTV's Cargo.lock."""
+import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
-import sys
 
 
 RECIPE_VERSIONS = {"cli": 1, "android": 1}  # Bump only when that tool's build recipe changes.
 
 
-def identity(kind):
+def identity(kind, revision=None):
     if kind not in RECIPE_VERSIONS:
         raise ValueError(f"unknown NSH tool: {kind}")
+    if revision is not None and (kind != "cli" or not re.fullmatch(r"[a-f0-9]{40}", revision)):
+        raise ValueError("Invalid revision for immutable Linux CLI lookup")
     inputs = {
-        "nsh": subprocess.check_output(
+        "nsh": revision or subprocess.check_output(
             ["git", "-C", "../nsh-patina", "rev-parse", "HEAD"], text=True
         ).strip(),
         "rustc": subprocess.check_output(
@@ -63,4 +66,8 @@ def identity(kind):
 
 
 if __name__ == "__main__":
-    print(identity(sys.argv[1]))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("kind", choices=RECIPE_VERSIONS)
+    parser.add_argument("--nsh-revision")
+    args = parser.parse_args()
+    print(identity(args.kind, args.nsh_revision))

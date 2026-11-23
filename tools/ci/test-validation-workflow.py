@@ -266,15 +266,26 @@ class Workflows(unittest.TestCase):
         tools = validation['tools']
         self.assertIn("inputs.tier != 'release'", tools)
         self.assertIn('uses: ./.github/workflows/ci-tools.yml', tools)
+        self.assertIn("needs.plan.outputs.linux-cli-ready != 'true'", tools)
         for lane in ('packages', 'smoke', 'candidate'):
             self.assertIn('needs: [plan, tools]', validation[lane])
-            self.assertIn('prepared-linux-tools:', validation[lane])
+            self.assertIn("prepared-linux-tools: ${{ needs.tools.outputs.cli-ready == 'true' }}", validation[lane])
+            self.assertIn("!cancelled()", validation[lane])
+            self.assertNotIn("needs.tools.result == 'success'", validation[lane])
         builder = (files / 'ci-tools.yml').read_text()
-        self.assertIn("if: inputs.android-abis == ''", builder)
-        self.assertIn("if: inputs.android-abis != ''", builder)
+        self.assertIn("continue-on-error: true", builder)
+        self.assertIn("uses: ./.github/actions/nsh-cli", builder)
+        self.assertNotIn("uses: ./.github/actions/android", builder)
         for name in ('nsh-cli', 'android', 'cargo-tool'):
             action = (ROOT / f'.github/actions/{name}/action.yml').read_text()
             self.assertIn("github.workflow != 'Release'", action)
+
+    def test_candidate_notices_and_sbom_build_tools_from_source(self):
+        candidate = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text()
+        tool_steps = re.findall(r"uses: \./\.github/actions/cargo-tool\n(.*?)(?=\n      - |$)", candidate, flags=re.DOTALL)
+        self.assertEqual(len(tool_steps), 4)
+        for step in tool_steps:
+            self.assertIn("cache: 'false'", step)
 
     def test_real_gtk_lifecycle_is_in_ordinary_linux_pr_validation(self):
         checks = module("check-plan")
