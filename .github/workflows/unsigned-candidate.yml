@@ -202,7 +202,9 @@ jobs:
         with:
           cache: 'false'
           prerequisites: ${{ matrix.platform == 'macos' && 'macos-package' || 'host' }}
-          # Linux packaging tools, installed fresh (uncached) and bounded.
+          # Keep the app build fresh while reusing Ubuntu package downloads.
+          apt-cache: ${{ matrix.platform == 'linux' && 'true' || 'false' }}
+          # Linux packaging tools.
           apt-packages: >-
             ${{ matrix.platform == 'linux' && 'ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
             libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11' || '' }}

@@ -609,10 +609,12 @@ and final-workflow provenance, retaining the unsigned input/check record after
 the Actions bundle expires.
 Use **Re-run failed jobs** to retry a failed validation, package, signing or
 publication stage while preserving successful package outputs at the same source
-SHA. GitHub increments the run attempt automatically; a changed source requires
-new validation. If a failed job already uploaded part of its output, remove only
-that job's unpublished Actions artifacts before retrying it: uploads never
-overwrite retained inputs. Keep successful package jobs' artifacts.
+SHA. If validation or packaging failed, the master seal job also reports a
+failure before pulling any artifacts. The failed-job retry runs the seal again
+once its prerequisites pass. GitHub increments the run attempt automatically.
+A changed source requires new validation. If a failed job already uploaded part
+of its output, remove only that job's unpublished Actions artifacts before
+retrying it. Keep successful package jobs' artifacts.
 
 If a protected-context alias fails after `seal-candidate` succeeded, retrying only
 the alias leaves a manifest from the previous attempt. Selection deliberately

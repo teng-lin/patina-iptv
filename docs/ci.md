@@ -80,7 +80,9 @@ runners.
 Ubuntu package snapshots can install offline across runner image refreshes
 within the same Ubuntu release, architecture and package list. If the installed
 base needs a different package version, apt refreshes the signed indexes and
-downloads the missing archives. Master saves the refreshed snapshot.
+downloads the missing archives. Master saves the refreshed snapshot. Unsigned
+Linux candidates can restore these downloads while compiling the app in a fresh
+output directory.
 
 The Android smoke builder links NSH's Linux describe program against Ubuntu's
 libmpv runtime and uses FFmpeg to generate media fixtures. Dispatch **Android
@@ -165,6 +167,11 @@ bytes under the release workflow/tag/SHA and verifies public bytes afterwards.
 PR validation cancels older runs of that PR. Master validation, including unsigned
 candidate packaging, cancels superseded master runs. Called release validation
 has an independent run-specific group and cannot be canceled by a master push.
+On a master candidate with a failed validation or package job, the seal job
+reports the failed gate before downloading artifacts. Re-running failed jobs
+retries the seal after the gate passes and reuses successful package jobs in the
+same run.
+
 Release and master share the unsigned package recipe. The release retains signing, final artifact smoke,
 attestation and publication. Failed stages can be rerun without rebuilding passed
 package jobs; never use **Re-run all jobs** when preserving those artifacts.
@@ -238,17 +245,18 @@ the package list and the snapshot format version. A new runner image can reuse
 the archives for the same Ubuntu release and package list. Each snapshot
 records when to use the Canonical archive's indexes. A gap in a restored cache
 triggers a refreshed download. Master and nightly
-populate shared entries for each runner image and package list. Shipping
-builds install the mirror's current packages. Linux packaging
-keeps recommended packages because it bundles runtime modules and copyright
+populate shared entries for each runner image and package list. Cold installs
+use the mirror's current packages. Linux packaging keeps recommended packages because it bundles runtime modules and copyright
 files from the build host. Android ARM type checking and SBOM generation use
 smaller prerequisite sets.
 The Linux host cache also covers `hosts/tizen-nsh`, which has its own workspace
 and lockfile.
 
-The Linux source archive collector bounds apt and download calls and reports
-each source package as it starts. Cached files match the bundled Ubuntu package
-versions and are checked against their source metadata before archive creation.
+The Linux source archive collector runs up to three source packages at a time,
+bounds apt and download calls, and reports each source package as it starts.
+If the exact cache misses, it can restore the previous archive snapshot. Apt
+downloads the missing files and the collector verifies each file against the
+source metadata. The saved snapshot holds only the files used by this build.
 
 The Android smoke build caches dependencies for the generated NSH runner
 workspace using the committed runner lock, NSH pin, compiler, NDK, host library

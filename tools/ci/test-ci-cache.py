@@ -381,6 +381,15 @@ class AptInstall(unittest.TestCase):
         self.assertNotIn("sudo apt-get", SETUP)
         self.assertIn("continue-on-error: true", SETUP.split("actions/cache/save", 1)[1].split("- ", 1)[0])
 
+    def test_linux_candidate_reuses_package_downloads_and_sources_with_a_fresh_build(self):
+        workflow = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text()
+        desktop = workflow.split("  package:\n", 1)[1].split("  sbom:\n", 1)[0]
+        self.assertIn("cache: 'false'", desktop)
+        self.assertIn("apt-cache: ${{ matrix.platform == 'linux' && 'true' || 'false' }}", desktop)
+        self.assertIn("uses: ./.github/actions/linux-sources", desktop)
+        action = (ROOT / ".github/actions/linux-sources/action.yml").read_text()
+        self.assertIn("restore-keys: ${{ steps.identity.outputs.restore-prefix }}", action)
+
     def test_image_refresh_can_restore_the_same_package_archives(self):
         script = SETUP.split("    - name: Identify the Linux packages\n", 1)[1]
         script = textwrap.dedent(script.split("      run: |\n", 1)[1].split("    - uses:", 1)[0])

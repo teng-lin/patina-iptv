@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """The tier workflows keep required checks, exact-SHA releases and native coverage."""
 import importlib.util
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import Mock
 
@@ -175,6 +179,41 @@ class Workflows(unittest.TestCase):
         smoke = (ROOT / '.github/workflows/android-smoke.yml').read_text()
         self.assertIn('testDebugUnitTest lintDebug assembleDebug', smoke)
         self.assertIn('testReleaseUnitTest lintRelease', (ROOT / 'tools/ci/prepare-android.sh').read_text())
+
+    @unittest.skipUnless(shutil.which("bash"), "candidate seal gate uses Bash")
+    def test_failed_master_gate_leaves_a_retryable_seal_before_artifact_downloads(self):
+        expressions = module("test-release-workflow")
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text()
+        seal = workflow.split("  seal-candidate:\n", 1)[1]
+        condition = re.search(r"if: \$\{\{(.*?)\}\}", seal)[1]
+        for event, ref, tier, cancelled, expected in (
+            ("push", "refs/heads/master", "", False, True),
+            ("push", "refs/heads/master", "", True, False),
+            ("push", "refs/heads/master", "release", False, False),
+            ("push", "refs/tags/v9.8.7", "", False, False),
+            ("workflow_dispatch", "refs/heads/master", "candidate", False, False),
+            ("pull_request", "refs/pull/17/merge", "", False, False),
+        ):
+            with self.subTest(event=event, ref=ref, cancelled=cancelled):
+                self.assertEqual(expressions.evaluate(condition, {
+                    "github": {"event_name": event, "ref": ref}, "inputs": {"tier": tier},
+                    "workflow_cancelled": cancelled,
+                }), expected)
+
+        before_downloads = seal.split("      - uses:", 1)[0]
+        self.assertIn("VALIDATION_RESULT: ${{ needs.validation.result }}", before_downloads)
+        self.assertIn("BUILD_RESULT: ${{ needs.candidate.result }}", before_downloads)
+        check = textwrap.dedent(before_downloads.split("        run: |\n", 1)[1])
+        environment = {"PLAN_RESULT": "success", "VALIDATION_RESULT": "success", "BUILD_RESULT": "success"}
+        for job, result, expected in ((None, "", 0), ("PLAN_RESULT", "failure", 1),
+                                      ("VALIDATION_RESULT", "cancelled", 1), ("BUILD_RESULT", "skipped", 1)):
+            with self.subTest(job=job, result=result):
+                env = os.environ | environment | ({job: result} if job else {})
+                run = subprocess.run(["bash", "-euo", "pipefail", "-c", check], env=env,
+                                     capture_output=True, text=True)
+                self.assertEqual(run.returncode, expected, run.stderr)
+                if expected:
+                    self.assertIn("Re-run failed jobs", run.stdout)
 
     def test_android_release_compiles_both_abis_before_one_assembly(self):
         unsigned = (ROOT / '.github/workflows/unsigned-candidate.yml').read_text()

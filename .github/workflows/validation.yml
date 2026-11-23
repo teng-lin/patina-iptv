@@ -202,9 +202,20 @@ jobs:
       desktop-matrix: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
   seal-candidate:
     needs: [plan, validation, candidate]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release'
+    # Record a failed gate as a failed seal, so Re-run failed jobs retries it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release' }}
     runs-on: ubuntu-24.04
     steps:
+      - name: Require a successful validation and unsigned build
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          VALIDATION_RESULT: ${{ needs.validation.result }}
+          BUILD_RESULT: ${{ needs.candidate.result }}
+        run: |
+          if [[ "$PLAN_RESULT" != success || "$VALIDATION_RESULT" != success || "$BUILD_RESULT" != success ]]; then
+            echo "::error::Cannot seal this candidate (plan=$PLAN_RESULT validation=$VALIDATION_RESULT packages=$BUILD_RESULT). Re-run failed jobs on this run."
+            exit 1
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false

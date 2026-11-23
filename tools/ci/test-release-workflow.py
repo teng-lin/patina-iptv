@@ -162,6 +162,8 @@ class Evaluation:
             return render(arguments[0]).lower().startswith(render(arguments[1]).lower())
         if name == "always":
             return True
+        if name == "cancelled":
+            return self.contexts.get("workflow_cancelled", False)
         raise ValueError(f"function {name} is not modeled by this test")
 
 

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tarfile
 import tempfile
+import threading
 import unittest
 
 spec = importlib.util.spec_from_file_location("native_sources", Path(__file__).with_name("native-sources.py"))
@@ -403,10 +404,10 @@ class Collecting(unittest.TestCase):
 
     def collect_linux(self, apt, cache=None):
         def fetch(component, stage):
-            sources.fetch_ubuntu(component, stage, run=apt, download=self.download, cache=cache)
+            return sources.fetch_ubuntu(component, stage, run=apt, download=self.download, cache=cache)
 
         output = self.root / "out" / sources.archive_name("linux", "9.8.7")
-        return sources.collect("linux", self.linux_package(), output, fetch=fetch), output
+        return sources.collect("linux", self.linux_package(), output, fetch=fetch, source_cache=cache), output
 
     def source_files(self):
         original, original_digest = payload("synthetic original source")
@@ -416,6 +417,36 @@ class Collecting(unittest.TestCase):
                        f" {packaging_digest} {len(packaging)} synthetic-media_1.2-3.debian.tar.xz\n").encode()
         return {"synthetic-media_1.2-3.dsc": description, "synthetic-media_1.2.orig.tar.xz": original,
                 "synthetic-media_1.2-3.debian.tar.xz": packaging}
+
+    def test_linux_collects_at_most_three_components_at_a_time(self):
+        package = self.linux_package()
+        manifest_path = package / sources.NOTICES["linux"] / "sources.json"
+        manifest = json.loads(manifest_path.read_text())
+        names = [f"synthetic-{index}" for index in range(7)]
+        manifest["components"] = [{"name": name, "version": "1"} for name in names]
+        manifest_path.write_text(json.dumps(manifest))
+        started = threading.Barrier(3)
+        running = set()
+        active_lock = threading.Lock()
+        high_water = 0
+
+        def fetch(component, stage):
+            nonlocal high_water
+            name = component["name"]
+            with active_lock:
+                running.add(name)
+                high_water = max(high_water, len(running))
+            if name in names[:3]:
+                started.wait(timeout=5)
+            component["sources"] = [{"file": name}]
+            (stage / name).write_text(name)
+            with active_lock:
+                running.remove(name)
+
+        output = self.root / sources.archive_name("linux", "9.8.7")
+        result = sources.collect("linux", package, output, fetch=fetch)
+        self.assertEqual(high_water, 3)
+        self.assertEqual([component["name"] for component in result["components"]], names)
 
     def test_linux_sources_come_from_apt_at_the_exact_version(self):
         files = self.source_files()
@@ -450,10 +481,16 @@ class Collecting(unittest.TestCase):
                 "synthetic-media_1.2-3/synthetic-media_1.2-3.dsc", "synthetic-media_1.2-3/synthetic-media_1.2.orig.tar.xz"])
         cache = self.root / "cache"
         self.collect_linux(apt, cache)
+        stale = cache / f"sha256-{'0' * 64}"
+        stale.write_bytes(b"superseded archive")
+        unrelated = cache / "unrelated.txt"
+        unrelated.touch()
         calls.clear()
         self.collect_linux(apt, cache)
         self.assertEqual([call[2] for call in calls], ["--print-uris"])
-        next(cache.iterdir()).write_bytes(b"invalid cache entry")
+        self.assertFalse(stale.exists())
+        self.assertTrue(unrelated.is_file())
+        next(cache.glob("sha512-*")).write_bytes(b"invalid cache entry")
         calls.clear()
         self.collect_linux(apt, cache)
         self.assertEqual([call[2] for call in calls], ["--print-uris", "--download-only"])

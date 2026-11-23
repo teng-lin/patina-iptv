@@ -33,6 +33,7 @@ Usage:
   native-sources.py macos APP OUTPUT.tar
   native-sources.py linux APPDIR OUTPUT.tar
 """
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import os
@@ -48,6 +49,7 @@ REPOSITORY = "https://github.com/teng-lin/patina-iptv"
 # GitHub refuses release files of 2 GiB or more.
 ARCHIVE_LIMIT = 2 * 1024 ** 3 - 1
 NOTICES = {"macos": "Contents/Resources/notices/native", "linux": "usr/bin/notices/native"}
+UBUNTU_DOWNLOAD_JOBS = 3
 
 
 def archive_name(platform, version):
@@ -436,11 +438,13 @@ def cached_source(cache, row, destination):
     if cache is None:
         return False
     entry = cache / f"{row['algorithm']}-{row['checksum']}"
+    if entry.is_symlink():
+        return False
     try:
         check_file(entry, row, destination.name)
-    except SystemExit:
+        shutil.copyfile(entry, destination)
+    except (SystemExit, FileNotFoundError):
         return False
-    shutil.copyfile(entry, destination)
     return True
 
 
@@ -454,6 +458,7 @@ def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
         files = print_uris(listed.stdout)
         restored = [cached_source(cache, row, directory / row["name"]) for row in files]
         if not all(restored):
+            # apt source reuses files here that match the signed index.
             fetched = run(["apt-get", "source", "--download-only", f"{name}={version}"], cwd=directory)
             if fetched.returncode != 0:
                 raise SystemExit(f"cannot fetch source of {label}: {fetched.stderr.strip()}")
@@ -485,13 +490,22 @@ def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
     extra = {path.name for path in directory.iterdir()} - {row["name"] for row in files}
     if extra:
         raise SystemExit(f"unexpected files fetched for {label}: {sorted(extra)}")
-    if cache is not None:
-        cache.mkdir(parents=True, exist_ok=True)
-        for row in files:
-            entry = cache / f"{row['algorithm']}-{row['checksum']}"
-            if entry.exists() and entry.stat().st_size == row["size"] and digest(entry, row["algorithm"]) == row["checksum"]:
-                continue
-            shutil.copyfile(directory / row["name"], entry)
+    if cache is None:
+        return ()
+    cache.mkdir(parents=True, exist_ok=True)
+    entries = []
+    for row in files:
+        entry = cache / f"{row['algorithm']}-{row['checksum']}"
+        entries.append(entry.name)
+        if (not entry.is_symlink() and entry.is_file() and entry.stat().st_size == row["size"]
+                and digest(entry, row["algorithm"]) == row["checksum"]):
+            continue
+        # Two source packages can share a file. Publish verified bytes atomically.
+        with tempfile.TemporaryDirectory(dir=cache) as temporary:
+            pending = Path(temporary) / entry.name
+            shutil.copyfile(directory / row["name"], pending)
+            pending.replace(entry)
+    return entries
 
 
 def linux_cache_key(package):
@@ -530,25 +544,45 @@ def collect(platform, package, output, fetch=None, scratch=None, source_cache=No
     if fetch is None:
         def fetch(component, stage):
             if platform == "macos":
-                fetch_homebrew(component, stage)
-            else:
-                fetch_ubuntu(component, stage, cache=source_cache)
+                return fetch_homebrew(component, stage)
+            return fetch_ubuntu(component, stage, cache=source_cache)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=scratch or output.parent) as directory:
         stage = Path(directory)
-        for component in description["components"]:
+
+        def collect_component(component):
             print(f"{component['name']} {component['version']}", flush=True)
-            fetch(component, stage)
+            entries = fetch(component, stage)
             if not component.get("sources"):
                 raise SystemExit(f"no source fetched for {component['name']} {component['version']}")
             if "recipe" in component:
                 recipe = stage / component["recipe"]
                 shutil.copyfile(notices / component["recipe"], recipe)
+            return entries or ()
+
+        components = description["components"]
+        used_entries = set()
+        if platform == "linux":
+            downloads = ThreadPoolExecutor(max_workers=UBUNTU_DOWNLOAD_JOBS)
+            try:
+                for entries in downloads.map(collect_component, components):
+                    used_entries.update(entries)
+            finally:
+                downloads.shutdown(wait=True, cancel_futures=True)
+        else:
+            for component in components:
+                collect_component(component)
         text = json.dumps(description, indent=2) + "\n"
         (stage / "sources.json").write_text(text)
         (stage / "SOURCE.txt").write_bytes((notices / "SOURCE.txt").read_bytes())
         write_archive(stage, output)
     output.with_suffix(".json").write_text(text)
+    if platform == "linux" and source_cache is not None:
+        # A fallback snapshot can carry old digests. Save only this package's sources.
+        for entry in source_cache.iterdir():
+            if (entry.name not in used_entries and re.fullmatch(r"sha256-[0-9a-f]{64}|sha512-[0-9a-f]{128}", entry.name)
+                    and (entry.is_file() or entry.is_symlink())):
+                entry.unlink(missing_ok=True)
     files = sum(len(component["sources"]) for component in description["components"])
     print(f"{output.name}: {len(description['components'])} components, {files} files, "
           f"{output.stat().st_size / 2**20:.0f} MB")
