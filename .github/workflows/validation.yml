@@ -68,16 +68,19 @@ jobs:
           inputs.tier != 'release' && (steps.select.outputs.candidate_build == 'true' ||
           (steps.select.outputs.smoke == 'true' && contains(fromJSON(steps.select.outputs.package_matrix).include.*.platform, 'linux')))
         id: tool-pins
+        continue-on-error: true
         run: python3 tools/ci/pins.py >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         if: steps.tool-pins.outcome == 'success'
         continue-on-error: true
         id: lookup-rust
+        timeout-minutes: 2
         with:
           toolchain: ${{ steps.tool-pins.outputs.toolchain }}
       - name: Look up the immutable Linux CLI without downloading it
         if: steps.lookup-rust.outcome == 'success'
         id: cli
+        timeout-minutes: 1
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
