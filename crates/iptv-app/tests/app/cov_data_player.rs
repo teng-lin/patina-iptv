@@ -1012,13 +1012,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert!(prop(&app, &props, "volume").as_u64().unwrap() > volume);
     step(app.press_key("ctrl+down"));
     assert_eq!(prop(&app, &props, "volume").as_u64().unwrap(), volume);
-    // Subtitles and tracks: its chooser, closed by a second press.
-    step(app.press("label:Subtitles and tracks"));
+    // More opens the track chooser.
+    step(app.play_bar_option("Subtitles and tracks"));
     step(app.wait_for("text:Subtitles"));
-    step(app.press("label:Subtitles and tracks"));
+    step(app.press("label:Close the chooser"));
     // The window full screen, and back.
-    step(app.press("label:Full screen"));
-    step(app.press("label:Full screen"));
+    step(app.play_bar_option("Full screen"));
+    step(app.play_bar_option("Full screen"));
     // It hides by itself a few seconds after the last input.
     run(&mut app, Duration::from_secs(8));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(1)));
@@ -1099,9 +1099,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 3, "reopened where the finger lifted");
     let titles = app.screen().count("text:Show -2").unwrap();
-    step(app.press("label:Program details"));
+    step(app.play_bar_option("Program details"));
     step(app.wait_for(&format!("text:Show -2 >> nth={titles}")));
-    step(app.press("label:Program details"));
+    step(app.press("id:description-layer"));
 
     // The strip's channel list over the video, closed again.
     strip(&mut app);

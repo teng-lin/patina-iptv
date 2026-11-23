@@ -35,19 +35,16 @@ use serde_json::{Value as Json, json};
 
 const WAIT: Duration = Duration::from_secs(5);
 /// The play bar's buttons (`play_bar::control_id`): its panel's rows.
-pub(crate) const BAR_CONTROLS: [&str; 12] = [
+pub(crate) const BAR_CONTROLS: [&str; 9] = [
     "play-bar-mute",
-    "play-bar-rewind",
-    "play-bar-play-pause",
-    "play-bar-forward",
-    "play-bar-record",
-    "play-bar-favorite",
-    "play-bar-tracks",
-    "play-bar-details",
-    "play-bar-picture",
     "play-bar-channels",
-    "play-bar-multiview",
     "play-bar-guide",
+    "play-bar-play-pause",
+    "play-bar-favorite",
+    "play-bar-pip",
+    "play-bar-multiview",
+    "play-bar-record",
+    "play-bar-more",
 ];
 /// An iPad Air 11-inch (M4) full screen, in points.
 const LANDSCAPE: (f32, f32) = (1180.0, 820.0);
@@ -473,7 +470,7 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
                 "the transport is centered: {pause:?}, {what}"
             );
             // Every button of the bar, the secondary ones too: a narrow
-            // window wraps them rather than cut them off at its edge.
+            // window keeps the secondary actions in More.
             let buttons: Vec<_> = app
                 .screen()
                 .layout_nodes()
@@ -485,7 +482,12 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
                             .is_some_and(|id| id.starts_with("play-bar-") && id != "play-bar-seek")
                 })
                 .collect();
-            assert!(buttons.len() >= 10, "the bar's buttons: {what}");
+            assert!(
+                buttons
+                    .iter()
+                    .any(|b| b.test_id.as_deref() == Some("play-bar-more")),
+                "secondary controls remain reachable: {what}"
+            );
             for b in buttons {
                 let r = b.bounds;
                 inside(
@@ -499,14 +501,14 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     }
 
     // A chooser over the video in a Split View window keeps clear of the
-    // bar, whose buttons wrap onto more rows there: at the largest text it
+    // bar, including at the largest text size when it
     // is at its tallest.
     for text in [TEXT[0], TEXT[2]] {
         let size = (375.0, 820.0);
         present(&mut app, size, text);
         show_bar(&mut app);
         let what = format!("the picture size chooser at {size:?}, text {text:.2}");
-        step(app.press("id:play-bar-picture"));
+        step(app.play_bar_option("Display"));
         step(app.wait_for("id:chooser-items"));
         app.settle();
         let panel = bounds(&app, "chooser-panel", &what);

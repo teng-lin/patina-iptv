@@ -317,7 +317,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
         {
             break;
         }
-        step(app.press_key("right"));
+        step(app.press_key("left"));
     }
     assert!(
         app.screen()

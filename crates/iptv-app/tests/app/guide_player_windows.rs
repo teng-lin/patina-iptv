@@ -168,13 +168,12 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert!(app.window_state("player-window-1").unwrap().is_some());
     assert!(iptv_app::player_has_source(1));
     step(app.wait_for("label:Play or pause"));
-    assert!(app.screen().matches("label:Subtitles and tracks").unwrap());
-    assert!(app.screen().matches("label:Full screen").unwrap());
+    assert!(app.screen().matches("id:play-bar-more").unwrap());
     let main_source = prop(&props, 0, "source");
     let auxiliary_source = prop(&props, 1, "source");
     let auxiliary_node = player_node(&props, 1);
     let main_mode = app.window_state("main").unwrap().unwrap().mode;
-    step(app.press("label:Full screen"));
+    step(app.play_bar_option("Full screen"));
     assert_eq!(
         app.window_state("player-window-1").unwrap().unwrap().mode,
         nsh_core::desktop::WindowMode::FullScreen
@@ -210,7 +209,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.hover("id:auxiliary-player-1 >> label:Video"));
     if !app
         .screen()
-        .matches("id:auxiliary-player-1 >> label:Subtitles and tracks")
+        .matches("id:auxiliary-player-1 >> id:play-bar-more")
         .unwrap()
     {
         step(app.press("id:auxiliary-player-1 >> label:Video"));
@@ -235,7 +234,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.hover("id:auxiliary-player-1 >> label:Video"));
     if !app
         .screen()
-        .matches("id:auxiliary-player-1 >> label:Subtitles and tracks")
+        .matches("id:auxiliary-player-1 >> id:play-bar-more")
         .unwrap()
     {
         step(app.press("id:auxiliary-player-1 >> label:Video"));
@@ -278,7 +277,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.hover("id:auxiliary-player-1 >> label:Video"));
     if !app
         .screen()
-        .matches("id:auxiliary-player-1 >> label:Subtitles and tracks")
+        .matches("id:auxiliary-player-1 >> id:play-bar-more")
         .unwrap()
     {
         step(app.press("id:auxiliary-player-1 >> label:Video"));
@@ -301,16 +300,9 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             }),
         },
     );
-    step(app.wait_until(
-        "auxiliary track choices are acknowledged",
-        Duration::from_secs(5),
-        |screen| {
-            screen
-                .accessibility_state("id:auxiliary-player-1 >> label:Subtitles and tracks")
-                .is_ok_and(|state| !state.disabled)
-        },
-    ));
-    step(app.press("id:auxiliary-player-1 >> label:Subtitles and tracks"));
+    app.settle();
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
+    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Subtitles and tracks"));
     let chooser = app.screen().layout_nodes().into_iter().find(|node| {
         node.test_id.as_deref() == Some("chooser-items") && node.bounds.size.height.0 > 0.0
     });
@@ -326,7 +318,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             .matches("text:/Second synthetic audio/")
             .unwrap()
     );
-    step(app.press("id:auxiliary-player-1 >> label:Subtitles and tracks"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
+    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Subtitles and tracks"));
     step(app.wait_for("text:/Second synthetic audio/"));
     step(app.press("text:/Second synthetic audio/"));
     app.settle();
@@ -545,7 +538,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert_eq!(iptv_app::player_opens(2), c_opens);
 
     // A fullscreen popup can enter compact mode and restore its own mode.
-    step(app.press("id:auxiliary-player-1 >> label:Full screen"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
+    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Full screen"));
     enter_popup_pip(&mut app, 1);
     step(app.hover("id:auxiliary-player-1 >> id:pip-video"));
     step(app.press("id:auxiliary-player-1 >> id:pip-back"));
@@ -554,7 +548,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         app.window_state("player-window-1").unwrap().unwrap().mode,
         nsh_core::desktop::WindowMode::FullScreen
     );
-    step(app.press("id:auxiliary-player-1 >> label:Full screen"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
+    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Full screen"));
 
     // The primary PiP remains independent while C is already compact.
     step(app.press("id:guide-ui >> label:Local A"));

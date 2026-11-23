@@ -171,31 +171,34 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
         .expect("the play/pause button")
         .bounds;
     assert!((bounds.origin.x.0 + bounds.size.width.0 / 2.0 - 480.0).abs() <= 0.5);
-    // Live playback disables seek buttons, so Left skips Rewind to Mute.
+    // Guide and Favorite are one step either side of live transport.
     step(app.press_key("left"));
-    assert!(selected(app, "play-bar-mute"));
+    assert!(selected(app, "play-bar-guide"));
     step(app.press_key("right"));
     assert!(selected(app, "play-bar-play-pause"));
     step(app.press_key("right"));
-    assert!(selected(app, "play-bar-record"));
+    assert!(selected(app, "play-bar-favorite"));
     // Down over live playback must keep focus in the bar, not zap channels.
     step(app.press_key("down"));
-    assert!(selected(app, "play-bar-record"));
+    assert!(selected(app, "play-bar-favorite"));
     assert_eq!(iptv_app::player_opens(0), opens);
     for _ in 0..12 {
-        if selected(app, "play-bar-picture") {
+        if selected(app, "play-bar-more") {
             break;
         }
         step(app.press_key("right"));
     }
-    assert!(selected(app, "play-bar-picture"));
+    assert!(selected(app, "play-bar-more"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:chooser-layer >> text:Display"));
+    step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for("id:chooser-layer >> text:Stretch to fill"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:Stretch to fill", Duration::from_secs(2)));
     assert!(
-        selected(app, "play-bar-picture"),
+        selected(app, "play-bar-more"),
         "popup restores control identity"
     );
     persistent(app, &lifetime, player);
@@ -214,12 +217,7 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     step(app.press_key("enter"));
     step(app.press_key("m"));
     step(app.wait_for("id:play-bar-layer"));
-    for _ in 0..12 {
-        if selected(app, "play-bar-guide") {
-            break;
-        }
-        step(app.press_key("right"));
-    }
+    step(app.press_key("left"));
     assert!(selected(app, "play-bar-guide"));
     step(app.press_key("enter"));
     step(app.wait_for("id:guide-preview"));

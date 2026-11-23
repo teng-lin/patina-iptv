@@ -41,6 +41,11 @@ impl Headless {
         self.0.press(selector)
     }
 
+    pub fn play_bar_option(&mut self, name: &str) -> Result<(), String> {
+        self.press("id:play-bar-more")?;
+        self.press(&format!("id:chooser-items >> text:{name}"))
+    }
+
     pub fn press_key(&mut self, key: &str) -> Result<(), String> {
         self.ready_for_input()?;
         self.0.press_key(key)

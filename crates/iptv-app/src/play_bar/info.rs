@@ -170,7 +170,10 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                     .text_color(rgb(WHITE)),
                 )
                 .child(when(
-                    move || program.with(|p| p.as_ref().is_some_and(|p| p.synopsis.is_some())),
+                    move || {
+                        !crate::scale::phone()
+                            && program.with(|p| p.as_ref().is_some_and(|p| p.synopsis.is_some()))
+                    },
                     move || {
                         text(move || {
                             program

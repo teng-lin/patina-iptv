@@ -333,20 +333,20 @@ fn choosers(app: &mut Headless) {
     step(app.press("text:Test Channel One"));
     step(app.wait_for("text:/^\\d+ min left$/"));
     step(app.press("label:Video"));
-    step(app.wait_for("label:Picture size"));
-    step(app.press("label:Picture size"));
+    step(app.wait_for("id:play-bar-more"));
+    step(app.play_bar_option("Display"));
     step(app.wait_for("text:Use for all channels"));
     step(app.wait_for("text:✓  Normal"));
     step(app.press("text:Zoom"));
     step(app.wait_for_gone("text:Use for all channels", GONE));
-    step(app.press("label:Picture size"));
+    step(app.play_bar_option("Display"));
     step(app.wait_for("text:✓  Zoom"));
     step(app.press("text:Use for all channels"));
     step(app.wait_for_gone("text:Use for all channels", GONE));
-    // A second press on the button that opened it closes it.
-    step(app.press("label:Picture size"));
+    // Dismiss the chooser without changing the selected size.
+    step(app.play_bar_option("Display"));
     step(app.wait_for("text:Use for all channels"));
-    step(app.press("label:Picture size"));
+    step(app.press("label:Close the chooser"));
     step(app.wait_for_gone("text:Use for all channels", GONE));
 
     // The sleep timer from the control strip (Menu): a time starts it,

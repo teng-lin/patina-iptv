@@ -245,6 +245,10 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                         && b[1] + b[3] <= size.1 + 0.5,
                     "{b:?} inside: {what}"
                 );
+                assert!(
+                    (b[1] + b[3] / 2.0 - pause[1] - pause[3] / 2.0).abs() <= 0.5,
+                    "single row: {b:?}, {pause:?}, {what}"
+                );
                 assert!(b[2] >= 44.0 - 0.5, "a 44-point target {b:?}: {what}");
             }
             // The program title sits above the transport and auxiliary actions.
@@ -267,6 +271,20 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             persistent(app, &lifetime, surface);
         }
     }
+    // A narrow landscape player keeps PiP visible as other actions move to More.
+    present(app, (422.0, 260.0), 1.0);
+    let favorite = bounds(app, "play-bar-favorite").expect("favorite remains direct");
+    let pip = bounds(app, "play-bar-pip").expect("PiP remains direct");
+    let more = bounds(app, "play-bar-more").expect("overflow remains direct");
+    assert!(favorite[0] + favorite[2] <= pip[0] && pip[0] + pip[2] <= more[0]);
+    assert!(bounds(app, "play-bar-multiview").is_none());
+    assert!(bounds(app, "play-bar-record").is_none());
+    step(app.press("id:play-bar-more"));
+    step(app.wait_for("id:chooser-items >> text:Multiview"));
+    step(app.wait_for("id:chooser-items >> text:Display"));
+    assert!(bounds(app, "play-bar-pip").is_none());
+    step(app.press("label:Close the chooser"));
+    step(app.wait_for("id:play-bar-pip"));
 }
 
 /// A foldable phone unfolded becomes a tablet (Android derives the idiom
