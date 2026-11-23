@@ -8,12 +8,15 @@ use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
 
 /// Parental policy verified against committed storage for external playback.
-pub struct ExternalPlaybackAuthorization(crate::parental::Snapshot);
+pub struct ExternalPlaybackAuthorization {
+    access: crate::parental::Snapshot,
+    grants: Vec<Target>,
+}
 
 impl ExternalPlaybackAuthorization {
     /// Check immediately before granting the relay admission, without yielding.
     pub fn is_current(&self) -> bool {
-        self.0.inspection_current(&[])
+        self.access.inspection_current(&self.grants)
     }
 }
 
@@ -21,23 +24,25 @@ fn external_playback_check(
     store: &iptv_store_sqlite::Store,
     authority: &ResolutionAuthority,
     group: &str,
-    access: &crate::parental::Snapshot,
-) -> iptv_store_sqlite::Result<bool> {
+    access: crate::parental::Snapshot,
+) -> iptv_store_sqlite::Result<Option<ExternalPlaybackAuthorization>> {
     let source = SourceId(authority.source());
     let channel = &authority.channel().id;
     let target = Target::live(source.0, channel.as_str());
     store.read_snapshot(|store| {
-        if !crate::parental::native_allowed(store, &target, access)?
-            || !store.source_policy(source)?.enabled
+        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
+            return Ok(None);
+        };
+        if !store.source_policy(source)?.enabled
             || !store
                 .guide_group_preferences(source, group)?
                 .external_player
             || store.guide_channel_blocked(source, channel.as_str())?
         {
-            return Ok(false);
+            return Ok(None);
         }
         let Some(stored) = store.source(source)? else {
-            return Ok(false);
+            return Ok(None);
         };
         let scope = iptv_library::OrganizationScope::group_channels(group);
         if !store
@@ -45,16 +50,17 @@ fn external_playback_check(
             .iter()
             .any(|row| &row.channel.id == channel)
         {
-            return Ok(false);
+            return Ok(None);
         }
         let Some(row) = store.channel(source, channel)? else {
-            return Ok(false);
+            return Ok(None);
         };
-        Ok(!row.blocked
+        Ok((!row.blocked
             && stored.incarnation == authority.incarnation()
             && &stored.source.config == authority.config()
             && &row.channel == authority.channel()
-            && access.inspection_current(&[]))
+            && access.inspection_current(&grants))
+        .then_some(ExternalPlaybackAuthorization { access, grants }))
     })
 }
 
@@ -256,7 +262,9 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .read(move |store| external_playback_check(store, &authority, &group, &access))
+            .read(move |store| {
+                Ok(external_playback_check(store, &authority, &group, access)?.is_some())
+            })
             .await?)
     }
 
@@ -268,14 +276,10 @@ impl Runtime {
         group: String,
     ) -> Result<Option<ExternalPlaybackAuthorization>, crate::Error> {
         let access = self.parental_snapshot();
-        let approved = self
+        Ok(self
             .services()
-            .call(move |store| {
-                let allowed = external_playback_check(store, &authority, &group, &access)?;
-                Ok(allowed.then_some(ExternalPlaybackAuthorization(access)))
-            })
-            .await?;
-        Ok(approved)
+            .call(move |store| external_playback_check(store, &authority, &group, access))
+            .await?)
     }
 
     /// Remembers `key` as the last channel of `source` (a zap never waits

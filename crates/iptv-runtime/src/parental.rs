@@ -715,21 +715,35 @@ pub(crate) fn native_allowed(
     target: &Target,
     snapshot: &Snapshot,
 ) -> iptv_store_sqlite::Result<bool> {
-    if snapshot.policy_revision.load(Ordering::SeqCst) != snapshot.policy_at {
-        return Ok(false);
+    Ok(native_grants(store, target, snapshot)?.is_some())
+}
+
+/// The grants an allowed decision depends on. An unprotected decision has
+/// no dependencies and survives unrelated content changes.
+pub(crate) fn native_grants(
+    store: &iptv_store_sqlite::Store,
+    target: &Target,
+    snapshot: &Snapshot,
+) -> iptv_store_sqlite::Result<Option<Vec<Target>>> {
+    if !snapshot.inspection_current(&[]) {
+        return Ok(None);
     }
-    let access = snapshot.access.clone();
-    let grants_current = snapshot.epoch.load(Ordering::SeqCst) == snapshot.at;
-    if !access.policy.protects(target.kind) {
-        return Ok(true);
+    if !snapshot.access.policy.protects(target.kind) {
+        return Ok(Some(Vec::new()));
     }
-    let parents = store.parental_ancestors(target)?;
-    let mut denied = store.parental_target_blocked(target)?;
-    for parent in parents {
-        denied |= store.parental_target_blocked(&parent)?
-            && !(grants_current && access.granted(&parent, now_ms()));
+    let blocked = store.parental_target_blocked(target)?;
+    let mut blocked_parents = Vec::new();
+    for parent in store.parental_ancestors(target)? {
+        if store.parental_target_blocked(&parent)? {
+            blocked_parents.push(parent);
+        }
     }
-    Ok(!denied || (grants_current && access.granted(target, now_ms())))
+    if !blocked && snapshot.inspection_current(&blocked_parents) {
+        return Ok(Some(blocked_parents));
+    }
+    Ok(snapshot
+        .inspection_current(std::slice::from_ref(target))
+        .then(|| vec![target.clone()]))
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -1045,10 +1059,12 @@ mod source_tests {
             .policy_revision
             .fetch_add(1, Ordering::SeqCst);
         assert!(!approved.is_current());
-        let pending_block = services.call(move |store| store.set_parental_blocked(&block, true));
+        let queued_block = block.clone();
+        let pending_block =
+            services.call(move |store| store.set_parental_blocked(&queued_block, true));
         assert!(
             owner
-                .authorize_external_playback(authority, group)
+                .authorize_external_playback(authority.clone(), group.clone())
                 .await
                 .unwrap()
                 .is_none()
@@ -1057,6 +1073,19 @@ mod source_tests {
         assert!(
             owner.parental_allowed(&target),
             "cache still allows the channel"
+        );
+        owner.parental.borrow_mut().access.unlock(block, now_ms());
+        let granted = owner
+            .authorize_external_playback(authority, group)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(granted.is_current());
+        owner.parental_lock();
+        assert!(!granted.is_current());
+        assert!(
+            owner.parental_allowed(&target),
+            "cache still lacks the committed block"
         );
         assert!(owner.drain_services());
     }
