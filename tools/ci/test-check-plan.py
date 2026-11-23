@@ -81,6 +81,19 @@ class Parts(unittest.TestCase):
             (root / "two/tests/it/main.rs").write_text("")
             (root / "three/tests/ignored.rs").write_text("")
             self.assertEqual(checks.integration_tests(root), ["app", "declared", "it", "native_player"])
+            # A renamed target claims its file; a target needing a feature the plan leaves
+            # off is skipped, as --tests skips it, while one enabled through default is kept.
+            (root / "two/tests/plain.rs").write_text("")
+            (root / "two/Cargo.toml").write_text(
+                '[package]\nname = "two"\n'
+                '[features]\ndefault = ["native"]\nnative = ["deep"]\ndeep = []\noptional = []\n'
+                '[[test]]\nname = "renamed"\npath = "tests/plain.rs"\n'
+                '[[test]]\nname = "gated"\npath = "check/gated.rs"\nrequired-features = ["optional"]\n'
+                '[[test]]\nname = "transitive"\npath = "check/transitive.rs"\nrequired-features = ["deep"]\n')
+            self.assertEqual(checks.integration_tests(root), ["app", "it", "native_player", "renamed", "transitive"])
+            # Glob members are expanded as Cargo expands them.
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["one", "t*"]\n')
+            self.assertEqual(checks.integration_tests(root), ["app", "it", "native_player", "renamed", "transitive"])
             (root / "one/tests/native_player.rs").unlink()
             with self.assertRaisesRegex(ValueError, "harnesses are missing"):
                 checks.integration_tests(root)

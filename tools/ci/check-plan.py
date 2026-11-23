@@ -56,16 +56,41 @@ def package_args(crates):
 
 
 def integration_tests(root=ROOT):
-    """Names of the workspace's integration test targets, as Cargo discovers them."""
+    """Names of the integration test targets `cargo test --tests` builds for the plan.
+
+    Follows Cargo's discovery: explicit [[test]] targets, then auto-discovered
+    files not already claimed by one. A target whose required features the
+    plan does not enable is skipped, as --tests skips it rather than failing.
+    """
     manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+    members = [path for pattern in manifest["workspace"]["members"]
+               for path in sorted(root.glob(pattern)) if (path / "Cargo.toml").is_file()]
+    plan_features = {}
+    for feature in COVERAGE_FEATURES.split(","):
+        crate, name = feature.split("/")
+        plan_features.setdefault(crate, set()).add(name)
     names = set()
-    for member in manifest["workspace"]["members"]:
-        package = tomllib.loads((root / member / "Cargo.toml").read_text(encoding="utf-8"))
-        names.update(target["name"] for target in package.get("test", []))
+    for member in members:
+        package = tomllib.loads((member / "Cargo.toml").read_text(encoding="utf-8"))
+        features = package.get("features", {})
+        pending = ["default", *plan_features.get(package["package"]["name"], ())]
+        enabled = set()
+        while pending:
+            feature = pending.pop()
+            if feature not in enabled:
+                enabled.add(feature)
+                # Only the package's own features; `dep:` and `crate/feature` entries enable other crates.
+                pending.extend(item for item in features.get(feature, ()) if ":" not in item and "/" not in item)
+        claimed = set()
+        for target in package.get("test", []):
+            if target.get("path"):
+                claimed.add((member / target["path"]).resolve())
+            if set(target.get("required-features", ())) <= enabled:
+                names.add(target["name"])
         if package["package"].get("autotests", True):
-            tests = root / member / "tests"
-            names.update(path.stem for path in tests.glob("*.rs"))
-            names.update(path.parent.name for path in tests.glob("*/main.rs"))
+            tests = member / "tests"
+            names.update(path.stem for path in tests.glob("*.rs") if path.resolve() not in claimed)
+            names.update(path.parent.name for path in tests.glob("*/main.rs") if path.resolve() not in claimed)
     if not set(APP_HARNESSES) <= names:
         raise ValueError("the app part's integration harnesses are missing")
     return sorted(names)
