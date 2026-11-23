@@ -189,7 +189,7 @@ and the NSH packaging version in `crates/iptv-app/nsh.json` without
 updating dependencies. It accepts increasing MAJOR.MINOR.PATCH versions.
 Review and commit those changes, then tag that commit `v<version>` when ready.
 The command does not commit, tag, or publish. Tag/version mismatch fails.
-workflow_dispatch builds artifacts
+An ordinary workflow dispatch builds artifacts
 without publishing; use platforms=desktop to validate desktop packages alone.
 A manual run on master is also the dry run for the release-only steps: it
 downloads the native source archives and writes the SBOM, and stops before the
@@ -197,6 +197,34 @@ checksum, attestation and publish steps. It signs with the release
 credentials, so it is refused on any other ref (`tools/ci/release-plan.py`).
 A tag publishes Android and desktop artifacts and SHA256SUMS to GitHub Releases only
 after every job succeeds.
+
+## Promote an existing tag manually
+
+Use the Release workflow's `promote_tag` and `validation_run` inputs on
+`master` when an existing tag has a successful exact-commit master Validation
+run and its unsigned artifacts are still available. This also works if the
+post-validation seal was skipped after a job retry.
+
+```sh
+gh workflow run release.yml --ref master \
+  -f 'promote_tag=v<version>' -f 'validation_run=<master-validation-run-id>'
+```
+
+Keep `platforms=android-desktop` and leave rehearsal disabled. The plan
+requires the aggregate validation and every unsigned packaging job to have
+passed. It checks each retained archive against the digest reported by GitHub
+before staging its files. The existing release approval, signing, installer
+smoke tests, checksum and publication jobs then run for the tag. Promotion
+shares a concurrency group with the tag-triggered workflow and refuses to
+replace a public release.
+
+For a manually promoted release, `candidate-manifest.json` records the tag,
+the tagged commit, the validation run and the input digests. The final build
+provenance identifies the `master` run that signed and published those
+packages. Verify the manifest and checksum file with the release workflow
+identity and `--source-ref refs/heads/master`. Check the manifest's `tag` and
+`sha` against the peeled release tag, then use `SHA256SUMS` to check the
+downloaded files.
 
 ## Release rehearsal
 
@@ -327,7 +355,7 @@ Every release carries, next to the packages:
 To check a download, with the [GitHub CLI](https://cli.github.com/) installed:
 
 ```sh
-# One file: built by this repository's release workflow from the release tag.
+# One file attested by a tag-triggered release.
 gh attestation verify Patina-<version>-linux-x86_64.AppImage \
   --repo teng-lin/patina-iptv \
   --signer-workflow teng-lin/patina-iptv/.github/workflows/release.yml \
