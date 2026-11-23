@@ -18,6 +18,8 @@ state=$1
 restored=$2
 shift 2
 packages=("$@")
+read -ra snapshot_packages <<< "${PATINA_APT_SNAPSHOT_PACKAGES:-}"
+snapshot=false
 download_seconds=${PATINA_APT_DOWNLOAD_SECONDS:-240}
 install_seconds=${PATINA_APT_INSTALL_SECONDS:-180}
 refresh_seconds=${PATINA_APT_REFRESH_SECONDS:-90}
@@ -65,8 +67,16 @@ restore_mirror() {
 }
 
 fetch_packages() {
-  bounded "$refresh_seconds" apt-get update -q -o APT::Update::Error-Mode=any &&
-    bounded "$download_seconds" apt-get install -q --download-only "${packages[@]}"
+  bounded "$refresh_seconds" apt-get update -q -o APT::Update::Error-Mode=any || return
+  if [ "${#snapshot_packages[@]}" -gt 0 ]; then
+    if bounded "$download_seconds" apt-get install -q --download-only "${snapshot_packages[@]}"; then
+      snapshot=true
+      return
+    fi
+    echo '::warning::could not populate the shared snapshot; downloading only the requested packages'
+    snapshot_packages=()
+  fi
+  bounded "$download_seconds" apt-get install -q --download-only "${packages[@]}"
 }
 
 install_packages() {
@@ -151,4 +161,5 @@ as_root find "$state/lists/partial" "$state/archives/partial" -mindepth 1 -delet
 as_root chown -R "$(id -u):$(id -g)" "$state"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "refreshed=$refreshed" >> "$GITHUB_OUTPUT"
+  echo "snapshot=$snapshot" >> "$GITHUB_OUTPUT"
 fi

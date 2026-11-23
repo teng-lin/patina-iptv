@@ -1,0 +1,33 @@
+name: Prune superseded CI caches
+on:
+  workflow_run:
+    workflows: [Validation]
+    types: [completed]
+    branches: [master]
+permissions: {}
+concurrency:
+  group: prune-master-caches
+  cancel-in-progress: false
+jobs:
+  prune:
+    if: >-
+      github.repository == 'teng-lin/patina-iptv' && github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Retire superseded master jobs' caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ -f tools/ci/prune-caches.py ]]; then
+            python3 tools/ci/prune-caches.py --apply
+          fi

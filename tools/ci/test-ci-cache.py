@@ -171,9 +171,18 @@ class ToolCache(unittest.TestCase):
             self.assertIn("cache-on-failure: ${{ inputs.cache-on-failure }}", text)
             self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", text)
             self.assertIn("if: inputs.cache == 'true'", text)
-        for workflow in ("ci", "windows", "coverage", "import-stress"):
+        for workflow in ("ci", "windows", "coverage"):
             text = (ROOT / f".github/workflows/{workflow}.yml").read_text()
             self.assertIn("cache-on-failure: 'true'", text)
+
+    def test_low_value_bulk_caches_are_off_and_the_fuzz_corpus_is_kept(self):
+        for workflow in ("ios", "import-stress", "android"):
+            text = (ROOT / f".github/workflows/{workflow}.yml").read_text()
+            self.assertIn("cargo-cache: 'false'", text)
+        fuzz = (ROOT / ".github/workflows/fuzz.yml").read_text()
+        self.assertNotIn("Swatinem/rust-cache", fuzz)
+        self.assertIn("restore-keys: fuzz-corpus-all-", fuzz)
+        self.assertIn("name: cargo-fuzz", fuzz)
 
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "composite installation uses Bash")
     def test_tool_install_uses_its_own_root_and_fixed_bootstrap_profile(self):
@@ -268,8 +277,9 @@ class AptInstall(unittest.TestCase):
             "PATINA_APT_REFRESH_SECONDS": "5", "PATINA_APT_DOWNLOAD_SECONDS": "11", "PATINA_APT_SOURCES": str(sources),
         }
 
-    def install(self, restored, fail="", github_actions="false"):
-        environment = os.environ | self.environment | {"FAKE_FAIL": fail, "GITHUB_ACTIONS": github_actions}
+    def install(self, restored, fail="", github_actions="false", snapshot=""):
+        environment = os.environ | self.environment | {"FAKE_FAIL": fail, "GITHUB_ACTIONS": github_actions,
+                                                      "PATINA_APT_SNAPSHOT_PACKAGES": snapshot}
         result = subprocess.run(["bash", str(APT), str(self.root / "state"), restored, "generated-a", "generated-b"],
                                 env=environment, capture_output=True, text=True)
         calls = self.log.read_text().splitlines() if self.log.exists() else []
@@ -281,7 +291,20 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(calls, ["apt-get update -q -o APT::Update::Error-Mode=any", "apt-get install -q --download-only generated-a generated-b",
                                  "apt-get install -q --no-download generated-a generated-b"])
         self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 5", "bound 11", "bound 7"])
-        self.assertEqual((self.root / "install-output").read_text(), "refreshed=true\n")
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=true\nsnapshot=false\n")
+
+    def test_shared_seed_downloads_the_superset_but_installs_the_requested_subset(self):
+        result, calls, _ = self.install("false", snapshot="generated-a generated-b generated-extra")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("apt-get install -q --download-only generated-a generated-b generated-extra", calls)
+        self.assertEqual(calls[-1], "apt-get install -q --no-download generated-a generated-b")
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=true\nsnapshot=true\n")
+
+    def test_failed_snapshot_download_still_installs_required_packages_without_publishing(self):
+        result, calls, _ = self.install("false", fail="2", snapshot="generated-extra")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("apt-get install -q --download-only generated-a generated-b", calls)
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=true\nsnapshot=false\n")
 
     def test_hosted_cold_install_uses_the_canonical_archive_first(self):
         result, calls, _ = self.install("false", github_actions="true")
@@ -308,13 +331,13 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b"])
         self.assertIn("URIs: https://archive.ubuntu.com/ubuntu\n", self.ubuntu.read_text())
-        self.assertEqual((self.root / "install-output").read_text(), "refreshed=false\n")
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=false\nsnapshot=false\n")
 
     def test_cache_hit_installs_without_contacting_the_mirror(self):
         result, calls, _ = self.install("true")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b"])
-        self.assertEqual((self.root / "install-output").read_text(), "refreshed=false\n")
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=false\nsnapshot=false\n")
 
     def test_an_incomplete_cache_falls_back_to_fresh_downloads(self):
         result, calls, _ = self.install("true", fail="1")
@@ -378,13 +401,13 @@ class AptInstall(unittest.TestCase):
     def test_setup_caches_packages_per_runner_image_and_package_list(self):
         self.assertIn("bash tools/ci/apt-install.sh", SETUP)
         self.assertIn("ImageVersion", SETUP)
-        self.assertIn('prefix="apt-v3-', SETUP)
+        self.assertIn('prefix="apt-v4-', SETUP)
         self.assertNotIn('cat tools/ci/apt-install.sh', SETUP)
         self.assertIn("${{ inputs.apt-packages }}", SETUP)
         # Android native builds can reuse host packages with fresh Cargo outputs.
-        self.assertEqual(SETUP.count("steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true')"), 2)
-        self.assertIn("steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'", SETUP)
-        self.assertIn("steps.packages.outputs.refreshed == 'true'", SETUP)
+        self.assertIn("steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true')", SETUP)
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/master'", SETUP)
+        self.assertIn("steps.packages.outputs.snapshot == 'true'", SETUP)
         self.assertNotIn("sudo apt-get", SETUP)
         self.assertIn("continue-on-error: true", SETUP.split("actions/cache/save", 1)[1].split("- ", 1)[0])
 
@@ -412,12 +435,42 @@ class AptInstall(unittest.TestCase):
                            env=common | {"ImageVersion": image, "EXTRA_PACKAGES": extra})
             return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
+        snapshot = set(identity("2026.1")["snapshot"].split())
+        for prerequisites in ("host", "android", "android-smoke", "android-check", "store"):
+            output.write_text("")
+            subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=ROOT, check=True,
+                           env=common | {"PREREQUISITES": prerequisites})
+            packages = next(line.removeprefix("packages=") for line in output.read_text().splitlines()
+                            if line.startswith("packages="))
+            self.assertLessEqual(set(packages.split()), snapshot, prerequisites)
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            lines = workflow.read_text().splitlines()
+            for index, line in enumerate(lines):
+                match = re.match(r"^( +)apt-packages: *(.*)$", line)
+                if match is None:
+                    continue
+                indentation, value = match.groups()
+                if value in (">", ">-", "|", "|-"):
+                    continuation = []
+                    for line in lines[index + 1:]:
+                        if not line.startswith(indentation + " "):
+                            break
+                        continuation.append(line.strip())
+                    value = " ".join(continuation)
+                for expression in re.findall(r"\$\{\{(.*?)\}\}", value):
+                    branches = re.search(r"&&\s*'([^']*)'\s*\|\|\s*'([^']*)'\s*$", expression)
+                    self.assertIsNotNone(branches, f"{workflow.name} uses an unsupported package expression")
+                    value = value.replace("${{" + expression + "}}", " ".join(branches.groups()))
+                self.assertLessEqual(set(value.strip("'\"").split()), snapshot, workflow.name)
+
         old = identity("2026.1")
         new = identity("2026.2")
         self.assertNotEqual(old["key"], new["key"])
         self.assertTrue(old["key"].startswith(new["restore-prefix"]))
         self.assertTrue(new["key"].startswith(new["restore-prefix"]))
-        self.assertNotEqual(new["restore-prefix"], identity("2026.2", "generated-pkg")["restore-prefix"])
+        extra = identity("2026.2", "generated-pkg")
+        self.assertEqual(new["key"], extra["key"])
+        self.assertNotEqual(new["packages"], extra["packages"])
         self.assertIn("restore-keys: ${{ steps.apt.outputs.restore-prefix }}", SETUP)
         self.assertIn("APT_RESTORED: ${{ steps.apt-cache.outputs.cache-matched-key != '' }}", SETUP)
 
@@ -435,6 +488,66 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(len(found), 2)
         self.assertIn("timeout-minutes: 9", found[0])
         self.assertNotIn("run: generated", found[0])
+
+
+class CachePruning(unittest.TestCase):
+    def test_keep_the_replacement_recently_used_caches_tools_and_other_refs(self):
+        spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
+        prune = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prune)
+
+        def entry(number, key, created, accessed, ref=prune.MASTER):
+            return {"id": number, "key": key, "ref": ref,
+                    "created_at": f"2026-01-01T{created}:00Z", "last_accessed_at": f"2026-01-01T{accessed}:00Z"}
+
+        entries = [
+            entry(1, "v0-rust-host-v2-old-test-Linux-x64-a-b", "01:00", "01:10"),
+            entry(2, "v0-rust-host-v2-new-test-Linux-x64-a-c", "02:10", "02:10"),
+            entry(3, "v0-rust-host-v2-used-test-Linux-x64-a-d", "01:00", "02:20"),
+            entry(4, "v0-rust-host-v2-old-test-Darwin-arm64-a-d", "01:00", "01:00"),
+            entry(5, "v0-rust-host-v2-old-test-Linux-x64-a-e", "01:00", "01:00", "refs/pull/7/merge"),
+            entry(6, "nsh-cli-Linux-X64-synthetic", "01:00", "01:00"),
+            entry(7, "v0-rust-ios-compile-v1-retired", "01:00", "01:00"),
+            entry(8, "apt-v3-ubuntu24.04-amd64-synthetic", "01:00", "01:00"),
+        ]
+        start = prune.timestamp("2026-01-01T02:00:00Z")
+        end = prune.timestamp("2026-01-01T03:00:00Z")
+        self.assertEqual({row["id"] for row in prune.superseded(entries, start, end)}, {1, 7})
+        entries.extend([
+            entry(9, "apt-v4-ubuntu24.04-amd64-0123456789abcdef-2026.1", "02:10", "02:10"),
+            entry(10, "apt-v4-ubuntu24.04-amd64-0123456789abcdef-2026.0", "01:00", "01:00"),
+        ])
+        self.assertEqual({row["id"] for row in prune.superseded(entries, start, end)}, {1, 7, 8})
+        next_start = prune.timestamp("2026-01-01T04:00:00Z")
+        next_end = prune.timestamp("2026-01-01T05:00:00Z")
+        self.assertEqual({row["id"] for row in prune.superseded(entries, next_start, next_end)}, {1, 3, 7, 8})
+        entries.extend([
+            entry(11, "v0-rust-android-smoke-x86_64-v5-0123456789abcdef-old-build-Linux-x64", "01:00", "01:00"),
+            entry(12, "v0-rust-android-smoke-x86_64-v5-0123456789abcdef-new-build-Linux-x64", "02:10", "02:10"),
+            entry(13, "v0-rust-android-smoke-x86_64-v5-fedcba9876543210-old-build-Linux-x64", "01:00", "01:00"),
+        ])
+        self.assertEqual({row["id"] for row in prune.superseded(entries, next_start, next_end)}, {1, 3, 7, 8, 11})
+        windows_compiler = "0" * 64
+        self.assertEqual(prune.family(f"v0-rust-windows-native-v1-{windows_compiler}-app-Windows_NT-x64-a-b"),
+                         ("rust", "windows-native-v1", windows_compiler, "Windows_NT-x64"))
+
+    def test_old_successful_master_attempt_cannot_prune_the_current_generation(self):
+        spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
+        prune = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prune)
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / "event.json"
+            event.write_text(json.dumps({"workflow_run": {
+                "head_sha": "a" * 40,
+            }}))
+            with (patch.dict(os.environ, GITHUB_EVENT_PATH=str(event)),
+                  patch.object(prune, "trusted_window", return_value=(None, None)),
+                  patch.object(prune.subprocess, "check_output", return_value="b" * 40 + "\n") as gh,
+                  patch.object(prune.subprocess, "run") as mutate,
+                  patch.object(sys, "argv", ["prune-caches.py", "--apply"])):
+                prune.main()
+            gh.assert_called_once()
+            mutate.assert_not_called()
 
 
 def steps(text):

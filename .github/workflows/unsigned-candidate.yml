@@ -206,6 +206,7 @@ jobs:
           prerequisites: ${{ matrix.platform == 'macos' && 'macos-package' || 'host' }}
           # Keep the app build fresh while reusing Ubuntu package downloads.
           apt-cache: ${{ matrix.platform == 'linux' && 'true' || 'false' }}
+          apt-cache-seed: ${{ matrix.platform == 'linux' && 'true' || 'false' }}
           # Linux packaging tools.
           apt-packages: >-
             ${{ matrix.platform == 'linux' && 'ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils

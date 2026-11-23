@@ -16,7 +16,7 @@ jobs:
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
-          cache-key: ios-compile-v1
+          cargo-cache: 'false'
           prerequisites: metadata
       - name: Compile device and simulator adapters without credentials
         env:
