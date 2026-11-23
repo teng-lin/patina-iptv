@@ -10,4 +10,6 @@ Issue #241 measured 104 PR runs between November 22 and 23, 2026 UTC. A newer pu
 
 Start by confirming branch protection requires the aggregate validation result for merge groups. The merge-queue option should run all checks selected for the same changed files and require their results through the aggregate gate. Keep nightly and standalone dispatch available. Adopt the short preflight if merge-queue coverage is unavailable or reviewers need full package results before queueing.
 
+The 3,862 canceled runner-minutes are an upper bound on savings in a sample of this size, about half the combined runner time of canceled and successful PRs. Each option still starts lightweight checks, and the merge queue spends runner time on its own builds. The available totals exclude a heavy-lane breakdown, so the pilot should also record runner-minutes by lane before using the sample to forecast savings.
+
 Run the selected policy for a comparable sample. Report canceled runner-minutes, the share of all PR runner-minutes consumed by canceled runs, median and p90 time to first actionable result, and merge-queue wait. Use an absolute head SHA and the final attempt for elapsed time. Include all attempts for billed runner-minutes and distinguish scheduler cancellations from superseded pushes.
