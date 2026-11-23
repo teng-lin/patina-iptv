@@ -157,9 +157,9 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     );
     // A context-click must select B without watching it in the main player.
     step(app.right_click("id:guide-row >> text:Local B"));
-    step(app.wait_for("text:Watch in new window"));
+    step(app.wait_for("text:Open in new window"));
     let main_opens = iptv_app::player_opens(0);
-    step(app.press("text:Watch in new window"));
+    step(app.press("text:Open in new window"));
     step(app.wait_until(
         "the auxiliary source is published",
         Duration::from_secs(5),
@@ -246,7 +246,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     for section in ["Movies", "Shows"] {
         step(app.right_click("id:guide-ui >> label:Local A"));
         step(app.back());
-        step(app.wait_for_gone("text:Watch in new window", Duration::from_secs(3)));
+        step(app.wait_for_gone("text:Open in new window", Duration::from_secs(3)));
         assert!(app.window_state("player-window-1").unwrap().is_some());
         step(app.press_key("tab"));
         step(app.press_key("left"));
@@ -448,8 +448,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     );
     assert!(!app.screen().matches("id:multiview-tile").unwrap());
     step(app.right_click("id:guide-row >> text:Local C"));
-    step(app.wait_for("text:Watch in new window"));
-    step(app.press("text:Watch in new window"));
+    step(app.wait_for("text:Open in new window"));
+    step(app.press("text:Open in new window"));
     step(app.wait_until(
         "the third source is published",
         Duration::from_secs(5),
@@ -587,8 +587,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     // Opening an existing auxiliary channel must not start another player.
     let second_opens = iptv_app::player_opens(1);
     step(app.right_click("id:guide-row >> text:Local B"));
-    step(app.wait_for("text:Watch in new window"));
-    step(app.press("text:Watch in new window"));
+    step(app.wait_for("text:Open in new window"));
+    step(app.press("text:Open in new window"));
     assert_eq!(iptv_app::player_opens(1), second_opens);
     enter_popup_pip(&mut app, 1);
     step(app.hover("id:auxiliary-player-1 >> id:pip-video"));
@@ -608,8 +608,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
 
     // Reopen B: reuse its free surface with a fresh session/window identity.
     step(app.right_click("id:guide-row >> text:Local B"));
-    step(app.wait_for("text:Watch in new window"));
-    step(app.press("text:Watch in new window"));
+    step(app.wait_for("text:Open in new window"));
+    step(app.press("text:Open in new window"));
     app.idle(Duration::from_millis(300)).unwrap();
     assert!(app.window_state("player-window-3").unwrap().is_some());
     assert!(app.window_state("player-window-1").unwrap().is_none());
@@ -626,7 +626,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     for session in [4, 5] {
         let root = format!("auxiliary-player-{session}");
         step(app.right_click("id:guide-row >> text:Local B"));
-        step(app.press("text:Watch in new window"));
+        step(app.press("text:Open in new window"));
         step(app.wait_for(&format!("id:auxiliary-player-{session} >> label:Video")));
         step(app.press(&format!("id:auxiliary-player-{session} >> label:Video")));
         // Unsupported keyboard DVR must not open an invisible input overlay.

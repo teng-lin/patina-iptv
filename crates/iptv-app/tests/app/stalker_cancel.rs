@@ -265,7 +265,7 @@ fn retrying_an_auxiliary_player_keeps_the_main_stalker_request_alive() {
     });
     app.right_click("id:guide-ui >> label:Quick portal channel")
         .unwrap();
-    app.press("text:Watch in new window").unwrap();
+    app.press("text:Open in new window").unwrap();
     crate::isolated::wait_outside(&mut app, "auxiliary link", WAIT, || {
         state.0.lock().unwrap().quick_calls == 1
     })
