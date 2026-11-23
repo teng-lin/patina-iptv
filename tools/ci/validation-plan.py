@@ -122,9 +122,15 @@ def fuzz_targets(paths, full=False, root=ROOT):
     return sorted(selected)
 
 
-def select(paths, tier="pr", root=ROOT, candidate_build=False):
+# Heavy lanes a draft pull request defers until it is marked ready for review.
+DRAFT_DEFERRED = ("packages", "windows-package", "coverage", "smoke")
+
+
+def select(paths, tier="pr", root=ROOT, candidate_build=False, draft=False):
     if tier not in ("pr", "full", "release"):
         raise ValueError(f"unknown validation tier: {tier}")
+    if type(draft) is not bool or (draft and tier != "pr"):
+        raise ValueError("only pull request validation can be a draft")
     if type(candidate_build) is not bool or (candidate_build and tier != "release"):
         raise ValueError("unsigned candidate builds require the release validation tier")
     full = tier != "pr"
@@ -172,6 +178,14 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False):
         result["package_matrix"] = {"include": []}
         for lane in ("android", "android_package", "packages", "windows-package"):
             result[lane] = False
+    # A draft gets fast feedback; its deferred lanes run once it is marked
+    # ready. The gate fails a draft run, so its result never stands in for them.
+    result["draft"] = draft
+    result["deferred"] = [lane for lane in DRAFT_DEFERRED if result[lane]] if draft else []
+    if draft:
+        result["package_matrix"] = {"include": []}
+        for lane in DRAFT_DEFERRED:
+            result[lane] = False
     macos_host = host and (full or "host" in requested or any(
         not documentation(path) and not matches([path], OTHER_HOSTS) for path in inputs))
     macos_package = any(entry["platform"] == "macos" for entry in result["package_matrix"]["include"])
@@ -194,6 +208,14 @@ def gate(plan, needs):
     tier = plan.get("tier")
     if tier not in ("pr", "full", "release"):
         return errors + ["validation tier is missing or invalid"]
+    draft, deferred = plan.get("draft", False), plan.get("deferred", [])
+    if (type(draft) is not bool or not isinstance(deferred, list) or not set(deferred) <= set(DRAFT_DEFERRED)
+            or (draft and tier != "pr") or (deferred and not draft)):
+        errors.append("draft selection is missing or invalid")
+    elif draft:
+        errors.append("draft pull request: the selected fast checks ran"
+                      + (f"; {', '.join(deferred)} run when it is marked ready for review" if deferred else "")
+                      + ". Mark it ready for review for a mergeable result.")
     candidate = plan.get("candidate_build")
     if type(candidate) is not bool:
         errors.append("unsigned candidate selection is missing or invalid")
@@ -262,7 +284,8 @@ def main():
     event = os.environ["EVENT"]
     tier = os.environ.get("TIER", "") or ("full" if event in ("schedule", "workflow_dispatch") else "pr")
     paths = changed_paths() if tier == "pr" else []
-    plan = select(paths, tier, candidate_build=os.environ.get("CANDIDATE_BUILD", "false") == "true")
+    draft = event == "pull_request" and os.environ.get("DRAFT", "false") == "true"
+    plan = select(paths, tier, candidate_build=os.environ.get("CANDIDATE_BUILD", "false") == "true", draft=draft)
     print("plan=" + json.dumps(plan, separators=(",", ":")))
     for key, value in plan.items():
         print(f"{key}=" + (str(value).lower() if isinstance(value, bool) else json.dumps(value) if isinstance(value, (list, dict)) else value))

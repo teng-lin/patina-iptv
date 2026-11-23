@@ -165,8 +165,13 @@ release/rehearsal runs always exercise the full path and requested matrix,
 including optional iOS packaging. Publication still attests the final signed
 bytes under the release workflow/tag/SHA and verifies public bytes afterwards.
 
-PR validation cancels older runs of that PR. Master validation, including unsigned
-candidate packaging, cancels superseded master runs. Called release validation
+PR validation cancels older runs of that PR. A draft PR runs only the fast lanes;
+its packaging, Windows installer, coverage and emulator smoke lanes wait until it
+is marked ready for review, which starts a complete run. Open a PR as a draft
+while pushing fixups. A draft run always fails its gate, naming the lanes it
+deferred, so its result never satisfies the required checks for that commit.
+Master validation lets a running candidate finish and keeps only the newest
+pending master push. Called release validation
 has an independent run-specific group and cannot be canceled by a master push.
 On a master candidate with a failed validation or package job, the seal job
 reports the failed gate before downloading artifacts. Re-running failed jobs
