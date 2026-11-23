@@ -35,10 +35,11 @@ pub enum Section {
     Parental,
     Remote,
     Vod,
+    About,
 }
 
 impl Section {
-    pub const ALL: [Section; 16] = [
+    pub const ALL: [Section; 17] = [
         Section::General,
         Section::Playlists,
         Section::Channels,
@@ -55,6 +56,7 @@ impl Section {
         Section::Parental,
         Section::Remote,
         Section::Vod,
+        Section::About,
     ];
 
     /// Stable section key (also the conventional first segment of its
@@ -77,6 +79,7 @@ impl Section {
             Section::Parental => "parental",
             Section::Remote => "remote",
             Section::Vod => "vod",
+            Section::About => "about",
         }
     }
 
@@ -104,6 +107,7 @@ impl Section {
             Section::Parental => &["scope", "unlock"],
             Section::Remote => &["timing", "mapping"],
             Section::Vod => &["catalog", "playback"],
+            Section::About => &[],
         }
     }
 

@@ -277,7 +277,7 @@ def android_sdk():
     if not home or sys.platform != "linux":
         return None
     tools = Path(home) / "build-tools/35.0.1"
-    found = (tools / "apksigner", tools / "aapt2", Path(home) / "platforms/android-35/android.jar")
+    found = (tools / "apksigner", tools / "aapt2", Path(home) / "platforms/android-36/android.jar")
     return found if all(path.is_file() for path in found) else None
 
 
@@ -296,7 +296,7 @@ class RealPackaging(Signing):
     def setUp(self):
         sdk = android_sdk()
         if not sdk or not JDK or not shutil.which("openssl"):
-            self.skipTest("needs Linux, ANDROID_HOME with build-tools 35.0.1 and platform android-35, a JDK and openssl")
+            self.skipTest("needs Linux, ANDROID_HOME with build-tools 35.0.1 and platform android-36, a JDK and openssl")
         super().setUp()
         _, aapt2, platform = sdk
         for name in ("package-android.sh", "check-android-artifacts.py"):

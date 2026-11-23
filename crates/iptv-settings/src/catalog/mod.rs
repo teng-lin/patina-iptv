@@ -47,6 +47,7 @@ pub fn section(section: Section) -> &'static [Setting] {
         Section::Parental => library::PARENTAL,
         Section::Remote => library::REMOTE,
         Section::Vod => library::VOD,
+        Section::About => &[],
     }
 }
 

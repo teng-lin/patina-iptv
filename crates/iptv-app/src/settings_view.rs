@@ -44,6 +44,7 @@ use crate::{Ui, tint};
 const WHITE: u32 = 0xFFFFFF;
 /// Titles of rows the app does not act on.
 const DIM_ALPHA: u8 = 0x80;
+const PRIVACY_POLICY_URL: &str = "https://teng-lin.github.io/patina-iptv/privacy-policy/";
 const NOTICE_FOR: Duration = Duration::from_millis(2_500);
 
 /// The pages, in the order the reference shows its settings.
@@ -100,7 +101,7 @@ pub static PAGES: &[Page] = &[
     },
     Page {
         key: "about",
-        parts: &[Part::Keys(&["general.about"])],
+        parts: &[Part::Section(Section::About)],
     },
 ];
 
@@ -307,6 +308,14 @@ fn run(ui: Ui, key: &'static str) {
         | "recordings.enable_startup"
         | "recordings.disable_startup"
         | "recordings.alarm_access" => crate::host::recording_command(key),
+        "about.privacy_policy" => {
+            let opened = open_url(PRIVACY_POLICY_URL);
+            crate::data::spawn_in_app(async move {
+                if !opened.await {
+                    notify(PRIVACY_POLICY_URL);
+                }
+            });
+        }
         "general.backup" => crate::parental_view::request(
             ui,
             iptv_core::parental::Target::settings(),
@@ -572,6 +581,8 @@ mod tests {
                 assert!(placed(section), "{section:?} has no page");
             }
         }
+        let privacy = row("about", "about.privacy_policy", &Settings::new());
+        assert_eq!(status(&Settings::new(), &privacy), Status::Active);
         for key in ["playlists.manage", "general.about"] {
             assert!(catalog::command(key).is_some(), "{key}");
         }

@@ -7,6 +7,19 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-11-23
+
+### Added
+
+- Open the Patina privacy policy from Settings → About on Android and iPad.
+
+### Changed
+
+- Android tablet and TV packages target Android 16 (API 36) and use optimized
+  code and resources.
+- Live playback controls stay in one row and keep picture in picture visible
+  when available. Additional actions move to More as space runs out.
+
 ## [0.1.6] - 2026-11-23
 
 ### Distribution
@@ -457,7 +470,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/teng-lin/patina-iptv/compare/v0.1.5...v0.1.6
 [0.1.3]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...v0.1.2

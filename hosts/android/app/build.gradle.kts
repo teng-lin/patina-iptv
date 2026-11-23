@@ -30,12 +30,12 @@ require(validationAppId == null || validationAppId == "com.hantekllc.iptvrs.vali
 
 android {
     namespace = "com.hantekllc.iptvrs.host"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.hantekllc.iptvrs"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = System.getenv("IPTV_ANDROID_VERSION_CODE")?.toInt()
             ?: System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
         versionName = System.getenv("VERSION")
@@ -67,7 +67,9 @@ android {
         // (IPTV_DEBUG_SIGNED_RELEASE=1, a local install over a debug build);
         // with none of them a release task fails ([releaseSigning]).
         getByName("release") {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = when (releaseSigning) {
                 "distribution" -> signingConfigs.getByName("distribution")
                 "debug" -> signingConfigs.getByName("debug")

@@ -57,7 +57,15 @@ Tags and manual runs default to platforms=android-desktop: Android ARM64 and ARM
 Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
 APK and AAB for tablets and TVs, each containing both ARM architectures.
 Packaging fails if either native library or the notices are missing. Both
-signing certificates are checked against the configured keystore before upload. Manual runs also offer platforms=android
+signing certificates are checked against the configured keystore before upload.
+The signed AAB carries the release's R8 mapping file. To symbolicate a crash,
+extract the map from the AAB for that exact release:
+
+```sh
+unzip -p Patina-0.1.7-android-tablet-tv.aab \
+  BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map > mapping.txt
+```
+ Manual runs also offer platforms=android
 or platforms=desktop independently. platforms=all adds an iPad device IPA;
 only that option requires Apple signing secrets and still needs iPad validation.
 
