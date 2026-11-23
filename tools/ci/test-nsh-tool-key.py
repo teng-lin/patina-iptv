@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check invalidation boundaries without compiling or downloading the toolchain."""
 import importlib.util
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -13,6 +14,11 @@ spec = importlib.util.spec_from_file_location(
 )
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+release_spec = importlib.util.spec_from_file_location(
+    "nsh_cli_release", Path(__file__).with_name("nsh-cli-release.py")
+)
+releases = importlib.util.module_from_spec(release_spec)
+release_spec.loader.exec_module(releases)
 
 
 class ToolIdentityTests(unittest.TestCase):
@@ -164,6 +170,119 @@ class IdentityStepTests(unittest.TestCase):
                         else:
                             self.assertNotEqual(result.returncode, 0)
                             self.assertFalse(output.exists())
+
+
+class ReleaseTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        self.source = self.root / "nsh"
+        self.source.write_bytes(b"synthetic executable")
+        self.key = "a" * 64
+        self.platform = "macOS-ARM64"
+        self.tag = releases.tag_for(self.platform, self.key)
+        self.manifest = self.root / releases.MANIFEST
+        self.manifest.write_text(json.dumps({"tag": self.tag, "digest": releases.digest_file(self.source)}))
+        self.license = self.root / releases.LICENSE
+        self.license.write_bytes(b"synthetic license")
+        self.release = {
+            "tagName": self.tag,
+            "isDraft": False,
+            "isImmutable": True,
+            "isPrerelease": True,
+            "assets": [{"name": asset.name, "state": "uploaded", "size": asset.stat().st_size,
+                        "digest": releases.digest_file(asset)} for asset in (self.source, self.manifest, self.license)],
+        }
+
+    def download(self, directory, binary=None):
+        (directory / "nsh").write_bytes(self.source.read_bytes() if binary is None else binary)
+        (directory / releases.MANIFEST).write_bytes(self.manifest.read_bytes())
+        (directory / releases.LICENSE).write_bytes(self.license.read_bytes())
+
+    def test_restore_rejects_wrong_bytes_without_replacing_existing_file(self):
+        destination = self.root / "bin" / "nsh"
+        destination.parent.mkdir()
+        destination.write_bytes(b"existing executable")
+
+        def download(*args):
+            self.download(Path(args[-1]), b"corrupt executable")
+            return subprocess.CompletedProcess(args, 0)
+
+        with patch.object(releases, "lookup", return_value=self.release), patch.object(releases, "gh", side_effect=download):
+            with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+                releases.restore(self.platform, self.key, destination)
+        self.assertEqual(destination.read_bytes(), b"existing executable")
+
+    def test_verified_release_installs_an_executable(self):
+        destination = self.root / "bin" / "nsh"
+
+        def command(*args):
+            if args[:2] == ("release", "download"):
+                self.download(Path(args[-1]))
+                return subprocess.CompletedProcess(args, 0)
+            self.assertEqual(args[:2], ("attestation", "verify"))
+            self.assertIn(releases.SIGNER, args)
+            self.assertIn("refs/heads/master", args)
+            return subprocess.CompletedProcess(args, 0)
+
+        with patch.object(releases, "lookup", return_value=self.release), patch.object(releases, "gh", side_effect=command):
+            self.assertTrue(releases.restore(self.platform, self.key, destination))
+        self.assertEqual(destination.read_bytes(), self.source.read_bytes())
+        self.assertTrue(os.access(destination, os.X_OK))
+
+    def test_unverified_attestation_prevents_install(self):
+        destination = self.root / "bin" / "nsh"
+
+        def command(*args):
+            if args[:2] == ("release", "download"):
+                self.download(Path(args[-1]))
+                return subprocess.CompletedProcess(args, 0)
+            return subprocess.CompletedProcess(args, 1)
+
+        with patch.object(releases, "lookup", return_value=self.release), patch.object(releases, "gh", side_effect=command):
+            with self.assertRaises(subprocess.CalledProcessError):
+                releases.restore(self.platform, self.key, destination)
+        self.assertFalse(destination.exists())
+
+    def test_missing_or_mutable_release_cannot_supply_an_executable(self):
+        with patch.object(releases, "lookup", return_value=None), patch.object(releases, "gh") as command:
+            self.assertFalse(releases.restore(self.platform, self.key, self.root / "bin" / "nsh"))
+            command.assert_not_called()
+        with self.assertRaises(ValueError):
+            releases.asset_digests({**self.release, "isImmutable": False}, self.tag)
+
+    def test_retry_uploads_only_missing_draft_assets_and_publishes_verified_bytes(self):
+        draft = {**self.release, "isDraft": True, "isImmutable": False}
+        partial = {**draft, "assets": draft["assets"][:1]}
+        with (patch.object(releases, "lookup", side_effect=[partial, draft, self.release]),
+              patch.object(releases, "gh", return_value=subprocess.CompletedProcess([], 0)) as command):
+            releases.publish(self.tag, self.root, "b" * 40)
+        self.assertEqual([call.args[:2] for call in command.call_args_list], [("release", "upload"), ("release", "edit")])
+        self.assertEqual(command.call_args_list[0].args[3:], (str(self.manifest), str(self.license)))
+
+    def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
+        artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
+        artifact.mkdir()
+        self.download(artifact)
+        event = self.root / "event.json"
+        run = {"event": "push", "head_branch": "master", "path": ".github/workflows/validation.yml",
+               "head_repository": {"full_name": releases.REPOSITORY}, "head_sha": "b" * 40}
+        with (patch.dict(os.environ, GITHUB_REPOSITORY=releases.REPOSITORY, GITHUB_REF="refs/heads/master",
+                         GITHUB_EVENT_NAME="workflow_run", GITHUB_EVENT_PATH=str(event)),
+              patch.object(releases, "publish") as publish,
+              patch.object(releases, "upstream_license", return_value=self.license.read_bytes()) as license_fetch):
+            for incorrect in ({"event": "pull_request"}, {"head_repository": {"full_name": "fork/patina-iptv"}}):
+                event.write_text(json.dumps({"workflow_run": run | incorrect}))
+                with self.assertRaises(ValueError):
+                    releases.publish_staged(self.root)
+            publish.assert_not_called()
+            event.write_text(json.dumps({"workflow_run": run}))
+            self.assertTrue(releases.prepare(self.root))
+            license_fetch.assert_called_once_with(run["head_sha"])
+            self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()), json.loads(self.manifest.read_text()))
+            releases.publish_staged(self.root)
+            publish.assert_called_once_with(self.tag, artifact, run["head_sha"])
 
 
 if __name__ == "__main__":

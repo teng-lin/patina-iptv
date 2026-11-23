@@ -219,6 +219,8 @@ jobs:
           python3 tools/ci/version.py
           echo "NSH=$(cd ../nsh-patina && pwd)/target/release/nsh" >> "$GITHUB_ENV"
       - uses: ./.github/actions/nsh-cli
+        with:
+          stage-release: 'true'
       - uses: ./.github/actions/desktop-cargo-cache
         if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'
         with:
