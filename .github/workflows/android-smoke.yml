@@ -32,6 +32,7 @@ permissions:
 # selected by the required Validation aggregate.
 jobs:
   build:
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -114,6 +115,7 @@ jobs:
           if-no-files-found: error
           retention-days: 3
   smoke:
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 45

@@ -90,7 +90,7 @@ runs:
         ABI: ${{ inputs.abi }}
       run: python3 tools/ci/nsh-android-bundle.py fetch "$RUNTIME_PATH" "$ABI" "$RUNTIME_KEY"
     - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-      if: inputs.cache != '' && steps.prepared.outcome != 'success' && github.workflow != 'Release' && steps.durable.outputs.missing != ''
+      if: inputs.cache != '' && steps.prepared.outcome != 'success' && github.workflow != 'Release' && steps.durable.outputs.missing != '' && !(github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.share == 'true')
       id: runtime
       with:
         path: ${{ steps.identity.outputs.path }}

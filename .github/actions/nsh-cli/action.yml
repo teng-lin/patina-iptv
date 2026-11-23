@@ -53,13 +53,13 @@ runs:
         TOOL_PATH: ${{ steps.identity.outputs.path }}
       run: python3 tools/ci/nsh-cli-release.py restore "$TOOL_PLATFORM" "$TOOL_KEY" "$TOOL_PATH"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true' && steps.prepared.outcome != 'success' && github.workflow != 'Release' && steps.release.outputs.restored != 'true'
+      if: inputs.cache == 'true' && steps.prepared.outcome != 'success' && github.workflow != 'Release' && steps.release.outputs.restored != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/master' && (inputs.share == 'true' || inputs.stage-release == 'true'))
       id: cli
       with:
         path: ${{ steps.identity.outputs.path }}
         key: nsh-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
     - name: Restore the retained macOS tool
-      if: inputs.cache == 'true' && steps.prepared.outcome != 'success' && github.workflow != 'Release' && runner.os == 'macOS' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && steps.prepared.outcome != 'success' && github.workflow != 'Release' && runner.os == 'macOS' && steps.release.outputs.restored != 'true' && steps.cli.outputs.cache-hit != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/master' && (inputs.share == 'true' || inputs.stage-release == 'true'))
       id: retained
       shell: bash
       env:
@@ -84,12 +84,13 @@ runs:
         inputs.share == 'true' || (steps.prepared.outcome != 'success' && inputs.stage-release == 'true' && inputs.cache == 'true' &&
         steps.release.outputs.restored != 'true' && github.repository == 'teng-lin/patina-iptv' &&
         github.event_name == 'push' && github.ref == 'refs/heads/master')
+      continue-on-error: true
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: patina-nsh-cli-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
         path: ${{ steps.identity.outputs.path }}
         if-no-files-found: error
-        retention-days: 30
+        retention-days: ${{ inputs.share == 'true' && 7 || 30 }}
         overwrite: true
     # Save now: a later app failure must not discard a successful tool build.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

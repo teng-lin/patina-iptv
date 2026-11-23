@@ -75,7 +75,7 @@ runs:
         TOOL_PATH: ${{ steps.identity.outputs.path }}
       run: python3 tools/ci/nsh-cli-release.py restore Windows-X64 "$TOOL_KEY" "$TOOL_PATH" --kind cargo-about
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.stage-release == 'true')
       id: tool
       with:
         path: ${{ steps.identity.outputs.path }}

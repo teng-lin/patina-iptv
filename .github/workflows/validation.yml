@@ -66,7 +66,7 @@ jobs:
     needs: plan
     if: >-
       inputs.tier != 'release' && (needs.plan.outputs.candidate_build == 'true' ||
-      needs.plan.outputs.smoke == 'true' || contains(fromJSON(needs.plan.outputs.package_matrix).include.*.platform, 'linux'))
+      (needs.plan.outputs.smoke == 'true' && contains(fromJSON(needs.plan.outputs.package_matrix).include.*.platform, 'linux')))
     uses: ./.github/workflows/ci-tools.yml
     with:
       android-abis: ${{ needs.plan.outputs.candidate_build == 'true' && 'arm64-v8a,armeabi-v7a,x86_64' || (needs.plan.outputs.smoke == 'true' && 'x86_64') || '' }}

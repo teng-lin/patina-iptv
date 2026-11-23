@@ -44,7 +44,7 @@ jobs:
           echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
           echo "android=$android" >> "$GITHUB_OUTPUT"
   windows-package:
-    if: inputs.windows
+    if: ${{ !cancelled() && inputs.windows }}
     runs-on: windows-2025
     timeout-minutes: 120
     steps:
@@ -325,6 +325,7 @@ jobs:
           # The members are compressed archives already.
           compression-level: 0
   sbom:
+    if: ${{ !cancelled() }}
     # No signing material and no publication rights: only the dependency graph.
     runs-on: ubuntu-24.04
     timeout-minutes: 30

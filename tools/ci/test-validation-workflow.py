@@ -164,6 +164,20 @@ class Workflows(unittest.TestCase):
                 continue
             self.assertIn(f'python3 {test}\n', helpers, test)
 
+    def test_reusable_lanes_can_run_without_the_optional_shared_builder(self):
+        for filename, jobs in {
+            "package-check.yml": ("desktop-packages",),
+            "android-smoke.yml": ("build", "smoke"),
+            "unsigned-candidate.yml": ("windows-package", "sbom"),
+        }.items():
+            workflow = (ROOT / ".github/workflows" / filename).read_text()
+            for job in jobs:
+                guard = workflow.split(f"\n  {job}:\n", 1)[1].splitlines()[0]
+                self.assertIn("if:", guard)
+                self.assertIn("!cancelled()", guard)
+        smoke = (ROOT / ".github/workflows/android-smoke.yml").read_text()
+        self.assertIn("!cancelled() && needs.build.result == 'success'", smoke)
+
     def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         self.assertIn("&& 'validation-master'", text)

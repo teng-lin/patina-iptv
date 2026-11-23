@@ -322,6 +322,18 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(workflow.count("uses: actions/download-artifact@"), 2)
         self.assertEqual(workflow.count("digest-mismatch: error"), 2)
 
+    def test_one_failed_release_does_not_block_other_staged_tools(self):
+        artifacts = [("failed", self.root / "failed"), ("next", self.root / "next")]
+        for _, directory in artifacts:
+            directory.mkdir()
+            (directory / releases.MANIFEST).touch()
+        with (patch.object(releases, "trusted_commit", return_value="b" * 40),
+              patch.object(releases, "staged", return_value=artifacts),
+              patch.object(releases, "publish", side_effect=[ValueError(), None]) as publish):
+            with self.assertRaisesRegex(RuntimeError, "Tool releases still pending: failed"):
+                releases.publish_staged(self.root)
+        self.assertEqual(publish.call_count, 2)
+
     def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
         artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
         artifact.mkdir()

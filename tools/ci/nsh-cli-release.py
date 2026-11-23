@@ -201,9 +201,17 @@ def prepare(root):
 
 def publish_staged(root):
     commit = trusted_commit()
+    failures = []
     for tag, directory in staged(root):
-        if (directory / MANIFEST).is_file():
+        if not (directory / MANIFEST).is_file():
+            continue
+        try:
             publish(tag, directory, commit)
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            print(f"::error::Could not publish {tag} ({type(error).__name__})")
+            failures.append(tag)
+    if failures:
+        raise RuntimeError(f"Tool releases still pending: {', '.join(failures)}")
 
 
 def main():
