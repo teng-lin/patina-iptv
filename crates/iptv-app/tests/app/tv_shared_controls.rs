@@ -629,7 +629,7 @@ fn the_header_more_control_waits_for_an_inline_channel_reorder() {
     step(app.long_press("id:guide-groups >> text:News"));
     step(app.press("id:menu-panel >> text:Reorder channels"));
     step(app.wait_for("id:organization-screen >> text:Reorder channels"));
-    step(app.wait_for("id:guide-row >> text:Local B"));
+    step(app.wait_for("id:guide-row >> text:/Local B/"));
     // Touch drives the app, but the guide takes no pointer while the order
     // is unfinished: no ⋯ that could not be pressed.
     assert!(!app.screen().matches("id:guide-more").unwrap());
