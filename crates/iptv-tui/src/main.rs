@@ -1,8 +1,12 @@
 mod player;
 
+#[cfg(test)]
+mod tests;
+
 use std::{
     collections::VecDeque,
     io,
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -26,11 +30,11 @@ use ratatui_core::{
 use ratatui_crossterm::CrosstermBackend;
 use tempfile::TempDir;
 
-fn parse_args() -> (VideoMode, bool, bool) {
+fn parse_args(args: impl IntoIterator<Item = String>) -> (VideoMode, bool, bool) {
     let mut mode = VideoMode::detect_default();
     let mut headless = false;
     let mut demo = false;
-    for arg in std::env::args().skip(1) {
+    for arg in args {
         match arg.as_str() {
             "--video=kitty" => mode = VideoMode::Kitty,
             "--video=inline" => mode = VideoMode::Inline,
@@ -69,14 +73,19 @@ fn seed_demo_home() -> io::Result<TempDir> {
     let dir = tempfile::Builder::new()
         .prefix("patina-tui-demo-")
         .tempdir()?;
-    let data = dir.path().join(".local/share/iptv-rs");
-    std::fs::create_dir_all(&data)?;
     // SAFETY: called at startup before any background threads are spawned.
     unsafe {
         std::env::set_var("HOME", dir.path());
         std::env::set_var("XDG_DATA_HOME", dir.path().join(".local/share"));
         std::env::set_var("XDG_CONFIG_HOME", dir.path().join(".config"));
     }
+    seed_demo(dir.path())?;
+    Ok(dir)
+}
+
+fn seed_demo(directory: &Path) -> io::Result<()> {
+    let data = directory.join(".local/share/iptv-rs");
+    std::fs::create_dir_all(&data)?;
     let mut playlist = String::from("#EXTM3U\n");
     for i in 1..=15 {
         let group = if i <= 5 {
@@ -90,7 +99,7 @@ fn seed_demo_home() -> io::Result<TempDir> {
             "#EXTINF:-1 tvg-id=\"ch.{i}\" group-title=\"{group}\",Synthetic Channel {i:02} HD\nhttp://127.0.0.1:19999/live/ch{i}.ts\n"
         ));
     }
-    let m3u_path = dir.path().join("demo.m3u");
+    let m3u_path = directory.join("demo.m3u");
     std::fs::write(&m3u_path, &playlist)?;
     let mut store = iptv_store_sqlite::Store::open(data.join("iptv.sqlite"))
         .map_err(|e| io::Error::other(e.to_string()))?;
@@ -127,7 +136,7 @@ fn seed_demo_home() -> io::Result<TempDir> {
         iptv_settings::Value::Bool(false),
     );
     std::fs::write(data.join("settings.json"), settings.to_json_string())?;
-    Ok(dir)
+    Ok(())
 }
 
 fn map_key_events(
@@ -294,10 +303,13 @@ impl Drop for TerminalGuard {
 
 fn main() -> io::Result<()> {
     env_logger::init();
-    iptv_app::set_tui_mode(true);
-    let (video_mode, headless, demo) = parse_args();
+    let (video_mode, headless, demo) = parse_args(std::env::args().skip(1));
     let _demo_dir = if demo { Some(seed_demo_home()?) } else { None };
+    run(video_mode, headless.then_some(Duration::from_millis(1200)))
+}
 
+fn run(video_mode: VideoMode, snapshot_duration: Option<Duration>) -> io::Result<()> {
+    iptv_app::set_tui_mode(true);
     let mut options = AppOptions::default();
     options.cells =
         CellSize::new(nsh_core::Points(8.0), nsh_core::Points(16.0)).map_err(io::Error::other)?;
@@ -322,14 +334,14 @@ fn main() -> io::Result<()> {
     )
     .map_err(io::Error::other)?;
 
-    if headless {
+    if let Some(duration) = snapshot_duration {
         let mut terminal = Terminal::new(TestBackend::new(120, 40))
             .map_err(|e| io::Error::other(e.to_string()))?;
         terminal
             .draw(|frame| draw_with_footer(frame, &mut view, video_mode))
             .map_err(|e| io::Error::other(e.to_string()))?;
         view.load(Root::of::<iptv_app::App>())?;
-        let deadline = Instant::now() + Duration::from_millis(1200);
+        let deadline = Instant::now() + duration;
         run_loop(
             &mut terminal,
             &mut view,

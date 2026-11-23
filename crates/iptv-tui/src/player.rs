@@ -22,6 +22,9 @@ use ratatui_core::{
 };
 use tempfile::TempDir;
 
+#[cfg(test)]
+mod tests;
+
 static NEXT_FRAME_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

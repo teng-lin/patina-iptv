@@ -134,9 +134,17 @@ impl RemoteKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nsh_core::keymap::Modifiers;
+
+    fn event(key: &str, code: &str) -> KeyEvent {
+        let mut event = KeyEvent::default();
+        event.key = key.to_owned().into();
+        event.code = code.to_owned().into();
+        event
+    }
 
     fn key(key: &str, code: &str) -> Option<RemoteKey> {
-        RemoteKey::from_parts(key, code, false)
+        RemoteKey::from_event(&event(key, code))
     }
 
     #[test]
@@ -173,15 +181,85 @@ mod tests {
 
     #[test]
     fn maps_transported_keys() {
-        assert_eq!(key("Unidentified", "F15"), Some(RemoteKey::Guide));
-        assert_eq!(key("Unidentified", "F21"), Some(RemoteKey::Search));
+        for (code, expected) in [
+            ("F13", RemoteKey::ChannelUp),
+            ("F14", RemoteKey::ChannelDown),
+            ("F15", RemoteKey::Guide),
+            ("F16", RemoteKey::Info),
+            ("F17", RemoteKey::Red),
+            ("F18", RemoteKey::Green),
+            ("F19", RemoteKey::Yellow),
+            ("F20", RemoteKey::Blue),
+            ("F21", RemoteKey::Search),
+            ("F22", RemoteKey::Record),
+        ] {
+            assert_eq!(
+                key("Unidentified", code),
+                Some(expected),
+                "{code} should decode the Android transport",
+            );
+            assert_eq!(
+                key(code, code),
+                None,
+                "{code} should remain a keyboard function key",
+            );
+        }
+        assert_eq!(
+            key("ArrowLeft", "F15"),
+            Some(RemoteKey::Left),
+            "a known logical key takes priority over a reserved transport code",
+        );
     }
 
     #[test]
     fn ignores_typing_and_chords() {
         assert_eq!(key("a", "KeyA"), None);
         assert_eq!(key("Unidentified", ""), None);
-        assert_eq!(RemoteKey::from_parts("ArrowUp", "", true), None);
         assert_eq!(key("12", ""), None);
+        assert_eq!(key("١", "Digit1"), None);
+
+        for (logical, physical, decoded) in [
+            ("ArrowUp", "ArrowUp", RemoteKey::Up),
+            ("Unidentified", "F15", RemoteKey::Guide),
+        ] {
+            let mut event = event(logical, physical);
+            for modifiers in [
+                Modifiers {
+                    ctrl: true,
+                    ..Modifiers::default()
+                },
+                Modifiers {
+                    alt: true,
+                    ..Modifiers::default()
+                },
+                Modifiers {
+                    cmd: true,
+                    ..Modifiers::default()
+                },
+            ] {
+                event.modifiers = modifiers;
+                assert_eq!(RemoteKey::from_event(&event), None, "{event:?}");
+            }
+            event.modifiers = Modifiers {
+                shift: true,
+                ..Modifiers::default()
+            };
+            assert_eq!(RemoteKey::from_event(&event), Some(decoded), "{event:?}");
+        }
+    }
+
+    #[test]
+    fn remote_hint_labels_cover_digits_channels_and_media_keys() {
+        for (logical, physical, label) in [
+            ("9", "Digit9", "9"),
+            ("Unidentified", "F13", "CH+"),
+            ("ChannelDown", "", "CH−"),
+            ("MediaPlayPause", "", "Play/Pause"),
+            ("MediaFastForward", "", "Fast forward"),
+            ("ArrowRight", "ArrowRight", "Right"),
+        ] {
+            let decoded = key(logical, physical).expect("remote key");
+            assert_eq!(decoded.label(), label, "{logical} {physical}");
+        }
     }
 }

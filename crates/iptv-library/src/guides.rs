@@ -369,6 +369,78 @@ mod tests {
             None
         );
     }
+
+    #[test]
+    fn reordered_and_relinked_guides_keep_their_identity_and_preferences_after_refresh() {
+        let s = sync_provider(
+            &[user_source(
+                FIRST_USER_FEED,
+                url("old-user"),
+                Some("Local listings".into()),
+            )],
+            &[url("provider")],
+        )
+        .expect("initial guides");
+        let provider = s[1].feed;
+        let shuffled = apply(&s, &Edit::Move(provider, -1))
+            .expect("valid identities")
+            .expect("moved provider");
+        assert_eq!(feeds(&shuffled), [provider.0, FIRST_USER_FEED.0]);
+        let disabled = apply(&shuffled, &Edit::SetEnabled(provider, false))
+            .expect("valid identities")
+            .expect("disabled provider");
+        assert!(!disabled[0].enabled);
+        let relink = Edit::Relink(FIRST_USER_FEED, url("new-user"));
+        let relinked = apply(&disabled, &relink)
+            .expect("valid identities")
+            .expect("changed user address");
+        assert_eq!(relinked[1].url, url("new-user"));
+        assert_eq!(relinked[1].name.as_deref(), Some("Local listings"));
+        assert_eq!(
+            apply(&relinked, &relink),
+            Ok(None),
+            "repeating the edit is a no-op"
+        );
+
+        let refreshed = sync_provider(&relinked, &[url("new-provider")]).expect("provider refresh");
+        assert_eq!(
+            refreshed,
+            [
+                GuideSource {
+                    url: url("new-provider"),
+                    ..relinked[0].clone()
+                },
+                relinked[1].clone(),
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_guide_identities_report_the_reason_and_offending_value() {
+        for (error, diagnostic) in [
+            (
+                GuideFeedError::DuplicateFeed(FeedId(7)),
+                "duplicate guide feed id 7",
+            ),
+            (
+                GuideFeedError::DuplicateProviderIndex(8),
+                "duplicate provider guide index 8",
+            ),
+            (
+                GuideFeedError::Exhausted,
+                "guide feed identity space exhausted",
+            ),
+            (
+                GuideFeedError::TooManyProviderGuides {
+                    count: MAX_PROVIDER_GUIDES + 1,
+                },
+                "1000 provider guides exceed the limit of 999",
+            ),
+        ] {
+            assert_eq!(error.to_string(), diagnostic);
+        }
+    }
+
     #[test]
     fn provider_growth_preserves_custom_ids_and_rejects_surplus_without_mutation() {
         let current = vec![

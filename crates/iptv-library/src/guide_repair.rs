@@ -242,3 +242,88 @@ pub struct Capability {
     pub name: &'static str,
     pub state: CapabilityState,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iptv_providers::ContentId;
+
+    fn mapping_request() -> Request {
+        Request::mapping(
+            ChannelRef {
+                source: SourceId(1),
+                content: ContentId::from_stored("synthetic-channel"),
+            },
+            Target::NoGuide,
+            TimeWindow { from: 0, to: 3600 },
+        )
+    }
+
+    #[test]
+    fn a_repair_requires_a_valid_window_and_mappings_for_the_same_playlist() {
+        let mut request = mapping_request();
+        assert!(request.valid());
+        assert!(!request.mappings[0].replace_explicit);
+
+        request.mappings[0].channel.source = SourceId(2);
+        assert!(!request.valid(), "mapping belongs to a different playlist");
+
+        request.mappings.clear();
+        assert!(!request.valid(), "a request must contain a change");
+        request.feed_order = Some(vec![FeedId(2), FeedId(1)]);
+        assert!(request.valid(), "reordering feeds is a change by itself");
+
+        request.window.to = request.window.from;
+        assert!(
+            !request.valid(),
+            "feed changes still require a valid window"
+        );
+    }
+
+    #[test]
+    fn repair_limits_count_feed_edits_and_additions_together() {
+        let mut request = mapping_request();
+        let mapping = request.mappings.pop().expect("single mapping request");
+        request.mappings = (0..MAX_MAPPING_CHANGES)
+            .map(|id| MappingRequest {
+                channel: ChannelRef {
+                    source: request.source,
+                    content: ContentId::from_stored(format!("synthetic-channel-{id}")),
+                },
+                ..mapping.clone()
+            })
+            .collect();
+        assert!(request.valid());
+        request.mappings.push(mapping);
+        assert!(!request.valid(), "too many mappings");
+
+        request.mappings.clear();
+        request.feeds = (1..MAX_FEED_CHANGES as u32)
+            .map(|id| FeedEdit {
+                feed: FeedId(id),
+                enabled: Some(false),
+                shift_minutes: None,
+                remove: false,
+            })
+            .collect();
+        let mut addition = FeedAddition {
+            evidence: ProbeEvidence {
+                stage: crate::inspection::ProbeId("synthetic-probe".into()),
+                source: request.source,
+                feed: None,
+                incarnation: "synthetic-incarnation".into(),
+                digest: [0; 32],
+                expires_at: 3600,
+            },
+            name: None,
+        };
+        request.additions.push(addition.clone());
+        assert!(
+            request.valid(),
+            "the exact combined feed change limit is accepted"
+        );
+        addition.evidence.stage = crate::inspection::ProbeId("another-synthetic-probe".into());
+        request.additions.push(addition);
+        assert!(!request.valid(), "edits and additions share one limit");
+    }
+}

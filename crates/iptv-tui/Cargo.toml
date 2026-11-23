@@ -13,7 +13,6 @@ workspace = true
 [[bin]]
 name = "patina-tui"
 path = "src/main.rs"
-test = false
 
 [dependencies]
 iptv-app = { path = "../iptv-app" }
@@ -33,6 +32,9 @@ flate2 = "1"
 tempfile.workspace = true
 env_logger.workspace = true
 log.workspace = true
+
+[dev-dependencies]
+iptv-app = { path = "../iptv-app", features = ["test-support"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

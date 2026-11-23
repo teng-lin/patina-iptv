@@ -17,24 +17,19 @@ FLOORS = {
     "iptv-import": 88.0,
     "iptv-net": 90.0,
     "iptv-store-sqlite": 92.0,
+    "iptv-sqlcipher-init": 85.0,
     "iptv-search": 94.0,
     "iptv-player-mpv": 94.0,
-    "iptv-library": 91.0,
+    "iptv-library": 98.0,
     "iptv-runtime": 90.0,
     "iptv-app": 90.0,
+    "iptv-tui": 80.0,
     # The wasm-only host bindings (exports and imports) run on the TV only.
     "iptv-web": 80.0,
+    "nsh-tv": 90.0,
 }
 
-
-# SQLCipher initialization is process-global and exercised through the store's
-# isolated-child tests. Coverage collection includes it; a stable independent
-# percentage is not yet established. The vendored TV adapter has its own decoder and transport tests.
-EXEMPTIONS = {
-    "iptv-sqlcipher-init": "process-global FFI initialization; store child-process regressions",
-    "iptv-tui": "optional local terminal binary host; interactive TTY and subprocess video adapter",
-    "nsh-tv": "vendored upstream adapter with decoder and Android transport tests",
-}
+EXEMPTIONS = {}
 
 
 def validate_inventory(root, floors=FLOORS, exemptions=EXEMPTIONS):
@@ -52,7 +47,7 @@ def parse_summary(summary_text):
     for line in summary_text.splitlines():
         # llvm-cov shortens paths to their common root; hosted output can
         # start at the crate name rather than include the workspace's crates/.
-        m = re.search(r"(?:^|[/\\])(iptv-[a-z0-9_-]+)[/\\]src[/\\]", line)
+        m = re.search(r"(?:^|[/\\])(iptv-[a-z0-9_-]+|nsh-tv)[/\\]src[/\\]", line)
         if not m:
             continue
         crate = m.group(1)

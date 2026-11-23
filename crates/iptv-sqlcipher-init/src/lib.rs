@@ -35,19 +35,25 @@ pub fn initialize() -> Result<()> {
     // It either waits for a foreign first-opener or completes cipher setup here.
     check(unsafe { sqlcipher_extra_init(std::ptr::null()) })?;
 
-    let deadline = Instant::now() + EXPORT_WAIT;
+    wait_for_export(&READY, export_registered, Instant::now() + EXPORT_WAIT)
+}
+
+fn export_registered() -> Result<bool> {
+    // The hook registers the extension after releasing its mutex. Each probe
+    // opens a fresh connection so it can see an extension registered later.
+    let connection = Connection::open_in_memory()?;
+    let query = "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='sqlcipher_export')";
+    connection.query_row(query, [], |row| row.get(0))
+}
+
+fn wait_for_export(
+    ready: &OnceLock<()>,
+    mut registered: impl FnMut() -> Result<bool>,
+    deadline: Instant,
+) -> Result<()> {
     loop {
-        // The hook releases its mutex before registering sqlcipher_export. A
-        // fresh connection observes auto-extensions registered before its open;
-        // an earlier connection would permanently miss the late registration.
-        let connection = Connection::open_in_memory()?;
-        let export: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='sqlcipher_export')",
-            [],
-            |row| row.get(0),
-        )?;
-        if export {
-            let _ = READY.set(());
+        if registered()? {
+            let _ = ready.set(());
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -67,3 +73,6 @@ fn check(code: std::ffi::c_int) -> Result<()> {
         Err(rusqlite::Error::SqliteFailure(ffi::Error::new(code), None))
     }
 }
+
+#[cfg(test)]
+mod tests;
