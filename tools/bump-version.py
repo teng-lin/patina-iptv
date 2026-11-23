@@ -35,22 +35,43 @@ def bump(root, requested, dry_run=False):
         if package.get("version") == {"workspace": True}:
             names.add(package["name"])
     changes = {}
+    locks = [
+        ("Cargo.lock", names, names),
+        # The terminal binary is built in CI but is not an NSH runner dependency.
+        ("tools/ci/package.Cargo.lock", names, names - {"iptv-tui"}),
+    ]
     # The fuzz harness is a workspace of its own; its lock names only the
     # crates it fuzzes, and its builds are --locked like every other.
-    for relative, complete in (("Cargo.lock", True), ("tools/ci/package.Cargo.lock", True), ("fuzz/Cargo.lock", False)):
+    if (root / "fuzz/Cargo.lock").is_file():
+        locks.append(("fuzz/Cargo.lock", names, set()))
+    tizen_manifest = root / "hosts/tizen-nsh/Cargo.toml"
+    if tizen_manifest.is_file():
+        original_tizen = tizen_manifest.read_text()
+        tizen = tomllib.loads(original_tizen)["package"]
+        if tizen["version"] != current:
+            raise ValueError("hosts/tizen-nsh/Cargo.toml version is out of sync")
+        updated_tizen, count = re.subn(
+            r'(^\[package\]\n(?:(?!^\[).*\n)*?^version = ")[^"\n]+("$)',
+            lambda match: match[1] + version + match[2], original_tizen, flags=re.MULTILINE,
+        )
+        if count != 1:
+            raise ValueError("Could not locate the Tizen package version")
+        changes[tizen_manifest] = updated_tizen
+        tizen_names = {tizen["name"]}
+        locks.append(("hosts/tizen-nsh/Cargo.lock", names | tizen_names, tizen_names))
+
+    for relative, local_names, required in locks:
         lock = root / relative
-        if not complete and not lock.exists():
-            continue
         blocks = lock.read_text().split("[[package]]")
         found = set()
         for index, block in enumerate(blocks[1:], 1):
             package = tomllib.loads(block)
-            if package["name"] in names and "source" not in package:
+            if package["name"] in local_names and "source" not in package:
                 if package["version"] != current:
                     raise ValueError(f"{relative} version is out of sync: {package['name']}")
                 blocks[index] = block.replace(f'version = "{current}"', f'version = "{version}"', 1)
                 found.add(package["name"])
-        if found != names and (complete or not found):
+        if not found or not required <= found:
             raise ValueError(f"Workspace packages missing from {relative}; regenerate it first")
         changes[lock] = "[[package]]".join(blocks)
     updated, count = re.subn(

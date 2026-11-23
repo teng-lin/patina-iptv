@@ -1,3 +1,5 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.github.jk1.dependency-license-report") version "3.1.5"
     id("com.android.application")
@@ -8,6 +10,7 @@ plugins {
 val nshJava: File = rootProject.file(providers.gradleProperty("nsh.java").get())
 // Filled by tools/sync-host.sh from the NSH build of the Rust crate.
 val nshOut = layout.buildDirectory.dir("nsh").get().asFile
+val nshConfig = rootProject.file("../../crates/iptv-app/nsh.json")
 
 // How `release` is signed: "distribution", "unsigned", "debug" or null (none
 // chosen: its tasks fail rather than fall back to the debug key unasked).
@@ -35,7 +38,8 @@ android {
         targetSdk = 35
         versionCode = System.getenv("IPTV_ANDROID_VERSION_CODE")?.toInt()
             ?: System.getenv("GITHUB_RUN_NUMBER")?.toInt() ?: 1
-        versionName = System.getenv("VERSION") ?: "0.1.4"
+        versionName = System.getenv("VERSION")
+            ?: (JsonSlurper().parse(nshConfig) as Map<*, *>)["version"] as String
         ndk { abiFilters += listOf("x86_64", "arm64-v8a", "armeabi-v7a") }
     }
 
