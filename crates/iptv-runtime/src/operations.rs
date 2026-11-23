@@ -11,17 +11,26 @@ use std::{future::Future, rc::Rc};
 /// Parental policy verified against committed storage for external playback.
 pub struct ExternalPlaybackAuthorization {
     access: crate::parental::Snapshot,
+    target: Target,
     grants: Vec<Target>,
 }
 
 impl ExternalPlaybackAuthorization {
-    pub(crate) fn new(access: crate::parental::Snapshot, grants: Vec<Target>) -> Self {
-        Self { access, grants }
+    pub(crate) fn new(
+        access: crate::parental::Snapshot,
+        target: Target,
+        grants: Vec<Target>,
+    ) -> Self {
+        Self {
+            access,
+            target,
+            grants,
+        }
     }
 
     /// Check immediately before granting the relay admission, without yielding.
     pub fn is_current(&self) -> bool {
-        self.access.inspection_current(&self.grants)
+        self.access.playback_current(&self.target, &self.grants)
     }
 }
 

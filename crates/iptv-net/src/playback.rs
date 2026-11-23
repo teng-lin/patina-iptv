@@ -259,10 +259,10 @@ impl RollingRoute {
     fn precedes(&self, window: hls::MediaWindow) -> bool {
         // A delta update can omit routes that are still inside its media
         // window. Retire only when the entire window that named them is older.
-        let prior = if window.full {
-            self.window.sequence
-        } else {
+        let prior = if window.skips_segments() {
             self.window.last_sequence
+        } else {
+            self.window.sequence
         };
         prior < window.sequence
     }
@@ -352,9 +352,22 @@ impl OpaqueRoutes {
                 bytes += target.url.as_str().len();
             }
         }
+        if let Some(window) = window {
+            // An upstream window can confirm a removal even when the relay
+            // has no room to serve it. Keep the old route available for the
+            // RFC 8216 §6.2.2 grace period so a later reload can make room.
+            for (id, route) in &mut self.targets {
+                if let Some(rolling) = &mut route.rolling
+                    && rolling.owner == batch.owner
+                    && rolling.expires.is_none()
+                    && rolling.precedes(window)
+                    && !batch.targets.contains_key(id)
+                {
+                    rolling.expires = now.checked_add(rolling.window.availability);
+                }
+            }
+        }
         if count > MAX_OPAQUE_ROUTES || bytes > MAX_OPAQUE_BYTES {
-            // Failed publication leaves all existing routes and their
-            // deadlines untouched, even if some expired routes could be removed.
             let reclaim = |id: &str, route: &OpaqueRoute| {
                 route.expired(now) && !batch.targets.contains_key(id)
             };
@@ -369,17 +382,15 @@ impl OpaqueRoutes {
             }
             self.targets.retain(|id, route| !reclaim(id, route));
         }
-        if let Some(window) = window {
+        if let Some(window) = window.filter(|window| window.skips_segments()) {
             for (id, route) in &mut self.targets {
                 if let Some(rolling) = &mut route.rolling
                     && rolling.owner == batch.owner
-                    && rolling.expires.is_none()
-                    && rolling.precedes(window)
+                    && window.carries(rolling.window)
                     && !batch.targets.contains_key(id)
                 {
-                    // RFC 8216 §6.2.2 keeps the removed segment available
-                    // for its duration plus the longest distributed window.
-                    rolling.expires = now.checked_add(rolling.window.availability);
+                    rolling.window.availability =
+                        rolling.window.availability.max(window.availability);
                 }
             }
         }
@@ -1998,11 +2009,11 @@ mod tests {
     async fn opaque_capacity_preserves_active_renditions_and_reclaims_old_windows() {
         let mut routes = OpaqueRoutes::default();
         let base = Url::parse("https://synthetic.example.test/").unwrap();
-        let window = |sequence, full| hls::MediaWindow {
+        let window = |sequence, full: bool| hls::MediaWindow {
             sequence,
+            first_listed_sequence: sequence + u64::from(!full),
             last_sequence: sequence + 10,
             availability: Duration::from_secs(60),
-            full,
         };
         let mut video = RouteBatch::new(routes.hash.clone(), "video");
         let old = video
@@ -2066,27 +2077,114 @@ mod tests {
         assert!(ids.iter().all(|id| routes.target(id).is_some()));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_full_route_table_recovers_after_the_carried_window_expires() {
+        let mut routes = OpaqueRoutes::default();
+        let base = Url::parse("https://synthetic.example.test/").unwrap();
+        let mut first = RouteBatch::new(routes.hash.clone(), "video");
+        let old = first
+            .add(false, base.join("old.ts").unwrap(), false)
+            .unwrap();
+        let retained = first
+            .add(false, base.join("retained.ts").unwrap(), false)
+            .unwrap();
+        let start = hls::MediaWindow {
+            sequence: 0,
+            first_listed_sequence: 0,
+            last_sequence: 2,
+            availability: Duration::from_secs(60),
+        };
+        routes.publish(first, Some(start)).unwrap();
+
+        let mut other = RouteBatch::new(routes.hash.clone(), "audio");
+        let other_ids: Vec<_> = (0..MAX_OPAQUE_ROUTES - 2)
+            .map(|i| {
+                other
+                    .add(false, base.join(&format!("audio-{i}.ts")).unwrap(), false)
+                    .unwrap()
+            })
+            .collect();
+        routes.publish(other, None).unwrap();
+
+        let hash = routes.hash.clone();
+        let make_batch = |include_new: bool| {
+            let mut batch = RouteBatch::new(hash.clone(), "video");
+            assert_eq!(
+                batch
+                    .add(false, base.join("retained.ts").unwrap(), false)
+                    .unwrap(),
+                retained
+            );
+            let new_route = include_new.then(|| {
+                batch
+                    .add(false, base.join("next.ts").unwrap(), false)
+                    .unwrap()
+            });
+            (batch, new_route)
+        };
+        let (delta, _) = make_batch(false);
+        let (rollover, next) = make_batch(true);
+        let next = next.unwrap();
+        routes
+            .publish(
+                delta,
+                Some(hls::MediaWindow {
+                    first_listed_sequence: 1,
+                    availability: Duration::from_secs(120),
+                    ..start
+                }),
+            )
+            .unwrap();
+        let advanced = hls::MediaWindow {
+            sequence: 1,
+            first_listed_sequence: 1,
+            last_sequence: 3,
+            ..start
+        };
+        assert!(routes.publish(rollover, Some(advanced)).is_err());
+        assert!(routes.target(&old).is_some());
+        assert!(routes.target(&next).is_none());
+
+        tokio::time::advance(Duration::from_secs(60)).await;
+        let (rollover, _) = make_batch(true);
+        assert!(routes.publish(rollover, Some(advanced)).is_err());
+        assert!(routes.target(&old).is_some());
+        assert!(routes.target(&next).is_none());
+
+        tokio::time::advance(Duration::from_secs(60)).await;
+        let (rollover, _) = make_batch(true);
+        routes.publish(rollover, Some(advanced)).unwrap();
+        assert!(routes.target(&old).is_none());
+        assert!(routes.target(&retained).is_some());
+        assert!(routes.target(&next).is_some());
+        assert!(other_ids.iter().all(|id| routes.target(id).is_some()));
+    }
+
     #[test]
     fn delta_hls_retires_only_routes_older_than_the_whole_window() {
         let prior = RollingRoute {
             owner: Arc::from("video"),
             window: hls::MediaWindow {
                 sequence: 10,
+                first_listed_sequence: 10,
                 last_sequence: 20,
                 availability: Duration::from_secs(60),
-                full: true,
             },
             expires: None,
         };
         let delta = |sequence| hls::MediaWindow {
             sequence,
+            first_listed_sequence: sequence + 5,
             last_sequence: sequence + 10,
-            full: false,
             ..prior.window
         };
         assert!(!prior.precedes(delta(11)));
         assert!(!prior.precedes(delta(20)));
         assert!(prior.precedes(delta(21)));
+        assert!(!delta(5).carries(prior.window));
+        assert!(delta(6).carries(prior.window));
+        assert!(delta(20).carries(prior.window));
+        assert!(!delta(21).carries(prior.window));
     }
 
     #[test]

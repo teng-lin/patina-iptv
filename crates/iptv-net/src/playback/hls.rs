@@ -106,17 +106,29 @@ pub(super) fn rewrite_with(
 #[derive(Clone, Copy)]
 pub(super) struct MediaWindow {
     pub sequence: u64,
+    pub first_listed_sequence: u64,
     pub last_sequence: u64,
     pub availability: Duration,
-    pub full: bool,
+}
+
+impl MediaWindow {
+    pub fn skips_segments(self) -> bool {
+        self.first_listed_sequence > self.sequence
+    }
+
+    pub fn carries(self, prior: Self) -> bool {
+        self.skips_segments()
+            && prior.last_sequence >= self.sequence
+            && prior.sequence < self.first_listed_sequence
+    }
 }
 
 /// Delta updates omit segments that may still be in the sliding window.
 pub(super) fn media_window(body: &[u8]) -> Option<MediaWindow> {
     let text = std::str::from_utf8(body).ok()?;
-    let mut sequence = None;
+    let mut sequence = 0;
     let mut target = None;
-    let mut skipped = None;
+    let mut skipped = 0;
     let mut segments = 0u64;
     let mut duration = 0.0;
     for line in text
@@ -127,7 +139,7 @@ pub(super) fn media_window(body: &[u8]) -> Option<MediaWindow> {
         if line == "#EXT-X-ENDLIST" || line.starts_with("#EXT-X-PLAYLIST-TYPE:") {
             return None;
         } else if let Some(value) = line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:") {
-            sequence = Some(decimal(value)?);
+            sequence = decimal(value)?;
         } else if let Some(value) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
             target = Some(decimal(value)? as f64);
         } else if let Some(value) = line.strip_prefix("#EXTINF:") {
@@ -140,23 +152,20 @@ pub(super) fn media_window(body: &[u8]) -> Option<MediaWindow> {
         } else if let Some(value) = line.strip_prefix("#EXT-X-SKIP:") {
             let attrs = attributes(value).ok()?;
             let count = attrs.iter().find(|attr| attr.name == "SKIPPED-SEGMENTS")?;
-            skipped = Some(decimal(count.value)?);
+            skipped = decimal(count.value)?;
         }
     }
     // The extra second bounds rounded segment durations. Two target
     // durations account for a retiring segment and any trailing parts.
     let target = target? + 1.0;
-    let skipped_segments = skipped.unwrap_or_default();
-    let seconds = duration + (skipped_segments as f64 + 2.0) * target;
-    let sequence = sequence?;
+    let seconds = duration + (skipped as f64 + 2.0) * target;
+    let first_listed_sequence = sequence.checked_add(skipped)?;
     Some(MediaWindow {
         sequence,
+        first_listed_sequence,
         // Include the next sequence for parts and preload hints.
-        last_sequence: sequence
-            .checked_add(skipped_segments)?
-            .checked_add(segments)?,
+        last_sequence: first_listed_sequence.checked_add(segments)?,
         availability: Duration::try_from_secs_f64(seconds.max(60.0)).ok()?,
-        full: skipped.is_none(),
     })
 }
 
@@ -539,17 +548,29 @@ mod tests {
             "#EXTINF:59.5,\na.ts\n#EXTINF:56,\nb.ts\n",
         );
         let full = media_window(playlist.as_bytes()).unwrap();
-        assert!(full.full);
+        assert!(!full.skips_segments());
         assert_eq!(full.sequence, 50);
+        assert_eq!(full.first_listed_sequence, 50);
         assert_eq!(full.last_sequence, 52);
         assert!(full.availability >= Duration::from_secs_f64(115.5 + 60.0));
         let delta = format!("{playlist}#EXT-X-SKIP:SKIPPED-SEGMENTS=2\n");
         let delta = media_window(delta.as_bytes()).unwrap();
-        assert!(!delta.full);
+        assert!(delta.skips_segments());
+        assert_eq!(delta.first_listed_sequence, 52);
         assert_eq!(delta.last_sequence, 54);
         assert!(delta.availability >= full.availability);
         let finished = format!("{playlist}#EXT-X-ENDLIST\n");
         assert!(media_window(finished.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn media_window_defaults_missing_sequence_to_zero() {
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nfirst.ts\n";
+        let window = media_window(playlist.as_bytes()).unwrap();
+        assert_eq!(window.sequence, 0);
+        assert_eq!(window.last_sequence, 1);
+        let invalid = format!("{playlist}#EXT-X-MEDIA-SEQUENCE:bad\n");
+        assert!(media_window(invalid.as_bytes()).is_none());
     }
 
     #[test]

@@ -158,17 +158,21 @@ async fn prepare_external_player(source: PlaySource) -> Option<ExternalPlayback>
 mod linux {
     use super::{ExternalHandoff, ExternalPlayback, ExternalSession, PlaySource};
     use std::{
-        io::Write,
-        process::{Command, Stdio},
-        sync::{
-            Arc,
-            atomic::{AtomicBool, Ordering},
-        },
+        io::{self, Write},
+        process::{Child, Command, ExitStatus, Stdio},
+        sync::mpsc,
+        time::Duration,
     };
 
     enum Player {
         Vlc,
         Mpv,
+    }
+
+    struct LaunchedPlayer {
+        handoff: ExternalHandoff,
+        /// Send to let the player stay open. Dropping this stops an unclaimed player.
+        keep: mpsc::Sender<()>,
     }
 
     pub(crate) async fn connect_external_player(
@@ -181,38 +185,39 @@ mod linux {
     async fn connect_with(
         source: PlaySource,
         before_launch: impl Fn() -> bool,
-        mut launch: impl FnMut(ExternalPlayback, Player) -> Option<(ExternalHandoff, Arc<AtomicBool>)>,
+        mut launch: impl FnMut(ExternalPlayback, Player) -> Option<LaunchedPlayer>,
     ) -> Option<ExternalHandoff> {
         for player in [Player::Vlc, Player::Mpv] {
             let playback = super::prepare_external_player(source.clone()).await?;
             if !before_launch() {
                 return None;
             }
-            let Some((mut handoff, exited)) = launch(playback, player) else {
+            let Some(LaunchedPlayer { mut handoff, keep }) = launch(playback, player) else {
                 continue;
             };
-            if handoff.connected().await && handoff.is_open() {
-                return Some(handoff);
-            }
-            handoff.session.close_and_wait().await;
-            // Fall back only when the process exited without reaching this
-            // relay. A player that already selected the stream owns the choice.
-            if !exited.load(Ordering::Acquire)
+            let connected = handoff.connected().await;
+            // The first request claims this launch, even if admission has
+            // already expired by the time the app handles it.
+            if connected
                 || handoff
                     .admission
                     .as_ref()
                     .is_some_and(|admission| admission.received_request())
             {
+                if keep.send(()).is_ok() && connected && handoff.is_open() {
+                    return Some(handoff);
+                }
+                handoff.session.close_and_wait().await;
                 return None;
             }
+            // The watcher retires the relay after reaping the unclaimed child.
+            drop(keep);
+            handoff.session.wait_retired().await;
         }
         None
     }
 
-    fn launch(
-        playback: ExternalPlayback,
-        player: Player,
-    ) -> Option<(ExternalHandoff, Arc<AtomicBool>)> {
+    fn launch(playback: ExternalPlayback, player: Player) -> Option<LaunchedPlayer> {
         let ExternalPlayback(relay, admission) = playback;
         // The protected playlist keeps the stream capability out of argv.
         let mut playlist = tempfile::Builder::new().suffix(".m3u").tempfile().ok()?;
@@ -233,48 +238,90 @@ mod linux {
                 command
             }
         };
-        let mut child = command
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .ok()?;
+            .stderr(Stdio::null());
         let session = ExternalSession::new(relay);
         let watched_session = session.clone();
-        let exited = Arc::new(AtomicBool::new(false));
-        let watched_exit = exited.clone();
-        super::super::background("iptv-external-player", move || {
-            let _ = child.wait();
-            watched_exit.store(true, Ordering::Release);
+        // Starting the child inside its watcher gives it an owner even
+        // when creating the thread fails.
+        let keep = start_watcher(command, move || {
             drop(playlist);
             watched_session.close_blocking();
-        })
-        .ok()?;
-        Some((
-            ExternalHandoff {
+        })?;
+        Some(LaunchedPlayer {
+            handoff: ExternalHandoff {
                 admission: Some(admission),
                 session,
             },
-            exited,
-        ))
+            keep,
+        })
+    }
+
+    fn start_watcher(
+        mut command: Command,
+        retired: impl FnOnce() + Send + 'static,
+    ) -> Option<mpsc::Sender<()>> {
+        let (keep, decision) = mpsc::channel();
+        super::super::background("iptv-external-player", move || {
+            if let Ok(child) = command.spawn()
+                && let Err(error) = watch_child(child, decision)
+            {
+                log::warn!("iptv external player: waiting for child failed: {error}");
+            }
+            retired();
+        })
+        .ok()?;
+        Some(keep)
+    }
+
+    fn watch_child(mut child: Child, decision: mpsc::Receiver<()>) -> io::Result<ExitStatus> {
+        // Poll only while waiting for the relay's first request. After one
+        // arrives, the external player owns its window and can exit normally.
+        loop {
+            if let Some(status) = child.try_wait()? {
+                return Ok(status);
+            }
+            match decision.recv_timeout(Duration::from_millis(100)) {
+                Ok(()) => return child.wait(),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    let _ = child.kill();
+                    return child.wait();
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        }
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::net::TcpStream;
+        use std::{net::TcpStream, os::unix::process::ExitStatusExt};
+
+        #[derive(Clone, Copy)]
+        enum VlcStartup {
+            Exited,
+            TimedOut,
+            Connected,
+        }
 
         #[test]
         fn external_player_retries_an_early_exit_with_a_fresh_capability() {
-            assert_eq!(attempts(false), 2);
+            assert_eq!(attempts(VlcStartup::Exited), 2);
+        }
+
+        #[test]
+        fn external_player_reaps_an_unclaimed_child_before_falling_back() {
+            assert_eq!(attempts(VlcStartup::TimedOut), 2);
         }
 
         #[test]
         fn external_player_keeps_vlc_when_it_connects() {
-            assert_eq!(attempts(true), 1);
+            assert_eq!(attempts(VlcStartup::Connected), 1);
         }
 
-        fn attempts(vlc_connects: bool) -> usize {
+        fn attempts(vlc: VlcStartup) -> usize {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
                 .unwrap();
@@ -286,6 +333,7 @@ mod linux {
                 };
                 let mut capabilities = Vec::new();
                 let mut receiver = None;
+                let mut reaped_vlc: Option<mpsc::Receiver<io::Result<ExitStatus>>> = None;
                 let handoff = connect_with(
                     source,
                     || true,
@@ -294,28 +342,48 @@ mod linux {
                         let capability = relay.url().to_owned();
                         let session = ExternalSession::new(relay);
                         capabilities.push(capability.clone());
-                        let exited = Arc::new(AtomicBool::new(false));
-                        if matches!(player, Player::Vlc) && !vlc_connects {
-                            exited.store(true, Ordering::Release);
-                            session.close();
-                        } else {
-                            let (address, path) = capability
-                                .strip_prefix("http://")
-                                .unwrap()
-                                .split_once('/')
-                                .unwrap();
-                            let mut stream = TcpStream::connect(address).unwrap();
-                            write!(stream, "GET /{path} HTTP/1.1\r\nHost: {address}\r\n\r\n")
-                                .unwrap();
-                            receiver = Some(stream);
-                        }
-                        Some((
-                            ExternalHandoff {
-                                admission: Some(admission),
-                                session,
-                            },
-                            exited,
-                        ))
+                        let (keep, decision) = mpsc::channel();
+                        let admission = match (player, vlc) {
+                            (Player::Vlc, VlcStartup::Exited) => {
+                                session.close();
+                                Some(admission)
+                            }
+                            (Player::Vlc, VlcStartup::TimedOut) => {
+                                let child = Command::new("sleep").arg("60").spawn().unwrap();
+                                let watched = session.clone();
+                                let (done, status) = mpsc::channel();
+                                std::thread::spawn(move || {
+                                    done.send(watch_child(child, decision)).unwrap();
+                                    watched.close_blocking();
+                                });
+                                reaped_vlc = Some(status);
+                                // Model the terminal admission result directly instead
+                                // of waiting for the relay's real startup deadline.
+                                None
+                            }
+                            _ => {
+                                if let Some(status) = reaped_vlc.take() {
+                                    assert_eq!(
+                                        status.try_recv().unwrap().unwrap().signal(),
+                                        Some(libc::SIGKILL)
+                                    );
+                                }
+                                let (address, path) = capability
+                                    .strip_prefix("http://")
+                                    .unwrap()
+                                    .split_once('/')
+                                    .unwrap();
+                                let mut stream = TcpStream::connect(address).unwrap();
+                                write!(stream, "GET /{path} HTTP/1.1\r\nHost: {address}\r\n\r\n")
+                                    .unwrap();
+                                receiver = Some((stream, decision));
+                                Some(admission)
+                            }
+                        };
+                        Some(LaunchedPlayer {
+                            handoff: ExternalHandoff { admission, session },
+                            keep,
+                        })
                     },
                 )
                 .await

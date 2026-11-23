@@ -190,8 +190,8 @@ pub(crate) fn external_playback_check(
             && stored.incarnation == authority.incarnation()
             && &stored.source.config == authority.config()
             && &row.channel == authority.channel()
-            && access.inspection_current(&grants);
-        Ok(allowed.then(|| ExternalPlaybackAuthorization::new(access, grants)))
+            && access.playback_current(&target, &grants);
+        Ok(allowed.then(|| ExternalPlaybackAuthorization::new(access, target, grants)))
     })
 }
 

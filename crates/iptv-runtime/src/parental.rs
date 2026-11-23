@@ -48,9 +48,63 @@ pub(crate) struct State {
     complete: bool,
     epoch: Arc<AtomicU64>,
     policy_revision: Arc<AtomicU64>,
+    transferred_groups: Option<TransferredGroups>,
     blocked: BTreeSet<Target>,
     ancestry: std::collections::BTreeMap<Target, Vec<Target>>,
     names: std::collections::BTreeMap<Target, String>,
+}
+
+/// A group unlock authorizes the handoff subject without unlocking its siblings.
+#[derive(Clone)]
+struct TransferredGroups {
+    channel: Target,
+    groups: Vec<Target>,
+}
+
+impl TransferredGroups {
+    fn allows(transfer: Option<&Self>, channel: &Target, group: &Target) -> bool {
+        transfer
+            .is_some_and(|transfer| transfer.channel == *channel && transfer.groups.contains(group))
+    }
+}
+
+impl State {
+    fn lock(&mut self) {
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        self.access.lock();
+        self.transferred_groups = None;
+    }
+
+    fn clear_transferred_groups(&mut self, channel: &Target) -> bool {
+        if self
+            .transferred_groups
+            .as_ref()
+            .is_some_and(|transfer| transfer.channel == *channel)
+        {
+            self.transferred_groups = None;
+            return true;
+        }
+        false
+    }
+
+    fn granted_for(&self, channel: &Target, grant: &Target, now: u64) -> bool {
+        self.access.granted(grant, now)
+            || TransferredGroups::allows(self.transferred_groups.as_ref(), channel, grant)
+    }
+
+    fn transfer_groups(&self, channel: &Target, now: u64) -> Option<TransferredGroups> {
+        let groups: Vec<_> = self
+            .ancestry
+            .get(channel)?
+            .iter()
+            .filter(|group| self.blocked.contains(*group) && self.granted_for(channel, group, now))
+            .cloned()
+            .collect();
+        (!groups.is_empty()).then(|| TransferredGroups {
+            channel: channel.clone(),
+            groups,
+        })
+    }
 }
 
 fn apply_policy(state: &mut State, new: Policy) {
@@ -58,9 +112,8 @@ fn apply_policy(state: &mut State, new: Policy) {
         return;
     }
     let settings = state.access.granted(&Target::settings(), now_ms());
-    state.epoch.fetch_add(1, Ordering::SeqCst);
     state.policy_revision.fetch_add(1, Ordering::SeqCst);
-    state.access.lock();
+    state.lock();
     state.access.policy = new;
     if settings {
         state.access.unlock(Target::settings(), now_ms());
@@ -343,7 +396,7 @@ impl Runtime {
             || state.ancestry.get(target).is_some_and(|parents| {
                 parents
                     .iter()
-                    .any(|p| state.blocked.contains(p) && !state.access.granted(p, now_ms()))
+                    .any(|p| state.blocked.contains(p) && !state.granted_for(target, p, now_ms()))
             });
         !blocked || state.access.granted(target, now_ms())
     }
@@ -483,6 +536,7 @@ impl Runtime {
     pub fn parental_content_left(&self, target: &Target) {
         let mut state = self.parental.borrow_mut();
         state.access.content_left(target);
+        state.clear_transferred_groups(target);
         state.epoch.fetch_add(1, Ordering::SeqCst);
     }
     pub fn parental_content_closed(&self) {
@@ -491,19 +545,20 @@ impl Runtime {
     pub fn parental_backgrounded(&self) {
         self.clear_per_use_grants(None);
     }
-    /// Transfers an existing per-use grant to the same live subject during
-    /// an external handoff, revoking all other per-use grants.
+    /// Keeps per-use authorization for the same live subject during an
+    /// external handoff, revoking all other per-use grants.
     pub fn parental_content_transferred(&self, target: &Target) {
         self.clear_per_use_grants(Some(target));
     }
     /// Revokes the transferred per-use grant when external playback ends.
     pub fn parental_end_transfer(&self, target: &Target) {
         let mut state = self.parental.borrow_mut();
-        if state.access.policy.window == UnlockWindow::EveryTime
-            && state.access.granted(target, now_ms())
-        {
-            state.access.content_left(target);
-            state.epoch.fetch_add(1, Ordering::SeqCst);
+        if state.access.policy.window == UnlockWindow::EveryTime {
+            let had_groups = state.clear_transferred_groups(target);
+            if had_groups || state.access.granted(target, now_ms()) {
+                state.access.content_left(target);
+                state.epoch.fetch_add(1, Ordering::SeqCst);
+            }
         }
     }
     fn clear_per_use_grants(&self, preserve: Option<&Target>) {
@@ -512,10 +567,13 @@ impl Runtime {
             return;
         }
         let now = now_ms();
-        let keep = preserve
-            .filter(|target| target.kind == ContentKind::Live && state.access.granted(target, now));
-        state.epoch.fetch_add(1, Ordering::SeqCst);
-        state.access.lock();
+        let preserve = preserve.filter(|target| target.kind == ContentKind::Live);
+        let keep = preserve.filter(|target| state.access.granted(target, now));
+        let groups = preserve
+            .filter(|_| keep.is_none())
+            .and_then(|target| state.transfer_groups(target, now));
+        state.lock();
+        state.transferred_groups = groups;
         if let Some(target) = keep {
             state.access.unlock(target.clone(), now);
         }
@@ -525,6 +583,7 @@ impl Runtime {
         apply_policy(&mut state, policy(self));
         Snapshot {
             access: state.access.clone(),
+            transferred_groups: state.transferred_groups.clone(),
             epoch: state.epoch.clone(),
             at: state.epoch.load(Ordering::SeqCst),
             policy_revision: state.policy_revision.clone(),
@@ -543,9 +602,7 @@ impl Runtime {
                 .is_some_and(|a| a.iter().any(|p| state.blocked.contains(p)))
     }
     pub fn parental_lock(&self) {
-        let mut state = self.parental.borrow_mut();
-        state.epoch.fetch_add(1, Ordering::SeqCst);
-        state.access.lock();
+        self.parental.borrow_mut().lock();
     }
     pub fn parental_unblocked_channel_played(&self) {
         if matches!(
@@ -593,6 +650,7 @@ impl Runtime {
 #[derive(Clone)]
 pub(crate) struct Snapshot {
     pub access: Access,
+    transferred_groups: Option<TransferredGroups>,
     epoch: Arc<AtomicU64>,
     at: u64,
     policy_revision: Arc<AtomicU64>,
@@ -645,12 +703,22 @@ impl Snapshot {
         }
     }
     pub(crate) fn inspection_current(&self, grants: &[Target]) -> bool {
+        self.grants_current(grants, |grant, now| self.access.granted(grant, now))
+    }
+
+    pub(crate) fn playback_current(&self, subject: &Target, grants: &[Target]) -> bool {
+        self.grants_current(grants, |grant, now| {
+            self.access.granted(grant, now)
+                || TransferredGroups::allows(self.transferred_groups.as_ref(), subject, grant)
+        })
+    }
+
+    fn grants_current(&self, grants: &[Target], allows: impl Fn(&Target, u64) -> bool) -> bool {
+        let now = now_ms();
         self.policy_revision.load(Ordering::SeqCst) == self.policy_at
             && (grants.is_empty()
                 || (self.epoch.load(Ordering::SeqCst) == self.at
-                    && grants
-                        .iter()
-                        .all(|target| self.access.granted(target, now_ms()))))
+                    && grants.iter().all(|grant| allows(grant, now))))
     }
 }
 
@@ -738,11 +806,11 @@ pub(crate) fn native_grants(
             blocked_parents.push(parent);
         }
     }
-    if !blocked && snapshot.inspection_current(&blocked_parents) {
+    if !blocked && snapshot.playback_current(target, &blocked_parents) {
         return Ok(Some(blocked_parents));
     }
     Ok(snapshot
-        .inspection_current(std::slice::from_ref(target))
+        .playback_current(target, std::slice::from_ref(target))
         .then(|| vec![target.clone()]))
 }
 
@@ -783,6 +851,7 @@ mod tests {
     fn snapshot() -> Snapshot {
         Snapshot {
             access: Access::default(),
+            transferred_groups: None,
             epoch: Arc::new(AtomicU64::new(0)),
             at: 0,
             policy_revision: Arc::new(AtomicU64::new(0)),
@@ -866,6 +935,7 @@ mod tests {
         .unwrap();
         let mut snapshot = Snapshot {
             access: Access::default(),
+            transferred_groups: None,
             epoch: Arc::new(AtomicU64::new(0)),
             at: 0,
             policy_revision: Arc::new(AtomicU64::new(0)),
@@ -998,6 +1068,133 @@ mod source_tests {
             stats: Default::default(),
         }
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn external_transfer_scopes_all_required_group_grants_to_the_chosen_channel() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x77; 32])),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        let services = owner.services();
+        let (authority, sibling, groups) = services.call(|store| {
+            let id = store.add_source(&source("generated-group-handoff"))?;
+            let mut parsed = iptv_providers::m3u::parse_m3u(concat!(
+                "#EXTM3U\n",
+                "#EXTINF:-1 group-title=\"Alpha\",Selected channel\nhttps://example.test/selected.ts\n",
+                "#EXTINF:-1 group-title=\"Alpha\",Sibling channel\nhttps://example.test/sibling.ts\n",
+                "#EXTINF:-1 group-title=\"Beta\",Separate channel\nhttps://example.test/separate.ts\n",
+            ));
+            let beta = parsed.channels.items[2].groups[0].clone();
+            parsed.channels.items[0].groups.push(beta);
+            store.replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])?;
+            let selected = &parsed.channels.items[0];
+            let groups: Vec<_> = selected.groups.iter().map(|group| Target {
+                source: id.0,
+                kind: ContentKind::Group,
+                id: group.as_str().into(),
+            }).collect();
+            for group in &groups {
+                store.set_parental_blocked(group, true)?;
+            }
+            store.set_guide_group_preference(
+                id,
+                &groups[0].id,
+                iptv_core::organization::GroupPreference::ExternalPlayer(true),
+            )?;
+            let stored = store.source(id)?.unwrap();
+            let authority = iptv_guide::playback::SourceAuthority::new(id.0, stored.incarnation, stored.source.config);
+            let sibling = Target::live(id.0, parsed.channels.items[1].id.as_str());
+            Ok((authority.resolve(selected), sibling, groups))
+        }).await.unwrap();
+        let target = Target::live(authority.source(), authority.channel().id.as_str());
+        owner.parental_refresh().await.unwrap();
+        owner
+            .set_setting("parental.live_enabled", iptv_settings::Value::Bool(true))
+            .unwrap();
+        {
+            let mut state = owner.parental.borrow_mut();
+            assert_eq!(state.access.policy.window, UnlockWindow::EveryTime);
+            state.access.unlock(groups[0].clone(), now_ms());
+        }
+        assert!(
+            owner
+                .authorize_external_playback(authority.clone(), groups[0].id.clone())
+                .await
+                .unwrap()
+                .is_none(),
+            "both blocked parents must be granted"
+        );
+        {
+            let mut state = owner.parental.borrow_mut();
+            state.access.unlock(groups[1].clone(), now_ms());
+            state.access.unlock(Target::settings(), now_ms());
+        }
+        assert!(owner.parental_allowed(&target));
+        assert!(owner.parental_allowed(&sibling));
+        // Android's chooser takes the app to the background before retiring
+        // native playback. The same grants must survive both transitions.
+        owner.set_foreground_for_external(false, Some(&target));
+        owner.parental_content_transferred(&target);
+        assert!(owner.parental_allowed(&target));
+        assert!(!owner.parental_allowed(&sibling));
+        let snapshot = owner.parental_snapshot();
+        {
+            let state = owner.parental.borrow();
+            assert!(!state.access.granted(&target, now_ms()));
+            assert!(!state.access.granted(&Target::settings(), now_ms()));
+            assert!(
+                groups
+                    .iter()
+                    .all(|group| !state.access.granted(group, now_ms()))
+            );
+        }
+        assert!(!snapshot.inspection_current(&groups));
+        let admitted = owner
+            .authorize_external_playback(authority.clone(), groups[0].id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(admitted.is_current());
+        assert!(
+            owner
+                .external_playback_allowed(authority.clone(), groups[0].id.clone())
+                .await
+                .unwrap()
+        );
+
+        // A new direct block still requires a direct channel unlock, even
+        // before this change has been reflected in the UI cache.
+        let block = target.clone();
+        services
+            .call(move |store| store.set_parental_blocked(&block, true))
+            .await
+            .unwrap();
+        assert!(
+            owner
+                .authorize_external_playback(authority.clone(), groups[0].id.clone())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let block = target.clone();
+        services
+            .call(move |store| store.set_parental_blocked(&block, false))
+            .await
+            .unwrap();
+        owner.parental_end_transfer(&target);
+        assert!(!admitted.is_current());
+        assert!(!owner.parental_allowed(&target));
+        assert!(
+            !owner
+                .external_playback_allowed(authority, groups[0].id.clone())
+                .await
+                .unwrap()
+        );
+        assert!(owner.drain_services());
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn external_admission_rejects_committed_blocks_before_cache_refresh() {
         let directory = tempfile::tempdir().unwrap();
