@@ -12,9 +12,11 @@ import subprocess
 REPOSITORY = 'teng-lin/patina-iptv'
 MASTER = 'refs/heads/master'
 RETIRED = ('v0-rust-ios-compile-v1-', 'v0-rust-stress-v2-', 'v0-rust-fuzz-v2-', 'v0-rust-android-check-v2-')
-RUST_FAMILY = re.compile(
-    r'^v0-rust-(host-v2|coverage-v2|android-smoke-x86_64-v5|windows-native-v1|windows-installer-v1|'
-    r'desktop-package-v2-linux|desktop-package-macos-v3)-.*-(Linux-x64|Darwin-arm64|Windows_NT-x64)(?:-|$)'
+RUST_HOST = r'(Linux-x64|Darwin-arm64|Windows_NT-x64)(?:-|$)'
+RUST_FAMILY = re.compile(r'^v0-rust-(host-v2|coverage-v2)-.*-' + RUST_HOST)
+RUST_COMPILER_FAMILY = re.compile(
+    r'^v0-rust-(android-smoke-x86_64-v5|windows-native-v1|windows-installer-v1|'
+    r'desktop-package-v2-linux|desktop-package-macos-v3)-([a-f0-9]{16}|[a-f0-9]{64})-.*-' + RUST_HOST
 )
 APT_FAMILY = re.compile(r'^apt-v4-(ubuntu[0-9.]+-[a-z0-9]+)-[a-f0-9]{16}-(.+)$')
 
@@ -24,7 +26,7 @@ def timestamp(value):
 
 
 def family(key):
-    if match := RUST_FAMILY.match(key):
+    if match := RUST_COMPILER_FAMILY.match(key) or RUST_FAMILY.match(key):
         return ('rust', *match.groups())
     if match := APT_FAMILY.match(key):
         return ('apt', *match.groups())
