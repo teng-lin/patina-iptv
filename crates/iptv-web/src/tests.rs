@@ -4,6 +4,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Wake, Waker};
 
 use serde_json::Value;
 
@@ -169,29 +172,30 @@ fn deliver_with(fake: &Fake, respond: &Responder) {
             break;
         }
         for id in due {
-            crate::exec::deliver_wake(id);
-            crate::exec::poll();
+            crate::on_wake(id);
         }
         for (id, key) in gets {
             let value = fake.kv.borrow().get(&key).cloned();
-            crate::exec::deliver_stored(id, value);
-            crate::exec::poll();
+            if let Some(bytes) = value {
+                crate::on_stored(id, write_input(&bytes));
+            } else {
+                crate::on_missing(id);
+            }
         }
         for (id, req, stream) in requests {
             let url = req["url"].as_str().unwrap().to_owned();
             fake.urls.borrow_mut().push(url.clone());
             match respond(&url) {
                 Ok((status, body)) => {
-                    crate::exec::deliver_status(id, status, Some(body.len() as u64));
+                    crate::on_status(id, u32::from(status), body.len() as f64);
                     if stream {
                         STREAMS.with(|s| s.borrow_mut().push((id, body.into_bytes(), false)));
                     } else {
-                        crate::exec::deliver_body(id, body.into_bytes());
+                        crate::on_body(id, write_input(body.as_bytes()));
                     }
                 }
-                Err(kind) => crate::exec::deliver_error(id, kind, "unreachable".into()),
+                Err(kind) => crate::on_error(id, kind, write_input(b"unreachable")),
             }
-            crate::exec::poll();
         }
         for id in next {
             let chunk = STREAMS.with(|s| {
@@ -204,8 +208,11 @@ fn deliver_with(fake: &Fake, respond: &Responder) {
                     Some(std::mem::take(&mut entry.1))
                 }
             });
-            crate::exec::deliver_chunk(id, chunk);
-            crate::exec::poll();
+            if let Some(bytes) = chunk {
+                crate::on_chunk(id, write_input(&bytes));
+            } else {
+                crate::on_end(id);
+            }
         }
     }
 }
@@ -214,9 +221,18 @@ thread_local! {
     static STREAMS: RefCell<Vec<(u32, Vec<u8>, bool)>> = const { RefCell::new(Vec::new()) };
 }
 
+fn write_input(bytes: &[u8]) -> u32 {
+    let len = u32::try_from(bytes.len()).expect("synthetic input fits the host ABI");
+    let input = crate::input(len);
+    // SAFETY: input(len) returns a writable buffer of exactly len bytes
+    // on this thread. The source is a separate slice and no export runs
+    // before the copy is complete.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), input, bytes.len()) };
+    len
+}
+
 fn send(cmd: Value) {
-    crate::app::command(&cmd.to_string());
-    crate::exec::poll();
+    crate::command(write_input(cmd.to_string().as_bytes()));
 }
 
 fn last_view(fake: &Fake) -> Value {
@@ -708,8 +724,7 @@ fn a_redirect_may_not_downgrade_or_leave_public_addresses() {
         serde_json::json!({ "cmd": "source", "source": { "kind": "m3u", "url": "https://lists.example.com/list.m3u" } }),
     );
     let id = fake.requests.borrow_mut().remove(0).0;
-    crate::exec::deliver_redirect(id, "http://lists.example.com/list.m3u");
-    crate::exec::poll();
+    crate::on_redirect(id, write_input(b"http://lists.example.com/list.m3u"));
     assert!(fake.closed.borrow().contains(&id));
     let view = last_view(&fake);
     assert_eq!(view["status"]["phase"], "failed", "{view}");
@@ -805,17 +820,10 @@ fn a_spawn_before_any_host_does_not_silence_later_wakes() {
 #[test]
 fn a_request_wakes_its_task_under_another_executor() {
     use iptv_import::Fetch;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::task::{Context, Wake, Waker};
-    struct Count(AtomicUsize);
-    impl Wake for Count {
-        fn wake(self: std::sync::Arc<Self>) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
+    use std::task::Context;
     let fake = Rc::new(Fake::default());
     install(fake.clone());
-    let count = std::sync::Arc::new(Count(AtomicUsize::new(0)));
+    let count = Arc::new(WakeCount::default());
     let waker = Waker::from(count.clone());
     let mut cx = Context::from_waker(&waker);
     let fetch = crate::exec::HostFetch::new();
@@ -831,6 +839,158 @@ fn a_request_wakes_its_task_under_another_executor() {
         "the delivery woke the task"
     );
     assert!(request.as_mut().poll(&mut cx).is_ready());
+}
+
+#[derive(Default)]
+struct WakeCount(AtomicUsize);
+
+impl Wake for WakeCount {
+    fn wake(self: Arc<Self>) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_buffered_request_waits_for_the_body_and_preserves_its_bytes() {
+    use iptv_import::Fetch;
+    use iptv_providers::{HttpRequest, Method};
+    use std::task::{Context, Poll, Waker};
+    use std::time::Duration;
+
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::adapters::HostFetch::default().with_idle_timeout(Duration::from_secs(7));
+    let mut request = HttpRequest::get("https://example.test/catalog");
+    request.method = Method::Post;
+    request.body = Some(vec![0, 128, 255]);
+    request.timeout = Some(Duration::from_millis(250));
+
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut pending = std::pin::pin!(fetch.fetch(request));
+    assert!(pending.as_mut().poll(&mut cx).is_pending());
+    let (id, json, stream) = fake.requests.borrow_mut().pop().expect("host request");
+    assert!(!stream);
+    assert_eq!(json["method"], "POST");
+    assert_eq!(json["body"], serde_json::json!([0, 128, 255]));
+    assert_eq!(json["timeoutMs"], 250);
+    assert_eq!(json["idleMs"], 7000);
+
+    let body = [255, 0, 128];
+    crate::on_status(id, 200, body.len() as f64);
+    assert!(pending.as_mut().poll(&mut cx).is_pending());
+    crate::on_body(id, write_input(&body));
+    let Poll::Ready(Ok(response)) = pending.as_mut().poll(&mut cx) else {
+        panic!("the body should complete the buffered request");
+    };
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, body);
+    assert!(
+        fake.closed.borrow().is_empty(),
+        "the host already ended the request"
+    );
+}
+
+#[test]
+fn a_stream_preserves_a_host_body_error_after_status() {
+    use iptv_import::{BodyStream, Fetch, FetchErrorKind};
+    use iptv_providers::HttpRequest;
+    use std::task::{Context, Poll};
+
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::adapters::HostFetch::new();
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut request =
+        std::pin::pin!(fetch.fetch_stream(HttpRequest::get("https://example.test/guide.xml")));
+    assert!(request.as_mut().poll(&mut cx).is_pending());
+    let (id, _, stream) = fake.requests.borrow_mut().pop().expect("stream request");
+    assert!(stream);
+    crate::on_status(id, 200, -1.0);
+    let Poll::Ready(Ok(mut response)) = request.as_mut().poll(&mut cx) else {
+        panic!("the host has delivered the stream status");
+    };
+
+    {
+        let mut chunk = std::pin::pin!(response.body.next_chunk());
+        assert!(chunk.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(*fake.next.borrow(), [id]);
+        crate::on_error(id, 3, write_input(b"synthetic interrupted read"));
+        let Poll::Ready(Err(error)) = chunk.as_mut().poll(&mut cx) else {
+            panic!("the host error should complete the streamed read");
+        };
+        assert_eq!(error.kind, FetchErrorKind::Body);
+        assert_eq!(error.detail, "synthetic interrupted read");
+    }
+    drop(response);
+    assert!(
+        fake.closed.borrow().is_empty(),
+        "the host already ended the stream"
+    );
+}
+
+#[test]
+fn a_stream_keeps_one_chunk_read_in_flight_and_aborts_once_when_dropped() {
+    use iptv_import::{BodyStream, Fetch};
+    use iptv_providers::HttpRequest;
+    use std::task::{Context, Poll, Waker};
+
+    let fake = Rc::new(Fake::default());
+    install(fake.clone());
+    let fetch = crate::adapters::HostFetch::new();
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut request =
+        std::pin::pin!(fetch.fetch_stream(HttpRequest::get("https://example.test/guide.xml")));
+    assert!(request.as_mut().poll(&mut cx).is_pending());
+    let (id, _, stream) = fake.requests.borrow_mut().pop().expect("stream request");
+    assert!(stream);
+    crate::on_status(id, 206, -1.0);
+    let Poll::Ready(Ok(mut response)) = request.as_mut().poll(&mut cx) else {
+        panic!("the host has delivered the stream status");
+    };
+    assert_eq!(response.status, 206);
+    assert_eq!(response.content_length, None);
+
+    {
+        let mut chunk = std::pin::pin!(response.body.next_chunk());
+        assert!(chunk.as_mut().poll(&mut cx).is_pending());
+    }
+    {
+        let mut retry = std::pin::pin!(response.body.next_chunk());
+        assert!(retry.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(
+            *fake.next.borrow(),
+            [id],
+            "the host owns the outstanding read"
+        );
+        crate::on_chunk(id, write_input(b"synthetic chunk"));
+        assert_eq!(
+            retry.as_mut().poll(&mut cx),
+            Poll::Ready(Ok(Some(b"synthetic chunk".to_vec())))
+        );
+    }
+
+    let count = Arc::new(WakeCount::default());
+    let waker = Waker::from(count.clone());
+    {
+        let mut pending_chunk = std::pin::pin!(response.body.next_chunk());
+        assert!(
+            pending_chunk
+                .as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        assert_eq!(*fake.next.borrow(), [id, id]);
+    }
+    drop(response);
+    assert_eq!(*fake.closed.borrow(), [id]);
+    crate::on_chunk(id, write_input(b"late chunk"));
+    crate::on_end(id);
+    assert_eq!(
+        count.0.load(Ordering::SeqCst),
+        0,
+        "dropping the body frees its suspended read"
+    );
+    assert_eq!(*fake.closed.borrow(), [id], "late deliveries are ignored");
 }
 
 #[test]

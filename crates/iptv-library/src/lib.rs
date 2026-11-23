@@ -280,3 +280,6 @@ pub mod inspection;
 
 /// Transactional guide repair contract values.
 pub mod guide_repair;
+
+#[cfg(test)]
+mod tests;

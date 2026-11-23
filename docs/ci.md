@@ -284,8 +284,8 @@ jobs** button in the Actions UI, never **Re-run all jobs**.
 `docs/contributing.md` is consumed by helper tests and selects those tests. Changes
 to lint and line-length wrappers execute the wrappers in the host lane. Other
 prose-only changes retain inexpensive planner validation. Every workspace crate
-must have a coverage floor or a nonempty documented exemption; SQLCipher's small
-process-global initializer is explicitly exempt while its isolated store tests run.
+has a Linux line coverage floor. SQLCipher coverage includes its initializer
+suite and the store's isolated process tests.
 Linux also builds workspace rustdoc with warnings denied, keeping API links valid.
 
 The iOS lane prepares the checksum-pinned MPVKit frameworks and checks both device

@@ -219,3 +219,67 @@ impl std::fmt::Display for InspectionError {
 impl std::error::Error for InspectionError {}
 
 pub type InspectionResult<T> = Result<T, InspectionError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_queries_enforce_page_size_source_count_and_utf8_byte_limits() {
+        let mut query = Query::source(SourceId(1));
+        assert!(query.valid(), "default source query");
+
+        for (limit, valid) in [
+            (0, false),
+            (1, true),
+            (MAX_PAGE, true),
+            (MAX_PAGE + 1, false),
+        ] {
+            query.limit = limit;
+            assert_eq!(query.valid(), valid, "page size {limit}");
+        }
+        query.limit = MAX_PAGE;
+
+        query.text = "é".repeat(MAX_QUERY_BYTES / 2);
+        assert!(query.valid(), "the maximum byte length is inclusive");
+        query.text.push('é');
+        assert!(
+            !query.valid(),
+            "multibyte text is bounded by encoded length"
+        );
+        query.text.clear();
+
+        for (count, valid) in [
+            (0, false),
+            (1, true),
+            (MAX_SOURCES, true),
+            (MAX_SOURCES + 1, false),
+        ] {
+            query.scope = SourceScope::Selected((1..=count as i64).map(SourceId).collect());
+            assert_eq!(query.valid(), valid, "selected source count {count}");
+        }
+        query.scope = SourceScope::AllEnabled;
+        assert!(query.valid());
+    }
+
+    #[test]
+    fn guide_windows_reject_reversed_equal_overlong_and_overflowing_endpoints() {
+        for (from, to, valid) in [
+            (-1, 0, true),
+            (0, 0, false),
+            (1, 0, false),
+            (0, MAX_WINDOW_SECONDS, true),
+            (0, MAX_WINDOW_SECONDS + 1, false),
+            (i64::MIN, i64::MIN + 1, true),
+            (i64::MAX - 1, i64::MAX, true),
+            (i64::MIN, i64::MAX, false),
+            (i64::MAX, i64::MIN, false),
+        ] {
+            assert_eq!(
+                TimeWindow { from, to }.valid(),
+                valid,
+                "window {from} to {to}"
+            );
+        }
+    }
+}

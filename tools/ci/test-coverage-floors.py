@@ -51,6 +51,12 @@ class CoverageFloors(unittest.TestCase):
         self.assertEqual(checker.parse_summary(nested), expected)
         self.assertEqual(checker.parse_summary(nested.replace("/", "\\")), expected)
 
+    def test_parse_summary_includes_the_vendored_tv_adapter(self):
+        for filename in ("vendor/nsh-tv/src/key.rs", "nsh-tv/src/key.rs", r"vendor\nsh-tv\src\key.rs"):
+            with self.subTest(filename=filename):
+                summary = f"{filename} 100 8 92.00% 10 0 100.00% 100 8 92.00% 0 0 -"
+                self.assertEqual(checker.parse_summary(summary), {"nsh-tv": [100, 8]})
+
     def test_evaluate_passes_when_above_floor(self):
         totals = {"iptv-core": [100, 5]}  # 95%
         results, failed = checker.evaluate(totals, {"iptv-core": 94.0})
