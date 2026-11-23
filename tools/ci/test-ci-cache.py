@@ -485,11 +485,32 @@ class CachePruning(unittest.TestCase):
         start = prune.timestamp("2026-01-01T02:00:00Z")
         end = prune.timestamp("2026-01-01T03:00:00Z")
         self.assertEqual({row["id"] for row in prune.superseded(entries, start, end)}, {1, 7})
-        entries.append(entry(9, "apt-v4-ubuntu24.04-amd64-0123456789abcdef-2026.1", "02:10", "02:10"))
+        entries.extend([
+            entry(9, "apt-v4-ubuntu24.04-amd64-0123456789abcdef-2026.1", "02:10", "02:10"),
+            entry(10, "apt-v4-ubuntu24.04-amd64-0123456789abcdef-2026.0", "01:00", "01:00"),
+        ])
         self.assertEqual({row["id"] for row in prune.superseded(entries, start, end)}, {1, 7, 8})
         next_start = prune.timestamp("2026-01-01T04:00:00Z")
         next_end = prune.timestamp("2026-01-01T05:00:00Z")
         self.assertEqual({row["id"] for row in prune.superseded(entries, next_start, next_end)}, {1, 3, 7, 8})
+
+    def test_old_successful_master_attempt_cannot_prune_the_current_generation(self):
+        spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
+        prune = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prune)
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / "event.json"
+            event.write_text(json.dumps({"workflow_run": {
+                "head_sha": "a" * 40,
+            }}))
+            with (patch.dict(os.environ, GITHUB_EVENT_PATH=str(event)),
+                  patch.object(prune, "trusted_window", return_value=(None, None)),
+                  patch.object(prune.subprocess, "check_output", return_value="b" * 40 + "\n") as gh,
+                  patch.object(prune.subprocess, "run") as mutate,
+                  patch.object(sys, "argv", ["prune-caches.py", "--apply"])):
+                prune.main()
+            gh.assert_called_once()
+            mutate.assert_not_called()
 
 
 def steps(text):

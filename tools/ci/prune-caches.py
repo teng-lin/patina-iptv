@@ -16,7 +16,7 @@ RUST_FAMILY = re.compile(
     r'^v0-rust-(host-v2|coverage-v2|android-smoke-x86_64-v5|windows-native-v1|windows-installer-v1|'
     r'desktop-package-v2-linux|desktop-package-macos-v3)-.*-(Linux-x64|Darwin-arm64|Windows_NT-x64)(?:-|$)'
 )
-APT_FAMILY = re.compile(r'^apt-v4-(ubuntu[0-9.]+-[a-z0-9]+)-[a-f0-9]{16}-')
+APT_FAMILY = re.compile(r'^apt-v4-(ubuntu[0-9.]+-[a-z0-9]+)-[a-f0-9]{16}-(.+)$')
 
 
 def timestamp(value):
@@ -50,7 +50,7 @@ def superseded(entries, start, finish):
         # it on subsequent exact hits as well as when a new generation is saved.
         if replacement > finish:
             continue
-        if group == ('apt', 'ubuntu24.04-amd64'):
+        if group[:2] == ('apt', 'ubuntu24.04-amd64'):
             apt_replaced = True
         for entry in caches:
             if (timestamp(entry['created_at']) < replacement
@@ -79,6 +79,12 @@ def main():
     args = parser.parse_args()
     event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
     start, finish = trusted_window(event, os.environ)
+    current = subprocess.check_output(
+        ['gh', 'api', f'repos/{REPOSITORY}/git/ref/heads/master', '--jq', '.object.sha'], text=True, timeout=30,
+    ).strip()
+    if event['workflow_run']['head_sha'] != current:
+        print('Skipping pruning for an older master commit', flush=True)
+        return
     endpoint = f'repos/{REPOSITORY}/actions/caches'
     pages = json.loads(subprocess.check_output(['gh', 'api', '--method', 'GET', '--paginate', '--slurp',
                                                 endpoint, '-f', f'ref={MASTER}', '-F', 'per_page=100'], timeout=60))
