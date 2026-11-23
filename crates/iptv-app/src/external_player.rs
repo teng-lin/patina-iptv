@@ -421,16 +421,17 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
             if !current() {
                 return;
             }
-            let session = if handoff.is_open()
-                && owner.parental_allowed(&target)
-                && resolve().is_some()
-                && matches!(approval, Ok(Some(approval)) if approval.is_current())
-            {
-                handoff.allow(lease)
-            } else {
-                drop(lease);
-                drop(handoff);
-                None
+            let session = match (handoff, lease) {
+                (handoff, lease)
+                    if handoff.is_open()
+                        && owner.parental_allowed(&target)
+                        && resolve().is_some()
+                        && matches!(approval, Ok(Some(approval)) if approval.is_current()) =>
+                {
+                    handoff.allow(lease)
+                }
+                // Release the handoff and lease before attempting recovery.
+                _ => None,
             };
             if let Some(session) = session {
                 let active = Active {
