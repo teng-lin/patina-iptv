@@ -13,7 +13,6 @@ use std::path::{Path, PathBuf};
 const LATER: &[&str] = &[
     // The play bar: another workstream is changing it; it gets its own
     // pass.
-    "play_bar.rs",
     "play_bar/progress.rs",
     // The guide's header (the list button, the debug overlay) and the
     // grid's empty state: the guide-navigation workstream's files.

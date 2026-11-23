@@ -1306,19 +1306,24 @@ fn exercise_admission(
             || held.wait_entered(Duration::ZERO),
         ));
         assert_eq!(props.lock().unwrap()["source"], previous_source);
-        if app.screen().count("label:Rewind").unwrap() == 0 {
+        if !app.screen().matches("id:play-bar-layer").unwrap() {
             step(app.press("label:Video"));
         }
-        step(app.wait_for("label:Rewind"));
-        step(app.wait_until(
-            "seek controls disabled for unpublished source",
-            Duration::from_secs(5),
-            |screen| {
-                screen
-                    .accessibility_state("label:Rewind")
-                    .is_ok_and(|state| state.disabled)
-            },
-        ));
+        step(app.wait_for("id:play-bar-play-pause"));
+        let screen = app.screen();
+        for id in ["id:play-bar-rewind", "id:play-bar-forward"] {
+            assert!(
+                !screen.matches(id).unwrap(),
+                "{id} is unavailable until the source is published"
+            );
+        }
+        assert!(
+            screen
+                .accessibility_state("id:play-bar-seek")
+                .unwrap()
+                .disabled,
+            "the timeline cannot seek in the unpublished source"
+        );
         for (name, data) in [
             (
                 "timeline",
