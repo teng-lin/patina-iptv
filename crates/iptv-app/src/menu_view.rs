@@ -5,6 +5,7 @@
 use crate::i18n::tr;
 use crate::organization_view::{self, Kind};
 use crate::runtime::model::SourceId;
+use iptv_core::guide::GroupName;
 use iptv_core::organization::{Block, BlockKind, GroupPreference, GroupPreferences};
 use iptv_library::ChannelScope;
 use iptv_presentation::lists::{Entry, ListId};
@@ -14,7 +15,7 @@ use iptv_presentation::menu::{
     Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_offset_menu, group_options,
     program_menu,
 };
-use nsh_core::prelude::*;
+use nsh_core::{platform::Idiom, prelude::*};
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, LIST_ITEM, MEDIUM, SANS, SECTION, TITLE};
 use crate::list_rows::{self, Mark, ROW};
@@ -760,11 +761,19 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
         return false;
     };
     let named = group_target(scope.as_ref()).is_some();
+    let schedule = crate::schedule();
+    let reorderable = named
+        && matches!(
+            list.resolve(&*schedule).map(Entry::at),
+            Some(Entry::Group(group)) if matches!(schedule.group_label(group), GroupName::Named(_))
+        );
     let rows = group_options(|item| match item {
         RenameGroup | BlockGroup | HideGroup | ShowFavoritesOnly => named,
         ResetGroupName | GroupEpgOffset => matches!(kind, Kind::GroupChannels(_)),
         GroupExternalPlayer => named && crate::host::EXTERNAL_PLAYER,
-        ManageGroups | SortChannels => *kind != Kind::Favorites,
+        ReorderGroups => reorderable,
+        ManageGroups => !reorderable && *kind != Kind::Favorites,
+        SortChannels => *kind != Kind::Favorites,
         _ => true,
     });
     ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
@@ -1226,14 +1235,18 @@ pub fn open_at(ui: Ui, channel: usize) {
     });
 }
 
-/// A right-click or long press moved the guide's focus to a program:
-/// its menu opens, and autoplay holds on it. The focus stays there when
-/// the menu (or the details it opens) closes, and opening a menu never
-/// starts playback (`docs/interaction.md`): nothing tunes it until the
-/// viewer moves the focus again. A choice still plays.
-pub fn open_focused(ui: Ui) {
+/// A right-click or long press on a timeline cell keeps focus on that
+/// program and holds autoplay. Desktop and tablet use the channel menu.
+pub fn open_timeline_context(ui: Ui) {
     crate::browse_playback::hold(ui);
-    open(ui);
+    if matches!(idiom(), Idiom::Desktop | Idiom::Pad) {
+        if let Some(channel) = crate::lists::focused_channel(ui) {
+            let minute = ui.focus.with_untracked(|focus| focus.cursor);
+            open_channel_at(ui, channel, minute, current_list(ui));
+        }
+    } else {
+        open(ui);
+    }
 }
 
 #[cfg(test)]

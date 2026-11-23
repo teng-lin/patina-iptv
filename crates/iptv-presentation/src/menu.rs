@@ -270,6 +270,7 @@ pub fn group_options(available: impl Fn(MenuItem) -> bool) -> Vec<Row> {
             GroupEpgOffset,
             BlockGroup,
             HideGroup,
+            ReorderGroups,
             ManageGroups,
         ],
         available,

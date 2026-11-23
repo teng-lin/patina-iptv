@@ -12,15 +12,15 @@ use iptv_presentation::guide::Pane;
 use nsh_core::element::ImageSrc;
 use nsh_core::prelude::*;
 
-use crate::theme::{
-    FOCUSED_CELL, FOCUSED_TEXT, RADIUS, TEXT_DISABLED_ALPHA, TEXT_SECONDARY_ALPHA, TEXT_SIZE,
-};
+use crate::fonts::LIST_ITEM;
+use crate::scale::Scale;
+use crate::theme::{FOCUSED_CELL, FOCUSED_TEXT, RADIUS, TEXT_DISABLED_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 /// Width with icons only, and with labels.
 pub const RAIL_W: f32 = 56.0;
-pub const RAIL_OPEN_W: f32 = 196.0;
+const RAIL_OPEN_W: f32 = 248.0;
 const ITEM_H: f32 = 44.0;
 const ICON: f32 = 22.0;
 const ITEM_MARGIN: f32 = 2.0;
@@ -47,7 +47,7 @@ pub fn width(ui: Ui) -> f32 {
     match ui.focus.with(|f| f.layout_pane()) {
         Pane::Guide | Pane::Preview => 0.0,
         Pane::Groups => RAIL_W,
-        Pane::Rail => RAIL_OPEN_W,
+        Pane::Rail => RAIL_W + (RAIL_OPEN_W - RAIL_W) * crate::scale::now(),
     }
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
     ))
 }
 
-fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
+fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
     // Its place in the rail now (discovery shelves follow imported VOD).
     let index = move || crate::lists::rail(ui).iter().position(|&i| i == item);
     let open = move || ui.focus.with(|f| f.layout_pane()) == Pane::Rail;
@@ -139,7 +139,7 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         .px(px(11.0))
         .flex_row()
         .items_center()
-        .gap(move || px(item_height(ui) * 0.4))
+        .gap(move || size.px(10.0))
         .rounded(px(RADIUS))
         .overflow_hidden()
         .bg(move || {
@@ -161,20 +161,28 @@ fn item_view(ui: Ui, item: RailItem) -> impl IntoElement {
         .child(
             svg(icon(item))
                 .size(move || px(item_height(ui).min(ICON)))
+                .flex_shrink_0()
                 .text_color(color),
         )
         .child(
             text(move || label(item))
+                .flex_1()
                 .number_of_lines(1)
+                .text_overflow(nsh_core::EllipsizeMode::Tail)
+                .font_family(crate::fonts::SANS)
                 .accessibility_elements_hidden(move || !open())
                 .opacity(move || if open() { 1.0_f32 } else { 0.0 })
-                .text_size(move || px(TEXT_SIZE.min(item_height(ui) * 0.8)))
+                .text_size(move || {
+                    let room = item_height(ui) * 0.8 / font_scale().max(1.0);
+                    px(size.text_px(LIST_ITEM).0.min(room))
+                })
                 .text_color(color),
         )
 }
 
 /// The rail: top items, then Playlists and Settings at the bottom.
 pub fn column(ui: Ui) -> impl IntoElement {
+    let size = Scale::new();
     effect(move || {
         let items = crate::lists::rail(ui);
         if ui
@@ -192,7 +200,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
             })
             .into_iter()
             .filter(move |i| i.at_bottom() == bottom)
-            .map(move |item| item_view(ui, item)),
+            .map(move |item| item_view(ui, size, item)),
         )
     };
     view()

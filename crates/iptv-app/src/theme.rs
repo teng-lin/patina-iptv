@@ -85,8 +85,7 @@ pub const TEXT_DISABLED_ALPHA: u8 = 0x60;
 /// Corner radii: focus shape and larger rounded surfaces, in dp.
 pub const RADIUS: f32 = 6.0;
 pub const RADIUS_LARGE: f32 = 16.0;
-/// Base text size (sp) and list padding (dp).
-pub const TEXT_SIZE: f32 = 14.0;
+/// List padding (dp).
 pub const LIST_PADDING: f32 = 16.0;
 /// Active recording control, distinct from the neutral idle icon.
 pub const RECORDING: u32 = 0xF34B4B;

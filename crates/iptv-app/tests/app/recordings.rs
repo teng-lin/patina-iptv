@@ -453,7 +453,7 @@ fn japanese_guide_preserves_the_providers_no_information_title() {
 }
 
 #[test]
-fn long_press_on_a_current_program_offers_record_without_starting_playback() {
+fn long_press_on_a_current_program_offers_record_now_in_the_channel_menu() {
     let Some(home) = isolated!() else { return };
     let (mut app, _, _, _) = fixture(
         &home,
@@ -464,11 +464,12 @@ fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     step(app.wait_for("text:Generated live program"));
     let opens = iptv_app::player_opens(0);
     step(app.long_press("role:cell[Generated live program]"));
-    step(app.wait_for("id:menu-panel >> text:/^Generated live program ·/"));
-    step(app.wait_for("id:menu-panel >> label:Record"));
+    let record_now = "id:menu-panel >> label:/^Record now · Generated live program/";
+    step(app.wait_for(record_now));
+    assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
     assert!(
         !app.screen()
-            .accessibility_state("id:menu-panel >> label:Record")
+            .accessibility_state(record_now)
             .unwrap()
             .disabled
     );
@@ -480,7 +481,7 @@ fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     assert_eq!(iptv_app::player_opens(0), opens);
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     step(app.back());
-    step(app.wait_for_gone("id:menu-panel >> label:Record", Duration::from_secs(2)));
+    step(app.wait_for_gone(record_now, Duration::from_secs(2)));
 }
 
 struct CaptureServer {

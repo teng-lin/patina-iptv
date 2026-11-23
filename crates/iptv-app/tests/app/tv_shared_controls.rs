@@ -643,9 +643,9 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     // ended hour before it, which this row cannot replay or focus).
     let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
     step(app.right_click(cell));
-    menu_opens_for(app, "Local A", true);
+    menu_opens_for(app, "Local A", false);
     step(app.long_press(cell));
-    menu_opens_for(app, "Local A", true);
+    menu_opens_for(app, "Local A", false);
     assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
 
     // A key goes back to the remote's view.

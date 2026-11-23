@@ -168,7 +168,7 @@ pub(super) fn cell(
         };
         ui.touched();
         if focus_program(p) {
-            crate::menu_view::open_focused(ui);
+            crate::menu_view::open_timeline_context(ui);
         }
     };
     view()

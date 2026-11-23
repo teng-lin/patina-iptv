@@ -212,8 +212,9 @@ visible entry point for touch and pointer users.
 
 - **Now:** in the guide, the channel list and recordings: Menu on a remote, and
   long OK on Android; M on a keyboard, and Shift+F10 on desktop. Long press and
-  right-click open program actions on a guide cell, channel actions on a
-  channel header or player-list row, and group options on a group.
+  right-click open channel actions on a channel header or player-list row,
+  and group options on a group. On tablets and desktops, guide timeline cells
+  open the same channel menu for the selected program's time block.
   Long OK on a player-list row opens its channel actions. Menu and M still
   give access to program and group actions from the player list. In the
   guide grid, the program menu also includes actions for its channel and
@@ -231,6 +232,8 @@ visible entry point for touch and pointer users.
   channel. Up and Down move it one row, and Left and Right move it to either
   end. Touch and mouse users can drag the handles and choose Save or Cancel.
   The playing channel keeps its player surface throughout the edit.
+- **Reorder groups** in a group's menu uses the same controls in the guide's
+  groups column. It starts on the group whose menu you opened.
 - **Show favorites only** filters that group. **Guide time offset** corrects
   the times in a provider group in 15-minute steps. Existing recordings keep
   their accepted capture windows. **Use external player** applies to explicit
