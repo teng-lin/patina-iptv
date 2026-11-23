@@ -56,8 +56,12 @@ previews use a dependency cache for the generated NSH runner workspace. The
 scheduled Validation run warms this cache on master. Master also refreshes
 the exact-key NSH tool and runtime caches and the Gradle dependency cache.
 Unsigned shipping builds use fresh app output directories and may restore
-the pinned tools and runtimes. One Android candidate runner builds both ARM
-ABIs and packages them together. Signing jobs use fresh runners.
+the pinned tools and runtimes. Android candidates compile ARM64 and ARMv7 in
+parallel, each with its own pinned NSH runtime cache. Both jobs can reuse the
+same Ubuntu package snapshot and start with fresh app build output. A single Gradle job
+checks the library architectures, source commit and matching NSH assets,
+then packages both ABIs with the generated notices. Signing jobs use fresh
+runners.
 
 Ubuntu package snapshots can install offline across runner image refreshes
 within the same Ubuntu release, architecture and package list. If the installed

@@ -41,7 +41,8 @@ NOTICES = ("about.toml", "LICENSE", "tools/ci/notices.hbs", "tools/ci/component-
 ANDROID_PACKAGE = (*NOTICES, *BUILD, "hosts/android/**", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
                    "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**", "about.toml", "LICENSE",
                    "tools/sync-host.sh", "tools/ci/android-ndk-env.sh", "tools/ci/check-android*",
-                   "tools/ci/sign-android.sh", "tools/ci/prepare-android.sh", "tools/ci/package-android.sh", "tools/ci/sbom.py",
+                   "tools/ci/sign-android.sh", "tools/ci/prepare-android.sh", "tools/ci/package-android.sh",
+                   "tools/ci/merge-android-native.py", "tools/ci/sbom.py",
                    "tools/mpv-runtime/**", "tools/mpv-runtime-unix/**", "crates/iptv-player-mpv/fixtures/**")
 LINUX_PACKAGE = ("tools/ci/*linux*.sh", "tools/ci/*linux*.py", "tools/ci/Dockerfile.*-smoke", "hosts/linux/**",
                  "tools/ci/enable-deb-src.sh")

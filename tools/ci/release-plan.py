@@ -18,7 +18,7 @@ Three kinds of run exist (.github/workflows/release.yml):
   signing job an hour later.
 
 Reads EVENT_NAME, REF, PLATFORMS and REHEARSAL from the environment and writes
-`matrix` and `signing_matrix` to the file named by GITHUB_OUTPUT.
+`desktop_matrix` and `signing_matrix` to the file named by GITHUB_OUTPUT.
 """
 import json
 import os
@@ -88,8 +88,9 @@ def main():
         check_changelog(Path.cwd(), environment.get("REF", ""))
     # Linux packages are not platform-signed; the others pass through the signing job.
     signing = [entry for entry in platforms if entry["platform"] != "linux"]
+    desktop = [entry for entry in platforms if entry["platform"] != "android"]
     with open(environment["GITHUB_OUTPUT"], "a") as output:
-        output.write("matrix=" + json.dumps({"include": platforms}) + "\n")
+        output.write("desktop_matrix=" + json.dumps({"include": desktop}) + "\n")
         output.write("signing_matrix=" + json.dumps({"include": signing}) + "\n")
     names = ", ".join(entry["platform"] for entry in platforms)
     if rehearsal == "true":

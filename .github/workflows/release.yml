@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       candidate: ${{ steps.candidate.outputs.run }}
-      matrix: ${{ steps.platforms.outputs.matrix }}
+      desktop_matrix: ${{ steps.platforms.outputs.desktop_matrix }}
       signing_matrix: ${{ steps.platforms.outputs.signing_matrix }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -217,7 +217,8 @@ jobs:
     if: needs.plan.outputs.candidate == ''
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
-      matrix: ${{ needs.plan.outputs.matrix }}
+      android: ${{ contains(fromJSON(needs.plan.outputs.signing_matrix).include.*.platform, 'android') }}
+      desktop-matrix: ${{ needs.plan.outputs.desktop_matrix }}
       windows: ${{ github.event_name == 'push' || inputs.platforms != 'android' }}
   sign:
     needs: [plan, tests, package]

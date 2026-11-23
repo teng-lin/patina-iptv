@@ -176,6 +176,21 @@ class Workflows(unittest.TestCase):
         self.assertIn('testDebugUnitTest lintDebug assembleDebug', smoke)
         self.assertIn('testReleaseUnitTest lintRelease', (ROOT / 'tools/ci/prepare-android.sh').read_text())
 
+    def test_android_release_compiles_both_abis_before_one_assembly(self):
+        unsigned = (ROOT / '.github/workflows/unsigned-candidate.yml').read_text()
+        native = unsigned.split('  android-native:\n', 1)[1].split('  android-package:\n', 1)[0]
+        self.assertIn('abi: [arm64-v8a, armeabi-v7a]', native)
+        self.assertIn('ABIS: ${{ matrix.abi }}', native)
+        self.assertIn('tools/sync-host.sh --release', native)
+        self.assertIn('name: android-native-${{ matrix.abi }}', native)
+        android, desktop = unsigned.split('  android-package:\n', 1)[1].split('  package:\n', 1)
+        self.assertIn('needs: android-native', android)
+        self.assertIn('pattern: android-native-*', android)
+        self.assertLess(android.index('merge-android-native.py'), android.index('prepare-android.sh'))
+        self.assertEqual(unsigned.count('name: signing-input-android'), 1)
+        self.assertIn('needs: dispatch-plan', desktop)
+        self.assertIn('fromJSON(inputs.desktop-matrix || needs.dispatch-plan.outputs.desktop', desktop)
+
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()
         self.assertIn("--release", script)

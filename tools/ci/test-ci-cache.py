@@ -308,8 +308,8 @@ class AptInstall(unittest.TestCase):
         self.assertIn("ImageVersion", SETUP)
         self.assertIn('cat tools/ci/apt-install.sh', SETUP)
         self.assertIn("${{ inputs.apt-packages }}", SETUP)
-        # Shipping builds (cache: 'false') never install cached packages.
-        self.assertEqual(SETUP.count("steps.apt.outputs.key != '' && inputs.cache == 'true'"), 2)
+        # Android native builds can reuse host packages with fresh Cargo outputs.
+        self.assertEqual(SETUP.count("steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true')"), 2)
         self.assertIn("steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'", SETUP)
         self.assertIn("steps.packages.outputs.refreshed == 'true'", SETUP)
         self.assertNotIn("sudo apt-get", SETUP)

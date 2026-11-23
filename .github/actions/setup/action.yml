@@ -25,6 +25,9 @@ inputs:
   apt-packages:
     description: Further Linux packages the job needs, installed and cached with the build packages
     default: ''
+  apt-cache:
+    description: Reuse Linux package snapshots when the Cargo cache is disabled
+    default: 'false'
   policy-tool:
     description: Install cargo-deny for jobs that run dependency policy checks
     default: 'true'
@@ -86,7 +89,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       id: apt-cache
-      if: steps.apt.outputs.key != '' && inputs.cache == 'true'
+      if: steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true')
       env:
         # A stalled cache download falls back to the mirror instead of hanging.
         SEGMENT_DOWNLOAD_TIMEOUT_MINS: '3'
@@ -113,7 +116,7 @@ runs:
     # install, not whatever the job's later steps leave behind. The packages
     # are installed by now, so a cache service outage must not fail the job.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: steps.apt.outputs.key != '' && inputs.cache == 'true' && steps.packages.outputs.refreshed == 'true' && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+      if: steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true') && steps.packages.outputs.refreshed == 'true' && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
       continue-on-error: true
       with:
         path: ${{ steps.apt.outputs.state }}
