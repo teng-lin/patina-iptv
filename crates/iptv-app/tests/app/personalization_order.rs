@@ -3,15 +3,22 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope};
 use personalization::*;
 use std::time::Duration;
-fn reorder_favorites(app: &mut crate::headless::Headless, row: usize) {
+
+#[track_caller]
+fn open_inline_order(app: &mut crate::headless::Headless) {
     menu(app, "Reorder channels");
-    step(app.wait_for(&format!("id:reorder-handle-{row}")));
+    step(app.wait_for("id:guide-reorder-handle"));
+    assert!(!app.screen().matches("id:organization-row-0").unwrap());
+}
+
+fn reorder_favorites(app: &mut crate::headless::Headless, row: usize) {
+    open_inline_order(app);
     step(app.drag(
-        &format!("id:reorder-handle-{row}"),
+        &format!("id:guide-row >> nth={row} >> id:guide-reorder-handle"),
         nsh_core::geometry::point(nsh_core::prelude::px(0.0), nsh_core::prelude::px(-105.0)),
     ));
-    step(app.wait_for("id:organization-row-0 >> text:Local C"));
-    step(app.press("id:organization-screen >> text:Done"));
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local C"));
+    step(app.press("id:organization-screen >> text:Save"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
 }
 #[test]
@@ -41,16 +48,16 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
         },
     ));
     // Reopening uses the just changed in-memory order, without restarting.
-    menu(app, "Reorder channels");
-    step(app.wait_for("id:organization-row-0 >> text:Local C"));
+    open_inline_order(app);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local C"));
     step(app.back());
     group(app, "News");
-    menu(app, "Reorder channels");
-    step(app.wait_for("id:organization-row-0 >> text:Local A"));
+    open_inline_order(app);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local A"));
     step(app.press_key("down"));
     step(app.press_key("enter")); // Select Local B.
     step(app.press_key("left"));
-    step(app.wait_for("id:organization-row-0 >> text:Local B"));
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
     step(app.back());
     step(app.wait_for("text:Save order"));
     step(app.press_key("enter"));
@@ -78,24 +85,24 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
         s.load_channels(f.source, &ChannelQuery::default()).unwrap()[0].name,
         "Local A"
     );
-    menu(app, "Reorder channels");
-    step(app.wait_for("id:organization-row-0 >> text:Local B"));
+    open_inline_order(app);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
     step(app.back());
     menu(app, "Channel order");
     step(app.wait_for("text:Playlist order"));
     step(app.press("text:Playlist order"));
     step(app.wait_for_gone("id:organization-sort", Duration::from_secs(5)));
-    menu(app, "Reorder channels");
-    step(app.wait_for("id:organization-row-0 >> text:Local A"));
+    open_inline_order(app);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local A"));
     // Leaving with a draft preserves the saved provider policy if discarded.
     step(app.press_key("enter"));
     step(app.press_key("right"));
-    step(app.press("id:organization-screen >> text:Close"));
+    step(app.press("id:organization-screen >> text:Cancel"));
     step(app.wait_for("text:Discard changes"));
     step(app.press("text:Discard changes"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
-    menu(app, "Reorder channels");
-    step(app.wait_for("id:organization-row-0 >> text:Local A"));
+    open_inline_order(app);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local A"));
     step(app.back());
     menu(app, "Channel order");
     step(app.wait_for("text:/Custom order$/"));
@@ -132,6 +139,7 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
     assert!(!app.screen().matches("id:organization-row-0").unwrap());
     assert!(!app.screen().matches("id:reorder-handle-0").unwrap());
     step(app.press_key("down"));
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local A"));
     step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
     step(app.press_key("enter"));
     step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
@@ -185,31 +193,32 @@ fn a_held_grip_scrolls_at_the_edge_and_moves_the_row_past_the_viewport() {
     let Some(home) = isolated!() else { return };
     let mut f = start(home, Settings::new(), true);
     let app = &mut f.app;
-    menu(app, "Reorder channels");
-    step(app.wait_for("id:reorder-handle-0"));
+    open_inline_order(app);
+    let first_grip = "role:row[Local A] >> id:guide-reorder-handle";
     step(app.set_viewport(Size::new(px(720.0), px(205.0))));
+    step(app.wait_for(first_grip));
     let nodes = app.screen().layout_nodes();
     let grip = nodes
         .iter()
-        .find(|n| n.test_id.as_deref() == Some("reorder-handle-0"))
+        .filter(|n| n.test_id.as_deref() == Some("guide-reorder-handle"))
+        .min_by(|a, b| a.bounds.origin.y.0.total_cmp(&b.bounds.origin.y.0))
         .unwrap();
     let mut node = grip;
     while node.scroll.is_none() {
         node = nodes.iter().find(|n| n.id == node.parent).unwrap();
     }
     let bottom = node.bounds.origin.y + node.bounds.size.height;
+    let drag_y = bottom - grip.bounds.center().y - px(5.0);
     assert!(
-        node.bounds.size.height < px(120.0),
-        "the last row is below the viewport"
+        drag_y > px(0.0) && drag_y < grip.bounds.size.height * 1.5,
+        "the last row needs edge scrolling"
     );
-    step(app.drag_and_hold(
-        "id:reorder-handle-0",
-        point(px(0.0), bottom - grip.bounds.center().y - px(5.0)),
-    ));
+    step(app.drag_and_hold(first_grip, point(px(0.0), drag_y)));
     step(app.run_for(Duration::from_millis(550)));
     step(app.drop_held());
-    step(app.wait_for("id:organization-row-2 >> text:Local A"));
-    step(app.press("id:organization-screen >> text:Done"));
+    step(app.set_viewport(Size::new(px(1920.0), px(1080.0))));
+    step(app.wait_for("id:guide-row >> nth=2 >> text:★ Local A"));
+    step(app.press("id:organization-screen >> text:Save"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
     let rows = crate::isolated::open_database(&f.path)
         .unwrap()
@@ -337,6 +346,32 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
         Duration::from_secs(5),
         |screen| list_is_hidden(screen) == Some(true),
     ));
+
+    // Target B from the player list while A keeps playing.
+    let opens = iptv_app::player_opens(0);
+    step(app.press_key("left"));
+    step(app.wait_until(
+        "the channel list reopens",
+        Duration::from_secs(5),
+        |screen| list_is_hidden(screen) == Some(false),
+    ));
+    step(app.press_key("up"));
+    open_inline_order(app);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
+    step(app.press("id:organization-screen >> text:Cancel"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    assert!(
+        app.screen()
+            .accessibility_state("id:guide-ui >> label:Local B")
+            .unwrap()
+            .selected,
+        "the guide keeps the channel targeted in the player list"
+    );
+    assert_eq!(iptv_app::player_opens(0), opens);
+    assert!(
+        iptv_app::player_has_source(0),
+        "the original stream stays open"
+    );
 }
 
 #[test]

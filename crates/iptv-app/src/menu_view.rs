@@ -363,7 +363,6 @@ pub fn perform(ui: Ui, item: MenuItem) {
         return;
     }
     ui.menu.set(None);
-    let standalone = !matches!(target, Target::Program { .. });
     let scope = list
         .resolve(&*crate::schedule())
         .and_then(|_| channel_scope(ui, &list));
@@ -426,24 +425,25 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         MenuItem::ManageParentalBlocks => crate::parental_view::manage(ui),
-        MenuItem::ManageBlocked | MenuItem::ManageHidden | MenuItem::ReorderChannels => {
-            let mode = match item {
-                MenuItem::ManageBlocked => Mode::Blocking,
-                MenuItem::ManageHidden => Mode::Visibility,
-                _ => Mode::Reorder,
+        MenuItem::ReorderChannels => {
+            if let Some((source, kind)) = scope {
+                let focus = channel
+                    .and_then(|ch| crate::parental_view::live_target(ui, ch))
+                    .filter(|target| target.source == source.0)
+                    .map(|target| target.id);
+                organization_view::open_context_reorder(ui, source, kind, focus, list);
+            }
+        }
+        MenuItem::ManageBlocked | MenuItem::ManageHidden => {
+            let mode = if item == MenuItem::ManageBlocked {
+                Mode::Blocking
+            } else {
+                Mode::Visibility
             };
-            if mode == Mode::Reorder && standalone {
-                if let Some((source, kind)) = scope {
-                    let focus = channel
-                        .and_then(|ch| crate::parental_view::live_target(ui, ch))
-                        .filter(|target| target.source == source.0)
-                        .map(|target| target.id);
-                    organization_view::open_context_reorder(ui, source, kind, focus, list);
-                }
-            } else if let Some(channel) = channel {
-                open_channel_editor(ui, channel, mode, scope, list);
+            if let Some(channel) = channel {
+                open_channel_editor(ui, channel, mode, scope);
             } else if let Some((source, kind)) = scope {
-                organization_view::open_guide_mode(ui, source, kind, None, mode, list);
+                organization_view::open_mode(ui, source, kind, None, mode);
             }
         }
         MenuItem::Record
@@ -495,7 +495,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::ChannelOptions => {
             if let Some(channel) = channel {
-                open_channel_editor(ui, channel, Mode::Options, scope, list);
+                open_channel_editor(ui, channel, Mode::Options, scope);
             }
         }
         MenuItem::SortChannels => {
@@ -560,14 +560,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
                     MenuItem::SortGroups => {
                         organization_view::open_sort(ui, *source, Kind::Groups, Some(list));
                     }
-                    MenuItem::ReorderGroups => organization_view::open_guide_mode(
-                        ui,
-                        *source,
-                        Kind::Groups,
-                        focus,
-                        Mode::Reorder,
-                        list,
-                    ),
+                    MenuItem::ReorderGroups => {
+                        organization_view::open_group_reorder(ui, *source, focus, list);
+                    }
                     _ => organization_view::open(ui, *source, Kind::Groups, focus),
                 }
             }
@@ -724,13 +719,7 @@ fn channel_scope(ui: Ui, list: &ListId) -> Option<(SourceId, Kind)> {
     }
 }
 
-fn open_channel_editor(
-    ui: Ui,
-    channel: usize,
-    mode: Mode,
-    scope: Option<(SourceId, Kind)>,
-    list: ListId,
-) {
+fn open_channel_editor(ui: Ui, channel: usize, mode: Mode, scope: Option<(SourceId, Kind)>) {
     let Some(target) = crate::parental_view::live_target(ui, channel) else {
         return;
     };
@@ -740,7 +729,7 @@ fn open_channel_editor(
         None if mode == Mode::Options => (SourceId(target.source), Kind::Channels),
         None => return,
     };
-    organization_view::open_guide_mode(ui, source, kind, Some(target.id), mode, list);
+    organization_view::open_mode(ui, source, kind, Some(target.id), mode);
 }
 
 /// Whether entry `entry` of a groups column has group options (what

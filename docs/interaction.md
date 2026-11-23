@@ -226,11 +226,11 @@ visible entry point for touch and pointer users.
   An upcoming block can schedule or cancel one. The player list uses the
   live block. On Linux and macOS, **Open in new window** plays the channel
   live in a separate Patina window.
-- **Reorder channel** and **Reorder channels** open the guide with a draft
-  order. OK or Enter picks up or places a channel. Up and Down move it one
-  row, and Left and Right move it to either end. Touch and mouse users can
-  drag the handles and choose Save or Cancel. The playing channel keeps its
-  player surface throughout the edit.
+- **Reorder channel** and **Reorder channels** open a draft order in the guide
+  from channel, group and program menus. OK or Enter picks up or places a
+  channel. Up and Down move it one row, and Left and Right move it to either
+  end. Touch and mouse users can drag the handles and choose Save or Cancel.
+  The playing channel keeps its player surface throughout the edit.
 - **Show favorites only** filters that group. **Guide time offset** corrects
   the times in a provider group in 15-minute steps. Existing recordings keep
   their accepted capture windows. **Use external player** applies to explicit

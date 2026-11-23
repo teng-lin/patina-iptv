@@ -50,8 +50,10 @@ pub(super) fn ruler(
         })
     };
     // Back to now, once the view left it.
+    let timeline_controls = move || !crate::organization_view::guide_order_open(ui);
+    let shifts_shown = move || !crate::IOS && timeline_controls();
     let now_button = when(
-        move || pan.away(),
+        move || timeline_controls() && pan.away(),
         move || button(|| tr("Now")).on_press(move || pan.to_now()),
     );
     // Enlarged text needs room for localized 12-hour labels (including
@@ -113,17 +115,12 @@ pub(super) fn ruler(
                         ))
                         .child(date_time(ui, size, pan).flex_1().min_w(px(0.0)))
                         .child(now_button)
-                        .children(
-                            (!crate::IOS)
-                                .then(|| {
-                                    [
-                                        shift(|| "‹", || tr("Go back 30 minutes"), -STEP),
-                                        shift(|| "›", || tr("Go forward 30 minutes"), STEP),
-                                    ]
-                                })
-                                .into_iter()
-                                .flatten(),
-                        ),
+                        .child(when(shifts_shown, move || {
+                            shift(|| "‹", || tr("Go back 30 minutes"), -STEP)
+                        }))
+                        .child(when(shifts_shown, move || {
+                            shift(|| "›", || tr("Go forward 30 minutes"), STEP)
+                        })),
                 )
                 .child(
                     view()

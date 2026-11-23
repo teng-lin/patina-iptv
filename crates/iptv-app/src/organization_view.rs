@@ -101,20 +101,17 @@ pub fn rename_group(ui: Ui, source: SourceId, id: String) {
     );
 }
 
-pub fn open_guide_mode(
-    ui: Ui,
-    source: SourceId,
-    kind: Kind,
-    focus: Option<String>,
-    mode: Mode,
-    list: ListId,
-) {
-    if mode != Mode::Reorder {
-        open_mode(ui, source, kind, focus, mode);
-        return;
-    }
-    let placement = reorder_placement(ui, &kind, list);
-    open_with(ui, source, kind, focus, mode, None, placement);
+pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list: ListId) {
+    let placement = reorder_placement(ui, &Kind::Groups, list);
+    open_with(
+        ui,
+        source,
+        Kind::Groups,
+        focus,
+        Mode::Reorder,
+        None,
+        placement,
+    );
 }
 
 pub fn open_context_reorder(
@@ -125,13 +122,21 @@ pub fn open_context_reorder(
     list: ListId,
 ) {
     batch(|| {
-        if ui.mode.get_untracked() == crate::ViewMode::Fullscreen {
+        let from_player = ui.mode.get_untracked() == crate::ViewMode::Fullscreen;
+        if from_player {
             crate::channels_view::close(ui);
             ui.panels.update(|panels| panels.hide());
             ui.mode.set(crate::ViewMode::Guide);
         }
+        let placement = guide_reorder_placement(ui, list.clone());
+        if from_player
+            && let Some(id) = &focus
+            && let Some(&channel) = guide_order_keys(ui, source, &list).get(id)
+        {
+            let now = ui.focus.with_untracked(|f| f.now);
+            crate::lists::tap(ui, channel, now);
+        }
         crate::browse_playback::hold(ui);
-        let placement = guide_reorder_placement(ui, list);
         open_with(ui, source, kind, focus, Mode::Reorder, None, placement);
     });
 }
