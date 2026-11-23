@@ -52,20 +52,21 @@ def step(name, *argv):
     return {"name": name, "argv": list(argv)}
 
 
-def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None):
+def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None, skip_app_build=False):
     if tier not in ("pr", "full", "native") or host not in ("linux", "macos", "windows"):
         raise ValueError("unsupported validation tier or host")
     workspace = package_args(workspace_crates(root))
     test_args = ["--locked", "--features", COVERAGE_FEATURES, *workspace]
     app_build = step("app-build", "cargo", "build", "--locked", "-p", "iptv-app", "--timings",
                      *(["--release"] if release else []))
+    app_build_steps = [] if skip_app_build else [app_build]
     if tier == "native":
         return [
             step("native-test-compilation", "cargo", "check", "--locked", "--timings", "--workspace", "--all-targets",
                  "--features", COVERAGE_FEATURES),
             step("native-player-tests", "cargo", "test", "--locked", "--timings", "-p", "iptv-player-mpv", "--lib",
                  "--", "--format=pretty"),
-            app_build,
+            *app_build_steps,
         ]
     memory = [argument for module in ("catalog_stream_memory::", "epg_memory::", "epg_stream_memory::")
               for argument in ("--skip", module)] if tier == "pr" else []
@@ -130,7 +131,7 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None)
                           "cargo", "test", *test_args, "--test", "native_player", GTK_LIFECYCLE,
                           "--", "--ignored", "--exact", "--format=pretty"))
     # Test-support builds must never replace the final production configuration.
-    steps.append(app_build)
+    steps.extend(app_build_steps)
     return steps
 
 
@@ -213,6 +214,7 @@ def main(argv=None):
     running.add_argument("--harness-output", type=Path, default=os.environ.get("IPTV_CI_HARNESSES") or None,
                          help="record workspace test executables for performance journeys")
     for action in (listing, running):
+        action.add_argument("--skip-app-build", action="store_true", help="reuse the app build already verified by packaging")
         action.add_argument("--test-threads", type=int, default=os.environ.get("IPTV_CI_TEST_THREADS") or None,
                             help="override the Rust test threads for the workspace test step")
         action.add_argument("--tier", choices=("pr", "full", "native"), default="full")
@@ -237,10 +239,12 @@ def main(argv=None):
     elif options.action == "run":
         if options.harness_output and options.tier == "native":
             parser.error("the native tier does not build the performance harnesses")
-        return run(plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads),
+        return run(plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads,
+                        skip_app_build=options.skip_app_build),
                    harness_output=options.harness_output)
     else:
-        checks = plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads)
+        checks = plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads,
+                      skip_app_build=options.skip_app_build)
         if options.json:
             print(json.dumps(checks, indent=2))
         else:

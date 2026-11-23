@@ -69,6 +69,8 @@ STRESS_CRATES = ("iptv-store-sqlite", "iptv-sqlcipher-init", "iptv-import", "ipt
 STRESS = (*BUILD, *(f"crates/{crate}/**" for crate in STRESS_CRATES), "tools/ci/import-stress.sh")
 COVERAGE = ("tools/ci/coverage.sh", "tools/ci/*coverage*.py")
 HOST_INPUTS = ("docs/capabilities.md", "tools/ci/lint.sh", "tools/ci/check-line-length.sh")
+OTHER_HOSTS = ("hosts/android/**", "hosts/ios/**", "hosts/linux/**", "hosts/windows/**",
+               "hosts/tizen/**", "hosts/tizen-nsh/**")
 HELPER_INPUTS = ("docs/contributing.md",)
 IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
        "tools/check-ios-simulator-entitlements.sh",
@@ -164,15 +166,20 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False):
         "smoke": full or ci or "smoke" in requested or matches(production, SMOKE),
         "stress": full or ci or "stress" in requested or matches(inputs, STRESS),
     }
-    for lane in HOST_VERIFICATIONS:
-        # A PR editing the standalone workflow must exercise that entry point.
-        result[f"{lane}_on_host"] = result[lane] and host and (tier != "pr" or lane not in requested)
     if tier == "release":
         # The release pipeline builds and validates the shipping packages once,
         # in clean jobs. Avoid constructing throwaway installers first.
         result["package_matrix"] = {"include": []}
         for lane in ("android", "android_package", "packages", "windows-package"):
             result[lane] = False
+    macos_host = host and (full or "host" in requested or any(
+        not documentation(path) and not matches([path], OTHER_HOSTS) for path in inputs))
+    macos_package = any(entry["platform"] == "macos" for entry in result["package_matrix"]["include"])
+    result["macos_host"] = ("packages" if macos_package else "host") if macos_host else "skip"
+    for lane in HOST_VERIFICATIONS:
+        # A PR editing the standalone workflow must exercise that entry point.
+        has_host = macos_host if lane == "ios" else host
+        result[f"{lane}_on_host"] = result[lane] and has_host and (tier != "pr" or lane not in requested)
     return result
 
 
@@ -184,13 +191,22 @@ def gate(plan, needs):
         errors.append("validation helper checks did not succeed")
     if not isinstance(plan, dict) or set(LANES) - plan.keys():
         return errors + ["validation plan is missing or incomplete"]
-    if plan.get("tier") not in ("pr", "full", "release"):
+    tier = plan.get("tier")
+    if tier not in ("pr", "full", "release"):
         return errors + ["validation tier is missing or invalid"]
     candidate = plan.get("candidate_build")
     if type(candidate) is not bool:
         errors.append("unsigned candidate selection is missing or invalid")
     elif needs.get("candidate", {}).get("result") not in (("success",) if candidate else ("success", "skipped")):
         errors.append("unsigned candidate packages did not meet the validation plan")
+    macos_host = plan.get("macos_host")
+    if (macos_host not in ("skip", "host", "packages")
+            or (macos_host != "skip" and plan["host"] is not True)
+            or (macos_host == "packages" and (plan["packages"] is not True or tier == "release"))
+            or (tier in ("full", "release") and macos_host == "skip")):
+        errors.append("macOS host routing is missing or invalid")
+    elif macos_host != "skip" and needs.get(macos_host, {}).get("outputs", {}).get("macos-host-verified") != "true":
+        errors.append("macOS host checks did not report success")
     for lane in LANES:
         if (lane == "fuzz" and not isinstance(plan[lane], list)) or (lane != "fuzz" and type(plan[lane]) is not bool):
             errors.append(f"invalid selection for {lane}")
@@ -199,12 +215,14 @@ def gate(plan, needs):
         selected = bool(plan[lane])
         if lane in HOST_VERIFICATIONS:
             on_host = plan.get(f"{lane}_on_host")
-            eligible = selected and plan["host"] is True
+            has_host = macos_host in ("host", "packages") if lane == "ios" else plan["host"] is True
+            eligible = selected and has_host
             if (type(on_host) is not bool or (on_host and not eligible)
-                    or (plan["tier"] != "pr" and on_host != eligible)):
+                    or (tier != "pr" and on_host != eligible)):
                 errors.append(f"host routing is missing or invalid for {lane}")
             if on_host is True:
-                evidence = needs.get("host", {}).get("outputs", {}).get(HOST_VERIFICATIONS[lane])
+                job = macos_host if lane == "ios" else "host"
+                evidence = needs.get(job, {}).get("outputs", {}).get(HOST_VERIFICATIONS[lane])
                 if result != "skipped" or evidence != "true":
                     errors.append(f"selected {lane}: missing successful host verification")
                 continue

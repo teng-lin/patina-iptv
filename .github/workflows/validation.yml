@@ -33,6 +33,7 @@ jobs:
       candidate_build: ${{ steps.select.outputs.candidate_build }}
       tier: ${{ steps.select.outputs.tier }}
       host: ${{ steps.select.outputs.host }}
+      macos_host: ${{ steps.select.outputs.macos_host }}
       ios: ${{ steps.select.outputs.ios }}
       ios_on_host: ${{ steps.select.outputs.ios_on_host }}
       credentials: ${{ steps.select.outputs.credentials }}
@@ -113,7 +114,8 @@ jobs:
     with:
       helpers-checked: true
       credentials: ${{ needs.plan.outputs.credentials_on_host == 'true' }}
-      ios: ${{ needs.plan.outputs.ios_on_host == 'true' }}
+      skip-macos: ${{ needs.plan.outputs.macos_host != 'host' }}
+      ios: ${{ needs.plan.outputs.ios_on_host == 'true' && needs.plan.outputs.macos_host == 'host' }}
       tier: ${{ needs.plan.outputs.tier == 'pr' && 'pr' || 'full' }}
   ios:
     needs: plan
@@ -141,6 +143,8 @@ jobs:
     uses: ./.github/workflows/package-check.yml
     with:
       matrix: ${{ needs.plan.outputs.package_matrix }}
+      macos-host-tier: ${{ needs.plan.outputs.macos_host == 'packages' && (needs.plan.outputs.tier == 'pr' && 'native' || 'full') || '' }}
+      ios: ${{ needs.plan.outputs.ios_on_host == 'true' && needs.plan.outputs.macos_host == 'packages' }}
   windows-package:
     needs: plan
     if: needs.plan.outputs.windows-package == 'true'

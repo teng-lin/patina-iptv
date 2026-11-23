@@ -60,6 +60,23 @@ class Selection(unittest.TestCase):
         self.assertTrue(plan["fuzz"])
         self.assertTrue(plan["stress"])
 
+    def test_macos_host_uses_packaging_only_when_both_checks_are_selected(self):
+        cases = (
+            (["Cargo.lock"], "pr", "packages"),
+            (["hosts/macos/Synthetic.swift"], "pr", "packages"),
+            (["crates/iptv-core/src/guide.rs"], "pr", "host"),
+            (["hosts/android/app/build.gradle.kts"], "pr", "skip"),
+            (["hosts/ios/Synthetic.swift"], "pr", "skip"),
+            (["tools/ci/smoke-macos-dmg.sh"], "pr", "skip"),
+            ([], "full", "packages"),
+            ([], "release", "host"),
+        )
+        for paths, tier, job in cases:
+            with self.subTest(paths=paths, tier=tier):
+                self.assertEqual(v.select(paths, tier)["macos_host"], job)
+        self.assertFalse(v.select(["hosts/ios/Synthetic.swift"])["ios_on_host"])
+        self.assertTrue(v.select(["Cargo.lock"])["ios_on_host"])
+
     def test_ci_helper_change_does_not_build_installers(self):
         plan = v.select(["tools/ci/test-sbom.py"])
         self.assertFalse(plan["host"])
@@ -183,10 +200,14 @@ class Aggregate(unittest.TestCase):
         needs = {lane: {"result": "success" if plan[lane] else "skipped"} for lane in v.LANES}
         needs.update(plan={"result": "success"}, helpers={"result": "success"},
                      candidate={"result": "success" if plan["candidate_build"] else "skipped"})
+        macos_host = plan["macos_host"]
+        if macos_host != "skip":
+            needs[macos_host].setdefault("outputs", {})["macos-host-verified"] = "true"
         for lane, evidence in v.HOST_VERIFICATIONS.items():
             if plan[f"{lane}_on_host"]:
                 needs[lane]["result"] = "skipped"
-                needs["host"].setdefault("outputs", {})[evidence] = "true"
+                job = macos_host if lane == "ios" else "host"
+                needs[job].setdefault("outputs", {})[evidence] = "true"
         return needs
 
     def test_shipping_candidate_builds_are_part_of_the_same_aggregate(self):
@@ -202,6 +223,14 @@ class Aggregate(unittest.TestCase):
 
     def test_successful_selection_and_deliberate_skips_pass(self):
         self.assertEqual(v.gate(self.plan, self.needs), [])
+
+    def test_mac_and_ios_evidence_must_come_from_the_selected_package_runner(self):
+        plan = v.select(["Cargo.lock"])
+        needs = self.successful_needs(plan)
+        self.assertEqual(v.gate(plan, needs), [])
+        needs["host"]["outputs"].update(needs["packages"].pop("outputs"))
+        self.assertIn("macOS host checks did not report success", v.gate(plan, needs))
+        self.assertIn("selected ios: missing successful host verification", v.gate(plan, needs))
 
     def test_host_and_standalone_routing(self):
         cases = (("credentials", "tools/ci/isolated-credentials.py", False),

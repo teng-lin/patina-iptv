@@ -249,6 +249,13 @@ class Plan(unittest.TestCase):
             self.assertFalse(any(step["name"] == "workspace-doctests" for step in full))
             self.assertFalse(any(step["name"] == "native-gtk-lifecycle" for step in full))
 
+    def test_packaged_mac_keeps_the_same_tests_and_reuses_the_app_build(self):
+        for tier in ("native", "full"):
+            with self.subTest(tier=tier):
+                standalone = checks.plan(tier=tier, host="macos")
+                self.assertEqual(standalone[-1]["name"], "app-build")
+                self.assertEqual(checks.plan(tier=tier, host="macos", skip_app_build=True), standalone[:-1])
+
     def test_runner_streams_argv_in_root_and_stops_at_first_failure(self):
         runner = Mock(side_effect=[subprocess.CompletedProcess([], 0), subprocess.CompletedProcess([], 7)])
         steps = [checks.step("first", "generated-tool", "argument with spaces"),
