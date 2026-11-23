@@ -92,13 +92,18 @@ impl ListId {
     /// The entry with this identity in `catalog`: "All channels" when its
     /// group is gone.
     pub fn find(&self, catalog: &dyn Schedule) -> usize {
+        self.resolve(catalog).unwrap_or(ALL)
+    }
+
+    /// Resolves the entry without substituting a different list if it is gone.
+    pub fn resolve(&self, catalog: &dyn Schedule) -> Option<usize> {
         match self {
-            ListId::Favorites => FAVORITES,
-            ListId::Recent => RECENT,
-            ListId::All => ALL,
+            ListId::Favorites => Some(FAVORITES),
+            ListId::Recent => Some(RECENT),
+            ListId::All => Some(ALL),
             ListId::Group(name) => (0..catalog.group_count())
                 .find(|&g| catalog.group_key(g) == *name)
-                .map_or(ALL, |g| Entry::Group(g).index()),
+                .map(|g| Entry::Group(g).index()),
         }
     }
 }
@@ -164,9 +169,23 @@ impl ChannelList {
             Entry::Group(g) if g < catalog.group_count() => catalog.group_channels(g),
             Entry::Group(_) => Vec::new(),
         };
+        let group_favorites = match Entry::at(entry) {
+            Entry::Group(group) if catalog.group_preferences(group).favorites_only => Some(
+                favorites
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::HashSet<_>>(),
+            ),
+            _ => None,
+        };
         let channels: Vec<usize> = channels
             .into_iter()
-            .filter(|&c| !catalog.channel_hidden(c))
+            .filter(|c| {
+                !catalog.channel_hidden(*c)
+                    && group_favorites
+                        .as_ref()
+                        .is_none_or(|favorites| favorites.contains(c))
+            })
             .collect();
         let first_listing = channels
             .iter()

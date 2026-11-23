@@ -287,6 +287,7 @@ pub(super) async fn show(
         resume: can_resume,
         ..
     } = *imported;
+    let mut organization_revision = organization::revision(owner);
     let mut schedule = organization::build(owner, source, groups, channels, guide, now).await;
     if !current() {
         return;
@@ -322,6 +323,12 @@ pub(super) async fn show(
         Some(h) => schedule.held_only(h.from, h.to).held_channels(h.keys),
         None => pages::paged(owner, schedule, source, now).await,
     };
+    while current() && organization::revision(owner) != organization_revision {
+        organization_revision = organization::revision(owner);
+        if let Some(replacement) = organization::apply(owner, &schedule, source).await {
+            schedule = replacement;
+        }
+    }
     if !current() {
         return;
     }

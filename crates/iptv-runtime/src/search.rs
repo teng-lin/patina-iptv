@@ -247,6 +247,16 @@ impl crate::Runtime {
                         options.catchup_days.map_or(0, |window| window(current))
                     })
                 };
+                let offsets: Vec<_> = resolved
+                    .iter()
+                    .map(|row| {
+                        row.and_then(|channel| iptv_guide::combined::epg_channel(schedule, channel))
+                            .map_or(0, |(epg, channel)| {
+                                i64::from(epg.epg_offset_minutes(channel)) * 60
+                            })
+                    })
+                    .collect();
+                let time_offset = |row: usize| offsets[row];
                 let favorites = resolved
                     .iter()
                     .enumerate()
@@ -264,6 +274,7 @@ impl crate::Runtime {
                     iptv_search::ProgramSearchOptions {
                         visible: Some(&visible),
                         catchup_days: Some(&days),
+                        time_offset: Some(&time_offset),
                         favorites: Some(&favorites),
                         ..options
                     },

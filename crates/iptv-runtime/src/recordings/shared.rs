@@ -433,7 +433,7 @@ impl Runtime {
         }
         let mut data = self.recordings.lock();
         let input = data.shared_for(source.0, channel);
-        if !data.active.is_empty()
+        if (!data.active.is_empty() || data.external_viewer.is_some())
             && !data.capacity_with(
                 source.0,
                 Some(surface),

@@ -220,23 +220,33 @@ fn clock(at: Option<i64>) -> Clock {
 }
 
 /// Identity and UTC survive a catalog reorder or a different guide epoch.
-struct PendingArchive {
+pub(crate) struct PendingArchive {
     key: String,
     at: i64,
     offset: i32,
     authority: Option<iptv_guide::playback::ResolutionAuthority>,
+    guide_offset: i32,
 }
 impl PendingArchive {
-    fn capture(schedule: &dyn Schedule, channel: usize, start: i32, offset: i32) -> Option<Self> {
+    pub(crate) fn capture(
+        schedule: &dyn Schedule,
+        channel: usize,
+        start: i32,
+        offset: i32,
+    ) -> Option<Self> {
         Some(Self {
             key: schedule.channel_key(channel)?,
             at: crate::guide::unix_of(schedule, start),
             offset,
             authority: resolution_authority(schedule, channel),
+            guide_offset: guide_offset(schedule, channel),
         })
     }
-    fn remap(&self, schedule: &dyn Schedule) -> Option<(usize, Playback)> {
+    pub(crate) fn remap(&self, schedule: &dyn Schedule) -> Option<(usize, Playback)> {
         let channel = schedule.find_channel(&self.key)?;
+        if guide_offset(schedule, channel) != self.guide_offset {
+            return None;
+        }
         let authority = resolution_authority(schedule, channel);
         match (&self.authority, &authority) {
             (Some(before), Some(after))
@@ -258,6 +268,27 @@ impl PendingArchive {
                 offset: self.offset,
             },
         ))
+    }
+}
+
+pub(crate) fn guide_offset(schedule: &dyn Schedule, channel: usize) -> i32 {
+    iptv_guide::combined::epg_channel(schedule, channel)
+        .map_or(0, |(epg, channel)| epg.epg_offset_minutes(channel))
+}
+
+/// Old archive start positions cannot address a different listing after a
+/// clock correction, including on seek and health retries.
+pub(crate) fn stop_archive_after_clock_edit(ui: Ui, before: &dyn Schedule, after: &dyn Schedule) {
+    if !matches!(ui.playback.get_untracked(), Playback::CatchUp { .. }) {
+        return;
+    }
+    let Some(key) = ui.player.main().key.get_untracked() else {
+        return;
+    };
+    if let (Some(old), Some(new)) = (before.find_channel(&key), after.find_channel(&key))
+        && guide_offset(before, old) != guide_offset(after, new)
+    {
+        crate::player_keys::stopped(ui);
     }
 }
 
@@ -425,12 +456,25 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
 
 /// Nothing plays: the player closes.
 pub fn stop(ui: Ui) {
+    stop_current(ui, None);
+}
+
+pub(crate) fn stop_for_handoff(ui: Ui, target: &iptv_core::parental::Target) {
+    stop_current(ui, Some(target));
+}
+
+fn stop_current(ui: Ui, handoff: Option<&iptv_core::parental::Target>) {
+    crate::seek::cancel(ui);
     ui.player.resume.set(false);
     ui.player.early.set(None);
     ui.pending_zap.set(None);
     ui.browse_playback.set(Default::default());
     crate::on_demand::flush(ui, false);
-    crate::runtime().parental_content_closed();
+    if let Some(target) = handoff {
+        crate::runtime().parental_content_transferred(target);
+    } else {
+        crate::runtime().parental_content_closed();
+    }
     ui.player.vod.set(None);
     ui.player.recorded.set(None);
     crate::runtime().close_recording_playback();
@@ -438,6 +482,7 @@ pub fn stop(ui: Ui) {
 }
 
 pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource) {
+    crate::seek::cancel(ui);
     crate::vod_view::flush(ui);
     ui.player.vod.set(None);
     crate::multiview::close(ui);
@@ -471,6 +516,7 @@ pub fn play_vod(
     full_screen: bool,
 ) {
     crate::interruption::viewer_acted(ui);
+    crate::seek::cancel(ui);
     crate::on_demand::flush(ui, false);
     let resume = playing.progress.resume_ms();
     crate::multiview::close(ui);
@@ -1414,5 +1460,26 @@ mod pending_archive_regressions {
         assert!(pending.remap(&recreated).is_none());
         let removed = iptv_core::guide::SyntheticSchedule;
         assert!(pending.remap(&removed).is_none());
+    }
+
+    #[test]
+    fn pending_catchup_expires_after_a_guide_time_correction() {
+        use iptv_core::organization::GroupPreferences;
+
+        let schedule = guide(false, 1_800_000_000, "generated-original");
+        let pending = PendingArchive::capture(&schedule, 0, -60, 0).unwrap();
+        schedule.set_organization(iptv_guide::Organization {
+            group_preferences: [(
+                "__other__".into(),
+                GroupPreferences {
+                    epg_offset_minutes: 30,
+                    ..GroupPreferences::default()
+                },
+            )]
+            .into(),
+            ..iptv_guide::Organization::default()
+        });
+        assert_eq!(guide_offset(&schedule, 0), 30);
+        assert!(pending.remap(&schedule).is_none());
     }
 }

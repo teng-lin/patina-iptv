@@ -171,10 +171,18 @@ fn run(ui: Ui) {
     let mut effect = None;
     ui.browse_playback.update(|b| effect = b.tick(ui.now_ms()));
     match effect {
-        Some(Effect::Tune { target, fullscreen }) => {
+        Some(Effect::Tune {
+            target,
+            fullscreen,
+            chosen,
+        }) => {
             if let Some(channel) = crate::favorites::channel_of(&target.key)
                 && crate::player::allow_guide_channel(channel)
             {
+                if chosen && crate::external_player::maybe_open(ui, channel, None) {
+                    ui.pending_zap.set(None);
+                    return;
+                }
                 if !playing_live(ui, channel) {
                     let state = ui.browse_playback.get_untracked();
                     ui.play(channel, Playback::Live);

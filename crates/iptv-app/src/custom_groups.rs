@@ -132,7 +132,15 @@ fn mutate<R: Send + 'static>(
         }
     });
 }
-pub fn open(ui: Ui, source: SourceId, browse: bool) {
+pub fn open(ui: Ui, source: SourceId) {
+    open_with(ui, source, None);
+}
+
+pub fn open_copy(ui: Ui, source: SourceId, scope: ChannelScope) {
+    open_with(ui, source, Some(scope));
+}
+
+fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
     if !crate::runtime().parental_settings_allowed()
         && crate::runtime().parental_blocked_targets().iter().any(|t| {
             t.source == source.0
@@ -140,7 +148,7 @@ pub fn open(ui: Ui, source: SourceId, browse: bool) {
                 && t.id.starts_with("custom:")
         })
     {
-        crate::parental_view::protected_settings(ui, move || open(ui, source, browse));
+        crate::parental_view::protected_settings(ui, move || open_with(ui, source, members));
         return;
     }
     advance();
@@ -160,8 +168,8 @@ pub fn open(ui: Ui, source: SourceId, browse: bool) {
         move |ui, result| match result {
             Ok(groups) => {
                 update(ui, |s| s.reload_groups(groups));
-                if browse {
-                    show_members(ui, ChannelScope::All);
+                if let Some(scope) = members {
+                    show_members(ui, scope);
                 }
             }
             Err(error) => {

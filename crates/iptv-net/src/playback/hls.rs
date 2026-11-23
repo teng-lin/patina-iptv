@@ -17,12 +17,28 @@
 //!   regular expression, so only quoted values, and also inside what the
 //!   others read as another attribute's value.
 
+use std::{borrow::Cow, collections::HashMap, time::Duration};
+
 use reqwest::Url;
 
-use super::{MAX_MANIFEST, invalid, resolve};
+use super::{MAX_MANIFEST, MAX_OPAQUE_URL, decimal, invalid, resolve};
 use crate::FetchError;
 
 pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u8>, FetchError> {
+    rewrite_with(body, None, |value, key, _| {
+        if key {
+            resolve(&format!("{prefix}key/"), base, value)
+        } else {
+            resolve(prefix, base, value)
+        }
+    })
+}
+
+pub(super) fn rewrite_with(
+    body: &[u8],
+    external: Option<&Url>,
+    mut map: impl FnMut(&str, bool, bool) -> Result<String, FetchError>,
+) -> Result<Vec<u8>, FetchError> {
     let text = std::str::from_utf8(body).map_err(|_| invalid("Invalid manifest text"))?;
     // FFmpeg ends a line at a NUL byte: what follows one in a tag line
     // would be a URI line to it, and part of the tag here.
@@ -30,6 +46,8 @@ pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u
         return Err(invalid("Invalid manifest text"));
     }
     let mut out = String::new();
+    let mut variables = HashMap::new();
+    let mut variant_uri = false;
     // A lone carriage return ends a line too. Some players read lines that
     // way (Java's `readLine`, behind the Android player; FFmpeg): a URI
     // hidden after a CR inside a tag line would pass here as part of the
@@ -37,12 +55,44 @@ pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u
     // its checks.
     for line in text.lines().flat_map(|line| line.split('\r')) {
         let line = line.trim();
-        if line.is_empty() {
+        if let Some(base) = external {
+            if let Some(definition) = line.strip_prefix("#EXT-X-DEFINE:") {
+                define(&mut variables, definition, base)?;
+                continue;
+            }
+            if line.starts_with('#')
+                && (!line.starts_with("#EXT")
+                    || line.starts_with("#EXT-X-SESSION-DATA:")
+                    || line.starts_with("#EXT-X-DATERANGE:")
+                    // The external relay cannot rewrite Steering Manifests.
+                    || line.starts_with("#EXT-X-CONTENT-STEERING:"))
+            {
+                continue;
+            }
+        }
+        let mut map_uri = |value: &str, key, playlist| {
+            let value = if external.is_some() {
+                expand_uri(value, &variables)?
+            } else {
+                Cow::Borrowed(value)
+            };
+            map(&value, key, playlist)
+        };
+        if line.starts_with("#EXT-X-STREAM-INF:") {
+            variant_uri = true;
+        }
+        if external.is_some() && line.starts_with("#EXTINF:") {
+            out.push_str(line.split_once(',').map_or(line, |(duration, _)| duration));
+            out.push(',');
+        } else if line.is_empty() {
         } else if !line.starts_with('#') {
-            out.push_str(&resolve(prefix, base, line)?);
+            out.push_str(&map_uri(line, false, std::mem::take(&mut variant_uri))?);
         } else if names_a_uri(line) {
-            rewrite_tag(line, base, prefix, &mut out)?;
+            rewrite_tag(line, external.is_some(), &mut map_uri, &mut out)?;
         } else {
+            if external.is_some() && line.contains("{$") {
+                return Err(invalid("Unsupported HLS variable reference"));
+            }
             out.push_str(line);
         }
         out.push('\n');
@@ -51,6 +101,165 @@ pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u
         }
     }
     Ok(out.into_bytes())
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MediaWindow {
+    pub sequence: u64,
+    pub first_listed_sequence: u64,
+    pub last_sequence: u64,
+    pub availability: Duration,
+}
+
+impl MediaWindow {
+    pub fn skips_segments(self) -> bool {
+        self.first_listed_sequence > self.sequence
+    }
+
+    pub fn carries(self, prior: Self) -> bool {
+        self.skips_segments()
+            && prior.last_sequence >= self.sequence
+            && prior.sequence < self.first_listed_sequence
+    }
+}
+
+/// Delta updates omit segments that may still be in the sliding window.
+pub(super) fn media_window(body: &[u8]) -> Option<MediaWindow> {
+    let text = std::str::from_utf8(body).ok()?;
+    let mut sequence = 0;
+    let mut target = None;
+    let mut skipped = 0;
+    let mut segments = 0u64;
+    let mut duration = 0.0;
+    for line in text
+        .lines()
+        .flat_map(|line| line.split('\r'))
+        .map(str::trim)
+    {
+        if line == "#EXT-X-ENDLIST" || line.starts_with("#EXT-X-PLAYLIST-TYPE:") {
+            return None;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:") {
+            sequence = decimal(value)?;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
+            target = Some(decimal(value)? as f64);
+        } else if let Some(value) = line.strip_prefix("#EXTINF:") {
+            let seconds: f64 = value.split(',').next()?.parse().ok()?;
+            if !seconds.is_finite() || seconds < 0.0 {
+                return None;
+            }
+            duration += seconds;
+            segments += 1;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-SKIP:") {
+            let attrs = attributes(value).ok()?;
+            let count = attrs.iter().find(|attr| attr.name == "SKIPPED-SEGMENTS")?;
+            skipped = decimal(count.value)?;
+        }
+    }
+    // The extra second bounds rounded segment durations. Two target
+    // durations account for a retiring segment and any trailing parts.
+    let target = target? + 1.0;
+    let seconds = duration + (skipped as f64 + 2.0) * target;
+    let first_listed_sequence = sequence.checked_add(skipped)?;
+    Some(MediaWindow {
+        sequence,
+        first_listed_sequence,
+        // Include the next sequence for parts and preload hints.
+        last_sequence: first_listed_sequence.checked_add(segments)?,
+        availability: Duration::try_from_secs_f64(seconds.max(60.0)).ok()?,
+    })
+}
+
+/// Definitions exist only inside this rewrite, so even query-derived values
+/// are never sent to the player. IMPORT needs an unambiguous parent context,
+/// which a URL shared across different playlists does not provide.
+fn define<'a>(
+    variables: &mut HashMap<&'a str, Cow<'a, str>>,
+    definition: &'a str,
+    base: &Url,
+) -> Result<(), FetchError> {
+    let attrs = attributes(definition)?;
+    let (name, value) = match attrs.as_slice() {
+        [
+            Attribute {
+                name: "NAME",
+                value: name,
+                quoted: true,
+            },
+            Attribute {
+                name: "VALUE",
+                value,
+                quoted: true,
+            },
+        ]
+        | [
+            Attribute {
+                name: "VALUE",
+                value,
+                quoted: true,
+            },
+            Attribute {
+                name: "NAME",
+                value: name,
+                quoted: true,
+            },
+        ] => (*name, Cow::Borrowed(*value)),
+        [
+            Attribute {
+                name: "QUERYPARAM",
+                value: name,
+                quoted: true,
+            },
+        ] => {
+            // HLS percent-decodes the query value. Preserve literal plus signs.
+            let query = base.query().unwrap_or_default().replace('+', "%2B");
+            let value = url::form_urlencoded::parse(query.as_bytes())
+                .find_map(|(key, value)| (key == *name).then(|| value.into_owned()))
+                .ok_or_else(|| invalid("Missing HLS query variable"))?;
+            (*name, Cow::Owned(value))
+        }
+        _ => return Err(invalid("Unsupported HLS variable definition")),
+    };
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        || value.len() > MAX_OPAQUE_URL
+        || value.contains(['"', '\0', '\r', '\n'])
+        || variables.insert(name, value).is_some()
+    {
+        return Err(invalid("Invalid HLS variable definition"));
+    }
+    Ok(())
+}
+
+fn expand_uri<'a>(
+    value: &'a str,
+    variables: &HashMap<&str, Cow<'_, str>>,
+) -> Result<Cow<'a, str>, FetchError> {
+    if !value.contains("{$") {
+        return Ok(Cow::Borrowed(value));
+    }
+    let mut remaining = value;
+    let mut expanded = String::new();
+    while let Some((prefix, reference)) = remaining.split_once("{$") {
+        let (name, tail) = reference
+            .split_once('}')
+            .ok_or_else(|| invalid("Invalid HLS variable reference"))?;
+        let replacement = variables
+            .get(name)
+            .ok_or_else(|| invalid("Undefined HLS variable reference"))?;
+        if expanded.len() + prefix.len() + replacement.len() > MAX_OPAQUE_URL {
+            return Err(invalid("Playback link exceeds limit"));
+        }
+        expanded.push_str(prefix);
+        expanded.push_str(replacement);
+        remaining = tail;
+    }
+    if expanded.len() + remaining.len() > MAX_OPAQUE_URL {
+        return Err(invalid("Playback link exceeds limit"));
+    }
+    expanded.push_str(remaining);
+    Ok(Cow::Owned(expanded))
 }
 
 /// Whether some reader could find a URI attribute in this tag line: all of
@@ -160,7 +369,12 @@ fn swallows_its_quote(value: &str) -> bool {
 /// Writes the tag `line` with every URI attribute on the relay: quoted,
 /// whether it came quoted or not, and all of them when one is repeated
 /// (players differ in which they take).
-fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result<(), FetchError> {
+fn rewrite_tag(
+    line: &str,
+    external: bool,
+    map: &mut impl FnMut(&str, bool, bool) -> Result<String, FetchError>,
+    out: &mut String,
+) -> Result<(), FetchError> {
     let (tag, list) = line.split_once(':').ok_or_else(malformed)?;
     let name = &tag[1..];
     if name.is_empty()
@@ -171,13 +385,14 @@ fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result
         return Err(malformed());
     }
     // HLS key URIs are opaque bytes: the relay serves them as they come.
-    let key_prefix;
-    let resource_prefix = if matches!(name, "EXT-X-KEY" | "EXT-X-SESSION-KEY") {
-        key_prefix = format!("{prefix}key/");
-        key_prefix.as_str()
-    } else {
-        prefix
-    };
+    let key = matches!(name, "EXT-X-KEY" | "EXT-X-SESSION-KEY");
+    let playlist = matches!(
+        name,
+        "EXT-X-MEDIA"
+            | "EXT-X-I-FRAME-STREAM-INF"
+            | "EXT-X-IMAGE-STREAM-INF"
+            | "EXT-X-RENDITION-REPORT"
+    );
     out.push_str(tag);
     out.push(':');
     for (index, attribute) in attributes(list)?.iter().enumerate() {
@@ -189,7 +404,7 @@ fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result
         if attribute.is_uri() {
             // A URL holds a backslash only in its query, where `%5C` means
             // the same; in the quotes it would be FFmpeg's escape.
-            let target = resolve(resource_prefix, base, attribute.value)?.replace('\\', "%5C");
+            let target = map(attribute.value, key, playlist)?.replace('\\', "%5C");
             // Media3 searches for uppercase `URI="` even inside values.
             // If it ignores this mixed-case name, a trailing `URI=` plus
             // our closing quote must not become its first URI match.
@@ -202,6 +417,8 @@ fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result
             out.push('"');
             out.push_str(&target);
             out.push('"');
+        } else if external && attribute.value.contains("{$") {
+            return Err(invalid("Unsupported HLS variable reference"));
         } else if attribute.quoted {
             // `…URI="` at the end of another attribute's value is where
             // Media3's search would start reading a URI.
@@ -250,6 +467,111 @@ mod tests {
     }
 
     const ON_RELAY: &str = "http://127.0.0.1:1/cap/http://synthetic.example.test/live/";
+
+    #[test]
+    fn external_variables_are_resolved_only_inside_opaque_uris() {
+        let base = base().join("?token=generated%2Bvalue+other").unwrap();
+        let body = concat!(
+            "#EXTM3U\n",
+            "#EXT-X-DEFINE:NAME=\"dir\",VALUE=\"media\"\n",
+            "#EXT-X-DEFINE:QUERYPARAM=\"token\"\n",
+            "#EXT-X-KEY:METHOD=AES-128,URI=\"{$dir}/key?token={$token}\"\n",
+            "{$dir}/segment.ts?token={$token}\n",
+        );
+        let mut mapped = Vec::new();
+        let rewritten = rewrite_with(body.as_bytes(), Some(&base), |uri, key, _| {
+            mapped.push((uri.to_owned(), key));
+            Ok(format!("http://127.0.0.1:1/cap/{}", mapped.len()))
+        })
+        .unwrap();
+        assert_eq!(
+            mapped,
+            [
+                ("media/key?token=generated+value+other".to_owned(), true),
+                (
+                    "media/segment.ts?token=generated+value+other".to_owned(),
+                    false
+                ),
+            ],
+        );
+        let rewritten = String::from_utf8(rewritten).unwrap();
+        assert!(!rewritten.contains("generated"));
+        assert!(!rewritten.contains("EXT-X-DEFINE"));
+    }
+
+    #[test]
+    fn external_variables_fail_closed_when_no_safe_substitution_exists() {
+        for playlist in [
+            "#EXTM3U\n{$missing}/segment.ts\n",
+            "#EXTM3U\n#EXT-X-DEFINE:IMPORT=\"parent\"\n{$parent}/segment.ts\n",
+            "#EXTM3U\n#EXT-X-DEFINE:QUERYPARAM=\"missing\"\n{$missing}/segment.ts\n",
+            "#EXTM3U\n#EXT-X-DEFINE:NAME=\"name\",VALUE=\"audio\"\n#EXT-X-STREAM-INF:BANDWIDTH=100,AUDIO=\"{$name}\"\nvariant\n",
+        ] {
+            assert!(
+                rewrite_with(playlist.as_bytes(), Some(&base()), |_, _, _| {
+                    panic!("an unsupported playlist must fail before publishing a URL")
+                })
+                .is_err(),
+                "{playlist}",
+            );
+        }
+    }
+
+    #[test]
+    fn external_playlists_omit_steering_but_keep_the_listed_variant() {
+        let playlist = concat!(
+            "#EXTM3U\n",
+            "#EXT-X-CONTENT-STEERING:SERVER-URI=\"steer.json\",PATHWAY-ID=\"a\"\n",
+            "#EXT-X-STREAM-INF:BANDWIDTH=100,PATHWAY-ID=\"a\"\nvariant\n",
+        );
+        let external = rewrite_with(playlist.as_bytes(), Some(&base()), |value, key, variant| {
+            assert_eq!(value, "variant");
+            assert!(variant);
+            assert!(!key);
+            Ok("opaque-variant".into())
+        })
+        .unwrap();
+        assert_eq!(
+            external,
+            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=100,PATHWAY-ID=\"a\"\nopaque-variant\n"
+        );
+        let native = rewrite_hls(playlist.as_bytes(), &base(), PREFIX).unwrap();
+        assert!(String::from_utf8(native).unwrap().contains(&format!(
+            "#EXT-X-CONTENT-STEERING:SERVER-URI=\"{ON_RELAY}steer.json\""
+        )));
+    }
+
+    #[test]
+    fn media_windows_include_delta_skips_and_bound_route_retention() {
+        let playlist = concat!(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:60\n#EXT-X-MEDIA-SEQUENCE:50\n",
+            "#EXTINF:59.5,\na.ts\n#EXTINF:56,\nb.ts\n",
+        );
+        let full = media_window(playlist.as_bytes()).unwrap();
+        assert!(!full.skips_segments());
+        assert_eq!(full.sequence, 50);
+        assert_eq!(full.first_listed_sequence, 50);
+        assert_eq!(full.last_sequence, 52);
+        assert!(full.availability >= Duration::from_secs_f64(115.5 + 60.0));
+        let delta = format!("{playlist}#EXT-X-SKIP:SKIPPED-SEGMENTS=2\n");
+        let delta = media_window(delta.as_bytes()).unwrap();
+        assert!(delta.skips_segments());
+        assert_eq!(delta.first_listed_sequence, 52);
+        assert_eq!(delta.last_sequence, 54);
+        assert!(delta.availability >= full.availability);
+        let finished = format!("{playlist}#EXT-X-ENDLIST\n");
+        assert!(media_window(finished.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn media_window_defaults_missing_sequence_to_zero() {
+        let playlist = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nfirst.ts\n";
+        let window = media_window(playlist.as_bytes()).unwrap();
+        assert_eq!(window.sequence, 0);
+        assert_eq!(window.last_sequence, 1);
+        let invalid = format!("{playlist}#EXT-X-MEDIA-SEQUENCE:bad\n");
+        assert!(media_window(invalid.as_bytes()).is_none());
+    }
 
     #[test]
     fn a_quoted_uri_is_rewritten_and_the_other_attributes_kept() {

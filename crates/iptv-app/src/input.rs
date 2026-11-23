@@ -122,6 +122,7 @@ fn capture(ui: Ui) -> Option<Capture> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InputOwner {
     Overlay(crate::overlays::Overlay),
+    ChannelList(iptv_presentation::channel_list::ListPane),
     Multiview,
     PlayBar,
     Card,
@@ -134,7 +135,13 @@ type Surface = (Context, InputOwner);
 
 fn surface(ui: &Ui) -> Surface {
     let owner = if let Some(overlay) = ui.top_overlay() {
-        InputOwner::Overlay(overlay)
+        if overlay == crate::overlays::Overlay::ChannelList {
+            ui.channels
+                .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
+                .unwrap_or(InputOwner::Overlay(overlay))
+        } else {
+            InputOwner::Overlay(overlay)
+        }
     } else if crate::multiview::is_open(*ui) {
         InputOwner::Multiview
     } else if ui.mode.get() == ViewMode::Fullscreen {
@@ -651,6 +658,18 @@ fn resolve(
             press,
             context: (ctx, _),
         } => {
+            if ctx == Context::Menu
+                && ui.menu.with(|menu| {
+                    menu.as_ref()
+                        .is_some_and(|menu| menu.group_offset.is_some())
+                })
+            {
+                match key {
+                    RemoteKey::Left => return Some((key, press, Action::MoveLeft)),
+                    RemoteKey::Right => return Some((key, press, Action::MoveRight)),
+                    _ => {}
+                }
+            }
             let action = keymap.resolve(ctx, key, press);
             let action = if crate::remote_editor::overridden(ctx, key) {
                 action
@@ -734,6 +753,13 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
                 && context(&ui) == Context::Guide))
     {
         return;
+    }
+    if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {
+        crate::player_keys::stop_playback(ui);
+        return;
+    }
+    if action != Action::Ignore {
+        crate::external_player::cancel_pending(ui);
     }
     if ui.player_surface != 0 {
         match action {
@@ -873,6 +899,11 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             Action::MoveDown => ui
                 .menu
                 .update(|m| m.as_mut().into_iter().for_each(|m| m.move_focus(1))),
+            Action::MoveLeft | Action::MoveRight => ui.menu.update(|menu| {
+                if let Some(menu) = menu {
+                    menu.step_group_offset(if action == Action::MoveLeft { -1 } else { 1 });
+                }
+            }),
             Action::Select => {
                 if let Some(item) = ui.menu.with(|m| m.as_ref().and_then(|m| m.focused())) {
                     crate::menu_view::perform(ui, item);
@@ -888,7 +919,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::ChannelList) {
-        crate::channels_view::key(ui, action);
+        crate::channels_view::key(ui, key, action);
         return;
     }
     if top == Some(Overlay::Search) {
@@ -942,9 +973,11 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            if (key == RemoteKey::Menu && entry == iptv_presentation::lists::ALL)
+            let combined = crate::data::combined::active(&crate::runtime());
+            if (key == RemoteKey::Menu && !combined && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
-                    && ui.app.library.shown.get_untracked().is_none())
+                    && ui.app.library.shown.get_untracked().is_none()
+                    && !combined)
             {
                 crate::wizard_view::open_add(ui);
             }
@@ -1003,6 +1036,45 @@ pub(crate) fn synthetic_enter(ui: Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[component]
+    fn PendingHandoff() -> impl IntoElement {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = Rc::new(crate::new_runtime(directory.path().to_owned()));
+        let ui = crate::with_runtime(runtime, || {
+            Ui::new(crate::SharedUi::new(), crate::player::Player::new())
+        });
+        crate::external_player::cancel_pending(ui);
+        view()
+            .child(text(move || {
+                format!("Request {}", ui.external_request.get())
+            }))
+            .child(
+                view()
+                    .label("Repeat select")
+                    .h(px(40.0))
+                    .on_press(move || apply(ui, RemoteKey::Red, Action::Select, true)),
+            )
+            .child(
+                view()
+                    .label("Unrelated touch")
+                    .h(px(40.0))
+                    .on_press(move || ui.touched()),
+            )
+    }
+
+    #[test]
+    fn ignored_select_repeat_keeps_the_external_handoff_pending() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<PendingHandoff>(),
+        ))
+        .unwrap();
+        app.wait_for("text:Request 1").unwrap();
+        app.press("label:Repeat select").unwrap();
+        assert!(app.screen().matches("text:Request 1").unwrap());
+        app.press("label:Unrelated touch").unwrap();
+        app.wait_for("text:Request 2").unwrap();
+    }
 
     #[test]
     fn keyboard_menu_and_ok_fire_once_while_held_and_moves_repeat() {

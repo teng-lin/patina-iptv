@@ -103,12 +103,8 @@ fn follow_lists(local: Ui) {
                 local.menu.set(None);
                 local.description.set(None);
                 local.chooser.set(None);
-            } else if matches!(
-                iptv_presentation::lists::Entry::at(local.focus.with_untracked(|f| f.group)),
-                iptv_presentation::lists::Entry::Favorites
-                    | iptv_presentation::lists::Entry::Recent
-            ) {
-                crate::lists::rebuild(local, true);
+            } else {
+                crate::lists::favorites_changed(local);
             }
         });
     });

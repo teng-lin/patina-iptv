@@ -52,6 +52,7 @@ fn every_public_command_returns_its_declared_application_value() {
     check!(organization_editor(source, scope(), Vec::new(), None) => commands::OrganizationItems);
     check!(guide_blocks(source) => Blocks);
     check!(guide_channel_blocked(source, "generated-channel".into()) => bool);
+    check!(set_group_preference(source, "generated-group".into(), iptv_core::organization::GroupPreference::FavoritesOnly(true)) => ());
     check!(set_guide_block(source, BlockKind::Channel, "generated-channel".into(), true) => ());
     check!(set_organization_sort(source, scope(), Sort::Name) => ());
     check!(save_organization_order(source, scope(), Vec::new(), Vec::new(), iptv_core::organization::Sort::Manual, false) => ());

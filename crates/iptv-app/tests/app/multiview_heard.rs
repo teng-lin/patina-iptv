@@ -410,7 +410,7 @@ fn with_the_sound_following_the_selected_tile_focus_moves_it_and_hand_back_holds
     badges(app, 2, 3);
 }
 
-// Player windows ("Watch in new window") exist on Linux and macOS only.
+// Player windows ("Open in new window") exist on Linux and macOS only.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn one_of_the_main_player_and_its_windows_is_heard_and_each_shows_it() {
@@ -423,8 +423,8 @@ fn one_of_the_main_player_and_its_windows_is_heard_and_each_shows_it() {
     // Two player windows: neither takes the sound.
     for n in [5, 6] {
         step(app.right_click(&format!("id:guide-ui >> text:{}", channel(n))));
-        step(app.wait_for("id:menu-panel >> text:Watch in new window"));
-        step(app.press("id:menu-panel >> text:Watch in new window"));
+        step(app.wait_for("id:menu-panel >> text:Open in new window"));
+        step(app.press("id:menu-panel >> text:Open in new window"));
     }
     step(
         app.wait_until("both windows play", Duration::from_secs(5), |_| {

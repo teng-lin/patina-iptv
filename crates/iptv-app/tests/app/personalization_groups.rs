@@ -3,6 +3,78 @@ use iptv_settings::Settings;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope};
 use personalization::*;
 use std::time::Duration;
+
+#[test]
+fn copy_channels_from_the_guide_is_scoped_to_its_group() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, Settings::new(), false);
+    let app = &mut f.app;
+    group(app, "News");
+    menu(app, "Copy channels to a group…");
+    step(app.wait_for("text:0 selected · 2 matching · 2 total"));
+    assert!(!app.shows("id:custom-groups-screen >> text:Local C"));
+}
+
+#[test]
+fn guide_group_rename_requires_a_custom_name_and_can_restore_a_provider_name() {
+    let Some(home) = isolated!() else { return };
+    let mut f = launch_prepared(
+        home,
+        Settings::new(),
+        false,
+        |path, source| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .create_custom_group(source, "Generated custom")
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut f.app;
+    step(app.set_environment("desktop", |env| {
+        env.os = nsh_core::platform::Os::Linux;
+        env.idiom = nsh_core::platform::Idiom::Desktop;
+    }));
+    step(app.press("text:/^☰  /"));
+    step(app.right_click("id:guide-groups >> text:Generated custom"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:Generated custom"));
+    step(app.submit("text:Enter text"));
+    step(app.wait_for("id:app-notice >> text:Enter a group name."));
+    assert!(app.screen().matches("text:Display name").unwrap());
+
+    step(app.type_text("text:Enter text", "   "));
+    step(app.press("id:organization-name-sheet >> text:Done"));
+    assert!(app.screen().matches("text:Display name").unwrap());
+    let groups = crate::isolated::open_database(&f.path)
+        .unwrap()
+        .custom_groups(f.source)
+        .unwrap();
+    assert_eq!(groups[0].name, "Generated custom");
+    step(app.clear("text:/^ {3}$/"));
+    step(app.type_text("text:Enter text", "Custom renamed"));
+    step(app.submit("text:Custom renamed"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+
+    step(app.right_click("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:News"));
+    step(app.type_text("text:Empty restores the provider name", "Generated news"));
+    step(app.submit("text:Generated news"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.right_click("id:guide-groups >> text:Generated news"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:Generated news"));
+    step(app.submit("text:Empty restores the provider name"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.wait_for("id:guide-groups >> text:News"));
+    step(app.wait_for("id:guide-groups >> text:Custom renamed"));
+}
+
 #[test]
 fn custom_groups_filter_select_copy_move_rename_delete_and_restore_focus() {
     let Some(home) = isolated!() else { return };
@@ -270,8 +342,19 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
     step(app.press_key("tab"));
     step(app.wait_for("id:guide-groups >> text:News"));
     step(app.press_key("shift+f10"));
-    step(app.wait_for("id:menu-panel >> text:Group order"));
+    step(app.wait_for("id:menu-panel >> text:Manage groups"));
     step(app.back());
+    step(app.right_click("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:News"));
+    step(app.type_text("text:Empty restores the provider name", "Generated news"));
+    step(app.submit("text:Generated news"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.wait_for("id:guide-groups >> text:Generated news"));
+    step(app.right_click("id:guide-groups >> text:Generated news"));
+    step(app.press("id:menu-panel >> text:Restore group name"));
+    step(app.wait_for("id:guide-groups >> text:News"));
     step(app.right_click("id:guide-groups >> text:News"));
     step(app.wait_for("id:menu-panel >> text:Hide group"));
     step(app.press("text:Block group"));
@@ -297,6 +380,9 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
 
     step(app.press_key("tab"));
     step(app.right_click("id:guide-groups >> text:Sport"));
+    step(app.press("id:menu-panel >> text:Manage groups"));
+    step(app.wait_for("id:organization-row-1 >> text:Sport"));
+    step(app.press("id:organization-row-1"));
     step(app.press("text:Reorder groups"));
     step(app.wait_for("id:organization-row-1 >> text:Sport"));
     step(app.press_key("enter"));
@@ -340,4 +426,43 @@ fn a_repeated_notice_keeps_its_full_time_after_the_earlier_one_expires() {
     assert!(app.shows("Content blocked"), "{:?}", app.screen().texts());
     step(app.run_for(SHOWN));
     assert!(!app.shows("Content blocked"), "{:?}", app.screen().texts());
+}
+
+#[test]
+fn standalone_group_preferences_apply_to_the_selected_group() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    group(app, "News");
+    step(app.long_press("id:guide-row >> text:/Local B/"));
+    step(app.press("id:menu-panel >> text:Remove from favorites"));
+    step(app.wait_for("id:guide-row >> text:Local B"));
+    let news = "id:guide-groups >> text:News";
+    let menu = "id:menu-panel";
+    step(app.press("text:/^☰  /"));
+    step(app.long_press(news));
+    step(app.wait_for("id:menu-panel >> role:header[News]"));
+    assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
+    step(app.press("id:menu-panel >> text:Show favorites only"));
+    step(app.wait_for_gone("id:guide-row >> text:/Local B/", Duration::from_secs(5)));
+    step(app.long_press(news));
+    step(app.press("id:menu-panel >> text:Guide time offset"));
+    step(app.press_key("right"));
+    step(app.wait_for(&format!("{menu} >> text:Guide time offset · +0:15")));
+    step(app.press("id:menu-panel >> text:Save"));
+    step(crate::isolated::wait_outside(
+        app,
+        "group offset saved",
+        Duration::from_secs(5),
+        || {
+            let store = crate::isolated::open_database(&fixture.path).unwrap();
+            let groups = store.groups(fixture.source, None).unwrap();
+            groups.into_iter().any(|group| {
+                group.name == "News"
+                    && store
+                        .guide_group_preferences(fixture.source, group.id.as_str())
+                        .is_ok_and(|prefs| prefs.favorites_only && prefs.epg_offset_minutes == 15)
+            })
+        },
+    ));
 }

@@ -1,7 +1,10 @@
 //! Named library operations. Views send values and await results; only this
 //! module creates database work items.
 use super::store_service::Services;
+use crate::operations::ExternalPlaybackAuthorization;
 use iptv_core::membership::Member;
+use iptv_core::parental::Target;
+use iptv_guide::playback::ResolutionAuthority;
 use iptv_library::{CustomGroupId, SourceId};
 use iptv_providers::ContentId;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope, CustomGroup, Store, StoreError};
@@ -133,7 +136,7 @@ fn channel_native(
     let current = services.clone();
     services.read(move |store| {
         access.access.policy = crate::parental::policy_settings(&current.settings());
-        let target = iptv_core::parental::Target::live(source.0, channel.as_str());
+        let target = Target::live(source.0, channel.as_str());
         if store.guide_channel_blocked(source, channel.as_str())?
             || !crate::parental::native_allowed(store, &target, &access)?
         {
@@ -145,6 +148,50 @@ fn channel_native(
                 channel: row.channel,
                 blocked: row.blocked,
             }))
+    })
+}
+
+pub(crate) fn external_playback_check(
+    store: &Store,
+    authority: &ResolutionAuthority,
+    group: &str,
+    access: crate::parental::Snapshot,
+) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
+    let source = SourceId(authority.source());
+    let channel = &authority.channel().id;
+    let target = Target::live(source.0, channel.as_str());
+    store.read_snapshot(|store| {
+        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
+            return Ok(None);
+        };
+        if !store.source_policy(source)?.enabled
+            || !store
+                .guide_group_preferences(source, group)?
+                .external_player
+            || store.guide_channel_blocked(source, channel.as_str())?
+        {
+            return Ok(None);
+        }
+        let Some(stored) = store.source(source)? else {
+            return Ok(None);
+        };
+        let scope = Kind::group_channels(group);
+        if !store
+            .ordered_guide_channels(source, &scope)?
+            .iter()
+            .any(|row| &row.channel.id == channel)
+        {
+            return Ok(None);
+        }
+        let Some(row) = store.channel(source, channel)? else {
+            return Ok(None);
+        };
+        let allowed = !row.blocked
+            && stored.incarnation == authority.incarnation()
+            && &stored.source.config == authority.config()
+            && &row.channel == authority.channel()
+            && access.playback_current(&target, &grants);
+        Ok(allowed.then(|| ExternalPlaybackAuthorization::new(access, target, grants)))
     })
 }
 
@@ -217,15 +264,27 @@ pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organiz
         .into_iter()
         .map(|r| (r.channel.id.as_str().to_owned(), r.name, r.hidden))
         .collect();
-    let groups = store
-        .guide_groups(source)?
-        .into_iter()
-        .map(|item| (item.id, item.name, item.hidden))
-        .collect();
+    let mut group_preferences = std::collections::HashMap::new();
+    let mut groups = Vec::new();
+    for item in store.guide_groups(source)? {
+        group_preferences.insert(
+            item.id.clone(),
+            store.guide_group_preferences(source, &item.id)?,
+        );
+        groups.push((item.id, item.name, item.hidden));
+    }
+    if !group_preferences.contains_key("__other__") {
+        group_preferences.insert(
+            "__other__".into(),
+            store.guide_group_preferences(source, "__other__")?,
+        );
+    }
     Ok(Organization {
         channels,
         groups,
         blocks: store.guide_blocks(source)?,
+        group_preferences,
+        channel_sort: store.guide_sort(source, &Kind::Channels)?,
     })
 }
 fn edit_organization_native(
@@ -860,6 +919,18 @@ pub async fn organization_editor(
             })
         })
         .await?)
+}
+
+pub fn set_group_preference(
+    owner: &crate::Runtime,
+    source: SourceId,
+    group: String,
+    preference: iptv_core::organization::GroupPreference,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let saved = owner
+        .services()
+        .call(move |store| store.set_guide_group_preference(source, &group, preference));
+    async move { Ok(saved.await?) }
 }
 
 /// Publishes a sort preference on the native writer.

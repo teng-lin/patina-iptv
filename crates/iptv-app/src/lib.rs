@@ -46,6 +46,7 @@ mod custom_groups;
 mod data;
 mod desktop;
 mod epg_sources_view;
+mod external_player;
 mod fav_editor;
 mod favorites;
 mod fonts;
@@ -232,6 +233,9 @@ pub struct Ui {
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
+    pub(crate) external_request: Signal<u64>,
+    pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
+    pub(crate) external_playback: Signal<Option<external_player::Active>>,
     pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
     /// A timeline pan's hold on the channel whose program on air it
     /// started from: browse playback keeps that channel while the pan
@@ -355,6 +359,9 @@ impl Ui {
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
+            external_request: signal(0),
+            external_handoff_target: signal(None),
+            external_playback: signal(None),
             pending_zap: signal(None),
             pan_anchor: signal(None),
             interruptions: signal(Default::default()),
@@ -465,11 +472,14 @@ impl Ui {
         let selection =
             ProgramSelection::for_program(&program, now, view.catchup_days(row), channel, live);
         match selection {
+            ProgramSelection::AlreadyLive if external_player::maybe_open(*self, channel, None) => {}
             ProgramSelection::AlreadyLive => {
                 self.mode.set(ViewMode::Fullscreen);
                 self.show_playing();
             }
             ProgramSelection::Live => browse_playback::select(*self),
+            ProgramSelection::Replay
+                if external_player::maybe_open(*self, channel, Some(program)) => {}
             ProgramSelection::Replay => {
                 if !player::allow_guide_channel(channel) {
                     return;
@@ -499,6 +509,7 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        external_player::cancel_pending(*self);
         if !player::allow_guide_channel(channel) {
             return;
         }
@@ -533,6 +544,7 @@ impl Ui {
         }
         // Accepted: the viewer's playback now (`interruption.rs`).
         crate::interruption::viewer_acted(*self);
+        seek::cancel(*self);
         crate::on_demand::flush(*self, false);
         self.player.vod.set(None);
         self.player.recorded.set(None);
@@ -548,6 +560,11 @@ impl Ui {
     /// A touch or a click on any control: touch or pointer mode, whichever
     /// made the press.
     pub fn touched(&self) {
+        // PIN entry continues the choice that opened the prompt. Dismissing
+        // the prompt cancels it in `parental_view::abort`.
+        if self.top_overlay() != Some(overlays::Overlay::Parental) {
+            external_player::cancel_pending(*self);
+        }
         self.pending_zap.set(None);
         browse_playback::activity(*self);
         self.input.set(self.last_press.get_untracked());
@@ -709,6 +726,9 @@ pub fn schedule() -> Rc<dyn Schedule> {
 /// again by key.
 pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
     let kept = lists::keep(*ui);
+    let previous = crate::schedule();
+    player::stop_archive_after_clock_edit(*ui, &*previous, &*schedule);
+    menu_view::invalidate_shifted_context(*ui, &*previous, &*schedule);
     runtime().set_schedule(schedule.clone());
     time::mark_shown();
     let n = schedule.channel_count();
@@ -966,6 +986,14 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
 /// Everything over the video: the guide, the full-screen tap catcher,
 /// the player panels and every screen and popup. None of it shows in the
 /// picture-in-picture window.
+pub(crate) fn guide_chrome_pointer_events(ui: Ui) -> PointerEvents {
+    if organization_view::guide_order_open(ui) {
+        PointerEvents::None
+    } else {
+        PointerEvents::Auto
+    }
+}
+
 fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
@@ -992,7 +1020,11 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
                 })
                 .opacity(move || if fullscreen() { 0.0_f32 } else { 1.0 })
                 .pointer_events(move || {
-                    if fullscreen() || organization_view::is_open(ui) {
+                    if fullscreen()
+                        || (organization_view::is_open(ui)
+                            && !(organization_view::guide_order_accessible(ui)
+                                && ui.drag_editing()))
+                    {
                         PointerEvents::None
                     } else {
                         PointerEvents::Auto
@@ -1179,6 +1211,7 @@ fn bind_back(ui: Ui) {
 /// One step back (the platform's Back, or a key standing in for it);
 /// `false` where Back leaves the app.
 pub(crate) fn go_back(ui: Ui) -> bool {
+    external_player::cancel_pending(ui);
     if ui.channel_number.with(|entry| entry.active()) {
         ui.channel_number.update(|entry| {
             entry.take();
@@ -1232,7 +1265,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::ChannelList) => {
-                channels_view::key(ui, iptv_nav::Action::Back);
+                channels_view::back(ui);
                 true
             }
             _ if top == Some(Overlay::ChannelPicker) => {

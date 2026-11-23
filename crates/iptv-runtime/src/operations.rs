@@ -1,9 +1,38 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
+use crate::commands::external_playback_check;
 use iptv_core::add_playlist::ImportId;
+use iptv_core::parental::Target;
+use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
+
+/// Parental policy verified against committed storage for external playback.
+pub struct ExternalPlaybackAuthorization {
+    access: crate::parental::Snapshot,
+    target: Target,
+    grants: Vec<Target>,
+}
+
+impl ExternalPlaybackAuthorization {
+    pub(crate) fn new(
+        access: crate::parental::Snapshot,
+        target: Target,
+        grants: Vec<Target>,
+    ) -> Self {
+        Self {
+            access,
+            target,
+            grants,
+        }
+    }
+
+    /// Check immediately before granting the relay admission, without yielding.
+    pub fn is_current(&self) -> bool {
+        self.access.playback_current(&self.target, &self.grants)
+    }
+}
 
 impl Runtime {
     pub fn browser_generation(&self) -> u64 {
@@ -16,9 +45,21 @@ impl Runtime {
         self.account_streams.set(limit);
     }
     pub fn set_foreground(&self, foreground: bool) {
+        self.set_foreground_for_external(foreground, None);
+    }
+    /// The native player chooser backgrounds the guide during a user-approved handoff.
+    pub fn set_foreground_for_external(
+        &self,
+        foreground: bool,
+        external: Option<&iptv_core::parental::Target>,
+    ) {
         self.foreground.set(foreground);
         if !foreground {
-            self.parental_backgrounded();
+            if let Some(target) = external {
+                self.parental_content_transferred(target);
+            } else {
+                self.parental_backgrounded();
+            }
         }
     }
     pub fn cancel_link_resolution(&self, surface: usize) {
@@ -180,6 +221,35 @@ impl Runtime {
     ) -> Result<(), crate::settings::SaveError> {
         let at = iptv_settings::Target::playlist(source.0.to_string());
         crate::settings::set_in(self, key, &at, value)
+    }
+
+    /// Revalidates the group choice and the exact authority used for a handoff.
+    pub async fn external_playback_allowed(
+        &self,
+        authority: ResolutionAuthority,
+        group: String,
+    ) -> Result<bool, crate::Error> {
+        let access = self.parental_snapshot();
+        Ok(self
+            .services()
+            .read(move |store| {
+                Ok(external_playback_check(store, &authority, &group, access)?.is_some())
+            })
+            .await?)
+    }
+
+    /// Orders final admission behind queued parental changes. The returned
+    /// policy revision also detects changes queued after this check.
+    pub async fn authorize_external_playback(
+        &self,
+        authority: ResolutionAuthority,
+        group: String,
+    ) -> Result<Option<ExternalPlaybackAuthorization>, crate::Error> {
+        let access = self.parental_snapshot();
+        Ok(self
+            .services()
+            .call(move |store| external_playback_check(store, &authority, &group, access))
+            .await?)
     }
 
     /// Remembers `key` as the last channel of `source` (a zap never waits

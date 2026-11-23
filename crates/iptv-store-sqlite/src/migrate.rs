@@ -153,6 +153,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "us_spelling",
         sql: include_str!("../migrations/0025_us_spelling.sql"),
     },
+    Migration {
+        version: 26,
+        name: "group_context_preferences",
+        sql: include_str!("../migrations/0026_group_context_preferences.sql"),
+    },
 ];
 
 /// The schema version this build writes.

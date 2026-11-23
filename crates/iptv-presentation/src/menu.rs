@@ -24,6 +24,9 @@ pub enum MenuItem {
     Reminder,
     Record,
     ScheduleRecording,
+    RecordNow,
+    CancelRecording,
+    StopRecording,
     CustomRecording,
     SaveToList,
     Description,
@@ -34,6 +37,7 @@ pub enum MenuItem {
     HideChannel,
     AssignEpg,
     ChannelOptions,
+    ChannelActions,
     ProtectChannel,
     // Group.
     ManageFavorites,
@@ -47,6 +51,15 @@ pub enum MenuItem {
     SortGroups,
     ReorderGroups,
     ManageGroups,
+    RenameGroup,
+    ResetGroupName,
+    ShowFavoritesOnly,
+    GroupExternalPlayer,
+    GroupEpgOffset,
+    DecreaseEpgOffset,
+    IncreaseEpgOffset,
+    ResetEpgOffset,
+    SaveEpgOffset,
     HideGroup,
     ProtectGroup,
     ManageParentalBlocks,
@@ -72,44 +85,61 @@ impl Row {
     }
 }
 
-/// What the menu was opened on: focus returns here on close.
+/// A resolved program position in the current catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Origin {
     pub channel: usize,
     pub program_start: i32,
 }
 
+/// The content addressed by the menu, independent of catalog order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Program {
+        channel: String,
+        start: i32,
+    },
+    Channel {
+        channel: String,
+        program: Program,
+        offset: i32,
+    },
+    Group,
+}
+
+impl Target {
+    pub fn channel_key(&self) -> Option<&str> {
+        match self {
+            Self::Program { channel, .. } | Self::Channel { channel, .. } => Some(channel),
+            Self::Group => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Menu {
     pub rows: Vec<Row>,
     pub focus: usize,
-    pub origin: Origin,
-    /// Stable list context when the menu opened.
-    pub list: Option<ListId>,
-    pub group_context: bool,
+    pub target: Target,
+    pub list: ListId,
+    pub group_offset: Option<i32>,
 }
 
 impl Menu {
     /// A menu focused on its first enabled action.
-    pub fn new(rows: Vec<Row>, origin: Origin) -> Menu {
+    pub fn new(rows: Vec<Row>, target: Target, list: ListId) -> Menu {
         let focus = rows.iter().position(Row::focusable).unwrap_or(0);
         Menu {
             rows,
             focus,
-            origin,
-            list: None,
-            group_context: false,
+            target,
+            list,
+            group_offset: None,
         }
     }
 
     pub fn focused(&self) -> Option<MenuItem> {
-        match self.rows.get(self.focus) {
-            Some(Row::Action {
-                item,
-                enabled: true,
-            }) => Some(*item),
-            _ => None,
-        }
+        self.action_at(self.focus)
     }
 
     /// Moves to the next focusable row in `step`'s direction; stays at the
@@ -135,16 +165,13 @@ impl Menu {
         }
     }
 
-    /// A tap: focus the row and return its action if it is enabled.
-    pub fn tap(&mut self, index: usize) -> Option<MenuItem> {
+    /// The action under a pointer or touch, if it is enabled.
+    pub fn action_at(&self, index: usize) -> Option<MenuItem> {
         match self.rows.get(index) {
             Some(Row::Action {
                 item,
                 enabled: true,
-            }) => {
-                self.focus = index;
-                Some(*item)
-            }
+            }) => Some(*item),
             _ => None,
         }
     }
@@ -167,6 +194,129 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
     }
     items.extend([SaveToList, Description]);
     items
+}
+
+const CHANNEL_ACTIONS: [MenuItem; 6] = [
+    MenuItem::ToggleFavorite,
+    MenuItem::BlockChannel,
+    MenuItem::HideChannel,
+    MenuItem::AssignEpg,
+    MenuItem::ChannelOptions,
+    MenuItem::ProtectChannel,
+];
+
+/// Actions shared by the guide's program menu and a group's own menu.
+const GROUP_ACTIONS: [MenuItem; 12] = [
+    MenuItem::ManageFavorites,
+    MenuItem::ManageBlocked,
+    MenuItem::ManageHidden,
+    MenuItem::ReorderChannels,
+    MenuItem::SortChannels,
+    MenuItem::CopyChannels,
+    MenuItem::CreateGroup,
+    MenuItem::BlockGroup,
+    MenuItem::HideGroup,
+    MenuItem::GroupOptions,
+    MenuItem::ProtectGroup,
+    MenuItem::ManageParentalBlocks,
+];
+
+/// The channel's fixed actions, with optional recording and desktop playback.
+pub fn channel_menu(
+    recording: Option<MenuItem>,
+    new_window: Option<bool>,
+    can_reorder: bool,
+) -> Vec<Row> {
+    use MenuItem::*;
+    let action = |item| Row::Action {
+        item,
+        enabled: true,
+    };
+    let mut rows = vec![action(ToggleFavorite)];
+    rows.extend(recording.map(action));
+    if let Some(enabled) = new_window {
+        rows.push(Row::Action {
+            item: WatchInNewWindow,
+            enabled,
+        });
+    }
+    if can_reorder {
+        rows.push(action(ReorderChannels));
+    }
+    rows.extend(
+        [
+            AssignEpg,
+            ChannelOptions,
+            BlockChannel,
+            HideChannel,
+            ProtectChannel,
+        ]
+        .map(action),
+    );
+    rows
+}
+
+/// The focused list's settings and group management shortcuts.
+pub fn group_options(available: impl Fn(MenuItem) -> bool) -> Vec<Row> {
+    use MenuItem::*;
+    standalone(
+        [
+            RenameGroup,
+            ResetGroupName,
+            SortChannels,
+            ReorderChannels,
+            ShowFavoritesOnly,
+            GroupExternalPlayer,
+            GroupEpgOffset,
+            BlockGroup,
+            HideGroup,
+            ManageGroups,
+        ],
+        available,
+    )
+}
+
+/// Edits a guide time correction in fifteen-minute increments.
+pub fn group_offset_menu(list: ListId, minutes: i32) -> Menu {
+    use MenuItem::*;
+    let rows = [
+        DecreaseEpgOffset,
+        IncreaseEpgOffset,
+        ResetEpgOffset,
+        SaveEpgOffset,
+    ]
+    .into_iter()
+    .map(|item| Row::Action {
+        item,
+        enabled: true,
+    })
+    .collect();
+    let mut menu = Menu::new(rows, Target::Group, list);
+    menu.group_offset = Some(minutes);
+    menu
+}
+
+impl Menu {
+    pub fn step_group_offset(&mut self, delta: i32) {
+        use iptv_core::organization::{GROUP_EPG_OFFSET_MAX, GROUP_EPG_OFFSET_MIN};
+        if let Some(offset) = &mut self.group_offset {
+            *offset = (*offset + delta * 15).clamp(GROUP_EPG_OFFSET_MIN, GROUP_EPG_OFFSET_MAX);
+        }
+    }
+}
+
+fn standalone(
+    actions: impl IntoIterator<Item = MenuItem>,
+    available: impl Fn(MenuItem) -> bool,
+) -> Vec<Row> {
+    actions
+        .into_iter()
+        .filter(|&item| available(item))
+        .map(|item| Row::Action {
+            item,
+            enabled: true,
+        })
+        .collect()
 }
 
 /// The guide's full context menu for a program. `enabled` says which
@@ -193,34 +343,10 @@ pub fn program_menu(
             .map(action),
     );
     rows.push(Row::Heading(Heading::Channel));
-    rows.extend(
-        [
-            ToggleFavorite,
-            BlockChannel,
-            HideChannel,
-            AssignEpg,
-            ChannelOptions,
-            ProtectChannel,
-        ]
-        .map(action),
-    );
+    rows.extend(CHANNEL_ACTIONS.map(action));
+    rows.push(action(ChannelActions));
     rows.push(Row::Heading(Heading::Group));
-    rows.extend(
-        [
-            ManageFavorites,
-            ManageBlocked,
-            BlockGroup,
-            ManageHidden,
-            ReorderChannels,
-            SortChannels,
-            CopyChannels,
-            CreateGroup,
-            GroupOptions,
-            ProtectGroup,
-            ManageParentalBlocks,
-        ]
-        .map(action),
-    );
+    rows.extend(GROUP_ACTIONS.map(action));
     rows
 }
 
@@ -239,6 +365,40 @@ mod tests {
         end: -60,
     };
     const FUTURE: Program = Program { start: 60, end: 90 };
+
+    #[test]
+    fn standalone_menus_focus_the_first_applicable_action() {
+        let rows = channel_menu(Some(RecordNow), Some(false), true);
+        let mut menu = Menu::new(
+            rows,
+            Target::Channel {
+                channel: "channel-a".into(),
+                program: LIVE,
+                offset: 0,
+            },
+            ListId::All,
+        );
+        assert_eq!(menu.focused(), Some(ToggleFavorite));
+        menu.move_focus(1);
+        assert_eq!(menu.focused(), Some(RecordNow));
+        menu.move_focus(1);
+        assert_eq!(
+            menu.focused(),
+            Some(ReorderChannels),
+            "skips the unavailable window"
+        );
+        assert!(!menu.rows.iter().any(|row| matches!(
+            row,
+            Row::Action {
+                item: Description | ManageFavorites,
+                ..
+            }
+        )));
+
+        let rows = group_options(|item| item != RenameGroup && item != ResetGroupName);
+        let menu = Menu::new(rows, Target::Group, ListId::All);
+        assert_eq!(menu.focused(), Some(SortChannels));
+    }
 
     #[test]
     fn program_actions_follow_the_observed_matrix() {
@@ -325,10 +485,11 @@ mod tests {
         assert_eq!(rows[2], Row::Heading(Heading::Program));
         let mut m = Menu::new(
             rows,
-            Origin {
-                channel: 0,
-                program_start: -10,
+            Target::Program {
+                channel: "channel-a".into(),
+                start: -10,
             },
+            ListId::All,
         );
         assert_eq!(m.focused(), Some(Search));
         m.move_focus(1);
@@ -345,10 +506,11 @@ mod tests {
         let only = |i| matches!(i, Description | ToggleFavorite);
         let mut m = Menu::new(
             program_menu(FUTURE, 0, 0, only),
-            Origin {
-                channel: 4,
-                program_start: 60,
+            Target::Program {
+                channel: "channel-a".into(),
+                start: 60,
             },
+            ListId::All,
         );
         assert_eq!(m.focused(), Some(Description));
         m.move_focus(-1);
@@ -357,8 +519,8 @@ mod tests {
         assert_eq!(m.focused(), Some(ToggleFavorite));
         m.move_focus(1);
         assert_eq!(m.focused(), Some(ToggleFavorite), "nothing enabled below");
-        assert_eq!(m.tap(0), None, "disabled");
-        assert_eq!(m.tap(2), None, "a heading");
+        assert_eq!(m.action_at(0), None, "disabled");
+        assert_eq!(m.action_at(2), None, "a heading");
     }
     #[test]
     fn zero_movement_is_a_noop_for_nonfocusable_and_ordinary_menus() {
@@ -373,13 +535,7 @@ mod tests {
                 enabled: true,
             }],
         ] {
-            let mut menu = Menu::new(
-                rows,
-                Origin {
-                    channel: 0,
-                    program_start: 0,
-                },
-            );
+            let mut menu = Menu::new(rows, Target::Group, ListId::All);
             let before = menu.clone();
             menu.move_focus(0);
             assert_eq!(menu, before);

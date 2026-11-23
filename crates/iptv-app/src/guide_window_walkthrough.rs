@@ -17,9 +17,9 @@ pub fn bind(ui: Ui) {
             .ok()
             .and_then(|key| schedule.find_channel(&key))
         {
-            crate::menu_view::open_at(ui, channel, ui.focus.with(|f| f.now));
+            crate::menu_view::open_at(ui, channel);
         }
-        println!("DEMO: channel context menu offers Watch in new window");
+        println!("DEMO: channel context menu offers Open in new window");
     });
     let _open = set_timeout(Duration::from_secs(9), move || {
         crate::menu_view::perform(ui, iptv_presentation::menu::MenuItem::WatchInNewWindow);
@@ -32,7 +32,7 @@ pub fn bind(ui: Ui) {
             .ok()
             .and_then(|key| schedule.find_channel(&key))
         {
-            crate::menu_view::open_at(ui, channel, ui.focus.with(|f| f.now));
+            crate::menu_view::open_at(ui, channel);
         }
     });
     let _next = set_timeout(Duration::from_secs(18), move || {

@@ -76,8 +76,14 @@ pub fn start(ui: Ui) {
     let was_background = std::cell::Cell::new(false);
     effect(move || {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
-        crate::runtime().set_foreground(!background);
+        let target = crate::host::EXTERNAL_PLAYER
+            .then(|| crate::external_player::handoff_target(ui))
+            .flatten();
+        crate::runtime().set_foreground_for_external(!background, target.as_ref());
         if was_background.replace(background) && !background {
+            if crate::host::ANDROID {
+                crate::external_player::returned(ui);
+            }
             // Returning from host permission settings needs a fresh OS acknowledgement.
             let owner = crate::runtime();
             spawn_in_app(async move {

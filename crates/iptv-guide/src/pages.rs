@@ -191,7 +191,7 @@ impl Pages {
 
     /// A page read for `request`; false (and dropped) when it is no longer
     /// wanted or belongs to another window.
-    pub(crate) fn insert(&self, request: PageRequest, store: GuideStore) -> bool {
+    pub(crate) fn insert(&self, request: PageRequest, store: GuideStore, max_pages: usize) -> bool {
         if self.loader.is_none()
             || request.owner != self.owner
             || self.range(request.page) != (request.from, request.to)
@@ -211,7 +211,7 @@ impl Pages {
             .iter()
             .filter(|p| matches!(p.state, PageState::Loaded(_)))
             .count()
-            > MAX_PAGES
+            > max_pages
         {
             let victim = pages
                 .iter()

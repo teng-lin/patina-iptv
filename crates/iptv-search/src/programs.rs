@@ -61,6 +61,8 @@ pub struct ProgramSearchOptions<'a> {
     /// The channel's archive window in days (0: none). `None`: no channel
     /// has catch-up.
     pub catchup_days: Option<&'a dyn Fn(usize) -> u8>,
+    /// Per-channel guide correction in seconds.
+    pub time_offset: Option<&'a dyn Fn(usize) -> i64>,
     /// Seconds before and after `now` to search (programs overlapping
     /// the window count).
     pub look_back: i64,
@@ -78,6 +80,7 @@ impl Default for ProgramSearchOptions<'_> {
             visible: None,
             include_past_without_catchup: false,
             catchup_days: None,
+            time_offset: None,
             look_back: 7 * DAY,
             look_ahead: 3 * DAY,
             group_by: GroupBy::Relevance,
@@ -438,13 +441,14 @@ impl ProgramIndex {
                     continue;
                 };
                 for o in &self.occ[Self::range(&self.occ_off, t)] {
-                    let start = self.base + i64::from(o.start);
-                    let end = start + i64::from(o.dur);
-                    if end <= from || start >= to {
-                        continue;
-                    }
                     let ch = o.channel as usize;
                     if opts.visible.is_some_and(|f| !f(ch)) {
+                        continue;
+                    }
+                    let start = (self.base + i64::from(o.start))
+                        .saturating_add(opts.time_offset.map_or(0, |offset| offset(ch)));
+                    let end = start.saturating_add(i64::from(o.dur));
+                    if end <= from || start >= to {
                         continue;
                     }
                     let archive = now.saturating_sub(i64::from(days[ch]) * DAY);

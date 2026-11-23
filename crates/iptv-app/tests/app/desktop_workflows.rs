@@ -726,7 +726,7 @@ fn typing_shortcut_characters_in_a_field_edits_it_and_controls_no_player() {
     );
 }
 
-// Player windows ("Watch in new window") exist on Linux and macOS only.
+// Player windows ("Open in new window") exist on Linux and macOS only.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
@@ -738,8 +738,8 @@ fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
     let main_opens = iptv_app::player_opens(0);
 
     step(app.right_click(&format!("id:guide-ui >> text:{}", channel(5))));
-    step(app.wait_for("id:menu-panel >> text:Watch in new window"));
-    step(app.press("id:menu-panel >> text:Watch in new window"));
+    step(app.wait_for("id:menu-panel >> text:Open in new window"));
+    step(app.press("id:menu-panel >> text:Open in new window"));
     step(
         app.wait_until("the second player plays", Duration::from_secs(5), |_| {
             iptv_app::player_has_source(1)
@@ -823,7 +823,7 @@ fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
     assert_eq!(iptv_app::player_opens(0), main_opens);
 }
 
-// Player windows ("Watch in new window") exist on Linux and macOS only.
+// Player windows ("Open in new window") exist on Linux and macOS only.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
@@ -833,7 +833,7 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
     play_then_guide(app, 3);
     let opens = iptv_app::player_opens(0);
     step(app.right_click(&format!("id:guide-ui >> text:{}", channel(6))));
-    step(app.press("id:menu-panel >> text:Watch in new window"));
+    step(app.press("id:menu-panel >> text:Open in new window"));
     step(
         app.wait_until("the second player plays", Duration::from_secs(5), |_| {
             iptv_app::player_has_source(1)
@@ -1336,7 +1336,7 @@ fn with_autoplay_dismissing_a_right_clicked_menu_tunes_nothing() {
         }),
     );
 
-    // A menu action that plays still plays: Watch in new window.
+    // A menu action that plays still plays: Open in new window.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         for _ in 0..3 {
@@ -1346,8 +1346,8 @@ fn with_autoplay_dismissing_a_right_clicked_menu_tunes_nothing() {
             step(app.back());
         }
         step(app.right_click(&format!("id:guide-ui >> text:{}", channel(10))));
-        step(app.wait_for("id:menu-panel >> text:Watch in new window"));
-        step(app.press("id:menu-panel >> text:Watch in new window"));
+        step(app.wait_for("id:menu-panel >> text:Open in new window"));
+        step(app.press("id:menu-panel >> text:Open in new window"));
         step(
             app.wait_until("the new window plays", Duration::from_secs(5), |_| {
                 iptv_app::player_has_source(1)

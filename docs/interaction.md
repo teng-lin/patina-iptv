@@ -212,13 +212,34 @@ visible entry point for touch and pointer users.
 
 - **Now:** in the guide, the channel list and recordings: Menu on a remote, and
   long OK on Android; M on a keyboard, and Shift+F10 on desktop. Long press and
-  right-click open the same menu on guide programs and channels, the channel
-  list and recordings. During playback, Menu and long OK open the playback bar
-  instead ([TV controls](tv-controls.md)).
+  right-click open program actions on a guide cell, channel actions on a
+  channel header or player-list row, and group options on a group.
+  Long OK on a player-list row opens its channel actions. Menu and M still
+  give access to program and group actions from the player list. In the
+  guide grid, the program menu also includes actions for its channel and
+  group. Menu or M on the single-playlist All channels group adds a
+  playlist. During fullscreen playback, Menu and long OK open the playback bar
+  ([TV controls](tv-controls.md)).
+- Choose **Channel actions** from a program menu to use that program's
+  time block. The channel menu opens on Favorites, followed by the recording
+  action for the selected block. A live block can start or stop a recording.
+  An upcoming block can schedule or cancel one. The player list uses the
+  live block. On Linux and macOS, **Open in new window** plays the channel
+  live in a separate Patina window.
+- **Reorder channel** and **Reorder channels** open a draft order in the guide
+  from channel, group and program menus. OK or Enter picks up or places a
+  channel. Up and Down move it one row, and Left and Right move it to either
+  end. Touch and mouse users can drag the handles and choose Save or Cancel.
+  The playing channel keeps its player surface throughout the edit.
+- **Show favorites only** filters that group. **Guide time offset** corrects
+  the times in a provider group in 15-minute steps. Existing recordings keep
+  their accepted capture windows. **Use external player** applies to explicit
+  channel choices on Android and Linux. Android offers installed video apps.
+  Linux tries VLC, then mpv.
 - **Now:** while touch or a pointer drives the app, a visible "More options"
-  control (⋯) opens the program and channel menu: in the guide header, after
-  the focused or tapped program's title, and at the end of each channel list
-  row. The header's ⋯ hides during an inline reorder of channels or groups,
+  control (⋯) opens the program menu in the guide header after the selected
+  program's title, and the channel menu at the end of each channel list row.
+  The header's ⋯ hides during an inline reorder of channels or groups,
   and the rows' ⋯ while multiview picks a channel (rows have no menu then).
   Keys hide it; they have Menu. Where touch or a pointer is usual, the
   title keeps the ⋯'s room while it is hidden, so switching input moves no

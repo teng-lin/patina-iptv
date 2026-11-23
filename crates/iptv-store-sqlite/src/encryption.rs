@@ -459,6 +459,13 @@ mod tests {
             let store = Store::open_encrypted(&path, &key()).unwrap();
             assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
             assert_eq!(credentials(&store.conn), before);
+            if version >= 26 {
+                let prefs = store
+                    .guide_group_preferences(crate::SourceId(1), "xt:live-group:1")
+                    .unwrap();
+                assert!(prefs.favorites_only && prefs.external_player);
+                assert_eq!(prefs.epg_offset_minutes, 30);
+            }
             let bytes = std::fs::read(&path).unwrap();
             assert!(
                 !bytes

@@ -73,6 +73,9 @@ impl Runtime {
     pub fn start_recordings(&self) {}
     pub fn sync_recording_contexts(&self) {}
     /// No recording competes for the account's connections.
+    pub fn reserve_external_viewing(&self, _source: SourceId) -> Option<Box<dyn Send>> {
+        None
+    }
     pub fn reserve_viewing(&self, _surface: usize, _source: SourceId) -> bool {
         !self.recordings_detached.get()
     }

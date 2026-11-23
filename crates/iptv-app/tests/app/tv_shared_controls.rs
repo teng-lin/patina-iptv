@@ -462,11 +462,11 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
     step(app.wait_for_gone("id:play-bar-back", Duration::from_secs(2)));
 }
 
-/// The program menu for `channel` is on screen (its heading names the
-/// channel); Back closes it.
+/// The menu's heading names the channel; Back closes it.
 #[track_caller]
-fn menu_opens_for(app: &mut crate::Headless, channel: &str) {
-    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+fn menu_opens_for(app: &mut crate::Headless, channel: &str, program_menu: bool) {
+    let favorite = "id:menu-panel >> text:/^(Add to favorites|Remove from favorites)$/";
+    step(app.wait_for(favorite));
     assert!(
         app.screen()
             .matches(&format!("id:menu-panel >> text:/^{channel}$/"))
@@ -474,8 +474,14 @@ fn menu_opens_for(app: &mut crate::Headless, channel: &str) {
         "the menu is for {channel}: {:?}",
         app.screen().texts()
     );
+    if program_menu {
+        step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+    } else {
+        assert!(!app.shows("id:menu-panel >> text:Search"));
+        assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
+    }
     step(app.back());
-    step(app.wait_for_gone("text:Manage favorites…", Duration::from_secs(2)));
+    step(app.wait_for_gone(favorite, Duration::from_secs(2)));
 }
 
 const GUIDE_MORE: &str = "id:guide-ui >> label:More options";
@@ -503,32 +509,32 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     step(app.wait_for("id:guide-more"));
     assert_eq!(width(app, "guide-more-slot"), room, "no text moves");
     step(app.press(GUIDE_MORE));
-    menu_opens_for(app, "Local A");
+    menu_opens_for(app, "Local A", true);
     assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
 
-    // Long press and right-click are its shortcuts: the same menu, no
-    // playback, on a channel and on a program.
+    // Long press and right-click target the channel header or program.
+    // Neither gesture starts playback.
     step(app.long_press("id:guide-ui >> label:Local B"));
-    menu_opens_for(app, "Local B");
+    menu_opens_for(app, "Local B", false);
     step(app.right_click("id:guide-ui >> label:Local B"));
-    menu_opens_for(app, "Local B");
+    menu_opens_for(app, "Local B", false);
     // The ⋯ follows what was tapped: Local B now.
     step(app.press(GUIDE_MORE));
-    menu_opens_for(app, "Local B");
+    menu_opens_for(app, "Local B", true);
     // The first row's second slot: the hour airing now (the first is the
     // ended hour before it, which this row cannot replay or focus).
     let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
     step(app.right_click(cell));
-    menu_opens_for(app, "Local A");
+    menu_opens_for(app, "Local A", true);
     step(app.long_press(cell));
-    menu_opens_for(app, "Local A");
+    menu_opens_for(app, "Local A", true);
     assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
 
     // A key goes back to the remote's view.
     step(app.press_key("down"));
     step(app.wait_for_gone("id:guide-more", Duration::from_secs(2)));
 
-    // The player's channel list: a ⋯ per row for touch, the same menu.
+    // The player's channel list: a ⋯ per row for channel actions.
     choose_fullscreen(app);
     step(app.wait_for("id:player-banner"));
     step(app.press_key("m"));
@@ -546,7 +552,8 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     );
     let playing = iptv_app::player_opens(0);
     step(app.press("label:More options for Local A"));
-    menu_opens_for(app, "Local A");
+    menu_opens_for(app, "Local A", false);
+    step(app.wait(Duration::from_secs(2)));
     assert_eq!(iptv_app::player_opens(0), playing, "a menu never zaps");
     assert!(app.screen().matches("text:2  Local B  ▶").unwrap());
 }
@@ -569,7 +576,7 @@ fn a_tablet_shows_the_more_control_before_any_tap() {
     // need not land on a program (which would play it).
     step(app.wait_for("id:guide-more"));
     step(app.press(GUIDE_MORE));
-    menu_opens_for(app, "Local A");
+    menu_opens_for(app, "Local A", true);
     assert_eq!(iptv_app::player_opens(0), 0, "a menu never plays");
     // A key still hides it.
     step(app.press_key("down"));
@@ -605,7 +612,7 @@ fn a_tv_remote_sees_no_more_control() {
 }
 
 #[test]
-fn the_header_more_control_waits_for_an_inline_group_reorder() {
+fn the_header_more_control_waits_for_an_inline_channel_reorder() {
     let Some(home) = isolated!() else { return };
     let mut fixture = personalization::start(home, Settings::new(), true);
     let app = &mut fixture.app;
@@ -619,9 +626,10 @@ fn the_header_more_control_waits_for_an_inline_group_reorder() {
     // The slot is mounted with the ⋯ only: a TV's title keeps that room.
     step(app.press_key("tab"));
     assert!(!app.screen().matches("id:guide-more-slot").unwrap());
-    step(app.long_press("id:guide-groups >> text:Sport"));
-    step(app.press("text:Reorder groups"));
-    step(app.wait_for("id:organization-row-1 >> text:Sport"));
+    step(app.long_press("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Reorder channels"));
+    step(app.wait_for("id:organization-screen >> text:Reorder channels"));
+    step(app.wait_for("id:guide-row >> text:/Local B/"));
     // Touch drives the app, but the guide takes no pointer while the order
     // is unfinished: no ⋯ that could not be pressed.
     assert!(!app.screen().matches("id:guide-more").unwrap());

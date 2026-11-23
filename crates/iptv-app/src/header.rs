@@ -487,6 +487,7 @@ pub fn header(ui: Ui) -> impl IntoElement {
         .test_id("guide-header")
         .pt_safe_area()
         .accessibility_elements_hidden(move || crate::organization_view::guide_order_open(ui))
+        .pointer_events(move || crate::guide_chrome_pointer_events(ui))
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(
             view()

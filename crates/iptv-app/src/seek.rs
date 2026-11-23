@@ -139,6 +139,14 @@ pub fn pending(ui: Ui) -> bool {
     ui.seek_target.get_untracked().is_some()
 }
 
+/// Retires the old archive's draft whenever playback changes or stops.
+pub(crate) fn cancel(ui: Ui) {
+    if pending(ui) {
+        PRESSES.with(|p| p.set(p.get().wrapping_add(1)));
+        ui.seek_target.set(None);
+    }
+}
+
 /// OK while a seek is being chosen: the archive opens there now.
 pub fn commit_now(ui: Ui) {
     PRESSES.with(|p| p.set(p.get() + 1));

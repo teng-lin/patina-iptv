@@ -83,6 +83,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let width = signal(0.0_f32);
     let size = Scale::new();
     let pan = Pan::new(ui, width);
+    let drag = organization_view::reorder_drag::DragList::new(ui, size, rows).guide(channel_width);
     let now = computed(move || ui.focus.with(|f| f.now));
     let order_scope = computed(move || organization_view::guide_order_scope(ui));
     let order_keys = computed(move || {
@@ -143,7 +144,9 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         let draft = order_focus.get();
         let was_reordering = was_reordering.replace(draft.is_some());
         if let Some((row, _)) = draft {
-            rows.scroll_to_index(row as u32, percentage(0.5), px(0.0), false);
+            if !untracked(|| drag.active()) {
+                rows.scroll_to_index(row as u32, percentage(0.5), px(0.0), false);
+            }
         } else if was_reordering {
             scroll_to_focused_row(ui, rows);
         }
@@ -152,41 +155,48 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
         .flex_1()
         .overflow_hidden()
         .child(
-            virtual_list(
-                move || count.get(),
-                move |at| {
-                    let channel = computed(move || {
-                        order.with(|order| match order {
-                            Some(channels) => channels.get(at.index()).copied(),
-                            None => ui.list.with(|l| l.channel(at.index())),
-                        })
-                    });
-                    let editing = computed(move || {
-                        order_focus
-                            .get()
-                            .and_then(|(row, selected)| (row == at.index()).then_some(selected))
-                    });
-                    row(
-                        ui,
-                        at,
-                        (column, pan, size),
-                        focused,
-                        number_w,
-                        (channel, editing),
+            drag.with_grips(
+                view().flex_1().overflow_hidden().child(
+                    virtual_list(
+                        move || count.get(),
+                        move |at| {
+                            let channel = computed(move || {
+                                order.with(|order| match order {
+                                    Some(channels) => channels.get(at.index()).copied(),
+                                    None => ui.list.with(|l| l.channel(at.index())),
+                                })
+                            });
+                            let editing = computed(move || {
+                                order_focus.get().and_then(|(row, selected)| {
+                                    (row == at.index()).then_some(selected)
+                                })
+                            });
+                            row(
+                                ui,
+                                at,
+                                (column, pan, size),
+                                focused,
+                                number_w,
+                                (channel, editing),
+                            )
+                        },
                     )
-                },
-            )
-            .estimated_item_size(move || px(size.whole(ROW_H)))
-            .element_ref(&rows)
-            // Scrolling the channels never tunes: a preview
-            // waiting to start stops (`browse_playback`).
-            .on_scroll_drag_start(move |_: &Point<Points>| crate::browse_playback::dragged(ui))
-            .on_viewable_items_change(move |v: &ViewableItems| {
-                if !organization_view::guide_order_open(ui) {
-                    ui.visible_rows.set(v.viewable);
-                }
-            })
-            .flex_1(),
+                    .estimated_item_size(move || px(size.whole(ROW_H)))
+                    .element_ref(&rows)
+                    .on_scroll(move |event: &ScrollEvent| drag.scrolled(*event))
+                    // Scrolling the channels never tunes: a preview
+                    // waiting to start stops (`browse_playback`).
+                    .on_scroll_drag_start(move |_: &Point<Points>| {
+                        crate::browse_playback::dragged(ui)
+                    })
+                    .on_viewable_items_change(move |v: &ViewableItems| {
+                        if !organization_view::guide_order_open(ui) {
+                            ui.visible_rows.set(v.viewable);
+                        }
+                    })
+                    .flex_1(),
+                ),
+            ),
         )
         .child(
             // Now, over the programs only, sliding with them.
@@ -409,6 +419,13 @@ fn row(
                 .flex_1()
                 .overflow_hidden()
                 .accessibility_elements_hidden(move || organization_view::guide_order_open(ui))
+                .pointer_events(move || {
+                    if organization_view::guide_order_open(ui) {
+                        PointerEvents::None
+                    } else {
+                        PointerEvents::Auto
+                    }
+                })
                 .child(
                     view()
                         .absolute()

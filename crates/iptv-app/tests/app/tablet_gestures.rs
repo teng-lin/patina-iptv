@@ -556,14 +556,16 @@ fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
     step(app.wait(SETTLE));
     nothing_activated(&app, &tuned, &db, "start");
 
-    let menu = "id:menu-panel >> text:Details";
+    let channel_menu = "id:menu-panel >> text:Channel options…";
     step(app.long_press(&format!("id:guide-ui >> label:{}", name(4))));
-    step(app.wait_for(menu));
+    step(app.wait_for(channel_menu));
+    assert!(!app.shows("id:menu-panel >> text:Details"));
     step(app.back());
-    step(app.wait_for_gone(menu, Duration::from_secs(3)));
+    step(app.wait_for_gone(channel_menu, Duration::from_secs(3)));
     step(app.wait(SETTLE));
     nothing_activated(&app, &tuned, &db, "a channel's menu dismissed");
 
+    let menu = "id:menu-panel >> text:Details";
     step(app.long_press("text:C5 P0"));
     step(app.wait_for(menu));
     step(app.back());
