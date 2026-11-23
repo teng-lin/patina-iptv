@@ -28,6 +28,9 @@ inputs:
   apt-cache:
     description: Reuse Linux package snapshots when the Cargo cache is disabled
     default: 'false'
+  apt-cache-seed:
+    description: Seed the shared Ubuntu package snapshot on a trusted master candidate
+    default: 'false'
   policy-tool:
     description: Install cargo-deny for jobs that run dependency policy checks
     default: 'true'
@@ -57,11 +60,12 @@ runs:
         PREREQUISITES: ${{ inputs.prerequisites }}
         EXTRA_PACKAGES: ${{ inputs.apt-packages }}
       run: |
+        host='libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2'
         case "$PREREQUISITES" in
           host)
-            packages='libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev
-              libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-              pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2'
+            packages="$host"
             ;;
           android|android-smoke)
             # NSH links and runs the generated describe program on Linux.
@@ -76,15 +80,20 @@ runs:
           android-check|store) packages='pkg-config clang cmake ninja-build' ;;
           *) echo "Unknown build prerequisites: $PREREQUISITES" >&2; exit 1 ;;
         esac
-        # One package per line, whatever block style the caller used.
-        packages=$(tr -s '[:space:]' '\n' <<< "$packages $EXTRA_PACKAGES" | sed '/^$/d' | sort -u | paste -sd ' ' -)
-        identity=$(printf '%s\n' "$packages" | sha256sum | cut -c1-16)
+        normalize() { tr -s '[:space:]' '\n' <<< "$1" | sed '/^$/d' | sort -u | paste -sd ' ' -; }
+        packages=$(normalize "$packages $EXTRA_PACKAGES")
+        snapshot=$(normalize "$host libasound2t64 libpulse0 libva2 libmpv2
+          ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
+          libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11
+          libgl1-mesa-dri gnome-keyring libglib2.0-bin")
+        identity=$(printf '%s\n' "$snapshot" | sha256sum | cut -c1-16)
         distribution=$(. /etc/os-release && echo "$ID$VERSION_ID")
         # Bump the format only when the saved snapshot layout changes.
-        prefix="apt-v3-$distribution-$(dpkg --print-architecture)-$identity-"
+        prefix="apt-v4-$distribution-$(dpkg --print-architecture)-$identity-"
         {
           echo "state=$RUNNER_TEMP/patina-apt"
           echo "packages=$packages"
+          echo "snapshot=$snapshot"
           echo "key=$prefix${ImageVersion:-unversioned}"
           echo "restore-prefix=$prefix"
         } >> "$GITHUB_OUTPUT"
@@ -107,6 +116,7 @@ runs:
         APT_STATE: ${{ steps.apt.outputs.state }}
         APT_RESTORED: ${{ steps.apt-cache.outputs.cache-matched-key != '' }}
         APT_PACKAGES: ${{ steps.apt.outputs.packages }}
+        PATINA_APT_SNAPSHOT_PACKAGES: ${{ inputs.apt-cache-seed == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.apt.outputs.snapshot || '' }}
       run: |
         case "$RUNNER_OS:$PREREQUISITES" in
           macOS:host|macOS:macos-package)
@@ -129,7 +139,7 @@ runs:
     # install, not whatever the job's later steps leave behind. The packages
     # are installed by now, so a cache service outage must not fail the job.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: steps.apt.outputs.key != '' && (inputs.cache == 'true' || inputs.apt-cache == 'true') && steps.packages.outputs.refreshed == 'true' && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+      if: steps.apt.outputs.key != '' && steps.packages.outputs.snapshot == 'true' && steps.apt-cache.outputs.cache-hit != 'true'
       continue-on-error: true
       with:
         path: ${{ steps.apt.outputs.state }}
