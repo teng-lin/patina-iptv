@@ -1,16 +1,34 @@
 //! Explicit browsing policy for older player journeys. Default delay/close
 //! behavior is exercised by the personalization integration tests.
+use iptv_settings::{KeyBinding, PressKind, Settings, Value};
+
 pub fn two_step_preview(home: &std::path::Path) {
-    let mut s = iptv_settings::Settings::new();
-    s.set("guide.stay_on_guide", iptv_settings::Value::Bool(true))
-        .unwrap();
-    s.set("guide.stay_on_list", iptv_settings::Value::Bool(true))
-        .unwrap();
-    s.set("guide.switch_delay", iptv_settings::Value::ms(0))
-        .unwrap();
+    two_step_preview_with(home, |_| {});
+}
+
+pub fn two_step_preview_with(home: &std::path::Path, adjust: impl FnOnce(&mut Settings)) {
+    let mut s = Settings::new();
+    s.set("guide.stay_on_guide", Value::Bool(true)).unwrap();
+    s.set("guide.stay_on_list", Value::Bool(true)).unwrap();
+    s.set("guide.switch_delay", Value::ms(0)).unwrap();
+    adjust(&mut s);
     let dir = crate::isolated::data_dir(home);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), s.to_json_string()).unwrap();
+}
+
+pub fn bind_ok_to_info_card(settings: &mut Settings) {
+    settings
+        .set(
+            iptv_settings::keys::KEY_OVERRIDES.as_str(),
+            Value::KeyBindings(vec![KeyBinding::new(
+                Some("player"),
+                "ok",
+                PressKind::Short,
+                "show_panels",
+            )]),
+        )
+        .unwrap();
 }
 
 /// From the guide, open the rail beside the groups and tap one of its items.

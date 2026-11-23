@@ -17,6 +17,7 @@ is below 1.0, a minor release may change behavior.
 
 - Android tablet and TV packages target Android 16 (API 36) and use optimized
   code and resources.
+- Both a tap and a hold of OK open the play bar during full-screen TV playback.
 - Live playback controls stay in one row and keep picture in picture visible
   when available. Additional actions move to More as space runs out.
 

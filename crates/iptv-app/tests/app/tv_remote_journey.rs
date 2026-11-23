@@ -3,8 +3,8 @@
 //! key down, its auto-repeats and its release, with the app telling a tap
 //! from a hold on its own clock.
 //!
-//! What it checks: long OK opens the controls once and its repeats and
-//! release do nothing more; rapid taps each act once; a press held while
+//! What it checks: either OK press opens the play bar once and the hold's
+//! repeats and release do nothing more; rapid taps each act once; a press held while
 //! the surface changes (a tap plays a channel) does nothing on release or
 //! by timer; a held OK keeps the info card up and presses the card it was
 //! held on. The journey: groups, choose a channel (full screen), the
@@ -15,6 +15,7 @@
 //!
 //! Synthetic data only: the personalization fixture's three local channels.
 
+use crate::browse_fixture::bind_ok_to_info_card;
 use crate::headless::KeyPhase;
 use crate::personalization::{self, Fixture, step};
 use crate::tv_shared_controls::{Lifetime, persistent, record_players, selected};
@@ -333,32 +334,23 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
         "no hold pressed Play/pause"
     );
 
-    // Rapid taps: each acts once, on its release, without waiting for
-    // the clock. OK shows the card, OK again hides it, a third shows it.
+    // The first tap opens the same bar. Each subsequent tap activates
+    // its focused control once, without reopening or retuning the stream.
     step(app.remote_tap(RemoteKey::Ok));
-    assert!(shows(app, "id:player-card"), "first tap");
+    assert!(shows(app, "id:play-bar-layer"));
+    assert!(selected(app, "play-bar-play-pause"));
+    assert!(!shows(app, "id:player-card"));
+    assert_eq!(logged("play bar: Play or pause"), 0);
     step(app.remote_tap(RemoteKey::Ok));
-    assert!(!shows(app, "id:player-card"), "second tap");
+    assert_eq!(logged("play bar: Play or pause"), 1);
     step(app.remote_tap(RemoteKey::Ok));
-    assert!(shows(app, "id:player-card"), "third tap");
+    assert_eq!(logged("play bar: Play or pause"), 2);
     assert_eq!(iptv_app::player_opens(0), 1, "taps never retune");
+    step(app.back());
+    back_to_guide(app);
 
-    // OK held on the card's Guide action as the card's own timer runs
-    // out: the press keeps the card up, and its release presses Guide.
-    step(app.remote_tap(RemoteKey::Right));
-    step(app.run_for(Duration::from_millis(4_900)));
-    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
-    step(app.run_for(Duration::from_millis(200)));
-    assert!(shows(app, "id:player-card"), "a held key keeps the card");
-    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
-    step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));
-    assert!(!shows(app, "id:player-banner"), "the guide, not the video");
-    assert_eq!(iptv_app::player_opens(0), 1, "the guide keeps the stream");
-
-    // OK held in the guide while a second tap plays Local B full screen: the
-    // press began on the guide, so neither its short action on an early
-    // release (the info card) nor its long one by timer (the guide's
-    // menu, or the player's controls) acts on the video.
+    // A press that started on the guide must not open the play bar after
+    // a touch takes the video full screen.
     step(app.press("id:guide-ui >> label:Local B"));
     plays(app, &lifetime, "http://example.test/b", 2);
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
@@ -368,7 +360,7 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
     plays(app, &lifetime, "http://example.test/b", 2);
     assert!(
-        !shows(app, "id:player-card"),
+        !shows(app, "id:play-bar-layer"),
         "the early release does nothing"
     );
     assert_eq!(
@@ -592,6 +584,7 @@ fn a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys() {
     let (mut fixture, lifetime, player) = tv_with(
         home,
         |settings| {
+            bind_ok_to_info_card(settings);
             settings
                 .set("parental.pin_input", Value::Enum("number_keys".into()))
                 .unwrap();
@@ -713,6 +706,7 @@ fn a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys() {
 fn holds_keep_their_card_decide_once_and_menu_does_not_toggle() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |settings| {
+        bind_ok_to_info_card(settings);
         // The card's own timeout is shorter than the long press.
         settings
             .set("player.controls_panel_timeout", Value::secs(1))
@@ -785,6 +779,7 @@ fn a_back_or_ok_held_into_a_pin_prompt_stays_cut_short() {
     let (mut fixture, lifetime, player) = tv_with(
         home,
         |settings| {
+            bind_ok_to_info_card(settings);
             settings
                 .set("parental.live_enabled", Value::Bool(true))
                 .unwrap();
@@ -984,6 +979,7 @@ fn touch_around_a_held_key_leaves_it_cut_short_and_back_with_its_prompt() {
 fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |settings| {
+        bind_ok_to_info_card(settings);
         // The card's own timeout is shorter than the long press.
         settings
             .set("player.controls_panel_timeout", Value::secs(1))

@@ -200,9 +200,17 @@ impl Keymap {
         Keymap::defaults()
     }
 
-    /// iptv-rs's default map: the remote's ([`Profile::Remote`]).
-    /// Equivalent to [`Keymap::default`], with no user overrides.
-    pub fn defaults() -> Keymap {
+    /// The TV's default map opens the shared play bar on either OK press.
+    pub fn tv() -> Self {
+        Self::with_player_ok(Action::ShowControls)
+    }
+
+    /// The shared default bindings, without user overrides.
+    pub fn defaults() -> Self {
+        Self::with_player_ok(Action::ShowPanels)
+    }
+
+    fn with_player_ok(player_ok: Action) -> Self {
         use Action as A;
         use Context::{Controls, Groups, Guide, Menu, Multiview, Player};
         use Press::{Long, Short};
@@ -246,13 +254,11 @@ impl Keymap {
             // Ch+/Ch- page the guide's channel list (observed); over video they zap.
             b(Some(Guide), K::ChannelUp, Short, A::PageUp),
             b(Some(Guide), K::ChannelDown, Short, A::PageDown),
-            // Full screen, the reference's player defaults: OK shows the
-            // info card and its action cards, Long OK and Menu the control
-            // strip (as observed in the reference), Up/Down zap, Left the
+            // Full screen: OK opens the player overlay, Up/Down zap, Left the
             // channel list over the video (Long Left beside the video),
             // Right the most recent channel (Long Right the history), Long
             // Back stops playback.
-            b(Some(Player), K::Ok, Short, A::ShowPanels),
+            b(Some(Player), K::Ok, Short, player_ok),
             b(Some(Player), K::Ok, Long, A::ShowControls),
             b(Some(Player), K::Menu, Short, A::ShowControls),
             b(Some(Player), K::Up, Short, A::ChannelUp),
@@ -608,6 +614,35 @@ mod tests {
         ] {
             assert!(k.has_long(Player, key), "{key:?}");
         }
+    }
+
+    #[test]
+    fn the_tv_opens_the_play_bar_for_both_ok_presses() {
+        let mut map = Keymap::tv();
+        for press in [Press::Short, Press::Long] {
+            assert_eq!(
+                map.resolve(Player, RemoteKey::Ok, press),
+                Some(Action::ShowControls)
+            );
+        }
+        assert_eq!(
+            map.resolve(Controls, RemoteKey::Ok, Press::Short),
+            Some(Action::Select)
+        );
+        map.set_override(b(
+            Some(Player),
+            RemoteKey::Ok,
+            Press::Long,
+            Action::ShowInfo,
+        ));
+        assert_eq!(
+            map.resolve(Player, RemoteKey::Ok, Press::Short),
+            Some(Action::ShowControls)
+        );
+        assert_eq!(
+            map.resolve(Player, RemoteKey::Ok, Press::Long),
+            Some(Action::ShowInfo)
+        );
     }
 
     #[test]

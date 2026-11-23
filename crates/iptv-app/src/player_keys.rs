@@ -2,7 +2,7 @@
 //!
 //! | Key | Tap | Hold |
 //! | --- | --- | --- |
-//! | OK | info card + action cards (again: hide; a replay: play/pause) | control strip |
+//! | OK on TV | play bar | play bar |
 //! | Menu | control strip (again: hide) | – |
 //! | Up / Down | channel up / down (`remote.player_up_down`: the channel list) | repeats |
 //! | Left | channel list over the video | channel list beside it |
@@ -88,7 +88,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
                 Pick::Hidden | Pick::Nothing => {}
             }
         }
-        // Over a failed stream, OK retries.
+        // The legacy cards remain available through a custom binding.
         Action::ShowPanels if crate::player::failed(&ui) => crate::player::retry(ui),
         Action::ShowPanels if crate::seek::pending(ui) => crate::seek::commit_now(ui),
         Action::ShowPanels if ok_pauses(ui) => {
@@ -98,7 +98,13 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         Action::ShowPanels => ui.update_panels(|p, now| p.show_card(now)),
         Action::ShowControls if !fullscreen => return false,
         Action::ShowControls if nsh_core::prelude::idiom() == nsh_core::platform::Idiom::Tv => {
-            crate::play_bar::remote(ui)
+            if key == RemoteKey::Ok && crate::player::failed(&ui) {
+                crate::player::retry(ui);
+            } else if key == RemoteKey::Ok && crate::seek::pending(ui) {
+                crate::seek::commit_now(ui);
+            } else {
+                crate::play_bar::remote(ui);
+            }
         }
         Action::ShowControls if key == RemoteKey::Menu => {
             ui.update_panels(|p, now| p.toggle_controls(now))

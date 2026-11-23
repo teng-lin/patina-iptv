@@ -100,7 +100,7 @@ Press Up from Search in the navigation rail to focus the playing video.
 
 | Key | Tap | Hold |
 |---|---|---|
-| OK | The info card with its action cards; over a failed stream, try again | The play bar, Play/pause focused |
+| OK | Opens the play bar with Play/pause focused. Over a failed stream, retries. | Same as tap |
 | Menu | The play bar (again: hide it) | – |
 | Up / Down | Channel up / down (`remote.player_up_down` can make them open the channel list) | Repeats |
 | Ch+ / Ch− and Page Up / Down | Channel up / down | Repeats |
@@ -119,7 +119,7 @@ list never tunes unless autoplay is on.
 
 ### Info card and its action cards
 
-The card captures Left, Right and OK while it shows.
+A custom remote binding can open the info card with action cards. The cards capture Left, Right and OK while they show.
 
 | Key | Tap | Hold |
 |---|---|---|
@@ -140,7 +140,7 @@ As full-screen live, except:
 |---|---|---|
 | Left / Right (`catchup.seek_keys`: Left/Right, the default) | Choose a seek one time-bar step back or on, shown on the card's bar; it starts after a short pause, or at once on OK | Repeats the step, faster (no hold action) |
 | Down / Up (`catchup.seek_keys`: Down/Up) | As Left / Right above, instead of zapping | As above |
-| OK | Starts a chosen seek at once; otherwise, when arrows seek (`catchup.seek_keys` Left/Right or Down/Up), play/pause; with media keys only (`transport`), the info card | The play bar |
+| OK | Starts a pending seek at once or opens the play bar with Play/pause focused | Same as tap |
 | Rewind / Fast-forward | Seek back / on | Repeats |
 | ⏭ (Next) | Back to live (a replay) | – |
 
@@ -150,7 +150,7 @@ does either.
 
 ## Play bar
 
-The shared bar of tablet and desktop, with remote focus. It captures the
+The same play bar appears on tablet and desktop. On TV it has remote focus. It captures the
 arrows and OK while it shows, so they never zap or seek behind it.
 
 | Key | Tap | Hold |

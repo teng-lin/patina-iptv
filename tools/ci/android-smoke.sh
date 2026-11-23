@@ -324,6 +324,13 @@ fi
 shot 05-fullscreen
 
 if [ "$is_tv" = true ]; then
+  step "open shared TV controls with a tap"
+  mark
+  keys KEYCODE_DPAD_CENTER KEYCODE_DPAD_RIGHT KEYCODE_BACK
+  expect 'key=ok .*phase=Up .*ctx=Player .*action=Some\(ShowControls\)' 10
+  expect 'key=right .*ctx=Controls .*action=Some\(MoveRight\)' 10
+  expect 'key=back .*ctx=Controls' 10
+
   step "shared TV controls and long OK release"
   mark
   # One second is deliberately above the 400 ms product default. Android's
