@@ -195,24 +195,20 @@ mod linux {
             let Some(LaunchedPlayer { mut handoff, keep }) = launch(playback, player) else {
                 continue;
             };
-            let connected = handoff.connected().await;
-            // The first request claims this launch, even if admission has
-            // already expired by the time the app handles it.
-            if connected
-                || handoff
-                    .admission
-                    .as_ref()
-                    .is_some_and(|admission| admission.received_request())
-            {
-                if keep.send(()).is_ok() && connected && handoff.is_open() {
-                    return Some(handoff);
-                }
-                handoff.session.close_and_wait().await;
-                return None;
+            if handoff.connected().await && handoff.is_open() && keep.send(()).is_ok() {
+                return Some(handoff);
             }
-            // The watcher retires the relay after reaping the unclaimed child.
+            // The watcher reaps the failed child before retiring the relay.
             drop(keep);
             handoff.session.wait_retired().await;
+            if handoff
+                .admission
+                .as_ref()
+                .is_some_and(|admission| admission.received_request())
+            {
+                // A player that reached the relay already claimed the launch.
+                return None;
+            }
         }
         None
     }
