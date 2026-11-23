@@ -38,7 +38,8 @@ Windows and Command on macOS.
 
 | Keys | Does |
 |---|---|
-| Arrows, Enter | Move and choose; Enter on a channel plays it full screen |
+| Arrows | Move. Up and Down wrap through the TV Guide's channel rows and groups. |
+| Enter | Choose. In TV Guide, a live channel starts in the preview. Press Enter on the active channel to expand it. |
 | Escape or Backspace | One step back ([Getting back](interaction.md#getting-back)) |
 | / or Mod+F | Search |
 | M, Shift+F10 | Menu for the focused program, channel or group |
@@ -74,9 +75,10 @@ Windows and Command on macOS.
 
 ## Full screen
 
-- **Now:** clicking a channel plays it full screen *inside* Patina's window
-  (unless **Keep the guide after choosing** is on). It never resizes the
-  operating system's window.
+- **Now:** a click on a live channel in TV Guide tunes it in the preview.
+  Click the active channel again to expand the video inside Patina's window.
+  The overlay layout can stay open after tuning with **Keep the guide overlay
+  after choosing**.
 - **Now:** a double click on the video toggles the operating system's full
   screen for that window, and plays nothing again. Escape first leaves the
   operating system's full screen, then the player's panels, then Patina's

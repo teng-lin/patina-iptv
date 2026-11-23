@@ -178,9 +178,8 @@ fn clicks_reach_the_guide_under_the_hidden_layers() {
     step(app.wait_for("text:Test Channel Three"));
     step(app.wait_for_gone("text:Test Channel One", Duration::from_secs(2)));
 
-    // The header's add button (under the hidden player panels' top bar
-    // too) opens the wizard.
-    step(app.press("text:+ Add playlist"));
+    // The rail and playlist screen let a pointer open the wizard.
+    crate::browse_fixture::open_add_playlist(&mut app);
     step(app.wait_for("text:Playlist link"));
 }
 

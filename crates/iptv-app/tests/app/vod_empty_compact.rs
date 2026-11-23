@@ -120,8 +120,7 @@ fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseu
     // Movies by pointer. Left puts the remote on the rail, which stays
     // narrow; a wider window keeps the rail, now beside the categories;
     // compact again, a click still reaches Add playlist.
-    step(app.wait_for("id:open-movies"));
-    step(app.press("id:open-movies"));
+    crate::browse_fixture::open_rail_item(app, t(pseudo, "Movies"));
     one_pane(app, pseudo);
     step(app.press_key("left"));
     one_pane(app, pseudo);
@@ -138,14 +137,13 @@ fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseu
     step(app.back());
     step(app.wait_for_gone(&wizard, Duration::from_secs(2)));
     // Shows by pointer, closed with the rail's Close.
-    step(app.wait_for("id:open-shows"));
-    step(app.press("id:open-shows"));
+    crate::browse_fixture::open_rail_item(app, t(pseudo, "Shows"));
     one_pane(app, pseudo);
     step(app.press(&close_selector(pseudo)));
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
     // Then the keyboard: Left reaches the rail, Right the action again
     // (the categories never return), Enter adds a playlist.
-    step(app.press("id:open-shows"));
+    crate::browse_fixture::open_rail_item(app, t(pseudo, "Shows"));
     one_pane(app, pseudo);
     step(app.press_key("left"));
     step(app.press_key("right"));

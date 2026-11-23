@@ -693,8 +693,15 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
         env.idiom = Idiom::Pad;
         env.screen_reader = true;
     }));
-    // A channel row: it plays full screen (#86).
+    // A channel row plays in the guide, then its second activation expands it.
     let row = app.screen().id("role:button[/^Local B$/]").unwrap();
+    activate(app, row);
+    step(app.wait_until(
+        "Local B opens in the preview",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) == 1,
+    ));
+    exposure.shown(app, "guide-ui", true);
     activate(app, row);
     exposure.shown(app, "guide-ui", false);
     exposure.shown(app, "video", true);
@@ -714,6 +721,13 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     exposure.selected_channel(app, "Local B");
     // A program cell on another row plays its channel.
     let cell = program_now(app, "Local C");
+    activate(app, cell);
+    step(app.wait_until(
+        "Local C opens in the preview",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) == 2,
+    ));
+    exposure.shown(app, "guide-ui", true);
     activate(app, cell);
     exposure.shown(app, "guide-ui", false);
     step(app.wait_for("text:/Local C  ▶/"));

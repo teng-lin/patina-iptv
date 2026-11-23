@@ -73,7 +73,7 @@ pub fn open_first_run(ui: Ui) {
     );
 }
 
-/// "Add playlist" from the guide: the playlist form.
+/// Opens the add-playlist form.
 pub fn open_add(ui: Ui) {
     if imports_unavailable() {
         return;
@@ -251,22 +251,6 @@ pub fn back(ui: Ui) -> bool {
     }
     send(ui, WizardEvent::Back);
     true
-}
-
-/// The top bar's entry point.
-pub fn add_button(ui: Ui) -> impl IntoElement {
-    let size = Scale::new();
-    ui_kit::caption(size, || tr("+ Add playlist"))
-        .role(AccessibilityRole::Button)
-        .px(move || size.px(12.0))
-        .py(move || size.px(5.0))
-        .rounded(px(RADIUS))
-        .text_color(rgb(LIST_TEXT))
-        .bg(tint(WHITE, RESTING_ALPHA * 2))
-        .on_press(move || {
-            ui.touched();
-            open_add(ui);
-        })
 }
 
 /// Which screen shows: rebuilt only when this changes.

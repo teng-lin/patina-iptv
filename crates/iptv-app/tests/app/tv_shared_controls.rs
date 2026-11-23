@@ -1,4 +1,5 @@
 //! Shared pointer/TV controls and guide preview retain one native player.
+use crate::browse_fixture::choose_fullscreen;
 use crate::personalization::{self, step};
 use iptv_settings::{Settings, Value};
 use nsh_core::{MountItem, NodeId, ViewKind, platform::Idiom};
@@ -133,6 +134,8 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     let opens = iptv_app::player_opens(0);
     step(app.press_key("up"));
     assert!(!selected(app, "guide-preview"));
+    step(app.press_key("tab"));
+    step(app.press_key("left"));
     step(app.press_key("up"));
     assert!(selected(app, "guide-preview"));
     step(app.press_key("pagedown"));
@@ -272,7 +275,7 @@ fn tv_rail_keeps_settings_inside_the_available_height() {
 }
 
 #[test]
-fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
+fn the_rail_reaches_preview_on_desktop_and_tv_without_reopening_video() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime) = preview_fixture(home);
     let app = &mut fixture.app;
@@ -314,34 +317,6 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         if idiom == Idiom::Desktop {
             step(app.press_key("tab"));
         }
-        step(app.press("id:guide-groups >> text:All channels"));
-        if idiom == Idiom::Tv {
-            step(app.press_key("right"));
-        }
-        step(app.press_key("down"));
-        step(app.press_key("up"));
-        // Guide A is focused while B keeps playing. Up must cancel A's pending autoplay.
-        step(app.press_key("up"));
-        assert!(selected(app, "guide-preview"), "first guide row, {idiom:?}");
-        step(app.run_for(Duration::from_secs(3)));
-        assert_eq!(iptv_app::player_opens(0), opens);
-        step(app.press_key("down"));
-        assert!(!selected(app, "guide-preview"));
-        step(app.press("text:/^☰  /"));
-        step(app.press("id:guide-groups >> text:Favorites"));
-        if idiom == Idiom::Desktop {
-            step(app.press_key("tab"));
-        }
-        let groups_width = width(app, "guide-groups");
-        let rail_width = width(app, "navigation-rail");
-        step(app.press_key("up"));
-        assert!(selected(app, "guide-preview"), "Favorites, {idiom:?}");
-        assert_eq!(width(app, "guide-groups"), groups_width);
-        assert_eq!(width(app, "navigation-rail"), rail_width);
-        step(app.press_key("down"));
-        step(app.press_key("up"));
-        step(app.back());
-        assert!(!selected(app, "guide-preview"));
         // Left enters Search; its expanded sidebar remains in place during preview focus.
         step(app.press_key("left"));
         let rail_width = width(app, "navigation-rail");
@@ -349,6 +324,8 @@ fn sidebar_up_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         step(app.press_key("up"));
         assert!(selected(app, "guide-preview"), "Search, {idiom:?}");
         assert_eq!(width(app, "navigation-rail"), rail_width);
+        step(app.run_for(Duration::from_secs(3)));
+        assert_eq!(iptv_app::player_opens(0), opens);
         step(app.press_key("down"));
         step(app.press_key("enter"));
         step(app.wait_for("id:search-screen"));
@@ -424,15 +401,8 @@ fn live_player_panels_expire_and_back_dismisses_without_stopping() {
     let mut fixture = personalization::start(home, settings, true);
     let app = &mut fixture.app;
     step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
-    step(app.press_key("enter"));
+    choose_fullscreen(app);
     step(app.wait_for("id:player-banner"));
-    // The banner renders before asynchronous tuning reaches the native
-    // player; count opens only once the initial stream has opened.
-    step(app.wait_until(
-        "initial native stream opens",
-        Duration::from_secs(5),
-        |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) > 0,
-    ));
     step(app.run_for(Duration::from_millis(3_100)));
     assert!(!app.screen().matches("id:player-banner").unwrap());
     let playing = iptv_app::player_opens(0);
@@ -471,7 +441,7 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
     let mut fixture = personalization::start(home, Settings::new(), true);
     let app = &mut fixture.app;
     step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
-    step(app.press_key("enter"));
+    choose_fullscreen(app);
     step(app.wait_for("id:player-banner"));
     step(app.press_key("m"));
     step(app.wait_for("id:play-bar-layer"));
@@ -559,7 +529,7 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     step(app.wait_for_gone("id:guide-more", Duration::from_secs(2)));
 
     // The player's channel list: a ⋯ per row for touch, the same menu.
-    step(app.press_key("enter"));
+    choose_fullscreen(app);
     step(app.wait_for("id:player-banner"));
     step(app.press_key("m"));
     step(app.wait_for("text:Channels"));

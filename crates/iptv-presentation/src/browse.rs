@@ -21,7 +21,7 @@
 //! An empty list (no favorites yet) cannot be entered: the focus stays in
 //! the groups column while the guide explains how to add some.
 
-use crate::guide::{Focus, Move, Pane, PreviewOrigin};
+use crate::guide::{Focus, Move, Pane};
 use iptv_core::guide::Schedule;
 
 /// An item of the navigation rail.
@@ -169,13 +169,10 @@ impl Focus {
 
     /// The column layout retained while the existing preview owns focus.
     pub fn layout_pane(&self) -> Pane {
-        if self.pane != Pane::Preview {
-            return self.pane;
-        }
-        match self.preview_origin {
-            PreviewOrigin::Guide => Pane::Guide,
-            PreviewOrigin::Favorites => Pane::Groups,
-            PreviewOrigin::Search => Pane::Rail,
+        if self.pane == Pane::Preview {
+            Pane::Rail
+        } else {
+            self.pane
         }
     }
 
@@ -184,19 +181,12 @@ impl Focus {
         matches!(self.layout_pane(), Pane::Rail | Pane::Groups)
     }
 
-    /// Up from the first guide row, Favorites or Search reaches the playing
-    /// preview without changing the underlying channel, time or list identity.
+    /// Up from Search reaches the playing preview without changing the
+    /// underlying channel, time or list identity.
     pub fn focus_preview(&mut self, playing: bool) -> bool {
-        if !playing {
+        if !playing || self.pane != Pane::Rail || self.rail != RailItem::Search {
             return false;
         }
-        let origin = match self.pane {
-            Pane::Guide if self.channel == 0 => PreviewOrigin::Guide,
-            Pane::Groups if self.group == crate::lists::FAVORITES => PreviewOrigin::Favorites,
-            Pane::Rail if self.rail == RailItem::Search => PreviewOrigin::Search,
-            _ => return false,
-        };
-        self.preview_origin = origin;
         self.pane = Pane::Preview;
         self.hint = false;
         true
@@ -209,11 +199,8 @@ impl Focus {
         }
     }
 
-    fn leave_preview(&mut self, list: &dyn Schedule) -> Outcome {
+    fn leave_preview(&mut self) -> Outcome {
         self.retain_preview(false);
-        if self.pane == Pane::Guide && list.channel_count() == 0 {
-            self.pane = Pane::Groups;
-        }
         Outcome::Moved
     }
 
@@ -222,7 +209,7 @@ impl Focus {
         self.retain_rail(cols.rail);
         self.hint = false;
         match (self.pane, m) {
-            (Pane::Preview, Move::Down) => self.leave_preview(list),
+            (Pane::Preview, Move::Down) => self.leave_preview(),
             (Pane::Preview, Move::Right) => {
                 self.pane = if list.channel_count() > 0 {
                     Pane::Guide
@@ -241,10 +228,7 @@ impl Focus {
                 Outcome::Moved
             }
             (Pane::Groups, Move::Up | Move::Down) => {
-                let step = if m == Move::Up { -1 } else { 1 };
-                let last = cols.entries.saturating_sub(1) as isize;
-                let to = (self.group as isize + step).clamp(0, last.max(0)) as usize;
-                self.select(to)
+                self.select(m.wrap_vertical(self.group, cols.entries))
             }
             (Pane::Groups, Move::Left) => {
                 self.pane = Pane::Rail;
@@ -304,7 +288,7 @@ impl Focus {
             return Outcome::Moved;
         }
         match self.pane {
-            Pane::Preview => self.leave_preview(list),
+            Pane::Preview => self.leave_preview(),
             Pane::Guide => {
                 if !(cols.back_to_now && self.return_to_now(list)) {
                     self.pane = Pane::Groups;

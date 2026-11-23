@@ -167,8 +167,7 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
     let props = observe_props(&mut app);
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
-    step(app.press("id:open-shows"));
+    crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
     step(app.press(SERIES));
     if lock == Lock::Series {

@@ -30,6 +30,7 @@ fn repeated_player_zaps_skip_intermediate_streams_and_menu_cancels_the_last() {
     step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
     loaded_stream(app, &opened, "http://example.test/a");
+    step(app.press_key("enter"));
     opened.lock().unwrap().clear();
     step(app.press_key("down"));
     step(app.run_for(Duration::from_millis(150)));

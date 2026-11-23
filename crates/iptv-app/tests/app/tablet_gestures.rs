@@ -479,7 +479,7 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
 
     // Under the threshold a drag is still a tap, an 8 dp sideways wobble
     // included: it chooses the live program. A pan right after it,
-    // before the switch delay, keeps that choice: it plays full screen.
+    // before the switch delay, keeps that choice in the preview.
     step(app.drag(&format!("text:{}", name(5)), Point::new(px(8.0), px(1.0))));
     step(app.drag(
         "id:guide-timeline >> text:C5 P0",
@@ -492,6 +492,8 @@ fn tablet_drags_scroll_and_pan_without_playing_or_recording() {
                 == Some("http://stream.example.test/5.m3u8")
         }),
     );
+    assert!(video_width_of(app.screen()) < 1280.0);
+    step(app.press("id:guide-preview"));
     step(app.wait_until("full screen", Duration::from_secs(3), |s| {
         video_width_of(s) >= 1280.0
     }));

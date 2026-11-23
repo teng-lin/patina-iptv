@@ -30,7 +30,8 @@ fn the_focus_model_navigates_real_data_and_gaps() {
         "same time column on the EPG-less channel"
     );
     f.apply(Move::Down, &s);
-    assert_eq!(f.channel, 1, "clamped to the last channel");
+    assert_eq!(f.channel, 0, "wrapped to the first channel");
+    assert_eq!(f.program(&s), Program { start: 60, end: 90 });
 }
 
 #[test]

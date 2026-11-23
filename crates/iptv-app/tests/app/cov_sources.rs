@@ -111,7 +111,7 @@ fn first_playlist(t: &mut T) {
 /// "+ Add playlist" opens the wizard over the screen; a playlist by link,
 /// named, is shown once added.
 fn add_by_link(t: &mut T, srv: &Server) {
-    t.press("text:+ Add playlist >> nth=1");
+    t.press("id:playlists-screen >> text:+ Add playlist");
     t.press("id:wizard-field-PlaylistUrl");
     t.enter(&srv.url("/link.m3u"));
     t.wait(&format!("text:{}", srv.url("/link.m3u")), 5);

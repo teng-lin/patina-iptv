@@ -326,10 +326,10 @@ pub fn context(ui: &Ui) -> Context {
 }
 
 /// A named keyboard binding fires again on auto-repeat (a held arrow
-/// keeps moving), except Menu (`M`): held, it opens its menu once.
+/// keeps moving). OK and Menu act once per physical press.
 fn named_key_options(key: RemoteKey) -> KeyOptions {
     KeyOptions {
-        repeat: key != RemoteKey::Menu,
+        repeat: !matches!(key, RemoteKey::Menu | RemoteKey::Ok),
         ..Default::default()
     }
 }
@@ -348,13 +348,35 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         .enumerate()
         .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
     let consumed = input.nav.borrow().consumed;
+    let guide_active =
+        computed(move || ui.mode.get() == ViewMode::Guide && context(&ui) == Context::Guide);
+    // Named bindings omit the repeat phase. Ask NSH to suppress repeats
+    // of remapped Select keys while they activate the guide's preview.
+    let guide_select_keys = computed(move || {
+        if !guide_active.get() {
+            return Vec::new();
+        }
+        ui.app.settings.get();
+        let keymap = crate::remote_editor::keymap();
+        KEYS.iter()
+            .map(|&(_, key)| key)
+            .chain((0..DIGITS.len() as u8).map(RemoteKey::Digit))
+            .filter(|&key| {
+                named_key_options(key).repeat
+                    && keymap.resolve(Context::Guide, key, Press::Short) == Some(Action::Select)
+            })
+            .collect::<Vec<_>>()
+    });
     for (name, key) in KEYS.iter().copied().chain(digits) {
         if !long_press() || name.contains('+') {
             let nav = input.nav.clone();
             // A keyboard binding reports no phase: while a prompt has its
             // key consumed it does not repeat (the platform holds the
             // auto-repeats), so only a fresh press reaches it.
-            let held_off = computed(move || consumed.with(|c| c.contains(&key)));
+            let held_off = computed(move || {
+                consumed.with(|c| c.contains(&key))
+                    || guide_select_keys.with(|keys| keys.contains(&key))
+            });
             effect(move || {
                 let mut options = named_key_options(key);
                 options.repeat &= !held_off.get();
@@ -703,8 +725,14 @@ fn keep_controls_until(ui: Ui, at: u64) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
-    // A held Menu opens a menu once; its repeats would close and reopen it.
-    if repeat && action == Action::ShowMenu {
+    // A held key must not reopen a menu or turn a guide preview into
+    // fullscreen. A remapped remote button can repeat Select.
+    if repeat
+        && (action == Action::ShowMenu
+            || (action == Action::Select
+                && ui.mode.get_untracked() == ViewMode::Guide
+                && context(&ui) == Context::Guide))
+    {
         return;
     }
     if ui.player_surface != 0 {
@@ -977,14 +1005,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keyboard_menu_fires_once_while_held_and_moves_repeat() {
+    fn keyboard_menu_and_ok_fire_once_while_held_and_moves_repeat() {
         assert!(!named_key_options(RemoteKey::Menu).repeat, "M: once");
-        for key in [
-            RemoteKey::Down,
-            RemoteKey::Right,
-            RemoteKey::Ok,
-            RemoteKey::ChannelUp,
-        ] {
+        assert!(!named_key_options(RemoteKey::Ok).repeat, "Enter: once");
+        for key in [RemoteKey::Down, RemoteKey::Right, RemoteKey::ChannelUp] {
             assert!(named_key_options(key).repeat, "{key:?}");
         }
     }

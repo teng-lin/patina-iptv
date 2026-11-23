@@ -80,7 +80,7 @@ In the guide:
 
 | Target | Remote | Touch | Mouse and keyboard | Result |
 |---|---|---|---|---|
-| Channel, or program on air | OK | Tap | Click or Enter | Plays full screen |
+| Channel, or program on air | OK | Tap | Click or Enter | Plays in the TV Guide preview |
 | Channel already playing live | OK | Tap | Click or Enter | Returns to full screen |
 | Past program within the channel's archive | OK | Tap | Click or Enter | Replays from the start |
 | Past program without replay, or upcoming program | OK | Tap | Click or Enter | Opens its details |
@@ -89,10 +89,13 @@ In the guide:
   `guide.switch_delay` before tuning, so that fast choices skip channels; a
   replay starts at once. On an iPad, a tap on the guide beside the open groups
   column only closes the column.
-- **Now:** the setting **Keep the guide after choosing** (`guide.stay_on_guide`,
-  off by default) keeps the guide open after tuning a live channel, in both
-  layouts. A replay and the channel already playing always go full screen.
-  `guide.autoplay` tunes the focused channel while browsing, without a choice.
+- **Now:** choosing a live channel in TV Guide tunes it in the preview.
+  Choose the active channel again to expand the same stream. Up and Down
+  wrap between the first and last channel rows and between the first and last
+  displayed groups. In the overlay layout, **Keep the guide overlay after
+  choosing** (`guide.stay_on_guide`, off by default) keeps the guide open
+  after tuning. A replay goes full screen. `guide.autoplay` tunes the focused
+  channel while browsing, without a choice.
 - **Now:** opening a program's details or menu never starts playback. A
   long press or right-click moves the focus to what it opens the menu for;
   `guide.autoplay` then holds on that channel, after the menu or its details
@@ -257,9 +260,9 @@ what the content needs at the current text size, not from the device type.
   either side, as the rotation lock allows, until portrait has a design of
   its own. Tablets, an unfolded phone and TVs rotate freely.
 - **Now:** the guide's header (`iptv_app::layout::GuideHeader`) puts its
-  shortcuts (the list on screen, Movies, Shows, Add playlist) on a row of their
-  own under the preview and the focused program in Compact, and in Medium
-  wherever the program would have less than its room beside them. The
+  group selector under the preview and the focused program in Compact, and
+  in Medium wherever the program needs more room. Movies, Shows and Playlists
+  are available in the navigation rail. The
   preview keeps its place at the top left and shrinks to leave that row room,
   but never below 64 points tall, which keeps the corner ‹ inside it. A short
   window grows the header instead, for the preview and for the focused
@@ -269,13 +272,13 @@ what the content needs at the current text size, not from the device type.
   giving way first. The
   program's times wrap onto a second line rather than clip, and a part
   wider than the column (large text in a narrow window) wraps within it; its
-  title stays on one line and is truncated. The shortcuts' row scrolls
+  title stays on one line and is truncated. The group-selector row scrolls
   sideways where the window is narrower than it. The
   guide's rows already take the full width below the header in every class.
 - **Now:** a Compact window at least 1.6 times as tall as it is wide (a phone
   held upright, a narrow portrait Split View window) stacks the header: the
   preview spans the window's width inside its margins, the focused program
-  sits under it, then the shortcuts' row. Beside the program the preview
+  sits under it, then the group-selector row. Beside the program the preview
   would be a thumbnail (132 × 74 points at 412 points wide); stacked it is
   388 × 218. The stacked header keeps the same 55% (70%) limit, and a window
   where it would pass that keeps the other arrangement. A small desktop window

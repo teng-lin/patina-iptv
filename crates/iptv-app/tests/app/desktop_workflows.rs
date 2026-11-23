@@ -526,14 +526,9 @@ fn window_full_screen_resizing_and_display_scale_keep_the_stream_and_the_channel
     let app = &mut fixture.app;
     let seen = fixture.seen.clone();
 
-    // A click on a channel plays it full screen inside the window.
-    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
-    step(
-        app.wait_until("Desk 03 plays", Duration::from_secs(5), |_| {
-            iptv_app::player_has_source(0)
-        }),
-    );
-    assert!(video_full_screen(app), "choosing is watching");
+    // Click the channel to play its preview, then click again to expand it.
+    crate::browse_fixture::tap_fullscreen(app, &format!("id:guide-ui >> text:{}", channel(3)));
+    assert!(video_full_screen(app), "the preview is expanded");
     let opens = iptv_app::player_opens(0);
     let player = seen.player(0).expect("the persistent player");
     let source = seen.prop(0, "source");
@@ -885,12 +880,7 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
     assert!(app.window_state("player-window-1").unwrap().is_none());
     step(app.wait_for(&format!("id:guide-ui >> text:{}", channel(3))));
     let before = iptv_app::player_opens(0);
-    step(app.press(&format!("id:guide-ui >> text:{}", channel(3))));
-    step(app.wait_until(
-        "the same channel plays again",
-        Duration::from_secs(5),
-        |_| iptv_app::player_has_source(0),
-    ));
+    crate::browse_fixture::tap_fullscreen(app, &format!("id:guide-ui >> text:{}", channel(3)));
     assert!(iptv_app::player_opens(0) > before);
     assert!(video_full_screen(app));
 

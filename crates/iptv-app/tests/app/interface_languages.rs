@@ -124,10 +124,9 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:Idioma"));
     step(app.wait_for("text:☰  Todos los canales"));
     step(app.wait_for("text:TV en directo"));
-    // The guide header's shortcuts, mounted under the settings, follow too.
-    step(app.wait_for("id:open-movies >> text:Películas"));
-    step(app.wait_for("id:open-shows >> text:Series"));
-    step(app.wait_for("text:+ Añadir lista"));
+    step(app.wait_for("id:navigation-rail >> text:Películas"));
+    step(app.wait_for("id:navigation-rail >> text:Series"));
+    step(app.wait_for("id:navigation-rail >> text:Listas de reproducción"));
     step(app.wait_for("text:Reproducir el último canal al iniciar"));
     let language_help =
         "Interface language: `system` follows the device, otherwise a language tag.";
@@ -240,7 +239,7 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
         crate::support::picked("not a playlist".to_owned())
     });
     step(app.press(&format!(
-        "text:{} >> nth=1",
+        "id:playlists-screen >> text:{}",
         pattern_free(&de.t("+ Add playlist"))
     )));
     shown(app, &de.t("Source type"));

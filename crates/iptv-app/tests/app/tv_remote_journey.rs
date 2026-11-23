@@ -18,7 +18,7 @@
 use crate::headless::KeyPhase;
 use crate::personalization::{self, Fixture, step};
 use crate::tv_shared_controls::{Lifetime, persistent, record_players, selected};
-use iptv_settings::{Settings, Value};
+use iptv_settings::{KeyBinding, PressKind, Settings, Value, keys};
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{NodeId, Size, ViewKind, prelude::px};
 use nsh_tv::RemoteKey;
@@ -57,8 +57,7 @@ fn logged(text: &str) -> usize {
         .count()
 }
 
-/// A TV on Android at 960×540 with remote phases; choosing plays full
-/// screen and browsing never tunes.
+/// A TV on Android at 960×540 with remote phases and autoplay disabled.
 fn tv(
     home: crate::isolated::Home,
     adjust: impl FnOnce(&mut Settings),
@@ -76,9 +75,6 @@ fn tv_with(
     log::set_logger(&LOG).expect("this process's only logger");
     log::set_max_level(log::LevelFilter::Info);
     let mut settings = Settings::new();
-    settings
-        .set("guide.stay_on_guide", Value::Bool(false))
-        .unwrap();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
     settings.set("guide.switch_delay", Value::ms(250)).unwrap();
     settings
@@ -161,6 +157,14 @@ fn plays(app: &mut crate::Headless, lifetime: &Arc<Mutex<Lifetime>>, url: &str, 
     assert_eq!(iptv_app::player_opens(0), opens, "{url}");
 }
 
+fn first_channel_fullscreen(app: &mut crate::Headless, lifetime: &Arc<Mutex<Lifetime>>) {
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, lifetime, "http://example.test/a", 1);
+    assert!(shows(app, "id:guide-preview"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:player-banner >> text:/Local A/"));
+}
+
 /// A hold of `key` for `ms`: its down, an auto-repeat every 50 ms when
 /// `repeats` (an Android remote; an IR remote sends none), its release.
 fn hold(app: &mut crate::Headless, key: RemoteKey, ms: u64, repeats: bool) {
@@ -224,16 +228,74 @@ fn back_to_guide(app: &mut crate::Headless) {
     step(app.back());
 }
 
+fn remap_guide_down_to_select(settings: &mut Settings) {
+    settings
+        .set(
+            keys::KEY_OVERRIDES.as_str(),
+            Value::KeyBindings(vec![KeyBinding::new(
+                Some("guide"),
+                "down",
+                PressKind::Short,
+                "select",
+            )]),
+        )
+        .unwrap();
+}
+
+#[test]
+fn a_remapped_select_only_activates_once_per_remote_press() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, remap_guide_down_to_select);
+    let app = &mut fixture.app;
+
+    step(app.remote_phase(RemoteKey::Down, KeyPhase::Down));
+    plays(app, &lifetime, "http://example.test/a", 1);
+    step(app.remote_phase(RemoteKey::Down, KeyPhase::Repeat));
+    step(app.remote_phase(RemoteKey::Down, KeyPhase::Up));
+    assert!(shows(app, "id:guide-preview"));
+    assert!(!shows(app, "id:player-banner"));
+
+    step(app.remote_tap(RemoteKey::Down));
+    step(app.wait_for("id:player-banner >> text:/Local A/"));
+    assert_eq!(iptv_app::player_opens(0), 1);
+    persistent(app, &lifetime, player);
+}
+
+#[test]
+fn a_desktop_key_remapped_to_select_repeats_only_outside_the_guide_grid() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    remap_guide_down_to_select(&mut settings);
+    let mut fixture = personalization::start(home, settings, true);
+    let app = &mut fixture.app;
+
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(false));
+    assert_eq!(iptv_app::keyboard_repeats("up"), Some(true));
+    step(app.press_key("tab"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(true));
+    step(app.press_key("tab"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(false));
+
+    step(app.press_key("down"));
+    step(app.wait_until(
+        "the remapped key starts preview playback",
+        Duration::from_secs(5),
+        |_| iptv_app::player_has_source(0),
+    ));
+    assert!(shows(app, "id:guide-preview"));
+    step(app.press_key("down"));
+    step(app.wait_for("id:player-banner >> text:/Local A/"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(true));
+    assert_eq!(iptv_app::player_opens(0), 1);
+}
+
 #[test]
 fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |_| {});
     let app = &mut fixture.app;
 
-    // A quick OK on the guide's first channel plays it full screen.
-    step(app.remote_tap(RemoteKey::Ok));
-    step(app.wait_for("id:player-banner"));
-    plays(app, &lifetime, "http://example.test/a", 1);
+    first_channel_fullscreen(app, &lifetime);
 
     // Long OK, with an Android remote's repeats and then an IR remote's
     // single down and up: the controls open once, Play/pause focused; no
@@ -293,10 +355,12 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     assert!(!shows(app, "id:player-banner"), "the guide, not the video");
     assert_eq!(iptv_app::player_opens(0), 1, "the guide keeps the stream");
 
-    // OK held in the guide while a tap plays Local B full screen: the
+    // OK held in the guide while a second tap plays Local B full screen: the
     // press began on the guide, so neither its short action on an early
     // release (the info card) nor its long one by timer (the guide's
     // menu, or the player's controls) acts on the video.
+    step(app.press("id:guide-ui >> label:Local B"));
+    plays(app, &lifetime, "http://example.test/b", 2);
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
     step(app.press("id:guide-ui >> label:Local B"));
     step(app.wait_for("id:player-banner"));
@@ -313,6 +377,8 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
     );
     back_to_guide(app);
 
+    step(app.press("id:guide-ui >> label:Local C"));
+    plays(app, &lifetime, "http://example.test/c", 3);
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
     step(app.press("id:guide-ui >> label:Local C"));
     step(app.wait_for("id:player-banner"));
@@ -343,9 +409,7 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     assert_eq!(iptv_app::player_opens(0), 0, "browsing never plays");
 
     // Choose Local A: full screen. The controls, then Back.
-    step(app.remote_tap(RemoteKey::Ok));
-    step(app.wait_for("id:player-banner >> text:/Local A/"));
-    plays(app, &lifetime, "http://example.test/a", 1);
+    first_channel_fullscreen(app, &lifetime);
     step(app.remote_tap(RemoteKey::Menu));
     step(app.wait_for("id:play-bar-layer"));
     assert!(selected(app, "play-bar-play-pause"));
@@ -386,14 +450,11 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
         4,
         "browsing the guide never tunes"
     );
-    // Up from the first row reaches the mini-player, which shows the
-    // playing channel; OK returns that stream to full screen as it is.
-    for _ in 0..3 {
-        if selected(app, "guide-preview") {
-            break;
-        }
-        step(app.remote_tap(RemoteKey::Up));
-    }
+    // Up from the rail's Search item reaches the mini-player; OK returns
+    // the playing channel to full screen as it is.
+    hold(app, RemoteKey::Left, 600, true);
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.remote_tap(RemoteKey::Up));
     assert!(selected(app, "guide-preview"));
     step(app.remote_tap(RemoteKey::Ok));
     step(app.wait_for("id:player-banner >> text:/Local B/"));
@@ -433,8 +494,7 @@ fn extra_large_text_keeps_every_focused_bar_control_on_screen() {
             .unwrap();
     });
     let app = &mut fixture.app;
-    step(app.remote_tap(RemoteKey::Ok));
-    plays(app, &lifetime, "http://example.test/a", 1);
+    first_channel_fullscreen(app, &lifetime);
     step(app.remote_tap(RemoteKey::Menu));
     step(app.wait_for("id:play-bar-layer"));
     // Left to the first enabled control, then Right through all of them:
@@ -617,8 +677,7 @@ fn holds_keep_their_card_decide_once_and_menu_does_not_toggle() {
     step(app.back());
     assert!(!menu_open(app));
 
-    step(app.remote_tap(RemoteKey::Ok));
-    plays(app, &lifetime, "http://example.test/a", 1);
+    first_channel_fullscreen(app, &lifetime);
     // A tap of OK held 1.5 s on the card's TV guide action (a remote with
     // no repeats): the card outlives its 1 s timeout and the release
     // presses the action.
@@ -882,8 +941,7 @@ fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
         settings.set("remote.long_press", Value::ms(2_000)).unwrap();
     });
     let app = &mut fixture.app;
-    step(app.remote_tap(RemoteKey::Ok));
-    plays(app, &lifetime, "http://example.test/a", 1);
+    first_channel_fullscreen(app, &lifetime);
 
     // A zap queued from the card, then OK held on its TV guide action
     // before the zap commits: the zap's banner restarts the card's own
@@ -966,7 +1024,7 @@ fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
     let app = &mut fixture.app;
     step(app.press("text:/^☰  /"));
     step(app.press_key("right"));
-    assert_eq!(iptv_app::keyboard_repeats("enter"), Some(true));
+    assert_eq!(iptv_app::keyboard_repeats("enter"), Some(false));
     step(app.press_key("down"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
@@ -983,9 +1041,9 @@ fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
     );
     assert_eq!(iptv_app::keyboard_repeats("8"), Some(false));
     assert_eq!(iptv_app::keyboard_repeats("down"), Some(true));
-    // A fresh press acts, and repeats again.
+    // A fresh press acts, while held Enter remains a single activation.
     step(app.press_key("enter"));
-    assert_eq!(iptv_app::keyboard_repeats("enter"), Some(true));
+    assert_eq!(iptv_app::keyboard_repeats("enter"), Some(false));
 }
 
 /// "Sound follows the selected tile" (#179) by a remote alone: the rail's

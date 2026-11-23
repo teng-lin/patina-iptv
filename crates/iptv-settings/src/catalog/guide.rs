@@ -321,7 +321,7 @@ pub static GUIDE: &[Setting] = &[
         "switching",
         "guide.stay_on_guide",
         boolean(false),
-        key("Keep the guide open after choosing a channel."),
+        key("Keep the guide overlay open after choosing a channel."),
     ),
     // default: ours
     guide(

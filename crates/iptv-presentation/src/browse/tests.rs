@@ -172,19 +172,20 @@ fn moving_over_the_groups_filters_the_guide_live() {
     assert_eq!(s.focus.window, home_window(40));
     assert_eq!(s.mv(Move::Down), Outcome::Preview);
     assert_eq!(s.shown(), [3, 4], "Sports only");
-    s.mv(Move::Down);
-    assert_eq!(s.mv(Move::Down), Outcome::None, "the last group clamps");
+    assert_eq!(s.mv(Move::Down), Outcome::Preview);
+    assert_eq!(s.shown(), [5, 6, 7, 8]);
+    assert_eq!(s.mv(Move::Down), Outcome::Preview, "last wraps to first");
+    assert_eq!(s.focus.group, FAVORITES);
+    assert!(s.shown().is_empty());
+    assert_eq!(s.mv(Move::Up), Outcome::Preview, "first wraps to last");
     assert_eq!(s.shown(), [5, 6, 7, 8]);
     assert_eq!(
         s.focus.pane,
         Pane::Groups,
         "previewing keeps the groups open"
     );
-    for _ in 0..10 {
-        s.mv(Move::Up);
-    }
+    assert_eq!(s.mv(Move::Down), Outcome::Preview);
     assert_eq!(s.focus.group, FAVORITES, "Favorites is first");
-    assert!(s.shown().is_empty());
 }
 
 #[test]
@@ -629,117 +630,36 @@ fn a_removed_shelf_focus_returns_to_tv_instead_of_another_row() {
 }
 
 #[test]
-fn preview_focus_keeps_the_guide_anchor_and_returns_the_existing_player() {
+fn up_from_search_reaches_the_playing_preview_and_preserves_the_guide_anchor() {
     let mut screen = Screen::new();
-    assert!(!screen.focus.focus_preview(false));
-    screen.focus.channel = 1;
-    assert!(!screen.focus.focus_preview(true));
-    screen.focus.channel = 0;
     let cursor = screen.focus.cursor;
-    assert!(screen.focus.focus_preview(true));
-    assert!(!screen.focus.columns_shown());
-    assert_eq!(screen.ok(), Outcome::ReturnToPlayer);
-    screen.rebuild(true);
-    assert_eq!(screen.focus.pane, Pane::Preview);
-    assert_eq!(screen.mv(Move::Down), Outcome::Moved);
-    assert_eq!(
-        (screen.focus.pane, screen.focus.channel, screen.focus.cursor),
-        (Pane::Guide, 0, cursor)
-    );
-    assert!(screen.focus.focus_preview(true));
-    assert_eq!(screen.back(), Outcome::Moved);
-    assert_eq!(screen.focus.pane, Pane::Guide);
-    assert!(screen.focus.focus_preview(true));
-    screen.focus.retain_preview(false);
-    assert_eq!(screen.focus.pane, Pane::Guide);
-    assert_eq!(screen.focus.channel, 0);
-}
-
-#[test]
-fn up_to_preview_restores_each_browse_origin_without_changing_content() {
-    for pane in [Pane::Guide, Pane::Groups, Pane::Rail] {
-        let mut screen = Screen::new();
-        screen.toggle_favorite(0);
-        screen.toggle_favorite(1);
-        screen.focus.pane = pane;
-        screen.focus.rail = RailItem::Search;
-        if pane == Pane::Groups {
-            screen.focus.group = FAVORITES;
-            screen.rebuild(false);
-        }
-        screen.focus.channel = usize::from(pane != Pane::Guide);
-        let key = screen.view.channel_key(screen.focus.channel);
-        let cursor = screen.focus.cursor;
-        assert!(!screen.focus.focus_preview(false), "idle player, {pane:?}");
-        assert!(screen.focus.focus_preview(true), "Up from {pane:?}");
-        assert_eq!(screen.focus.columns_shown(), pane != Pane::Guide);
-        assert!(
-            !screen.focus.focus_preview(true),
-            "repeated Up stays in preview"
-        );
-        assert_eq!(screen.mv(Move::Down), Outcome::Moved);
-        assert_eq!(screen.focus.pane, pane, "Down restores {pane:?}");
-        assert_eq!(screen.view.channel_key(screen.focus.channel), key);
-        assert_eq!(screen.focus.cursor, cursor);
-        assert!(screen.focus.focus_preview(true));
-        assert_eq!(screen.back(), Outcome::Moved);
-        assert_eq!(screen.focus.pane, pane, "Back restores {pane:?}");
-        assert!(screen.focus.focus_preview(true));
-        screen.focus.retain_preview(false);
-        assert_eq!(screen.focus.pane, pane, "Stop restores {pane:?}");
-        assert_eq!(screen.view.channel_key(screen.focus.channel), key);
-    }
-}
-
-#[test]
-fn empty_favorites_can_focus_an_existing_player_and_return_to_their_group() {
-    let mut screen = Screen::new();
+    assert!(!screen.focus.focus_preview(true), "row Up wraps");
     screen.focus.pane = Pane::Groups;
     screen.focus.group = FAVORITES;
-    screen.rebuild(false);
-    assert_eq!(screen.view.channel_count(), 0);
+    assert!(!screen.focus.focus_preview(true), "group Up wraps");
+    screen.focus.pane = Pane::Rail;
+    screen.focus.rail = RailItem::Movies;
+    assert!(!screen.focus.focus_preview(true));
+    screen.focus.rail = RailItem::Search;
+    assert!(!screen.focus.focus_preview(false));
     assert!(screen.focus.focus_preview(true));
-    assert_eq!(screen.mv(Move::Down), Outcome::Moved);
-    assert_eq!(screen.focus.pane, Pane::Groups);
-    assert_eq!(screen.focus.group, FAVORITES);
-    assert!(screen.focus.focus_preview(true));
-    assert_eq!(screen.mv(Move::Right), Outcome::Moved);
-    assert_eq!(
-        screen.focus.pane,
-        Pane::Groups,
-        "empty guide cannot own focus"
+    assert!(screen.focus.columns_shown());
+    assert!(
+        !screen.focus.focus_preview(true),
+        "repeated Up stays in preview"
     );
-}
-
-#[test]
-fn preview_entry_is_limited_to_the_top_item_of_each_column() {
-    let mut focus = Focus::at(0);
-    focus.channel = 1;
-    assert!(!focus.focus_preview(true));
-    focus.pane = Pane::Groups;
-    focus.group = ALL;
-    assert!(!focus.focus_preview(true));
-    focus.pane = Pane::Rail;
-    focus.rail = RailItem::Movies;
-    assert!(!focus.focus_preview(true));
-}
-
-#[test]
-fn an_emptied_guide_under_the_preview_returns_to_groups() {
-    for back in [false, true] {
-        let mut screen = Screen::new();
-        assert!(screen.focus.focus_preview(true));
-        screen.focus.group = FAVORITES;
-        screen.rebuild(false);
+    assert_eq!(screen.ok(), Outcome::ReturnToPlayer);
+    for leave in [|screen: &mut Screen| screen.mv(Move::Down), Screen::back] {
+        screen.rebuild(true);
         assert_eq!(screen.focus.pane, Pane::Preview);
-        let outcome = if back {
-            screen.back()
-        } else {
-            screen.mv(Move::Down)
-        };
-        assert_eq!(outcome, Outcome::Moved);
-        assert_eq!(screen.focus.pane, Pane::Groups);
+        assert_eq!(leave(&mut screen), Outcome::Moved);
+        assert_eq!(screen.focus.pane, Pane::Rail);
+        assert_eq!(screen.focus.rail, RailItem::Search);
+        assert_eq!((screen.focus.channel, screen.focus.cursor), (0, cursor));
+        assert!(screen.focus.focus_preview(true));
     }
+    screen.focus.retain_preview(false);
+    assert_eq!(screen.focus.pane, Pane::Rail);
 }
 
 #[test]
@@ -750,6 +670,7 @@ fn preview_left_and_right_reach_their_adjacent_columns() {
     assert!(screen.focus.focus_preview(true));
     assert_eq!(screen.mv(Move::Right), Outcome::Moved);
     assert_eq!(screen.focus.pane, Pane::Guide);
+    screen.focus.pane = Pane::Rail;
     assert!(screen.focus.focus_preview(true));
     assert_eq!(screen.mv(Move::Left), Outcome::Moved);
     assert_eq!(screen.focus.pane, Pane::Groups);

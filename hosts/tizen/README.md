@@ -74,24 +74,23 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   (title, ★ for a favorite, times, progress, minutes left or until it
   starts, the list), and the guide grid below: 8 channels, two and a half
   hours, the playing channel marked ▶. Moving never tunes.
-- Grid: Up/Down move between channels in the same time column,
-  Left/Right between programs (Left from the earliest one shows the
-  groups column), Channel Up/Down or Page Up/Down turn a page of
-  8 channels. Holding Left on the guide screen opens the groups column at
-  once (a Left held from full screen only opens the guide). Up from the
-  first channel focuses the preview while a channel plays (OK: full
-  screen, Down: back to the grid).
-- OK on a program on now plays it full screen (on the channel already
-  playing, it only goes full screen); on an ended program the archive
-  still has, it plays that program from its start. A program that has
-  not started, or one the archive no longer has, shows a notice.
-- Groups column: Up/Down move through the lists and show each in the grid
-  (while a held key moves through them, the list shows once it is
-  released, and a held Up stops at the first list: press Up again there
-  for the preview); Right or OK enters it (an empty Favorites cannot be entered);
-  Left goes to the rail (Search and TV). Back: a past or future program
-  returns to now, then the groups, then the rail; on the rail Back does
-  nothing.
+- Grid: Up/Down move between channels in the same time column and wrap
+  between the first and last rows. Left/Right move between programs
+  (Left from the earliest one shows the groups column). Channel Up/Down
+  or Page Up/Down turn a page of 8 channels. Holding Left on the guide
+  screen opens the groups column at once. Holding Left from full screen
+  opens the guide.
+- OK on a live program tunes the channel in the preview. OK on the
+  playing channel expands the same stream to full screen. An ended
+  program with an archive plays from its start. An upcoming or
+  unavailable program shows a notice.
+- Groups column: Up/Down move through the lists and wrap at the ends.
+  Each selection shows its list in the grid. When a key repeats, the
+  list shows once the key is released. Right or OK enters a nonempty
+  list, and Left goes to the rail. Back returns to now from a past or
+  future program, then goes to groups, then the rail.
+- Rail: Search and TV. When video plays, Up from Search focuses the
+  preview. OK expands it to full screen, and Down returns to Search.
 - Full screen: Up/Down or Channel Up/Down zap within the list shown (a
   channel played from search that the list does not have zaps within its
   own group), Left or Back return to the guide on the playing channel
@@ -193,8 +192,9 @@ guide:
 - Channel change, input to moving video: about 1.6 s (raw TS on AVPlay).
 - Remote input to the rendered guide screen (stored guide, idle, with a
   debugger attached): median about 10 ms, worst about 40 ms, over
-  28 keys in the grid, the groups column and the rail. OK to full screen,
-  including opening the stream, about 0.2 s.
+  28 keys in the grid, the groups column and the rail. On the build used
+  for this measurement, a single OK opened the stream and switched to full
+  screen in about 0.2 s.
 - Search and moving favorites are not yet measured on the TV. On a
   desktop browser with a synthetic account of the same size
   (7,300 channels, 242,000 programs): search answer to rendered results

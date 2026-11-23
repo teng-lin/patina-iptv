@@ -388,7 +388,7 @@ fn adding_playlist_reauthenticates_a_cached_portal_after_startup_auth_failed() {
             ImageData::new(M3U.as_bytes().to_vec()),
         )]
     });
-    step(app.press("text:+ Add playlist"));
+    crate::browse_fixture::open_add_playlist(&mut app);
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
