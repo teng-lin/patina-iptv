@@ -34,7 +34,9 @@ jobs:
       tier: ${{ steps.select.outputs.tier }}
       host: ${{ steps.select.outputs.host }}
       ios: ${{ steps.select.outputs.ios }}
+      ios_on_host: ${{ steps.select.outputs.ios_on_host }}
       credentials: ${{ steps.select.outputs.credentials }}
+      credentials_on_host: ${{ steps.select.outputs.credentials_on_host }}
       helpers_full: ${{ steps.select.outputs.helpers_full }}
       windows: ${{ steps.select.outputs.windows }}
       android: ${{ steps.select.outputs.android }}
@@ -105,19 +107,21 @@ jobs:
           git ls-files -z '*.sh' | xargs -0 "$RUNNER_TEMP/helper-linters/bin/shellcheck"
 
   host:
-    needs: [plan, helpers]
+    needs: plan
     if: needs.plan.outputs.host == 'true'
     uses: ./.github/workflows/ci.yml
     with:
       helpers-checked: true
+      credentials: ${{ needs.plan.outputs.credentials_on_host == 'true' }}
+      ios: ${{ needs.plan.outputs.ios_on_host == 'true' }}
       tier: ${{ needs.plan.outputs.tier == 'pr' && 'pr' || 'full' }}
   ios:
     needs: plan
-    if: needs.plan.outputs.ios == 'true'
+    if: needs.plan.outputs.ios == 'true' && needs.plan.outputs.ios_on_host != 'true'
     uses: ./.github/workflows/ios.yml
   credentials:
     needs: plan
-    if: needs.plan.outputs.credentials == 'true'
+    if: needs.plan.outputs.credentials == 'true' && needs.plan.outputs.credentials_on_host != 'true'
     uses: ./.github/workflows/credentials.yml
   windows:
     needs: plan
@@ -174,11 +178,12 @@ jobs:
           PLAN: ${{ needs.plan.outputs.plan }}
           NEEDS: ${{ toJSON(needs) }}
         run: python3 tools/ci/validation-plan.py gate
-  # Preserve the current protected contexts during migration. Each alias mirrors
-  # the entire aggregate, including Windows and source-only Android compilation.
+  # Keep the PR and merge-queue contexts until branch protection requires validation.
   protected-contexts:
     needs: validation
-    if: always()
+    if: >-
+      always() && vars.PATINA_REQUIRE_AGGREGATE_ONLY != 'true' && inputs.tier != 'release' &&
+      (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch')
     strategy:
       matrix:
         context: ['test (ubuntu-24.04)', 'test (macos-15)', android]
@@ -193,12 +198,24 @@ jobs:
     if: needs.plan.outputs.candidate_build == 'true'
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
-      matrix: '{"include":[{"platform":"android","os":"ubuntu-24.04"},{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
+      android: true
+      desktop-matrix: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
   seal-candidate:
     needs: [plan, validation, candidate]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release'
+    # Record a failed gate as a failed seal, so Re-run failed jobs retries it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release' }}
     runs-on: ubuntu-24.04
     steps:
+      - name: Require a successful validation and unsigned build
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          VALIDATION_RESULT: ${{ needs.validation.result }}
+          BUILD_RESULT: ${{ needs.candidate.result }}
+        run: |
+          if [[ "$PLAN_RESULT" != success || "$VALIDATION_RESULT" != success || "$BUILD_RESULT" != success ]]; then
+            echo "::error::Cannot seal this candidate (plan=$PLAN_RESULT validation=$VALIDATION_RESULT packages=$BUILD_RESULT). Re-run failed jobs on this run."
+            exit 1
+          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false

@@ -6,11 +6,18 @@ cd "$(dirname "$0")/../.."
 # Never inherit signing material when running dependency build/plugin code.
 unset KEYSTORE_PATH STORE_PASSWORD KEY_PASSWORD KEY_ALIAS KEYSTORE
 export IPTV_UNSIGNED_RELEASE=1
-bash tools/ci/notices.sh
+notices=${1:-target/notices}
+if [[ $# == 0 ]]; then
+  bash tools/ci/notices.sh
+else
+  # The native build audits the generated runner workspace.
+  test -s "$notices/NSH-RUNNERS.html"
+  test -s "$notices/runner-components.json"
+fi
 (cd hosts/android && ./gradlew --no-daemon :app:generateLicenseReport)
 rm -rf hosts/android/app/build/nsh/assets/notices
 mkdir -p hosts/android/app/build/nsh/assets/notices
-cp -R target/notices/. hosts/android/app/build/nsh/assets/notices/
+cp -R "$notices/." hosts/android/app/build/nsh/assets/notices/
 cp -R hosts/android/app/build/reports/dependency-license hosts/android/app/build/nsh/assets/notices/gradle
 (cd hosts/android && ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease bundleRelease)
 # The signed AAB retains the exact R8 map for this build.

@@ -48,7 +48,7 @@ class Targets(unittest.TestCase):
 class Runner(unittest.TestCase):
     """fuzz-imports.sh with stub tools: which targets it runs, and how it fails."""
 
-    def run_script(self, *arguments, listed="imports\nmanifests", crashing=""):
+    def run_script(self, *arguments, listed="imports\nmanifests", crashing="", workers="1"):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "tools/ci").mkdir(parents=True)
@@ -70,7 +70,8 @@ class Runner(unittest.TestCase):
                 tool.chmod(0o755)
             log = root / "calls.log"
             environment = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"], STUB_LOG=str(log),
-                               STUB_LISTED=listed, STUB_CRASHING=crashing, IPTV_FUZZ_TOOLCHAIN="nightly-synthetic")
+                               STUB_LISTED=listed, STUB_CRASHING=crashing, IPTV_FUZZ_TOOLCHAIN="nightly-synthetic",
+                               IPTV_FUZZ_JOBS=workers)
             result = subprocess.run(["bash", str(root / "tools/ci/fuzz-imports.sh"), *arguments],
                                     env=environment, capture_output=True, text=True)
             calls = log.read_text().splitlines() if log.exists() else []
@@ -100,6 +101,20 @@ class Runner(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("fuzzing failed for: imports", result.stderr)
         self.assertEqual(len(calls), 2)
+
+    def test_parallel_targets_share_one_build_and_report_every_crash(self):
+        result, calls, _ = self.run_script("300", workers="3", crashing="imports")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(calls[0].endswith("cargo build"))
+        self.assertEqual({call.split(" run ")[1].split()[0] for call in calls[1:]}, {"imports", "manifests"})
+        self.assertTrue(all("-max_total_time=300" in call for call in calls[1:]))
+        self.assertIn("fuzzing failed for: imports", result.stderr)
+
+    def test_parallel_selection_cannot_run_two_writers_on_one_corpus(self):
+        result, calls, _ = self.run_script("60", "imports", "imports", workers="3")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("parallel fuzz targets must be unique: imports", result.stderr)
+        self.assertEqual(calls, [])
 
     def test_no_targets_and_toolchain_query(self):
         result, calls, _ = self.run_script("60", listed="")

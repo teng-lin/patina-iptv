@@ -185,15 +185,17 @@ pub fn loaded_stream(
     opened: &std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     url: &str,
 ) {
-    step(app.wait_until(
-        "authorized synthetic stream",
-        Duration::from_secs(5),
-        |_| {
-            opened
-                .lock()
-                .unwrap()
-                .last()
-                .is_some_and(|last| last == url)
-        },
-    ));
+    let authorized = |_: &nsh_testing::Screen| {
+        opened
+            .lock()
+            .unwrap()
+            .last()
+            .is_some_and(|last| last == url)
+    };
+    let timeout = Duration::from_secs(5);
+    if app.clock().is_manual() {
+        app.wait_until_fixed_clock("authorized synthetic stream", timeout, authorized);
+    } else {
+        step(app.wait_until("authorized synthetic stream", timeout, authorized));
+    }
 }

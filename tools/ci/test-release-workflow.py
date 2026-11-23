@@ -162,6 +162,8 @@ class Evaluation:
             return render(arguments[0]).lower().startswith(render(arguments[1]).lower())
         if name == "always":
             return True
+        if name == "cancelled":
+            return self.contexts.get("workflow_cancelled", False)
         raise ValueError(f"function {name} is not modeled by this test")
 
 
@@ -466,7 +468,7 @@ class Plan(unittest.TestCase):
     def test_a_tag_push_packages_android_and_desktop(self):
         result, outputs = self.plan("push", "refs/tags/v9.8.7")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(outputs, {"matrix": ["android", "linux", "macos"], "signing_matrix": ["android", "macos"]})
+        self.assertEqual(outputs, {"desktop_matrix": ["linux", "macos"], "signing_matrix": ["android", "macos"]})
         self.assertIn("with the release credentials", result.stdout)
 
     def test_a_rehearsal_packages_the_complete_default_matrix_from_any_branch(self):
@@ -474,7 +476,7 @@ class Plan(unittest.TestCase):
             with self.subTest(ref):
                 result, outputs = self.plan("workflow_dispatch", ref, rehearsal="true")
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(outputs, {"matrix": ["android", "linux", "macos"], "signing_matrix": ["android", "macos"]})
+                self.assertEqual(outputs, {"desktop_matrix": ["linux", "macos"], "signing_matrix": ["android", "macos"]})
                 self.assertIn("no release credentials", result.stdout)
 
     def test_a_rehearsal_with_ios_is_refused_before_anything_is_built(self):
@@ -497,16 +499,16 @@ class Plan(unittest.TestCase):
 
     def test_a_manual_run_on_master_keeps_every_selection_and_ios_signing(self):
         expected = {
-            "android-desktop": (["android", "linux", "macos"], ["android", "macos"]),
-            "android": (["android"], ["android"]),
+            "android-desktop": (["linux", "macos"], ["android", "macos"]),
+            "android": ([], ["android"]),
             "desktop": (["linux", "macos"], ["macos"]),
-            "all": (["android", "linux", "macos", "ios"], ["android", "macos", "ios"]),
+            "all": (["linux", "macos", "ios"], ["android", "macos", "ios"]),
         }
         for platforms, (matrix, signing) in expected.items():
             with self.subTest(platforms):
                 result, outputs = self.plan("workflow_dispatch", "refs/heads/master", platforms)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(outputs, {"matrix": matrix, "signing_matrix": signing})
+                self.assertEqual(outputs, {"desktop_matrix": matrix, "signing_matrix": signing})
 
     def test_a_push_is_never_a_rehearsal_or_a_branch(self):
         result, outputs = self.plan("push", "refs/tags/v9.8.7", rehearsal="true")

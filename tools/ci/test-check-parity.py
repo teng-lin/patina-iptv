@@ -69,7 +69,7 @@ class Parity(unittest.TestCase):
         self.assertIn("--tests", tests)
         self.assertIn("--doc", steps["workspace-doctests"])
         for name in ("repair-display-independence", "inspection-display-budget",
-                     "guide-input-budget", "busy-store-reader"):
+                     "busy-guide-navigation", "busy-store-reader"):
             argv = steps[name]
             self.assertEqual(argv[argv.index("--") + 1:], ["--ignored", "--exact", "--format=pretty"])
 

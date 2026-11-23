@@ -4,9 +4,12 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
+import threading
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("native_sources", Path(__file__).with_name("native-sources.py"))
 sources = importlib.util.module_from_spec(spec)
@@ -367,6 +370,32 @@ class Collecting(unittest.TestCase):
         self.assertEqual(self.attempts, ["https://example.test/releases/synthetic-1.2.3.tar.xz",
                                          "https://mirror.example.test/synthetic-1.2.3.tar.xz"])
 
+    def test_a_timed_out_primary_removes_partial_bytes_and_tries_the_mirror(self):
+        package = self.macos_package(with_git=False)
+        notices = package / sources.NOTICES["macos"]
+        component = json.loads((notices / "sources.json").read_text())["components"][0]
+        primary = component["sources"][0]["url"]
+        mirror = component["sources"][0]["mirrors"][0]
+        seen = []
+
+        def curl(arguments, **options):
+            self.assertEqual(options["timeout"], 180)
+            url = arguments[-1]
+            seen.append(url)
+            destination = Path(arguments[arguments.index("--output") + 1])
+            if url == primary:
+                destination.write_bytes(b"partial")
+                raise subprocess.TimeoutExpired(arguments, options["timeout"])
+            self.assertFalse(destination.exists())
+            destination.write_bytes(self.files[url])
+            return subprocess.CompletedProcess(arguments, 0, stderr="")
+
+        stage = self.root / "stage"
+        with patch.object(sources.subprocess, "run", side_effect=curl):
+            sources.fetch_homebrew(component, stage)
+        self.assertEqual(seen, [primary, mirror])
+        self.assertEqual((stage / component["sources"][0]["file"]).read_bytes(), self.files[mirror])
+
     def test_archive_is_reproducible(self):
         _, first = self.collect_macos(self.macos_package())
         before = first.read_bytes()
@@ -395,18 +424,18 @@ class Collecting(unittest.TestCase):
 
     def linux_package(self):
         notices = self.root / "AppDir" / sources.NOTICES["linux"]
-        notices.mkdir(parents=True)
+        notices.mkdir(parents=True, exist_ok=True)
         component = {"name": "synthetic-media", "version": "7:1.2-3", "binaries": ["libsynthetic1:amd64"]}
         (notices / "sources.json").write_text(json.dumps(sources.manifest("linux", "9.8.7", [component])))
         (notices / "SOURCE.txt").write_text(sources.source_note("linux", "9.8.7"))
         return self.root / "AppDir"
 
-    def collect_linux(self, apt):
+    def collect_linux(self, apt, cache=None):
         def fetch(component, stage):
-            sources.fetch_ubuntu(component, stage, run=apt, download=self.download)
+            return sources.fetch_ubuntu(component, stage, run=apt, download=self.download, cache=cache)
 
         output = self.root / "out" / sources.archive_name("linux", "9.8.7")
-        return sources.collect("linux", self.linux_package(), output, fetch=fetch), output
+        return sources.collect("linux", self.linux_package(), output, fetch=fetch, source_cache=cache), output
 
     def source_files(self):
         original, original_digest = payload("synthetic original source")
@@ -416,6 +445,36 @@ class Collecting(unittest.TestCase):
                        f" {packaging_digest} {len(packaging)} synthetic-media_1.2-3.debian.tar.xz\n").encode()
         return {"synthetic-media_1.2-3.dsc": description, "synthetic-media_1.2.orig.tar.xz": original,
                 "synthetic-media_1.2-3.debian.tar.xz": packaging}
+
+    def test_linux_collects_at_most_three_components_at_a_time(self):
+        package = self.linux_package()
+        manifest_path = package / sources.NOTICES["linux"] / "sources.json"
+        manifest = json.loads(manifest_path.read_text())
+        names = [f"synthetic-{index}" for index in range(7)]
+        manifest["components"] = [{"name": name, "version": "1"} for name in names]
+        manifest_path.write_text(json.dumps(manifest))
+        started = threading.Barrier(3)
+        running = set()
+        active_lock = threading.Lock()
+        high_water = 0
+
+        def fetch(component, stage):
+            nonlocal high_water
+            name = component["name"]
+            with active_lock:
+                running.add(name)
+                high_water = max(high_water, len(running))
+            if name in names[:3]:
+                started.wait(timeout=5)
+            component["sources"] = [{"file": name}]
+            (stage / name).write_text(name)
+            with active_lock:
+                running.remove(name)
+
+        output = self.root / sources.archive_name("linux", "9.8.7")
+        result = sources.collect("linux", package, output, fetch=fetch)
+        self.assertEqual(high_water, 3)
+        self.assertEqual([component["name"] for component in result["components"]], names)
 
     def test_linux_sources_come_from_apt_at_the_exact_version(self):
         files = self.source_files()
@@ -448,6 +507,22 @@ class Collecting(unittest.TestCase):
             self.assertEqual(archive.getnames(), [
                 "SOURCE.txt", "sources.json", "synthetic-media_1.2-3/synthetic-media_1.2-3.debian.tar.xz",
                 "synthetic-media_1.2-3/synthetic-media_1.2-3.dsc", "synthetic-media_1.2-3/synthetic-media_1.2.orig.tar.xz"])
+        cache = self.root / "cache"
+        self.collect_linux(apt, cache)
+        stale = cache / f"sha256-{'0' * 64}"
+        stale.write_bytes(b"superseded archive")
+        unrelated = cache / "unrelated.txt"
+        unrelated.touch()
+        calls.clear()
+        self.collect_linux(apt, cache)
+        self.assertEqual([call[2] for call in calls], ["--print-uris"])
+        self.assertFalse(stale.exists())
+        self.assertTrue(unrelated.is_file())
+        next(cache.glob("sha512-*")).write_bytes(b"invalid cache entry")
+        calls.clear()
+        self.collect_linux(apt, cache)
+        self.assertEqual([call[2] for call in calls], ["--print-uris", "--download-only"])
+
         # A file that differs from the signed index is refused.
         files["synthetic-media_1.2.orig.tar.xz"] = b"different bytes"
         original = apt

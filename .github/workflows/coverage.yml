@@ -23,7 +23,7 @@ jobs:
         timeout-minutes: 25
         with:
           cache-on-failure: 'true'
-          cache-key: coverage-v2-${{ hashFiles('tools/ci/coverage.sh', '.github/workflows/coverage.yml') }}
+          cache-key: coverage-v2-${{ hashFiles('tools/ci/coverage.sh') }}
           # The isolated native player display.
           apt-packages: xvfb libgl1-mesa-dri
       - name: Test coverage floor enforcement
@@ -46,7 +46,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: ${{ !cancelled() && (success() || hashFiles('target/coverage/**') != '') }}
         with:
           name: coverage
           path: |

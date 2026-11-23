@@ -5,7 +5,7 @@
 //! A scenario still runs in a process of its own with a fresh `$HOME`:
 //! its `#[test]` starts with `let Some(home) = isolated!() else { return };`
 //! (see [`isolated`]). `IPTV_RS_TEST_JOBS` caps how many scenario
-//! processes run at once (default 4). Tests that need no app (like
+//! processes run at once (default 6). Tests that need no app (like
 //! `type_drift`) are plain `#[test]`s and run in this process.
 //!
 //! Adding a scenario: a module here (`mod my_scenario;` below and

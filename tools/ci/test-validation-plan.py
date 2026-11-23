@@ -87,6 +87,21 @@ class Selection(unittest.TestCase):
                      "crates/iptv-player-mpv/src/player.rs", "crates/iptv-nav/src/lib.rs"):
             self.assertTrue(v.select([path])["smoke"], path)
 
+    def test_app_harness_changes_need_host_tests_but_no_android_or_ios_build(self):
+        paths = ["crates/iptv-app/tests/app/play_bar.rs", "crates/iptv-app/tests/app/fixtures/playlist.m3u"]
+        plan = v.select(paths)
+        self.assertTrue(plan["host"])
+        self.assertTrue(plan["windows"])
+        self.assertFalse(any(plan[lane] for lane in ("android", "ios", "smoke", "packages", "windows-package")))
+        self.assertTrue(v.select([*paths, "crates/iptv-app/src/play_bar.rs"])["smoke"])
+
+    def test_leaf_workflow_edits_exercise_their_lane(self):
+        for path, selected in v.LANE_WORKFLOWS.items():
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertEqual([lane for lane in v.LANES if plan[lane]], [selected])
+                self.assertTrue(plan["helpers_full"])
+
     def test_storage_and_epg_changes_keep_large_regressions(self):
         for path in ("crates/iptv-store-sqlite/src/lib.rs", "crates/iptv-import/src/lib.rs", "crates/iptv-epg/src/lib.rs",
                      "crates/iptv-providers/src/xtream/parse.rs", "crates/iptv-guide/src/combined.rs",
@@ -161,13 +176,22 @@ class Selection(unittest.TestCase):
 class Aggregate(unittest.TestCase):
     def setUp(self):
         self.plan = v.select(["crates/iptv-core/src/guide.rs"])
-        self.needs = {lane: {"result": "success" if self.plan[lane] else "skipped"} for lane in v.LANES}
-        self.needs.update(plan={"result": "success"}, helpers={"result": "success"}, candidate={"result": "skipped"})
+        self.needs = self.successful_needs(self.plan)
+
+    @staticmethod
+    def successful_needs(plan):
+        needs = {lane: {"result": "success" if plan[lane] else "skipped"} for lane in v.LANES}
+        needs.update(plan={"result": "success"}, helpers={"result": "success"},
+                     candidate={"result": "success" if plan["candidate_build"] else "skipped"})
+        for lane, evidence in v.HOST_VERIFICATIONS.items():
+            if plan[f"{lane}_on_host"]:
+                needs[lane]["result"] = "skipped"
+                needs["host"].setdefault("outputs", {})[evidence] = "true"
+        return needs
 
     def test_shipping_candidate_builds_are_part_of_the_same_aggregate(self):
         self.plan = v.select([], 'release', candidate_build=True)
-        self.needs = {lane: {'result': 'success' if self.plan[lane] else 'skipped'} for lane in v.LANES}
-        self.needs.update(plan={'result': 'success'}, helpers={'result': 'success'}, candidate={'result': 'success'})
+        self.needs = self.successful_needs(self.plan)
         self.assertEqual(v.gate(self.plan, self.needs), [])
         for result in ('failure', 'skipped', 'cancelled', None):
             self.needs['candidate']['result'] = result
@@ -178,6 +202,47 @@ class Aggregate(unittest.TestCase):
 
     def test_successful_selection_and_deliberate_skips_pass(self):
         self.assertEqual(v.gate(self.plan, self.needs), [])
+
+    def test_host_and_standalone_routing(self):
+        cases = (("credentials", "tools/ci/isolated-credentials.py", False),
+                 ("credentials", "crates/iptv-store-sqlite/src/lib.rs", True),
+                 ("ios", "tools/ci/check-ios.sh", False),
+                 ("ios", "crates/iptv-core/src/guide.rs", True))
+        for lane, path, on_host in cases:
+            with self.subTest(lane=lane, path=path):
+                plan = v.select([path])
+                self.assertTrue(plan[lane])
+                self.assertEqual(plan[f"{lane}_on_host"], on_host)
+                needs = self.successful_needs(plan)
+                self.assertEqual(v.gate(plan, needs), [])
+                if on_host:
+                    evidence = v.HOST_VERIFICATIONS[lane]
+                    needs["host"]["outputs"].pop(evidence)
+                    self.assertIn(f"selected {lane}: missing successful host verification", v.gate(plan, needs))
+                    needs["host"]["outputs"][evidence] = "true"
+                needs[lane]["result"] = "failure"
+                self.assertTrue(v.gate(plan, needs))
+                if not on_host:
+                    plan[f"{lane}_on_host"] = True
+                    self.assertIn(f"host routing is missing or invalid for {lane}", v.gate(plan, needs))
+
+    def test_edits_to_standalone_workflows_exercise_their_own_setup_alongside_host_tests(self):
+        for lane in ("credentials", "ios"):
+            with self.subTest(lane=lane):
+                paths = [f".github/workflows/{lane}.yml", "crates/iptv-core/src/guide.rs"]
+                plan = v.select(paths)
+                self.assertTrue(plan["host"])
+                self.assertTrue(plan[lane])
+                self.assertFalse(plan[f"{lane}_on_host"])
+                needs = self.successful_needs(plan)
+                self.assertEqual(v.gate(plan, needs), [])
+                needs["host"].setdefault("outputs", {})[v.HOST_VERIFICATIONS[lane]] = "true"
+                needs[lane]["result"] = "skipped"
+                self.assertIn(f"selected {lane}: skipped", v.gate(plan, needs))
+                self.assertEqual(
+                    v.select(paths, "release", candidate_build=True),
+                    v.select([], "release", candidate_build=True),
+                )
 
     def test_android_compile_and_windows_failures_block_even_when_packages_skip(self):
         for lane in ("android", "windows"):

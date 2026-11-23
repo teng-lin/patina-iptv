@@ -29,6 +29,7 @@ jobs:
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
+          prerequisites: android-check
           cache-key: android-check-v2-${{ hashFiles('tools/ci/check-android.sh', 'tools/ci/android-ndk-env.sh') }}
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         timeout-minutes: 10
@@ -56,6 +57,7 @@ jobs:
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
+          prerequisites: android
           cache-key: android-v2-${{ hashFiles('tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/android/action.yml') }}
       - uses: ./.github/actions/android
       - name: Build Android native library

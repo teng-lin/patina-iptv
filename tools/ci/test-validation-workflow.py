@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """The tier workflows keep required checks, exact-SHA releases and native coverage."""
 import importlib.util
+import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import Mock
 
@@ -42,6 +46,14 @@ class Workflows(unittest.TestCase):
         self.assertIn("name: host-tests (${{ matrix.os }})", host)
         self.assertIn("name: android-packaging", android)
 
+    def test_standalone_lanes_pass_prerequisite_options_to_setup(self):
+        for name, option in (("credentials", "policy-tool: 'false'"), ("import-stress", "prerequisites: store")):
+            with self.subTest(name=name):
+                text = (ROOT / f".github/workflows/{name}.yml").read_text()
+                checkout, setup = text.split("      - uses: ./.github/actions/setup\n", 1)
+                self.assertNotIn(option, checkout)
+                self.assertIn(option, setup.split("      - name:", 1)[0])
+
     def test_native_validation_has_no_signing_environment(self):
         for name in ("ios", "credentials"):
             text = (ROOT / f".github/workflows/{name}.yml").read_text()
@@ -63,10 +75,32 @@ class Workflows(unittest.TestCase):
         self.assertIn("if: always()", aggregate)
         aliases = text.split("  protected-contexts:\n", 1)[1]
         self.assertIn("needs: validation", aliases)
-        self.assertIn("if: always()", aliases)
+        self.assertIn("always() && vars.PATINA_REQUIRE_AGGREGATE_ONLY != 'true'", aliases)
+        self.assertIn("github.event_name == 'pull_request'", aliases)
+        self.assertIn("github.event_name == 'merge_group'", aliases)
         for context in ("test (ubuntu-24.04)", "test (macos-15)", "android"):
             self.assertIn(context, aliases)
         self.assertIn('test "$RESULT" = success', aliases)
+
+    def test_collocated_credentials_report_success_from_linux_only(self):
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("credentials: ${{ needs.plan.outputs.credentials_on_host == 'true' }}", validation)
+        self.assertIn("needs.plan.outputs.credentials_on_host != 'true'", validation)
+        step = host.split("        id: credentials\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: matrix.os == 'ubuntu-24.04' && inputs.credentials", step)
+        self.assertLess(step.index("tools/ci/isolated-credentials.py"), step.index("verified=true"))
+        self.assertIn("credentials-verified: ${{ steps.credentials.outputs.verified }}", host)
+
+    def test_collocated_ios_reports_success_from_macos_only(self):
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("ios: ${{ needs.plan.outputs.ios_on_host == 'true' }}", validation)
+        self.assertIn("needs.plan.outputs.ios_on_host != 'true'", validation)
+        step = host.split("        id: ios\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: matrix.os == 'macos-15' && inputs.ios", step)
+        self.assertLess(step.index("bash tools/ci/check-ios.sh"), step.index("verified=true"))
+        self.assertIn("ios-verified: ${{ steps.ios.outputs.verified }}", host)
 
     def test_release_explicitly_requests_candidate_tier_and_publishes_after_artifact_checks(self):
         text = (ROOT / ".github/workflows/release.yml").read_text()
@@ -108,12 +142,12 @@ class Workflows(unittest.TestCase):
         helpers = text.split('  helpers:\n', 1)[1].split('  host:\n', 1)[0]
         self.assertIn('python3 tools/ci/check-package-lock.py', helpers)
         host = text.split('  host:\n', 1)[1].split('  ios:\n', 1)[0]
-        self.assertIn('needs: [plan, helpers]', host)
+        self.assertIn('needs: plan', host)
         self.assertIn('helpers-checked: true', host)
 
     def test_delegated_helpers_run_every_helper_test_the_host_skips(self):
         # tools/check.sh skips its helper tests when the helpers job ran
-        # them (IPTV_HELPERS_CHECKED): each must be in that job, by name or
+        # them separately (IPTV_HELPERS_CHECKED): each must be in that job, by name or
         # through its tools/ci/test-*.py loop.
         script = (ROOT / 'tools/check.sh').read_text()
         guards = script.split('if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then\n')[1:]
@@ -153,6 +187,56 @@ class Workflows(unittest.TestCase):
         smoke = (ROOT / '.github/workflows/android-smoke.yml').read_text()
         self.assertIn('testDebugUnitTest lintDebug assembleDebug', smoke)
         self.assertIn('testReleaseUnitTest lintRelease', (ROOT / 'tools/ci/prepare-android.sh').read_text())
+
+    @unittest.skipUnless(shutil.which("bash"), "candidate seal gate uses Bash")
+    def test_failed_master_gate_leaves_a_retryable_seal_before_artifact_downloads(self):
+        expressions = module("test-release-workflow")
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text()
+        seal = workflow.split("  seal-candidate:\n", 1)[1]
+        condition = re.search(r"if: \$\{\{(.*?)\}\}", seal)[1]
+        for event, ref, tier, cancelled, expected in (
+            ("push", "refs/heads/master", "", False, True),
+            ("push", "refs/heads/master", "", True, False),
+            ("push", "refs/heads/master", "release", False, False),
+            ("push", "refs/tags/v9.8.7", "", False, False),
+            ("workflow_dispatch", "refs/heads/master", "candidate", False, False),
+            ("pull_request", "refs/pull/17/merge", "", False, False),
+        ):
+            with self.subTest(event=event, ref=ref, cancelled=cancelled):
+                self.assertEqual(expressions.evaluate(condition, {
+                    "github": {"event_name": event, "ref": ref}, "inputs": {"tier": tier},
+                    "workflow_cancelled": cancelled,
+                }), expected)
+
+        before_downloads = seal.split("      - uses:", 1)[0]
+        self.assertIn("VALIDATION_RESULT: ${{ needs.validation.result }}", before_downloads)
+        self.assertIn("BUILD_RESULT: ${{ needs.candidate.result }}", before_downloads)
+        check = textwrap.dedent(before_downloads.split("        run: |\n", 1)[1])
+        environment = {"PLAN_RESULT": "success", "VALIDATION_RESULT": "success", "BUILD_RESULT": "success"}
+        for job, result, expected in ((None, "", 0), ("PLAN_RESULT", "failure", 1),
+                                      ("VALIDATION_RESULT", "cancelled", 1), ("BUILD_RESULT", "skipped", 1)):
+            with self.subTest(job=job, result=result):
+                env = os.environ | environment | ({job: result} if job else {})
+                run = subprocess.run(["bash", "-euo", "pipefail", "-c", check], env=env,
+                                     capture_output=True, text=True)
+                self.assertEqual(run.returncode, expected, run.stderr)
+                if expected:
+                    self.assertIn("Re-run failed jobs", run.stdout)
+
+    def test_android_release_compiles_both_abis_before_one_assembly(self):
+        unsigned = (ROOT / '.github/workflows/unsigned-candidate.yml').read_text()
+        native = unsigned.split('  android-native:\n', 1)[1].split('  android-package:\n', 1)[0]
+        self.assertIn('abi: [arm64-v8a, armeabi-v7a]', native)
+        self.assertIn('ABIS: ${{ matrix.abi }}', native)
+        self.assertIn('tools/sync-host.sh --release', native)
+        self.assertIn('name: android-native-${{ matrix.abi }}', native)
+        android, desktop = unsigned.split('  android-package:\n', 1)[1].split('  package:\n', 1)
+        self.assertIn('needs: android-native', android)
+        self.assertIn('pattern: android-native-*', android)
+        self.assertLess(android.index('merge-android-native.py'), android.index('prepare-android.sh'))
+        self.assertEqual(unsigned.count('name: signing-input-android'), 1)
+        self.assertIn('needs: dispatch-plan', desktop)
+        self.assertIn('fromJSON(inputs.desktop-matrix || needs.dispatch-plan.outputs.desktop', desktop)
 
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()

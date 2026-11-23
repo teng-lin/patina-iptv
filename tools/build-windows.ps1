@@ -25,14 +25,14 @@ try {
         # named libtest output as tools/check.sh. Platform extras stay here.
         & python "$PSScriptRoot/ci/pins.py" check-nsh
         if ($LASTEXITCODE -ne 0) { throw 'The NSH checkout is not at the commit in nsh.rev' }
-        & cargo test --locked -p nsh-platform-windows --lib chrome::tests -- --format=pretty
+        & cargo test --locked --timings -p nsh-platform-windows --lib chrome::tests -- --format=pretty
         if ($LASTEXITCODE -ne 0) { throw 'Windows pointer regression failed' }
         $checkArgs = @("$PSScriptRoot/ci/check-plan.py", 'run', '--tier', $Tier, '--host', 'windows')
         if ($Release) { $checkArgs += '--release' }
         & python @checkArgs
         if ($LASTEXITCODE -ne 0) { throw 'Shared Rust validation failed' }
     }
-    $buildArgs = @('build', '--locked', '-p', 'iptv-app')
+    $buildArgs = @('build', '--locked', '--timings', '-p', 'iptv-app')
     $profile = 'debug'
     if ($Release) { $buildArgs += '--release'; $profile = 'release' }
     if (!$Check) {

@@ -10,8 +10,11 @@ on:
         default: true
   workflow_call:
     inputs:
-      matrix:
+      desktop-matrix:
         type: string
+        required: true
+      android:
+        type: boolean
         required: true
       windows:
         type: boolean
@@ -20,6 +23,23 @@ permissions:
   contents: read
   actions: read
 jobs:
+  dispatch-plan:
+    # Reusable callers already have a plan. Keep the manual matrix input.
+    if: inputs.matrix != ''
+    runs-on: ubuntu-24.04
+    outputs:
+      desktop: ${{ steps.select.outputs.desktop }}
+      android: ${{ steps.select.outputs.android }}
+    steps:
+      - id: select
+        env:
+          MATRIX: ${{ inputs.matrix }}
+        run: |
+          rows=$(jq -ce '.include | if type == "array" then . else error("expected an include array") end' <<< "$MATRIX")
+          desktop=$(jq -c '{include: map(select(.platform != "android"))}' <<< "$rows")
+          android=$(jq -c 'any(.[]; .platform == "android")' <<< "$rows")
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
+          echo "android=$android" >> "$GITHUB_OUTPUT"
   windows-package:
     if: inputs.windows
     runs-on: windows-2025
@@ -30,7 +50,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-windows
         with:
-          cache: 'false'
+          # A trusted unsigned master build can seed the preview cache from fresh output.
+          cache: ${{ github.ref == 'refs/heads/master' && 'true' || 'false' }}
+          profile: installer
+          cache-lookup-only: 'true'
       - name: Set release metadata
         shell: pwsh
         run: python tools/ci/version.py
@@ -65,10 +88,109 @@ jobs:
           name: signing-input-windows
           path: dist/Patina-*-windows-x86_64-setup.exe
           if-no-files-found: error
-  package:
+  android-native:
+    needs: dispatch-plan
+    if: ${{ !cancelled() && (inputs.android || needs.dispatch-plan.outputs.android == 'true') }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(inputs.matrix) }}
+      matrix:
+        abi: [arm64-v8a, armeabi-v7a]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        timeout-minutes: 25
+        with:
+          cache: 'false'
+          prerequisites: android
+          apt-cache: 'true'
+          policy-tool: ${{ matrix.abi == 'arm64-v8a' && 'true' || 'false' }}
+      - uses: ./.github/actions/android
+        with:
+          abi: ${{ matrix.abi }}
+      - name: Build and stage the Android native library
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+          ABIS: ${{ matrix.abi }}
+        run: |
+          bash tools/sync-host.sh --release
+          mv hosts/android/app/build/nsh target/android-native
+          git rev-parse HEAD > target/android-native/commit.txt
+      # Generate notices where NSH wrote the locked runner workspace.
+      - uses: ./.github/actions/cargo-tool
+        if: matrix.abi == 'arm64-v8a'
+        with:
+          name: cargo-about
+          version: 0.9.3
+          features: cli
+      - name: Generate Rust and NSH notices
+        if: matrix.abi == 'arm64-v8a'
+        run: |
+          bash tools/ci/notices.sh
+          test -s target/notices/runner-components.json
+          mv target/notices target/android-native/notices
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-native-${{ matrix.abi }}
+          path: target/android-native/
+          if-no-files-found: error
+          include-hidden-files: true
+          overwrite: true
+          retention-days: 7
+  android-package:
+    needs: android-native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        timeout-minutes: 25
+        with:
+          cache: 'false'
+          prerequisites: metadata
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            hosts/android/**/*.gradle.kts
+            hosts/android/gradle.properties
+            hosts/android/gradle/wrapper/gradle-wrapper.properties
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+      - name: Install Android packaging tools
+        run: |
+          source tools/ci/android-ndk-env.sh
+          sdkmanager "platforms;android-36" "build-tools;35.0.1" "ndk;$IPTV_ANDROID_NDK"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$IPTV_ANDROID_NDK" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: android-native-*
+          path: target/android-native-inputs
+      - name: Set release metadata
+        run: python3 tools/ci/version.py
+      - name: Assemble and check the unsigned Android APK and AAB
+        run: |
+          python3 tools/ci/merge-android-native.py target/android-native-inputs
+          bash tools/ci/prepare-android.sh target/android-native-inputs/android-native-arm64-v8a/notices
+          tar -cf target/signing-input.tar target/android-unsigned
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signing-input-android
+          path: target/signing-input.tar
+          if-no-files-found: error
+          overwrite: true
+  package:
+    needs: dispatch-plan
+    if: ${{ !cancelled() && fromJSON(inputs.desktop-matrix || needs.dispatch-plan.outputs.desktop || '{"include":[]}').include[0] != null }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.desktop-matrix || needs.dispatch-plan.outputs.desktop || '{"include":[]}') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -79,7 +201,10 @@ jobs:
         timeout-minutes: 25
         with:
           cache: 'false'
-          # Linux packaging tools, installed fresh (uncached) and bounded.
+          prerequisites: ${{ matrix.platform == 'macos' && 'macos-package' || 'host' }}
+          # Keep the app build fresh while reusing Ubuntu package downloads.
+          apt-cache: ${{ matrix.platform == 'linux' && 'true' || 'false' }}
+          # Linux packaging tools.
           apt-packages: >-
             ${{ matrix.platform == 'linux' && 'ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
             libgirepository1.0-dev librsvg2-dev xvfb x11-utils xauth dbus-x11' || '' }}
@@ -94,14 +219,11 @@ jobs:
           python3 tools/ci/version.py
           echo "NSH=$(cd ../nsh-patina && pwd)/target/release/nsh" >> "$GITHUB_ENV"
       - uses: ./.github/actions/nsh-cli
-        if: matrix.platform != 'android'
-      - uses: ./.github/actions/android
-        if: matrix.platform == 'android'
-      - name: Build Android native library
-        if: matrix.platform == 'android'
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: bash tools/sync-host.sh --release
+      - uses: ./.github/actions/desktop-cargo-cache
+        if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'
+        with:
+          platform: macos
+          lookup-only: 'true'
       - name: Linux packages
         if: matrix.platform == 'linux'
         run: |
@@ -119,21 +241,18 @@ jobs:
       # release.
       - name: Corresponding source of the system libraries bundled in the AppImage
         if: matrix.platform == 'linux'
-        run: |
-          bash tools/ci/enable-deb-src.sh
-          python3 tools/ci/native-sources.py linux target/Patina.AppDir \
-            "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
-      - name: Prepare unsigned Android artifacts
-        if: matrix.platform == 'android'
-        run: bash tools/ci/prepare-android.sh
+        timeout-minutes: 15
+        uses: ./.github/actions/linux-sources
       # libmpv is the pinned macOS runtime, fetched and verified by hash.
-      - name: Build macOS app without signing credentials
+      - name: Build, bundle and audit the unsigned macOS app
         if: matrix.platform == 'macos'
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: |
-          bash tools/package-macos.sh
-          bash tools/ci/package-macos.sh
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
+        run: bash tools/package-macos.sh
+      - name: Check and smoke-test the unsigned macOS DMG
+        if: matrix.platform == 'macos'
+        run: bash tools/ci/package-macos.sh
       # Homebrew libraries the app may still link beside the pinned runtime
       # (normally none, and then there is no archive): publish the sources
       # named by the formulae of the installed versions.
@@ -170,7 +289,6 @@ jobs:
         shell: bash
         run: |
           case "${{ matrix.platform }}" in
-            android) input=target/android-unsigned ;;
             macos) input=target/package ;;
             ios) input=target/ios ;;
           esac
@@ -210,6 +328,7 @@ jobs:
         timeout-minutes: 25
         with:
           cache: 'false'
+          prerequisites: metadata
       - name: Set release metadata
         run: python3 tools/ci/version.py
       - uses: ./.github/actions/cargo-tool

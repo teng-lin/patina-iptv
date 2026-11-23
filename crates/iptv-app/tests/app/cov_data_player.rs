@@ -218,27 +218,19 @@ fn wait_live_reload_fixed(
 ) -> Value {
     // External authorization runs in real time. Pump its actual native props
     // at the current manual time, so a slow worker cannot manufacture stalls.
-    let deadline = Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(5));
-    loop {
-        app.catch_up();
-        let source = native_source(app.screen(), props);
-        if iptv_app::player_has_source(0)
-            && source["live"] == json!(true)
-            && source["reconnect"] == json!(reconnect)
-            && source["token"].as_u64().is_some()
-            && source["token"] != previous["token"]
-            && source["url"] == previous["url"]
-        {
-            break;
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "new native retry token was not published"
-        );
-        app.engine().control().frame();
-        app.next_batch(remaining);
-    }
+    app.wait_until_fixed_clock(
+        "a new native retry token",
+        Duration::from_secs(5),
+        |screen| {
+            let source = native_source(screen, props);
+            iptv_app::player_has_source(0)
+                && source["live"] == json!(true)
+                && source["reconnect"] == json!(reconnect)
+                && source["token"].as_u64().is_some()
+                && source["token"] != previous["token"]
+                && source["url"] == previous["url"]
+        },
+    );
     prop(app, props, "source")
 }
 

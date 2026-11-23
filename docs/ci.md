@@ -9,13 +9,13 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 |---|---|---|---|
 | Formatting, lint, dependency policy and CI helper tests | Relevant code/build changes; documentation-only changes run tier-contract tests | Full | Full |
 | Linux unit/integration correctness and doctests | Full suite for application/Rust changes | Full | Full |
-| iOS device/simulator adapters | Compile shared Rust/iOS input changes with verified MPVKit | Compile | Compile |
+| iOS device/simulator adapters | Compile shared production Rust/iOS input changes with verified MPVKit | Compile | Compile |
 | Production Linux credential broker | Credential/storage/build changes, isolated DBus and disposable keyring | Full | Full |
 | Nine portable crates and the Tizen core (`iptv-web`) built for wasm | Once, on Linux | Once, on Linux | Once, on Linux |
 | macOS/Windows | Compile all test targets, native player tests, Windows chrome tests, production app build | Full host suites | Full host suites |
 | Linux GTK PiP/context-loss and correlated first-render journeys | Ordinary host checks; no dependency on coverage | Full | Full |
 | Reader/writer/analysis independence gates | Exact isolated gates on Linux | Exact gates on every host | Exact gates on every host |
-| Android compile | Both ARM ABIs for Rust/dependency/Android changes | Both ARM ABIs | Shipping package jobs compile both |
+| Android compile | Both ARM ABIs for production Rust/dependency/Android changes | Both ARM ABIs | Shipping package jobs compile both |
 | Tablet/TV playback, lifecycle and remote-input smoke | UI/Android/runtime/player/input/network changes | Both forms | Both forms for candidate code |
 | Installers and APK/AAB | Desktop installers for actual packaging/runtime/dependency inputs; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
 | Coverage and floors | Coverage/validation infrastructure changes; manual run available | Full workspace | Full report for this candidate SHA |
@@ -36,16 +36,73 @@ and ordinary doctests are checked once on Linux rather than on three hosts.
 
 Performance journeys retain their approved three repetitions and exact
 store-read/player-open ceilings. Their wall-clock values remain informational.
-Changing repetitions requires an explicit fixture-policy change; this tier
-split does not weaken that policy or existing strict display latency budgets.
+Changing repetitions requires an explicit fixture-policy change. The busy-guide
+test requires navigation to mount while another connection holds the SQLite
+writer lock, and requires the queued write to save after the lock is released.
+It reports maximum key-to-frame latency. On a controlled performance host, run
+`IPTV_STRICT_GUIDE_LATENCY=1 bash tools/check.sh pr` to also enforce the 50 ms limit.
+The Linux job reuses the app and native player test executables that Cargo
+reported during workspace testing. Its scenario timing artifact records
+individual child process durations in milliseconds. The manual **Tests**
+workflow's `app-test-jobs` input compares four, six, or eight Rust test threads
+and sets the same cap on Linux app scenario subprocesses. The dedicated timing
+checks run separately.
 
 Fuzz targets run in one job, sharing the pinned tool, sanitizer dependencies
-and full corpus cache. New/shared parser inputs select all targets; unknown
-fuzz target names fail before execution. Only master refreshes reusable caches. Host, coverage and stress lanes retain
-compiled dependencies even when a later assertion or coverage floor fails. PRs
-restore those caches without writing them, Unsigned shipping builds use fresh app output directories and no bulk Cargo cache,
-but may restore exact-key pinned NSH tools and the notice generator. Signing jobs
-restore neither build nor tool caches.
+and full corpus cache. Five-minute runs build the instrumented targets before
+running up to three targets concurrently. New/shared parser inputs select all
+targets, and unknown fuzz target names fail before execution.
+Only master refreshes shared Cargo caches. Host, coverage and stress lanes retain
+compiled dependencies when a later assertion or coverage floor fails. Desktop
+previews use a dependency cache for the generated NSH runner workspace. The
+scheduled Validation run warms this cache on master. Windows native tests and
+installers use separate caches keyed by the MSVC toolset, Windows SDK, Rust
+and dependency inputs. The unsigned Windows installer and macOS package jobs
+on master can seed the preview caches from their fresh builds. Those jobs look
+up cache keys without downloading compiled application dependencies.
+
+The macOS package setup uses the runner's pkg-config and the pinned libmpv
+verified by the package script. Host player tests still have FFmpeg for media
+fixtures. On a macOS tool cache miss, packaging tries a 30-day build artifact
+for the exact NSH CLI or cargo-about identity. It checks that the artifact
+came from a trusted master run and verifies the archive digest before use.
+A missing or invalid artifact triggers the locked source build.
+
+Master also refreshes the exact-key NSH runtime and Gradle dependency caches.
+Unsigned shipping builds use fresh app output directories and may restore
+the pinned tools and runtimes. Android candidates compile ARM64 and ARMv7 in
+parallel, each with its own pinned NSH runtime cache. Both jobs can reuse the
+same Ubuntu package snapshot and start with fresh app build output. A single Gradle job
+checks the library architectures, source commit and matching NSH assets,
+then packages both ABIs with the generated notices. Signing jobs use fresh
+runners.
+
+Ubuntu package snapshots can install offline across runner image refreshes
+within the same Ubuntu release, architecture and package list. If the installed
+base needs a different package version, apt refreshes the signed indexes and
+downloads the missing archives. Master saves the refreshed snapshot. Unsigned
+Linux candidates can restore these downloads while compiling the app in a fresh
+output directory.
+
+The Android smoke builder links NSH's Linux describe program against Ubuntu's
+libmpv runtime and uses FFmpeg to generate media fixtures. Dispatch **Android
+smoke** with `cold: true` to bypass apt, Rust, NSH and Gradle caches for a
+comparison run. The ARM source check and import stress lanes install compiler
+prerequisites. The iOS compile and Rust SBOM lanes use metadata setup, with
+MPVKit installed by the iOS check itself.
+
+When the plan selects both production credential persistence and host tests,
+the Linux host job runs the credential script with its disposable D-Bus session
+and keyring. The aggregate requires explicit success from that step. A
+credential-only change still selects the standalone credential job.
+When host and iOS checks are both selected, the macOS host job compiles the
+iOS device and simulator targets and checks the simulator entitlements. An
+iOS-only change or manual dispatch can use the standalone workflow. PRs that edit
+either standalone workflow run that workflow even when host tests also run.
+
+Changes confined to the Rust app's test directory run host correctness and
+Windows test compilation. Edits to a leaf validation workflow select its
+own lane. Shared workflow and shipping dependency changes use broad validation.
 
 ## Required checks and migration
 
@@ -63,11 +120,11 @@ mirrors the whole aggregate. Reusable host jobs have distinct prefixed check
 names; the old independent event subscriptions are removed to avoid ambiguous
 or duplicate protected checks.
 
-After observing the aggregate on code, docs-only, native, dependency and
-packaging PRs, an administrator can replace the three required contexts with
-`validation`, preserving existing GitHub Actions app binding and the other
-protection settings. Remove compatibility jobs only after that protection
-change is effective. This implementation does not modify repository settings.
+Verify the aggregate check on PRs and merge-queue runs, then add `validation`
+as a required check with the existing GitHub Actions app binding. Once that
+requirement is effective, remove the three alias requirements and set the
+repository variable `PATINA_REQUIRE_AGGREGATE_ONLY` to `true` to skip the alias
+jobs. Master pushes and scheduled runs use the aggregate directly.
 
 ## Release artifacts
 
@@ -111,14 +168,18 @@ bytes under the release workflow/tag/SHA and verifies public bytes afterwards.
 PR validation cancels older runs of that PR. Master validation, including unsigned
 candidate packaging, cancels superseded master runs. Called release validation
 has an independent run-specific group and cannot be canceled by a master push.
-The legacy protected status aliases stay intact. Release and master share the
-unsigned package recipe; the release retains signing, final artifact smoke,
+On a master candidate with a failed validation or package job, the seal job
+reports the failed gate before downloading artifacts. Re-running failed jobs
+retries the seal after the gate passes and reuses successful package jobs in the
+same run.
+
+Release and master share the unsigned package recipe. The release retains signing, final artifact smoke,
 attestation and publication. Failed stages can be rerun without rebuilding passed
 package jobs; never use **Re-run all jobs** when preserving those artifacts.
 
-The helper lane owns Python/shell lint and helper regressions once per validation;
-the host waits for it, then runs Rust checks and Kotlin lint. `tools/check.sh`
-retains all helper and lint checks locally. A docs-only selection still exercises
+The helper lane owns Python/shell lint and helper regressions once per validation.
+It runs in parallel with the host lane, and the aggregate requires both.
+`tools/check.sh` retains all helper and lint checks locally. A docs-only selection still exercises
 the planner and aggregate contract without setting up compilers.
 
 Performance policy uses the PR/merge-group base or master's `before` commit. Tag,
@@ -166,25 +227,43 @@ not steady-state measurements.
 
 Hosted runner setup must fail fast, not consume a job's whole timeout (#159).
 `.github/actions/setup` installs Linux packages through `tools/ci/apt-install.sh`.
-Each package install is bounded to eight minutes, and each list refresh or dpkg
-repair to 90 seconds. A failed or stalled install is repaired and retried once
-with refreshed lists, so a stalled Ubuntu mirror fails the step within about
-twenty-two minutes. apt itself retries downloads and gives up on a connection that
-sends nothing for 30 seconds. The script skips the image's initramfs and
+Each download attempt is bounded to four minutes, each list refresh or dpkg
+repair to 90 seconds, and each offline install to three minutes. On GitHub's
+Ubuntu runners, known cloud archive URLs use Canonical's HTTPS archive first.
+A failed fetch retries once with the configured mirror. apt refreshes signed
+indexes and can reuse completed downloads across attempts. The install starts after the download
+finishes, and a failed install gets one offline retry after dpkg repair.
+apt gives up on a connection that sends nothing for 30 seconds.
+The script skips the image's initramfs and
 man-db rebuilds, which GTK's udev/systemd upgrade otherwise triggers. Every
 workflow step using the setup action has its own `timeout-minutes`, and a job
 needing further Linux packages names them in the action's `apt-packages`
 input, or calls the script, rather than running its own `apt-get install`.
 
 Package lists and downloaded `.deb` files are cached under a key naming the
-runner image (`ImageOS`/`ImageVersion`), the architecture, the package list and
-the install script, so most runs install without contacting the mirror; a gap
-in a restored cache goes straight to the refreshed retry. A new runner image or
-package list misses once and saves its own entry of a few hundred megabytes.
-Unlike the gigabyte Cargo caches, any branch may save one, because the key is
-exact and master's entry serves every later PR on that image. Shipping builds (`cache: 'false'`) never
-use it and install the mirror's current packages. Recommended packages are kept:
-Linux packaging bundles runtime modules and copyright files from the build host.
+runner image (`ImageOS`/`ImageVersion`), the Ubuntu release, the architecture,
+the package list and the snapshot format version. A new runner image can reuse
+the archives for the same Ubuntu release and package list. Each snapshot
+records when to use the Canonical archive's indexes. A gap in a restored cache
+triggers a refreshed download. Master and nightly
+populate shared entries for each runner image and package list. Cold installs
+use the mirror's current packages. Linux packaging keeps recommended packages because it bundles runtime modules and copyright
+files from the build host. Android ARM type checking and SBOM generation use
+smaller prerequisite sets.
+The Linux host cache also covers `hosts/tizen-nsh`, which has its own workspace
+and lockfile.
+
+The Linux source archive collector runs up to three source packages at a time,
+bounds apt and download calls, and reports each source package as it starts.
+If the exact cache misses, it can restore the previous archive snapshot. Apt
+downloads the missing files and the collector verifies each file against the
+source metadata. The saved snapshot holds only the files used by this build.
+
+The Android smoke build caches dependencies for the generated NSH runner
+workspace using the committed runner lock, NSH pin, compiler, NDK, host library
+versions, ABI, and profile. The generic pinned NSH runtime has a separate cache.
+The development APK disables LTO and records Cargo timings. A manual Android
+smoke run can select ThinLTO for comparison.
 
 The `android-check` loss attributed to post-run cleanup on #143 (run 44780222843,
 attempt 1) was in fact this download: its setup step spent 40 minutes fetching

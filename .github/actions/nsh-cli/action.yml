@@ -23,8 +23,17 @@ runs:
       with:
         path: ${{ steps.identity.outputs.path }}
         key: nsh-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+    - name: Restore the retained macOS tool
+      if: inputs.cache == 'true' && runner.os == 'macOS' && steps.cli.outputs.cache-hit != 'true'
+      id: retained
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TOOL_ARTIFACT: patina-nsh-cli-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+        TOOL_PATH: ${{ steps.identity.outputs.path }}
+      run: python3 tools/ci/restore-macos-tool.py "$TOOL_ARTIFACT" "$TOOL_PATH"
     - name: Build NSH CLI
-      if: steps.cli.outputs.cache-hit != 'true'
+      if: steps.cli.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
       shell: bash
       # Bootstrap tools are not shipped. Keep their profile identical on all hosts.
       env:
@@ -32,6 +41,15 @@ runs:
         CARGO_PROFILE_RELEASE_OPT_LEVEL: '1'
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
       run: cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
+    - name: Retain the macOS tool independently of the dependency cache
+      if: inputs.cache == 'true' && runner.os == 'macOS' && github.ref == 'refs/heads/master' && steps.cli.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: patina-nsh-cli-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+        path: ${{ steps.identity.outputs.path }}
+        if-no-files-found: error
+        retention-days: 30
     # Save now: a later app failure must not discard a successful tool build.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       if: inputs.cache == 'true' && steps.cli.outputs.cache-hit != 'true'

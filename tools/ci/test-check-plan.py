@@ -37,6 +37,23 @@ class Plan(unittest.TestCase):
             self.assertEqual(checks.run([rustdoc], runner=runner), 0)
         self.assertEqual(runner.call_args.kwargs["env"]["RUSTDOCFLAGS"], "-D warnings")
 
+    def test_workspace_test_run_records_both_app_executables(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "harnesses.json"
+            artifact = {"reason": "compiler-artifact", "manifest_path": str(root / "crates/iptv-app/Cargo.toml")}
+            messages = [
+                dict(artifact, target={"name": name, "kind": ["test"]}, executable=str(root / name))
+                for name in sorted(checks.PERFORMANCE_HARNESSES)
+            ]
+            stream = "\n".join([*(json.dumps(message) for message in messages), "test synthetic ... ok"])
+            script = [sys.executable, "-c", f"print({stream!r})", "--"]
+            logged = io.StringIO()
+            with redirect_stdout(logged):
+                self.assertEqual(checks.record_harnesses(script, {"cwd": root}, output, root), 0)
+            self.assertEqual(logged.getvalue(), "test synthetic ... ok\n")
+            self.assertEqual(json.loads(output.read_text()), {name: str(root / name) for name in checks.PERFORMANCE_HARNESSES})
+
     def test_workspace_inventory_reads_package_names_not_directory_names(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -69,6 +86,19 @@ class Plan(unittest.TestCase):
         self.assertIn("--timings", self.by_name["workspace-tests"])
         self.assertIn("--timings", self.by_name["app-build"])
 
+    def test_test_thread_override_only_applies_to_parallel_workspace_tests(self):
+        self.assertNotIn("--test-threads", self.by_name["workspace-tests"])
+        for tier in ("full", "pr"):
+            for threads in (4, 6, 8):
+                for check in checks.plan(tier=tier, test_threads=threads):
+                    argv = check["argv"]
+                    with self.subTest(tier=tier, threads=threads, check=check["name"]):
+                        if check["name"] == "workspace-tests":
+                            self.assertEqual(argv[argv.index("--test-threads") + 1], str(threads))
+                            self.assertGreater(argv.index("--test-threads"), argv.index("--"))
+                        else:
+                            self.assertNotIn("--test-threads", argv)
+
     def test_integration_scenarios_share_at_most_two_executables_per_crate(self):
         metadata = json.loads(subprocess.check_output(
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
@@ -95,7 +125,7 @@ class Plan(unittest.TestCase):
                 if argv[1] == "test":
                     self.assertIn("--format=pretty", argv[argv.index("--") + 1:])
         for name in ["workspace-tests", "workspace-doctests", "repair-display-independence",
-                     "inspection-display-budget", "guide-input-budget", "busy-store-reader"]:
+                     "inspection-display-budget", "busy-guide-navigation", "busy-store-reader"]:
             argv = self.by_name[name]
             self.assertEqual(argv[argv.index("--features") + 1], checks.COVERAGE_FEATURES)
             self.assertEqual(packages(argv), list(checks.workspace_crates()))
@@ -104,7 +134,7 @@ class Plan(unittest.TestCase):
         expected = {
             "repair-display-independence": (["--lib"], checks.REPAIR),
             "inspection-display-budget": (["--test", "it"], checks.INSPECTION),
-            "guide-input-budget": (["--test", "app"], checks.LATENCY),
+            "busy-guide-navigation": (["--test", "app"], checks.LATENCY),
             "busy-store-reader": (["--test", "app"], checks.BUSY_READER),
         }
         for name, (target, test) in expected.items():

@@ -32,7 +32,8 @@ jobs:
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
-          cache-key: packages-v2-${{ hashFiles('.github/workflows/package-check.yml', 'tools/ci/package-linux.sh', 'tools/package-macos.sh') }}
+          cargo-cache: 'false'
+          prerequisites: ${{ matrix.platform == 'macos' && 'macos-package' || 'host' }}
           # Linux packaging tools; macOS ignores this list.
           apt-packages: >-
             ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
@@ -47,26 +48,34 @@ jobs:
           version: 0.9.3
           features: cli
       - uses: ./.github/actions/nsh-cli
+      - uses: ./.github/actions/desktop-cargo-cache
+        with:
+          platform: ${{ matrix.platform }}
       - name: Linux package installation and smoke tests
         if: matrix.platform == 'linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
         run: |
           sudo gem install fpm -v 1.16.0 --no-document
           bash tools/ci/setup-linux-packaging.sh
           export PATH="$RUNNER_TEMP/linux-packaging:$PATH"
-          export APPIMAGE_EXTRACT_AND_RUN=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          export APPIMAGE_EXTRACT_AND_RUN=1
           bash tools/ci/package-linux.sh
           bash tools/ci/check-linux-packages.sh
-          # As in a release: every bundled system library's source must be
-          # fetchable (libmpv's is retained with its pinned runtime release).
-          bash tools/ci/enable-deb-src.sh
-          python3 tools/ci/native-sources.py linux target/Patina.AppDir \
-            "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
-      - name: macOS ad hoc package installation and smoke test
+      - name: Corresponding source of the system libraries bundled in the AppImage
+        if: matrix.platform == 'linux'
+        timeout-minutes: 15
+        uses: ./.github/actions/linux-sources
+      - name: Build, bundle and audit the macOS app
         if: matrix.platform == 'macos'
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
+        run: bash tools/package-macos.sh
+      - name: Check macOS DMGs and smoke-test the transferred package
+        if: matrix.platform == 'macos'
         run: |
-          bash tools/package-macos.sh
           bash tools/ci/package-macos.sh
           mkdir -p "$RUNNER_TEMP/signing-download"
           COPYFILE_DISABLE=1 tar -cf "$RUNNER_TEMP/signing-download/signing-input.tar" target/package
@@ -78,6 +87,13 @@ jobs:
           # fetchable (normally none: libmpv is the pinned runtime).
           python3 tools/ci/native-sources.py macos target/package/Patina.app \
             "target/native-sources/Patina-$VERSION-macos-native-sources.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: rust-timings-desktop-package-${{ matrix.platform }}
+          path: target/desktop-cargo/cargo-timings/*.html
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-packages-${{ matrix.platform }}

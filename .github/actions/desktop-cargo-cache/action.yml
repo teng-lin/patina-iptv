@@ -1,0 +1,45 @@
+name: Generated desktop runner cache
+description: Reuse dependencies for the locked NSH desktop runner
+inputs:
+  platform:
+    description: Desktop platform
+    required: true
+  lookup-only:
+    description: Seed an absent cache from a fresh build
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Identify the desktop compiler and native libraries
+      id: compiler
+      shell: bash
+      run: |
+        compiler=$(rustc -vV)
+        clang=$(clang --version)
+        host_compiler=$(cc --version)
+        if [[ "$RUNNER_OS" == macOS ]]; then
+          libraries=$(pkg-config --version)
+          sdk=$(xcrun --sdk macosx --show-sdk-build-version)
+        else
+          libraries=$(dpkg-query -W libc6-dev libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev)
+          sdk=''
+        fi
+        identity=$(printf '%s\n' "$compiler" "$clang" "$host_compiler" "$libraries" "$sdk" "${ImageOS:-}" | shasum -a 256 | cut -c1-16)
+        echo "key=$identity" >> "$GITHUB_OUTPUT"
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        # Preserve the existing Linux cache. The macOS namespace also serves fresh master candidates.
+        add-job-id-key: ${{ inputs.platform != 'macos' }}
+        key: >-
+          ${{ inputs.platform == 'macos'
+          && format('desktop-package-macos-v3-{0}-{1}', steps.compiler.outputs.key,
+            hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', 'tools/ci/locked-build-env.sh', 'tools/ci/locked-cargo.py', 'tools/mpv-runtime-unix/runtime-macos.json'))
+          || format('desktop-package-v2-linux-{0}-{1}', steps.compiler.outputs.key,
+            hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', 'tools/ci/locked-cargo.py', 'tools/ci/package-linux.sh', 'tools/package-macos.sh', 'tools/mpv-runtime-unix/runtime-*.json')) }}
+        # The committed runner lock supplies the identity before NSH generates the workspace.
+        add-rust-environment-hash-key: 'false'
+        lookup-only: ${{ inputs.lookup-only }}
+        save-if: ${{ github.ref == 'refs/heads/master' }}
+        cache-on-failure: ${{ inputs.lookup-only != 'true' }}
+        cache-bin: 'false'
+        workspaces: crates/iptv-app/.nsh/rust -> ../../../../target/desktop-cargo
