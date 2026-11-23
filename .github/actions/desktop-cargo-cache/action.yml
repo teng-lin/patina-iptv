@@ -28,8 +28,8 @@ runs:
         echo "key=$identity" >> "$GITHUB_OUTPUT"
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
-        # Preserve the existing Linux cache. The macOS namespace also serves fresh master candidates.
-        add-job-id-key: ${{ inputs.platform != 'macos' }}
+        # Fresh master candidates and PR previews share the same platform namespace.
+        add-job-id-key: 'false'
         key: >-
           ${{ inputs.platform == 'macos'
           && format('desktop-package-macos-v3-{0}-{1}', steps.compiler.outputs.key,

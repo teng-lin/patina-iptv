@@ -220,17 +220,20 @@ jobs:
           echo "NSH=$(cd ../nsh-patina && pwd)/target/release/nsh" >> "$GITHUB_ENV"
       - uses: ./.github/actions/nsh-cli
       - uses: ./.github/actions/desktop-cargo-cache
-        if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'
+        if: (matrix.platform == 'linux' || matrix.platform == 'macos') && github.ref == 'refs/heads/master'
         with:
-          platform: macos
+          platform: ${{ matrix.platform }}
           lookup-only: 'true'
       - name: Linux packages
         if: matrix.platform == 'linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
         run: |
           sudo gem install fpm -v 1.16.0 --no-document
           bash tools/ci/setup-linux-packaging.sh
           export PATH="$RUNNER_TEMP/linux-packaging:$PATH"
-          export APPIMAGE_EXTRACT_AND_RUN=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          export APPIMAGE_EXTRACT_AND_RUN=1
           bash tools/ci/package-linux.sh
           bash tools/ci/check-linux-packages.sh
       # The AppImage's libmpv (with FFmpeg) is the pinned runtime, fetched by
