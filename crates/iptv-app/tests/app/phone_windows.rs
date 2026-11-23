@@ -304,6 +304,20 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
     assert!(bounds(app, "play-bar-pip").is_none());
     step(app.press("label:Close the chooser"));
     step(app.wait_for("id:play-bar-pip"));
+
+    // The overflow remains open across a resize that keeps the same actions.
+    // Once the actions fit on the bar, dismiss the old list as a unit.
+    step(app.press("id:play-bar-more"));
+    present(app, (371.0, 260.0), 1.0);
+    step(app.wait_for("id:chooser-items >> text:Display"));
+    present(app, (532.0, 280.0), 1.0);
+    step(app.wait_for("id:play-bar-picture"));
+    assert!(
+        !app.screen()
+            .matches("id:chooser-items >> text:Display")
+            .unwrap()
+    );
+    assert!(bounds(app, "play-bar-more").is_none());
 }
 
 /// A foldable phone unfolded becomes a tablet (Android derives the idiom

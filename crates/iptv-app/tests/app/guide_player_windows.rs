@@ -300,7 +300,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             }),
         },
     );
-    app.settle();
+    step(app.wait_for("id:auxiliary-player-1 >> id:play-bar-tracks"));
     step(app.press("id:auxiliary-player-1 >> id:play-bar-tracks"));
     let chooser = app.screen().layout_nodes().into_iter().find(|node| {
         node.test_id.as_deref() == Some("chooser-items") && node.bounds.size.height.0 > 0.0

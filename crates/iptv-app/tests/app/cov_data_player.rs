@@ -1077,8 +1077,31 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 1, "reopened 30 s on");
+
+    // A desktop can shrink below the required width of the full transport.
+    // Play/Pause and More remain visible and both seeks move into More.
+    const NARROW_REPLAY_WIDTH: f32 = 180.0;
+    step(app.set_viewport(Size::new(px(NARROW_REPLAY_WIDTH), px(480.0))));
+    step(app.wait_for("id:play-bar-more"));
+    assert!(!seen(&app, "id:play-bar-rewind"));
+    assert!(!seen(&app, "id:play-bar-forward"));
+    for id in ["play-bar-play-pause", "play-bar-more"] {
+        let bounds = app
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.test_id.as_deref() == Some(id))
+            .expect(id)
+            .bounds;
+        assert!(
+            bounds.origin.x.0 >= 0.0
+                && bounds.origin.x.0 + bounds.size.width.0 <= NARROW_REPLAY_WIDTH
+        );
+    }
+    step(app.press("id:play-bar-more"));
+    step(app.wait_for("id:chooser-items >> text:Fast-forward"));
     let previous = prop(&app, &props, "source");
-    step(app.press("label:Rewind"));
+    step(app.press("id:chooser-items >> text:Rewind"));
     run(&mut app, Duration::from_secs(1));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
@@ -1087,6 +1110,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 2, "reopened 10 s back");
+    step(app.set_viewport(size));
     let line = touch_area(&app, |w, h| h == 20.0 && w > 100.0);
     let previous = prop(&app, &props, "source");
     step(app.drag(&line, Point::new(px(60.0), px(0.0))));

@@ -886,8 +886,11 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             return;
         }
         // Back (or Menu) closes program details.
-        if matches!(action, Action::Back | Action::ShowMenu) {
-            crate::menu_view::close(ui);
+        match action {
+            Action::MoveUp => crate::menu_view::scroll_description(ui, -1.0),
+            Action::MoveDown => crate::menu_view::scroll_description(ui, 1.0),
+            Action::Back | Action::ShowMenu => crate::menu_view::close(ui),
+            _ => {}
         }
         return;
     }

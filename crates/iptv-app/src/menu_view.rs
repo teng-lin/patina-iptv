@@ -1084,11 +1084,21 @@ fn origin_program(schedule: &dyn crate::guide::Schedule, origin: Origin) -> crat
     schedule.program_at(origin.channel, minute)
 }
 
-/// The description popover: title, time range and text; no actions (those
-/// live in the menu). Back or a tap closes it.
+pub(crate) fn scroll_description(ui: Ui, direction: f32) {
+    ui.description_scroll
+        .scroll_by(direction * crate::scale::now() * 96.0);
+}
+
+/// The description popover. Back or a tap closes it.
 fn description(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let shown = move || ui.description.get().is_some();
+    let scrolling = ui.description_scroll;
+    effect(move || {
+        if ui.description.get().is_some() {
+            scrolling.reset();
+        }
+    });
     let program = move || {
         ui.guide_data();
         ui.description
@@ -1127,7 +1137,9 @@ fn description(ui: Ui) -> impl IntoElement {
             close(ui);
         })
         .child(
-            scroll()
+            scrolling
+                .view()
+                .test_id("description-scroll")
                 .max_h(percentage(1.0))
                 .max_w(percentage(1.0))
                 .w(px(480.0))

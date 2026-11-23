@@ -265,11 +265,17 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
     let details = "text:/^Test Channel Two · \\d/";
     step(app.play_bar_option("Program details"));
     step(app.wait_for(details));
+    step(app.press("id:play-bar-play-pause"));
+    assert!(app.screen().matches(details).unwrap());
+    step(app.press("id:play-bar-play-pause"));
     step(app.press("id:description-layer"));
     step(gone(app, details));
     // Dismissing the picture chooser leaves the bar open.
     step(app.play_bar_option("Display"));
     step(app.wait_for("text:Stretch to fill"));
+    step(app.press("id:play-bar-mute"));
+    assert!(app.screen().matches("text:Stretch to fill").unwrap());
+    step(app.press("id:play-bar-mute"));
     step(app.press("label:Close the chooser"));
     step(gone(app, "text:Stretch to fill"));
     assert!(app.screen().matches("label:Mute").unwrap(), "the bar stays");

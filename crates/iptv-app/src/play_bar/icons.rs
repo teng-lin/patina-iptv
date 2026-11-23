@@ -7,6 +7,7 @@ use nsh_core::element::ImageSrc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Icon {
     Volume,
+    Listen,
     Muted,
     Rewind,
     Play,
@@ -46,6 +47,10 @@ fn body(icon: Icon) -> &'static str {
         Icon::Volume => {
             "<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/>\
              <path d='M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'/>"
+        }
+        // A player window with a waveform identifies the audio source.
+        Icon::Listen => {
+            "<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M5 12h3l2-4 3 8 2-4h4'/>"
         }
         Icon::Muted => {
             "<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/>\

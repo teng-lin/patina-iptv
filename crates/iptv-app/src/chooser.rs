@@ -48,7 +48,7 @@ pub struct Open {
     values: Vec<String>,
     /// Snapshot behind both the translated labels and their opaque pick values.
     tracks: Option<iptv_core::tracks::Tracks>,
-    // Preserve action identity across resizes and the originating desktop window.
+    // Preserve action identity for a press and keep the originating desktop window.
     more: Option<More>,
     pub list: Chooser,
 }
@@ -176,7 +176,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         Kind::History => history(ui),
         Kind::More => (Vec::new(), Vec::new(), 0),
         Kind::Volume => {
-            let level = ui.media.volume.with(|v| v.level);
+            let level = crate::media::audible_volume(ui);
             (
                 (0..=10).map(|n| format!("{}%", n * 10)).collect(),
                 Vec::new(),
@@ -310,7 +310,8 @@ pub fn pick(ui: Ui, index: usize) {
             if let Some(more) = open.more
                 && let Some(&control) = more.controls.get(index)
             {
-                crate::play_bar::activate(ui, control, more.window);
+                ui.owner
+                    .run(|| crate::play_bar::activate(ui, control, more.window));
             }
         }
         Kind::History => play_recent(ui, &value),
@@ -351,6 +352,24 @@ fn start_sleep(ui: Ui, minutes: u32) {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let open = move || ui.chooser.with(Option::is_some);
+    let width = signal(None);
+    effect(move || {
+        let stale = ui.chooser.with(|chooser| {
+            chooser
+                .as_ref()
+                .and_then(|chooser| chooser.more.as_ref())
+                .is_some_and(|more| {
+                    width
+                        .get()
+                        .is_some_and(|width| crate::play_bar::overflow(ui, width) != more.controls)
+                })
+        });
+        // Keep row identities stable for an in-flight press. A change in
+        // availability or fit dismisses the old list before it can be used.
+        if stale {
+            close(ui);
+        }
+    });
     let count = move || ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len));
     let size = Scale::new();
     let list = element_ref();
@@ -428,6 +447,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     view()
         .absolute()
         .inset_0()
+        // This layer still measures the local window when a short chooser
+        // hides the bar, including in an auxiliary player window.
+        .on_layout(move |bounds: &Bounds<Points>| {
+            let measured = (bounds.size.width.0 > 0.0).then_some(bounds.size.width.0);
+            if width.get_untracked() != measured {
+                width.set(measured);
+            }
+        })
         // At the right, clear of the panels at the bottom.
         .items_end()
         .justify_center()

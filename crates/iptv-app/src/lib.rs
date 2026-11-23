@@ -227,6 +227,8 @@ pub struct SharedUi {
 #[derive(Clone, Copy)]
 pub struct Ui {
     pub app: SharedUi,
+    /// Owns work that must survive changes to controls inside this window.
+    owner: Owner,
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_presentation::browse_playback::BrowsePlayback>,
@@ -271,6 +273,7 @@ pub struct Ui {
     pub menu: Signal<Option<Menu>>,
     /// The program description popover, if open.
     pub description: Signal<Option<Origin>>,
+    description_scroll: ui_kit::FocusScroll,
     pub recordings: Signal<iptv_presentation::recording::Screen>,
     pub vod: Signal<iptv_presentation::vod::Screen>,
     pub recordings_open: Memo<bool>,
@@ -355,6 +358,7 @@ impl Ui {
         let recordings_open = computed(move || recordings.with(|s| s.open));
         let ui = Self {
             app,
+            owner: Owner::current(),
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
@@ -404,6 +408,7 @@ impl Ui {
             seek_target: signal(None),
             menu: signal(None),
             description: signal(None),
+            description_scroll: ui_kit::FocusScroll::new(),
             recordings,
             vod: signal(iptv_presentation::vod::Screen::default()),
             recordings_open,

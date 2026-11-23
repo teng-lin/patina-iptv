@@ -84,6 +84,15 @@ pub fn muted(ui: Ui) -> bool {
         || (ui.player_surface == 0 && ui.player_windows.with(|w| w.audible().is_some()))
 }
 
+/// The level currently audible on this player, including audio ownership.
+pub(crate) fn audible_volume(ui: Ui) -> u8 {
+    if muted(ui) {
+        0
+    } else {
+        ui.media.volume.with(|v| v.level)
+    }
+}
+
 fn change_volume(ui: Ui, change: impl FnOnce(&mut Volume)) {
     batch(|| {
         ui.media.volume.update(change);
