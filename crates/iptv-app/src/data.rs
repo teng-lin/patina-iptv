@@ -76,7 +76,7 @@ pub fn start(ui: Ui) {
     let was_background = std::cell::Cell::new(false);
     effect(move || {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
-        let target = crate::host::ANDROID
+        let target = crate::host::EXTERNAL_PLAYER
             .then(|| crate::external_player::handoff_target(ui))
             .flatten();
         crate::runtime().set_foreground_for_external(!background, target.as_ref());

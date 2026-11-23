@@ -55,7 +55,12 @@ impl ExternalSession {
     }
 
     fn retire(&self) -> Option<Retirement> {
-        let connection = self.0.connection.lock().ok()?.take()?;
+        let connection = self
+            .0
+            .connection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()?;
         Some(Retirement {
             connection: Some(connection),
             session: self.0.clone(),
@@ -76,6 +81,10 @@ impl ExternalSession {
     pub(crate) async fn close_and_wait(&self) {
         // Another caller may already be retiring this session.
         self.close();
+        self.wait_retired().await;
+    }
+
+    pub(crate) async fn wait_retired(&self) {
         let mut retired = self.0.retired.subscribe();
         let _ = retired.wait_for(|done| *done).await;
     }

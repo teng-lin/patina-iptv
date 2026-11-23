@@ -392,6 +392,7 @@ impl ExternalSession {
         true
     }
     pub(crate) async fn close_and_wait(&self) {}
+    pub(crate) async fn wait_retired(&self) {}
 }
 pub(crate) struct ExternalHandoff;
 impl ExternalHandoff {

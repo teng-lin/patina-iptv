@@ -403,9 +403,15 @@ mod tests {
     #[test]
     fn external_variables_are_resolved_only_inside_opaque_uris() {
         let base = base().join("?token=generated%2Bvalue+other").unwrap();
-        let body = b"#EXTM3U\n#EXT-X-DEFINE:NAME=\"dir\",VALUE=\"media\"\n#EXT-X-DEFINE:QUERYPARAM=\"token\"\n#EXT-X-KEY:METHOD=AES-128,URI=\"{$dir}/key?token={$token}\"\n{$dir}/segment.ts?token={$token}\n";
+        let body = concat!(
+            "#EXTM3U\n",
+            "#EXT-X-DEFINE:NAME=\"dir\",VALUE=\"media\"\n",
+            "#EXT-X-DEFINE:QUERYPARAM=\"token\"\n",
+            "#EXT-X-KEY:METHOD=AES-128,URI=\"{$dir}/key?token={$token}\"\n",
+            "{$dir}/segment.ts?token={$token}\n",
+        );
         let mut mapped = Vec::new();
-        let rewritten = rewrite_with(body, Some(&base), |uri, key, _| {
+        let rewritten = rewrite_with(body.as_bytes(), Some(&base), |uri, key, _| {
             mapped.push((uri.to_owned(), key));
             Ok(format!("http://127.0.0.1:1/cap/{}", mapped.len()))
         })

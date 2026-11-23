@@ -137,6 +137,11 @@ pub fn cancel_pending(ui: Ui) {
     ui.external_request
         .update(|generation| *generation = generation.wrapping_add(1));
     clear_pending_target(ui, None);
+    if let Some(active) = ui.external_playback.get_untracked()
+        && active.session.is_retired()
+    {
+        clear_retired(ui, &active);
+    }
 }
 
 pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
@@ -312,13 +317,18 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                 return;
             }
             if let Some(session) = handoff.allow(lease) {
-                ui.external_playback.set(Some(Active {
+                let active = Active {
                     ticket,
                     target,
                     authority: expected,
                     group: group_id,
                     session,
-                }));
+                };
+                ui.external_playback.set(Some(active.clone()));
+                crate::data::spawn_in_app(async move {
+                    active.session.wait_retired().await;
+                    clear_retired(ui, &active);
+                });
             } else {
                 unavailable();
             }
