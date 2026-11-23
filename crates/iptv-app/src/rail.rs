@@ -197,6 +197,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
     };
     view()
         .test_id("navigation-rail")
+        .pointer_events(move || crate::guide_chrome_pointer_events(ui))
         .w(move || px(width(ui)))
         .overflow_hidden()
         .py(px(8.0))

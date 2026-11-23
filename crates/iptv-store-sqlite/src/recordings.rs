@@ -45,6 +45,7 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
         id: JobId(r.get(0)?),
         source_current: r.get(11)?,
+        series_start: r.get(12)?,
         request: Request {
             source: r.get(1)?,
             channel: r.get(2)?,
@@ -178,7 +179,10 @@ impl Store {
         Ok(self
             .conn
             .prepare("SELECT j.*, EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=j.source_id
-                AND r.incarnation=j.source_incarnation) FROM recording_jobs j ORDER BY starts_at DESC, id DESC LIMIT 1000")?
+                AND r.incarnation=j.source_incarnation),
+                (SELECT MIN(rj.starts_at) FROM recording_rule_jobs rj JOIN recording_rules q ON q.id=rj.rule_id
+                 WHERE rj.job_id=j.id AND q.repeat='series')
+                FROM recording_jobs j ORDER BY starts_at DESC, id DESC LIMIT 1000")?
             .query_map([], row)?
             .collect::<rusqlite::Result<_>>()?)
     }
@@ -187,7 +191,10 @@ impl Store {
             .conn
             .query_row(
                 "SELECT j.*, EXISTS(SELECT 1 FROM guide_revisions r WHERE r.source_id=j.source_id
-                AND r.incarnation=j.source_incarnation) FROM recording_jobs j WHERE id=?1",
+                AND r.incarnation=j.source_incarnation),
+                (SELECT MIN(rj.starts_at) FROM recording_rule_jobs rj JOIN recording_rules q ON q.id=rj.rule_id
+                 WHERE rj.job_id=j.id AND q.repeat='series')
+                FROM recording_jobs j WHERE id=?1",
                 [id.0],
                 row,
             )
@@ -690,6 +697,23 @@ impl Store {
             )
             .optional()?
             .map(iptv_core::recording::RuleId))
+    }
+
+    /// The same primary provider group used when projecting guide timestamps.
+    pub fn channel_guide_offset_seconds(
+        &self,
+        source: crate::SourceId,
+        channel: &str,
+    ) -> Result<i64> {
+        Ok(self.conn.query_row(
+            "SELECT COALESCE(o.epg_offset_minutes, 0) FROM channels c
+             LEFT JOIN groups g ON g.source_id=c.source_id AND g.kind='live'
+               AND g.id=json_extract(c.group_ids,'$[0]')
+             LEFT JOIN group_overlays o ON o.source_id=c.source_id AND o.group_id=COALESCE(g.id,'__other__')
+             WHERE c.source_id=?1 AND c.id=?2",
+            params![source.0, channel],
+            |row| row.get::<_, i64>(0),
+        ).optional()?.unwrap_or(0) * 60)
     }
 
     /// Title matching uses only the configured channel's effective guide binding.

@@ -5,6 +5,8 @@
 #[cfg(target_os = "android")]
 mod android_transport;
 mod clock;
+mod external_player;
+pub(crate) use external_player::*;
 pub(crate) mod credential_key;
 pub(crate) mod platform_data;
 mod process;

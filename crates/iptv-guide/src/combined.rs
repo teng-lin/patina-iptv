@@ -197,6 +197,19 @@ impl Schedule for CombinedSchedule {
             })
             .unwrap_or_default()
     }
+    fn group_preferences(&self, group: usize) -> iptv_core::organization::GroupPreferences {
+        let Some(&(source, group)) = self.groups.get(group) else {
+            return iptv_core::organization::GroupPreferences::default();
+        };
+        let schedule = &self.sources[source].schedule;
+        group.map_or_else(
+            || iptv_core::organization::GroupPreferences {
+                sort: schedule.channel_sort(),
+                ..Default::default()
+            },
+            |group| schedule.group_preferences(group),
+        )
+    }
     fn group_channels(&self, g: usize) -> Vec<usize> {
         let Some(&(s, g)) = self.groups.get(g) else {
             return Vec::new();

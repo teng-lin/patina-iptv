@@ -109,10 +109,10 @@ pub fn rebuild(ui: Ui, keep: bool) {
 
 /// The favorites changed: the Favorites list follows if it is shown.
 pub fn favorites_changed(ui: Ui) {
-    if matches!(
-        Entry::at(ui.focus.with_untracked(|f| f.group)),
-        Entry::Favorites | Entry::Recent
-    ) {
+    let entry = Entry::at(ui.focus.with_untracked(|f| f.group));
+    if matches!(entry, Entry::Favorites | Entry::Recent)
+        || matches!(entry, Entry::Group(group) if crate::schedule().group_preferences(group).favorites_only)
+    {
         rebuild(ui, true);
     }
 }

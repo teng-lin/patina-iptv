@@ -522,3 +522,57 @@ fn the_generated_ungrouped_bucket_retains_its_identity_through_preparation() {
     schedule.set_organization(super::Organization::default());
     assert_eq!(schedule.group_label(0), GroupName::Ungrouped);
 }
+
+#[test]
+fn a_group_clock_correction_does_not_shift_shared_guide_bindings() {
+    use iptv_core::organization::GroupPreferences;
+
+    let parsed = parse_m3u(
+        "#EXTM3U\n\
+         #EXTINF:-1 tvg-id=\"a.test\" group-title=\"Generated A\",Alpha\n\
+         http://example.test/alpha\n\
+         #EXTINF:-1 tvg-id=\"a.test\" group-title=\"Generated B\",Beta\n\
+         http://example.test/beta\n",
+    );
+    let groups = parsed.groups;
+    let channels = parsed.channels.items;
+    let a = ChannelKey::new(channels[0].id.as_str());
+    let b = ChannelKey::new(channels[1].id.as_str());
+    let guide = store_for(&[(&a, Some("a.test"), "Alpha"), (&b, Some("a.test"), "Beta")]);
+    let schedule = EpgSchedule::from_catalog(&groups, &channels, guide, NOW);
+    schedule.set_organization(super::Organization {
+        group_preferences: [(
+            groups[0].id.as_str().to_owned(),
+            GroupPreferences {
+                epg_offset_minutes: 45,
+                ..GroupPreferences::default()
+            },
+        )]
+        .into_iter()
+        .collect(),
+        ..Default::default()
+    });
+    assert_eq!(schedule.listing_start(0), Some(15));
+    assert_eq!(schedule.listing_start(1), Some(-30));
+    let shifted = schedule.program_at(0, 15);
+    assert_eq!(shifted, Program { start: 15, end: 75 });
+    assert_eq!(
+        schedule.listing(0, shifted),
+        Some(Listing::Title("Alpha News".into()))
+    );
+    assert_eq!(
+        schedule.description(0, shifted).as_deref(),
+        Some("About Alpha News.")
+    );
+    assert_eq!(
+        schedule.stored_epg_time(0, schedule.unix(15)),
+        schedule.unix(-30)
+    );
+    assert_eq!(
+        schedule.program_at(1, 0),
+        Program {
+            start: -30,
+            end: 30
+        }
+    );
+}

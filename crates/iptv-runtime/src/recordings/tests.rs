@@ -187,6 +187,7 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
     let mut job = Job {
         id: JobId(1),
         source_current: true,
+        series_start: None,
         request: Request {
             source: 1,
             channel: "generated".into(),
@@ -403,6 +404,7 @@ async fn series_padding_is_applied_once_and_raw_occurrence_cancellation_survives
             Some(RecurrenceTiming {
                 program_start: start,
                 program_end: end,
+                guide_offset_seconds: None,
                 lead_seconds: 300,
                 trail_seconds: 600,
             }),
@@ -477,6 +479,7 @@ async fn current_daily_and_weekly_captures_keep_the_nominal_clock_and_duration()
                 Some(RecurrenceTiming {
                     program_start: start,
                     program_end: end,
+                    guide_offset_seconds: None,
                     lead_seconds: 300,
                     trail_seconds: 600,
                 }),

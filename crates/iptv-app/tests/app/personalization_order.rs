@@ -127,14 +127,14 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
     step(app.press_key("down"));
     step(app.press_key("right"));
     menu(app, "Reorder channels");
-    step(app.wait_for("text:Press OK to select a row."));
+    step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
     step(app.wait_for("id:guide-row"));
     assert!(!app.screen().matches("id:organization-row-0").unwrap());
     assert!(!app.screen().matches("id:reorder-handle-0").unwrap());
     step(app.press_key("down"));
-    assert!(app.shows("Press OK to select a row."));
+    step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
     step(app.press_key("enter"));
-    step(app.wait_for("text:Use the arrows to move. Press OK to place."));
+    step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
     step(app.press_key("up"));
     step(app.press_key("enter"));
     step(app.back());
@@ -166,7 +166,7 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
     menu(app, "Channel order");
     step(app.wait_for("text:Custom order"));
     step(app.press("text:Custom order"));
-    step(app.wait_for("text:Press OK to select a row."));
+    step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
     // Activating the saved Custom order is itself a change, even with no drag.
     step(app.back());
     step(app.wait_for("text:Save order"));
@@ -337,4 +337,44 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
         Duration::from_secs(5),
         |screen| list_is_hidden(screen) == Some(true),
     ));
+}
+
+#[test]
+fn channel_context_reorders_inline_with_the_pointer() {
+    use nsh_core::{geometry::point, platform::Idiom, prelude::px};
+
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_environment("desktop input", |env| {
+        env.idiom = Idiom::Desktop;
+        env.os = nsh_core::platform::Os::Linux;
+    }));
+    group(app, "News");
+    step(app.right_click("id:guide-row >> text:/Local B/"));
+    step(app.wait_for("id:menu-panel >> role:header[Local B]"));
+    step(app.press("id:menu-panel >> text:Reorder channel"));
+    let grip = "id:guide-row >> nth=1 >> id:guide-reorder-handle";
+    step(app.wait_for(grip));
+    step(app.drag(grip, point(px(0.0), px(-51.0))));
+    step(app.wait_for("id:guide-row >> nth=0 >> text:/Local B/"));
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    let store = crate::isolated::open_database(&fixture.path).unwrap();
+    let news = store
+        .groups(fixture.source, None)
+        .unwrap()
+        .into_iter()
+        .find(|group| group.name == "News")
+        .unwrap();
+    let rows = store
+        .load_channels(
+            fixture.source,
+            &ChannelQuery {
+                scope: ChannelScope::Group(news.id),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(rows[0].name, "Local B");
 }

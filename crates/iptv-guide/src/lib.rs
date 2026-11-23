@@ -55,6 +55,9 @@ pub struct Organization {
     pub channels: Vec<(String, String, bool)>,
     pub groups: Vec<(String, String, bool)>,
     pub blocks: iptv_core::organization::Blocks,
+    pub group_preferences:
+        std::collections::HashMap<String, iptv_core::organization::GroupPreferences>,
+    pub channel_sort: iptv_core::organization::Sort,
 }
 
 #[derive(Clone, Default)]
@@ -63,6 +66,10 @@ struct OrganizationState {
     hidden: Vec<bool>,
     channel_blocks: Vec<iptv_core::organization::Block>,
     blocked_groups: std::collections::HashSet<String>,
+    group_preferences: std::collections::HashMap<String, iptv_core::organization::GroupPreferences>,
+    channel_sort: iptv_core::organization::Sort,
+    epg_offsets: Option<Vec<i32>>,
+    offset_bounds: (i32, i32),
     order: Vec<usize>,
     groups: Vec<(usize, GroupName)>,
     lists: Option<Vec<(String, String, Vec<usize>)>>,
@@ -222,7 +229,16 @@ impl EpgSchedule {
     /// A page read for `request`; false when it is no longer wanted (the
     /// user went back to now) or is not this schedule's.
     pub fn insert_page(&self, request: PageRequest, store: GuideStore) -> bool {
-        self.pages.insert(request, store)
+        let clock_adjusted = self
+            .organization
+            .borrow()
+            .as_ref()
+            .is_some_and(|state| state.offset_bounds != (0, 0));
+        self.pages.insert(
+            request,
+            store,
+            pages::MAX_PAGES + usize::from(clock_adjusted),
+        )
     }
 
     /// Whether the programs around `t` are in memory; asks for their day
@@ -513,11 +529,25 @@ impl EpgSchedule {
         self.channels.get(channel).map(|c| &c.key)
     }
 
+    pub fn epg_offset_minutes(&self, channel: usize) -> i32 {
+        self.organization
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.epg_offsets.as_ref()?.get(channel))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Translates display time to the time used by the guide store and pages.
+    pub fn stored_epg_time(&self, channel: usize, display: UnixTime) -> UnixTime {
+        display - i64::from(self.epg_offset_minutes(channel)) * 60
+    }
+
     /// The description of `program`, when the EPG has one: from memory,
     /// else from the description lookup.
     pub fn description(&self, channel: usize, program: Program) -> Option<String> {
         let key = self.key(channel)?;
-        let t = self.probe(program);
+        let t = self.probe(channel, program);
         let (desc, start) = self
             .channel_store(Some(key), t, |s| {
                 let p = s.program_at(key, t)?;
@@ -533,8 +563,12 @@ impl EpgSchedule {
     /// A time inside `program` (its first second, or its middle if short).
     /// Read an overlapping program from the retained part of its slot.
     /// If it reaches the held window, that window already contains it whole.
-    fn probe(&self, program: Program) -> UnixTime {
-        let (a, b) = (self.unix(program.start), self.unix(program.end));
+    fn probe(&self, channel: usize, program: Program) -> UnixTime {
+        let offset = self.epg_offset_minutes(channel);
+        let (a, b) = (
+            self.unix(program.start - offset),
+            self.unix(program.end - offset),
+        );
         let t = (a + 59).min((a + b) / 2).max(a);
         let held_from = self.held.map_or(UnixTime::MIN, |(from, _)| from);
         let from = self.pages.loaded_from().max(held_from);
@@ -740,6 +774,37 @@ impl Shape<'_> {
                 .hidden
                 .push(pref.is_some_and(|(_, _, hidden)| *hidden) || group_hidden);
         }
+        if organization
+            .group_preferences
+            .values()
+            .any(|pref| pref.epg_offset_minutes != 0)
+        {
+            let groups: std::collections::HashSet<_> =
+                self.group_keys.iter().map(String::as_str).collect();
+            let offsets: Vec<_> = self
+                .sources
+                .iter()
+                .map(|c| {
+                    let group = c
+                        .as_ref()
+                        .and_then(|c| c.groups.first())
+                        .map(|id| id.as_str())
+                        .filter(|id| groups.contains(id))
+                        .unwrap_or("__other__");
+                    organization
+                        .group_preferences
+                        .get(group)
+                        .map_or(0, |pref| pref.epg_offset_minutes)
+                })
+                .collect();
+            for &offset in &offsets {
+                state.offset_bounds.0 = state.offset_bounds.0.min(offset);
+                state.offset_bounds.1 = state.offset_bounds.1.max(offset);
+            }
+            state.epg_offsets = Some(offsets);
+        }
+        state.group_preferences = organization.group_preferences;
+        state.channel_sort = organization.channel_sort;
         state.blocked_groups = organization.blocks.groups;
         state.order = self.playlist_order.to_vec();
         if state.order.len() != self.channels.len() {
@@ -827,7 +892,12 @@ impl Schedule for EpgSchedule {
             self.minute(t) + PAST_END
         });
         let end = end.max(now + iptv_core::guide::VISIBLE);
-        (first.min(now), end)
+        let (min_offset, max_offset) = self
+            .organization
+            .borrow()
+            .as_ref()
+            .map_or((0, 0), |state| state.offset_bounds);
+        ((first + min_offset).min(now), end + max_offset)
     }
 
     fn listing_start(&self, channel: usize) -> Option<i32> {
@@ -840,7 +910,7 @@ impl Schedule for EpgSchedule {
                 .and_then(|schedule| schedule.get(0))
                 .map(|program| program.start())
         };
-        start.map(|start| self.minute(start))
+        start.map(|start| self.minute(start) + self.epg_offset_minutes(channel))
     }
 
     fn channel_count(&self) -> usize {
@@ -884,7 +954,8 @@ impl Schedule for EpgSchedule {
         // through a minute (its start rounds down to it) owns that minute, so
         // the minute a cell starts at finds that cell's program, not the one
         // before it, and cells never overlap.
-        let t = self.unix(minute) + 59;
+        let offset = self.epg_offset_minutes(channel);
+        let t = self.unix(minute - offset) + 59;
         let key = self.key(channel);
         let found = self
             .channel_store(key, t, |s| match key.and_then(|k| s.program_at(k, t)) {
@@ -894,7 +965,7 @@ impl Schedule for EpgSchedule {
             .or_else(|| self.held_across(key, t));
         // Its day is loading: the hour slot.
         let (start, end) = found.unwrap_or_else(|| self.loading_slot(key, t));
-        let (start, end) = (self.minute(start), self.minute(end));
+        let (start, end) = (self.minute(start) + offset, self.minute(end) + offset);
         // Sub-minute programs still get a one-minute cell.
         Program {
             start,
@@ -993,6 +1064,23 @@ impl Schedule for EpgSchedule {
             .unwrap_or_else(|| GroupName::Named(String::new()))
     }
 
+    fn group_preferences(&self, group: usize) -> iptv_core::organization::GroupPreferences {
+        let key = self.group_key(group);
+        self.organization
+            .borrow()
+            .as_ref()
+            .and_then(|state| state.group_preferences.get(&key))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn channel_sort(&self) -> iptv_core::organization::Sort {
+        self.organization
+            .borrow()
+            .as_ref()
+            .map_or_default(|state| state.channel_sort)
+    }
+
     fn group_channels(&self, group: usize) -> Vec<usize> {
         if let Some(lists) = self
             .organization
@@ -1082,10 +1170,12 @@ impl Schedule for EpgSchedule {
 
     fn listing(&self, channel: usize, program: Program) -> Option<Listing> {
         let key = self.key(channel)?;
-        let t = self.probe(program);
+        let t = self.probe(channel, program);
         let found = self.channel_store(Some(key), t, |s| {
             s.program_at(key, t)
-                .filter(|p| self.minute(p.start()) == program.start)
+                .filter(|p| {
+                    self.minute(p.start()) + self.epg_offset_minutes(channel) == program.start
+                })
                 // A guide stored before badges were folded at import.
                 .map(|p| iptv_epg::fold_superscripts(p.title()).into_owned())
         });

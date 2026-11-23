@@ -658,6 +658,18 @@ fn resolve(
             press,
             context: (ctx, _),
         } => {
+            if ctx == Context::Menu
+                && ui.menu.with(|menu| {
+                    menu.as_ref()
+                        .is_some_and(|menu| menu.group_offset.is_some())
+                })
+            {
+                match key {
+                    RemoteKey::Left => return Some((key, press, Action::MoveLeft)),
+                    RemoteKey::Right => return Some((key, press, Action::MoveRight)),
+                    _ => {}
+                }
+            }
             let action = keymap.resolve(ctx, key, press);
             let action = if crate::remote_editor::overridden(ctx, key) {
                 action
@@ -732,6 +744,9 @@ fn keep_controls_until(ui: Ui, at: u64) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
+    if action != Action::Ignore {
+        crate::external_player::cancel_pending(ui);
+    }
     // A held key must not reopen a menu or turn a guide preview into
     // fullscreen. A remapped remote button can repeat Select.
     if repeat
@@ -880,6 +895,11 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             Action::MoveDown => ui
                 .menu
                 .update(|m| m.as_mut().into_iter().for_each(|m| m.move_focus(1))),
+            Action::MoveLeft | Action::MoveRight => ui.menu.update(|menu| {
+                if let Some(menu) = menu {
+                    menu.step_group_offset(if action == Action::MoveLeft { -1 } else { 1 });
+                }
+            }),
             Action::Select => {
                 if let Some(item) = ui.menu.with(|m| m.as_ref().and_then(|m| m.focused())) {
                     crate::menu_view::perform(ui, item);

@@ -81,22 +81,50 @@ impl Runtime {
             lead_seconds: timing.map_or(0, |timing| timing.lead_seconds),
             trail_seconds: timing.map_or(0, |timing| timing.trail_seconds),
         };
+        let mut accepted_offset = None;
         let occurrence_start = if repeat == Repeat::Series {
-            let first_start = if let Some(timing) = timing {
-                timing.program_start
-            } else {
-                // Older API callers still get a stable identity for a currently
-                // airing episode whose record-now capture begins at `now`.
-                let query = rule.clone();
-                self.services()
-                    .read(move |store| store.recording_series_windows(&query, now()))
-                    .await?
-                    .into_iter()
-                    .filter(|(start, end)| *start < request.end && *end > request.start)
-                    .min_by_key(|(start, _)| start.abs_diff(request.start))
-                    .map_or(request.start, |(start, _)| start)
-            };
-            rule.local_start = local_timestamp(first_start)
+            let query = rule.clone();
+            let start = request.start;
+            let end = request.end;
+            let (first_start, offset) = self
+                .services()
+                .read(move |store| {
+                    store.read_snapshot(|store| {
+                        let shift = store.channel_guide_offset_seconds(
+                            iptv_library::SourceId(query.request.source),
+                            &query.request.channel,
+                        )?;
+                        if let Some(timing) = timing {
+                            if timing
+                                .guide_offset_seconds
+                                .is_some_and(|expected| expected != shift)
+                            {
+                                return Err(super::stale_guide_time());
+                            }
+                            let minute = timing.program_start.saturating_sub(shift);
+                            let raw = store
+                                .recording_series_windows(&query, minute)?
+                                .into_iter()
+                                .find(|(start, _)| start.div_euclid(60) == minute.div_euclid(60))
+                                .map_or(minute, |(start, _)| start);
+                            return Ok((raw, shift));
+                        }
+                        // Older callers supply capture times, including a record-now
+                        // request that starts partway through its first occurrence.
+                        let start = start.saturating_sub(shift);
+                        let end = end.saturating_sub(shift);
+                        let first = store
+                            .recording_series_windows(&query, now().saturating_sub(shift))?
+                            .into_iter()
+                            .filter(|(first, last)| *first < end && *last > start)
+                            .min_by_key(|(first, _)| first.abs_diff(start))
+                            .map_or(start, |(first, _)| first);
+                        Ok((first, shift))
+                    })
+                })
+                .await?;
+            accepted_offset = Some(offset);
+            rule.local_start = local_timestamp(first_start.saturating_add(offset))
                 .ok_or_else(|| Error::unavailable("Recording time unavailable"))?;
             first_start
         } else {
@@ -117,7 +145,19 @@ impl Runtime {
                     &request,
                     occurrence_start,
                     now(),
-                    |store| admission.authorize(store),
+                    |store| {
+                        admission.authorize(store)?;
+                        if let Some(offset) = accepted_offset
+                            && offset
+                                != store.channel_guide_offset_seconds(
+                                    iptv_library::SourceId(request.source),
+                                    &request.channel,
+                                )?
+                        {
+                            return Err(super::stale_guide_time());
+                        }
+                        Ok(())
+                    },
                 )
             })
             .await?;
@@ -217,10 +257,22 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
     let current = now();
     let rules = services.read(|store| store.recording_rules()).await?;
     for rule in rules.into_iter().filter(|rule| rule.enabled) {
-        let windows = if rule.repeat == Repeat::Series {
+        let (shift, windows) = if rule.repeat == Repeat::Series {
             let query = rule.clone();
             services
-                .read(move |store| store.recording_series_windows(&query, current))
+                .read(move |store| {
+                    store.read_snapshot(|store| {
+                        let shift = store.channel_guide_offset_seconds(
+                            iptv_library::SourceId(query.request.source),
+                            &query.request.channel,
+                        )?;
+                        Ok((
+                            shift,
+                            store
+                                .recording_series_windows(&query, current.saturating_sub(shift))?,
+                        ))
+                    })
+                })
                 .await?
         } else {
             let mut windows = Vec::new();
@@ -239,16 +291,18 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
                 }
                 cursor = end;
             }
-            windows
+            (0, windows)
         };
-        for (start, end) in windows {
+        for (occurrence, end) in windows {
             let id = rule.id;
             if services
-                .read(move |store| store.recording_rule_has_occurrence(id, start))
+                .read(move |store| store.recording_rule_has_occurrence(id, occurrence))
                 .await?
             {
                 continue;
             }
+            let start = occurrence.saturating_add(shift);
+            let end = end.saturating_add(shift);
             let mut request = rule.request.clone();
             request.start = if rule.repeat == Repeat::Series {
                 start.saturating_sub(i64::from(rule.lead_seconds))
@@ -267,7 +321,7 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
             services
                 .call(move |store| {
                     store
-                        .materialize_recording_rule_at(id, job, &request, start, current)
+                        .materialize_recording_rule_at(id, job, &request, occurrence, current)
                         .map(|_| ())
                 })
                 .await?;

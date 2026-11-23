@@ -220,6 +220,22 @@ visible entry point for touch and pointer users.
   group. Menu or M on the single-playlist All channels group adds a
   playlist. During fullscreen playback, Menu and long OK open the playback bar
   ([TV controls](tv-controls.md)).
+- Choose **Channel actions** from a program menu to use that program's
+  time block. The channel menu opens on Favorites, followed by the recording
+  action for the selected block. A live block can start or stop a recording.
+  An upcoming block can schedule or cancel one. The player list uses the
+  live block. On Linux and macOS, **Open in new window** plays the channel
+  live in a separate Patina window.
+- **Reorder channel** and **Reorder channels** open the guide with a draft
+  order. OK or Enter picks up or places a channel. Up and Down move it one
+  row, and Left and Right move it to either end. Touch and mouse users can
+  drag the handles and choose Save or Cancel. The playing channel keeps its
+  player surface throughout the edit.
+- **Show favorites only** filters that group. **Guide time offset** corrects
+  the times in a provider group in 15-minute steps. Existing recordings keep
+  their accepted capture windows. **Use external player** applies to explicit
+  channel choices on Android and Linux. Android offers installed video apps.
+  Linux tries VLC, then mpv.
 - **Now:** while touch or a pointer drives the app, a visible "More options"
   control (⋯) opens the program menu in the guide header after the selected
   program's title, and the channel menu at the end of each channel list row.

@@ -75,6 +75,10 @@ enum Account {
     // M3U cannot establish account equivalence. Conservatively share a budget.
     Unknown,
 }
+fn stale_guide_time() -> iptv_store_sqlite::StoreError {
+    iptv_store_sqlite::StoreError::Unavailable("Guide time changed. Choose the program again.")
+}
+
 fn account(config: &SourceConfig) -> Account {
     match config {
         SourceConfig::Xtream(c) => Account::Xtream(
@@ -122,6 +126,7 @@ struct Data {
     limits: HashMap<i64, u32>,
     provider_limits: HashMap<i64, u32>,
     viewers: HashMap<usize, Lease>,
+    external_viewer: Option<Lease>,
     inputs: HashMap<u64, shared::Registered>,
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
@@ -198,7 +203,11 @@ impl Data {
         // A replacement may retire its sole old viewer owner before opening.
         // Other admissions still count that registry entry until closure joins.
         let superseded = replacing
-            .and_then(|surface| self.viewers.get(&surface))
+            .and_then(|surface| {
+                self.viewers
+                    .get(&surface)
+                    .or_else(|| self.suspended_viewers.get(&surface))
+            })
             .and_then(Lease::connection)
             .filter(|id| {
                 !self.viewers.iter().any(|(surface, lease)| {
@@ -207,10 +216,9 @@ impl Data {
                     .active
                     .values()
                     .any(|(lease, _)| lease.connection() == Some(*id))
-                    && !self
-                        .suspended_viewers
-                        .values()
-                        .any(|lease| lease.connection() == Some(*id))
+                    && !self.suspended_viewers.iter().any(|(surface, lease)| {
+                        Some(*surface) != replacing && lease.connection() == Some(*id)
+                    })
             });
         // Existing leases retain their original account and limit when a playlist is edited.
         let leases = self
@@ -219,6 +227,7 @@ impl Data {
             .filter(|(surface, _)| Some(**surface) != replacing)
             .map(|(_, lease)| lease)
             .chain(self.active.values().map(|(lease, _)| lease))
+            .chain(self.external_viewer.iter())
             .chain(
                 self.inputs
                     .values()
@@ -227,8 +236,11 @@ impl Data {
             )
             .chain(
                 self.suspended_viewers
-                    .values()
-                    .filter(|lease| lease.input.is_some()),
+                    .iter()
+                    .filter(|(surface, lease)| {
+                        Some(**surface) != replacing && lease.input.is_some()
+                    })
+                    .map(|(_, lease)| lease),
             )
             .filter(|lease| same(lease));
         let mut inputs = vec![input];
@@ -523,6 +535,26 @@ impl Runtime {
             }
         }
     }
+    /// The external player replaces the primary viewer and keeps its own
+    /// account claim even when Android suspends its native surfaces.
+    pub fn reserve_external_viewing(&self, source: SourceId) -> Option<Box<dyn Send>> {
+        if self.recordings_detached.get() {
+            return None;
+        }
+        struct ExternalViewer(Arc<State>);
+        impl Drop for ExternalViewer {
+            fn drop(&mut self) {
+                self.0.lock().external_viewer.take();
+            }
+        }
+        let mut data = self.recordings.lock();
+        if data.external_viewer.is_some() || !data.capacity(source.0, Some(0)) {
+            return None;
+        }
+        data.external_viewer = Some(data.lease(source.0));
+        Some(Box::new(ExternalViewer(self.recordings.clone())))
+    }
+
     /// Called before changing a viewing surface, including multiview. A retry of
     /// an existing surface retains its reservation; PiP adds no reservation.
     pub fn reserve_viewing(&self, surface: usize, source: SourceId) -> bool {
@@ -530,7 +562,9 @@ impl Runtime {
             return false;
         }
         let mut data = self.recordings.lock();
-        if !data.active.is_empty() && !data.capacity(source.0, Some(surface)) {
+        if (!data.active.is_empty() || data.external_viewer.is_some())
+            && !data.capacity(source.0, Some(surface))
+        {
             return false;
         }
         self.recordings.cancel_preparation(surface);

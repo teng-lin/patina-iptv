@@ -225,6 +225,7 @@ struct PendingArchive {
     at: i64,
     offset: i32,
     authority: Option<iptv_guide::playback::ResolutionAuthority>,
+    guide_offset: i32,
 }
 impl PendingArchive {
     fn capture(schedule: &dyn Schedule, channel: usize, start: i32, offset: i32) -> Option<Self> {
@@ -233,10 +234,14 @@ impl PendingArchive {
             at: crate::guide::unix_of(schedule, start),
             offset,
             authority: resolution_authority(schedule, channel),
+            guide_offset: guide_offset(schedule, channel),
         })
     }
     fn remap(&self, schedule: &dyn Schedule) -> Option<(usize, Playback)> {
         let channel = schedule.find_channel(&self.key)?;
+        if guide_offset(schedule, channel) != self.guide_offset {
+            return None;
+        }
         let authority = resolution_authority(schedule, channel);
         match (&self.authority, &authority) {
             (Some(before), Some(after))
@@ -258,6 +263,27 @@ impl PendingArchive {
                 offset: self.offset,
             },
         ))
+    }
+}
+
+pub(crate) fn guide_offset(schedule: &dyn Schedule, channel: usize) -> i32 {
+    iptv_guide::combined::epg_channel(schedule, channel)
+        .map_or(0, |(epg, channel)| epg.epg_offset_minutes(channel))
+}
+
+/// Old archive start positions cannot address a different listing after a
+/// clock correction, including on seek and health retries.
+pub(crate) fn stop_archive_after_clock_edit(ui: Ui, before: &dyn Schedule, after: &dyn Schedule) {
+    if !matches!(ui.playback.get_untracked(), Playback::CatchUp { .. }) {
+        return;
+    }
+    let Some(key) = ui.player.main().key.get_untracked() else {
+        return;
+    };
+    if let (Some(old), Some(new)) = (before.find_channel(&key), after.find_channel(&key))
+        && guide_offset(before, old) != guide_offset(after, new)
+    {
+        crate::player_keys::stopped(ui);
     }
 }
 

@@ -379,3 +379,21 @@ pub(crate) fn language_changed(_tag: &str) {}
 /// A browser host registers no native components: the page implements
 /// `tv.player`.
 pub mod exports {}
+
+pub(crate) const EXTERNAL_PLAYER: bool = false;
+pub(crate) struct ExternalHandoff;
+impl ExternalHandoff {
+    pub(crate) async fn connected(&mut self) -> bool {
+        false
+    }
+    pub(crate) fn allow(self, _lease: Box<dyn Send>) {}
+}
+pub(crate) async fn prepare_external_player(
+    _source: iptv_core::playback::PlaySource,
+) -> Option<()> {
+    None
+}
+pub(crate) fn open_external_player(_playback: ()) -> Option<ExternalHandoff> {
+    None
+}
+pub(crate) fn external_player_returned() {}

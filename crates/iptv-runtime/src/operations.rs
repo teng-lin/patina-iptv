@@ -182,6 +182,54 @@ impl Runtime {
         crate::settings::set_in(self, key, &at, value)
     }
 
+    /// Revalidates the group choice and the exact authority used for a handoff.
+    pub async fn external_playback_allowed(
+        &self,
+        authority: iptv_guide::playback::ResolutionAuthority,
+        group: String,
+    ) -> Result<bool, crate::Error> {
+        let source = SourceId(authority.source());
+        let channel = authority.channel().id.clone();
+        if !matches!(
+            self.live_channel_allowed(source, channel.as_str().to_owned())
+                .await,
+            Ok(true)
+        ) {
+            return Ok(false);
+        }
+        Ok(self
+            .services()
+            .read(move |store| {
+                if !store.source_policy(source)?.enabled
+                    || !store
+                        .guide_group_preferences(source, &group)?
+                        .external_player
+                    || store.guide_channel_blocked(source, channel.as_str())?
+                {
+                    return Ok(false);
+                }
+                let Some(stored) = store.source(source)? else {
+                    return Ok(false);
+                };
+                let scope = iptv_library::OrganizationScope::group_channels(&group);
+                if !store
+                    .ordered_guide_channels(source, &scope)?
+                    .iter()
+                    .any(|row| row.channel.id == channel)
+                {
+                    return Ok(false);
+                }
+                let Some(row) = store.channel(source, &channel)? else {
+                    return Ok(false);
+                };
+                Ok(!row.blocked
+                    && stored.incarnation == authority.incarnation()
+                    && &stored.source.config == authority.config()
+                    && &row.channel == authority.channel())
+            })
+            .await?)
+    }
+
     /// Remembers `key` as the last channel of `source` (a zap never waits
     /// for the disk).
     pub fn save_last_channel(&self, source: Option<SourceId>, key: &str) {

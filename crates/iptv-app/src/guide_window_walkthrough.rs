@@ -19,7 +19,7 @@ pub fn bind(ui: Ui) {
         {
             crate::menu_view::open_at(ui, channel);
         }
-        println!("DEMO: channel context menu offers Watch in new window");
+        println!("DEMO: channel context menu offers Open in new window");
     });
     let _open = set_timeout(Duration::from_secs(9), move || {
         crate::menu_view::perform(ui, iptv_presentation::menu::MenuItem::WatchInNewWindow);

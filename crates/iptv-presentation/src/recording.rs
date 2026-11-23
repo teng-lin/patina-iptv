@@ -56,6 +56,7 @@ pub struct Draft {
     pub repeat: Repeat,
     pub program_start: Option<i64>,
     pub program_end: Option<i64>,
+    pub guide_offset_seconds: Option<i64>,
     /// A player action starts immediately without opening the scheduling form.
     pub immediate: bool,
     pub entry: Option<Entry>,
@@ -92,6 +93,7 @@ impl Draft {
             repeat: Repeat::Once,
             program_start: None,
             program_end: None,
+            guide_offset_seconds: None,
             immediate: false,
             entry: None,
             options_open: false,
@@ -316,6 +318,7 @@ mod tests {
         Job {
             id: JobId(id),
             source_current: true,
+            series_start: None,
             request: Request {
                 source: 1,
                 channel: "synthetic".into(),

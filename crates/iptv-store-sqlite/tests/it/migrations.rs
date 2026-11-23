@@ -198,6 +198,44 @@ fn a_v24_store_keeps_its_data_under_us_spelling() {
     );
 }
 
+#[test]
+fn group_preferences_default_cleanly_and_keep_existing_overlays() {
+    use iptv_core::organization::{GroupPreference, Sort};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("generated-v25.db");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 25).unwrap());
+    let mut store = Store::open(&path).unwrap();
+    let group = "xt:live-group:1";
+    let before = store.guide_group_preferences(SRC, group).unwrap();
+    assert_eq!(before.sort, Sort::Name);
+    assert!(!before.favorites_only);
+    assert_eq!(before.epg_offset_minutes, 0);
+
+    store
+        .set_guide_group_preference(SRC, group, GroupPreference::FavoritesOnly(true))
+        .unwrap();
+    store
+        .set_guide_group_preference(SRC, group, GroupPreference::ExternalPlayer(true))
+        .unwrap();
+    store
+        .set_guide_group_preference(SRC, group, GroupPreference::EpgOffsetMinutes(-45))
+        .unwrap();
+    drop(store);
+
+    let store = Store::open(&path).unwrap();
+    let saved = store.guide_group_preferences(SRC, group).unwrap();
+    assert_eq!(saved.sort, before.sort);
+    assert!(saved.favorites_only && saved.external_player);
+    assert_eq!(saved.epg_offset_minutes, -45);
+    assert_eq!(
+        store
+            .channel_guide_offset_seconds(SRC, "xt:live:101")
+            .unwrap(),
+        -2700
+    );
+}
+
 /// A historical version: its schema snapshot and the data files to load
 /// into it, in order.
 struct Version {
@@ -612,7 +650,49 @@ const HISTORY: &[Version] = &[
             "data_v24.sql",
         ],
     },
+    Version {
+        version: 25,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
+            "data_v19.sql",
+            "data_v20.sql",
+            "data_v21.sql",
+            "data_v22.sql",
+            "data_v23.sql",
+            "data_v24.sql",
+            "data_v25.sql",
+        ],
+    },
 ];
+
+fn seed_sql(version: u32, name: &str) -> String {
+    let sql = fixture(name);
+    if version >= 25 {
+        sql.replace("favourites", "favorites")
+            .replace("epg_programmes", "epg_programs")
+            .replace("programme_count", "program_count")
+            .replace("cancelled", "canceled")
+    } else {
+        sql
+    }
+}
 
 fn fixture(name: &str) -> String {
     let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
@@ -648,7 +728,7 @@ fn build_old_file(path: &Path, v: &Version) {
     }
     conn.pragma_update(None, "user_version", v.version).unwrap();
     for data in v.data {
-        conn.execute_batch(&fixture(data)).unwrap();
+        conn.execute_batch(&seed_sql(v.version, data)).unwrap();
     }
 }
 

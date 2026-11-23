@@ -78,6 +78,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 .is_some_and(|(before, now)| before.same_catalog(now));
             if same_catalog && crate::runtime().organization_edit_current(source, ticket) {
                 let kept = crate::lists::keep(ui);
+                crate::player::stop_archive_after_clock_edit(ui, &*current, &*replacement);
                 crate::data::combined::remember_single(
                     &crate::runtime(),
                     source,

@@ -78,6 +78,7 @@ pub fn start(ui: Ui) {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
         crate::runtime().set_foreground(!background);
         if was_background.replace(background) && !background {
+            crate::host::external_player_returned();
             // Returning from host permission settings needs a fresh OS acknowledgement.
             let owner = crate::runtime();
             spawn_in_app(async move {

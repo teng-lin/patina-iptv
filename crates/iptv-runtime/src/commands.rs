@@ -217,15 +217,27 @@ pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organiz
         .into_iter()
         .map(|r| (r.channel.id.as_str().to_owned(), r.name, r.hidden))
         .collect();
-    let groups = store
-        .guide_groups(source)?
-        .into_iter()
-        .map(|item| (item.id, item.name, item.hidden))
-        .collect();
+    let mut group_preferences = std::collections::HashMap::new();
+    let mut groups = Vec::new();
+    for item in store.guide_groups(source)? {
+        group_preferences.insert(
+            item.id.clone(),
+            store.guide_group_preferences(source, &item.id)?,
+        );
+        groups.push((item.id, item.name, item.hidden));
+    }
+    if !group_preferences.contains_key("__other__") {
+        group_preferences.insert(
+            "__other__".into(),
+            store.guide_group_preferences(source, "__other__")?,
+        );
+    }
     Ok(Organization {
         channels,
         groups,
         blocks: store.guide_blocks(source)?,
+        group_preferences,
+        channel_sort: store.guide_sort(source, &Kind::Channels)?,
     })
 }
 fn edit_organization_native(
@@ -860,6 +872,18 @@ pub async fn organization_editor(
             })
         })
         .await?)
+}
+
+pub fn set_group_preference(
+    owner: &crate::Runtime,
+    source: SourceId,
+    group: String,
+    preference: iptv_core::organization::GroupPreference,
+) -> impl Future<Output = Result<(), crate::Error>> + use<> {
+    let saved = owner
+        .services()
+        .call(move |store| store.set_guide_group_preference(source, &group, preference));
+    async move { Ok(saved.await?) }
 }
 
 /// Publishes a sort preference on the native writer.

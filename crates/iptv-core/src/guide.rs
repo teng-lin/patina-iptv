@@ -125,6 +125,12 @@ pub trait Schedule {
         };
         (start..end).collect()
     }
+    fn group_preferences(&self, _group: usize) -> crate::organization::GroupPreferences {
+        crate::organization::GroupPreferences::default()
+    }
+    fn channel_sort(&self) -> crate::organization::Sort {
+        crate::organization::Sort::default()
+    }
     /// The owning category's channels in display order, independent of which
     /// category rows the browser currently shows. Channels without a category
     /// use the playlist's order.

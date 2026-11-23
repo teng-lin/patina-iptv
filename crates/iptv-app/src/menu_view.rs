@@ -5,13 +5,14 @@
 use crate::i18n::tr;
 use crate::organization_view::{self, Kind};
 use crate::runtime::model::SourceId;
-use iptv_core::organization::{Block, BlockKind};
+use iptv_core::organization::{Block, BlockKind, GroupPreference, GroupPreferences};
 use iptv_library::ChannelScope;
 use iptv_presentation::lists::{Entry, ListId};
 use iptv_presentation::organization::Mode;
 
 use iptv_presentation::menu::{
-    Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_options, program_menu,
+    Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_offset_menu, group_options,
+    program_menu,
 };
 use nsh_core::prelude::*;
 
@@ -52,6 +53,7 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
             | MenuItem::ManageHidden
             | MenuItem::ReorderChannels
             | MenuItem::SortChannels
+            | MenuItem::ChannelActions
             | MenuItem::ChannelOptions
             | MenuItem::GroupOptions
             | MenuItem::CopyChannels
@@ -69,6 +71,9 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         WatchInNewWindow => tr("Watch in new window"),
         Reminder => tr("Remind me"),
         Record => tr("Record"),
+        RecordNow => tr("Record now"),
+        CancelRecording => tr("Cancel recording"),
+        StopRecording => tr("Stop recording"),
         ScheduleRecording => tr("Schedule recording"),
         CustomRecording => tr("Schedule a recording…"),
         SaveToList => tr("Save to my list"),
@@ -85,6 +90,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         HideChannel => tr("Hide channel"),
         AssignEpg => tr("Choose guide data…"),
         ChannelOptions => tr("Channel options…"),
+        ChannelActions => tr("Channel actions…"),
         ManageFavorites => tr("Manage favorites…"),
         ManageBlocked => tr("Manage blocked channels…"),
         ManageHidden => tr("Manage hidden channels…"),
@@ -97,7 +103,14 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         ReorderGroups => tr("Reorder groups"),
         ManageGroups => tr("Manage groups"),
         RenameGroup => tr("Rename group"),
-        ResetGroupName => tr("Use provider name"),
+        ResetGroupName => tr("Restore group name"),
+        ShowFavoritesOnly => tr("Show favorites only"),
+        GroupExternalPlayer => tr("Use external player"),
+        GroupEpgOffset => tr("Guide time offset"),
+        DecreaseEpgOffset => tr("15 minutes earlier"),
+        IncreaseEpgOffset => tr("15 minutes later"),
+        ResetEpgOffset => tr("Reset to zero"),
+        SaveEpgOffset => tr("Save"),
         HideGroup => tr("Hide group"),
     }
 }
@@ -142,7 +155,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             MenuItem::ManageHidden | MenuItem::ManageBlocked | MenuItem::ReorderChannels => {
                 scope.is_some()
             }
-            MenuItem::GroupOptions => scope.is_some() || aggregate_options(&list),
+            MenuItem::GroupOptions => scope.is_some(),
             MenuItem::SortChannels => scope
                 .as_ref()
                 .is_some_and(|(_, kind)| *kind != Kind::Favorites),
@@ -185,22 +198,38 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
     ui.menu.set(Some(Menu::new(rows, target, list)));
 }
 
-/// Opens the actions for a channel row in the guide or player list.
+/// The player list has no timeline cursor. Its channel actions use the live block.
 pub fn open_channel(ui: Ui, channel: usize) {
-    let Some(key) = crate::schedule().channel_key(channel) else {
+    open_channel_at(ui, channel, crate::time::now_minute(), current_list(ui));
+}
+
+fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
+    let schedule = crate::schedule();
+    let Some(key) = schedule.channel_key(channel) else {
         return;
     };
-    let rows = channel_menu(|item| match item {
-        MenuItem::WatchInNewWindow => {
-            (crate::host::LINUX || crate::host::MACOS)
-                && crate::desktop::player_windows::can_open(ui, channel)
-        }
-        _ => implemented(item, ui.player_surface),
-    });
+    let program = schedule.program_at(channel, minute);
+    let origin = Origin {
+        channel,
+        program_start: program.start,
+    };
+    let scope = channel_scope(ui, &list);
+    let offset = crate::player::guide_offset(&*schedule, channel);
+    let new_window = (crate::host::LINUX || crate::host::MACOS)
+        .then(|| crate::desktop::player_windows::can_open(ui, channel));
+    let rows = channel_menu(
+        crate::recordings_view::channel_menu_action(ui, origin),
+        new_window,
+        scope.is_some(),
+    );
     ui.menu.set(Some(Menu::new(
         rows,
-        Target::Channel(key),
-        current_list(ui),
+        Target::Channel {
+            channel: key,
+            program,
+            offset,
+        },
+        list,
     )));
 }
 
@@ -209,22 +238,53 @@ fn menu_channel(target: &Target) -> Option<usize> {
 }
 
 fn program_origin(target: &Target) -> Option<Origin> {
-    let Target::Program { start, .. } = target else {
-        return None;
+    let start = match target {
+        Target::Program { start, .. } => *start,
+        Target::Channel { program, .. } => program.start,
+        Target::Group => return None,
     };
     Some(Origin {
         channel: menu_channel(target)?,
-        program_start: *start,
+        program_start: start,
     })
 }
 
 /// Closes the menu or popover, keeping focus on its guide selection.
 pub fn close(ui: Ui) {
+    if let Some(list) = ui.menu.with(|menu| {
+        let menu = menu.as_ref()?;
+        menu.group_offset.map(|_| menu.list.clone())
+    }) {
+        if show_group_options(ui, list) {
+            ui.menu.update(|menu| {
+                if let Some(menu) = menu {
+                    menu.focus = menu
+                        .rows
+                        .iter()
+                        .position(|row| {
+                            matches!(
+                                row,
+                                Row::Action {
+                                    item: MenuItem::GroupEpgOffset,
+                                    ..
+                                }
+                            )
+                        })
+                        .unwrap_or(menu.focus);
+                }
+            });
+        } else {
+            ui.menu.set(None);
+        }
+        return;
+    }
     let origin = ui
         .menu
         .with(|m| {
             let menu = m.as_ref().filter(|menu| menu.list == current_list(ui))?;
-            program_origin(&menu.target)
+            matches!(menu.target, Target::Program { .. })
+                .then(|| program_origin(&menu.target))
+                .flatten()
         })
         .or_else(|| ui.description.get());
     ui.menu.set(None);
@@ -238,29 +298,71 @@ pub fn close(ui: Ui) {
 }
 
 pub fn perform(ui: Ui, item: MenuItem) {
-    let Some((target, list)) = ui.menu.with(|menu| {
+    let Some((target, list, offset)) = ui.menu.with(|menu| {
         let menu = menu.as_ref()?;
         menu.rows
             .contains(&Row::Action {
                 item,
                 enabled: true,
             })
-            .then(|| (menu.target.clone(), menu.list.clone()))
+            .then(|| (menu.target.clone(), menu.list.clone(), menu.group_offset))
     }) else {
         return;
     };
+    if offset.is_some() && item != MenuItem::SaveEpgOffset {
+        ui.menu.update(|menu| {
+            if let Some(menu) = menu {
+                match item {
+                    MenuItem::DecreaseEpgOffset => menu.step_group_offset(-1),
+                    MenuItem::IncreaseEpgOffset => menu.step_group_offset(1),
+                    MenuItem::ResetEpgOffset => menu.group_offset = Some(0),
+                    _ => {}
+                }
+            }
+        });
+        return;
+    }
     ui.menu.set(None);
+    let standalone = !matches!(target, Target::Program { .. });
     let scope = list
         .resolve(&*crate::schedule())
         .and_then(|_| channel_scope(ui, &list));
-    if target == Target::Group && scope.is_none() && !aggregate_options(&list) {
+    if target == Target::Group && scope.is_none() {
         return;
     }
     let channel = menu_channel(&target);
     if channel.is_none() && target != Target::Group {
         return;
     }
+    if let Target::Channel {
+        program, offset, ..
+    } = target
+        && matches!(
+            item,
+            MenuItem::RecordNow
+                | MenuItem::ScheduleRecording
+                | MenuItem::CancelRecording
+                | MenuItem::StopRecording
+        )
+    {
+        let Some(origin) = program_origin(&target) else {
+            return;
+        };
+        let schedule = crate::schedule();
+        if crate::player::guide_offset(&*schedule, origin.channel) != offset
+            || origin_program(&*schedule, origin) != program
+            || !crate::recordings_view::perform_channel_action(ui, origin, item)
+        {
+            open_channel_at(ui, origin.channel, program.start, list);
+        }
+        return;
+    }
     match item {
+        MenuItem::ChannelActions => {
+            if let Some(origin) = program_origin(&target) {
+                open_channel_at(ui, origin.channel, origin.program_start, list);
+            }
+        }
         MenuItem::BlockChannel | MenuItem::BlockGroup => {
             if item == MenuItem::BlockChannel
                 && channel.is_some_and(|ch| crate::schedule().channel_block(ch) == Block::Group)
@@ -290,7 +392,15 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 MenuItem::ManageHidden => Mode::Visibility,
                 _ => Mode::Reorder,
             };
-            if let Some(channel) = channel {
+            if mode == Mode::Reorder && standalone {
+                if let Some((source, kind)) = scope {
+                    let focus = channel
+                        .and_then(|ch| crate::parental_view::live_target(ui, ch))
+                        .filter(|target| target.source == source.0)
+                        .map(|target| target.id);
+                    organization_view::open_context_reorder(ui, source, kind, focus, list);
+                }
+            } else if let Some(channel) = channel {
                 open_channel_editor(ui, channel, mode, scope, list);
             } else if let Some((source, kind)) = scope {
                 organization_view::open_guide_mode(ui, source, kind, None, mode, list);
@@ -355,6 +465,28 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::GroupOptions => {
             show_group_options(ui, list);
+        }
+        MenuItem::ShowFavoritesOnly | MenuItem::GroupExternalPlayer | MenuItem::SaveEpgOffset => {
+            if let Some(target) = group_target(scope.as_ref()) {
+                let current = list_preferences(&list);
+                let preference = match (item, offset) {
+                    (MenuItem::ShowFavoritesOnly, _) => {
+                        GroupPreference::FavoritesOnly(!current.favorites_only)
+                    }
+                    (MenuItem::GroupExternalPlayer, _) => {
+                        GroupPreference::ExternalPlayer(!current.external_player)
+                    }
+                    (MenuItem::SaveEpgOffset, Some(offset)) => {
+                        GroupPreference::EpgOffsetMinutes(offset)
+                    }
+                    _ => return,
+                };
+                set_group_preference(target, preference);
+            }
+        }
+        MenuItem::GroupEpgOffset => {
+            let minutes = list_preferences(&list).epg_offset_minutes;
+            ui.menu.set(Some(group_offset_menu(list, minutes)));
         }
         MenuItem::RenameGroup => {
             if let Some(target) = group_target(scope.as_ref()) {
@@ -579,7 +711,7 @@ pub fn has_group_options(ui: Ui, entry: usize) -> bool {
         return false;
     }
     let list = ListId::of(entry, &*schedule);
-    channel_scope(ui, &list).is_some() || aggregate_options(&list)
+    channel_scope(ui, &list).is_some()
 }
 
 /// A focused group is actionable even when none of its channels are visible.
@@ -594,29 +726,57 @@ pub fn open_group_options(ui: Ui, entry: usize) -> bool {
 
 fn show_group_options(ui: Ui, list: ListId) -> bool {
     use MenuItem::*;
-
     let scope = channel_scope(ui, &list);
-    let rows = if let Some((_, kind)) = scope.as_ref() {
-        let named = group_target(scope.as_ref()).is_some();
-        group_options(|item| match item {
-            RenameGroup | BlockGroup | HideGroup => named,
-            ResetGroupName => matches!(kind, Kind::GroupChannels(_)),
-            ManageGroups | SortGroups | ReorderGroups | SortChannels => *kind != Kind::Favorites,
-            ManageFavorites => false,
-            _ => true,
-        })
-    } else if aggregate_options(&list) {
-        group_options(|item| item == ManageFavorites)
-    } else {
+    let Some((_, kind)) = scope.as_ref() else {
         return false;
     };
+    let named = group_target(scope.as_ref()).is_some();
+    let rows = group_options(|item| match item {
+        RenameGroup | BlockGroup | HideGroup | ShowFavoritesOnly => named,
+        ResetGroupName | GroupEpgOffset => matches!(kind, Kind::GroupChannels(_)),
+        GroupExternalPlayer => named && crate::host::EXTERNAL_PLAYER,
+        ManageGroups | SortChannels => *kind != Kind::Favorites,
+        _ => true,
+    });
     ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
     true
 }
 
-fn aggregate_options(list: &ListId) -> bool {
-    matches!(list, ListId::All | ListId::Favorites)
-        && crate::data::combined::active(&crate::runtime())
+fn list_preferences(list: &ListId) -> GroupPreferences {
+    let schedule = crate::schedule();
+    match list.resolve(&*schedule).map(Entry::at) {
+        Some(Entry::Group(group)) => schedule.group_preferences(group),
+        Some(Entry::All) => GroupPreferences {
+            sort: schedule.channel_sort(),
+            ..GroupPreferences::default()
+        },
+        _ => GroupPreferences::default(),
+    }
+}
+
+fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPreference) {
+    let source = SourceId(target.source);
+    let owner = crate::runtime();
+    let save =
+        crate::runtime::commands::set_group_preference(&owner, source, target.id, preference);
+    crate::data::spawn_in_app(async move {
+        match save.await {
+            Ok(()) => crate::data::organization::changed(&owner, source),
+            Err(_) => crate::settings_view::notify(tr(
+                "The change could not be saved. Reopen the list and try again.",
+            )),
+        }
+    });
+}
+
+fn offset_label(minutes: i32) -> String {
+    let sign = match minutes.signum() {
+        -1 => "−",
+        1 => "+",
+        _ => "",
+    };
+    let minutes = minutes.abs();
+    format!("{sign}{}:{:02}", minutes / 60, minutes % 60)
 }
 
 fn heading_text(ui: Ui, heading: Heading) -> String {
@@ -625,6 +785,9 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
         let Some(menu) = menu.as_ref() else {
             return String::new();
         };
+        if let Some(offset) = menu.group_offset {
+            return format!("{} · {}", tr("Guide time offset"), offset_label(offset));
+        }
         match heading {
             Heading::Program => program_origin(&menu.target).map_or_else(String::new, |origin| {
                 let p = origin_program(&*crate::schedule(), origin);
@@ -648,8 +811,60 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
     })
 }
 
+fn action_detail(ui: Ui, item: MenuItem) -> String {
+    ui.guide_data();
+    ui.menu.with(|menu| {
+        let Some(menu) = menu.as_ref() else {
+            return String::new();
+        };
+        if let Target::Channel { program, .. } = menu.target
+            && matches!(
+                item,
+                MenuItem::RecordNow
+                    | MenuItem::ScheduleRecording
+                    | MenuItem::CancelRecording
+                    | MenuItem::StopRecording
+            )
+            && let Some(channel) = menu_channel(&menu.target)
+        {
+            return format!(
+                "{} · {}–{}",
+                title(channel, program),
+                clock(program.start),
+                clock(program.end),
+            );
+        }
+        if menu.target == Target::Group {
+            let preferences = list_preferences(&menu.list);
+            match item {
+                MenuItem::SortChannels => {
+                    return organization_view::sort_label(preferences.sort).to_owned();
+                }
+                MenuItem::ShowFavoritesOnly | MenuItem::GroupExternalPlayer => {
+                    let enabled = if item == MenuItem::ShowFavoritesOnly {
+                        preferences.favorites_only
+                    } else {
+                        preferences.external_player
+                    };
+                    return if enabled { tr("On") } else { tr("Off") }.to_owned();
+                }
+                MenuItem::GroupEpgOffset => return offset_label(preferences.epg_offset_minutes),
+                _ => {}
+            }
+        }
+        String::new()
+    })
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     let open = move || ui.menu.with(Option::is_some);
+    let fixed_heading = move || {
+        ui.menu.with(|menu| match menu.as_ref()?.target {
+            Target::Channel { .. } => Some(Heading::Channel),
+            Target::Group => Some(Heading::Group),
+            Target::Program { .. } => None,
+        })
+    };
     let count = move || ui.menu.with(|m| m.as_ref().map_or(0, |m| m.rows.len()));
     let list = element_ref();
     let size = Scale::new();
@@ -679,10 +894,33 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     let favorite = item == MenuItem::ToggleFavorite
                         && channel.is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)));
                     let blocked = directly_blocked(&menu.list, item, channel);
-                    label(item, favorite, blocked).to_owned()
+                    match (item, &menu.target) {
+                        (MenuItem::ReorderChannels, Target::Channel { .. }) => {
+                            tr("Reorder channel")
+                        }
+                        (MenuItem::WatchInNewWindow, Target::Channel { .. }) => {
+                            tr("Open in new window")
+                        }
+                        _ => label(item, favorite, blocked),
+                    }
+                    .to_owned()
                 })
             }
             None => String::new(),
+        };
+        let subtitle = move || {
+            let Some(Row::Action { item, .. }) = row() else {
+                return String::new();
+            };
+            action_detail(ui, item)
+        };
+        let accessible_label = move || {
+            let subtitle = subtitle();
+            if subtitle.is_empty() {
+                title()
+            } else {
+                format!("{} · {}", title(), subtitle)
+            }
         };
         let name = list_rows::name(size, title)
             // Headings in the lists' heading size.
@@ -692,28 +930,43 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 Some(Row::Heading(_)) => mark().secondary(),
                 _ => mark().disabled(),
             });
-        list_rows::row(size, ROW, mark)
-            .role(move || {
-                if heading() {
-                    AccessibilityRole::Header
+        list_rows::row_with(
+            size,
+            move || {
+                if subtitle().is_empty() {
+                    ROW
                 } else {
-                    AccessibilityRole::Menuitem
+                    list_rows::ROW_TWO
                 }
-            })
-            .label(title)
-            .accessibility_state(move || AccessibilityState {
-                selected: focused(),
-                disabled: matches!(row(), Some(Row::Action { enabled: false, .. })),
-                ..Default::default()
-            })
-            .child(name)
-            .on_press(move || {
-                ui.touched();
-                let picked = ui.menu.with(|m| m.as_ref()?.action_at(at.index()));
-                if let Some(item) = picked {
-                    perform(ui, item);
-                }
-            })
+            },
+            mark,
+        )
+        .justify_center()
+        .role(move || {
+            if heading() {
+                AccessibilityRole::Header
+            } else {
+                AccessibilityRole::Menuitem
+            }
+        })
+        .label(accessible_label)
+        .accessibility_state(move || AccessibilityState {
+            selected: focused(),
+            disabled: matches!(row(), Some(Row::Action { enabled: false, .. })),
+            ..Default::default()
+        })
+        .child(name)
+        .child(when(
+            move || !subtitle().is_empty(),
+            move || crate::ui_kit::caption(size, subtitle).text_color(move || mark().secondary()),
+        ))
+        .on_press(move || {
+            ui.touched();
+            let picked = ui.menu.with(|m| m.as_ref()?.action_at(at.index()));
+            if let Some(item) = picked {
+                perform(ui, item);
+            }
+        })
     };
     let menu_opacity = move || if open() { 1.0_f32 } else { 0.0 };
     view()
@@ -756,7 +1009,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(
             view()
                 .test_id("menu-panel")
-                .w(move || px(size.whole(PANEL_W)))
+                .w(move || px(size.whole(PANEL_W).min(window().width.0)))
                 .accessibility_elements_hidden(move || {
                     crate::overlays::Overlay::Menu.accessibility_hidden(ui)
                 })
@@ -765,6 +1018,24 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .px(px(12.0))
                 .py(px(16.0))
                 .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
+                .child(when(
+                    move || fixed_heading().is_some(),
+                    move || {
+                        view()
+                            .flex_shrink(0.0)
+                            .px(move || size.px(list_rows::INSET))
+                            .py(move || size.px(12.0))
+                            .bg(move || rgb(ui.app.theme.with(|theme| theme.background.alt)))
+                            .child(
+                                crate::ui_kit::title(size, move || {
+                                    fixed_heading()
+                                        .map_or_else(String::new, |h| heading_text(ui, h))
+                                })
+                                .role(AccessibilityRole::Header)
+                                .number_of_lines(1),
+                            )
+                    },
+                ))
                 .child(
                     virtual_list(count, row)
                         .estimated_item_size(list_rows::pitch(size, ROW))
@@ -892,7 +1163,8 @@ pub fn open_at(ui: Ui, channel: usize) {
         let minute = ui.focus.with_untracked(|focus| focus.cursor);
         crate::lists::tap(ui, channel, minute);
         crate::browse_playback::hold(ui);
-        open_channel(ui, channel);
+        let minute = ui.focus.with_untracked(|focus| focus.cursor);
+        open_channel_at(ui, channel, minute, current_list(ui));
     });
 }
 

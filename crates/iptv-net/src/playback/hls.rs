@@ -23,6 +23,20 @@ use super::{MAX_MANIFEST, invalid, resolve};
 use crate::FetchError;
 
 pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u8>, FetchError> {
+    rewrite_with(body, false, |value, key| {
+        if key {
+            resolve(&format!("{prefix}key/"), base, value)
+        } else {
+            resolve(prefix, base, value)
+        }
+    })
+}
+
+pub(super) fn rewrite_with(
+    body: &[u8],
+    external: bool,
+    mut map: impl FnMut(&str, bool) -> Result<String, FetchError>,
+) -> Result<Vec<u8>, FetchError> {
     let text = std::str::from_utf8(body).map_err(|_| invalid("Invalid manifest text"))?;
     // FFmpeg ends a line at a NUL byte: what follows one in a tag line
     // would be a URI line to it, and part of the tag here.
@@ -37,11 +51,23 @@ pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u
     // its checks.
     for line in text.lines().flat_map(|line| line.split('\r')) {
         let line = line.trim();
-        if line.is_empty() {
+        if external
+            && line.starts_with('#')
+            && (!line.starts_with("#EXT")
+                || line.starts_with("#EXT-X-SESSION-DATA:")
+                || line.starts_with("#EXT-X-DATERANGE:")
+                || line.starts_with("#EXT-X-DEFINE:"))
+        {
+            continue;
+        }
+        if external && line.starts_with("#EXTINF:") {
+            out.push_str(line.split_once(',').map_or(line, |(duration, _)| duration));
+            out.push(',');
+        } else if line.is_empty() {
         } else if !line.starts_with('#') {
-            out.push_str(&resolve(prefix, base, line)?);
+            out.push_str(&map(line, false)?);
         } else if names_a_uri(line) {
-            rewrite_tag(line, base, prefix, &mut out)?;
+            rewrite_tag(line, &mut map, &mut out)?;
         } else {
             out.push_str(line);
         }
@@ -160,7 +186,11 @@ fn swallows_its_quote(value: &str) -> bool {
 /// Writes the tag `line` with every URI attribute on the relay: quoted,
 /// whether it came quoted or not, and all of them when one is repeated
 /// (players differ in which they take).
-fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result<(), FetchError> {
+fn rewrite_tag(
+    line: &str,
+    map: &mut impl FnMut(&str, bool) -> Result<String, FetchError>,
+    out: &mut String,
+) -> Result<(), FetchError> {
     let (tag, list) = line.split_once(':').ok_or_else(malformed)?;
     let name = &tag[1..];
     if name.is_empty()
@@ -171,13 +201,7 @@ fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result
         return Err(malformed());
     }
     // HLS key URIs are opaque bytes: the relay serves them as they come.
-    let key_prefix;
-    let resource_prefix = if matches!(name, "EXT-X-KEY" | "EXT-X-SESSION-KEY") {
-        key_prefix = format!("{prefix}key/");
-        key_prefix.as_str()
-    } else {
-        prefix
-    };
+    let key = matches!(name, "EXT-X-KEY" | "EXT-X-SESSION-KEY");
     out.push_str(tag);
     out.push(':');
     for (index, attribute) in attributes(list)?.iter().enumerate() {
@@ -189,7 +213,7 @@ fn rewrite_tag(line: &str, base: &Url, prefix: &str, out: &mut String) -> Result
         if attribute.is_uri() {
             // A URL holds a backslash only in its query, where `%5C` means
             // the same; in the quotes it would be FFmpeg's escape.
-            let target = resolve(resource_prefix, base, attribute.value)?.replace('\\', "%5C");
+            let target = map(attribute.value, key)?.replace('\\', "%5C");
             // Media3 searches for uppercase `URI="` even inside values.
             // If it ignores this mixed-case name, a trailing `URI=` plus
             // our closing quote must not become its first URI match.

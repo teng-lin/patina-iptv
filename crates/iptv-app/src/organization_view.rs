@@ -117,6 +117,25 @@ pub fn open_guide_mode(
     open_with(ui, source, kind, focus, mode, None, placement);
 }
 
+pub fn open_context_reorder(
+    ui: Ui,
+    source: SourceId,
+    kind: Kind,
+    focus: Option<String>,
+    list: ListId,
+) {
+    batch(|| {
+        if ui.mode.get_untracked() == crate::ViewMode::Fullscreen {
+            crate::channels_view::close(ui);
+            ui.panels.update(|panels| panels.hide());
+            ui.mode.set(crate::ViewMode::Guide);
+        }
+        crate::browse_playback::hold(ui);
+        let placement = guide_reorder_placement(ui, list);
+        open_with(ui, source, kind, focus, Mode::Reorder, None, placement);
+    });
+}
+
 fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
     if idiom() != nsh_core::platform::Idiom::Tv
         || ui.mode.get_untracked() == crate::ViewMode::Fullscreen
@@ -126,17 +145,21 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
         crate::lists::open_groups(ui);
         Placement::Groups
     } else {
-        let return_to_groups = ui.focus.with_untracked(|f| f.pane == Pane::Groups);
-        let entry = list.find(&*crate::schedule());
-        crate::lists::preview(ui, entry);
-        ui.focus.update(|f| {
-            f.close_columns();
-            f.hint = false;
-        });
-        Placement::Guide {
-            list,
-            return_to_groups,
-        }
+        guide_reorder_placement(ui, list)
+    }
+}
+
+fn guide_reorder_placement(ui: Ui, list: ListId) -> Placement {
+    let return_to_groups = ui.focus.with_untracked(|f| f.pane == Pane::Groups);
+    let entry = list.find(&*crate::schedule());
+    crate::lists::preview(ui, entry);
+    ui.focus.update(|f| {
+        f.close_columns();
+        f.hint = false;
+    });
+    Placement::Guide {
+        list,
+        return_to_groups,
     }
 }
 
@@ -509,7 +532,7 @@ fn save_order(ui: Ui) {
     let mut draft = None;
     let mut unchanged = false;
     update(ui, |s| {
-        if s.saving {
+        if s.saving || s.dragging {
             return;
         }
         if let Some((original, order)) = s.editor.order_ids() {
@@ -885,7 +908,7 @@ fn label(edit: Edit, hidden: bool, blocked: bool, groups: bool) -> &'static str 
     }
 }
 
-fn sort_label(sort: Sort) -> &'static str {
+pub(crate) fn sort_label(sort: Sort) -> &'static str {
     match sort {
         Sort::Provider => tr("Playlist order"),
         Sort::Name => tr("Name (A–Z)"),
@@ -1305,6 +1328,14 @@ fn confirm_order_sheet(ui: Ui, size: Scale) -> impl IntoElement {
 fn reorder_hint(ui: Ui) -> &'static str {
     if !reordering(ui) {
         ""
+    } else if guide_order_open(ui) {
+        if ui.drag_editing() && !ui.keys_shown() {
+            tr("Drag a handle to move a channel.")
+        } else if idiom() == nsh_core::platform::Idiom::Desktop {
+            tr("Enter picks up or places · ↑/↓ move · ←/→ jump to either end")
+        } else {
+            tr("OK picks up or places · ↑/↓ move · ←/→ jump to either end")
+        }
     } else if ui.drag_editing() && !ui.keys_shown() {
         tr("Drag the handles to reorder.")
     } else {
@@ -1529,6 +1560,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         .test_id("organization-screen")
         .absolute()
         .inset_0()
+        .pointer_events(PointerEvents::BoxNone)
         .accessibility_elements_hidden(move || {
             crate::overlays::Overlay::Organization.accessibility_covered(ui)
         })
@@ -1549,7 +1581,40 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .child(ui_kit::label(size, move || {
                     state(ui, screen_title).unwrap_or("")
                 }))
-                .child(ui_kit::caption(size, move || reorder_hint(ui))),
+                .max_w(move || px((window().width.0 - size.of(40.0)).max(0.0)))
+                .child(ui_kit::caption(size, move || reorder_hint(ui)))
+                .child(when(
+                    move || {
+                        guide_order_accessible(ui)
+                            && ui.drag_editing()
+                            && reordering(ui)
+                            && state(ui, |s| !s.dragging && !s.saving) == Some(true)
+                    },
+                    move || {
+                        view()
+                            .flex_row()
+                            .justify_end()
+                            .gap(move || size.px(10.0))
+                            .child(ui_kit::action(
+                                ui,
+                                size,
+                                tr("Cancel"),
+                                || false,
+                                0xFFFFFF,
+                                move || {
+                                    back(ui);
+                                },
+                            ))
+                            .child(ui_kit::action(
+                                ui,
+                                size,
+                                tr("Save"),
+                                || false,
+                                0xFFFFFF,
+                                move || save_order(ui),
+                            ))
+                    },
+                )),
         )
         .child(when(groups, move || {
             view()
@@ -1569,7 +1634,7 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
         ))
 }
 
-mod reorder_drag;
+pub(crate) mod reorder_drag;
 
 fn editor_rows(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();

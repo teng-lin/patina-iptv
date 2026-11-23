@@ -25,6 +25,25 @@ impl Sort {
     }
 }
 
+/// Preferences scoped to one named live channel group.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GroupPreferences {
+    pub sort: Sort,
+    pub favorites_only: bool,
+    pub external_player: bool,
+    pub epg_offset_minutes: i32,
+}
+
+pub const GROUP_EPG_OFFSET_MIN: i32 = -12 * 60;
+pub const GROUP_EPG_OFFSET_MAX: i32 = 14 * 60;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupPreference {
+    FavoritesOnly(bool),
+    ExternalPlayer(bool),
+    EpgOffsetMinutes(i32),
+}
+
 /// How a channel's playback is blocked by guide preferences.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Block {

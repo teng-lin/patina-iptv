@@ -207,9 +207,10 @@ pub fn ready(
     t: UnixTime,
     retry: impl FnOnce(Result<(), PageReadError>) + 'static,
 ) -> bool {
-    let Some((epg, _)) = iptv_guide::combined::epg_channel(&**schedule, channel) else {
+    let Some((epg, local)) = iptv_guide::combined::epg_channel(&**schedule, channel) else {
         return true;
     };
+    let t = epg.stored_epg_time(local, t);
     epg.pin_page(Some(t));
     if epg.ensure_loaded(t) {
         return true;
@@ -230,9 +231,9 @@ pub fn pin_archive(owner: &Rc<crate::Runtime>, archive: Option<(usize, UnixTime)
     let schedule = owner.schedule();
     each(&*schedule, |s| s.pin_page(None));
     if let Some((channel, time)) = archive
-        && let Some((epg, _)) = iptv_guide::combined::epg_channel(&*schedule, channel)
+        && let Some((epg, local)) = iptv_guide::combined::epg_channel(&*schedule, channel)
     {
-        epg.pin_page(Some(time));
+        epg.pin_page(Some(epg.stored_epg_time(local, time)));
     }
 }
 pub fn evict(owner: &Rc<crate::Runtime>) {

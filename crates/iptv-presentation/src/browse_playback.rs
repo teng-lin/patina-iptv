@@ -25,7 +25,11 @@ pub struct Policy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
-    Tune { target: Target, fullscreen: bool },
+    Tune {
+        target: Target,
+        fullscreen: bool,
+        chosen: bool,
+    },
     Fullscreen,
 }
 
@@ -150,17 +154,22 @@ impl BrowsePlayback {
             .min()
     }
     pub fn tick(&mut self, now: u64) -> Option<Effect> {
-        if let Some(Pending { at, fullscreen, .. }) = self.pending
+        if let Some(Pending {
+            at,
+            fullscreen,
+            chosen,
+        }) = self.pending
             && now >= at
         {
             self.pending = None;
             if fullscreen {
                 self.fullscreen_at = None;
             }
-            return self
-                .target
-                .clone()
-                .map(|target| Effect::Tune { target, fullscreen });
+            return self.target.clone().map(|target| Effect::Tune {
+                target,
+                fullscreen,
+                chosen,
+            });
         }
         if self.fullscreen_at.is_some_and(|at| now >= at) {
             self.fullscreen_at = None;
@@ -198,7 +207,8 @@ mod tests {
             b.tick(950),
             Some(Effect::Tune {
                 target: target("b").unwrap(),
-                fullscreen: false
+                fullscreen: false,
+                chosen: false
             })
         );
         b.focus(target("c"), policy(), 1000);
@@ -328,7 +338,8 @@ mod tests {
             b.tick(500),
             Some(Effect::Tune {
                 target: target("a").unwrap(),
-                fullscreen: true
+                fullscreen: true,
+                chosen: true
             })
         );
         // A drag with nothing waiting changes nothing.

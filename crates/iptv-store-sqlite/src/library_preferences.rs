@@ -2,7 +2,7 @@
 use crate::error::Result;
 use crate::sources::ensure_source;
 use crate::{SourceId, Store};
-use iptv_core::organization::{BlockKind, Blocks, Item, Sort};
+use iptv_core::organization::{BlockKind, Blocks, GroupPreference, GroupPreferences, Item, Sort};
 use iptv_library::{ChannelScope, OrganizationScope};
 use iptv_providers::model::ContentKind;
 use iptv_providers::{GroupId, model::Group};
@@ -239,6 +239,73 @@ impl Store {
             "DELETE FROM guide_blocks WHERE source_id=?1 AND kind=?2 AND content_id=?3"
         };
         self.conn.execute(sql, params![source.0, kind, id])?;
+        Ok(())
+    }
+
+    pub fn guide_group_preferences(&self, source: SourceId, id: &str) -> Result<GroupPreferences> {
+        let sort = self.guide_sort(source, &OrganizationScope::group_channels(id))?;
+        let prefs = self
+            .conn
+            .query_row(
+                "SELECT favorites_only,external_player,epg_offset_minutes FROM group_overlays
+             WHERE source_id=?1 AND group_id=?2",
+                params![source.0, id],
+                |row| {
+                    Ok(GroupPreferences {
+                        sort,
+                        favorites_only: row.get(0)?,
+                        external_player: row.get(1)?,
+                        epg_offset_minutes: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(prefs.unwrap_or(GroupPreferences {
+            sort,
+            ..GroupPreferences::default()
+        }))
+    }
+
+    pub fn set_guide_group_preference(
+        &mut self,
+        source: SourceId,
+        id: &str,
+        preference: GroupPreference,
+    ) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(group) = custom_id(id) {
+            ensure_custom_scope(&tx, source, group)?;
+            if matches!(preference, GroupPreference::EpgOffsetMinutes(_)) {
+                return Err(crate::StoreError::Unavailable(
+                    "Guide time offsets apply to provider groups",
+                ));
+            }
+        } else {
+            ensure_source(&tx, source)?;
+            let exists = id == "__other__" || tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM groups WHERE source_id=?1 AND id=?2 AND kind='live')",
+                params![source.0, id],
+                |row| row.get(0),
+            )?;
+            if !exists {
+                return Err(crate::StoreError::Unavailable("Group no longer exists"));
+            }
+        }
+        let (column, value) = match preference {
+            GroupPreference::FavoritesOnly(value) => ("favorites_only", i32::from(value)),
+            GroupPreference::ExternalPlayer(value) => ("external_player", i32::from(value)),
+            GroupPreference::EpgOffsetMinutes(value) => ("epg_offset_minutes", value),
+        };
+        tx.execute(
+            &format!(
+                "INSERT INTO group_overlays(source_id,group_id,{column}) VALUES(?1,?2,?3)
+             ON CONFLICT(source_id,group_id) DO UPDATE SET {column}=excluded.{column}"
+            ),
+            params![source.0, id, value],
+        )?;
+        tx.commit()?;
         Ok(())
     }
 

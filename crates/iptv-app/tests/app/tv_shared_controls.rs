@@ -612,7 +612,7 @@ fn a_tv_remote_sees_no_more_control() {
 }
 
 #[test]
-fn the_header_more_control_waits_for_an_inline_group_reorder() {
+fn the_header_more_control_waits_for_an_inline_channel_reorder() {
     let Some(home) = isolated!() else { return };
     let mut fixture = personalization::start(home, Settings::new(), true);
     let app = &mut fixture.app;
@@ -626,9 +626,10 @@ fn the_header_more_control_waits_for_an_inline_group_reorder() {
     // The slot is mounted with the ⋯ only: a TV's title keeps that room.
     step(app.press_key("tab"));
     assert!(!app.screen().matches("id:guide-more-slot").unwrap());
-    step(app.long_press("id:guide-groups >> text:Sport"));
-    step(app.press("text:Reorder groups"));
-    step(app.wait_for("id:organization-row-1 >> text:Sport"));
+    step(app.long_press("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Reorder channels"));
+    step(app.wait_for("id:organization-screen >> text:Reorder channels"));
+    step(app.wait_for("id:guide-row >> text:Local B"));
     // Touch drives the app, but the guide takes no pointer while the order
     // is unfinished: no ⋯ that could not be pressed.
     assert!(!app.screen().matches("id:guide-more").unwrap());

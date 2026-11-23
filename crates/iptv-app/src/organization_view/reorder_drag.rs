@@ -5,7 +5,7 @@ use super::{
 use nsh_core::prelude::*;
 use std::time::Duration;
 
-const GRIP_COLUMN: f32 = 56.0;
+pub(crate) const GRIP_COLUMN: f32 = 56.0;
 const EDGE: f32 = 44.0;
 const MAX_SCROLL_STEP: f32 = 22.0;
 
@@ -20,17 +20,18 @@ struct Drag {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct DragList {
+pub(crate) struct DragList {
     ui: Ui,
     size: Scale,
     rows: ElementRef,
     active: Signal<Option<Drag>>,
     scroll: Signal<f32>,
     viewport: Signal<Option<Bounds<Points>>>,
+    column: Option<fn() -> f32>,
 }
 
 impl DragList {
-    pub(super) fn new(ui: Ui, size: Scale, rows: ElementRef) -> Self {
+    pub(crate) fn new(ui: Ui, size: Scale, rows: ElementRef) -> Self {
         Self {
             ui,
             size,
@@ -38,18 +39,28 @@ impl DragList {
             active: signal(None),
             scroll: signal(0.0),
             viewport: signal(None),
+            column: None,
         }
     }
 
-    pub(super) fn active(self) -> bool {
+    pub(crate) fn guide(mut self, column: fn() -> f32) -> Self {
+        self.column = Some(column);
+        self
+    }
+
+    pub(crate) fn active(self) -> bool {
         self.active.with(Option::is_some)
     }
 
     fn pitch(self) -> f32 {
-        list_rows::pitch(self.size, ROW)().0
+        if self.column.is_some() {
+            self.size.whole(crate::grid::ROW_H)
+        } else {
+            list_rows::pitch(self.size, ROW)().0
+        }
     }
 
-    pub(super) fn scrolled(self, event: ScrollEvent) {
+    pub(crate) fn scrolled(self, event: ScrollEvent) {
         if self.scroll.get_untracked() == event.offset.y.0 {
             return;
         }
@@ -110,7 +121,8 @@ impl DragList {
             let top = drag.y + self.scroll.get_untracked() - drag.grab_offset;
             let to = (top / self.pitch()).round().max(0.0) as usize;
             update(self.ui, |screen| {
-                if let Some(order) = screen.editor.reorder.as_mut()
+                if !screen.saving
+                    && let Some(order) = screen.editor.reorder.as_mut()
                     && order.selected().is_some_and(|item| item.id == drag.id)
                 {
                     order.move_selected_to(to);
@@ -165,12 +177,13 @@ impl DragList {
         }
     }
 
-    pub(super) fn with_grips(self, content: View) -> View {
+    pub(crate) fn with_grips(self, content: View) -> View {
         let size = self.size;
         let viewport = element_ref();
         effect(move || {
-            if contents_hidden(self.ui) && self.active() {
-                untracked(|| self.finish(false));
+            let closed = self.column.is_some() && !super::guide_order_accessible(self.ui);
+            if (closed || contents_hidden(self.ui)) && self.active() {
+                untracked(|| self.finish(closed));
             }
         });
         content
@@ -192,17 +205,22 @@ impl DragList {
                         if !self.ui.drag_editing()
                             || !reordering(self.ui)
                             || contents_hidden(self.ui)
+                            || (self.column.is_some() && !super::guide_order_accessible(self.ui))
                         {
                             return;
                         }
                         if let Some(viewport) = self.viewport.get_untracked() {
                             let x = request.event.page.x - viewport.origin.x;
-                            if x >= viewport.size.width - self.size.px(GRIP_COLUMN) {
+                            let right = self
+                                .column
+                                .map_or(viewport.size.width, |column| px(column()));
+                            if x >= right - self.size.px(GRIP_COLUMN) && x <= right {
                                 request.claim();
                             }
                         }
                     }),
             )
+            .keep_touches(self.column.is_some())
             .on_responder_grant(move |event: &ResponderEvent| {
                 if let Some(viewport) = self.viewport.get_untracked() {
                     self.start((event.page.y - viewport.origin.y).0);
@@ -220,7 +238,15 @@ impl DragList {
                     view()
                         .absolute()
                         .left(px(0.0))
-                        .right(px(0.0))
+                        .right(move || {
+                            self.column.map_or(px(0.0), |column| {
+                                px(self.viewport.with(|bounds| {
+                                    bounds.map_or(0.0, |bounds| {
+                                        (bounds.size.width.0 - column()).max(0.0)
+                                    })
+                                }))
+                            })
+                        })
                         .top(move || {
                             self.active.with(|drag| {
                                 px(drag.as_ref().map_or(0.0, |drag| drag.y - drag.grab_offset))
@@ -257,7 +283,7 @@ pub(super) fn handle(size: Scale, row: usize) -> impl IntoElement {
         .test_id(&format!("reorder-handle-{row}"))
 }
 
-fn grip(size: Scale) -> View {
+pub(crate) fn grip(size: Scale) -> View {
     view()
         .w(move || size.px(GRIP_COLUMN - 2.0 * list_rows::INSET))
         .gap(px(3.0))

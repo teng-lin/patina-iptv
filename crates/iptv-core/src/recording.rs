@@ -91,6 +91,7 @@ pub struct RuleId(pub i64);
 pub struct RecurrenceTiming {
     pub program_start: i64,
     pub program_end: i64,
+    pub guide_offset_seconds: Option<i64>,
     pub lead_seconds: u32,
     pub trail_seconds: u32,
 }
@@ -136,6 +137,8 @@ pub struct Job {
     pub id: JobId,
     /// A read-time observation for views; native services recheck before I/O.
     pub source_current: bool,
+    /// Unshifted airing start of a linked series occurrence, if present.
+    pub series_start: Option<i64>,
     pub request: Request,
     pub status: Status,
     pub bytes: u64,
@@ -151,6 +154,7 @@ mod tests {
         Job {
             id: JobId(id),
             source_current: true,
+            series_start: None,
             request: Request {
                 source: 1,
                 channel: "synthetic".into(),

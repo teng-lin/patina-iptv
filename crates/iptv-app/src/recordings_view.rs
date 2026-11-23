@@ -5,7 +5,7 @@ use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
 use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
 use iptv_presentation::capabilities::recording_notice;
-use iptv_presentation::menu::Origin;
+use iptv_presentation::menu::{MenuItem, Origin};
 use iptv_presentation::recording::{Draft, status_label};
 use nsh_core::prelude::*;
 use std::time::Duration;
@@ -308,6 +308,108 @@ fn request(origin: Origin) -> Option<Request> {
         end: crate::guide::unix_of(&*schedule, program.end),
     })
 }
+/// The active job must belong to the selected occurrence, including its end
+/// when an immediate recording starts after the program began.
+fn occurrence_job(request: &Request, stored_start: i64, jobs: Vec<Job>) -> Option<Job> {
+    jobs.into_iter()
+        .filter(|job| {
+            job.source_current
+                && job.status.active()
+                && job.request.source == request.source
+                && job.request.channel == request.channel
+                && if let Some(raw) = job.series_start {
+                    (stored_start..stored_start + 60).contains(&raw)
+                } else {
+                    job.request.end == request.end
+                        && match job.status {
+                            Status::Scheduled => job.request.start == request.start,
+                            _ => (request.start..request.end).contains(&job.request.start),
+                        }
+                }
+        })
+        .max_by_key(|job| job.status == Status::Recording)
+}
+
+fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
+    if ui.player_surface != 0 || !available(origin.channel) {
+        return None;
+    }
+    let schedule = crate::schedule();
+    let program = schedule.program_at(origin.channel, origin.program_start);
+    let mut request = request(origin)?;
+    request.start = crate::guide::unix_of(&*schedule, program.start);
+    let stored_start =
+        request.start - i64::from(crate::player::guide_offset(&*schedule, origin.channel)) * 60;
+    if let Some(job) = occurrence_job(
+        &request,
+        stored_start,
+        crate::runtime().recording_snapshot(),
+    ) {
+        let item = if job.status == Status::Recording {
+            MenuItem::StopRecording
+        } else {
+            MenuItem::CancelRecording
+        };
+        return Some((item, Some(job)));
+    }
+    let item = match program.airing(crate::time::now_minute()) {
+        crate::guide::Airing::Live => MenuItem::RecordNow,
+        crate::guide::Airing::Upcoming => MenuItem::ScheduleRecording,
+        crate::guide::Airing::Ended => return None,
+    };
+    Some((item, None))
+}
+
+pub fn channel_menu_action(ui: Ui, origin: Origin) -> Option<MenuItem> {
+    channel_action(ui, origin).map(|(item, _)| item)
+}
+
+pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
+    let Some((current, job)) = channel_action(ui, origin) else {
+        return false;
+    };
+    if current != item {
+        return false;
+    }
+    match (current, job) {
+        (MenuItem::StopRecording, Some(job)) => execute(ui, job, false, "Stop recording"),
+        (MenuItem::CancelRecording, Some(job)) => execute(ui, job, false, "Cancel recording"),
+        (MenuItem::RecordNow, _) => start_origin(ui, origin, false),
+        (MenuItem::ScheduleRecording, _) => {
+            if let Some(request) = request(origin) {
+                schedule_window(ui, request);
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn schedule_window(ui: Ui, request: Request) {
+    let target = iptv_core::parental::Target::live(request.source, request.channel.clone());
+    crate::parental_view::request(ui, target, move || {
+        if ui.recordings.with_untracked(|state| state.busy) {
+            return;
+        }
+        ui.recordings.update(|state| state.busy = true);
+        let owner = crate::runtime();
+        crate::data::spawn_in_app(async move {
+            let result = owner.schedule_recording(request).await;
+            ui.recordings.update(|state| state.busy = false);
+            let message = match &result {
+                Ok(_) => tr("Recording scheduled"),
+                Err(error) => translated_reason(
+                    error
+                        .unavailable_reason()
+                        .unwrap_or("Recording action failed"),
+                ),
+            };
+            crate::settings_view::notify(message);
+            reload(ui);
+        });
+    });
+}
+
 pub fn remember(ui: Ui, origin: Origin) {
     let context = request(origin).map(|request| (origin, request));
     ui.recordings.update(|s| s.context = context);
@@ -359,6 +461,7 @@ fn prepare_program(ui: Ui, origin: Origin, custom: bool) -> bool {
         Some((
             crate::guide::unix_of(&*schedule, program.start),
             crate::guide::unix_of(&*schedule, program.end),
+            i64::from(crate::player::guide_offset(&*schedule, origin.channel)) * 60,
         ))
     };
     ui.menu.set(None);
@@ -383,8 +486,9 @@ fn prepare_program(ui: Ui, origin: Origin, custom: bool) -> bool {
             s.draft = None;
         } else {
             let mut draft = Draft::new(request);
-            draft.program_start = program.map(|(start, _)| start);
-            draft.program_end = program.map(|(_, end)| end);
+            draft.program_start = program.map(|(start, _, _)| start);
+            draft.program_end = program.map(|(_, end, _)| end);
+            draft.guide_offset_seconds = program.map(|(_, _, offset)| offset);
             s.draft = Some(draft);
         }
     });
@@ -431,6 +535,7 @@ fn save_allowed(ui: Ui, draft: Draft) {
                             iptv_core::recording::RecurrenceTiming {
                                 program_start: draft.program_start.unwrap_or(draft.request.start),
                                 program_end: draft.program_end.unwrap_or(draft.request.end),
+                                guide_offset_seconds: draft.guide_offset_seconds,
                                 lead_seconds: draft.lead_minutes.clamp(0, 60) as u32 * 60,
                                 trail_seconds: draft.trail_minutes.clamp(0, 60) as u32 * 60,
                             },
@@ -1035,5 +1140,58 @@ fn translated_reason(message: &str) -> &str {
         tr(message)
     } else {
         tr("Recording action failed")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_recording_matches_the_airing_and_owning_playlist() {
+        let request = Request {
+            source: 1,
+            channel: "generated-channel".into(),
+            channel_name: "Generated channel".into(),
+            title: "Generated program".into(),
+            start: 1_800_000_000,
+            end: 1_800_003_600,
+        };
+        let raw_start = request.start - 900;
+        let mut job = Job {
+            id: JobId(7),
+            source_current: true,
+            series_start: Some(raw_start + 18),
+            request: request.clone(),
+            status: Status::Scheduled,
+            bytes: 0,
+            message: String::new(),
+        };
+        job.request.start -= 600;
+        job.request.end += 900;
+        let mut neighbor = job.clone();
+        neighbor.id = JobId(8);
+        neighbor.series_start = Some(raw_start + 3600);
+        let mut other_playlist = job.clone();
+        other_playlist.id = JobId(9);
+        other_playlist.request.source = 2;
+        assert_eq!(
+            occurrence_job(
+                &request,
+                raw_start,
+                vec![neighbor.clone(), other_playlist, job.clone()]
+            )
+            .map(|job| job.id),
+            Some(JobId(7)),
+        );
+        assert_eq!(occurrence_job(&request, raw_start, vec![neighbor]), None);
+        job.series_start = None;
+        job.status = Status::Recording;
+        job.request = request.clone();
+        job.request.start += 1200;
+        assert_eq!(
+            occurrence_job(&request, raw_start, vec![job]).map(|job| job.id),
+            Some(JobId(7))
+        );
     }
 }
