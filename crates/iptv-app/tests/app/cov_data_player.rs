@@ -63,7 +63,8 @@ fn guide(now: i64) -> String {
         while first + k * LEN < now + 6 * 3_600 {
             let (start, stop) = (first + k * LEN, first + (k + 1) * LEN);
             xml.push_str(&format!(
-                "<programme channel=\"{channel}\" start=\"{}\" stop=\"{}\"><title>Show {}</title></programme>",
+                "<programme channel=\"{channel}\" start=\"{}\" stop=\"{}\"><title>Show {}</title>\
+                 <desc>Generated program synopsis.</desc></programme>",
                 format_xmltv_time(start),
                 format_xmltv_time(stop),
                 k - live
@@ -994,6 +995,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     send(&mut app, "tracks", tracks());
     step(app.press("label:Video"));
     step(app.wait_for("label:Mute"));
+    step(app.wait_for("id:play-bar-layer >> text:Generated program synopsis."));
     step(app.wait_for("text:720p"));
     step(app.wait_for("text:/50/"));
     // Mute, then the desktop's volume along its bar.

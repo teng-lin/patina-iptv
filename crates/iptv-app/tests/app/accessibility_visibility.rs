@@ -652,34 +652,6 @@ fn activate(app: &mut Headless, id: NodeId) {
     step(app.run_for(Duration::from_millis(500)));
 }
 
-/// The program cell airing now on `channel`'s guide row: the first one
-/// right of the channel, as a screen reader reaches it from the row.
-fn program_now(app: &Headless, channel: &str) -> NodeId {
-    let row = app
-        .screen()
-        .id(&format!("role:button[/^{channel}$/]"))
-        .unwrap();
-    let nodes = app.screen().layout_nodes();
-    let row = nodes.iter().find(|n| n.id == row).unwrap().bounds;
-    // The cell under the now line: both slide by one transform, which the
-    // layout leaves out, so their laid-out places compare as they are.
-    let now = nodes
-        .iter()
-        .find(|n| n.test_id.as_deref() == Some("guide-now-line"))
-        .unwrap()
-        .bounds;
-    let x = now.origin.x.0 + now.size.width.0 / 2.0;
-    let y = row.origin.y.0 + row.size.height.0 / 2.0;
-    nodes
-        .iter()
-        .filter(|n| n.test_id.as_deref() == Some("guide-program") && !n.hidden)
-        .filter(|n| n.bounds.origin.x.0 <= x && x < n.bounds.origin.x.0 + n.bounds.size.width.0)
-        .filter(|n| n.bounds.origin.y.0 <= y && y <= n.bounds.origin.y.0 + n.bounds.size.height.0)
-        .max_by(|a, b| a.bounds.size.width.0.total_cmp(&b.bounds.size.width.0))
-        .unwrap_or_else(|| panic!("{channel}'s program on now"))
-        .id
-}
-
 /// #192: what a screen reader activates plays as a tap does. TalkBack's
 /// double tap on a guide row, a program cell or the play bar's buttons
 /// reaches the app as a bare press; the play bar it opens over full-screen
@@ -691,10 +663,46 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     let observed = exposure.clone();
     let mut settings = Settings::new();
     settings.set("guide.switch_delay", Value::ms(0)).unwrap();
-    let mut fixture = personalization::start_with_setup(home, settings, true, move |app| {
-        app.observe(move |_, batch| observed.record(batch));
-    });
+    settings
+        .set("epg.update_on_start", Value::Bool(true))
+        .unwrap();
+    let guide_file = home.path().join("screen-reader-guide.xml");
+    std::fs::write(
+        &guide_file,
+        crate::support::guide(
+            crate::support::now(),
+            &[("c", "Local C", "Local C bulletin")],
+        ),
+    )
+    .unwrap();
+    let mut fixture = personalization::launch_prepared(
+        home,
+        settings,
+        true,
+        move |path, source| {
+            let mut store = crate::isolated::open_database(path).unwrap();
+            store
+                .set_guide_sources(
+                    source,
+                    &[iptv_store_sqlite::GuideSource {
+                        feed: iptv_epg::FeedId(1001),
+                        provider_index: None,
+                        url: iptv_providers::SecretUrl::new(guide_file.to_string_lossy()),
+                        name: Some("Synthetic screen reader guide".into()),
+                        enabled: true,
+                        shift_minutes: 0,
+                    }],
+                )
+                .unwrap();
+        },
+        |_| {},
+        move |app| app.observe(move |_, batch| observed.record(batch)),
+    );
     let app = &mut fixture.app;
+    let live_cell = "id:guide-ui >> role:cell[Local C bulletin]";
+    step(app.wait_for_within(live_cell, Duration::from_secs(20)));
+    step(app.press("text:/^☰  /"));
+    step(app.press_key("right"));
     step(app.set_environment("a tablet with TalkBack", |env| {
         env.idiom = Idiom::Pad;
         env.screen_reader = true;
@@ -726,7 +734,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     exposure.shown(app, "guide-ui", true);
     exposure.selected_channel(app, "Local B");
     // A program cell on another row plays its channel.
-    let cell = program_now(app, "Local C");
+    let cell = app.screen().id(live_cell).unwrap();
     activate(app, cell);
     step(app.wait_until(
         "Local C opens in the preview",
@@ -734,6 +742,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
         |_| iptv_app::player_has_source(0) && iptv_app::player_opens(0) == 2,
     ));
     exposure.shown(app, "guide-ui", true);
+    let cell = app.screen().id(live_cell).unwrap();
     activate(app, cell);
     exposure.shown(app, "guide-ui", false);
     step(app.wait_for("text:/Local C  ▶/"));

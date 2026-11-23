@@ -7,7 +7,7 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
-## [0.1.6] - 2026-11-22
+## [0.1.6] - 2026-11-23
 
 ### Distribution
 
