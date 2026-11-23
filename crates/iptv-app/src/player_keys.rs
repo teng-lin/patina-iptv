@@ -136,9 +136,17 @@ pub(crate) fn stop_playback(ui: Ui) {
 /// Nothing plays, as after the viewer's Stop: also when an episode ends
 /// away from its player (#187).
 pub(crate) fn stopped(ui: Ui) {
+    stop_to_guide(ui, crate::player::stop);
+}
+
+pub(crate) fn stopped_for_external(ui: Ui, target: &iptv_core::parental::Target) {
+    stop_to_guide(ui, |ui| crate::player::stop_for_handoff(ui, target));
+}
+
+fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
     crate::multiview::close(ui);
     ui.playing.set(None);
-    crate::player::stop(ui);
+    stop(ui);
     ui.mode.set(crate::settings::browse_mode());
 }
 

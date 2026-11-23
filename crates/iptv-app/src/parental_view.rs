@@ -67,6 +67,7 @@ pub fn close(ui: Ui) {
 /// Lifecycle teardown must invalidate an in-flight authorization even when
 /// user dismissal is temporarily disabled during a credential write.
 pub fn abort(ui: Ui) {
+    crate::external_player::cancel_pending(ui);
     ui.parental.set(None);
     crate::runtime().parental_lock();
     dismiss_keyboard();
@@ -207,7 +208,25 @@ pub fn allow_play(ui: Ui, channel: usize, playback: crate::Playback) -> bool {
         }
         return true;
     }
-    request(ui, target, move || ui.play(channel, playback));
+    match playback {
+        crate::Playback::CatchUp { start, offset } => {
+            let schedule = crate::schedule();
+            if let Some(pending) =
+                crate::player::PendingArchive::capture(&*schedule, channel, start, offset)
+            {
+                request(ui, target, move || {
+                    if let Some((channel, playback)) = pending.remap(&*crate::schedule()) {
+                        ui.play(channel, playback);
+                    } else {
+                        crate::settings_view::notify(tr(
+                            "Guide time changed. Choose the program again.",
+                        ));
+                    }
+                });
+            }
+        }
+        crate::Playback::Live => request(ui, target, move || ui.play(channel, playback)),
+    }
     false
 }
 pub fn block(ui: Ui, target: Target, blocked: bool) {

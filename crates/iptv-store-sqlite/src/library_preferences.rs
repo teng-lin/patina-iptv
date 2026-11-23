@@ -7,6 +7,7 @@ use iptv_library::{ChannelScope, OrganizationScope};
 use iptv_providers::model::ContentKind;
 use iptv_providers::{GroupId, model::Group};
 use rusqlite::{OptionalExtension, params};
+use std::borrow::Cow;
 
 pub use iptv_library::SourcePolicy;
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +67,13 @@ fn ensure_custom_scope(conn: &rusqlite::Connection, source: SourceId, id: i64) -
 
 fn custom_id(key: &str) -> Option<i64> {
     key.strip_prefix("custom:")?.parse().ok()
+}
+
+fn group_preference_key(id: &str) -> Cow<'_, str> {
+    custom_id(id).map_or_else(
+        || Cow::Borrowed(id),
+        |group| Cow::Owned(format!("custom:{group}")),
+    )
 }
 
 fn sort_key(scope: &OrganizationScope) -> String {
@@ -244,12 +252,13 @@ impl Store {
 
     pub fn guide_group_preferences(&self, source: SourceId, id: &str) -> Result<GroupPreferences> {
         let sort = self.guide_sort(source, &OrganizationScope::group_channels(id))?;
+        let id = group_preference_key(id);
         let prefs = self
             .conn
             .query_row(
                 "SELECT favorites_only,external_player,epg_offset_minutes FROM group_overlays
              WHERE source_id=?1 AND group_id=?2",
-                params![source.0, id],
+                params![source.0, id.as_ref()],
                 |row| {
                     Ok(GroupPreferences {
                         sort,
@@ -298,12 +307,13 @@ impl Store {
             GroupPreference::ExternalPlayer(value) => ("external_player", i32::from(value)),
             GroupPreference::EpgOffsetMinutes(value) => ("epg_offset_minutes", value),
         };
+        let id = group_preference_key(id);
         tx.execute(
             &format!(
                 "INSERT INTO group_overlays(source_id,group_id,{column}) VALUES(?1,?2,?3)
              ON CONFLICT(source_id,group_id) DO UPDATE SET {column}=excluded.{column}"
             ),
-            params![source.0, id, value],
+            params![source.0, id.as_ref(), value],
         )?;
         tx.commit()?;
         Ok(())

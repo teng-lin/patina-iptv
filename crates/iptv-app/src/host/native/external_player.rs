@@ -1,6 +1,7 @@
 use iptv_core::playback::PlaySource;
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
 use std::sync::{Arc, Mutex};
+use tokio::sync::watch;
 
 pub(crate) const EXTERNAL_PLAYER: bool = cfg!(any(target_os = "android", target_os = "linux"));
 
@@ -9,66 +10,119 @@ struct Connection {
     lease: Option<Box<dyn Send>>,
 }
 
+struct Session {
+    connection: Mutex<Option<Connection>>,
+    retired: watch::Sender<bool>,
+}
+
+struct Retirement {
+    connection: Option<Connection>,
+    session: Arc<Session>,
+}
+
+impl Drop for Retirement {
+    fn drop(&mut self) {
+        // The account slot stays occupied until its HTTP worker has joined.
+        if let Some(Connection { relay, lease }) = self.connection.take() {
+            relay.shutdown_blocking();
+            drop(lease);
+        }
+        self.session.retired.send_replace(true);
+    }
+}
+
 #[derive(Clone)]
-pub(crate) struct ExternalSession(Arc<Mutex<Option<Connection>>>);
+pub(crate) struct ExternalSession(Arc<Session>);
 
 impl ExternalSession {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     fn new(relay: PlaybackRelay) -> Self {
-        Self(Arc::new(Mutex::new(Some(Connection {
-            relay,
-            lease: None,
-        }))))
+        Self(Arc::new(Session {
+            connection: Mutex::new(Some(Connection { relay, lease: None })),
+            retired: watch::Sender::new(false),
+        }))
     }
 
     pub(crate) fn is_open(&self) -> bool {
-        self.0.lock().is_ok_and(|connection| connection.is_some())
+        self.0
+            .connection
+            .lock()
+            .is_ok_and(|connection| connection.is_some())
     }
 
-    fn take(&self) -> Option<Connection> {
-        self.0.lock().ok()?.take()
+    pub(crate) fn is_retired(&self) -> bool {
+        *self.0.retired.borrow()
+    }
+
+    fn retire(&self) -> Option<Retirement> {
+        let connection = self.0.connection.lock().ok()?.take()?;
+        Some(Retirement {
+            connection: Some(connection),
+            session: self.0.clone(),
+        })
     }
 
     #[cfg(target_os = "linux")]
     fn close_blocking(&self) {
-        if let Some(Connection { relay, lease }) = self.take() {
-            relay.shutdown_blocking();
-            drop(lease);
-        }
+        drop(self.retire());
     }
 
     pub(crate) fn close(&self) {
-        if let Some(Connection { relay, lease }) = self.take() {
-            let _ = super::background("iptv-retire-external-player", move || {
-                relay.shutdown_blocking();
-                drop(lease);
-            });
+        if let Some(retirement) = self.retire() {
+            let _ = super::background("iptv-retire-external-player", move || drop(retirement));
         }
+    }
+
+    pub(crate) async fn close_and_wait(&self) {
+        // Another caller may already be retiring this session.
+        self.close();
+        let mut retired = self.0.retired.subscribe();
+        let _ = retired.wait_for(|done| *done).await;
     }
 }
 
 pub(crate) struct ExternalPlayback(PlaybackRelay, ExternalAdmission);
 pub(crate) struct ExternalHandoff {
-    admission: ExternalAdmission,
+    admission: Option<ExternalAdmission>,
     session: ExternalSession,
+}
+
+impl Drop for ExternalHandoff {
+    fn drop(&mut self) {
+        if self.admission.is_some() {
+            self.session.close();
+        }
+    }
 }
 
 impl ExternalHandoff {
     pub(crate) async fn connected(&mut self) -> bool {
-        self.admission.connected().await
+        match &mut self.admission {
+            Some(admission) => admission.connected().await,
+            None => false,
+        }
     }
 
     pub(crate) fn is_open(&self) -> bool {
         self.session.is_open()
     }
 
-    pub(crate) fn allow(self, lease: Box<dyn Send>) -> Option<ExternalSession> {
-        {
-            let mut connection = self.session.0.lock().ok()?;
-            connection.as_mut()?.lease = Some(lease);
-            self.admission.allow();
+    pub(crate) fn allow(mut self, lease: Box<dyn Send>) -> Option<ExternalSession> {
+        let allowed = {
+            let mut state = self.session.0.connection.lock().ok()?;
+            let connection = state.as_mut()?;
+            let allowed = self.admission.take()?.allow();
+            if allowed {
+                connection.lease = Some(lease);
+            }
+            allowed
+        };
+        if allowed {
+            Some(self.session.clone())
+        } else {
+            self.session.close();
+            None
         }
-        Some(self.session)
     }
 }
 
@@ -135,7 +189,10 @@ pub(crate) fn open_external_player(playback: ExternalPlayback) -> Option<Externa
                 player.close_blocking();
             })
             .ok()?;
-            return Some(ExternalHandoff { admission, session });
+            return Some(ExternalHandoff {
+                admission: Some(admission),
+                session,
+            });
         }
     }
     None
@@ -187,7 +244,10 @@ mod android {
             if let Some(previous) = current.replace(session.clone()) {
                 previous.close();
             }
-            Some(ExternalHandoff { admission, session })
+            Some(ExternalHandoff {
+                admission: Some(admission),
+                session,
+            })
         } else {
             None
         }

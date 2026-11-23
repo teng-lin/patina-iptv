@@ -744,9 +744,6 @@ fn keep_controls_until(ui: Ui, at: u64) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
-    if action != Action::Ignore {
-        crate::external_player::cancel_pending(ui);
-    }
     // A held key must not reopen a menu or turn a guide preview into
     // fullscreen. A remapped remote button can repeat Select.
     if repeat
@@ -756,6 +753,9 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
                 && context(&ui) == Context::Guide))
     {
         return;
+    }
+    if action != Action::Ignore {
+        crate::external_player::cancel_pending(ui);
     }
     if ui.player_surface != 0 {
         match action {
@@ -1032,6 +1032,45 @@ pub(crate) fn synthetic_enter(ui: Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[component]
+    fn PendingHandoff() -> impl IntoElement {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = Rc::new(crate::new_runtime(directory.path().to_owned()));
+        let ui = crate::with_runtime(runtime, || {
+            Ui::new(crate::SharedUi::new(), crate::player::Player::new())
+        });
+        crate::external_player::cancel_pending(ui);
+        view()
+            .child(text(move || {
+                format!("Request {}", ui.external_request.get())
+            }))
+            .child(
+                view()
+                    .label("Repeat select")
+                    .h(px(40.0))
+                    .on_press(move || apply(ui, RemoteKey::Red, Action::Select, true)),
+            )
+            .child(
+                view()
+                    .label("Unrelated touch")
+                    .h(px(40.0))
+                    .on_press(move || ui.touched()),
+            )
+    }
+
+    #[test]
+    fn ignored_select_repeat_keeps_the_external_handoff_pending() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<PendingHandoff>(),
+        ))
+        .unwrap();
+        app.wait_for("text:Request 1").unwrap();
+        app.press("label:Repeat select").unwrap();
+        assert!(app.screen().matches("text:Request 1").unwrap());
+        app.press("label:Unrelated touch").unwrap();
+        app.wait_for("text:Request 2").unwrap();
+    }
 
     #[test]
     fn keyboard_menu_and_ok_fire_once_while_held_and_moves_repeat() {

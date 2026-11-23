@@ -486,13 +486,38 @@ impl Runtime {
         state.epoch.fetch_add(1, Ordering::SeqCst);
     }
     pub fn parental_content_closed(&self) {
-        if self.parental.borrow().access.policy.window == UnlockWindow::EveryTime {
-            self.parental_lock();
-        }
+        self.clear_per_use_grants(None);
     }
     pub fn parental_backgrounded(&self) {
-        if self.parental.borrow().access.policy.window == UnlockWindow::EveryTime {
-            self.parental_lock();
+        self.clear_per_use_grants(None);
+    }
+    /// Transfers an existing per-use grant to the same live subject during
+    /// an external handoff, revoking all other per-use grants.
+    pub fn parental_content_transferred(&self, target: &Target) {
+        self.clear_per_use_grants(Some(target));
+    }
+    /// Revokes the transferred per-use grant when external playback ends.
+    pub fn parental_end_transfer(&self, target: &Target) {
+        let mut state = self.parental.borrow_mut();
+        if state.access.policy.window == UnlockWindow::EveryTime
+            && state.access.granted(target, now_ms())
+        {
+            state.access.content_left(target);
+            state.epoch.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    fn clear_per_use_grants(&self, preserve: Option<&Target>) {
+        let mut state = self.parental.borrow_mut();
+        if state.access.policy.window != UnlockWindow::EveryTime {
+            return;
+        }
+        let now = now_ms();
+        let keep = preserve
+            .filter(|target| target.kind == ContentKind::Live && state.access.granted(target, now));
+        state.epoch.fetch_add(1, Ordering::SeqCst);
+        state.access.lock();
+        if let Some(target) = keep {
+            state.access.unlock(target.clone(), now);
         }
     }
     pub(crate) fn parental_snapshot(&self) -> Snapshot {
@@ -710,6 +735,37 @@ pub(crate) fn native_allowed(
 #[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_transfer_keeps_only_the_existing_per_use_grant() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Runtime::new(crate::Ports::new(directory.path().to_owned(), |_| {
+            Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x31; 32]))
+        }));
+        let channel = Target::live(1, "synthetic-channel");
+        let other = Target::live(1, "synthetic-other");
+        {
+            let mut state = owner.parental.borrow_mut();
+            state.access.policy.window = UnlockWindow::EveryTime;
+            state.access.unlock(channel.clone(), now_ms());
+            state.access.unlock(other.clone(), now_ms());
+            state.access.unlock(Target::settings(), now_ms());
+        }
+
+        owner.set_foreground_for_external(false, Some(&channel));
+        owner.parental_content_transferred(&channel);
+        {
+            let state = owner.parental.borrow();
+            assert!(state.access.granted(&channel, now_ms()));
+            assert!(!state.access.granted(&other, now_ms()));
+            assert!(!state.access.granted(&Target::settings(), now_ms()));
+        }
+
+        owner.parental_end_transfer(&channel);
+        owner.parental_content_transferred(&channel);
+        assert!(!owner.parental.borrow().access.granted(&channel, now_ms()));
+    }
+
     fn snapshot() -> Snapshot {
         Snapshot {
             access: Access::default(),

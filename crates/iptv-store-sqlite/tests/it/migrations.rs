@@ -236,6 +236,32 @@ fn group_preferences_default_cleanly_and_keep_existing_overlays() {
     );
 }
 
+#[test]
+fn custom_group_preferences_share_the_canonical_guide_id() {
+    use iptv_core::organization::GroupPreference;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("generated-v25.db");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 25).unwrap());
+    let mut store = Store::open(&path).unwrap();
+    let custom = store.custom_groups(SRC).unwrap()[0].id;
+    let canonical = format!("custom:{}", custom.0);
+    let alias = format!("custom:0{}", custom.0);
+    store
+        .set_guide_group_preference(SRC, &alias, GroupPreference::ExternalPlayer(true))
+        .unwrap();
+    let saved = store.guide_group_preferences(SRC, &canonical).unwrap();
+    assert!(saved.external_player);
+    assert_eq!(store.guide_group_preferences(SRC, &alias).unwrap(), saved);
+    assert!(store.delete_custom_group(custom).unwrap());
+    assert!(
+        !store
+            .guide_group_preferences(SRC, &canonical)
+            .unwrap()
+            .external_player
+    );
+}
+
 /// A historical version: its schema snapshot and the data files to load
 /// into it, in order.
 struct Version {

@@ -16,9 +16,21 @@ impl Runtime {
         self.account_streams.set(limit);
     }
     pub fn set_foreground(&self, foreground: bool) {
+        self.set_foreground_for_external(foreground, None);
+    }
+    /// The native player chooser backgrounds the guide during a user-approved handoff.
+    pub fn set_foreground_for_external(
+        &self,
+        foreground: bool,
+        external: Option<&iptv_core::parental::Target>,
+    ) {
         self.foreground.set(foreground);
         if !foreground {
-            self.parental_backgrounded();
+            if let Some(target) = external {
+                self.parental_content_transferred(target);
+            } else {
+                self.parental_backgrounded();
+            }
         }
     }
     pub fn cancel_link_resolution(&self, surface: usize) {

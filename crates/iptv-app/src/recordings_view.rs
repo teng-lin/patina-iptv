@@ -844,6 +844,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
         } else {
             None
         };
+        let mut failure_notice = None;
         ui.recordings.update(|s| {
             s.busy = false;
             if let Some(jobs) = jobs {
@@ -861,17 +862,24 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
                     }
                 }
                 Err(_) => {
-                    s.error = Some(
-                        if action == "Delete recording" {
-                            "Recording could not be deleted"
-                        } else {
-                            "Recording action failed; check whether its file is available"
-                        }
-                        .into(),
-                    )
+                    if s.open {
+                        s.error = Some(
+                            if action == "Delete recording" {
+                                "Recording could not be deleted"
+                            } else {
+                                "Recording action failed; check whether its file is available"
+                            }
+                            .into(),
+                        );
+                    } else {
+                        failure_notice = Some(tr("Recording action failed"));
+                    }
                 }
             }
         });
+        if let Some(message) = failure_notice {
+            crate::settings_view::notify(message);
+        }
         reload(ui);
     });
 }

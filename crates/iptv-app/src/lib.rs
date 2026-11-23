@@ -234,6 +234,7 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub(crate) external_request: Signal<u64>,
+    pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
     pub(crate) external_playback: Signal<Option<external_player::Active>>,
     pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
     /// A timeline pan's hold on the channel whose program on air it
@@ -359,6 +360,7 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             external_request: signal(0),
+            external_handoff_target: signal(None),
             external_playback: signal(None),
             pending_zap: signal(None),
             pan_anchor: signal(None),
@@ -542,6 +544,7 @@ impl Ui {
         }
         // Accepted: the viewer's playback now (`interruption.rs`).
         crate::interruption::viewer_acted(*self);
+        seek::cancel(*self);
         crate::on_demand::flush(*self, false);
         self.player.vod.set(None);
         self.player.recorded.set(None);
@@ -557,7 +560,11 @@ impl Ui {
     /// A touch or a click on any control: touch or pointer mode, whichever
     /// made the press.
     pub fn touched(&self) {
-        external_player::cancel_pending(*self);
+        // PIN entry continues the choice that opened the prompt. Dismissing
+        // the prompt cancels it in `parental_view::abort`.
+        if self.top_overlay() != Some(overlays::Overlay::Parental) {
+            external_player::cancel_pending(*self);
+        }
         self.pending_zap.set(None);
         browse_playback::activity(*self);
         self.input.set(self.last_press.get_untracked());
