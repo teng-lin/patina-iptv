@@ -29,6 +29,8 @@ const MAX_ROWS: usize = 7;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Picture,
+    More,
+    Volume,
     Sleep,
     Track(Track),
     AudioDelay,
@@ -46,7 +48,33 @@ pub struct Open {
     values: Vec<String>,
     /// Snapshot behind both the translated labels and their opaque pick values.
     tracks: Option<iptv_core::tracks::Tracks>,
+    // Preserve action identity for a press and keep the originating desktop window.
+    more: Option<More>,
     pub list: Chooser,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct More {
+    controls: Vec<iptv_presentation::play_bar::Control>,
+    window: Option<nsh_core::element::desktop::WindowRef>,
+}
+
+pub(super) fn open_more(
+    ui: Ui,
+    controls: Vec<iptv_presentation::play_bar::Control>,
+    window: Option<nsh_core::element::desktop::WindowRef>,
+) {
+    if controls.is_empty() {
+        return;
+    }
+    ui.chooser.set(Some(Open {
+        kind: Kind::More,
+        list: Chooser::new(controls.len(), 0),
+        labels: Vec::new(),
+        values: Vec::new(),
+        tracks: None,
+        more: Some(More { controls, window }),
+    }));
 }
 
 fn picture_label(size: PictureSize) -> &'static str {
@@ -83,6 +111,8 @@ pub fn picture_name(ui: Ui) -> &'static str {
 fn title(kind: Kind) -> &'static str {
     match kind {
         Kind::Picture => tr("Picture size"),
+        Kind::More => tr("More options"),
+        Kind::Volume => tr("Volume"),
         Kind::Sleep => tr("Sleep timer"),
         Kind::Track(Track::Video) => tr("Video"),
         Kind::Track(Track::Audio) => tr("Audio"),
@@ -90,6 +120,10 @@ fn title(kind: Kind) -> &'static str {
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
     }
+}
+
+fn volume_index(ui: Ui) -> usize {
+    (usize::from(crate::media::audible_volume(ui)) + 5) / 10
 }
 
 /// The entries, what each sets, and the one in effect.
@@ -144,6 +178,12 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             (labels, Vec::new(), at.unwrap_or(delays.len() / 2))
         }
         Kind::History => history(ui),
+        Kind::More => (Vec::new(), Vec::new(), 0),
+        Kind::Volume => (
+            (0..=10).map(|n| format!("{}%", n * 10)).collect(),
+            Vec::new(),
+            volume_index(ui),
+        ),
     }
 }
 
@@ -189,6 +229,7 @@ impl Open {
             labels,
             values,
             tracks: Some(tracks),
+            more: None,
         }
     }
 
@@ -219,21 +260,12 @@ pub fn open(ui: Ui, kind: Kind) {
         labels,
         values,
         tracks: None,
+        more: None,
     }));
 }
 
 pub fn close(ui: Ui) {
     ui.chooser.set(None);
-}
-
-/// Opens `kind`, or closes it when it is the one open (a pointer's second
-/// press on the button that opened it).
-pub fn toggle(ui: Ui, kind: Kind) {
-    if ui.chooser.with_untracked(|c| c.as_ref().map(|c| c.kind)) == Some(kind) {
-        close(ui);
-    } else {
-        open(ui, kind);
-    }
 }
 
 pub fn move_focus(ui: Ui, step: isize) {
@@ -268,6 +300,18 @@ pub fn pick(ui: Ui, index: usize) {
         Kind::AudioDelay => {
             if let Some(ms) = audio_delays().get(index) {
                 ui.media.delay_ms.set(*ms);
+            }
+        }
+        Kind::Volume => {
+            if index <= 10 {
+                crate::media::set_volume(ui, index as i32 * 10);
+            }
+        }
+        Kind::More => {
+            if let Some(more) = open.more
+                && let Some(&control) = more.controls.get(index)
+            {
+                crate::play_bar::activate(ui, control, more.window);
             }
         }
         Kind::History => play_recent(ui, &value),
@@ -308,10 +352,25 @@ fn start_sleep(ui: Ui, minutes: u32) {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let open = move || ui.chooser.with(Option::is_some);
-    let count = move || {
-        ui.chooser
-            .with(|c| c.as_ref().map_or(0, |c| c.labels.len()))
-    };
+    let width = signal(None);
+    effect(move || {
+        let stale = ui.chooser.with(|chooser| {
+            chooser
+                .as_ref()
+                .and_then(|chooser| chooser.more.as_ref())
+                .is_some_and(|more| {
+                    width
+                        .get()
+                        .is_some_and(|width| crate::play_bar::overflow(ui, width) != more.controls)
+                })
+        });
+        // Keep row identities stable for an in-flight press. A change in
+        // availability or fit dismisses the old list before it can be used.
+        if stale {
+            close(ui);
+        }
+    });
+    let count = move || ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len));
     let size = Scale::new();
     let list = element_ref();
     let focus = computed(move || ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)));
@@ -327,34 +386,56 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 c.as_ref().and_then(|c| {
                     let index = at.index();
                     let label = match c.kind {
-                        Kind::History => c.labels.get(index)?.clone(),
+                        Kind::More => {
+                            crate::play_bar::label(ui, *c.more.as_ref()?.controls.get(index)?)
+                                .to_owned()
+                        }
+                        Kind::History | Kind::Volume => c.labels.get(index)?.clone(),
                         Kind::Track(_) => c
                             .track_labels_in(crate::i18n::language())
                             .get(index)?
                             .clone(),
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
-                    let checked = c.kind != Kind::History && c.list.selected == index;
+                    let checked = match c.kind {
+                        Kind::History | Kind::More => false,
+                        Kind::Volume => volume_index(ui) == index,
+                        _ => c.list.selected == index,
+                    };
                     Some((label, checked, c.list.focus == index))
                 })
             })
         };
         let selected = move || entry().is_some_and(|(_, checked, _)| checked);
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
+        let action = move || {
+            ui.chooser
+                .with(|c| c.as_ref().is_some_and(|c| c.kind == Kind::More))
+        };
         list_rows::row(size, ROW, mark)
-            .role(AccessibilityRole::Option)
+            .role(move || {
+                if action() {
+                    AccessibilityRole::Button
+                } else {
+                    AccessibilityRole::Option
+                }
+            })
             .accessibility_state(move || AccessibilityState {
                 selected: selected(),
-                checked: Some(if selected() {
-                    Checked::True
-                } else {
-                    Checked::False
+                checked: (!action()).then(|| {
+                    if selected() {
+                        Checked::True
+                    } else {
+                        Checked::False
+                    }
                 }),
                 ..Default::default()
             })
             .on_press(move || {
                 ui.touched();
-                pick(ui, at.index());
+                // The row unmounts on selection. Playback actions and timers
+                // belong to the window where the chooser opened.
+                ui.owner.run(|| pick(ui, at.index()));
             })
             .child(
                 list_rows::name(size, move || {
@@ -371,6 +452,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     view()
         .absolute()
         .inset_0()
+        // This layer still measures the local window when a short chooser
+        // hides the bar, including in an auxiliary player window.
+        .on_layout(move |bounds: &Bounds<Points>| {
+            let measured = (bounds.size.width.0 > 0.0).then_some(bounds.size.width.0);
+            if width.get_untracked() != measured {
+                width.set(measured);
+            }
+        })
         // At the right, clear of the panels at the bottom.
         .items_end()
         .justify_center()
@@ -466,6 +555,8 @@ mod tests {
     fn every_chooser_and_picture_size_has_its_own_name() {
         let kinds = [
             Kind::Picture,
+            Kind::More,
+            Kind::Volume,
             Kind::Sleep,
             Kind::Track(Track::Video),
             Kind::Track(Track::Audio),

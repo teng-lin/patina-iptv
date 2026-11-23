@@ -20,6 +20,9 @@ pub const HIDE_AFTER_MS: u64 = 3_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {
     Mute,
+    Volume,
+    Listen,
+    More,
     Rewind,
     PlayPause,
     Forward,

@@ -518,20 +518,21 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
 }
 
 /// The play bar's control ids, in their order on the bar.
-const BAR: [&str; 13] = [
+const BAR: [&str; 14] = [
     "play-bar-mute",
+    "play-bar-channels",
+    "play-bar-guide",
     "play-bar-rewind",
     "play-bar-play-pause",
     "play-bar-forward",
-    "play-bar-record",
     "play-bar-favorite",
+    "play-bar-pip",
+    "play-bar-multiview",
+    "play-bar-record",
+    "play-bar-picture",
     "play-bar-tracks",
     "play-bar-details",
-    "play-bar-picture",
-    "play-bar-channels",
-    "play-bar-multiview",
-    "play-bar-pip",
-    "play-bar-guide",
+    "play-bar-more",
 ];
 
 #[test]

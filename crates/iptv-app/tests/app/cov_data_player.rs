@@ -1012,13 +1012,13 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert!(prop(&app, &props, "volume").as_u64().unwrap() > volume);
     step(app.press_key("ctrl+down"));
     assert_eq!(prop(&app, &props, "volume").as_u64().unwrap(), volume);
-    // Subtitles and tracks: its chooser, closed by a second press.
-    step(app.press("label:Subtitles and tracks"));
+    // More opens the track chooser.
+    step(app.play_bar_option("Subtitles and tracks"));
     step(app.wait_for("text:Subtitles"));
-    step(app.press("label:Subtitles and tracks"));
+    step(app.press("label:Close the chooser"));
     // The window full screen, and back.
-    step(app.press("label:Full screen"));
-    step(app.press("label:Full screen"));
+    step(app.play_bar_option("Full screen"));
+    step(app.play_bar_option("Full screen"));
     // It hides by itself a few seconds after the last input.
     run(&mut app, Duration::from_secs(8));
     step(app.wait_for_gone("label:Mute", Duration::from_secs(1)));
@@ -1077,8 +1077,31 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 1, "reopened 30 s on");
+
+    // A desktop can shrink below the required width of the full transport.
+    // Play/Pause and More remain visible and both seeks move into More.
+    const NARROW_REPLAY_WIDTH: f32 = 180.0;
+    step(app.set_viewport(Size::new(px(NARROW_REPLAY_WIDTH), px(480.0))));
+    step(app.wait_for("id:play-bar-more"));
+    assert!(!seen(&app, "id:play-bar-rewind"));
+    assert!(!seen(&app, "id:play-bar-forward"));
+    for id in ["play-bar-play-pause", "play-bar-more"] {
+        let bounds = app
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.test_id.as_deref() == Some(id))
+            .expect(id)
+            .bounds;
+        assert!(
+            bounds.origin.x.0 >= 0.0
+                && bounds.origin.x.0 + bounds.size.width.0 <= NARROW_REPLAY_WIDTH
+        );
+    }
+    step(app.press("id:play-bar-more"));
+    step(app.wait_for("id:chooser-items >> text:Fast-forward"));
     let previous = prop(&app, &props, "source");
-    step(app.press("label:Rewind"));
+    step(app.press("id:chooser-items >> text:Rewind"));
     run(&mut app, Duration::from_secs(1));
     step(
         app.wait_until("authorized player load", Duration::from_secs(5), |_| {
@@ -1087,6 +1110,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 2, "reopened 10 s back");
+    step(app.set_viewport(size));
     let line = touch_area(&app, |w, h| h == 20.0 && w > 100.0);
     let previous = prop(&app, &props, "source");
     step(app.drag(&line, Point::new(px(60.0), px(0.0))));
@@ -1099,9 +1123,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 3, "reopened where the finger lifted");
     let titles = app.screen().count("text:Show -2").unwrap();
-    step(app.press("label:Program details"));
+    step(app.play_bar_option("Program details"));
     step(app.wait_for(&format!("text:Show -2 >> nth={titles}")));
-    step(app.press("label:Program details"));
+    step(app.press("id:description-layer"));
 
     // The strip's channel list over the video, closed again.
     strip(&mut app);

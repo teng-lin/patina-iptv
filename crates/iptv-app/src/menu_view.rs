@@ -1084,11 +1084,21 @@ fn origin_program(schedule: &dyn crate::guide::Schedule, origin: Origin) -> crat
     schedule.program_at(origin.channel, minute)
 }
 
-/// The description popover: title, time range and text; no actions (those
-/// live in the menu). Back or a tap closes it.
+pub(crate) fn scroll_description(ui: Ui, direction: f32) {
+    ui.description_scroll
+        .scroll_by(direction * crate::scale::now() * 96.0);
+}
+
+/// The description popover. Back or a tap closes it.
 fn description(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     let shown = move || ui.description.get().is_some();
+    let scrolling = ui.description_scroll;
+    effect(move || {
+        if ui.description.get().is_some() {
+            scrolling.reset();
+        }
+    });
     let program = move || {
         ui.guide_data();
         ui.description
@@ -1101,7 +1111,14 @@ fn description(ui: Ui) -> impl IntoElement {
         .items_end()
         .pt_safe_area()
         .px(px(40.0))
-        .py(px(40.0))
+        .pt(px(40.0))
+        .pb(move || {
+            px(if crate::play_bar::shows(ui) {
+                crate::play_bar::height(ui) + 8.0
+            } else {
+                40.0
+            })
+        })
         .bg(move || tint(0x000000, if shown() { 0x80 } else { 0 }))
         .test_id("description-layer")
         .accessibility_elements_hidden(move || {
@@ -1120,68 +1137,80 @@ fn description(ui: Ui) -> impl IntoElement {
             close(ui);
         })
         .child(
-            view()
+            scrolling
+                .view()
+                .test_id("description-scroll")
+                .max_h(percentage(1.0))
+                .max_w(percentage(1.0))
                 .w(px(480.0))
-                .gap(px(10.0))
-                .p(px(24.0))
-                .rounded(px(RADIUS_LARGE))
-                .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
                 .child(
-                    text(move || program().map_or(String::new(), |(ch, p)| title(ch, p)))
-                        .font_family(SANS)
-                        .font_weight(MEDIUM)
-                        .text_size(move || size.text_px(TITLE))
-                        .text_color(rgb(LIST_TEXT)),
-                )
-                .child(
-                    text(move || {
-                        program().map_or(String::new(), |(ch, p)| {
-                            format!("{} · {}–{}", channel_name(ch), clock(p.start), clock(p.end))
-                        })
-                    })
-                    .font_family(SANS)
-                    .text_size(move || size.text_px(HEADER_TIMES))
-                    .text_color(Mark::Plain.secondary()),
-                )
-                .child(
-                    text(move || {
-                        program()
-                            .and_then(|(channel, program)| {
-                                crate::header::program_description(
-                                    &*crate::schedule(),
-                                    channel,
-                                    program,
-                                )
-                            })
-                            .unwrap_or_default()
-                    })
-                    .font_family(SANS)
-                    .text_size(move || size.text_px(HEADER_BODY))
-                    .text_color(rgb(LIST_TEXT)),
-                )
-                .child(when(
-                    move || {
-                        ui.player_surface == 0
-                            && program().is_some_and(|(ch, p)| {
-                                crate::recordings_view::available(ch)
-                                    && crate::guide::unix_of(&*crate::schedule(), p.end)
-                                        > crate::time::wall_unix()
-                            })
-                    },
-                    move || {
-                        crate::ui_kit::button(
-                            ui,
-                            size,
-                            tr("Record"),
-                            || true,
-                            move || {
-                                if let Some(origin) = ui.description.get_untracked() {
-                                    crate::recordings_view::program(ui, origin, false);
-                                }
-                            },
+                    view()
+                        .gap(px(10.0))
+                        .p(px(24.0))
+                        .rounded(px(RADIUS_LARGE))
+                        .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
+                        .child(
+                            text(move || program().map_or(String::new(), |(ch, p)| title(ch, p)))
+                                .font_family(SANS)
+                                .font_weight(MEDIUM)
+                                .text_size(move || size.text_px(TITLE))
+                                .text_color(rgb(LIST_TEXT)),
                         )
-                    },
-                )),
+                        .child(
+                            text(move || {
+                                program().map_or(String::new(), |(ch, p)| {
+                                    format!(
+                                        "{} · {}–{}",
+                                        channel_name(ch),
+                                        clock(p.start),
+                                        clock(p.end)
+                                    )
+                                })
+                            })
+                            .font_family(SANS)
+                            .text_size(move || size.text_px(HEADER_TIMES))
+                            .text_color(Mark::Plain.secondary()),
+                        )
+                        .child(
+                            text(move || {
+                                program()
+                                    .and_then(|(channel, program)| {
+                                        crate::header::program_description(
+                                            &*crate::schedule(),
+                                            channel,
+                                            program,
+                                        )
+                                    })
+                                    .unwrap_or_default()
+                            })
+                            .font_family(SANS)
+                            .text_size(move || size.text_px(HEADER_BODY))
+                            .text_color(rgb(LIST_TEXT)),
+                        )
+                        .child(when(
+                            move || {
+                                ui.player_surface == 0
+                                    && program().is_some_and(|(ch, p)| {
+                                        crate::recordings_view::available(ch)
+                                            && crate::guide::unix_of(&*crate::schedule(), p.end)
+                                                > crate::time::wall_unix()
+                                    })
+                            },
+                            move || {
+                                crate::ui_kit::button(
+                                    ui,
+                                    size,
+                                    tr("Record"),
+                                    || true,
+                                    move || {
+                                        if let Some(origin) = ui.description.get_untracked() {
+                                            crate::recordings_view::program(ui, origin, false);
+                                        }
+                                    },
+                                )
+                            },
+                        )),
+                ),
         )
 }
 

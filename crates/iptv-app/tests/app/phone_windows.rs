@@ -231,6 +231,10 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 .filter_map(|id| bounds(app, id))
                 .collect();
             assert_eq!(rows.len(), BAR_CONTROLS.len(), "the bar's controls: {what}");
+            assert!(
+                bounds(app, "play-bar-more").is_none(),
+                "all actions fit: {what}"
+            );
             let pause = bounds(app, "play-bar-play-pause").expect("play/pause");
             assert!(
                 (pause[0] + pause[2] / 2.0 - size.0 / 2.0).abs() <= 0.5,
@@ -244,6 +248,10 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                         && b[1] >= -0.5
                         && b[1] + b[3] <= size.1 + 0.5,
                     "{b:?} inside: {what}"
+                );
+                assert!(
+                    (b[1] + b[3] / 2.0 - pause[1] - pause[3] / 2.0).abs() <= 0.5,
+                    "single row: {b:?}, {pause:?}, {what}"
                 );
                 assert!(b[2] >= 44.0 - 0.5, "a 44-point target {b:?}: {what}");
             }
@@ -267,6 +275,60 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             persistent(app, &lifetime, surface);
         }
     }
+    // All ten controls fit at this width only by using spare space on the left.
+    present(app, (532.0, 280.0), 1.0);
+    let direct: Vec<_> = BAR_CONTROLS
+        .iter()
+        .map(|id| bounds(app, id).expect(id))
+        .collect();
+    assert!(bounds(app, "play-bar-more").is_none());
+    assert!(direct.iter().all(|b| b[0] >= 0.0 && b[0] + b[2] <= 532.5));
+    assert!(
+        direct
+            .windows(2)
+            .all(|pair| pair[0][0] + pair[0][2] <= pair[1][0] + 0.5),
+        "adjacent targets do not intersect: {direct:?}"
+    );
+
+    // A narrower landscape player keeps PiP visible as other actions move to More.
+    present(app, (370.0, 260.0), 1.0);
+    let favorite = bounds(app, "play-bar-favorite").expect("favorite remains direct");
+    let pip = bounds(app, "play-bar-pip").expect("PiP remains direct");
+    let more = bounds(app, "play-bar-more").expect("overflow remains direct");
+    assert!(favorite[0] + favorite[2] <= pip[0] && pip[0] + pip[2] <= more[0]);
+    assert!(bounds(app, "play-bar-multiview").is_none());
+    assert!(bounds(app, "play-bar-record").is_none());
+    step(app.press("id:play-bar-more"));
+    step(app.wait_for("id:chooser-items >> text:Multiview"));
+    step(app.wait_for("id:chooser-items >> text:Display"));
+    assert!(bounds(app, "play-bar-pip").is_none());
+    step(app.press("label:Close the chooser"));
+    step(app.wait_for("id:play-bar-pip"));
+
+    // The overflow remains open across a resize that keeps the same actions.
+    // Once the actions fit on the bar, dismiss the old list as a unit.
+    step(app.press("id:play-bar-more"));
+    present(app, (371.0, 260.0), 1.0);
+    step(app.wait_for("id:chooser-items >> text:Display"));
+    present(app, (532.0, 280.0), 1.0);
+    step(app.wait_for("id:play-bar-picture"));
+    assert!(
+        !app.screen()
+            .matches("id:chooser-items >> text:Display")
+            .unwrap()
+    );
+    assert!(bounds(app, "play-bar-more").is_none());
+
+    // A control that moves into More after a press must still extend the
+    // bar's idle deadline, and that deadline must survive the resize.
+    step(app.run_for(Duration::from_millis(750)));
+    step(app.press("id:play-bar-favorite"));
+    present(app, (180.0, 260.0), 1.0);
+    assert!(bounds(app, "play-bar-favorite").is_none());
+    step(app.run_for(Duration::from_millis(2_500)));
+    assert!(bounds(app, "play-bar-more").is_some());
+    step(app.run_for(Duration::from_millis(600)));
+    assert!(bounds(app, "play-bar-more").is_none());
 }
 
 /// A foldable phone unfolded becomes a tablet (Android derives the idiom

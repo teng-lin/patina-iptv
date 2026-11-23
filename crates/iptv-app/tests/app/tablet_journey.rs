@@ -907,8 +907,7 @@ fn interruptions_pause_and_resume_the_heard_multiview_tile() {
 
 /// A Galaxy Tab A9+ (800 × 1280 dp) half of a split screen either way, at
 /// the 1.15 font scale such tablets default to: the full-screen play bar
-/// keeps every button inside the window, its right-hand group wrapping
-/// under the transport rather than running past the edge.
+/// keeps every visible button inside the window and offers overflow in More.
 #[test]
 fn a_split_screen_tablet_keeps_every_play_bar_button_inside_the_window() {
     let Some(home) = isolated!() else { return };
@@ -943,7 +942,7 @@ fn a_split_screen_tablet_keeps_every_play_bar_button_inside_the_window() {
             })
             .filter_map(|n| n.test_id.clone())
             .collect();
-        for id in ["play-bar-guide", "play-bar-multiview", "play-bar-channels"] {
+        for id in ["play-bar-play-pause", "play-bar-guide"] {
             assert!(buttons.iter().any(|b| &**b == id), "{id} shown: {what}");
         }
         for id in &buttons {

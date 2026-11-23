@@ -107,6 +107,110 @@ pub(crate) fn preview_fixture_with(
 }
 
 #[test]
+fn tv_can_scroll_long_program_details_and_reopen_at_the_top() {
+    let Some(home) = isolated!() else { return };
+    const PROGRAM: &str = "Generated long program";
+    const DETAILS: &str = "id:description-scroll >> text:Generated long program";
+    let guide = home.path().join("details.xml");
+    let synopsis = "This is a generated program synopsis with several lines. ".repeat(36);
+    let xml = crate::support::guide(crate::support::now(), &[("one", "Local A", PROGRAM)])
+        .replace("</title>", &format!("</title><desc>{synopsis}</desc>"));
+    std::fs::write(&guide, xml).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("guide.stay_on_guide", Value::Bool(true))
+        .unwrap();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    settings
+        .set("epg.update_on_start", Value::Bool(true))
+        .unwrap();
+    let mut fixture = personalization::launch_prepared(
+        home,
+        settings,
+        true,
+        |path, source| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_guide_sources(
+                    source,
+                    &[iptv_store_sqlite::GuideSource {
+                        feed: iptv_epg::FeedId(1001),
+                        provider_index: None,
+                        url: iptv_providers::SecretUrl::new(guide.to_string_lossy()),
+                        name: None,
+                        enabled: true,
+                        shift_minutes: 0,
+                    }],
+                )
+                .unwrap();
+        },
+        |config| {
+            config.viewport =
+                nsh_core::Size::new(nsh_core::prelude::px(960.0), nsh_core::prelude::px(540.0));
+        },
+        |_| {},
+    );
+    let app = &mut fixture.app;
+    step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
+    step(app.wait_for_within("text:Generated long program", Duration::from_secs(20)));
+    step(app.press("text:/^☰  /"));
+    step(app.press_key("right"));
+    choose_fullscreen(app);
+    step(app.press_key("m"));
+    for _ in 0..12 {
+        if selected(app, "play-bar-details") {
+            break;
+        }
+        step(app.press_key("right"));
+    }
+    assert!(selected(app, "play-bar-details"));
+    step(app.press_key("enter"));
+    step(app.wait_for(DETAILS));
+    let title_y = |app: &crate::Headless| {
+        let nodes = app.screen().layout_nodes();
+        let scroll = nodes
+            .iter()
+            .find(|node| node.test_id.as_deref() == Some("description-scroll"))
+            .unwrap();
+        assert!(
+            scroll
+                .scroll
+                .as_ref()
+                .unwrap()
+                .content_size
+                .unwrap()
+                .height
+                .0
+                > scroll.bounds.size.height.0,
+            "the synopsis needs to scroll"
+        );
+        let card = nodes.iter().find(|node| node.parent == scroll.id).unwrap();
+        nodes
+            .iter()
+            .find(|node| {
+                node.parent == card.id && node.text.as_ref().is_some_and(|t| t.text.text == PROGRAM)
+            })
+            .unwrap()
+            .bounds
+            .origin
+            .y
+            .0
+    };
+    let top = title_y(app);
+    step(app.press_key("down"));
+    assert!(title_y(app) < top - 1.0);
+    step(app.press_key("up"));
+    assert!((title_y(app) - top).abs() <= 0.5);
+    step(app.press_key("down"));
+    assert!(title_y(app) < top - 1.0);
+    step(app.back());
+    assert!(selected(app, "play-bar-details"));
+    step(app.press_key("enter"));
+    step(app.wait_for(DETAILS));
+    assert!((title_y(app) - top).abs() <= 0.5);
+}
+
+#[test]
 fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime) = preview_fixture(home);
@@ -171,16 +275,16 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
         .expect("the play/pause button")
         .bounds;
     assert!((bounds.origin.x.0 + bounds.size.width.0 / 2.0 - 480.0).abs() <= 0.5);
-    // Live playback disables seek buttons, so Left skips Rewind to Mute.
+    // Guide and Favorite are one step either side of live transport.
     step(app.press_key("left"));
-    assert!(selected(app, "play-bar-mute"));
+    assert!(selected(app, "play-bar-guide"));
     step(app.press_key("right"));
     assert!(selected(app, "play-bar-play-pause"));
     step(app.press_key("right"));
-    assert!(selected(app, "play-bar-record"));
+    assert!(selected(app, "play-bar-favorite"));
     // Down over live playback must keep focus in the bar, not zap channels.
     step(app.press_key("down"));
-    assert!(selected(app, "play-bar-record"));
+    assert!(selected(app, "play-bar-favorite"));
     assert_eq!(iptv_app::player_opens(0), opens);
     for _ in 0..12 {
         if selected(app, "play-bar-picture") {
@@ -214,12 +318,7 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     step(app.press_key("enter"));
     step(app.press_key("m"));
     step(app.wait_for("id:play-bar-layer"));
-    for _ in 0..12 {
-        if selected(app, "play-bar-guide") {
-            break;
-        }
-        step(app.press_key("right"));
-    }
+    step(app.press_key("left"));
     assert!(selected(app, "play-bar-guide"));
     step(app.press_key("enter"));
     step(app.wait_for("id:guide-preview"));

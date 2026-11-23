@@ -227,6 +227,8 @@ pub struct SharedUi {
 #[derive(Clone, Copy)]
 pub struct Ui {
     pub app: SharedUi,
+    /// Owns work that must survive changes to controls inside this window.
+    owner: Owner,
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_presentation::browse_playback::BrowsePlayback>,
@@ -261,9 +263,8 @@ pub struct Ui {
     pub panels: Signal<Panels>,
     /// The pointer's play bar over full-screen video (`play_bar.rs`).
     pub play_bar: Signal<iptv_presentation::play_bar::PlayBar>,
-    /// The play bar's laid-out height above the window's bottom (0 until
-    /// it first shows): its rows wrap in a narrow window.
-    pub play_bar_height: Signal<f32>,
+    /// Outer bounds of this player window's bar, including margins and safe area.
+    pub play_bar_size: Signal<Option<nsh_core::Size<Points>>>,
     pub paused: Signal<bool>,
     /// A catch-up seek being chosen: the target, in seconds into the
     /// program, opened once the keys pause (`seek.rs`).
@@ -272,6 +273,7 @@ pub struct Ui {
     pub menu: Signal<Option<Menu>>,
     /// The program description popover, if open.
     pub description: Signal<Option<Origin>>,
+    description_scroll: ui_kit::FocusScroll,
     pub recordings: Signal<iptv_presentation::recording::Screen>,
     pub vod: Signal<iptv_presentation::vod::Screen>,
     pub recordings_open: Memo<bool>,
@@ -356,6 +358,7 @@ impl Ui {
         let recordings_open = computed(move || recordings.with(|s| s.open));
         let ui = Self {
             app,
+            owner: Owner::current(),
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
@@ -400,11 +403,12 @@ impl Ui {
             visible_rows: signal(None),
             panels: signal(Panels::default()),
             play_bar: signal(Default::default()),
-            play_bar_height: signal(0.0),
+            play_bar_size: signal(None),
             paused: signal(false),
             seek_target: signal(None),
             menu: signal(None),
             description: signal(None),
+            description_scroll: ui_kit::FocusScroll::new(),
             recordings,
             vod: signal(iptv_presentation::vod::Screen::default()),
             recordings_open,

@@ -181,7 +181,7 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     );
 
     // Track selection by the remote on the same bar: the host reports a
-    // subtitle track; Right reaches Tracks, OK opens its chooser, Down and
+    // subtitle track; Left reaches Tracks, OK opens its chooser, Down and
     // OK pick the track. The choice goes to the same player as a property:
     // no stream opens, and focus returns to Tracks.
     app.engine().control().dispatch_event(
@@ -206,14 +206,14 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
         {
             break;
         }
-        step(app.press_key("right"));
+        step(app.press_key("left"));
     }
     assert!(
         app.screen()
             .accessibility_state("id:play-bar-tracks")
             .unwrap()
             .selected,
-        "Right reaches Tracks"
+        "Left reaches Tracks"
     );
     step(app.press_key("enter"));
     step(app.wait_for("id:chooser-layer >> text:/English$/"));

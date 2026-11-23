@@ -241,16 +241,9 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
     for name in ["Rewind", "Fast-forward"] {
         let selector = format!("label:{name}");
         assert!(
-            app.screen()
-                .accessibility_state(&selector)
-                .unwrap()
-                .disabled,
-            "live-only seeking stays disabled"
+            !app.screen().matches(&selector).unwrap(),
+            "live transport omits seeking"
         );
-        let error = app
-            .press(&selector)
-            .expect_err("disabled seeking cannot receive a press");
-        assert!(error.contains("is disabled"), "{error}");
     }
     assert_eq!(
         iptv_app::player_opens(0),
@@ -264,26 +257,25 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
         "Play or pause",
         "Favorite",
         "Favorite",
-        "Subtitles and tracks",
-        "Full screen",
-        "Full screen",
     ] {
         step(app.press(&format!("label:{name}")));
     }
-    // Program details: a second press closes them.
+    step(app.play_bar_option("Full screen"));
+    step(app.play_bar_option("Full screen"));
     let details = "text:/^Test Channel Two · \\d/";
-    step(app.press("label:Program details"));
+    step(app.play_bar_option("Program details"));
     step(app.wait_for(details));
-    step(app.press("label:Program details"));
+    step(app.press("id:play-bar-play-pause"));
+    assert!(app.screen().matches(details).unwrap());
+    step(app.press("id:play-bar-play-pause"));
+    step(app.press("id:description-layer"));
     step(gone(app, details));
-    // Picture size: a second press closes it, and so does a press beside
-    // it; the bar stays meanwhile.
-    step(app.press("label:Picture size"));
+    // Dismissing the picture chooser leaves the bar open.
+    step(app.play_bar_option("Display"));
     step(app.wait_for("text:Stretch to fill"));
-    step(app.press("label:Picture size"));
-    step(gone(app, "text:Stretch to fill"));
-    step(app.press("label:Picture size"));
-    step(app.wait_for("text:Stretch to fill"));
+    step(app.press("id:play-bar-mute"));
+    assert!(app.screen().matches("text:Stretch to fill").unwrap());
+    step(app.press("id:play-bar-mute"));
     step(app.press("label:Close the chooser"));
     step(gone(app, "text:Stretch to fill"));
     assert!(app.screen().matches("label:Mute").unwrap(), "the bar stays");
@@ -293,6 +285,14 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
         app.screen().matches("label:Picture in picture").unwrap(),
         "the bar's picture-in-picture button"
     );
+    // The overflow volume chooser follows mute changes on the visible bar.
+    step(app.set_viewport(Size::new(px(500.0), px(720.0))));
+    step(app.play_bar_option("Volume"));
+    step(app.press("id:play-bar-mute"));
+    step(app.wait_for("id:chooser-items >> text:✓  0%"));
+    step(app.press("id:play-bar-mute"));
+    step(app.press("label:Close the chooser"));
+    step(app.set_viewport(Size::new(px(1280.0), px(720.0))));
     // The channel list replaces the bar; Back closes it.
     step(app.press("label:Channel list"));
     step(gone(app, "label:Mute"));

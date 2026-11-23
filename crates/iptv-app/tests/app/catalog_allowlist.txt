@@ -104,6 +104,7 @@ iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M3 9h4
 iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M6 4.5h4v15H6zM14 4.5h4v15h-4z'/>
 iptv-app/src/play_bar/icons.rs	<path fill='currentColor' stroke='none' d='M7 4.5v15L19.5 12z'/>
 iptv-app/src/play_bar/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M16 15L9 8M9 13V8h5'/>
+iptv-app/src/play_bar/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M5 12h3l2-4 3 8 2-4h4'/>
 iptv-app/src/play_bar/icons.rs	<rect x='2' y='4' width='20' height='16' rx='2'/><rect x='12' y='11' width='8' height='7' rx='1' fill='currentColor'/>
 iptv-app/src/play_bar/icons.rs	<rect x='2.5' y='5' width='19' height='14' rx='2'/><path d='M6 11V8.5h3M18 13v2.5h-3'/>
 iptv-app/src/play_bar/icons.rs	<rect x='3' y='4' width='18' height='16' rx='2'/><path d='M3 9h18M3 14.5h18M9 9v11M15 14.5V20'/>
