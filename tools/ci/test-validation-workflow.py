@@ -293,8 +293,14 @@ class Workflows(unittest.TestCase):
         self.assertNotIn('make-iptv-fixtures.py', build)
         self.assertNotIn('needs:', streams.split('    steps:', 1)[0])
         # Streams depend only on their script and are reused while it is unchanged.
-        self.assertIn("sha256sum tools/make-hls-fixtures.sh", streams)
-        self.assertIn('bash tools/make-hls-fixtures.sh --android-smoke', streams)
+        self.assertIn("printf '%s\\n' \"$STREAMS_ARGS\"; cat tools/make-hls-fixtures.sh; } | sha256sum", streams)
+        self.assertIn('${ImageVersion:-unversioned}', streams)
+        self.assertIn('STREAMS_ARGS: --android-smoke', streams)
+        self.assertIn('bash tools/make-hls-fixtures.sh $STREAMS_ARGS', streams)
+        # The artifact is published before a bounded, non-fatal cache save.
+        save = streams.index('actions/cache/save')
+        self.assertLess(streams.index('name: android-smoke-streams'), save)
+        self.assertIn('timeout-minutes: 5\n        continue-on-error: true', streams[save:])
         self.assertLess(streams.index('actions/cache/restore'), streams.index('bash tools/make-hls-fixtures.sh'))
         self.assertIn("if: steps.cache.outputs.cache-hit != 'true' && inputs.cold != true && github.ref == 'refs/heads/master'",
                       streams)

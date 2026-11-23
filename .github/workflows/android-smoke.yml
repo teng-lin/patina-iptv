@@ -115,13 +115,20 @@ jobs:
   streams:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      # The encoder's arguments are part of the cache identity.
+      STREAMS_ARGS: --android-smoke
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      # The runner image fixes the FFmpeg build a miss installs; segments embed
+      # the encoder version, so each image encodes its own once.
       - name: Identify the synthetic streams
         id: streams
-        run: echo "key=android-smoke-streams-v1-${ImageOS:-unknown}-$(sha256sum tools/make-hls-fixtures.sh | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: |
+          recipe=$({ printf '%s\n' "$STREAMS_ARGS"; cat tools/make-hls-fixtures.sh; } | sha256sum | cut -c1-16)
+          echo "key=android-smoke-streams-v1-${ImageOS:-unknown}-${ImageVersion:-unversioned}-$recipe" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache
         if: inputs.cold != true
@@ -134,13 +141,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           bash tools/ci/apt-install.sh "$RUNNER_TEMP/patina-apt" false ffmpeg
-          bash tools/make-hls-fixtures.sh --android-smoke
-      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        if: steps.cache.outputs.cache-hit != 'true' && inputs.cold != true && github.ref == 'refs/heads/master'
-        continue-on-error: true
-        with:
-          path: fixtures/hls
-          key: ${{ steps.streams.outputs.key }}
+          bash tools/make-hls-fixtures.sh $STREAMS_ARGS
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-smoke-streams
@@ -149,6 +150,15 @@ jobs:
           retention-days: 3
           # The segments are H.264 already.
           compression-level: 0
+      # After the upload, and bounded: a stalled cache service must not hold
+      # back the emulator jobs or cancel this one.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: steps.cache.outputs.cache-hit != 'true' && inputs.cold != true && github.ref == 'refs/heads/master'
+        timeout-minutes: 5
+        continue-on-error: true
+        with:
+          path: fixtures/hls
+          key: ${{ steps.streams.outputs.key }}
   smoke:
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.streams.result == 'success' }}
     needs: [build, streams]
