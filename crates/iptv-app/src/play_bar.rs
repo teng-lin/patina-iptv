@@ -148,16 +148,19 @@ fn update(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
     let Some(at) = ui.play_bar.with_untracked(PlayBar::hide_at_ms) else {
         return;
     };
-    let _task = set_timeout(Duration::from_millis(at.saturating_sub(now)), move || {
-        let now = ui.now_ms();
-        // Later input moved the deadline: then this does nothing.
-        if untracked(|| ui.play_bar.try_get())
-            .is_some_and(|b| b.hide_at_ms().is_some_and(|at| now >= at))
-        {
-            ui.play_bar.update(|b| {
-                b.tick(now);
-            });
-        }
+    // The window owns the idle deadline even when a resize replaces a button.
+    ui.owner.run(|| {
+        let _task = set_timeout(Duration::from_millis(at.saturating_sub(now)), move || {
+            let now = ui.now_ms();
+            // Later input moved the deadline: then this does nothing.
+            if untracked(|| ui.play_bar.try_get())
+                .is_some_and(|b| b.hide_at_ms().is_some_and(|at| now >= at))
+            {
+                ui.play_bar.update(|b| {
+                    b.tick(now);
+                });
+            }
+        });
     });
 }
 

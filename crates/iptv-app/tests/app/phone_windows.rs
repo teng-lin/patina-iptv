@@ -318,6 +318,17 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             .unwrap()
     );
     assert!(bounds(app, "play-bar-more").is_none());
+
+    // A control that moves into More after a press must still extend the
+    // bar's idle deadline, and that deadline must survive the resize.
+    step(app.run_for(Duration::from_millis(750)));
+    step(app.press("id:play-bar-favorite"));
+    present(app, (180.0, 260.0), 1.0);
+    assert!(bounds(app, "play-bar-favorite").is_none());
+    step(app.run_for(Duration::from_millis(2_500)));
+    assert!(bounds(app, "play-bar-more").is_some());
+    step(app.run_for(Duration::from_millis(600)));
+    assert!(bounds(app, "play-bar-more").is_none());
 }
 
 /// A foldable phone unfolded becomes a tablet (Android derives the idiom

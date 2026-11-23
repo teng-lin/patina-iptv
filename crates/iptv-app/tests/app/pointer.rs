@@ -285,6 +285,14 @@ fn bar_buttons(app: &mut Headless, step: impl Fn(Result<(), String>)) {
         app.screen().matches("label:Picture in picture").unwrap(),
         "the bar's picture-in-picture button"
     );
+    // The overflow volume chooser follows mute changes on the visible bar.
+    step(app.set_viewport(Size::new(px(500.0), px(720.0))));
+    step(app.play_bar_option("Volume"));
+    step(app.press("id:play-bar-mute"));
+    step(app.wait_for("id:chooser-items >> text:✓  0%"));
+    step(app.press("id:play-bar-mute"));
+    step(app.press("label:Close the chooser"));
+    step(app.set_viewport(Size::new(px(1280.0), px(720.0))));
     // The channel list replaces the bar; Back closes it.
     step(app.press("label:Channel list"));
     step(gone(app, "label:Mute"));

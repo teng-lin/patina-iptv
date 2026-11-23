@@ -122,6 +122,10 @@ fn title(kind: Kind) -> &'static str {
     }
 }
 
+fn volume_index(ui: Ui) -> usize {
+    (usize::from(crate::media::audible_volume(ui)) + 5) / 10
+}
+
 /// The entries, what each sets, and the one in effect.
 fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
     match kind {
@@ -175,14 +179,11 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
         }
         Kind::History => history(ui),
         Kind::More => (Vec::new(), Vec::new(), 0),
-        Kind::Volume => {
-            let level = crate::media::audible_volume(ui);
-            (
-                (0..=10).map(|n| format!("{}%", n * 10)).collect(),
-                Vec::new(),
-                (usize::from(level) + 5) / 10,
-            )
-        }
+        Kind::Volume => (
+            (0..=10).map(|n| format!("{}%", n * 10)).collect(),
+            Vec::new(),
+            volume_index(ui),
+        ),
     }
 }
 
@@ -310,8 +311,7 @@ pub fn pick(ui: Ui, index: usize) {
             if let Some(more) = open.more
                 && let Some(&control) = more.controls.get(index)
             {
-                ui.owner
-                    .run(|| crate::play_bar::activate(ui, control, more.window));
+                crate::play_bar::activate(ui, control, more.window);
             }
         }
         Kind::History => play_recent(ui, &value),
@@ -390,15 +390,18 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             crate::play_bar::label(ui, *c.more.as_ref()?.controls.get(index)?)
                                 .to_owned()
                         }
-                        Kind::History => c.labels.get(index)?.clone(),
+                        Kind::History | Kind::Volume => c.labels.get(index)?.clone(),
                         Kind::Track(_) => c
                             .track_labels_in(crate::i18n::language())
                             .get(index)?
                             .clone(),
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
-                    let checked =
-                        !matches!(c.kind, Kind::History | Kind::More) && c.list.selected == index;
+                    let checked = match c.kind {
+                        Kind::History | Kind::More => false,
+                        Kind::Volume => volume_index(ui) == index,
+                        _ => c.list.selected == index,
+                    };
                     Some((label, checked, c.list.focus == index))
                 })
             })
@@ -430,7 +433,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             })
             .on_press(move || {
                 ui.touched();
-                pick(ui, at.index());
+                // The row unmounts on selection. Playback actions and timers
+                // belong to the window where the chooser opened.
+                ui.owner.run(|| pick(ui, at.index()));
             })
             .child(
                 list_rows::name(size, move || {
