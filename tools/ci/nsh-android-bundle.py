@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Transfer the exact four NSH runtime files needed for each Android ABI."""
 import argparse
+import gzip
 import importlib.util
 import os
 from pathlib import Path
@@ -25,12 +26,16 @@ def entries(abi):
 
 def pack(root, abi, archive):
     archive.parent.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(archive, 'w:gz') as output:
-        for name in entries(abi):
-            path = root / name
-            if not path.is_file() or path.is_symlink() or not 0 < path.stat().st_size <= LIMIT:
-                raise ValueError(f'Invalid NSH runtime file: {name}')
-            output.add(path, arcname=name, recursive=False)
+    with archive.open('wb') as raw, gzip.GzipFile(fileobj=raw, mode='wb', mtime=0, filename='') as stream:
+        with tarfile.open(fileobj=stream, mode='w') as output:
+            for name in entries(abi):
+                path = root / name
+                if not path.is_file() or path.is_symlink() or not 0 < path.stat().st_size <= LIMIT:
+                    raise ValueError(f'Invalid NSH runtime file: {name}')
+                entry = tarfile.TarInfo(name)
+                entry.size = path.stat().st_size
+                with path.open('rb') as source:
+                    output.addfile(entry, source)
 
 
 def unpack(root, abi, archive):

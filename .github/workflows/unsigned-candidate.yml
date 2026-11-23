@@ -65,6 +65,7 @@ jobs:
           name: cargo-about
           version: 0.9.3
           features: cli
+          stage-release: 'true'
       - name: Build Windows installer
         shell: pwsh
         run: ./tools/package-windows.ps1

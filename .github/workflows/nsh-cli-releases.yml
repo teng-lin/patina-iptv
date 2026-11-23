@@ -1,4 +1,4 @@
-name: Publish NSH tool releases
+name: Publish pinned CI tools
 on:
   workflow_run:
     workflows: [Validation]
@@ -13,6 +13,7 @@ jobs:
     if: >-
       github.repository == 'teng-lin/patina-iptv' && github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'master' &&
+      github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -31,6 +32,12 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           pattern: patina-nsh-*-release-*
           path: target/nsh-cli-releases
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: patina-cargo-about-release-*
+          path: target/nsh-cli-releases
       - name: Generate checksum manifests
         id: manifests
         env:
@@ -40,7 +47,7 @@ jobs:
         if: steps.manifests.outputs.available == 'true'
         with:
           subject-path: target/nsh-cli-releases/*/nsh-cli.json
-      - name: Publish completed NSH CLI builds
+      - name: Publish completed tool builds
         if: steps.manifests.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}

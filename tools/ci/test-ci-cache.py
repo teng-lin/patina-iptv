@@ -95,6 +95,19 @@ class ToolCache(unittest.TestCase):
         Path('.cargo/config.toml').write_text('[build]\nrustflags = ["--cfg=generated_workspace"]\n')
         self.assertNotEqual(configured, self.identity(TOOL_RECIPE_VERSION="2")["key"])
 
+    def test_inherited_cargo_profile_flags_invalidate_a_source_build(self):
+        before = self.identity()["key"]
+        self.assertNotEqual(before, self.identity(CARGO_PROFILE_RELEASE_PANIC="abort")["key"])
+
+    def test_windows_cargo_about_is_staged_by_the_existing_candidate_job(self):
+        workflow = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text()
+        candidate = workflow.split("  windows-package:", 1)[1].split("  android-native:", 1)[0]
+        self.assertIn("stage-release: 'true'", candidate)
+        self.assertIn("github.workflow != 'Release'", next(
+            line for line in RECIPE.splitlines() if "if: inputs.stage-release" in line))
+        self.assertIn("github.event_name == 'push'", RECIPE)
+        self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
+
     def test_invalid_executable_names_are_rejected(self):
         with self.assertRaisesRegex(SystemExit, "invalid Cargo tool name"):
             self.identity(TOOL_NAME="../generated")

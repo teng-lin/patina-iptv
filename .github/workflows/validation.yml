@@ -206,11 +206,11 @@ jobs:
         run: test "$RESULT" = success
   candidate:
     needs: [plan, tools]
-    if: ${{ !cancelled() && needs.plan.outputs.candidate_build == 'true' && needs.tools.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.candidate_build == 'true' && (needs.tools.result == 'success' || needs.tools.result == 'skipped') }}
     uses: ./.github/workflows/unsigned-candidate.yml
     with:
       android: true
-      prepared-linux-tools: true
+      prepared-linux-tools: ${{ needs.tools.result == 'success' }}
       desktop-matrix: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
   seal-candidate:
     needs: [plan, validation, candidate]

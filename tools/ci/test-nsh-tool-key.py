@@ -143,6 +143,19 @@ class ToolIdentityTests(unittest.TestCase):
 
 
 class IdentityStepTests(unittest.TestCase):
+    def test_prepared_tools_can_fall_back_on_a_runner_image_mismatch(self):
+        root = Path(__file__).resolve().parents[2]
+        for action in ("nsh-cli", "android"):
+            text = (root / f".github/actions/{action}/action.yml").read_text()
+            identity, restore = text.split("    - uses: actions/download-artifact", 1)
+            self.assertIn("inputs.prepared == 'true' || inputs.share == 'true'", identity)
+            download = restore.split("    - name: ", 1)[0]
+            self.assertIn("github.workflow != 'Release'", download)
+            self.assertIn("continue-on-error: true", download)
+            self.assertIn("steps.prepared.outcome != 'success'", restore)
+        smoke = (root / ".github/workflows/android-smoke.yml").read_text()
+        self.assertIn("inputs.prepared-linux-tools && !inputs.cold", smoke)
+
     def test_identity_step_errors_and_canonical_cache_paths(self):
         root = Path(__file__).resolve().parents[2]
         for action in ("nsh-cli", "android"):
@@ -271,19 +284,47 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual([call.args[:2] for call in command.call_args_list], [("release", "upload"), ("release", "edit")])
         self.assertEqual(command.call_args_list[0].args[3:], (str(self.manifest), str(self.license)))
 
+    def test_retry_replaces_incomplete_or_stale_assets_in_a_draft(self):
+        draft = {**self.release, "isDraft": True, "isImmutable": False}
+        stale = {**draft, "assets": [
+            {**draft["assets"][0], "digest": "sha256:" + "b" * 64},
+            {**draft["assets"][1], "state": "starter", "size": 0, "digest": None},
+            draft["assets"][2],
+        ]}
+        with (patch.object(releases, "lookup", side_effect=[stale, draft, self.release]),
+              patch.object(releases, "gh", return_value=subprocess.CompletedProcess([], 0)) as command):
+            releases.publish(self.tag, self.root, "b" * 40)
+        self.assertEqual(command.call_args_list[0].args,
+                         ("release", "upload", self.tag, "--clobber", str(self.source), str(self.manifest)))
+
+    def test_windows_cargo_about_artifact_uses_its_own_source_license(self):
+        artifact = self.root / f"patina-cargo-about-release-Windows-X64-{self.key}"
+        artifact.mkdir()
+        executable = artifact / "cargo-about.exe"
+        executable.write_bytes(b"synthetic windows executable")
+        tag = releases.tag_for("Windows-X64", self.key, "cargo-about")
+        with (patch.object(releases, "trusted_commit", return_value="b" * 40),
+              patch.object(releases, "lookup", return_value=None),
+              patch.object(releases, "read_license", return_value=b"license") as read_license):
+            self.assertTrue(releases.prepare(self.root))
+        read_license.assert_called_once_with(releases.CARGO_ABOUT_LICENSE)
+        self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()),
+                         {"tag": tag, "digest": releases.digest_file(executable)})
+
     def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
         artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
         artifact.mkdir()
         self.download(artifact)
         event = self.root / "event.json"
-        run = {"event": "push", "head_branch": "master", "path": ".github/workflows/validation.yml",
+        run = {"event": "push", "conclusion": "success", "head_branch": "master", "path": ".github/workflows/validation.yml",
                "head_repository": {"full_name": releases.REPOSITORY}, "head_sha": "b" * 40}
         with (patch.dict(os.environ, GITHUB_REPOSITORY=releases.REPOSITORY, GITHUB_REF="refs/heads/master",
                          GITHUB_EVENT_NAME="workflow_run", GITHUB_EVENT_PATH=str(event)),
               patch.object(releases, "publish") as publish,
               patch.object(releases, "lookup", return_value=None),
               patch.object(releases, "upstream_license", return_value=self.license.read_bytes()) as license_fetch):
-            for incorrect in ({"event": "pull_request"}, {"head_repository": {"full_name": "fork/patina-iptv"}}):
+            for incorrect in ({"event": "pull_request"}, {"conclusion": "failure"}, {"conclusion": "cancelled"},
+                              {"head_repository": {"full_name": "fork/patina-iptv"}}):
                 event.write_text(json.dumps({"workflow_run": run | incorrect}))
                 with self.assertRaises(ValueError):
                     releases.publish_staged(self.root)
@@ -311,6 +352,11 @@ class AndroidBundleTests(unittest.TestCase):
                 path.write_bytes(f'synthetic {name}'.encode())
             archive = root / 'runtime.tar.gz'
             bundle.pack(source, 'x86_64', archive)
+            first = archive.read_bytes()
+            for name in bundle.entries('x86_64'):
+                os.utime(source / name, (1234567890, 1234567890))
+            bundle.pack(source, 'x86_64', archive)
+            self.assertEqual(first, archive.read_bytes())
             output = root / 'restored'
             with self.assertRaisesRegex(ValueError, 'requested ABI'):
                 bundle.unpack(output, 'arm64-v8a', archive)

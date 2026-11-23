@@ -50,7 +50,7 @@ jobs:
           cargo-cache: 'false'
       - uses: ./.github/actions/android
         with:
-          prepared: ${{ inputs.prepared-linux-tools && 'true' || 'false' }}
+          prepared: ${{ inputs.prepared-linux-tools && !inputs.cold && 'true' || 'false' }}
           abi: x86_64
           cache: ${{ !inputs.cold && 'gradle' || '' }}
       - name: Identify the Android compiler and host libraries
