@@ -207,13 +207,18 @@ fn a_held_grip_scrolls_at_the_edge_and_moves_the_row_past_the_viewport() {
     while node.scroll.is_none() {
         node = nodes.iter().find(|n| n.id == node.parent).unwrap();
     }
-    let bottom = node.bounds.origin.y + node.bounds.size.height;
-    let drag_y = bottom - grip.bounds.center().y - px(5.0);
+    let pitch = grip.bounds.size.height.0;
+    let bottom = node.bounds.origin.y.0 + node.bounds.size.height.0;
+    let distance_to_bottom = bottom - grip.bounds.center().y.0;
     assert!(
-        drag_y > px(0.0) && drag_y < grip.bounds.size.height * 1.5,
-        "the last row needs edge scrolling"
+        distance_to_bottom < 2.0 * pitch,
+        "the last row's center starts below the viewport"
     );
-    step(app.drag_and_hold(first_grip, point(px(0.0), drag_y)));
+    // Reach the edge without moving far enough to place A in the last row
+    // until the list itself scrolls under the held grip.
+    let drag_y = (distance_to_bottom - 5.0).min(1.25 * pitch);
+    assert!(drag_y > 0.0, "the first grip starts inside the viewport");
+    step(app.drag_and_hold(first_grip, point(px(0.0), px(drag_y))));
     step(app.run_for(Duration::from_millis(550)));
     step(app.drop_held());
     step(app.set_viewport(Size::new(px(1920.0), px(1080.0))));
