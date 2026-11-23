@@ -46,6 +46,14 @@ class Workflows(unittest.TestCase):
         self.assertIn("name: host-tests (${{ matrix.os }})", host)
         self.assertIn("name: android-packaging", android)
 
+    def test_standalone_lanes_pass_prerequisite_options_to_setup(self):
+        for name, option in (("credentials", "policy-tool: 'false'"), ("import-stress", "prerequisites: store")):
+            with self.subTest(name=name):
+                text = (ROOT / f".github/workflows/{name}.yml").read_text()
+                checkout, setup = text.split("      - uses: ./.github/actions/setup\n", 1)
+                self.assertNotIn(option, checkout)
+                self.assertIn(option, setup.split("      - name:", 1)[0])
+
     def test_native_validation_has_no_signing_environment(self):
         for name in ("ios", "credentials"):
             text = (ROOT / f".github/workflows/{name}.yml").read_text()

@@ -12,11 +12,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          prerequisites: store
           persist-credentials: false
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
+          prerequisites: store
           cache-on-failure: 'true'
           cache-key: stress-v2-${{ hashFiles('tools/ci/import-stress.sh') }}
       - name: Full catalog and million-program EPG memory budgets

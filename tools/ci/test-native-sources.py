@@ -4,10 +4,12 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location("native_sources", Path(__file__).with_name("native-sources.py"))
 sources = importlib.util.module_from_spec(spec)
@@ -367,6 +369,32 @@ class Collecting(unittest.TestCase):
         # The primary address failed; the mirror supplied the same checksummed bytes.
         self.assertEqual(self.attempts, ["https://example.test/releases/synthetic-1.2.3.tar.xz",
                                          "https://mirror.example.test/synthetic-1.2.3.tar.xz"])
+
+    def test_a_timed_out_primary_removes_partial_bytes_and_tries_the_mirror(self):
+        package = self.macos_package(with_git=False)
+        notices = package / sources.NOTICES["macos"]
+        component = json.loads((notices / "sources.json").read_text())["components"][0]
+        primary = component["sources"][0]["url"]
+        mirror = component["sources"][0]["mirrors"][0]
+        seen = []
+
+        def curl(arguments, **options):
+            self.assertEqual(options["timeout"], 180)
+            url = arguments[-1]
+            seen.append(url)
+            destination = Path(arguments[arguments.index("--output") + 1])
+            if url == primary:
+                destination.write_bytes(b"partial")
+                raise subprocess.TimeoutExpired(arguments, options["timeout"])
+            self.assertFalse(destination.exists())
+            destination.write_bytes(self.files[url])
+            return subprocess.CompletedProcess(arguments, 0, stderr="")
+
+        stage = self.root / "stage"
+        with patch.object(sources.subprocess, "run", side_effect=curl):
+            sources.fetch_homebrew(component, stage)
+        self.assertEqual(seen, [primary, mirror])
+        self.assertEqual((stage / component["sources"][0]["file"]).read_bytes(), self.files[mirror])
 
     def test_archive_is_reproducible(self):
         _, first = self.collect_macos(self.macos_package())

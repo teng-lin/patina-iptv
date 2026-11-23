@@ -97,7 +97,8 @@ and keyring. The aggregate requires explicit success from that step. A
 credential-only change still selects the standalone credential job.
 When host and iOS checks are both selected, the macOS host job compiles the
 iOS device and simulator targets and checks the simulator entitlements. An
-iOS-only change or manual dispatch can use the standalone workflow.
+iOS-only change or manual dispatch can use the standalone workflow. PRs that edit
+either standalone workflow run that workflow even when host tests also run.
 
 Changes confined to the Rust app's test directory run host correctness and
 Windows test compilation. Edits to a leaf validation workflow select its

@@ -222,8 +222,27 @@ class Aggregate(unittest.TestCase):
                     needs["host"]["outputs"][evidence] = "true"
                 needs[lane]["result"] = "failure"
                 self.assertTrue(v.gate(plan, needs))
-                plan[f"{lane}_on_host"] = not on_host
-                self.assertIn(f"host routing is missing or invalid for {lane}", v.gate(plan, needs))
+                if not on_host:
+                    plan[f"{lane}_on_host"] = True
+                    self.assertIn(f"host routing is missing or invalid for {lane}", v.gate(plan, needs))
+
+    def test_edits_to_standalone_workflows_exercise_their_own_setup_alongside_host_tests(self):
+        for lane in ("credentials", "ios"):
+            with self.subTest(lane=lane):
+                paths = [f".github/workflows/{lane}.yml", "crates/iptv-core/src/guide.rs"]
+                plan = v.select(paths)
+                self.assertTrue(plan["host"])
+                self.assertTrue(plan[lane])
+                self.assertFalse(plan[f"{lane}_on_host"])
+                needs = self.successful_needs(plan)
+                self.assertEqual(v.gate(plan, needs), [])
+                needs["host"].setdefault("outputs", {})[v.HOST_VERIFICATIONS[lane]] = "true"
+                needs[lane]["result"] = "skipped"
+                self.assertIn(f"selected {lane}: skipped", v.gate(plan, needs))
+                self.assertEqual(
+                    v.select(paths, "release", candidate_build=True),
+                    v.select([], "release", candidate_build=True),
+                )
 
     def test_android_compile_and_windows_failures_block_even_when_packages_skip(self):
         for lane in ("android", "windows"):

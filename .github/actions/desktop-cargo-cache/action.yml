@@ -29,10 +29,10 @@ runs:
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       with:
         # Preserve the existing Linux cache. The macOS namespace also serves fresh master candidates.
-        shared-key: ${{ inputs.platform == 'macos' && 'desktop-package-macos-v3' || '' }}
+        add-job-id-key: ${{ inputs.platform != 'macos' }}
         key: >-
           ${{ inputs.platform == 'macos'
-          && format('{0}-{1}', steps.compiler.outputs.key,
+          && format('desktop-package-macos-v3-{0}-{1}', steps.compiler.outputs.key,
             hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', 'tools/ci/locked-build-env.sh', 'tools/ci/locked-cargo.py', 'tools/mpv-runtime-unix/runtime-macos.json'))
           || format('desktop-package-v2-linux-{0}-{1}', steps.compiler.outputs.key,
             hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', 'tools/ci/locked-cargo.py', 'tools/ci/package-linux.sh', 'tools/package-macos.sh', 'tools/mpv-runtime-unix/runtime-*.json')) }}

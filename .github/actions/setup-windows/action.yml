@@ -65,8 +65,9 @@ runs:
       with:
         cache-on-failure: ${{ inputs.cache-on-failure }}
         cache-bin: 'false'
-        shared-key: windows-${{ inputs.profile }}-v1
-        key: ${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/mpv-runtime/runtime.json') }}
+        # Installer previews and unsigned master builds share this build identity.
+        add-job-id-key: 'false'
+        key: windows-${{ inputs.profile }}-v1-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/mpv-runtime/runtime.json') }}
         lookup-only: ${{ inputs.cache-lookup-only }}
         # Per-PR copies of these gigabyte-sized caches evict each other.
         # PRs can restore master caches; only master refreshes them.

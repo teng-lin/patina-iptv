@@ -346,15 +346,22 @@ def run(arguments, cwd=None):
 
 def download(url, destination):
     """True when the file arrived. Integrity is the caller's checksum, not the transport."""
-    result = run(["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
-                  # Also refused and reset connections; the checksum guards what arrives.
-                  "--retry-all-errors",
-                  "--connect-timeout", "20", "--max-time", "120", "--retry-max-time", "120", "--proto", "=https,http",
-                  "--proto-redir", "=https,http", "--output", str(destination), url])
-    if result.returncode != 0:
+    arguments = [
+        "curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
+        # Also refused and reset connections; the checksum guards what arrives.
+        "--retry-all-errors", "--connect-timeout", "20", "--max-time", "120", "--retry-max-time", "120",
+        "--proto", "=https,http", "--proto-redir", "=https,http", "--output", str(destination), url,
+    ]
+    try:
+        result = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        print(f"  timed out downloading {url}", file=sys.stderr)
+    else:
+        if result.returncode == 0:
+            return True
         print(f"  could not download {url}: {result.stderr.strip()}", file=sys.stderr)
-        Path(destination).unlink(missing_ok=True)
-    return result.returncode == 0
+    Path(destination).unlink(missing_ok=True)
+    return False
 
 
 GIT_ATTEMPTS = 3

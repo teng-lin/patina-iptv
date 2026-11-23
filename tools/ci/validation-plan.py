@@ -165,7 +165,8 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False):
         "stress": full or ci or "stress" in requested or matches(inputs, STRESS),
     }
     for lane in HOST_VERIFICATIONS:
-        result[f"{lane}_on_host"] = result[lane] and host
+        # A PR editing the standalone workflow must exercise that entry point.
+        result[f"{lane}_on_host"] = result[lane] and host and (tier != "pr" or lane not in requested)
     if tier == "release":
         # The release pipeline builds and validates the shipping packages once,
         # in clean jobs. Avoid constructing throwaway installers first.
@@ -198,7 +199,9 @@ def gate(plan, needs):
         selected = bool(plan[lane])
         if lane in HOST_VERIFICATIONS:
             on_host = plan.get(f"{lane}_on_host")
-            if type(on_host) is not bool or on_host != (selected and plan["host"] is True):
+            eligible = selected and plan["host"] is True
+            if (type(on_host) is not bool or (on_host and not eligible)
+                    or (plan["tier"] != "pr" and on_host != eligible)):
                 errors.append(f"host routing is missing or invalid for {lane}")
             if on_host is True:
                 evidence = needs.get("host", {}).get("outputs", {}).get(HOST_VERIFICATIONS[lane])
