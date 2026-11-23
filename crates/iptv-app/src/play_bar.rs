@@ -9,8 +9,9 @@
 //! Left: mute and (desktop) volume.
 //! Center: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
 //! Right: favorite, subtitles and tracks, program details, picture size,
-//! channel list, multiview, guide, and (desktop) window full screen. It acts on
-//! the full-screen player (surface 0); while multiview's grid is open it
+//! channel list, multiview, guide, and (desktop) window full screen. Below
+//! the controls, the timeline shows live progress or seeks in a replay.
+//! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
 //! (a tile watched full screen) its Multiview button goes back to the
@@ -20,6 +21,7 @@ use crate::i18n::tr;
 
 pub(crate) mod icons;
 mod info;
+mod progress;
 
 use std::time::Duration;
 
@@ -128,7 +130,7 @@ pub fn height(ui: Ui) -> f32 {
         return laid_out;
     }
     let row = target() + 8.0;
-    6.0 + info::ESTIMATED_HEIGHT + 4.0 + row + 10.0 + 16.0 + safe_area().bottom.0
+    6.0 + info::ESTIMATED_HEIGHT + 4.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
 }
 
 /// Changes the bar's state and (re)schedules its hiding.
@@ -378,7 +380,8 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                             },
                         ))
                         .child(right(ui)),
-                ),
+                )
+                .child(progress::line(ui)),
         )
 }
 
@@ -467,6 +470,7 @@ fn control_label(control: Control) -> &'static str {
         Control::Guide => crate::i18n::key("TV guide"),
         Control::Search => crate::i18n::key("Search"),
         Control::Fullscreen => crate::i18n::key("Full screen"),
+        Control::Timeline => crate::i18n::key("Playback position"),
     }
 }
 fn control_id(control: Control) -> &'static str {
@@ -486,6 +490,7 @@ fn control_id(control: Control) -> &'static str {
         Control::Guide => "play-bar-guide",
         Control::Search => "play-bar-search",
         Control::Fullscreen => "play-bar-fullscreen",
+        Control::Timeline => "play-bar-seek",
     }
 }
 
@@ -496,7 +501,7 @@ fn tracks(ui: Ui) -> Option<Track> {
 }
 fn enabled(ui: Ui, control: Control) -> bool {
     match control {
-        Control::Rewind | Control::Forward => {
+        Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
         }
         Control::Record => {
@@ -580,11 +585,18 @@ fn activate(
                 nsh_core::desktop::WindowMode::FullScreen
             });
         }
+        Control::Timeline => {
+            if crate::seek::pending(ui) {
+                crate::seek::commit_now(ui);
+            }
+            ui.play_bar
+                .update(|b| b.focus_control(Control::PlayPause, ui.now_ms()));
+        }
     }
     used(ui);
 }
 
-fn focused(ui: Ui, control: Control) -> bool {
+pub(super) fn focused(ui: Ui, control: Control) -> bool {
     idiom() == Idiom::Tv && ui.keys_shown() && ui.play_bar.with(|b| b.focus == Some(control))
 }
 /// Explicit TV long OK/Menu: keep short OK's info-card semantics intact.
@@ -621,29 +633,39 @@ pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
     match action {
         Action::MoveLeft | Action::MoveRight => {
             let forward = action == Action::MoveRight;
-            let enabled = [
-                Control::Mute,
-                Control::Rewind,
-                Control::PlayPause,
-                Control::Forward,
-                Control::Record,
-                Control::Favorite,
-                Control::Tracks,
-                Control::Details,
-                Control::Picture,
-                Control::Channels,
-                Control::Multiview,
-                Control::Pip,
-                Control::Guide,
-            ]
-            .into_iter()
-            .filter(|c| (*c != Control::Pip || crate::pip::supported(ui)) && enabled(ui, *c))
-            .collect::<Vec<_>>();
-            update(ui, |b, now| {
-                b.move_focus(if forward { 1 } else { -1 }, &enabled, now)
-            });
+            if focused(ui, Control::Timeline) && enabled(ui, Control::Timeline) {
+                seek_timeline(ui, forward);
+            } else {
+                let enabled = [
+                    Control::Mute,
+                    Control::Rewind,
+                    Control::PlayPause,
+                    Control::Forward,
+                    Control::Record,
+                    Control::Favorite,
+                    Control::Tracks,
+                    Control::Details,
+                    Control::Picture,
+                    Control::Channels,
+                    Control::Multiview,
+                    Control::Pip,
+                    Control::Guide,
+                ]
+                .into_iter()
+                .filter(|c| (*c != Control::Pip || crate::pip::supported(ui)) && enabled(ui, *c))
+                .collect::<Vec<_>>();
+                update(ui, |b, now| {
+                    b.move_focus(if forward { 1 } else { -1 }, &enabled, now)
+                });
+            }
         }
-        Action::MoveDown => used(ui),
+        Action::MoveDown => {
+            if enabled(ui, Control::Timeline) {
+                update(ui, |b, now| b.focus_control(Control::Timeline, now));
+            } else {
+                used(ui);
+            }
+        }
         Action::MoveUp => {
             update(ui, |b, now| b.focus_control(Control::PlayPause, now));
         }
@@ -657,6 +679,15 @@ pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
         _ => return false,
     }
     true
+}
+
+/// D-pad and native adjustable actions use the same seek admission and step.
+pub(super) fn seek_timeline(ui: Ui, forward: bool) {
+    if enabled(ui, Control::Timeline) {
+        let step = crate::seek::steps().timebar;
+        crate::seek::step(ui, if forward { step } else { -step });
+        used(ui);
+    }
 }
 
 /// Mute, the desktop volume slider, and the audio handoff between windows.
@@ -882,9 +913,7 @@ fn details(ui: Ui) {
         crate::menu_view::close(ui);
         return;
     }
-    let Some((channel, p)) = untracked(|| info::current_program(ui)) else {
-        return;
-    };
+    let (channel, p) = untracked(|| progress::program(ui));
     crate::recordings_view::remember(
         ui,
         Origin {

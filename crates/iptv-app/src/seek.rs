@@ -145,6 +145,40 @@ pub fn commit_now(ui: Ui) {
     commit(ui);
 }
 
+/// The program playing from the archive: its length in seconds and how
+/// far into it a seek may go now. `None` unless one plays.
+pub fn span(ui: Ui) -> Option<(i32, i32)> {
+    if crate::on_demand::active(ui) {
+        if !crate::on_demand::seekable(ui) {
+            return None;
+        }
+        let (_, length) = elapsed(ui)?;
+        return (length > 0).then_some((length, length));
+    }
+    program(ui).map(|(_, length, limit)| (length, limit))
+}
+
+/// A seek to `target` seconds into the archived program being chosen
+/// (the play bar's progress bar under a finger or the mouse, within
+/// [`span`]'s limit): shown at once, opened once `commit` says so or the
+/// pointer pauses.
+pub fn to(ui: Ui, target: i32, commit_now: bool) {
+    if crate::on_demand::active(ui) {
+        crate::on_demand::seek_to(ui, target.max(0) as u64 * 1000);
+        return;
+    }
+    crate::interruption::viewer_acted(ui);
+    ui.seek_target.set(Some(target.max(0)));
+    commit_later(
+        ui,
+        if commit_now {
+            Duration::ZERO
+        } else {
+            COMMIT_AFTER
+        },
+    );
+}
+
 /// Opens the archive at the target after `wait`, unless another seek came.
 fn commit_later(ui: Ui, wait: Duration) {
     let press = PRESSES.with(|p| {

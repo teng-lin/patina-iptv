@@ -119,8 +119,8 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     step(app.wait_for("text:CATCH-UP"));
     assert_eq!(app.screen().count(LINE).unwrap(), 1);
 
-    // The play bar uses the transport icons for seeking and shows the
-    // position above them.
+    // The same bar serves seekable TV playback. OK commits before the
+    // debounce clock advances and never also pauses the player.
     let player = app
         .screen()
         .layout_nodes()
@@ -130,35 +130,45 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
         .id;
     step(app.press_key("m"));
     step(app.wait_for("id:play-bar-layer"));
-    assert!(!app.screen().matches("id:play-bar-time-line").unwrap());
-    step(app.press_key("right"));
+    step(app.press_key("down"));
     assert!(
         app.screen()
-            .accessibility_state("id:play-bar-forward")
+            .accessibility_state("id:play-bar-seek")
             .unwrap()
             .selected
     );
     let opens = iptv_app::player_opens(0);
-    step(app.press_key("enter"));
-    step(app.wait_for("id:play-bar-position >> text:5:30"));
+    step(app.press_key("right"));
+    step(app.wait_for("id:play-bar-time-line >> text:10:00"));
     assert_eq!(
         iptv_app::player_opens(0),
         opens,
-        "the position updates before the archive reopens"
+        "selection has not committed before OK"
     );
     assert!(
         !app.screen().matches(CARD).unwrap(),
         "the old card stays hidden behind the shared bar"
     );
-    step(app.run_for(Duration::from_secs(1)));
-    step(app.wait_until(
-        "forward seek reopens the archive",
-        Duration::from_secs(5),
-        |_| iptv_app::player_opens(0) == opens + 1,
-    ));
+    let clock_before_ok = app.clock().now();
+    step(app.press_key("enter"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while iptv_app::player_opens(0) == opens && std::time::Instant::now() < deadline {
+        app.settle(); // flush native workers without advancing the manual clock
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        app.clock().now(),
+        clock_before_ok,
+        "OK committed with the debounce clock frozen"
+    );
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opens + 1,
+        "one explicit archive seek"
+    );
     assert!(
         app.screen()
-            .accessibility_state("id:play-bar-forward")
+            .accessibility_state("id:play-bar-play-pause")
             .unwrap()
             .selected
     );
@@ -167,11 +177,8 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     assert_eq!(
         iptv_app::player_opens(0),
         opens + 1,
-        "one press produces one archive seek"
+        "the canceled seek timer does not reopen again"
     );
-    step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(2)));
-    step(app.press_key("m"));
-    step(app.wait_for("id:play-bar-layer"));
 
     // Track selection by the remote on the same bar: the host reports a
     // subtitle track; Right reaches Tracks, OK opens its chooser, Down and

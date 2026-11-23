@@ -254,6 +254,16 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 title[0] + title[2] <= size.0 + 0.5,
                 "{title:?} inside: {what}"
             );
+            let timeline = bounds(app, "play-bar-time-line").expect("the bottom timeline");
+            assert!(
+                rows.iter()
+                    .all(|control| control[1] + control[3] <= timeline[1] + 0.5),
+                "the timeline is below all controls: {timeline:?}, {what}"
+            );
+            assert!(
+                timeline[1] + timeline[3] <= size.1 + 0.5,
+                "{timeline:?} inside: {what}"
+            );
             persistent(app, &lifetime, surface);
         }
     }

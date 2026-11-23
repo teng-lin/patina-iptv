@@ -9,7 +9,7 @@ use crate::i18n::tr;
 use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, channel_name, clock, tint};
 
-use super::WHITE;
+use super::{WHITE, progress};
 
 pub(super) const ESTIMATED_HEIGHT: f32 = 64.0;
 const LIVE_BG: u32 = 0xA93D42;
@@ -22,21 +22,12 @@ struct ProgramInfo {
     next: Option<(String, String)>,
 }
 
-pub(super) fn current_program(ui: Ui) -> Option<(usize, crate::guide::Program)> {
-    ui.guide_data();
-    let channel = ui.playing.get()?;
-    let minute = match ui.playback.get() {
-        Playback::Live => ui.focus.with(|f| f.now),
-        Playback::CatchUp { start, .. } => start,
-    };
-    Some((channel, crate::schedule().program_at(channel, minute)))
-}
-
 fn program_info(ui: Ui) -> Option<ProgramInfo> {
-    if crate::on_demand::active(ui) {
+    ui.guide_data();
+    if crate::on_demand::active(ui) || ui.playing.get().is_none() {
         return None;
     }
-    let (channel, program) = current_program(ui)?;
+    let (channel, program) = progress::program(ui);
     let schedule = crate::schedule();
     let next = if ui.playback.get() == Playback::Live {
         let next = schedule.program_at(channel, program.end);
@@ -67,7 +58,6 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
 pub(super) fn header(ui: Ui) -> impl IntoElement {
     let program = computed(move || program_info(ui));
     let next = computed(move || program.with(|p| p.as_ref().and_then(|p| p.next.clone())));
-    let position = computed(move || crate::seek::elapsed(ui));
     let size = move || ui.player.main().size.get().filter(|&(w, h)| w > 0 && h > 0);
     let fps = computed(move || fps_label(ui.player.main().format.with(|f| f.fps)));
     let live = move || !ui.paused.get() && ui.playback.get() == Playback::Live;
@@ -228,32 +218,6 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                     )
             },
         ))
-        .child(when(
-            move || position.with(Option::is_some),
-            move || {
-                view()
-                    .test_id("play-bar-position")
-                    .flex_row()
-                    .gap(px(6.0))
-                    .child(position_text(move || {
-                        position
-                            .get()
-                            .map(|(at, _)| crate::seek::hms(at))
-                            .unwrap_or_default()
-                    }))
-                    .child(position_text(|| "/".into()))
-                    .child(position_text(move || match position.get() {
-                        Some((_, length)) if length > 0 => crate::seek::hms(length),
-                        _ => "–:––".into(),
-                    }))
-            },
-        ))
-}
-
-fn position_text(label: impl Fn() -> String + 'static) -> Text {
-    text(label)
-        .text_size(px(OSD_DETAIL))
-        .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
 }
 
 fn quality_bg() -> Rgba {
