@@ -15,6 +15,7 @@ import tomllib
 
 ROOT = Path(__file__).resolve().parents[2]
 LANES = ("host", "windows", "android", "packages", "windows-package", "coverage", "fuzz", "smoke", "stress", "ios", "credentials")
+HOST_VERIFICATIONS = {"credentials": "credentials-verified", "ios": "ios-verified"}
 BUILD = ("Cargo.toml", "Cargo.lock", "crates/**/Cargo.toml", "rust-toolchain.toml", "nsh.rev", ".cargo/**", "vendor/nsh-tv/**")
 CI = (".github/workflows/**", ".github/actions/**", "tools/ci/validation-plan.py", "tools/ci/check-plan.py",
       "tools/ci/pins.py", "tools/ci/apt-install.sh", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh",
@@ -143,13 +144,11 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False):
         ({"platform": "macos", "os": "macos-15"}, common_package or matches(inputs, MACOS_PACKAGE)),
     ) if selected]
     android_package_inputs = full or ci or matches(inputs, ANDROID_PACKAGE)
-    credentials = full or ci or "credentials" in requested or matches(inputs, CREDENTIALS)
     result = {
         "tier": tier,
         "candidate_build": candidate_build,
         "ios": full or ci or "ios" in requested or matches(production, IOS),
-        "credentials": credentials,
-        "credentials_on_host": credentials and host,
+        "credentials": full or ci or "credentials" in requested or matches(inputs, CREDENTIALS),
         "host": host,
         "helpers_full": full or matches(paths, (*HOST_INPUTS, *HELPER_INPUTS)) or any(not documentation(path) for path in paths),
         "windows": (full or ci or rust or "windows" in requested
@@ -164,6 +163,8 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False):
         "smoke": full or ci or "smoke" in requested or matches(production, SMOKE),
         "stress": full or ci or "stress" in requested or matches(inputs, STRESS),
     }
+    for lane in HOST_VERIFICATIONS:
+        result[f"{lane}_on_host"] = result[lane] and host
     if tier == "release":
         # The release pipeline builds and validates the shipping packages once,
         # in clean jobs. Avoid constructing throwaway installers first.
@@ -188,19 +189,21 @@ def gate(plan, needs):
         errors.append("unsigned candidate selection is missing or invalid")
     elif needs.get("candidate", {}).get("result") not in (("success",) if candidate else ("success", "skipped")):
         errors.append("unsigned candidate packages did not meet the validation plan")
-    credentials_on_host = plan.get("credentials_on_host")
-    if type(credentials_on_host) is not bool or credentials_on_host != (plan["credentials"] and plan["host"]):
-        errors.append("credential check routing is missing or invalid")
     for lane in LANES:
         if (lane == "fuzz" and not isinstance(plan[lane], list)) or (lane != "fuzz" and type(plan[lane]) is not bool):
             errors.append(f"invalid selection for {lane}")
             continue
         result = needs.get(lane, {}).get("result")
         selected = bool(plan[lane])
-        if lane == "credentials" and credentials_on_host is True:
-            if result != "skipped" or needs.get("host", {}).get("outputs", {}).get("credentials-verified") != "true":
-                errors.append("the Linux host did not verify production credential persistence")
-            continue
+        if lane in HOST_VERIFICATIONS:
+            on_host = plan.get(f"{lane}_on_host")
+            if type(on_host) is not bool or on_host != (selected and plan["host"] is True):
+                errors.append(f"host routing is missing or invalid for {lane}")
+            if on_host is True:
+                evidence = needs.get("host", {}).get("outputs", {}).get(HOST_VERIFICATIONS[lane])
+                if result != "skipped" or evidence != "true":
+                    errors.append(f"selected {lane}: missing successful host verification")
+                continue
         if selected and result != "success":
             errors.append(f"selected {lane}: {result or 'missing'}")
         elif not selected and result not in ("success", "skipped"):

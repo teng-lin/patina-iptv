@@ -34,6 +34,7 @@ jobs:
       tier: ${{ steps.select.outputs.tier }}
       host: ${{ steps.select.outputs.host }}
       ios: ${{ steps.select.outputs.ios }}
+      ios_on_host: ${{ steps.select.outputs.ios_on_host }}
       credentials: ${{ steps.select.outputs.credentials }}
       credentials_on_host: ${{ steps.select.outputs.credentials_on_host }}
       helpers_full: ${{ steps.select.outputs.helpers_full }}
@@ -112,10 +113,11 @@ jobs:
     with:
       helpers-checked: true
       credentials: ${{ needs.plan.outputs.credentials_on_host == 'true' }}
+      ios: ${{ needs.plan.outputs.ios_on_host == 'true' }}
       tier: ${{ needs.plan.outputs.tier == 'pr' && 'pr' || 'full' }}
   ios:
     needs: plan
-    if: needs.plan.outputs.ios == 'true'
+    if: needs.plan.outputs.ios == 'true' && needs.plan.outputs.ios_on_host != 'true'
     uses: ./.github/workflows/ios.yml
   credentials:
     needs: plan

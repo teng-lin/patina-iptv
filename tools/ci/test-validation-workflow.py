@@ -80,6 +80,16 @@ class Workflows(unittest.TestCase):
         self.assertLess(step.index("tools/ci/isolated-credentials.py"), step.index("verified=true"))
         self.assertIn("credentials-verified: ${{ steps.credentials.outputs.verified }}", host)
 
+    def test_collocated_ios_reports_success_from_macos_only(self):
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("ios: ${{ needs.plan.outputs.ios_on_host == 'true' }}", validation)
+        self.assertIn("needs.plan.outputs.ios_on_host != 'true'", validation)
+        step = host.split("        id: ios\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: matrix.os == 'macos-15' && inputs.ios", step)
+        self.assertLess(step.index("bash tools/ci/check-ios.sh"), step.index("verified=true"))
+        self.assertIn("ios-verified: ${{ steps.ios.outputs.verified }}", host)
+
     def test_release_explicitly_requests_candidate_tier_and_publishes_after_artifact_checks(self):
         text = (ROOT / ".github/workflows/release.yml").read_text()
         tests = text.split("  tests:\n", 1)[1].split("  windows-sign:\n", 1)[0]

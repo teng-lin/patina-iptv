@@ -8,6 +8,9 @@ on:
       credentials:
         type: boolean
         default: false
+      ios:
+        type: boolean
+        default: false
       tier:
         type: string
         default: full
@@ -15,6 +18,9 @@ on:
       credentials-verified:
         description: The Linux production credential check succeeded
         value: ${{ jobs.test.outputs.credentials-verified }}
+      ios-verified:
+        description: Both iOS targets and the simulator entitlements were checked
+        value: ${{ jobs.test.outputs.ios-verified }}
   workflow_dispatch:
     inputs:
       tier:
@@ -43,8 +49,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     outputs:
-      # Only the Linux matrix job sets this output. Empty outputs are omitted.
+      # Each check emits evidence on its own platform. Empty outputs are omitted.
       credentials-verified: ${{ steps.credentials.outputs.verified }}
+      ios-verified: ${{ steps.ios.outputs.verified }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -98,6 +105,15 @@ jobs:
         if: matrix.os == 'ubuntu-24.04' && inputs.credentials
         run: |
           python3 tools/ci/isolated-credentials.py
+          echo 'verified=true' >> "$GITHUB_OUTPUT"
+      - name: Compile iOS device and simulator adapters and check simulator entitlements
+        id: ios
+        if: matrix.os == 'macos-15' && inputs.ios
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          unset LIBRARY_PATH LD_LIBRARY_PATH DYLD_LIBRARY_PATH IPTV_RS_MPV_LIB_DIR
+          bash tools/ci/check-ios.sh
           echo 'verified=true' >> "$GITHUB_OUTPUT"
       - name: Performance report
         if: always() && matrix.os == 'ubuntu-24.04'

@@ -176,15 +176,22 @@ class Selection(unittest.TestCase):
 class Aggregate(unittest.TestCase):
     def setUp(self):
         self.plan = v.select(["crates/iptv-core/src/guide.rs"])
-        self.needs = {lane: {"result": "success" if self.plan[lane] else "skipped"} for lane in v.LANES}
-        self.needs.update(plan={"result": "success"}, helpers={"result": "success"}, candidate={"result": "skipped"})
+        self.needs = self.successful_needs(self.plan)
+
+    @staticmethod
+    def successful_needs(plan):
+        needs = {lane: {"result": "success" if plan[lane] else "skipped"} for lane in v.LANES}
+        needs.update(plan={"result": "success"}, helpers={"result": "success"},
+                     candidate={"result": "success" if plan["candidate_build"] else "skipped"})
+        for lane, evidence in v.HOST_VERIFICATIONS.items():
+            if plan[f"{lane}_on_host"]:
+                needs[lane]["result"] = "skipped"
+                needs["host"].setdefault("outputs", {})[evidence] = "true"
+        return needs
 
     def test_shipping_candidate_builds_are_part_of_the_same_aggregate(self):
         self.plan = v.select([], 'release', candidate_build=True)
-        self.needs = {lane: {'result': 'success' if self.plan[lane] else 'skipped'} for lane in v.LANES}
-        self.needs.update(plan={'result': 'success'}, helpers={'result': 'success'}, candidate={'result': 'success'})
-        self.needs['credentials'] = {'result': 'skipped'}
-        self.needs['host']['outputs'] = {'credentials-verified': 'true'}
+        self.needs = self.successful_needs(self.plan)
         self.assertEqual(v.gate(self.plan, self.needs), [])
         for result in ('failure', 'skipped', 'cancelled', None):
             self.needs['candidate']['result'] = result
@@ -196,24 +203,27 @@ class Aggregate(unittest.TestCase):
     def test_successful_selection_and_deliberate_skips_pass(self):
         self.assertEqual(v.gate(self.plan, self.needs), [])
 
-    def test_host_and_standalone_credential_routing(self):
-        for inputs, on_host in ((["tools/ci/isolated-credentials.py"], False),
-                                (["crates/iptv-store-sqlite/src/lib.rs"], True)):
-            with self.subTest(inputs=inputs):
-                plan = v.select(inputs)
-                self.assertTrue(plan["credentials"])
-                self.assertEqual(plan["credentials_on_host"], on_host)
-                needs = {lane: {"result": "success" if plan[lane] else "skipped"} for lane in v.LANES}
-                needs.update(plan={"result": "success"}, helpers={"result": "success"}, candidate={"result": "skipped"})
-                if on_host:
-                    needs["credentials"]["result"] = "skipped"
-                    self.assertTrue(v.gate(plan, needs))
-                    needs["host"]["outputs"] = {"credentials-verified": "true"}
+    def test_host_and_standalone_routing(self):
+        cases = (("credentials", "tools/ci/isolated-credentials.py", False),
+                 ("credentials", "crates/iptv-store-sqlite/src/lib.rs", True),
+                 ("ios", "tools/ci/check-ios.sh", False),
+                 ("ios", "crates/iptv-core/src/guide.rs", True))
+        for lane, path, on_host in cases:
+            with self.subTest(lane=lane, path=path):
+                plan = v.select([path])
+                self.assertTrue(plan[lane])
+                self.assertEqual(plan[f"{lane}_on_host"], on_host)
+                needs = self.successful_needs(plan)
                 self.assertEqual(v.gate(plan, needs), [])
-                needs["credentials"]["result"] = "failure"
+                if on_host:
+                    evidence = v.HOST_VERIFICATIONS[lane]
+                    needs["host"]["outputs"].pop(evidence)
+                    self.assertIn(f"selected {lane}: missing successful host verification", v.gate(plan, needs))
+                    needs["host"]["outputs"][evidence] = "true"
+                needs[lane]["result"] = "failure"
                 self.assertTrue(v.gate(plan, needs))
-                plan["credentials_on_host"] = not on_host
-                self.assertIn("credential check routing is missing or invalid", v.gate(plan, needs))
+                plan[f"{lane}_on_host"] = not on_host
+                self.assertIn(f"host routing is missing or invalid for {lane}", v.gate(plan, needs))
 
     def test_android_compile_and_windows_failures_block_even_when_packages_skip(self):
         for lane in ("android", "windows"):
