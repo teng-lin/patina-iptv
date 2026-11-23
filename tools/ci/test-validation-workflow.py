@@ -167,6 +167,7 @@ class Workflows(unittest.TestCase):
     def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         self.assertIn("&& 'validation-master'", text)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", text)
         self.assertIn("inputs.tier != 'release'", text)
         candidate = text.split('  candidate:\n', 1)[1].split('  seal-candidate:', 1)[0]
         self.assertIn('needs: plan', candidate)
