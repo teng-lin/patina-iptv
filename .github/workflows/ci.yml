@@ -47,11 +47,13 @@ permissions:
   actions: read
 jobs:
   test:
-    name: host-tests (${{ matrix.os }})
+    # Linux runs the shared plan as two parallel parts (tools/check.sh): `app`
+    # runs iptv-app's integration harnesses and the journeys that reuse them,
+    # `core` runs every other check. macOS runs its whole tier in one job.
+    name: host-tests (${{ matrix.os }}${{ matrix.part && format(', {0}', matrix.part) || '' }})
     strategy:
       fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.skip-macos && '["ubuntu-24.04"]' || '["ubuntu-24.04","macos-15"]') }}
+      matrix: ${{ fromJSON(inputs.skip-macos && '{"include":[{"os":"ubuntu-24.04","part":"core"},{"os":"ubuntu-24.04","part":"app"}]}' || '{"include":[{"os":"ubuntu-24.04","part":"core"},{"os":"ubuntu-24.04","part":"app"},{"os":"macos-15","part":""}]}') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     outputs:
@@ -70,9 +72,11 @@ jobs:
           cache-on-failure: 'true'
           apt-packages: xvfb libgl1-mesa-dri ${{ matrix.os == 'ubuntu-24.04' && inputs.credentials && 'gnome-keyring dbus-x11 libglib2.0-bin' || '' }}
           extra-workspaces: ${{ matrix.os == 'ubuntu-24.04' && 'hosts/tizen-nsh' || '' }}
-          policy-tool: ${{ matrix.os == 'ubuntu-24.04' }}
+          policy-tool: ${{ matrix.part == 'core' }}
+          # The core part builds every dependency the app part does; only it saves.
+          cargo-cache-save: ${{ matrix.part != 'app' }}
       - name: Install linters
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.part == 'core'
         run: |
           python3 -m venv "$RUNNER_TEMP/linters"
           "$RUNNER_TEMP/linters/bin/pip" install ruff==0.11.13 shellcheck-py==0.10.0.1
@@ -82,7 +86,7 @@ jobs:
           chmod +x "$RUNNER_TEMP/linters/bin/ktlint"
           echo "$RUNNER_TEMP/linters/bin" >> "$GITHUB_PATH"
       - name: Prepare performance report and base policy
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.part == 'app'
         env:
           PERF_EVENT: ${{ github.event_name }}
           PERF_REF: ${{ github.ref }}
@@ -95,25 +99,26 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then
             mkdir -p "$RUNNER_TEMP/patina-app-timings"
             export IPTV_RS_TEST_TIMINGS="$RUNNER_TEMP/patina-app-timings"
-            bash tools/check.sh "${{ inputs.tier == 'pr' && 'pr' || 'full' }}"
+            bash tools/check.sh "${{ inputs.tier == 'pr' && 'pr' || 'full' }}" "$CHECK_PART"
           else
             python3 tools/ci/check-plan.py run --host macos --tier "${{ inputs.tier == 'pr' && 'native' || 'full' }}"
             echo 'macos-verified=true' >> "$GITHUB_OUTPUT"
           fi
         env:
+          CHECK_PART: ${{ matrix.part }}
           IPTV_HELPERS_CHECKED: ${{ inputs.helpers-checked }}
           IPTV_REQUIRE_PLAYER_TESTS: '1'
           IPTV_TEST_WAIT_SCALE: ${{ matrix.os == 'macos-15' && '2' || '1' }}
-          IPTV_REQUIRE_LINTERS: ${{ matrix.os == 'ubuntu-24.04' && '1' || '0' }}
-          IPTV_CI_HARNESSES: ${{ matrix.os == 'ubuntu-24.04' && format('{0}/patina-harnesses.json', runner.temp) || '' }}
+          IPTV_REQUIRE_LINTERS: ${{ matrix.part == 'core' && '1' || '0' }}
+          IPTV_CI_HARNESSES: ${{ matrix.part == 'app' && format('{0}/patina-harnesses.json', runner.temp) || '' }}
           IPTV_RS_TEST_JOBS: ${{ inputs.app-test-jobs || '6' }}
           IPTV_CI_TEST_THREADS: ${{ matrix.os == 'ubuntu-24.04' && inputs.app-test-jobs || '' }}
       - name: Reproducible performance journeys
-        if: matrix.os == 'ubuntu-24.04'
+        if: matrix.part == 'app'
         run: python3 tools/performance/journeys.py run --harness-manifest "$RUNNER_TEMP/patina-harnesses.json"
       - name: Verify production key creation and reopen with disposable credentials
         id: credentials
-        if: matrix.os == 'ubuntu-24.04' && inputs.credentials
+        if: matrix.part == 'core' && inputs.credentials
         run: |
           python3 tools/ci/isolated-credentials.py
           echo 'verified=true' >> "$GITHUB_OUTPUT"
@@ -127,11 +132,11 @@ jobs:
           bash tools/ci/check-ios.sh
           echo 'verified=true' >> "$GITHUB_OUTPUT"
       - name: Performance report
-        if: always() && matrix.os == 'ubuntu-24.04'
+        if: always() && matrix.part == 'app'
         run: |
           cat target/performance/summary.json >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && matrix.os == 'ubuntu-24.04'
+        if: always() && matrix.part == 'app'
         with:
           name: performance-linux
           path: target/performance/summary.json
@@ -140,12 +145,12 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: rust-timings-${{ matrix.os }}
+          name: rust-timings-${{ matrix.os }}${{ matrix.part && format('-{0}', matrix.part) || '' }}
           path: target/cargo-timings/*.html
           if-no-files-found: warn
           retention-days: 7
       - name: App scenario timings
-        if: always() && matrix.os == 'ubuntu-24.04'
+        if: always() && matrix.part == 'app'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-scenario-timings-linux

@@ -48,7 +48,12 @@ class Parity(unittest.TestCase):
         format_argv = plan.format_plan()[0]["argv"]
         self.assertEqual({format_argv[i + 1] for i, arg in enumerate(format_argv[:-1]) if arg == "-p"}, self.members)
         script = (ROOT / "tools/check.sh").read_text(encoding="utf-8")
-        self.assertEqual(script.count('python3 tools/ci/check-plan.py run --tier "$tier" --host "$host"\n'), 1)
+        self.assertEqual(script.count('python3 tools/ci/check-plan.py run --tier "$tier" --host "$host" ${part:+--part "$part"}\n'), 1)
+        self.assertEqual(script.count('python3 tools/ci/check-plan.py run --tier "$tier" --host "$host" --part app\n'), 1)
+        # The app part leaves before the linters, policy and helper tests.
+        app = script.index('--part app\n')
+        self.assertLess(app, script.index("python3 tools/ci/check-plan.py format\n"))
+        self.assertLess(app, script.index("cargo deny --locked check"))
         self.assertEqual(script.count("python3 tools/ci/check-plan.py format\n"), 1)
         self.assertEqual(lines_with("tools/check.sh", "cargo test"), [])
         self.assertLess(self.wasm, self.libraries)

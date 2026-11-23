@@ -43,7 +43,7 @@ class Workflows(unittest.TestCase):
     def test_standalone_lanes_do_not_emit_legacy_required_names(self):
         host = (ROOT / ".github/workflows/ci.yml").read_text()
         android = (ROOT / ".github/workflows/android.yml").read_text()
-        self.assertIn("name: host-tests (${{ matrix.os }})", host)
+        self.assertIn("name: host-tests (${{ matrix.os }}${{ matrix.part && format(', {0}', matrix.part) || '' }})", host)
         self.assertIn("name: android-packaging", android)
 
     def test_standalone_lanes_pass_prerequisite_options_to_setup(self):
@@ -88,7 +88,7 @@ class Workflows(unittest.TestCase):
         self.assertIn("credentials: ${{ needs.plan.outputs.credentials_on_host == 'true' }}", validation)
         self.assertIn("needs.plan.outputs.credentials_on_host != 'true'", validation)
         step = host.split("        id: credentials\n", 1)[1].split("      - name:", 1)[0]
-        self.assertIn("if: matrix.os == 'ubuntu-24.04' && inputs.credentials", step)
+        self.assertIn("if: matrix.part == 'core' && inputs.credentials", step)
         self.assertLess(step.index("tools/ci/isolated-credentials.py"), step.index("verified=true"))
         self.assertIn("credentials-verified: ${{ steps.credentials.outputs.verified }}", host)
 
@@ -110,8 +110,9 @@ class Workflows(unittest.TestCase):
         host = (ROOT / ".github/workflows/ci.yml").read_text()
         packages = (ROOT / ".github/workflows/package-check.yml").read_text()
         self.assertIn("skip-macos: ${{ needs.plan.outputs.macos_host != 'host' }}", validation)
-        self.assertIn("inputs.skip-macos && '[\"ubuntu-24.04\"]'", host)
-        self.assertIn("policy-tool: ${{ matrix.os == 'ubuntu-24.04' }}", host)
+        self.assertIn("inputs.skip-macos && '{\"include\":[{\"os\":\"ubuntu-24.04\",\"part\":\"core\"},{\"os\":\"ubuntu-24.04\",\"part\":\"app\"}]}'", host)
+        self.assertIn("{\"os\":\"macos-15\",\"part\":\"\"}", host)
+        self.assertIn("policy-tool: ${{ matrix.part == 'core' }}", host)
         self.assertIn("macos-host-tier: ${{ needs.plan.outputs.macos_host == 'packages' &&", validation)
         step = packages.split("        id: macos-host\n", 1)[1].split("      - ", 1)[0]
         self.assertIn("if: matrix.platform == 'macos' && inputs.macos-host-tier != ''", step)

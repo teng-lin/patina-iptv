@@ -16,6 +16,9 @@ inputs:
   cargo-cache:
     description: Use the shared Cargo cache when the job has no dedicated compiler cache
     default: 'true'
+  cargo-cache-save:
+    description: Save the shared Cargo cache on master (false for a job whose build is a subset of another's)
+    default: 'true'
   extra-workspaces:
     description: Additional workspaces whose Cargo artifacts this job produces
     default: ''
@@ -162,7 +165,7 @@ runs:
         cache-bin: 'false'
         # Per-PR copies of these gigabyte-sized caches evict the reusable tools.
         # PRs can restore master caches; only master refreshes bulk dependencies.
-        save-if: ${{ github.ref == 'refs/heads/master' }}
+        save-if: ${{ github.ref == 'refs/heads/master' && inputs.cargo-cache-save == 'true' }}
         workspaces: |
           .
           ../nsh-patina

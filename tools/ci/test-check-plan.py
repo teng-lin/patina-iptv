@@ -23,6 +23,102 @@ def packages(argv):
     return [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "-p"]
 
 
+def selected_tests(argv):
+    cargo = argv[:argv.index("--")]
+    return [cargo[index + 1] for index, value in enumerate(cargo[:-1]) if value == "--test"]
+
+
+class Parts(unittest.TestCase):
+    """The two parallel CI parts run exactly the whole plan, split in two."""
+
+    def test_parts_partition_every_check_of_the_whole_plan(self):
+        for tier in ("pr", "full"):
+            whole = [check["name"] for check in checks.plan(tier=tier)]
+            app = [check["name"] for check in checks.plan(tier=tier, part="app")]
+            core = [check["name"] for check in checks.plan(tier=tier, part="core")]
+            with self.subTest(tier=tier):
+                self.assertFalse(set(app) & set(core))
+                self.assertEqual(sorted(app + core),
+                                 sorted([name for name in whole if name != "workspace-tests"] + ["app-tests", "core-tests"]))
+                self.assertEqual(app, list(checks.APP_PART_STEPS))
+                # The strict timing gates still run alone, after the tests that build their harness.
+                self.assertEqual(app[0], "app-tests")
+                self.assertEqual(core[-1], "app-build")
+
+    def test_parts_build_the_same_graph_as_the_whole_test_step(self):
+        whole = next(check["argv"] for check in checks.plan(tier="pr") if check["name"] == "workspace-tests")
+        parts = {check["name"]: check["argv"] for part in checks.PARTS
+                 for check in checks.plan(tier="pr", part=part)}
+        prefix = whole[:whole.index("--tests")]
+        options = whole[whole.index("--"):]
+        for name in ("app-tests", "core-tests"):
+            argv = parts[name]
+            with self.subTest(step=name):
+                self.assertEqual(argv[:len(prefix)], prefix)
+                self.assertEqual(argv[argv.index("--"):], options)
+                self.assertIn("--timings", argv)
+                self.assertNotIn("--tests", argv)
+        self.assertEqual(selected_tests(parts["app-tests"]), list(checks.APP_HARNESSES))
+        self.assertIn("--lib", parts["core-tests"])
+        self.assertNotIn("--lib", parts["app-tests"])
+        self.assertEqual(sorted(selected_tests(parts["core-tests"]) + selected_tests(parts["app-tests"])),
+                         checks.integration_tests())
+
+    def test_integration_tests_follow_cargo_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["one", "two", "three"]\n')
+            for member, extra in (("one", ""), ("two", '[[test]]\nname = "declared"\npath = "check/declared.rs"\n'),
+                                  ("three", "")):
+                (root / member / "tests").mkdir(parents=True)
+                autotests = "autotests = false\n" if member == "three" else ""
+                (root / member / "Cargo.toml").write_text(f'[package]\nname = "{member}"\n{autotests}{extra}')
+            (root / "one/tests/app").mkdir()
+            (root / "one/tests/app/main.rs").write_text("")
+            (root / "one/tests/native_player.rs").write_text("")
+            (root / "one/tests/app/scenario.rs").write_text("")
+            (root / "two/tests/it").mkdir()
+            (root / "two/tests/it/main.rs").write_text("")
+            (root / "three/tests/ignored.rs").write_text("")
+            self.assertEqual(checks.integration_tests(root), ["app", "declared", "it", "native_player"])
+            (root / "one/tests/native_player.rs").unlink()
+            with self.assertRaisesRegex(ValueError, "harnesses are missing"):
+                checks.integration_tests(root)
+
+    @unittest.skipUnless(shutil.which(os.environ.get("IPTV_REAL_CARGO") or "cargo")
+                         and (checks.ROOT.parent / "nsh-patina").is_dir(), "needs Cargo and the NSH checkout")
+    def test_parts_select_exactly_the_targets_cargo_tests(self):
+        cargo = os.environ.get("IPTV_REAL_CARGO") or "cargo"
+        metadata = json.loads(subprocess.check_output(
+            [cargo, "metadata", "--locked", "--no-deps", "--format-version", "1"], cwd=checks.ROOT, text=True))
+        tested = {(target["kind"][0] if target["kind"] != ["cdylib", "rlib"] else "lib", target["name"])
+                  for package in metadata["packages"] for target in package["targets"]
+                  if target.get("test") and target["kind"] != ["custom-build"]}
+        libraries = {name for kind, name in tested if kind == "lib"}
+        # --tests selects libraries and integration tests; the parts select
+        # --lib plus every integration test by name, so no other kind may opt in.
+        self.assertEqual({kind for kind, _ in tested}, {"lib", "test"})
+        self.assertTrue(libraries)
+        self.assertEqual(sorted({name for kind, name in tested if kind == "test"}), checks.integration_tests())
+
+    def test_parts_reject_the_native_tier_and_unknown_parts(self):
+        for options in ({"tier": "native", "part": "app"}, {"part": "everything"}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                checks.plan(**options)
+        for argv in (["list", "--tier", "native", "--part", "core"],
+                     ["run", "--part", "core", "--harness-output", "harnesses.json"]):
+            with self.subTest(argv=argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                checks.main(argv)
+
+    def test_app_part_records_the_performance_harnesses(self):
+        runner = Mock(return_value=subprocess.CompletedProcess([], 0))
+        app_tests = next(check for check in checks.plan(tier="pr", part="app") if check["name"] == "app-tests")
+        with patch.object(checks, "record_harnesses", return_value=0) as record, redirect_stdout(io.StringIO()):
+            self.assertEqual(checks.run([app_tests], runner=runner, harness_output=Path("harnesses.json")), 0)
+        record.assert_called_once()
+        runner.assert_not_called()
+
+
 class Plan(unittest.TestCase):
     def setUp(self):
         self.steps = checks.plan()
