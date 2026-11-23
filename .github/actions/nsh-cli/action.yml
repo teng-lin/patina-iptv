@@ -2,7 +2,7 @@ name: Pinned NSH CLI
 description: Reuse the finished CLI independently of application dependencies
 inputs:
   cache:
-    description: Restore the exact tool artifact and refresh it on master
+    description: Restore and save the tool artifact (disabled for release builds)
     default: 'true'
 runs:
   using: composite
@@ -34,8 +34,7 @@ runs:
       run: cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
     # Save now: a later app failure must not discard a successful tool build.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true' && steps.cli.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
-      continue-on-error: true
+      if: inputs.cache == 'true' && steps.cli.outputs.cache-hit != 'true'
       with:
         path: ${{ steps.identity.outputs.path }}
         key: nsh-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
