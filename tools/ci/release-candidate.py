@@ -192,14 +192,16 @@ def promote(directory, environment=os.environ, root=ROOT):
     with tempfile.TemporaryDirectory(prefix='patina-promotion-') as temporary:
         stage = Path(temporary)
         source_tree = stage / 'source'
-        subprocess.run(['git', 'worktree', 'add', '--detach', str(source_tree), commit], cwd=root, check=True)
+        subprocess.run(['git', 'worktree', 'add', '--detach', str(source_tree), commit],
+                       cwd=root, stdout=sys.stderr, check=True)
         try:
             release_plan.check_changelog(source_tree, f'refs/tags/{tag}')
             inputs = identity(source_tree)
             build = build_identity(source_tree)
             plan = validation.select([], 'release', source_tree, candidate_build=True)
         finally:
-            subprocess.run(['git', 'worktree', 'remove', str(source_tree)], cwd=root, check=True)
+            subprocess.run(['git', 'worktree', 'remove', str(source_tree)],
+                           cwd=root, stdout=sys.stderr, check=True)
         directory.mkdir(parents=True)
         for name, artifact in sorted(artifacts.items()):
             archive = stage / 'artifact.zip'
