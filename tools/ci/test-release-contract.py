@@ -233,6 +233,12 @@ class Candidate(unittest.TestCase):
         self.assertEqual(attempt, 3)
         self.assertEqual(checks, dict.fromkeys(self.candidate.PROMOTION_JOBS, "success"))
         self.assertEqual(set(inventory), self.candidate.REQUIRED)
+        split = (self.candidate.PROMOTION_JOBS - {self.candidate.LEGACY_ANDROID_JOB}) | self.candidate.SPLIT_ANDROID_JOBS
+        split_jobs = {"jobs": [{"name": name, "conclusion": "success"} for name in sorted(split)]}
+        self.assertEqual(inspect(self.run, split_jobs, artifacts)[1], dict.fromkeys(split, "success"))
+        split_jobs['jobs'] = [job for job in split_jobs['jobs'] if job['name'] != 'candidate / android-package']
+        with self.assertRaisesRegex(ValueError, 'every unsigned package build'):
+            inspect(self.run, split_jobs, artifacts)
         for run, job_result, artifact_result in (
             ({**self.run, "head_sha": "c" * 40}, jobs, artifacts),
             ({**self.run, "event": "pull_request"}, jobs, artifacts),
@@ -247,6 +253,13 @@ class Candidate(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 inspect(run, job_result, artifact_result)
+
+    def test_seal_names_the_missing_android_artifact(self):
+        android = self.directory / 'signing-input-android'
+        (android / 'synthetic.bin').unlink()
+        android.rmdir()
+        with self.assertRaisesRegex(ValueError, 'missing candidate artifact groups: signing-input-android'):
+            self.candidate.seal(self.directory, self.environment, self.root)
 
     def test_promotion_artifacts_cannot_write_outside_their_group_or_overwrite_members(self):
         group = self.root / "group"

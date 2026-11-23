@@ -243,6 +243,7 @@ class Workflows(unittest.TestCase):
         workflow = ROOT / '.github/workflows/unsigned-candidate.yml'
         assembly = expressions.jobs(workflow)['android-package']
         condition = re.search(r'if: \$\{\{(.*?)\}\}', assembly)[1]
+        self.assertIn('!cancelled()', condition)
         for result, cancelled, expected in (
                 ('success', False, True), ('failure', False, False), ('skipped', False, False),
                 ('cancelled', True, False), ('success', True, False)):

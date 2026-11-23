@@ -40,6 +40,9 @@ PROMOTION_JOBS = {
     'candidate / package (android, ubuntu-24.04)', 'candidate / package (linux, ubuntu-24.04)',
     'candidate / package (macos, macos-15)',
 }
+LEGACY_ANDROID_JOB = 'candidate / package (android, ubuntu-24.04)'
+SPLIT_ANDROID_JOBS = {'candidate / android-native (arm64-v8a)', 'candidate / android-native (armeabi-v7a)',
+                      'candidate / android-package'}
 INPUTS = ('Cargo.lock', 'Cargo.toml', 'nsh.rev', 'rust-toolchain.toml', 'tools/ci/package.Cargo.lock',
           '.github/workflows/unsigned-candidate.yml', '.github/workflows/validation.yml',
           'tools/ci/check-plan.py', 'tools/ci/signing-policy.json', 'tools/ci/version.py', '.cargo/config.toml',
@@ -68,8 +71,10 @@ def build_identity(root=ROOT):
 
 def inventory(directory):
     groups = {path.name for path in directory.iterdir() if path.name != 'manifest.json'}
-    if not REQUIRED <= groups or groups - REQUIRED - OPTIONAL:
-        raise ValueError('candidate artifact groups are missing or unexpected')
+    if missing := REQUIRED - groups:
+        raise ValueError('missing candidate artifact groups: ' + ', '.join(sorted(missing)))
+    if unexpected := groups - REQUIRED - OPTIONAL:
+        raise ValueError('unexpected candidate artifact groups: ' + ', '.join(sorted(unexpected)))
     files = {}
     for group in sorted(groups):
         folder = directory / group
@@ -146,8 +151,12 @@ def promotion_inputs(repository, run_id, commit):
         raise ValueError('promotion requires a successful master Validation push at the tagged commit')
     attempt = run['run_attempt']
     result = api(f'{base}/attempts/{attempt}/jobs?per_page=100')
-    checks = {job['name']: job['conclusion'] for job in result['jobs'] if job['name'] in PROMOTION_JOBS}
-    if checks != dict.fromkeys(PROMOTION_JOBS, 'success'):
+    candidates = PROMOTION_JOBS | SPLIT_ANDROID_JOBS
+    checks = {job['name']: job['conclusion'] for job in result['jobs'] if job['name'] in candidates}
+    required = PROMOTION_JOBS
+    if SPLIT_ANDROID_JOBS & checks.keys():
+        required = (PROMOTION_JOBS - {LEGACY_ANDROID_JOB}) | SPLIT_ANDROID_JOBS
+    if checks != dict.fromkeys(required, 'success'):
         raise ValueError('master validation and every unsigned package build must have passed')
     result = api(f'{base}/artifacts?per_page=100')
     if result['total_count'] != len(result['artifacts']):
@@ -162,8 +171,8 @@ def promotion_inputs(repository, run_id, commit):
                 or str(source['id']) != run_id or not re.fullmatch(r'sha256:[0-9a-f]{64}', artifact['digest'] or '')):
             raise ValueError(f'invalid or ambiguous candidate artifact {name}')
         artifacts[name] = {'id': artifact['id'], 'digest': artifact['digest']}
-    if REQUIRED - artifacts.keys():
-        raise ValueError('the master run is missing required unsigned artifacts')
+    if missing := REQUIRED - artifacts.keys():
+        raise ValueError('the master run is missing unsigned artifacts: ' + ', '.join(sorted(missing)))
     return attempt, checks, artifacts
 
 
