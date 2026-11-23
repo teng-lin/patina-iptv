@@ -219,9 +219,17 @@ pub(crate) fn header_fits_as(
     let channel = bounds(app, "guide-header-channel", &what);
     let source = bounds(app, "guide-header-source", &what);
     let program = bounds(app, "guide-header-program", &what);
-    assert!((channel[0] - source[0]).abs() <= 0.5, "{what}");
+    assert!(
+        ((source[0] + source[2]) - (details[0] + details[2])).abs() <= 0.5,
+        "the source {source:?} aligns with the right edge of the details {details:?}: {what}"
+    );
     assert!(channel[1] + channel[3] <= source[1] + 0.5, "{what}");
-    assert!(source[1] + source[3] <= program[1] + 0.5, "{what}");
+    let center_y = |b: [f32; 4]| b[1] + b[3] / 2.0;
+    assert!(
+        (center_y(source) - center_y(program)).abs() <= 0.5,
+        "the source {source:?} and program {program:?} share a row: {what}"
+    );
+    assert!(program[0] + program[2] <= source[0] + 0.5, "{what}");
     for (part, b) in [
         ("channel", channel),
         ("source", source),

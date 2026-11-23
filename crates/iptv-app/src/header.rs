@@ -267,14 +267,6 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 ),
         )
         .child(
-            text(move || labels.with(|labels| labels.1.clone()))
-                .test_id("guide-header-source")
-                .number_of_lines(1)
-                .font_family(SANS)
-                .text_size(move || size.text_px(HEADER_TIMES))
-                .text_color(secondary()),
-        )
-        .child(
             view()
                 .flex_row()
                 .items_center()
@@ -289,6 +281,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     })
                     .test_id("guide-header-program")
                     .flex_1()
+                    .min_w(px(0.0))
                     .number_of_lines(1)
                     .font_family(SANS)
                     .font_weight(MEDIUM)
@@ -310,7 +303,18 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                                 move || more(ui, size),
                             ))
                     },
-                )),
+                ))
+                .child(
+                    text(move || labels.with(|labels| labels.1.clone()))
+                        .test_id("guide-header-source")
+                        .flex_shrink_0()
+                        .max_w(percentage(0.5))
+                        .number_of_lines(1)
+                        .text_right()
+                        .font_family(SANS)
+                        .text_size(move || size.text_px(HEADER_TIMES))
+                        .text_color(secondary()),
+                ),
         )
         .child(
             // Times, progress and minutes left wrap in compact windows.

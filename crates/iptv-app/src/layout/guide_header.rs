@@ -117,7 +117,8 @@ fn stack(width: f32, height: f32, scale: f32, text: f32, most: f32) -> Option<Gu
 
 /// The height (points) of the channel metadata, title and times in a
 /// column `column` points wide at `scale` and text factor `text`. The channel
-/// name, source and title each take a line. The times row wraps onto further lines
+/// name takes the first line. The title and source share the next line.
+/// The times row wraps onto further lines
 /// where the column is narrower than they are (the span over at most two
 /// lines of its own).
 pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
@@ -150,7 +151,7 @@ pub fn details_height(column: f32, scale: f32, text: f32) -> f32 {
         }
     }
     let times: f32 = rows.iter().sum::<f32>() + gap * (rows.len().saturating_sub(1)) as f32;
-    2.0 * times_line + line(HEADER_TITLE) + 3.0 * DETAILS_GAP * scale + times
+    times_line + line(HEADER_TITLE) + 2.0 * DETAILS_GAP * scale + times
 }
 
 /// The header's height and the preview's width in a window `width` ×
@@ -274,25 +275,25 @@ mod tests {
                 "{w}x{h} at {font}: {g:?}, room {room}"
             );
         }
-        // The channel name, playlist, title and times take one line each.
+        // The channel name, title with its source, and times each take a line.
         assert_eq!(
             details_height(400.0, 1.0, 1.0),
-            2.0 * 21.0 + 27.0 + 3.0 * 6.0 + 21.0
+            21.0 + 27.0 + 2.0 * 6.0 + 21.0
         );
         // A narrow column wraps the minutes left onto a line of their own.
         assert_eq!(
             details_height(200.0, 1.0, 1.0),
-            2.0 * 21.0 + 27.0 + 3.0 * 6.0 + 21.0 + 12.0 + 21.0
+            21.0 + 27.0 + 2.0 * 6.0 + 21.0 + 12.0 + 21.0
         );
         // A part exactly as wide as the row's rest stays; a hair wider wraps.
         let exact = TIMES_SPAN_W + TIMES_GAP + TIMES_PROGRESS_W + TIMES_GAP + TIMES_LEFT_W;
         assert_eq!(
             details_height(exact, 1.0, 1.0),
-            2.0 * 21.0 + 27.0 + 3.0 * 6.0 + 21.0
+            21.0 + 27.0 + 2.0 * 6.0 + 21.0
         );
         assert_eq!(
             details_height(exact - 0.25, 1.0, 1.0),
-            2.0 * 21.0 + 27.0 + 3.0 * 6.0 + 21.0 + 12.0 + 21.0
+            21.0 + 27.0 + 2.0 * 6.0 + 21.0 + 12.0 + 21.0
         );
         // At AX3 in a 214-point column the span (440 points) would need
         // three lines; the app ellipsizes it after two, so two are budgeted,
@@ -301,9 +302,8 @@ mod tests {
         let line = (HEADER_TIMES * ax3 * LINE_HEIGHT).ceil();
         assert_eq!(
             details_height(214.0, 1.0, ax3),
-            2.0 * line
-                + (HEADER_TITLE * ax3 * LINE_HEIGHT).ceil()
-                + 3.0 * 6.0
+            line + (HEADER_TITLE * ax3 * LINE_HEIGHT).ceil()
+                + 2.0 * 6.0
                 + 2.0 * line
                 + 12.0
                 + line
@@ -317,9 +317,9 @@ mod tests {
         // Phones at full size: the preview spans the window inside its
         // margins, with the metadata and program underneath.
         for (w, h, want) in [
-            (412.0, 915.0, (362.0, 388.0, 218.0)),
-            (390.0, 844.0, (383.0, 366.0, 206.0)),
-            (360.0, 800.0, (366.0, 336.0, 189.0)),
+            (412.0, 915.0, (335.0, 388.0, 218.0)),
+            (390.0, 844.0, (356.0, 366.0, 206.0)),
+            (360.0, 800.0, (339.0, 336.0, 189.0)),
         ] {
             let g = GuideHeader::of(w, h, 1.0, 1.0);
             assert!(g.stacked(), "{w}x{h}: {g:?}");
@@ -343,7 +343,7 @@ mod tests {
         // The header grows for the channel metadata and wrapped times.
         for (w, h, want) in [
             (915.0, 412.0, (136.0, 199.0, 112.0)),
-            (780.0, 360.0, (132.0, 192.0, 108.0)),
+            (780.0, 360.0, (119.0, 169.0, 95.0)),
         ] {
             let g = GuideHeader::of(w, h, 1.0, 1.0);
             assert!(!g.stacked(), "{w}x{h}: {g:?}");

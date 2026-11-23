@@ -278,11 +278,14 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
             .bounds
     };
     let star = bounds("guide-header-favorite");
+    let source = bounds("guide-header-source");
     let channel = bounds("guide-header-channel");
     let details = bounds("guide-header-details");
     assert!((star.origin.y.0 - channel.origin.y.0).abs() < 1.0);
     let right = |b: nsh_core::Bounds<nsh_core::Points>| b.origin.x.0 + b.size.width.0;
     assert!((right(star) - right(details)).abs() < 1.0);
+    assert!((right(source) - right(star)).abs() < 1.0);
+    assert!(source.origin.y.0 >= star.origin.y.0 + star.size.height.0 - 0.5);
 
     let opened: Arc<Mutex<Vec<String>>> = Arc::default();
     let observed = opened.clone();
