@@ -333,7 +333,7 @@ fn choosers(app: &mut Headless) {
     step(app.press("text:Test Channel One"));
     step(app.wait_for("text:/^\\d+ min left$/"));
     step(app.press("label:Video"));
-    step(app.wait_for("id:play-bar-more"));
+    step(app.wait_for("id:play-bar-play-pause"));
     step(app.play_bar_option("Display"));
     step(app.wait_for("text:Use for all channels"));
     step(app.wait_for("text:✓  Normal"));

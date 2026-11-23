@@ -7,8 +7,8 @@
 //!
 //! Above the controls: the channel, program information and stream quality.
 //! Sound and guide navigation sit left of transport. Favorite, picture in
-//! picture, multiview and recording sit to its right. More holds secondary
-//! actions and controls that do not fit. The timeline sits below the row.
+//! picture, multiview and display sit to its right. More holds only the
+//! available actions that do not fit. The timeline sits below the row.
 //! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -129,9 +129,8 @@ pub fn bind(ui: Ui) {
 /// safe area): popups over the video keep clear of it. Until the first
 /// layout use an estimate.
 pub fn height(ui: Ui) -> f32 {
-    let laid_out = ui.play_bar_height.get();
-    if laid_out > 0.0 {
-        return laid_out;
+    if let Some(size) = ui.play_bar_size.get() {
+        return size.height.0;
     }
     let row = target() + 8.0;
     6.0 + info::ESTIMATED_HEIGHT + 4.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
@@ -311,6 +310,7 @@ const LEFT: &[Control] = &[
     Control::Mute,
     Control::Volume,
     Control::Listen,
+    Control::Tracks,
     Control::Channels,
     Control::Guide,
 ];
@@ -319,7 +319,10 @@ const RIGHT: &[Control] = &[
     Control::Favorite,
     Control::Pip,
     Control::Multiview,
+    Control::Picture,
     Control::Record,
+    Control::Details,
+    Control::Fullscreen,
     Control::More,
 ];
 const VOLUME_WIDTH: f32 = 96.0;
@@ -331,53 +334,78 @@ struct Layout {
     more: Vec<Control>,
 }
 
+fn group_width(group: &[Control], row: &[Control], size: f32) -> f32 {
+    let gap = if group == CENTER {
+        TRANSPORT_GAP
+    } else {
+        BUTTON_GAP
+    };
+    let mut width = 0.0;
+    for control in group.iter().filter(|c| row.contains(c)) {
+        if width > 0.0 {
+            width += gap;
+        }
+        width += match control {
+            Control::Volume => VOLUME_WIDTH,
+            Control::PlayPause => size + 8.0,
+            _ => size,
+        };
+    }
+    width
+}
+
 fn layout(ui: Ui) -> Layout {
     use Control::*;
     let size = target();
-    let seekable = enabled(ui, Timeline);
-    let center = CENTER
-        .iter()
-        .copied()
-        .filter(|c| *c == PlayPause || seekable);
-    let transport = size
-        + 8.0
-        + if seekable {
-            2.0 * (size + TRANSPORT_GAP)
-        } else {
-            0.0
-        };
-    let room = (window().width.0 - transport) / 2.0 - bar_margin() - PANEL_PADDING - group_gap();
-    let supported = |c: &Control| match c {
-        Volume | Fullscreen => desktop_controls(),
-        Listen => enabled(ui, Listen),
-        Pip => crate::pip::supported(ui),
-        _ => true,
+    let width = ui
+        .play_bar_size
+        .get()
+        .map_or_else(|| window().width.0, |s| s.width.0);
+    let available = width - 2.0 * (bar_margin() + PANEL_PADDING);
+    let eligible = |c: &Control| match c {
+        Pip => crate::pip::supported(ui) && enabled(ui, Pip),
+        More => false,
+        _ => enabled(ui, *c),
     };
-    let fit = |buttons: &[Control], drop_order: &[Control]| {
-        let mut group: Vec<_> = buttons.iter().copied().filter(supported).collect();
-        let width = |c: Control| if c == Volume { VOLUME_WIDTH } else { size };
-        let mut used = group.iter().map(|c| width(*c) + BUTTON_GAP).sum::<f32>() - BUTTON_GAP;
-        for control in drop_order {
-            if used <= room {
-                break;
-            }
-            if let Some(at) = group.iter().position(|c| c == control) {
-                used -= width(group.remove(at)) + BUTTON_GAP;
+    let candidates: Vec<_> = LEFT
+        .iter()
+        .chain(CENTER)
+        .chain(RIGHT)
+        .copied()
+        .filter(eligible)
+        .collect();
+    let mut row = candidates.clone();
+    let mut more = Vec::new();
+    let needed = |row: &[Control]| {
+        group_width(LEFT, row, size)
+            + group_width(CENTER, row, size)
+            + group_width(RIGHT, row, size)
+            + 2.0 * group_gap()
+    };
+    if needed(&row) > available {
+        row.retain(|c| CENTER.contains(c));
+        row.push(More);
+        // A wide volume slider can miss its slot while a later icon still fits.
+        for control in [
+            Favorite, Guide, Pip, Mute, Multiview, Listen, Record, Channels, Tracks, Volume,
+            Details, Picture, Fullscreen,
+        ] {
+            if candidates.contains(&control) {
+                row.push(control);
+                if needed(&row) > available {
+                    row.pop();
+                }
             }
         }
-        group
-    };
-    let left = fit(LEFT, &[Volume, Channels, Listen, Mute, Guide]);
-    let right = fit(RIGHT, &[Record, Multiview, Pip, Favorite]);
-    let row: Vec<_> = left.into_iter().chain(center).chain(right).collect();
-    // Keep the menu order stable across resizes, even as items move into it.
-    let more = [
-        Favorite, Guide, Channels, Record, Listen, Mute, Volume, Tracks, Details, Pip, Multiview,
-        Picture, Fullscreen,
-    ]
-    .into_iter()
-    .filter(|c| supported(c) && !row.contains(c))
-    .collect();
+        more.extend(candidates.iter().filter(|c| !row.contains(c)).copied());
+        row = LEFT
+            .iter()
+            .chain(CENTER)
+            .chain(RIGHT)
+            .copied()
+            .filter(|c| row.contains(c))
+            .collect();
+    }
     Layout { row, more }
 }
 
@@ -392,15 +420,22 @@ fn bar_now(ui: Ui) -> impl IntoElement {
     // Hidden, the bar is unmounted: forget its height, which a resize or a
     // text change meanwhile makes stale, until it lays out again.
     cleanup(move || {
-        if untracked(|| ui.play_bar_height.try_get()).is_some() {
-            ui.play_bar_height.set(0.0);
+        if untracked(|| ui.play_bar_size.try_get()).is_some() {
+            ui.play_bar_size.set(None);
         }
     });
     let controls = computed(move || layout(ui));
     effect(move || {
         let focus = ui.play_bar.with(|b| b.focus);
         if focus.is_some_and(|c| c != Control::Timeline && !controls.with(|l| l.row.contains(&c))) {
-            update(ui, |b, now| b.focus_control(Control::More, now));
+            let next = controls.with(|l| {
+                if l.row.contains(&Control::More) {
+                    Control::More
+                } else {
+                    Control::PlayPause
+                }
+            });
+            update(ui, |b, now| b.focus_control(next, now));
         }
     });
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
@@ -412,9 +447,8 @@ fn bar_now(ui: Ui) -> impl IntoElement {
         .px(move || px(bar_margin()))
         .pb_safe_area_plus(px(16.0))
         .on_layout(move |b: &Bounds<Points>| {
-            let h = b.size.height.0;
-            if untracked(|| ui.play_bar_height.get()) != h {
-                ui.play_bar_height.set(h);
+            if ui.play_bar_size.get_untracked() != Some(b.size) {
+                ui.play_bar_size.set(Some(b.size));
             }
         })
         // Only the panel takes presses: around it they reach the video.
@@ -446,7 +480,8 @@ fn bar_now(ui: Ui) -> impl IntoElement {
 /// An icon button shared by touch, pointer and D-pad. Admission and actions
 /// are resolved from the same stable identity on every input path.
 fn button(ui: Ui, control: Control, icon: impl Fn() -> Icon + 'static, size: f32) -> View {
-    let target_window = (control == Control::More).then(nsh_core::element::desktop::current_window);
+    let target_window = matches!(control, Control::More | Control::Fullscreen)
+        .then(nsh_core::element::desktop::current_window);
     view()
         .role(AccessibilityRole::Button)
         .accessible(true)
@@ -591,6 +626,24 @@ pub(super) fn activate(
     }
     log::info!("iptv play bar: {}", control_label(control));
     use crate::chooser::{self, Kind};
+    if control == Control::Details && ui.description.with_untracked(Option::is_some) {
+        crate::menu_view::close(ui);
+        return;
+    }
+    if ui.description.with_untracked(Option::is_some) {
+        crate::menu_view::close(ui);
+    }
+    if let Some(kind) = ui.chooser.with_untracked(|c| c.as_ref().map(|c| c.kind)) {
+        chooser::close(ui);
+        if matches!(
+            (control, kind),
+            (Control::More, Kind::More)
+                | (Control::Picture, Kind::Picture)
+                | (Control::Tracks, Kind::Track(_))
+        ) {
+            return;
+        }
+    }
     match control {
         Control::Mute => crate::media::toggle_mute(ui),
         Control::More => chooser::open_more(
@@ -753,7 +806,10 @@ fn group(ui: Ui, controls: Memo<Layout>, candidates: &'static [Control]) -> View
     let group = if candidates == CENTER {
         group.flex_shrink_0().gap(px(TRANSPORT_GAP))
     } else {
-        let side = group.flex_1().min_w(px(0.0)).gap(px(BUTTON_GAP));
+        let side = group
+            .flex_1()
+            .min_w(move || px(controls.with(|l| group_width(candidates, &l.row, target()))))
+            .gap(px(BUTTON_GAP));
         if candidates == RIGHT {
             side.justify_end()
         } else {
@@ -799,6 +855,17 @@ fn icon(ui: Ui, c: Control) -> Icon {
         Control::Multiview => Icon::Multiview,
         Control::Record => Icon::Record,
         Control::More => Icon::More,
+        Control::Tracks => Icon::Subtitles,
+        Control::Details => Icon::Info,
+        Control::Picture => Icon::PictureSize,
+        Control::Fullscreen
+            if nsh_core::element::desktop::current_window()
+                .state()
+                .is_some_and(|s| s.mode == nsh_core::desktop::WindowMode::FullScreen) =>
+        {
+            Icon::ExitFullScreen
+        }
+        Control::Fullscreen => Icon::FullScreen,
         _ => unreachable!("only toolbar controls have icons"),
     }
 }

@@ -942,7 +942,7 @@ fn a_split_screen_tablet_keeps_every_play_bar_button_inside_the_window() {
             })
             .filter_map(|n| n.test_id.clone())
             .collect();
-        for id in ["play-bar-play-pause", "play-bar-guide", "play-bar-more"] {
+        for id in ["play-bar-play-pause", "play-bar-guide"] {
             assert!(buttons.iter().any(|b| &**b == id), "{id} shown: {what}");
         }
         for id in &buttons {

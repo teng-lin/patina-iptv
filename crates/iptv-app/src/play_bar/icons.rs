@@ -22,6 +22,9 @@ pub enum Icon {
     Forward,
     Star,
     StarFilled,
+    Subtitles,
+    Info,
+    PictureSize,
     ChannelList,
     Multiview,
     PictureInPicture,
@@ -75,6 +78,18 @@ fn body(icon: Icon) -> &'static str {
         }
         Icon::StarFilled => {
             "<path fill='currentColor' d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>"
+        }
+        Icon::Subtitles => {
+            "<rect x='3' y='5' width='18' height='14' rx='2'/>\
+             <path d='M7 12h3M12 12h5M7 15.5h7M16 15.5h1'/>"
+        }
+        Icon::Info => {
+            "<circle cx='12' cy='12' r='9'/>\
+             <path d='M12 11v6'/><circle fill='currentColor' stroke='none' cx='12' cy='7.5' r='1.3'/>"
+        }
+        Icon::PictureSize => {
+            "<rect x='2.5' y='5' width='19' height='14' rx='2'/>\
+             <path d='M6 11V8.5h3M18 13v2.5h-3'/>"
         }
         Icon::ChannelList => {
             "<path d='M8 6.5h13M8 12h13M8 17.5h13'/>\

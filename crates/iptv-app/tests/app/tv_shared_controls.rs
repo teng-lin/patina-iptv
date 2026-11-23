@@ -183,22 +183,19 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     assert!(selected(app, "play-bar-favorite"));
     assert_eq!(iptv_app::player_opens(0), opens);
     for _ in 0..12 {
-        if selected(app, "play-bar-more") {
+        if selected(app, "play-bar-picture") {
             break;
         }
         step(app.press_key("right"));
     }
-    assert!(selected(app, "play-bar-more"));
-    step(app.press_key("enter"));
-    step(app.wait_for("id:chooser-layer >> text:Display"));
-    step(app.press_key("down"));
+    assert!(selected(app, "play-bar-picture"));
     step(app.press_key("enter"));
     step(app.wait_for("id:chooser-layer >> text:Stretch to fill"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:Stretch to fill", Duration::from_secs(2)));
     assert!(
-        selected(app, "play-bar-more"),
+        selected(app, "play-bar-picture"),
         "popup restores control identity"
     );
     persistent(app, &lifetime, player);

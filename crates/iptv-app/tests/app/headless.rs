@@ -42,6 +42,10 @@ impl Headless {
     }
 
     pub fn play_bar_option(&mut self, name: &str) -> Result<(), String> {
+        let direct = format!("id:play-bar-layer >> label:{name}");
+        if self.screen().matches(&direct)? {
+            return self.press(&direct);
+        }
         self.press("id:play-bar-more")?;
         self.press(&format!("id:chooser-items >> text:{name}"))
     }

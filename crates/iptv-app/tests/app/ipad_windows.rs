@@ -35,7 +35,7 @@ use serde_json::{Value as Json, json};
 
 const WAIT: Duration = Duration::from_secs(5);
 /// The play bar's buttons (`play_bar::control_id`): its panel's rows.
-pub(crate) const BAR_CONTROLS: [&str; 9] = [
+pub(crate) const BAR_CONTROLS: [&str; 10] = [
     "play-bar-mute",
     "play-bar-channels",
     "play-bar-guide",
@@ -43,8 +43,9 @@ pub(crate) const BAR_CONTROLS: [&str; 9] = [
     "play-bar-favorite",
     "play-bar-pip",
     "play-bar-multiview",
+    "play-bar-picture",
     "play-bar-record",
-    "play-bar-more",
+    "play-bar-details",
 ];
 /// An iPad Air 11-inch (M4) full screen, in points.
 const LANDSCAPE: (f32, f32) = (1180.0, 820.0);
@@ -465,10 +466,12 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
                 );
             }
             let pause = bounds(&app, "play-bar-play-pause", &what);
-            assert!(
-                (pause[0] + pause[2] / 2.0 - size.0 / 2.0).abs() <= 0.5,
-                "the transport is centered: {pause:?}, {what}"
-            );
+            if size.0 >= PORTRAIT.0 {
+                assert!(
+                    (pause[0] + pause[2] / 2.0 - size.0 / 2.0).abs() <= 0.5,
+                    "the transport is centered with spare space: {pause:?}, {what}"
+                );
+            }
             // Every button of the bar, the secondary ones too: a narrow
             // window keeps the secondary actions in More.
             let buttons: Vec<_> = app
@@ -483,9 +486,10 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
                 })
                 .collect();
             assert!(
-                buttons
-                    .iter()
-                    .any(|b| b.test_id.as_deref() == Some("play-bar-more")),
+                buttons.iter().any(|b| matches!(
+                    b.test_id.as_deref(),
+                    Some("play-bar-picture" | "play-bar-more")
+                )),
                 "secondary controls remain reachable: {what}"
             );
             for b in buttons {

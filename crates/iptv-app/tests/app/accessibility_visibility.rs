@@ -618,7 +618,7 @@ fn a_popup_hides_its_underlay_while_the_pointer_bar_keeps_its_visible_controls()
     step(app.press_key("enter"));
     step(app.press_key("enter"));
     step(app.press("label:Video"));
-    step(app.wait_for("id:play-bar-more"));
+    step(app.wait_for("id:play-bar-play-pause"));
     exposure.shown(app, "play-bar-layer", true);
     step(app.play_bar_option("Display"));
     exposure.shown(app, "chooser-layer", true);

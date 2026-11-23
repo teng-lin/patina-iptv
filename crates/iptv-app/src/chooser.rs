@@ -64,15 +64,8 @@ pub(super) fn open_more(
     controls: Vec<iptv_presentation::play_bar::Control>,
     window: Option<nsh_core::element::desktop::WindowRef>,
 ) {
-    if ui
-        .chooser
-        .with_untracked(|c| c.as_ref().is_some_and(|c| c.kind == Kind::More))
-    {
-        close(ui);
+    if controls.is_empty() {
         return;
-    }
-    if ui.description.with_untracked(Option::is_some) {
-        crate::menu_view::close(ui);
     }
     ui.chooser.set(Some(Open {
         kind: Kind::More,

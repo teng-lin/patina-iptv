@@ -231,6 +231,10 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 .filter_map(|id| bounds(app, id))
                 .collect();
             assert_eq!(rows.len(), BAR_CONTROLS.len(), "the bar's controls: {what}");
+            assert!(
+                bounds(app, "play-bar-more").is_none(),
+                "all actions fit: {what}"
+            );
             let pause = bounds(app, "play-bar-play-pause").expect("play/pause");
             assert!(
                 (pause[0] + pause[2] / 2.0 - size.0 / 2.0).abs() <= 0.5,
@@ -271,8 +275,23 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             persistent(app, &lifetime, surface);
         }
     }
-    // A narrow landscape player keeps PiP visible as other actions move to More.
-    present(app, (422.0, 260.0), 1.0);
+    // All ten controls fit at this width only by using spare space on the left.
+    present(app, (532.0, 280.0), 1.0);
+    let direct: Vec<_> = BAR_CONTROLS
+        .iter()
+        .map(|id| bounds(app, id).expect(id))
+        .collect();
+    assert!(bounds(app, "play-bar-more").is_none());
+    assert!(direct.iter().all(|b| b[0] >= 0.0 && b[0] + b[2] <= 532.5));
+    assert!(
+        direct
+            .windows(2)
+            .all(|pair| pair[0][0] + pair[0][2] <= pair[1][0] + 0.5),
+        "adjacent targets do not intersect: {direct:?}"
+    );
+
+    // A narrower landscape player keeps PiP visible as other actions move to More.
+    present(app, (370.0, 260.0), 1.0);
     let favorite = bounds(app, "play-bar-favorite").expect("favorite remains direct");
     let pip = bounds(app, "play-bar-pip").expect("PiP remains direct");
     let more = bounds(app, "play-bar-more").expect("overflow remains direct");

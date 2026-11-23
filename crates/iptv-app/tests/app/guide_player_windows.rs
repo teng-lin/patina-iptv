@@ -168,7 +168,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert!(app.window_state("player-window-1").unwrap().is_some());
     assert!(iptv_app::player_has_source(1));
     step(app.wait_for("label:Play or pause"));
-    assert!(app.screen().matches("id:play-bar-more").unwrap());
+    assert!(app.screen().matches("id:play-bar-play-pause").unwrap());
     let main_source = prop(&props, 0, "source");
     let auxiliary_source = prop(&props, 1, "source");
     let auxiliary_node = player_node(&props, 1);
@@ -209,7 +209,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.hover("id:auxiliary-player-1 >> label:Video"));
     if !app
         .screen()
-        .matches("id:auxiliary-player-1 >> id:play-bar-more")
+        .matches("id:auxiliary-player-1 >> id:play-bar-play-pause")
         .unwrap()
     {
         step(app.press("id:auxiliary-player-1 >> label:Video"));
@@ -234,7 +234,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.hover("id:auxiliary-player-1 >> label:Video"));
     if !app
         .screen()
-        .matches("id:auxiliary-player-1 >> id:play-bar-more")
+        .matches("id:auxiliary-player-1 >> id:play-bar-play-pause")
         .unwrap()
     {
         step(app.press("id:auxiliary-player-1 >> label:Video"));
@@ -277,7 +277,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.hover("id:auxiliary-player-1 >> label:Video"));
     if !app
         .screen()
-        .matches("id:auxiliary-player-1 >> id:play-bar-more")
+        .matches("id:auxiliary-player-1 >> id:play-bar-play-pause")
         .unwrap()
     {
         step(app.press("id:auxiliary-player-1 >> label:Video"));
@@ -301,8 +301,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         },
     );
     app.settle();
-    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
-    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Subtitles and tracks"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-tracks"));
     let chooser = app.screen().layout_nodes().into_iter().find(|node| {
         node.test_id.as_deref() == Some("chooser-items") && node.bounds.size.height.0 > 0.0
     });
@@ -318,8 +317,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             .matches("text:/Second synthetic audio/")
             .unwrap()
     );
-    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
-    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Subtitles and tracks"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-tracks"));
     step(app.wait_for("text:/Second synthetic audio/"));
     step(app.press("text:/Second synthetic audio/"));
     app.settle();
@@ -538,8 +536,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     assert_eq!(iptv_app::player_opens(2), c_opens);
 
     // A fullscreen popup can enter compact mode and restore its own mode.
-    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
-    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Full screen"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-fullscreen"));
     enter_popup_pip(&mut app, 1);
     step(app.hover("id:auxiliary-player-1 >> id:pip-video"));
     step(app.press("id:auxiliary-player-1 >> id:pip-back"));
@@ -548,8 +545,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         app.window_state("player-window-1").unwrap().unwrap().mode,
         nsh_core::desktop::WindowMode::FullScreen
     );
-    step(app.press("id:auxiliary-player-1 >> id:play-bar-more"));
-    step(app.press("id:auxiliary-player-1 >> id:chooser-items >> text:Full screen"));
+    step(app.press("id:auxiliary-player-1 >> id:play-bar-fullscreen"));
 
     // The primary PiP remains independent while C is already compact.
     step(app.press("id:guide-ui >> label:Local A"));
