@@ -211,8 +211,8 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     t.press("text:Playlists >> nth=0");
     t.press("text:Synthetic viewer");
     t.press("text:Show this playlist");
-    t.wait("text:Synthetic Viewer", 10);
-    t.press("text:Synthetic Viewer >> nth=0");
+    t.wait("id:guide-row >> text:Synthetic Viewer", 10);
+    t.press("id:guide-row >> text:Synthetic Viewer");
     crate::cov_data::until(
         &mut t.app,
         "generated viewer stream active",

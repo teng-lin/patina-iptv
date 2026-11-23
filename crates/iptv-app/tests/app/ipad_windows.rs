@@ -3,9 +3,8 @@
 //! turned either way, and the windows multitasking gives the app beside
 //! another (about 320 to 700 points wide), at the default text size and at
 //! large Dynamic Type sizes: the guide keeps its focused channel and the
-//! channel playing in its preview, the header's shortcuts move under the
-//! preview by `iptv_app::layout::GuideHeader`'s policy and stay inside
-//! the window; full-screen video keeps its progress and the play bar's
+//! channel playing in its preview, with the metadata inside the window.
+//! Full-screen video keeps its progress and the play bar's
 //! primary controls; a show's details keep the selected episode; the
 //! compact empty Movies and Shows and Search's field stay inside the
 //! window. Nothing opens a stream, and the one `tv.player` is never
@@ -25,7 +24,7 @@ use std::time::Duration;
 use crate::headless::Headless;
 use crate::personalization::step;
 use crate::tv_shared_controls::{Lifetime, persistent, preview_fixture_with};
-use iptv_app::layout::{Class, GuideHeader, Shortcuts};
+use iptv_app::layout::{Class, GuideHeader};
 use iptv_settings::{Settings, Value};
 use nsh_core::platform::{Idiom, Lifecycle, Os};
 use nsh_core::{
@@ -148,8 +147,7 @@ pub(crate) fn channel_selected(app: &Headless, name: &str) -> bool {
 }
 
 /// The guide's header in an iPad window: the video under the preview, the
-/// corner ‹ inside it, the shortcuts beside or under it by the policy and
-/// inside the window, the program's minutes left on screen.
+/// corner ‹ inside it and the program's minutes left on screen.
 #[track_caller]
 pub(crate) fn header_fits(app: &Headless, player: NodeId, size: (f32, f32), text: f32) {
     header_fits_as(app, player, size, text, policy(size, text));
@@ -192,33 +190,13 @@ pub(crate) fn header_fits_as(
         "the preview over the rows: {what}"
     );
     assert_eq!(rows[2], w, "the rows keep the window's width: {what}");
-    assert_eq!(
-        app.screen().matches("id:guide-header-shortcuts").unwrap(),
-        want.shortcuts == Shortcuts::Below,
-        "the shortcuts {:?} by the policy: {what}",
-        want.shortcuts
+    let selector = bounds(app, "guide-list-selector", &what);
+    let header = bounds(app, "guide-header", &what);
+    assert!(
+        selector[1] >= header[1] + header[3] - 0.5 && selector[1] + selector[3] <= rows[1] + 0.5,
+        "the group selector {selector:?} between header {header:?} and rows {rows:?}: {what}"
     );
-    if want.shortcuts == Shortcuts::Below {
-        // The row under the preview keeps the group switcher inside the window.
-        let row = bounds(app, "guide-header-shortcuts", &what);
-        assert!(row[1] >= preview[1] + preview[3], "row {row:?}: {what}");
-        assert!(
-            row[1] + row[3] <= rows[1] + 0.5,
-            "row {row:?} over the rows: {what}"
-        );
-        inside(row, size, &format!("the shortcuts' row, {what}"));
-        let list = bounds_of(app, "id:guide-header-shortcuts >> text:/^☰  /", &what);
-        assert!(
-            list[0] >= -0.5 && list[0] < w,
-            "the list {list:?} starts in the window: {what}"
-        );
-    } else {
-        inside(
-            bounds_of(app, "id:guide-header >> text:/^☰  /", &what),
-            size,
-            &format!("the group switcher, {what}"),
-        );
-    }
+    inside(selector, size, &format!("the group selector, {what}"));
     let left = find(app, |n| {
         n.text
             .as_ref()
@@ -238,7 +216,27 @@ pub(crate) fn header_fits_as(
             && n.bounds.origin.x.0 >= details[0] - 0.5
     })
     .unwrap_or_else(|| panic!("the program's times shown: {what}"));
-    for (part, b) in [("times", times), ("minutes left", left)] {
+    let channel = bounds(app, "guide-header-channel", &what);
+    let source = bounds(app, "guide-header-source", &what);
+    let program = bounds(app, "guide-header-program", &what);
+    assert!(
+        ((source[0] + source[2]) - (details[0] + details[2])).abs() <= 0.5,
+        "the source {source:?} aligns with the right edge of the details {details:?}: {what}"
+    );
+    assert!(channel[1] + channel[3] <= source[1] + 0.5, "{what}");
+    let center_y = |b: [f32; 4]| b[1] + b[3] / 2.0;
+    assert!(
+        (center_y(source) - center_y(program)).abs() <= 0.5,
+        "the source {source:?} and program {program:?} share a row: {what}"
+    );
+    assert!(program[0] + program[2] <= source[0] + 0.5, "{what}");
+    for (part, b) in [
+        ("channel", channel),
+        ("source", source),
+        ("program", program),
+        ("times", times),
+        ("minutes left", left),
+    ] {
         assert!(
             b[1] >= details[1] - 0.5 && b[1] + b[3] <= details[1] + details[3] + 0.5,
             "{part} {b:?} whole inside the details {details:?}: {what}"
@@ -276,6 +274,8 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
             present(app, size, text);
             let what = format!("{size:?} at text {text:.2}");
             assert!(channel_selected(app, "Local C"), "focus kept: {what}");
+            step(app.wait_for("id:guide-header-details >> text:Local C"));
+            step(app.wait_for("id:guide-header-details >> text:Synthetic personalization · Sport"));
             assert!(!channel_selected(app, "Local B"), "one focus: {what}");
             assert!(iptv_app::player_has_source(0), "B plays on: {what}");
             assert_eq!(iptv_app::player_opens(0), opens, "no open: {what}");
@@ -300,14 +300,14 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
 
     // Keys still move the focus in a Split View window (an iPad's keyboard
     // stays in the guide's rows: the preview takes the focus on TVs and
-    // desktops only), and a tap on a shortcut under the preview still works.
+    // desktops only). The group selector still works by touch.
     present(app, (375.0, 820.0), TEXT[2]);
     step(app.press_key("up"));
     assert!(channel_selected(app, "Local B"));
     step(app.press_key("down"));
     assert!(channel_selected(app, "Local C"));
     present(app, (375.0, 820.0), TEXT[1]);
-    step(app.press("id:guide-header-shortcuts >> text:/^☰  /"));
+    step(app.press("id:guide-list-selector"));
     step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);

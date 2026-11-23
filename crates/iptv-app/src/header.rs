@@ -1,23 +1,22 @@
 //! The guide's header: the preview at the top left (the video layer is laid
 //! out under it in guide mode, `panels::preview_rect`) and, to its right,
-//! the focused program: its title (Roboto Medium) with the favorite star
-//! at the right, its times with a progress bar and the minutes left (the
-//! group's name at the right), and its description in gray. At the right
-//! the list on screen (a tap opens the groups).
+//! the focused channel and its source, then the program's title, timing
+//! and description.
 
 use crate::i18n::{tr, trf};
 
-use iptv_core::lists::group_of;
+use iptv_core::{guide::Schedule, lists::group_of};
+use iptv_guide::combined::CombinedSchedule;
 use std::time::Duration;
 
 use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, HEADER_TITLE, MEDIUM, SANS};
 use crate::guide::{Airing, Pane, Program};
-use crate::layout::{DETAILS_GAP, MAX_TIMES_LINES, Shortcuts, TIMES_GAP, TIMES_PROGRESS_W};
+use crate::layout::{COLUMN_GAP, DETAILS_GAP, MAX_TIMES_LINES, TIMES_GAP, TIMES_PROGRESS_W};
 use crate::panels::{PREVIEW_MARGIN, PREVIEW_RADIUS, header_now};
 use crate::scale::Scale;
-use crate::theme::{BRIGHT_TEXT, RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
+use crate::theme::{BRIGHT_TEXT, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, clock, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -167,6 +166,36 @@ fn settled(ui: Ui, program: Memo<Focused>) -> Signal<Focused> {
     shown
 }
 
+fn channel_labels(
+    catalog: &dyn Schedule,
+    channel: usize,
+    single_playlist: Option<&str>,
+) -> (String, String) {
+    let (catalog, channel, playlist) = if let Some(combined) = catalog
+        .as_any()
+        .and_then(|catalog| catalog.downcast_ref::<CombinedSchedule>())
+    {
+        let Some((source, local)) = combined.channel_source(channel) else {
+            return (String::new(), String::new());
+        };
+        (
+            &*source.schedule as &dyn Schedule,
+            local,
+            Some(source.name.as_str()),
+        )
+    } else {
+        (catalog, channel, single_playlist)
+    };
+    let group =
+        group_of(catalog, channel).map(|g| crate::listing_labels::group(catalog.group_label(g)));
+    let source = match (playlist.filter(|name| !name.is_empty()), group) {
+        (Some(playlist), Some(group)) if !group.is_empty() => format!("{playlist} · {group}"),
+        (Some(playlist), _) => playlist.to_owned(),
+        (None, group) => group.unwrap_or_default(),
+    };
+    (catalog.channel_name(channel), source)
+}
+
 fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let settled = settled(ui, program);
     // Read once per focused program (a stored guide reads it from disk).
@@ -185,20 +214,58 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     };
     let live =
         move || program.with(|p| p.is_some_and(|(_, now, _, _, p)| p.airing(now) == Airing::Live));
-    let group = move || {
-        program.with(|p| {
-            let (_, _, _, ch, _) = (*p)?;
-            let catalog = crate::schedule();
-            group_of(&*catalog, ch).map(|g| crate::listing_labels::group(catalog.group_label(g)))
-        })
-    };
+    let single_playlist = computed(move || {
+        ui.app.library.version.get();
+        let shown = ui.app.library.shown.get()?;
+        crate::runtime::data::library::playlists(&crate::runtime())
+            .ok()?
+            .into_iter()
+            .find(|playlist| playlist.id == shown)
+            .map(|playlist| playlist.name)
+    });
+    let channel = computed(move || program.with(|p| p.map(|p| p.3)));
+    let labels = computed(move || {
+        ui.app.data_version.get();
+        channel.get().map_or_else(
+            || (String::new(), String::new()),
+            |channel| {
+                single_playlist.with(|playlist| {
+                    channel_labels(&*crate::schedule(), channel, playlist.as_deref())
+                })
+            },
+        )
+    });
     view()
         .test_id("guide-header-details")
         .flex_1()
         // A compact header gives it less room than its lines want: clip them
-        // (the header grows for the title and times: `GuideHeader`).
+        // (the header grows for the channel, title and times).
         .overflow_hidden()
         .gap(move || size.px(DETAILS_GAP))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .gap(move || size.px(TIMES_GAP))
+                .child(
+                    text(move || labels.with(|labels| labels.0.clone()))
+                        .test_id("guide-header-channel")
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .number_of_lines(1)
+                        .font_family(SANS)
+                        .font_weight(MEDIUM)
+                        .text_size(move || size.text_px(HEADER_TIMES))
+                        .text_color(rgb(BRIGHT_TEXT)),
+                )
+                .child(
+                    text(move || if favorite() { "★" } else { "" })
+                        .test_id("guide-header-favorite")
+                        .flex_shrink_0()
+                        .text_size(move || size.text_px(HEADER_TIMES))
+                        .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
+                ),
+        )
         .child(
             view()
                 .flex_row()
@@ -212,17 +279,14 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                             })
                         })
                     })
+                    .test_id("guide-header-program")
                     .flex_1()
+                    .min_w(px(0.0))
                     .number_of_lines(1)
                     .font_family(SANS)
                     .font_weight(MEDIUM)
                     .text_size(move || size.text_px(HEADER_TITLE))
                     .text_color(rgb(WHITE)),
-                )
-                .child(
-                    text(move || if favorite() { "★" } else { "" })
-                        .text_size(move || size.text_px(HEADER_TITLE * 0.8))
-                        .text_color(move || rgb(ui.app.theme.with(|t| t.accent.light))),
                 )
                 .child(when(
                     move || more_shown(ui, program) || more_reserved(),
@@ -239,13 +303,21 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                                 move || more(ui, size),
                             ))
                     },
-                )),
+                ))
+                .child(
+                    text(move || labels.with(|labels| labels.1.clone()))
+                        .test_id("guide-header-source")
+                        .flex_shrink_0()
+                        .max_w(percentage(0.5))
+                        .number_of_lines(1)
+                        .text_right()
+                        .font_family(SANS)
+                        .text_size(move || size.text_px(HEADER_TIMES))
+                        .text_color(secondary()),
+                ),
         )
         .child(
-            // Times, progress and minutes left; the group at the right. A
-            // narrow header wraps them onto a second line rather than clip,
-            // and a part wider than the column (large text in a Split View
-            // window) wraps within it.
+            // Times, progress and minutes left wrap in compact windows.
             view()
                 .flex_row()
                 .flex_wrap()
@@ -303,15 +375,6 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .font_family(SANS)
                     .text_size(move || size.text_px(HEADER_TIMES))
                     .text_color(secondary()),
-                )
-                .child(
-                    text(move || group().unwrap_or_default())
-                        .flex_1()
-                        .number_of_lines(1)
-                        .text_right()
-                        .font_family(SANS)
-                        .text_size(move || size.text_px(HEADER_TIMES))
-                        .text_color(secondary()),
                 ),
         )
         .child(
@@ -365,43 +428,6 @@ fn more_reserved() -> bool {
     )
 }
 
-/// The list on screen; a tap opens the groups.
-fn list_button(ui: Ui) -> impl IntoElement {
-    text(move || format!("☰  {}", crate::lists::list_name(ui)))
-        .role(AccessibilityRole::Button)
-        .px(px(10.0))
-        .py(px(6.0))
-        .rounded(px(RADIUS))
-        .bg(tint(WHITE, RESTING_ALPHA))
-        .number_of_lines(1)
-        .text_size(px(15.0))
-        .text_color(rgb(WHITE))
-        .on_press(move || {
-            ui.touched();
-            crate::lists::open_groups(ui);
-        })
-}
-
-/// Clear while the inline channel order is open over the header.
-fn shortcuts_opacity(ui: Ui) -> f32 {
-    if crate::organization_view::inline_order_open(ui) {
-        0.0
-    } else {
-        1.0
-    }
-}
-
-/// The list on screen (a tap opens the groups) and the development key stats ([`debug_overlay`]).
-fn side(ui: Ui) -> impl IntoElement {
-    view()
-        .items_end()
-        .opacity(move || shortcuts_opacity(ui))
-        .gap(px(8.0))
-        .child(list_button(ui))
-        .child(view().flex_1())
-        .children(key_stats(ui))
-}
-
 /// The key stats line, in development only ([`debug_overlay`]).
 fn key_stats(ui: Ui) -> Option<Text> {
     debug_overlay().then(|| {
@@ -409,31 +435,20 @@ fn key_stats(ui: Ui) -> Option<Text> {
             ui.stats
                 .with(|s| format!("keys {} · {} µs (max {})", s.keys, s.last_us, s.max_us))
         })
+        .absolute()
+        .bottom(px(PREVIEW_MARGIN))
+        .right(px(PREVIEW_MARGIN))
+        .pointer_events(PointerEvents::None)
+        .opacity(move || {
+            if crate::organization_view::inline_order_open(ui) {
+                0.0_f32
+            } else {
+                1.0_f32
+            }
+        })
         .text_size(px(11.0))
         .text_color(tint(WHITE, 0x60))
     })
-}
-
-/// The same shortcuts in a compact header ([`Shortcuts::Below`]): one row
-/// under the preview and the focused program, scrolled sideways where the
-/// window is narrower than the row.
-fn shortcuts_row(ui: Ui) -> impl IntoElement {
-    scroll()
-        .horizontal()
-        .scrollbar(false)
-        .test_id("guide-header-shortcuts")
-        .opacity(move || shortcuts_opacity(ui))
-        .mt(move || px(crate::panels::guide_header_now().row_gap))
-        .h(move || px(crate::panels::guide_header_now().row))
-        .flex_shrink_0()
-        .child(
-            view()
-                .flex_row()
-                .items_center()
-                .gap(px(8.0))
-                .child(list_button(ui))
-                .children(key_stats(ui)),
-        )
 }
 
 /// The key-timing line in the header is for development: debug builds, or
@@ -464,10 +479,6 @@ pub fn header(ui: Ui) -> impl IntoElement {
                 .map(|ch| (version, f.now, f.channel, ch, p))
         })
     });
-    // A compact window moves the shortcuts under the preview and the
-    // program (`crate::layout`). Only this header's own views change:
-    // the preview keeps its place, and the player under it is resized.
-    let below = computed(move || crate::panels::shortcuts_now() == Shortcuts::Below);
     // A compact portrait window stacks the program under a preview as wide
     // as the window (`GuideHeader::stacked`); the player under the preview
     // is resized with it, as for any other arrangement.
@@ -495,13 +506,12 @@ pub fn header(ui: Ui) -> impl IntoElement {
                             .flex_1()
                             .min_h(px(0.0))
                             .flex_row()
-                            .gap(move || size.px(24.0))
+                            .gap(move || size.px(COLUMN_GAP))
                             .child(preview(ui, size))
                             .child(details(ui, program, size))
-                            .child(when(move || !below.get(), move || side(ui)))
                     }),
                 )
-                .child(when(move || below.get(), move || shortcuts_row(ui)))
+                .children(key_stats(ui))
                 .child(preview_ring(ui))
                 .child(when(move || corner_back_shown(ui), move || corner_back(ui))),
         )

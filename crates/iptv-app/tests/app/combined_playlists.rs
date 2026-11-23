@@ -250,9 +250,14 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     step(app.wait_for_within("text:Beta bulletin", Duration::from_secs(20)));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 4);
 
-    // These shared rows have the same original provider key. Editing Beta
-    // must not change Alpha's membership.
+    step(app.wait_for("id:guide-header-details >> text:Shared"));
+    step(app.wait_for("id:guide-header-details >> text:Alpha · News"));
+
+    // These shared rows have the same original provider key. The header
+    // follows Beta's source, and editing Beta preserves Alpha's membership.
     step(app.press("text:/^Shared · Beta/"));
+    step(app.wait_for("id:guide-header-details >> text:Shared"));
+    step(app.wait_for("id:guide-header-details >> text:Beta · News"));
     step(app.press_key("m"));
     step(app.wait_for("text:Add to favorites"));
     step(app.press("text:Add to favorites"));
@@ -263,6 +268,24 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
         || favorite_names(&path, beta) == ["Shared"],
     ));
     assert!(favorite_names(&path, alpha).is_empty());
+    step(app.wait_for("id:guide-header-details >> text:★"));
+    let nodes = app.screen().layout_nodes();
+    let bounds = |id| {
+        nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("missing {id}"))
+            .bounds
+    };
+    let star = bounds("guide-header-favorite");
+    let source = bounds("guide-header-source");
+    let channel = bounds("guide-header-channel");
+    let details = bounds("guide-header-details");
+    assert!((star.origin.y.0 - channel.origin.y.0).abs() < 1.0);
+    let right = |b: nsh_core::Bounds<nsh_core::Points>| b.origin.x.0 + b.size.width.0;
+    assert!((right(star) - right(details)).abs() < 1.0);
+    assert!((right(source) - right(star)).abs() < 1.0);
+    assert!(source.origin.y.0 >= star.origin.y.0 + star.size.height.0 - 0.5);
 
     let opened: Arc<Mutex<Vec<String>>> = Arc::default();
     let observed = opened.clone();
