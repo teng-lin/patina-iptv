@@ -467,6 +467,11 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
                     &format!("{control}, {what}"),
                 );
             }
+            let pause = bounds(&app, "play-bar-play-pause", &what);
+            assert!(
+                (pause[0] + pause[2] / 2.0 - size.0 / 2.0).abs() <= 0.5,
+                "the transport is centered: {pause:?}, {what}"
+            );
             // Every button of the bar, the secondary ones too: a narrow
             // window wraps them rather than cut them off at its edge.
             let buttons: Vec<_> = app

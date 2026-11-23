@@ -37,6 +37,31 @@ class VersionTests(unittest.TestCase):
         self.assertEqual(lock, (self.root / "tools/ci/package.Cargo.lock").read_text())
         self.assertIn('"version": "1.3.0"', (self.root / "crates/iptv-app/nsh.json").read_text())
 
+    def test_runner_locks_follow_their_own_members(self):
+        workspace = self.root / "Cargo.toml"
+        workspace.write_text(workspace.read_text().replace(
+            '["crates/iptv-app"]', '["crates/iptv-app", "crates/iptv-tui"]'))
+        terminal = self.root / "crates/iptv-tui"
+        terminal.mkdir()
+        (terminal / "Cargo.toml").write_text('[package]\nname = "iptv-tui"\nversion.workspace = true\n')
+        lock = self.root / "Cargo.lock"
+        lock.write_text(lock.read_text() + '\n[[package]]\nname = "iptv-tui"\nversion = "1.2.3"\n')
+
+        tizen = self.root / "hosts/tizen-nsh"
+        tizen.mkdir(parents=True)
+        (tizen / "Cargo.toml").write_text('[workspace]\n\n[package]\nname = "patina-tizen"\n'
+                                        'description = "Synthetic [runner]"\nversion = "1.2.3"\n')
+        (tizen / "Cargo.lock").write_text((self.root / "tools/ci/package.Cargo.lock").read_text()
+                                        + '\n[[package]]\nname = "patina-tizen"\nversion = "1.2.3"\n')
+
+        bump_version.bump(self.root, "patch")
+        self.assertIn('name = "iptv-tui"\nversion = "1.2.4"', lock.read_text())
+        self.assertIn('name = "synthetic-app"\nversion = "1.2.4"',
+                      (self.root / "tools/ci/package.Cargo.lock").read_text())
+        self.assertIn('version = "1.2.4"', (tizen / "Cargo.toml").read_text())
+        self.assertIn('name = "patina-tizen"\nversion = "1.2.4"', (tizen / "Cargo.lock").read_text())
+        self.assertIn('name = "synthetic-app"\nversion = "1.2.4"', (tizen / "Cargo.lock").read_text())
+
     def test_dry_run_and_increment_choices(self):
         before = self.snapshot()
         for requested, expected in [("patch", "1.2.4"), ("major", "2.0.0"), ("2.4.6", "2.4.6")]:

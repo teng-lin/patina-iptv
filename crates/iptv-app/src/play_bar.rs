@@ -5,13 +5,13 @@
 //! while a screen reader runs (`iptv_presentation::play_bar`). A TV opens this same bar with long OK or Menu
 //! and traverses its controls with the D-pad. Short OK keeps the info card.
 //!
-//! Left: mute and (desktop) volume, the stream's quality, the channel.
+//! Above the controls: the channel, program information and stream quality.
+//! Left: mute and (desktop) volume.
 //! Center: rewind, play/pause, fast-forward (catch-up only; `seek.rs`).
 //! Right: favorite, subtitles and tracks, program details, picture size,
-//! channel list, multiview, guide, (desktop) window full screen, frame rate. Under
-//! it the program's progress: where the archive plays (click or drag to
-//! seek) or how far the live program is, with its times. It acts on
-//! the full-screen player (surface 0); while multiview's grid is open it
+//! channel list, multiview, guide, and (desktop) window full screen. Below
+//! the controls, the timeline shows live progress or seeks in a replay.
+//! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
 //! (a tile watched full screen) its Multiview button goes back to the
@@ -20,6 +20,7 @@
 use crate::i18n::tr;
 
 pub(crate) mod icons;
+mod info;
 mod progress;
 
 use std::time::Duration;
@@ -30,20 +31,16 @@ use iptv_presentation::channel_list::ListMode;
 use iptv_presentation::menu::Origin;
 use iptv_presentation::panels::QuickAction;
 use iptv_presentation::play_bar::{Control, PlayBar};
-use iptv_presentation::tracks::{fps_label, resolution_class};
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};
 
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_DISABLED_ALPHA};
-use crate::theme::{TEXT_SECONDARY_ALPHA, TEXT_SIZE};
-use crate::{Playback, Ui, ViewMode, channel_name, tint};
+use crate::{Playback, Ui, ViewMode, tint};
 use icons::Icon;
 
 const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;
-/// The frame rate's room at the right end ("120 fps").
-const FPS_W: f32 = 48.0;
 /// Volume and window full screen are the app's on the desktop only
 /// (Linux and macOS; Android keeps the system volume).
 const DESKTOP: bool = crate::desktop::DESKTOP;
@@ -58,10 +55,8 @@ pub fn pointer_available() -> bool {
     !matches!(idiom(), Idiom::Tv | Idiom::Terminal)
 }
 
-/// A button's side: a finger's target on touch devices, smaller under a
-/// mouse. A phone's is 44 points (Apple's touch minimum), so the bar's
-/// three groups keep one row on a phone on its side (740 to 915 points
-/// across); 48 would wrap them there.
+/// A button's side: a finger's target on touch devices, smaller under a mouse.
+/// The phone uses Apple's 44-point touch minimum.
 fn target() -> f32 {
     if idiom() == Idiom::Desktop {
         40.0
@@ -79,10 +74,9 @@ fn desktop_controls() -> bool {
     DESKTOP && idiom() != Idiom::Tv && !crate::scale::phone()
 }
 
-/// The bar's margin at the window's sides (points): narrower on a phone,
-/// for the same row.
+/// Keep enough room for the centered transport in tight windows.
 fn bar_margin() -> f32 {
-    if crate::scale::phone() {
+    if crate::scale::phone() || window().width.0 < 360.0 {
         PHONE_BAR_MARGIN
     } else {
         BAR_MARGIN
@@ -128,18 +122,15 @@ pub fn bind(ui: Ui) {
 }
 
 /// The bar's height above the window's bottom (with its margin and the
-/// safe area): popups over the video keep clear of it. The laid-out
-/// height, which counts the rows a narrow window wraps the buttons onto
-/// and times wrapped by large text; one row's until the bar first shows.
+/// safe area): popups over the video keep clear of it. Until the first
+/// layout use an estimate.
 pub fn height(ui: Ui) -> f32 {
     let laid_out = ui.play_bar_height.get();
     if laid_out > 0.0 {
         return laid_out;
     }
     let row = target() + 8.0;
-    // Panel padding, the row, the gap, the progress line, the margin and
-    // the safe area under it (`pb_safe_area_plus`).
-    6.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
+    6.0 + info::ESTIMATED_HEIGHT + 4.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
 }
 
 /// Changes the bar's state and (re)schedules its hiding.
@@ -304,13 +295,20 @@ const PANEL_PADDING: f32 = 12.0;
 const GROUP_GAP: f32 = 8.0;
 const TRANSPORT_GAP: f32 = 6.0;
 
-/// The width (points) the bar needs for its three groups on one row: its
-/// margins, the left group at its least (mute), the transport and every
-/// button of the right group.
+fn group_gap() -> f32 {
+    if window().width.0 < 360.0 {
+        4.0
+    } else {
+        GROUP_GAP
+    }
+}
+
+/// The transport sits between equal-width groups. Both sides need enough
+/// space for the wider group, which holds the auxiliary controls.
 fn one_row_width(ui: Ui) -> f32 {
     let size = target();
     let transport = 3.0 * size + 8.0 + 2.0 * TRANSPORT_GAP;
-    2.0 * (bar_margin() + PANEL_PADDING + GROUP_GAP) + size + transport + right_width(ui, size)
+    2.0 * (bar_margin() + PANEL_PADDING + group_gap() + right_width(ui, size)) + transport
 }
 
 /// Whether the window is too narrow for one row (an iPad's Split View or
@@ -362,15 +360,25 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                 .bg(panel)
                 .on_mouse_enter(move |_: &MouseEvent| hover(ui, true))
                 .on_mouse_leave(move |_: &MouseEvent| hover(ui, false))
-                .child(when(crate::scale::phone, move || title_line(ui)))
+                .child(info::header(ui))
                 .child(
                     view()
                         .flex_row()
                         .flex_wrap()
                         .items_center()
-                        .gap(px(GROUP_GAP))
+                        .gap(move || px(group_gap()))
                         .child(left(ui))
                         .child(center(ui))
+                        .child(when(
+                            move || narrow(ui),
+                            move || {
+                                // Match the mute side when the auxiliary controls wrap below.
+                                view()
+                                    .flex_1()
+                                    .min_w(px(target()))
+                                    .pointer_events(PointerEvents::None)
+                            },
+                        ))
                         .child(right(ui)),
                 )
                 .child(progress::line(ui)),
@@ -682,38 +690,19 @@ pub(super) fn seek_timeline(ui: Ui, forward: bool) {
     }
 }
 
-fn badge(value: impl Fn() -> Option<String> + Copy + 'static) -> impl IntoElement {
-    text(move || value().unwrap_or_default())
-        .px(move || px(if value().is_some() { 6.0 } else { 0.0 }))
-        .py(px(1.0))
-        .rounded(px(4.0))
-        .text_size(px(12.0))
-        .font_weight(FontWeight::BOLD)
-        .text_color(rgb(WHITE))
-        .bg(move || {
-            tint(
-                WHITE,
-                if value().is_some() {
-                    RESTING_ALPHA * 3
-                } else {
-                    0
-                },
-            )
-        })
-}
-
-/// Mute, volume, quality, channel. On a phone the quality and the channel
-/// take a line of their own above the buttons ([`title_line`]): beside
-/// them, the one row of buttons a phone on its side keeps would leave the
-/// channel's name no room.
+/// Mute, the desktop volume slider, and the audio handoff between windows.
 fn left(ui: Ui) -> impl IntoElement {
     let size = target();
     let muted = move || crate::media::muted(ui) || ui.media.volume.with(|v| v.level == 0);
-    // It gives way first on a narrow window: the channel's name shortens,
-    // then the rest is cut, never the buttons beside it.
     view()
         .flex_1()
-        .min_w(px(size))
+        .min_w(move || {
+            px(if narrow(ui) {
+                size
+            } else {
+                right_width(ui, size)
+            })
+        })
         .overflow_hidden()
         .flex_row()
         .items_center()
@@ -729,7 +718,6 @@ fn left(ui: Ui) -> impl IntoElement {
             move || crate::listen::choice(ui) && !crate::listen::heard(ui),
             move || listen(ui),
         ))
-        .child(when(|| !crate::scale::phone(), move || title(ui)))
 }
 
 /// Listen to this, while another player is heard (#135): its sound
@@ -763,54 +751,6 @@ fn listen(ui: Ui) -> impl IntoElement {
                 .text_size(px(12.0))
                 .text_color(rgb(WHITE)),
         )
-}
-
-/// The quality badges and the channel's (or the title's) name.
-fn title(ui: Ui) -> impl IntoElement {
-    let height = move || {
-        ui.player
-            .main()
-            .size
-            .get()
-            .map(|(_, h)| h)
-            .filter(|h| *h > 0)
-    };
-    let lines = move || height().map(|h| format!("{h}p"));
-    let class = move || {
-        ui.player
-            .main()
-            .size
-            .get()
-            .filter(|(w, h)| *w > 0 && *h > 0)
-            .map(|(w, h)| resolution_class(w, h).to_owned())
-    };
-    view()
-        .flex_shrink(1.0)
-        .min_w(px(0.0))
-        .overflow_hidden()
-        .flex_row()
-        .items_center()
-        .gap(px(8.0))
-        .child(badge(lines))
-        .child(badge(class))
-        .child(
-            text(move || {
-                ui.app.data_version.get();
-                crate::on_demand::title(ui)
-                    .or_else(|| ui.playing.get().map(channel_name))
-                    .unwrap_or_default()
-            })
-            .test_id("bar-title")
-            .flex_shrink(1.0)
-            .number_of_lines(1)
-            .text_size(px(TEXT_SIZE))
-            .text_color(rgb(WHITE)),
-        )
-}
-
-/// A phone's line above the buttons: the quality and the name, whole.
-fn title_line(ui: Ui) -> impl IntoElement {
-    view().px(px(4.0)).pt(px(4.0)).child(title(ui))
 }
 
 /// The desktop's volume: press or drag along it.
@@ -876,18 +816,16 @@ fn center(ui: Ui) -> impl IntoElement {
         .child(button(ui, Control::Forward, || Icon::Forward, size))
 }
 
-/// The right group's width on one row: its buttons (recording, picture in
-/// picture and window full screen where the host has them) and the frame
-/// rate.
+/// The right group's width on one row, including optional host controls.
 fn right_width(ui: Ui, size: f32) -> f32 {
     let buttons = 8.0
         + if desktop_controls() { 1.0 } else { 0.0 }
         + if crate::pip::supported(ui) { 1.0 } else { 0.0 };
-    buttons * size + (buttons - 1.0) * 2.0 + FPS_W + 6.0
+    buttons * size + (buttons - 1.0) * 2.0
 }
 
 /// Favorite, tracks, details, picture size, channels, multiview, guide,
-/// window full screen, frame rate.
+/// and window full screen.
 fn right(ui: Ui) -> impl IntoElement {
     let icon_window = nsh_core::element::desktop::current_window();
     let size = target();
@@ -966,14 +904,6 @@ fn right(ui: Ui) -> impl IntoElement {
                 size,
             )
         }))
-        .child(
-            text(move || fps_label(ui.player.main().format.with(|f| f.fps)).unwrap_or_default())
-                .w(px(FPS_W))
-                .text_right()
-                .ml(px(6.0))
-                .text_size(px(12.0))
-                .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA)),
-        )
 }
 
 /// The playing program's details (the description popover), or closes
