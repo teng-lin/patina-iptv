@@ -8,10 +8,12 @@ import subprocess
 import sys
 
 
+RECIPE_VERSIONS = {"cli": 1, "android": 1}  # Bump only when that tool's build recipe changes.
+
+
 def identity(kind):
-    if kind not in ("cli", "android"):
+    if kind not in RECIPE_VERSIONS:
         raise ValueError(f"unknown NSH tool: {kind}")
-    action = "nsh-cli" if kind == "cli" else "android"
     inputs = {
         "nsh": subprocess.check_output(
             ["git", "-C", "../nsh-patina", "rev-parse", "HEAD"], text=True
@@ -19,8 +21,7 @@ def identity(kind):
         "rustc": subprocess.check_output(
             ["rustc", "-vV"], cwd="../nsh-patina" if kind == "android" else ".", text=True
         ),
-        "recipe": Path(f".github/actions/{action}/action.yml").read_text(),
-        "key_recipe": Path(__file__).read_text(),
+        "recipe": RECIPE_VERSIONS[kind],
         "environment": {
             key: value for key, value in os.environ.items()
             if key in ("ImageOS", "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CC", "CFLAGS", "CXX", "CXXFLAGS", "AR")
@@ -38,7 +39,8 @@ def identity(kind):
         name: path.read_text() if path.exists() else None for name, path in configs.items()
     }
     if kind == "android":
-        # The recipe pins the ABI, NDK, SDK and Rust profile. NSH selects the
+        # The transport key includes the ABI; the recipe version covers the profile.
+        # NSH selects the
         # newest installed build-tools directory, not necessarily the version
         # installed by our action. Hash the inventory rather than duplicating
         # NSH's version ordering; even an extra older version safely invalidates.
@@ -50,6 +52,10 @@ def identity(kind):
         }
         if not inputs["build_tools"]:
             raise ValueError("Android SDK has no installed build-tools")
+        ndk = Path(os.environ["ANDROID_NDK_HOME"])
+        inputs["ndk"] = (ndk / "source.properties").read_text()
+        inputs["platforms"] = {path.parent.name: path.read_text()
+                               for path in (sdk / "platforms").glob("*/source.properties")}
         inputs["java"] = subprocess.check_output(
             ["java", "-version"], stderr=subprocess.STDOUT, text=True
         )
