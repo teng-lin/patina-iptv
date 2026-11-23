@@ -1232,7 +1232,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::ChannelList) => {
-                channels_view::key(ui, iptv_nav::Action::Back);
+                channels_view::back(ui);
                 true
             }
             _ if top == Some(Overlay::ChannelPicker) => {

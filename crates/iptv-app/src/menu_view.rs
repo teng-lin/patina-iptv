@@ -122,7 +122,7 @@ pub fn open(ui: Ui) {
     open_for(ui, channel, minute);
 }
 
-fn open_for(ui: Ui, channel: usize, minute: i32) {
+pub fn open_for(ui: Ui, channel: usize, minute: i32) {
     let now = ui.focus.with(|f| f.now);
     let schedule = crate::schedule();
     let Some(key) = schedule.channel_key(channel) else {

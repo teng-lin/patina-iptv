@@ -895,7 +895,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::ChannelList) {
-        crate::channels_view::key(ui, action);
+        crate::channels_view::key(ui, key, action);
         return;
     }
     if top == Some(Overlay::Search) {

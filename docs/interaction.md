@@ -213,7 +213,9 @@ visible entry point for touch and pointer users.
 - **Now:** in the guide, the channel list and recordings: Menu on a remote, and
   long OK on Android; M on a keyboard, and Shift+F10 on desktop. Long press and
   right-click open program actions on a guide cell, channel actions on a
-  channel header or player-list row, and group options on a group. In the
+  channel header or player-list row, and group options on a group.
+  Long OK on a player-list row opens its channel actions. Menu and M still
+  give access to program and group actions from the player list. In the
   guide grid, the program menu also includes actions for its channel and
   group. Menu or M on the single-playlist All channels group adds a
   playlist. During fullscreen playback, Menu and long OK open the playback bar

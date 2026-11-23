@@ -13,7 +13,7 @@ use crate::i18n::tr;
 use crate::lists::entry_name;
 
 use crate::layout::ListPanel;
-use iptv_nav::Action;
+use iptv_nav::{Action, RemoteKey};
 use iptv_presentation::channel_list::{ChannelList, ListMode, ListPane, Outcome};
 use iptv_presentation::lists::{ChannelList as Rows, Entry, FAVORITES, entry_count};
 use nsh_core::prelude::*;
@@ -146,7 +146,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, usize) -> Outcome) {
 }
 
 /// The remote while the list shows.
-pub fn key(ui: Ui, action: Action) {
+pub fn key(ui: Ui, key: RemoteKey, action: Action) {
     let playing = playing(ui);
     let step = |by: isize| update(ui, move |c, l, n| c.move_focus(by, l, n));
     match action {
@@ -169,11 +169,18 @@ pub fn key(ui: Ui, action: Action) {
                     ListPane::Groups => {
                         crate::menu_view::open_group_options(ui, list.entry);
                     }
+                    ListPane::Channels if key == RemoteKey::Menu => {
+                        if let Some(channel) = ui.list.with_untracked(|rows| rows.channel(list.row))
+                        {
+                            let now = ui.focus.with_untracked(|focus| focus.now);
+                            crate::menu_view::open_for(ui, channel, now);
+                        }
+                    }
                     ListPane::Channels => open_channel_menu(ui, list.row),
                 }
             }
         }
-        Action::Back => update(ui, |c, _, _| c.back()),
+        Action::Back => back(ui),
         // Picking for multiview: nothing plays here.
         Action::ChannelUp | Action::ChannelDown | Action::PlayPause
             if crate::multiview::picking(ui) => {}
@@ -189,6 +196,10 @@ pub fn key(ui: Ui, action: Action) {
         Action::PlayPause => ui.paused.update(|p| *p = !*p),
         _ => {}
     }
+}
+
+pub fn back(ui: Ui) {
+    update(ui, |state, _, _| state.back());
 }
 
 fn open_channel_menu(ui: Ui, row: usize) {
