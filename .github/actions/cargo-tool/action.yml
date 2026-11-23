@@ -112,8 +112,7 @@ runs:
         name: patina-cargo-about-${{ runner.arch }}-${{ steps.identity.outputs.key }}
         path: ${{ steps.identity.outputs.path }}
         if-no-files-found: error
-        retention-days: 7
-        overwrite: true0
+        retention-days: 30
     - name: Check the Windows executable before staging it
       id: stage
       if: inputs.cache == 'true' && inputs.stage-release == 'true' && github.workflow != 'Release' && github.event_name == 'push' && github.ref == 'refs/heads/master' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli' && steps.durable.outputs.restored != 'true'

@@ -107,6 +107,10 @@ class ToolCache(unittest.TestCase):
             line for line in RECIPE.splitlines() if "inputs.stage-release ==" in line))
         self.assertIn("github.event_name == 'push'", RECIPE)
         self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
+        retained = next(step for step in steps(RECIPE) if "name: patina-cargo-about-${{ runner.arch }}" in step)
+        self.assertIn("retention-days: 30", retained)
+        staged = next(step for step in steps(RECIPE) if "name: patina-cargo-about-release-" in step)
+        self.assertEqual("overwrite: true", staged.splitlines()[-1].strip())
 
     def test_invalid_executable_names_are_rejected(self):
         with self.assertRaisesRegex(SystemExit, "invalid Cargo tool name"):
