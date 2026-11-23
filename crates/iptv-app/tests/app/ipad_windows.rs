@@ -19,7 +19,7 @@
 //! generated on-demand catalog on a local mock server.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::headless::Headless;
 use crate::personalization::step;
@@ -397,6 +397,9 @@ fn show_bar(app: &mut Headless) {
 fn ipad_app() -> Headless {
     let mut config = EngineConfig {
         viewport: Size::new(px(LANDSCAPE.0), px(LANDSCAPE.1)),
+        // Resizing and inspecting the layout can cross the play bar's idle
+        // deadline on a slow runner. Keep the engine clock under test control.
+        clock: nsh_core::time::Clock::manual(SystemTime::now()),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     ipad(&mut config.environment);
@@ -414,11 +417,15 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
 
     // A movie by touch, at 37 s of 2 min.
     crate::browse_fixture::open_rail_item(&mut app, "Movies");
-    step(app.wait_for("id:vod-screen"));
-    step(app.press("label:/^Generated Aurora ·/"));
+    let movie_card = "id:vod-screen >> label:/^Generated Aurora ·/";
+    step(app.wait_for(movie_card));
+    step(app.press(movie_card));
     step(app.wait_for("text:Play"));
     step(app.press("text:Play"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
+    step(app.wait_until("the movie's native source", WAIT, |_| {
+        !seen.lock().unwrap().life.sources.is_empty()
+    }));
     let movie = sources(&seen);
     assert_eq!(movie.len(), 1, "{movie:?}");
     let token = seen.lock().unwrap().props["source"]["token"].clone();
@@ -507,13 +514,14 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     // A chooser over the video in a Split View window keeps clear of the
     // bar, including at the largest text size when it
     // is at its tallest.
+    let picture_chooser = "id:chooser-panel >> text:Picture size";
     for text in [TEXT[0], TEXT[2]] {
         let size = (375.0, 820.0);
         present(&mut app, size, text);
         show_bar(&mut app);
         let what = format!("the picture size chooser at {size:?}, text {text:.2}");
         step(app.play_bar_option("Display"));
-        step(app.wait_for("id:chooser-items"));
+        step(app.wait_for(picture_chooser));
         app.settle();
         let panel = bounds(&app, "chooser-panel", &what);
         inside(panel, size, &what);
@@ -534,7 +542,8 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
             "chooser {panel:?} above the bar's top {bar_top}: {what}"
         );
         step(app.back());
-        // The chooser stays mounted, clear, while closed.
+        // The chooser stays mounted while closed. Wait for its content.
+        step(app.wait_for_gone(picture_chooser, WAIT));
         app.settle();
         assert_eq!(iptv_app::player_opens(0), opens, "no open: {what}");
     }
@@ -558,8 +567,9 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
 
     // A show's details with its second episode selected by touch.
     crate::browse_fixture::open_rail_item(&mut app, "Shows");
-    step(app.wait_for("id:vod-screen"));
-    step(app.press("label:/^Generated Voyage ·/"));
+    let show_card = "id:vod-screen >> label:/^Generated Voyage ·/";
+    step(app.wait_for(show_card));
+    step(app.press(show_card));
     step(app.wait_for("text:/Generated First/"));
     let episodes = |app: &Headless| {
         [
