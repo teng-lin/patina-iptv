@@ -175,7 +175,7 @@ FAKES = {
     "debconf-set-selections": 'cat >> "$FAKE_LOG.debconf"\n',
     # `timeout --kill-after=30 SECONDS COMMAND...` records the bound it was given.
     "timeout": 'echo "bound $2" >> "$FAKE_LOG"; shift 2; exec "$@"\n',
-    "dpkg": 'echo "dpkg $*" >> "$FAKE_LOG"\n',
+    "dpkg": 'if [ "$1" = --print-architecture ]; then echo amd64; else echo "dpkg $*" >> "$FAKE_LOG"; fi\n',
     "apt-get": textwrap.dedent("""\
         echo "apt-get $*" >> "$FAKE_LOG"
         count=$(grep -c '^apt-get' "$FAKE_LOG")
@@ -217,6 +217,7 @@ class AptInstall(unittest.TestCase):
         self.other.write_text("deb https://packages.example.test/ubuntu noble main\n")
         self.environment = {
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_LOG": str(self.log),
+            "GITHUB_OUTPUT": str(self.root / "install-output"),
             "PATINA_APT_CONF": str(self.root / "apt.conf"), "PATINA_INITRAMFS_CONF": str(self.initramfs),
             "PATINA_MAN_DB_TRIGGER": str(self.man_db), "PATINA_APT_INSTALL_SECONDS": "7",
             "PATINA_APT_REFRESH_SECONDS": "5", "PATINA_APT_DOWNLOAD_SECONDS": "11", "PATINA_APT_SOURCES": str(sources),
@@ -235,11 +236,13 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(calls, ["apt-get update -q -o APT::Update::Error-Mode=any", "apt-get install -q --download-only generated-a generated-b",
                                  "apt-get install -q --no-download generated-a generated-b"])
         self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 5", "bound 11", "bound 7"])
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=true\n")
 
     def test_cache_hit_installs_without_contacting_the_mirror(self):
         result, calls, _ = self.install("true")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b"])
+        self.assertEqual((self.root / "install-output").read_text(), "refreshed=false\n")
 
     def test_an_incomplete_cache_falls_back_to_fresh_downloads(self):
         result, calls, _ = self.install("true", fail="1")
@@ -308,8 +311,33 @@ class AptInstall(unittest.TestCase):
         # Shipping builds (cache: 'false') never install cached packages.
         self.assertEqual(SETUP.count("steps.apt.outputs.key != '' && inputs.cache == 'true'"), 2)
         self.assertIn("steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'", SETUP)
+        self.assertIn("steps.packages.outputs.refreshed == 'true'", SETUP)
         self.assertNotIn("sudo apt-get", SETUP)
         self.assertIn("continue-on-error: true", SETUP.split("actions/cache/save", 1)[1].split("- ", 1)[0])
+
+    def test_image_refresh_can_restore_the_same_package_archives(self):
+        script = SETUP.split("    - name: Identify the Linux packages\n", 1)[1]
+        script = textwrap.dedent(script.split("      run: |\n", 1)[1].split("    - uses:", 1)[0])
+        output = self.root / "output"
+        common = os.environ | self.environment | {
+            "PREREQUISITES": "android-smoke", "EXTRA_PACKAGES": "", "RUNNER_TEMP": str(self.root),
+            "GITHUB_OUTPUT": str(output),
+        }
+
+        def identity(image, extra=""):
+            output.write_text("")
+            subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=ROOT, check=True,
+                           env=common | {"ImageVersion": image, "EXTRA_PACKAGES": extra})
+            return dict(line.split("=", 1) for line in output.read_text().splitlines())
+
+        old = identity("2026.1")
+        new = identity("2026.2")
+        self.assertNotEqual(old["key"], new["key"])
+        self.assertTrue(old["key"].startswith(new["restore-prefix"]))
+        self.assertTrue(new["key"].startswith(new["restore-prefix"]))
+        self.assertNotEqual(new["restore-prefix"], identity("2026.2", "generated-pkg")["restore-prefix"])
+        self.assertIn("restore-keys: ${{ steps.apt.outputs.restore-prefix }}", SETUP)
+        self.assertIn("APT_RESTORED: ${{ steps.apt-cache.outputs.cache-matched-key != '' }}", SETUP)
 
     def test_every_setup_step_has_its_own_timeout(self):
         for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):

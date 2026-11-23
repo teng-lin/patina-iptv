@@ -59,6 +59,11 @@ Unsigned shipping builds use fresh app output directories and may restore
 the pinned tools and runtimes. One Android candidate runner builds both ARM
 ABIs and packages them together. Signing jobs use fresh runners.
 
+Ubuntu package snapshots can install offline across runner image refreshes
+within the same Ubuntu release, architecture and package list. If the installed
+base needs a different package version, apt refreshes the signed indexes and
+downloads the missing archives. Master saves the refreshed snapshot.
+
 The Android smoke builder links NSH's Linux describe program against Ubuntu's
 libmpv runtime and uses FFmpeg to generate media fixtures. Dispatch **Android
 smoke** with `cold: true` to bypass apt, Rust, NSH and Gradle caches for a

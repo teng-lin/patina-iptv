@@ -44,8 +44,8 @@ runs:
         persist-credentials: false
     - shell: bash
       run: mv nsh-source ../nsh-patina
-    # Linux packages come from a cache keyed on the runner image and package
-    # list, so most runs never contact the Ubuntu mirror (#159).
+    # Exact image hits install offline. A new image can reuse the archives
+    # for the same Ubuntu release, architecture and package list.
     - name: Identify the Linux packages
       id: apt
       if: runner.os == 'Linux' && inputs.prerequisites != 'metadata'
@@ -76,11 +76,13 @@ runs:
         # One package per line, whatever block style the caller used.
         packages=$(tr -s '[:space:]' '\n' <<< "$packages $EXTRA_PACKAGES" | sed '/^$/d' | sort -u | paste -sd ' ' -)
         identity=$({ echo "$packages"; cat tools/ci/apt-install.sh; } | sha256sum | cut -c1-16)
-        image="${ImageOS:-$(. /etc/os-release && echo "$ID$VERSION_ID")}-${ImageVersion:-unversioned}"
+        distribution=$(. /etc/os-release && echo "$ID$VERSION_ID")
+        prefix="apt-v2-$distribution-$(dpkg --print-architecture)-$identity-"
         {
           echo "state=$RUNNER_TEMP/patina-apt"
           echo "packages=$packages"
-          echo "key=apt-v1-$image-$(dpkg --print-architecture)-$identity"
+          echo "key=$prefix${ImageVersion:-unversioned}"
+          echo "restore-prefix=$prefix"
         } >> "$GITHUB_OUTPUT"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       id: apt-cache
@@ -91,12 +93,14 @@ runs:
       with:
         path: ${{ steps.apt.outputs.state }}
         key: ${{ steps.apt.outputs.key }}
+        restore-keys: ${{ steps.apt.outputs.restore-prefix }}
     - name: Install system packages
+      id: packages
       if: inputs.prerequisites != 'metadata'
       shell: bash
       env:
         APT_STATE: ${{ steps.apt.outputs.state }}
-        APT_RESTORED: ${{ steps.apt-cache.outputs.cache-hit == 'true' }}
+        APT_RESTORED: ${{ steps.apt-cache.outputs.cache-matched-key != '' }}
         APT_PACKAGES: ${{ steps.apt.outputs.packages }}
       run: |
         if [ "${RUNNER_OS}" = Linux ]; then
@@ -109,7 +113,7 @@ runs:
     # install, not whatever the job's later steps leave behind. The packages
     # are installed by now, so a cache service outage must not fail the job.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: steps.apt.outputs.key != '' && inputs.cache == 'true' && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+      if: steps.apt.outputs.key != '' && inputs.cache == 'true' && steps.packages.outputs.refreshed == 'true' && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
       continue-on-error: true
       with:
         path: ${{ steps.apt.outputs.state }}

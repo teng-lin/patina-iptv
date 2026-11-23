@@ -4,9 +4,9 @@
 # usage: apt-install.sh STATE_DIR RESTORED PACKAGE...
 #
 # STATE_DIR holds apt's package lists and downloaded .debs so the setup action
-# can cache them. RESTORED=true means that cache was restored for this exact
-# runner image and package list: the install then never contacts the mirror,
-# and any gap in the cache fails straight into the refreshed retry. Package
+# can cache them. RESTORED=true tries the restored snapshot offline,
+# including on a newer image of the same Ubuntu release. Any missing package
+# or version conflict falls through to the refreshed retry. Package
 # downloads are bounded independently of dpkg. A failed mirror fetch is
 # retried once using Canonical's archive when the runner uses a cloud mirror.
 set -euo pipefail
@@ -96,7 +96,9 @@ if command -v debconf-set-selections > /dev/null 2>&1; then
 fi
 as_root rm -f "$man_db_trigger"
 
+refreshed=false
 if [ "$restored" != true ] || ! install_packages; then
+  refreshed=true
   if [ "$restored" = true ]; then
     echo "::warning::cached apt install failed; refreshing the package lists and downloads"
     repair_packages
@@ -116,3 +118,6 @@ fi
 # the runner user) a tree it can read.
 as_root find "$state/lists/partial" "$state/archives/partial" -mindepth 1 -delete
 as_root chown -R "$(id -u):$(id -g)" "$state"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "refreshed=$refreshed" >> "$GITHUB_OUTPUT"
+fi
