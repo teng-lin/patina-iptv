@@ -177,6 +177,13 @@ impl DragList {
         }
     }
 
+    fn can_grab(self) -> bool {
+        self.ui.drag_editing()
+            && reordering(self.ui)
+            && !contents_hidden(self.ui)
+            && (self.column.is_none() || super::guide_order_accessible(self.ui))
+    }
+
     pub(crate) fn with_grips(self, content: View) -> View {
         let size = self.size;
         let viewport = element_ref();
@@ -202,11 +209,7 @@ impl DragList {
                 TouchClaim::on_start()
                     .capture()
                     .ask(move |request: &ClaimRequest| {
-                        if !self.ui.drag_editing()
-                            || !reordering(self.ui)
-                            || contents_hidden(self.ui)
-                            || (self.column.is_some() && !super::guide_order_accessible(self.ui))
-                        {
+                        if !self.can_grab() {
                             return;
                         }
                         if let Some(viewport) = self.viewport.get_untracked() {
@@ -229,6 +232,21 @@ impl DragList {
             .on_responder_move(move |e: &ResponderEvent| self.dragged(e.gesture.delta.y.0))
             .on_responder_release(move |_: &ResponderEvent| self.finish(false))
             .on_responder_terminate(move |_: &ResponderEvent| self.finish(true))
+            .child(when(
+                move || crate::host::ANDROID && self.column.is_none() && self.can_grab(),
+                move || {
+                    // Keep the grip strip outside the native scroll view's touch path.
+                    view()
+                        .absolute()
+                        .right(px(0.0))
+                        .top(px(0.0))
+                        .bottom(px(0.0))
+                        .w(move || size.px(GRIP_COLUMN))
+                        .focusable(false)
+                        .accessibility_elements_hidden(true)
+                        .on_press(|| {})
+                },
+            ))
             .child(when(
                 move || self.active(),
                 move || {
