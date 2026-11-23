@@ -13,6 +13,12 @@ pub(crate) struct Active {
     session: host::ExternalSession,
 }
 
+impl PartialEq for Active {
+    fn eq(&self, other: &Self) -> bool {
+        self.ticket == other.ticket
+    }
+}
+
 pub fn enforce(ui: Ui) {
     let Some(active) = ui.external_playback.get_untracked() else {
         return;
