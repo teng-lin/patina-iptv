@@ -59,6 +59,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::ScheduleReady(schedule) => {
             crate::set_schedule(&ui, schedule);
             crate::player::enforce_guide_blocks(ui);
+            crate::external_player::enforce(ui);
         }
         RuntimeEvent::OrganizationReady {
             source,
@@ -79,6 +80,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             if same_catalog && crate::runtime().organization_edit_current(source, ticket) {
                 let kept = crate::lists::keep(ui);
                 crate::player::stop_archive_after_clock_edit(ui, &*current, &*replacement);
+                crate::menu_view::invalidate_shifted_context(ui, &*current, &*replacement);
                 crate::data::combined::remember_single(
                     &crate::runtime(),
                     source,
@@ -114,7 +116,10 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             }
         }
         RuntimeEvent::GuideChanged => ui.app.guide_pages.update(|version| *version += 1),
-        RuntimeEvent::LibraryChanged => ui.app.library.version.update(|version| *version += 1),
+        RuntimeEvent::LibraryChanged => {
+            ui.app.library.version.update(|version| *version += 1);
+            crate::external_player::enforce(ui);
+        }
         RuntimeEvent::SettingsChanged => ui.app.settings.update(|version| *version += 1),
     }
 }

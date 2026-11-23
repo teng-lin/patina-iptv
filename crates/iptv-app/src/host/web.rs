@@ -381,12 +381,25 @@ pub(crate) fn language_changed(_tag: &str) {}
 pub mod exports {}
 
 pub(crate) const EXTERNAL_PLAYER: bool = false;
+#[derive(Clone)]
+pub(crate) struct ExternalSession;
+impl ExternalSession {
+    pub(crate) fn close(&self) {}
+    pub(crate) fn is_open(&self) -> bool {
+        false
+    }
+}
 pub(crate) struct ExternalHandoff;
 impl ExternalHandoff {
     pub(crate) async fn connected(&mut self) -> bool {
         false
     }
-    pub(crate) fn allow(self, _lease: Box<dyn Send>) {}
+    pub(crate) fn is_open(&self) -> bool {
+        false
+    }
+    pub(crate) fn allow(self, _lease: Box<dyn Send>) -> Option<ExternalSession> {
+        None
+    }
 }
 pub(crate) async fn prepare_external_player(
     _source: iptv_core::playback::PlaySource,

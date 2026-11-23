@@ -92,7 +92,7 @@ Windows and Command on macOS.
 
 ## Several players
 
-A guide channel's menu has **Watch in new window** (Linux and macOS): a
+A guide channel's menu has **Open in new window** (Linux and macOS): a
 separate player window for that channel, beside the main window's player.
 
 - **Now: one player has the sound** (#135). A new player window opens
@@ -155,7 +155,7 @@ recordings keep the app running, as it already did when quitting.
 | Host | Window positions | Compact window above others | After a display goes away | Fallback |
 |---|---|---|---|---|
 | macOS | Read and set | Floating level | Patina moves the main window, its picture-in-picture window and player windows when unreachable (above) | — |
-| Windows | Read and set for the main window and its picture-in-picture window | Floating level requested for the picture-in-picture window (not checked on Windows) | Patina moves the main window and its picture-in-picture window | Separate player windows (**Watch in new window**) are offered on Linux and macOS only |
+| Windows | Read and set for the main window and its picture-in-picture window | Floating level requested for the picture-in-picture window (not checked on Windows) | Patina moves the main window and its picture-in-picture window | Separate player windows (**Open in new window**) are offered on Linux and macOS only |
 | Linux, X11 | Not available: GTK 4 neither reports nor sets positions | Left to the window manager | The window manager keeps windows on screen | The compact window is titled "Picture-in-Picture", so window-manager rules written for browsers' picture-in-picture apply |
 | Linux, Wayland (Hyprland) | Not through GTK; Patina places a window only when it first becomes compact, through Hyprland's IPC, and never moves one the viewer arranged | Hyprland rules that match the title | The compositor moves windows off removed outputs | As X11 |
 | Linux, other Wayland compositors | Not available | Compositor policy | The compositor | As X11 |

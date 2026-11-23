@@ -4,12 +4,53 @@ use std::sync::{Arc, Mutex};
 
 pub(crate) const EXTERNAL_PLAYER: bool = cfg!(any(target_os = "android", target_os = "linux"));
 
-type Viewer = Arc<Mutex<Option<Box<dyn Send>>>>;
+struct Connection {
+    relay: PlaybackRelay,
+    lease: Option<Box<dyn Send>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ExternalSession(Arc<Mutex<Option<Connection>>>);
+
+impl ExternalSession {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn new(relay: PlaybackRelay) -> Self {
+        Self(Arc::new(Mutex::new(Some(Connection {
+            relay,
+            lease: None,
+        }))))
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.0.lock().is_ok_and(|connection| connection.is_some())
+    }
+
+    fn take(&self) -> Option<Connection> {
+        self.0.lock().ok()?.take()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn close_blocking(&self) {
+        if let Some(Connection { relay, lease }) = self.take() {
+            relay.shutdown_blocking();
+            drop(lease);
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        if let Some(Connection { relay, lease }) = self.take() {
+            let _ = super::background("iptv-retire-external-player", move || {
+                relay.shutdown_blocking();
+                drop(lease);
+            });
+        }
+    }
+}
 
 pub(crate) struct ExternalPlayback(PlaybackRelay, ExternalAdmission);
 pub(crate) struct ExternalHandoff {
     admission: ExternalAdmission,
-    viewer: Viewer,
+    session: ExternalSession,
 }
 
 impl ExternalHandoff {
@@ -17,11 +58,17 @@ impl ExternalHandoff {
         self.admission.connected().await
     }
 
-    pub(crate) fn allow(self, lease: Box<dyn Send>) {
-        if let Ok(mut viewer) = self.viewer.lock() {
-            *viewer = Some(lease);
+    pub(crate) fn is_open(&self) -> bool {
+        self.session.is_open()
+    }
+
+    pub(crate) fn allow(self, lease: Box<dyn Send>) -> Option<ExternalSession> {
+        {
+            let mut connection = self.session.0.lock().ok()?;
+            connection.as_mut()?.lease = Some(lease);
             self.admission.allow();
         }
+        Some(self.session)
     }
 }
 
@@ -80,18 +127,15 @@ pub(crate) fn open_external_player(playback: ExternalPlayback) -> Option<Externa
             .stderr(Stdio::null())
             .spawn();
         if let Ok(mut child) = child {
-            let viewer: Viewer = Arc::default();
-            let claim = viewer.clone();
+            let session = ExternalSession::new(relay);
+            let player = session.clone();
             super::background("iptv-external-player", move || {
                 let _ = child.wait();
                 drop(playlist);
-                drop(relay);
-                if let Ok(mut viewer) = claim.lock() {
-                    viewer.take();
-                }
+                player.close_blocking();
             })
             .ok()?;
-            return Some(ExternalHandoff { admission, viewer });
+            return Some(ExternalHandoff { admission, session });
         }
     }
     None
@@ -99,7 +143,7 @@ pub(crate) fn open_external_player(playback: ExternalPlayback) -> Option<Externa
 
 #[cfg(target_os = "android")]
 mod android {
-    use super::{ExternalHandoff, ExternalPlayback, PlaybackRelay, Viewer};
+    use super::{ExternalHandoff, ExternalPlayback, ExternalSession};
     use jni::{
         JavaVM,
         objects::{GlobalRef, JClass, JValue},
@@ -107,7 +151,7 @@ mod android {
     use std::sync::{Mutex, OnceLock};
 
     static HOST: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
-    static PLAYBACK: Mutex<Option<(PlaybackRelay, Viewer)>> = Mutex::new(None);
+    static PLAYBACK: Mutex<Option<ExternalSession>> = Mutex::new(None);
 
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_com_hantekllc_iptvrs_host_ExternalPlayerHost_initialize(
@@ -139,17 +183,21 @@ mod android {
         };
         if open() == Some(true) {
             let mut current = PLAYBACK.lock().ok()?;
-            let viewer: Viewer = std::sync::Arc::default();
-            *current = Some((relay, viewer.clone()));
-            Some(ExternalHandoff { admission, viewer })
+            let session = ExternalSession::new(relay);
+            if let Some(previous) = current.replace(session.clone()) {
+                previous.close();
+            }
+            Some(ExternalHandoff { admission, session })
         } else {
             None
         }
     }
 
     pub(crate) fn external_player_returned() {
-        if let Ok(mut current) = PLAYBACK.lock() {
-            current.take();
+        if let Ok(mut current) = PLAYBACK.lock()
+            && let Some(session) = current.take()
+        {
+            session.close();
         }
     }
 }

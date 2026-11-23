@@ -286,6 +286,7 @@ fn manage_pick(ui: Ui, index: usize) {
     }
 }
 pub fn enforce(ui: Ui) {
+    crate::external_player::enforce(ui);
     let denied = ui.vod.with_untracked(|s| {
         s.cards
             .iter()

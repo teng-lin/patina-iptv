@@ -78,7 +78,11 @@ pub fn start(ui: Ui) {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
         crate::runtime().set_foreground(!background);
         if was_background.replace(background) && !background {
-            crate::host::external_player_returned();
+            if crate::host::ANDROID {
+                crate::external_player::cancel_pending(ui);
+                crate::host::external_player_returned();
+                ui.external_playback.set(None);
+            }
             // Returning from host permission settings needs a fresh OS acknowledgement.
             let owner = crate::runtime();
             spawn_in_app(async move {

@@ -318,10 +318,18 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
                 continue;
             }
             let job = JobId(identity(services.ports().entropy)?);
+            let expected_offset = (rule.repeat == Repeat::Series).then_some(shift);
             services
                 .call(move |store| {
                     store
-                        .materialize_recording_rule_at(id, job, &request, occurrence, current)
+                        .materialize_recording_rule_at(
+                            id,
+                            job,
+                            &request,
+                            occurrence,
+                            current,
+                            expected_offset,
+                        )
                         .map(|_| ())
                 })
                 .await?;

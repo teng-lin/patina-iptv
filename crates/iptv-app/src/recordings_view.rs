@@ -310,7 +310,12 @@ fn request(origin: Origin) -> Option<Request> {
 }
 /// The active job must belong to the selected occurrence, including its end
 /// when an immediate recording starts after the program began.
-fn occurrence_job(request: &Request, stored_start: i64, jobs: Vec<Job>) -> Option<Job> {
+fn occurrence_job(
+    request: &Request,
+    stored_start: i64,
+    jobs: Vec<Job>,
+    padded_matches: impl Fn(&Request) -> bool,
+) -> Option<Job> {
     jobs.into_iter()
         .filter(|job| {
             job.source_current
@@ -320,14 +325,49 @@ fn occurrence_job(request: &Request, stored_start: i64, jobs: Vec<Job>) -> Optio
                 && if let Some(raw) = job.series_start {
                     (stored_start..stored_start + 60).contains(&raw)
                 } else {
-                    job.request.end == request.end
+                    (job.request.end == request.end
                         && match job.status {
                             Status::Scheduled => job.request.start == request.start,
                             _ => (request.start..request.end).contains(&job.request.start),
-                        }
+                        })
+                        || padded_matches(&job.request)
                 }
         })
         .max_by_key(|job| job.status == Status::Recording)
+}
+
+fn padded_occurrence(
+    schedule: &dyn crate::guide::Schedule,
+    channel: usize,
+    program: crate::guide::Program,
+    airing: &Request,
+    recording: &Request,
+) -> bool {
+    const MAX_PADDING: i64 = 3600;
+    if recording.title != airing.title
+        || !(airing.start - MAX_PADDING..=airing.start).contains(&recording.start)
+        || !(airing.end..=airing.end + MAX_PADDING).contains(&recording.end)
+        || !matches!(
+            schedule.listing(channel, program),
+            Some(crate::guide::Listing::Title(_))
+        )
+    {
+        return false;
+    }
+    let epoch = schedule.epoch_unix();
+    let from = ((recording.start - epoch).div_euclid(60)) as i32;
+    let to = ((recording.end - epoch).div_euclid(60)) as i32;
+    // A padded request spanning two same-title airings is ambiguous.
+    let mut matches = schedule
+        .programs_between(channel, from, to - from)
+        .into_iter()
+        .filter(|candidate| {
+            candidate.start >= from
+                && candidate.end <= to
+                && crate::listing_labels::listing(schedule.listing(channel, *candidate))
+                    == airing.title
+        });
+    matches.next() == Some(program) && matches.next().is_none()
 }
 
 fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
@@ -344,6 +384,7 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
         &request,
         stored_start,
         crate::runtime().recording_snapshot(),
+        |recording| padded_occurrence(&*schedule, origin.channel, program, &request, recording),
     ) {
         let item = if job.status == Status::Recording {
             MenuItem::StopRecording
@@ -1179,18 +1220,22 @@ mod tests {
             occurrence_job(
                 &request,
                 raw_start,
-                vec![neighbor.clone(), other_playlist, job.clone()]
+                vec![neighbor.clone(), other_playlist, job.clone()],
+                |_| false
             )
             .map(|job| job.id),
             Some(JobId(7)),
         );
-        assert_eq!(occurrence_job(&request, raw_start, vec![neighbor]), None);
+        assert_eq!(
+            occurrence_job(&request, raw_start, vec![neighbor], |_| false),
+            None
+        );
         job.series_start = None;
         job.status = Status::Recording;
         job.request = request.clone();
         job.request.start += 1200;
         assert_eq!(
-            occurrence_job(&request, raw_start, vec![job]).map(|job| job.id),
+            occurrence_job(&request, raw_start, vec![job], |_| false).map(|job| job.id),
             Some(JobId(7))
         );
     }

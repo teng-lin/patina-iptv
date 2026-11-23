@@ -4,6 +4,42 @@ use iptv_core::guide::Program;
 use iptv_guide::playback::{Resolution, StalkerLink};
 use iptv_presentation::lists::{Entry, ListId};
 
+#[derive(Clone)]
+pub(crate) struct Active {
+    ticket: u64,
+    target: iptv_core::parental::Target,
+    authority: iptv_guide::playback::ResolutionAuthority,
+    group: String,
+    session: host::ExternalSession,
+}
+
+pub fn enforce(ui: Ui) {
+    let Some(active) = ui.external_playback.get_untracked() else {
+        return;
+    };
+    if !active.session.is_open() || !crate::runtime().parental_allowed(&active.target) {
+        active.session.close();
+        ui.external_playback.set(None);
+        return;
+    }
+    let owner = crate::runtime();
+    crate::data::spawn_in_app(async move {
+        let allowed = owner
+            .external_playback_allowed(active.authority, active.group)
+            .await;
+        if !matches!(allowed, Ok(true))
+            && ui.external_playback.with_untracked(|state| {
+                state
+                    .as_ref()
+                    .is_some_and(|state| state.ticket == active.ticket)
+            })
+        {
+            active.session.close();
+            ui.external_playback.set(None);
+        }
+    });
+}
+
 fn group(ui: Ui) -> Option<(ListId, usize)> {
     let schedule = crate::schedule();
     let entry = ui.list.with_untracked(|list| list.entry());
@@ -142,8 +178,10 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
             if !handoff.connected().await || !current() {
                 return;
             }
-            let verified = owner.external_playback_allowed(expected, group_id).await;
-            if !current() {
+            let verified = owner
+                .external_playback_allowed(expected.clone(), group_id.clone())
+                .await;
+            if !current() || !handoff.is_open() {
                 return;
             }
             if !matches!(verified, Ok(true))
@@ -163,8 +201,17 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
             crate::interruption::viewer_acted(ui);
             crate::player_keys::stopped(ui);
             owner.retire_viewing_inputs(0).await;
-            if current() && owner.parental_allowed(&target) {
-                handoff.allow(lease);
+            if current()
+                && owner.parental_allowed(&target)
+                && let Some(session) = handoff.allow(lease)
+            {
+                ui.external_playback.set(Some(Active {
+                    ticket,
+                    target,
+                    authority: expected,
+                    group: group_id,
+                    session,
+                }));
             }
         });
     });

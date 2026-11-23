@@ -233,7 +233,8 @@ pub struct Ui {
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
-    pub external_request: Signal<u64>,
+    pub(crate) external_request: Signal<u64>,
+    pub(crate) external_playback: Signal<Option<external_player::Active>>,
     pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
     /// A timeline pan's hold on the channel whose program on air it
     /// started from: browse playback keeps that channel while the pan
@@ -358,6 +359,7 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             external_request: signal(0),
+            external_playback: signal(None),
             pending_zap: signal(None),
             pan_anchor: signal(None),
             interruptions: signal(Default::default()),
@@ -717,7 +719,9 @@ pub fn schedule() -> Rc<dyn Schedule> {
 /// again by key.
 pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
     let kept = lists::keep(*ui);
-    player::stop_archive_after_clock_edit(*ui, &*crate::schedule(), &*schedule);
+    let previous = crate::schedule();
+    player::stop_archive_after_clock_edit(*ui, &*previous, &*schedule);
+    menu_view::invalidate_shifted_context(*ui, &*previous, &*schedule);
     runtime().set_schedule(schedule.clone());
     time::mark_shown();
     let n = schedule.channel_count();

@@ -536,7 +536,7 @@ impl Store {
         request: &Request,
         now: i64,
     ) -> Result<Option<JobId>> {
-        self.materialize_recording_rule_at(rule, id, request, request.start, now)
+        self.materialize_recording_rule_at(rule, id, request, request.start, now, None)
     }
 
     pub fn materialize_recording_rule_at(
@@ -546,10 +546,19 @@ impl Store {
         request: &Request,
         occurrence_start: i64,
         now: i64,
+        expected_offset: Option<i64>,
     ) -> Result<Option<JobId>> {
-        let tx = self
-            .conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &self.conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )?;
+        if let Some(offset) = expected_offset
+            && self
+                .channel_guide_offset_seconds(crate::SourceId(request.source), &request.channel)?
+                != offset
+        {
+            return Ok(None);
+        }
         let allowed: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM recording_rules q JOIN guide_revisions r
             ON r.source_id=q.source_id AND r.incarnation=q.source_incarnation

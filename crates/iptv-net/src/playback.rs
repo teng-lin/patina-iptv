@@ -518,6 +518,16 @@ impl PlaybackRelay {
         }
     }
 
+    /// A native thread can join retirement without a Tokio executor.
+    pub fn shutdown_blocking(mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(closed) = self.closed.take() {
+            let _ = closed.blocking_recv();
+        }
+    }
+
     /// Number of downstream write deadlines reached by this relay owner.
     /// Request parsing and upstream read deadlines do not contribute.
     #[cfg(any(test, feature = "test-support"))]

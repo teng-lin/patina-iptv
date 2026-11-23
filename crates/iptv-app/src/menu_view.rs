@@ -249,6 +249,46 @@ fn program_origin(target: &Target) -> Option<Origin> {
     })
 }
 
+pub(crate) fn invalidate_shifted_context(
+    ui: Ui,
+    before: &dyn crate::guide::Schedule,
+    after: &dyn crate::guide::Schedule,
+) {
+    let shifted = |channel: usize| {
+        before
+            .channel_key(channel)
+            .and_then(|key| after.find_channel(&key))
+            .is_some_and(|next| {
+                crate::player::guide_offset(before, channel)
+                    != crate::player::guide_offset(after, next)
+            })
+    };
+    if ui.menu.with_untracked(|menu| {
+        menu.as_ref()
+            .and_then(|menu| menu.target.channel_key())
+            .and_then(|key| before.find_channel(key))
+            .is_some_and(shifted)
+    }) {
+        ui.menu.set(None);
+    }
+    if ui
+        .description
+        .get_untracked()
+        .is_some_and(|origin| shifted(origin.channel))
+    {
+        ui.description.set(None);
+    }
+    ui.recordings.update(|state| {
+        if state
+            .context
+            .as_ref()
+            .is_some_and(|(origin, _)| shifted(origin.channel))
+        {
+            state.context = None;
+        }
+    });
+}
+
 /// Closes the menu or popover, keeping focus on its guide selection.
 pub fn close(ui: Ui) {
     if let Some(list) = ui.menu.with(|menu| {
