@@ -283,6 +283,30 @@ class Workflows(unittest.TestCase):
                     'needs': {'android-native': {'result': result}}, 'workflow_cancelled': cancelled,
                 }), expected)
 
+    def test_smoke_streams_are_encoded_beside_the_apk_build_and_the_guide_just_in_time(self):
+        workflow = (ROOT / '.github/workflows/android-smoke.yml').read_text()
+        build = workflow.split('  build:\n', 1)[1].split('\n  streams:\n', 1)[0]
+        streams = workflow.split('\n  streams:\n', 1)[1].split('\n  smoke:\n', 1)[0]
+        smoke = workflow.split('\n  smoke:\n', 1)[1]
+        # The APK build no longer waits for the encoder.
+        self.assertNotIn('make-hls-fixtures.sh', build)
+        self.assertNotIn('make-iptv-fixtures.py', build)
+        self.assertNotIn('needs:', streams.split('    steps:', 1)[0])
+        # Streams depend only on their script and are reused while it is unchanged.
+        self.assertIn("sha256sum tools/make-hls-fixtures.sh", streams)
+        self.assertIn('bash tools/make-hls-fixtures.sh --android-smoke', streams)
+        self.assertLess(streams.index('actions/cache/restore'), streams.index('bash tools/make-hls-fixtures.sh'))
+        self.assertIn("if: steps.cache.outputs.cache-hit != 'true' && inputs.cold != true && github.ref == 'refs/heads/master'",
+                      streams)
+        self.assertNotIn('make-iptv-fixtures.py', streams)
+        # The time-centred playlist and guide are made after both downloads, before serving.
+        self.assertIn('needs: [build, streams]', smoke)
+        guide = smoke.index('python3 -I tools/make-iptv-fixtures.py --channels 300')
+        self.assertLess(smoke.index('name: android-smoke-streams'), guide)
+        self.assertLess(smoke.index('name: android-smoke-input'), guide)
+        self.assertLess(guide, smoke.index('tools/mock-server.py 8089 fixtures/hls'))
+        self.assertIn('path: hosts/android/app/build/outputs/apk/debug\n', smoke)
+
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()
         self.assertIn("--release", script)
