@@ -102,16 +102,23 @@ pub fn rename_group(ui: Ui, source: SourceId, id: String) {
 }
 
 pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list: ListId) {
-    let placement = reorder_placement(ui, &Kind::Groups, list);
-    open_with(
-        ui,
-        source,
-        Kind::Groups,
-        focus,
-        Mode::Reorder,
-        None,
-        placement,
-    );
+    batch(|| {
+        leave_fullscreen_for_reorder(ui);
+        if let Some(entry) = list.resolve(&*crate::schedule()) {
+            crate::lists::preview(ui, entry);
+        }
+        crate::lists::open_groups(ui);
+        crate::browse_playback::hold(ui);
+        open_with(
+            ui,
+            source,
+            Kind::Groups,
+            focus,
+            Mode::Reorder,
+            None,
+            Placement::Groups,
+        );
+    });
 }
 
 pub fn open_context_reorder(
@@ -122,12 +129,7 @@ pub fn open_context_reorder(
     list: ListId,
 ) {
     batch(|| {
-        let from_player = ui.mode.get_untracked() == crate::ViewMode::Fullscreen;
-        if from_player {
-            crate::channels_view::close(ui);
-            ui.panels.update(|panels| panels.hide());
-            ui.mode.set(crate::ViewMode::Guide);
-        }
+        let from_player = leave_fullscreen_for_reorder(ui);
         let placement = guide_reorder_placement(ui, list.clone());
         if from_player
             && let Some(id) = &focus
@@ -139,6 +141,16 @@ pub fn open_context_reorder(
         crate::browse_playback::hold(ui);
         open_with(ui, source, kind, focus, Mode::Reorder, None, placement);
     });
+}
+
+fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
+    let from_player = ui.mode.get_untracked() == crate::ViewMode::Fullscreen;
+    if from_player {
+        crate::channels_view::close(ui);
+        ui.panels.update(|panels| panels.hide());
+        ui.mode.set(crate::ViewMode::Guide);
+    }
+    from_player
 }
 
 fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
@@ -1600,9 +1612,10 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                 .child(ui_kit::caption(size, move || reorder_hint(ui)))
                 .child(when(
                     move || {
-                        guide_order_accessible(ui)
+                        ui.top_overlay() == Some(crate::overlays::Overlay::Organization)
                             && ui.drag_editing()
                             && reordering(ui)
+                            && !contents_hidden(ui)
                             && state(ui, |s| !s.dragging && !s.saving) == Some(true)
                     },
                     move || {

@@ -13,7 +13,7 @@ rule was checked on.
 
 | Where | Vertical wheel or two-finger swipe | Horizontal swipe, or Shift + wheel | Right-click | Visible way in |
 |---|---|---|---|---|
-| Guide | Moves through the channels | Moves through program time | Program and channel menu | ⋯ after the program's title |
+| Guide | Moves through the channels | Moves through program time | Channel menu on a channel name or program cell | Program menu via ⋯ after the program's title |
 | Guide's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |
 | Channel list over the video | Scrolls the channels | Nothing | Channel menu | ⋯ at the end of each row |
 | Channel list's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |

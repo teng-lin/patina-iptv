@@ -120,6 +120,30 @@ fn shows(app: &crate::Headless, selector: &str) -> bool {
     app.screen().matches(selector).unwrap()
 }
 
+#[test]
+fn long_ok_on_a_group_reorders_it_in_the_guide() {
+    let Some(home) = isolated!() else { return };
+    let (mut fixture, _, _) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    step(app.press("text:/^☰  /"));
+    step(app.press("id:guide-groups >> text:Sport"));
+    hold(app, RemoteKey::Ok, 700, true);
+    step(app.wait_for("id:menu-panel >> role:header[Sport]"));
+    step(app.press("id:menu-panel >> text:Reorder groups"));
+    step(app.wait_for("id:organization-row-1 >> text:Sport"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.remote_tap(RemoteKey::Up));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:organization-row-0 >> text:Sport"));
+    step(app.remote_tap(RemoteKey::Back));
+    step(app.back());
+    step(app.wait_for("text:Save order"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    let store = crate::isolated::open_database(&fixture.path).unwrap();
+    assert_eq!(store.guide_groups(fixture.source).unwrap()[0].name, "Sport");
+}
+
 /// Whether the channel list over the video is open: one of its rows has
 /// the focus pill (the layer stays mounted, unseen, while closed).
 fn list_open(app: &crate::Headless) -> bool {

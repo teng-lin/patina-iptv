@@ -270,6 +270,8 @@ fn a_group_edit_finishes_after_its_editor_is_closed_during_write_contention() {
 
 #[test]
 fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
+    use nsh_core::{geometry::point, prelude::px};
+
     let Some(home) = isolated!() else { return };
     let mut f = start(home, Settings::new(), false);
     let app = &mut f.app;
@@ -342,7 +344,8 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
     step(app.press_key("tab"));
     step(app.wait_for("id:guide-groups >> text:News"));
     step(app.press_key("shift+f10"));
-    step(app.wait_for("id:menu-panel >> text:Manage groups"));
+    step(app.wait_for("id:menu-panel >> text:Reorder groups"));
+    assert!(!app.shows("id:menu-panel >> text:Manage groups"));
     step(app.back());
     step(app.right_click("id:guide-groups >> text:News"));
     step(app.press("id:menu-panel >> text:Rename group"));
@@ -380,20 +383,44 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
 
     step(app.press_key("tab"));
     step(app.right_click("id:guide-groups >> text:Sport"));
-    step(app.press("id:menu-panel >> text:Manage groups"));
+    step(app.press("id:menu-panel >> text:Reorder groups"));
     step(app.wait_for("id:organization-row-1 >> text:Sport"));
-    step(app.press("id:organization-row-1"));
-    step(app.press("text:Reorder groups"));
-    step(app.wait_for("id:organization-row-1 >> text:Sport"));
-    step(app.press_key("enter"));
-    step(app.press_key("left"));
-    step(app.back());
-    step(app.wait_for("text:Save order"));
-    step(app.press("text:Save order"));
+    let grip = "id:organization-row-1 >> id:reorder-handle-1";
+    step(app.wait_for(grip));
+    step(app.drag(grip, point(px(0.0), px(-51.0))));
+    step(app.wait_for("id:organization-row-0 >> text:Sport"));
+    step(app.press("id:organization-screen >> text:Save"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
     let store = crate::isolated::open_database(&f.path).unwrap();
     assert_eq!(store.guide_groups(f.source).unwrap()[0].name, "Sport");
     assert!(store.parental_credential().unwrap().is_none());
+}
+
+#[test]
+fn a_provider_group_named_other_can_be_reordered() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = launch_prepared(
+        home,
+        Settings::new(),
+        false,
+        |path, source| {
+            let playlist = format!(
+                "{M3U}#EXTINF:-1 group-title=\"Other\",Generated grouped channel\nhttp://example.test/other\n"
+            );
+            let catalog = iptv_providers::m3u::parse_m3u(&playlist);
+            crate::isolated::open_database(path)
+                .unwrap()
+                .replace_catalog(source, &catalog.groups, &catalog.channels.items, &[], &[])
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut fixture.app;
+    step(app.press("text:/^☰  /"));
+    step(app.long_press("id:guide-groups >> text:Other"));
+    step(app.wait_for("id:menu-panel >> text:Reorder groups"));
+    assert!(!app.shows("id:menu-panel >> text:Manage groups"));
 }
 
 #[test]

@@ -152,6 +152,8 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
     // full screen and in a smaller window.
     step(app.press("text:☰  All channels"));
     step(app.wait_for("text:News"));
+    step(app.press_key("left"));
+    step(app.wait_for("id:navigation-rail >> text:Live TV"));
     for (w, h, scale) in [(1920.0, 1080.0, 1.0), (1280.0, 720.0, 0.875)] {
         step(app.set_viewport(Size::new(px(w), px(h))));
         let name = (roboto.clone(), 20.0 * scale, 400);
@@ -161,6 +163,13 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
         // (The header's group line reads "News" too, in its own type.)
         let group = styles(&mut app, "News");
         assert!(close_to(&group, &name), "group rows: {group:?}");
+        for label in ["Search", "Live TV"] {
+            let rail = app
+                .screen()
+                .span_style(&format!("id:navigation-rail >> text:{label}"))
+                .unwrap();
+            assert!((rail.font_size.0 - name.1).abs() < 0.01, "{label}");
+        }
         let row = styles(&mut app, "1  Test Channel One");
         assert!(close_to(&row, &name), "channel list row: {row:?}");
         // What is on, in the list: the programs' family.
@@ -177,6 +186,17 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
             &(condensed, 16.0 * scale, 400)
         ));
     }
+
+    step(
+        app.set_environment("iPad Accessibility Extra Large", |env| {
+            env.idiom = nsh_core::platform::Idiom::Pad;
+            env.os = nsh_core::platform::Os::Ios;
+            env.font_scale = 40.0 / 17.0;
+        }),
+    );
+    let rail = (roboto, 35.2, 400);
+    let shown = styles_when(&mut app, "Live TV", |styles| close_to(styles, &rail));
+    assert!(close_to(&shown, &rail), "rail at AX3: {shown:?}");
 }
 
 /// Whether one of `found` is `want` (the size to a hundredth).

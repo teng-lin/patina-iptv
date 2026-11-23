@@ -349,18 +349,23 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixtu
         })
         .expect("focused future program")
         .id;
-    if idiom == Idiom::Desktop {
-        step(app.right_click(&format!("view:{selected}")));
-    } else {
-        step(app.long_press(&format!("view:{selected}")));
-    }
-    step(app.wait_for("id:menu-panel >> text:Schedule recording"));
+    let cell = format!("view:{selected}");
+    let open_menu = |app: &mut Headless| {
+        if idiom == Idiom::Desktop {
+            step(app.right_click(&cell));
+        } else {
+            step(app.long_press(&cell));
+        }
+    };
+    let schedule = "id:menu-panel >> text:Schedule recording";
+    open_menu(&mut app);
+    step(app.wait_for(schedule));
     assert!(
         !app.screen()
             .matches("id:menu-panel >> text:Record")
             .unwrap()
     );
-    step(app.press("id:menu-panel >> text:Schedule recording"));
+    step(app.press(schedule));
     assert!(
         !app.screen().matches("text:Save recording").unwrap(),
         "guide scheduling must skip the custom form"
@@ -369,13 +374,17 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixtu
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    step(app.wait_for_within("text:/Scheduled ·/", Duration::from_secs(15)));
+    step(app.wait_for_within(
+        "id:app-notice >> text:Recording scheduled",
+        Duration::from_secs(15),
+    ));
     let jobs = crate::isolated::open_database(&path)
         .unwrap()
         .recording_jobs()
         .unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].request.source, source.0);
+    assert_eq!(jobs[0].status, iptv_core::recording::Status::Scheduled);
     assert_eq!(jobs[0].request.title, title);
     assert!(
         jobs[0].request.start > now,
@@ -385,25 +394,19 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixtu
         (jobs[0].request.start, jobs[0].request.end),
         expected.unwrap()
     );
+    // Reopening the menu offers cancellation for this occurrence.
+    open_menu(&mut app);
+    let cancel = "id:menu-panel >> text:Cancel recording";
+    step(app.wait_for(cancel));
+    assert!(!app.shows(schedule));
+    step(app.back());
+    step(app.wait_for_gone(cancel, Duration::from_secs(3)));
+
+    crate::browse_fixture::open_rail_item(&mut app, "Recordings");
+    step(app.wait_for_within("text:/Scheduled ·/", Duration::from_secs(15)));
     step(app.press("id:recording-job"));
     step(app.wait_for("text:Save recording"));
     step(app.press("text:Close"));
-    // Repeating the same guide action opens the existing job, never a duplicate.
-    if idiom == Idiom::Desktop {
-        step(app.right_click(&format!("view:{selected}")));
-    } else {
-        step(app.long_press(&format!("view:{selected}")));
-    }
-    step(app.press("id:menu-panel >> text:Schedule recording"));
-    step(app.wait_for("text:Cancel recording"));
-    assert_eq!(
-        crate::isolated::open_database(path)
-            .unwrap()
-            .recording_jobs()
-            .unwrap()
-            .len(),
-        1
-    );
 }
 
 #[test]
@@ -453,7 +456,7 @@ fn japanese_guide_preserves_the_providers_no_information_title() {
 }
 
 #[test]
-fn long_press_on_a_current_program_offers_record_without_starting_playback() {
+fn long_press_on_a_current_program_offers_record_now_in_the_channel_menu() {
     let Some(home) = isolated!() else { return };
     let (mut app, _, _, _) = fixture(
         &home,
@@ -464,11 +467,12 @@ fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     step(app.wait_for("text:Generated live program"));
     let opens = iptv_app::player_opens(0);
     step(app.long_press("role:cell[Generated live program]"));
-    step(app.wait_for("id:menu-panel >> text:/^Generated live program ·/"));
-    step(app.wait_for("id:menu-panel >> label:Record"));
+    let record_now = "id:menu-panel >> label:/^Record now · Generated live program/";
+    step(app.wait_for(record_now));
+    assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
     assert!(
         !app.screen()
-            .accessibility_state("id:menu-panel >> label:Record")
+            .accessibility_state(record_now)
             .unwrap()
             .disabled
     );
@@ -480,7 +484,7 @@ fn long_press_on_a_current_program_offers_record_without_starting_playback() {
     assert_eq!(iptv_app::player_opens(0), opens);
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     step(app.back());
-    step(app.wait_for_gone("id:menu-panel >> label:Record", Duration::from_secs(2)));
+    step(app.wait_for_gone(record_now, Duration::from_secs(2)));
 }
 
 struct CaptureServer {
