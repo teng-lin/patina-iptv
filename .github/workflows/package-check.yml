@@ -5,6 +5,19 @@ on:
       matrix:
         type: string
         default: '{"include":[{"platform":"linux","os":"ubuntu-24.04"},{"platform":"macos","os":"macos-15"}]}'
+      macos-host-tier:
+        type: string
+        default: ''
+      ios:
+        type: boolean
+        default: false
+    outputs:
+      macos-host-verified:
+        description: The macOS host checks passed on the packaging runner
+        value: ${{ jobs.desktop-packages.outputs.macos-host-verified }}
+      ios-verified:
+        description: Both iOS targets and the simulator entitlements were checked
+        value: ${{ jobs.desktop-packages.outputs.ios-verified }}
   workflow_dispatch:
     inputs:
       matrix:
@@ -25,6 +38,9 @@ jobs:
       matrix: ${{ fromJSON(inputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    outputs:
+      macos-host-verified: ${{ steps.macos-host.outputs.verified }}
+      ios-verified: ${{ steps.ios.outputs.verified }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -87,11 +103,40 @@ jobs:
           # fetchable (normally none: libmpv is the pinned runtime).
           python3 tools/ci/native-sources.py macos target/package/Patina.app \
             "target/native-sources/Patina-$VERSION-macos-native-sources.tar"
+      - name: Validate the macOS host tier using the packaging runner
+        id: macos-host
+        if: matrix.platform == 'macos' && inputs.macos-host-tier != ''
+        shell: bash
+        env:
+          HOST_TIER: ${{ inputs.macos-host-tier }}
+          IPTV_REQUIRE_PLAYER_TESTS: '1'
+          IPTV_TEST_WAIT_SCALE: '2'
+          IPTV_RS_MPV_LIB_DIR: ${{ github.workspace }}/target/mpv-runtime-macos/lib
+        run: |
+          command -v ffmpeg >/dev/null || brew install ffmpeg
+          if [[ "$HOST_TIER" == full ]]; then
+            rustup component add clippy
+          fi
+          export LIBRARY_PATH="$IPTV_RS_MPV_LIB_DIR"
+          export PKG_CONFIG_PATH="$IPTV_RS_MPV_LIB_DIR/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          python3 tools/ci/check-plan.py run --host macos --tier "$HOST_TIER" --skip-app-build
+          echo 'verified=true' >> "$GITHUB_OUTPUT"
+      - name: Compile iOS device and simulator adapters and check simulator entitlements
+        id: ios
+        if: matrix.platform == 'macos' && inputs.ios
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash tools/ci/check-ios.sh
+          echo 'verified=true' >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: rust-timings-desktop-package-${{ matrix.platform }}
-          path: target/desktop-cargo/cargo-timings/*.html
+          path: |
+            target/desktop-cargo/cargo-timings/*.html
+            target/cargo-timings/*.html
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

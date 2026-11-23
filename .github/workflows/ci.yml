@@ -11,6 +11,9 @@ on:
       ios:
         type: boolean
         default: false
+      skip-macos:
+        type: boolean
+        default: false
       tier:
         type: string
         default: full
@@ -21,6 +24,9 @@ on:
       ios-verified:
         description: Both iOS targets and the simulator entitlements were checked
         value: ${{ jobs.test.outputs.ios-verified }}
+      macos-host-verified:
+        description: The macOS host checks passed
+        value: ${{ jobs.test.outputs.macos-host-verified }}
   workflow_dispatch:
     inputs:
       tier:
@@ -45,13 +51,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        os: ${{ fromJSON(inputs.skip-macos && '["ubuntu-24.04"]' || '["ubuntu-24.04","macos-15"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     outputs:
       # Each check emits evidence on its own platform. Empty outputs are omitted.
       credentials-verified: ${{ steps.credentials.outputs.verified }}
       ios-verified: ${{ steps.ios.outputs.verified }}
+      macos-host-verified: ${{ steps.host-tier.outputs.macos-verified }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -63,6 +70,7 @@ jobs:
           cache-on-failure: 'true'
           apt-packages: xvfb libgl1-mesa-dri ${{ matrix.os == 'ubuntu-24.04' && inputs.credentials && 'gnome-keyring dbus-x11 libglib2.0-bin' || '' }}
           extra-workspaces: ${{ matrix.os == 'ubuntu-24.04' && 'hosts/tizen-nsh' || '' }}
+          policy-tool: ${{ matrix.os == 'ubuntu-24.04' }}
       - name: Install linters
         if: matrix.os == 'ubuntu-24.04'
         run: |
@@ -81,6 +89,7 @@ jobs:
           PERF_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: python3 tools/performance/base-policy.py
       - name: Validate the host tier
+        id: host-tier
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -89,6 +98,7 @@ jobs:
             bash tools/check.sh "${{ inputs.tier == 'pr' && 'pr' || 'full' }}"
           else
             python3 tools/ci/check-plan.py run --host macos --tier "${{ inputs.tier == 'pr' && 'native' || 'full' }}"
+            echo 'macos-verified=true' >> "$GITHUB_OUTPUT"
           fi
         env:
           IPTV_HELPERS_CHECKED: ${{ inputs.helpers-checked }}

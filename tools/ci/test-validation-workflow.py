@@ -95,12 +95,28 @@ class Workflows(unittest.TestCase):
     def test_collocated_ios_reports_success_from_macos_only(self):
         validation = (ROOT / ".github/workflows/validation.yml").read_text()
         host = (ROOT / ".github/workflows/ci.yml").read_text()
-        self.assertIn("ios: ${{ needs.plan.outputs.ios_on_host == 'true' }}", validation)
+        packages = (ROOT / ".github/workflows/package-check.yml").read_text()
+        for job, workflow, platforms in (("host", host, "matrix.os == 'macos-15'"),
+                                         ("packages", packages, "matrix.platform == 'macos'")):
+            self.assertIn(f"ios: ${{{{ needs.plan.outputs.ios_on_host == 'true' && needs.plan.outputs.macos_host == '{job}' }}}}", validation)
+            step = workflow.split("        id: ios\n", 1)[1].split("      - ", 1)[0]
+            self.assertIn(f"if: {platforms} && inputs.ios", step)
+            self.assertLess(step.index("bash tools/ci/check-ios.sh"), step.index("verified=true"))
+            self.assertIn("ios-verified: ${{ steps.ios.outputs.verified }}", workflow)
         self.assertIn("needs.plan.outputs.ios_on_host != 'true'", validation)
-        step = host.split("        id: ios\n", 1)[1].split("      - name:", 1)[0]
-        self.assertIn("if: matrix.os == 'macos-15' && inputs.ios", step)
-        self.assertLess(step.index("bash tools/ci/check-ios.sh"), step.index("verified=true"))
-        self.assertIn("ios-verified: ${{ steps.ios.outputs.verified }}", host)
+
+    def test_mac_packaging_replaces_the_separate_host_and_debug_app_build(self):
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        packages = (ROOT / ".github/workflows/package-check.yml").read_text()
+        self.assertIn("skip-macos: ${{ needs.plan.outputs.macos_host != 'host' }}", validation)
+        self.assertIn("inputs.skip-macos && '[\"ubuntu-24.04\"]'", host)
+        self.assertIn("policy-tool: ${{ matrix.os == 'ubuntu-24.04' }}", host)
+        self.assertIn("macos-host-tier: ${{ needs.plan.outputs.macos_host == 'packages' &&", validation)
+        step = packages.split("        id: macos-host\n", 1)[1].split("      - ", 1)[0]
+        self.assertIn("if: matrix.platform == 'macos' && inputs.macos-host-tier != ''", step)
+        self.assertLess(packages.index("bash tools/ci/smoke-macos-dmg.sh"), packages.index("        id: macos-host"))
+        self.assertLess(step.index("--skip-app-build"), step.index("verified=true"))
 
     def test_release_explicitly_requests_candidate_tier_and_publishes_after_artifact_checks(self):
         text = (ROOT / ".github/workflows/release.yml").read_text()
