@@ -118,24 +118,26 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     ] {
         s.set(k, v).unwrap();
     }
-    let mut f = start(home, s, true);
-    let app = &mut f.app;
     let opened: Arc<Mutex<Vec<String>>> = Arc::default();
     let observed = opened.clone();
-    app.observe(move |_, batch| {
-        for item in &batch.items {
-            if let MountItem::ComponentProps { props, .. } = item {
-                for (key, value) in props {
-                    if key.as_ref() == "source"
-                        && let Some(source) = value.as_ref().map(crate::support::upstream_source)
-                        && let Some(url) = source["url"].as_str()
-                    {
-                        observed.lock().unwrap().push(url.into());
+    let mut f = start_with_setup(home, s, true, |app| {
+        app.observe(move |_, batch| {
+            for item in &batch.items {
+                if let MountItem::ComponentProps { props, .. } = item {
+                    for (key, value) in props {
+                        if key.as_ref() == "source"
+                            && let Some(source) =
+                                value.as_ref().map(crate::support::upstream_source)
+                            && let Some(url) = source["url"].as_str()
+                        {
+                            observed.lock().unwrap().push(url.into());
+                        }
                     }
                 }
             }
-        }
+        });
     });
+    let app = &mut f.app;
     step(app.run_for(Duration::from_millis(600)));
     loaded_stream(app, &opened, "http://example.test/a");
     assert!(preview(app));
