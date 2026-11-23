@@ -999,7 +999,13 @@ fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
     step(app.remote_tap(RemoteKey::Down));
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
     step(app.run_for(Duration::from_millis(1_500)));
-    plays(app, &lifetime, "http://example.test/b", 2);
+    // The zap finishes on a worker. Waiting for it must leave the held key
+    // at 1,500 ms, even if the worker is slow to publish its result.
+    app.wait_until_fixed_clock("the queued channel opens", Duration::from_secs(10), |_| {
+        source(&lifetime).as_deref() == Some("http://example.test/b")
+            && iptv_app::player_opens(0) >= 2
+    });
+    assert_eq!(iptv_app::player_opens(0), 2);
     assert!(shows(app, "id:player-card"), "the held key keeps the card");
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
     step(app.wait_for_gone("id:player-card", Duration::from_secs(2)));

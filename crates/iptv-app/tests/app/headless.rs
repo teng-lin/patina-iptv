@@ -211,6 +211,31 @@ impl Headless {
         self.0
             .wait_until(what, crate::isolated::scaled_duration(timeout), done)
     }
+
+    /// Pumps work from other threads while leaving the manual clock fixed.
+    #[track_caller]
+    pub fn wait_until_fixed_clock(
+        &mut self,
+        what: &str,
+        timeout: Duration,
+        done: impl Fn(&Screen) -> bool,
+    ) {
+        assert!(self.clock().is_manual());
+        let deadline = std::time::Instant::now() + crate::isolated::scaled_duration(timeout);
+        loop {
+            self.catch_up();
+            if done(self.screen()) {
+                return;
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "{what} did not happen before the timeout"
+            );
+            self.engine().control().frame();
+            self.next_batch(remaining);
+        }
+    }
 }
 
 impl Deref for Headless {

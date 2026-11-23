@@ -23,6 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Condvar, Mutex, PoisonError};
+use std::time::Instant;
 
 use tempfile::TempDir;
 
@@ -31,6 +32,7 @@ pub const CHILD: &str = "IPTV_RS_TEST_CHILD";
 /// How many scenario processes may run at once.
 pub const JOBS: &str = "IPTV_RS_TEST_JOBS";
 const DEFAULT_JOBS: usize = 6;
+const TIMINGS: &str = "IPTV_RS_TEST_TIMINGS";
 /// A file the child writes when it reaches the scenario: a name that
 /// selects no test exits successfully too.
 const RAN: &str = "IPTV_RS_TEST_RAN";
@@ -187,9 +189,16 @@ pub fn run_with_env(here: &str, overrides: &[(&str, &str)]) -> Option<Home> {
         cmd.env("IPTV_TEST_WAIT_SCALE", scale);
     }
     cmd.envs(overrides.iter().copied());
+    let started = Instant::now();
     let out = cmd
         .output()
         .unwrap_or_else(|e| panic!("{name}: cannot run {}: {e}", exe.display()));
+    if let Some(timings) = std::env::var_os(TIMINGS) {
+        let filename = format!("{}.txt", name.replace("::", "-"));
+        let path = PathBuf::from(timings).join(filename);
+        std::fs::write(&path, format!("{}\n", started.elapsed().as_millis()))
+            .unwrap_or_else(|e| panic!("{name}: cannot write {}: {e}", path.display()));
+    }
     // Through the test harness: shown when this test fails, or with
     // --nocapture.
     print!("{}", String::from_utf8_lossy(&out.stdout));

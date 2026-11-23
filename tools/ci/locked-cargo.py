@@ -32,6 +32,8 @@ if command in {"build", "check", "test", "run", "metadata", "rustc", "clippy"}:
         manifest = Path.cwd() / "Cargo.toml"
     generated = root / "crates/iptv-app/.nsh/rust"
     if manifest.is_relative_to(generated):
+        if command == "build" and os.environ.get("IPTV_CARGO_TIMINGS") == "1" and "--timings" not in args:
+            args.insert(index + 1, "--timings")
         # Cargo itself rejects stale dependencies; never resolve updates here.
         contents = (root / "tools/ci/package.Cargo.lock").read_bytes()
         destination = generated / "Cargo.lock"

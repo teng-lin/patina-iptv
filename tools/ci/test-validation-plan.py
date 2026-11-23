@@ -87,6 +87,21 @@ class Selection(unittest.TestCase):
                      "crates/iptv-player-mpv/src/player.rs", "crates/iptv-nav/src/lib.rs"):
             self.assertTrue(v.select([path])["smoke"], path)
 
+    def test_app_harness_changes_need_host_tests_but_no_android_or_ios_build(self):
+        paths = ["crates/iptv-app/tests/app/play_bar.rs", "crates/iptv-app/tests/app/fixtures/playlist.m3u"]
+        plan = v.select(paths)
+        self.assertTrue(plan["host"])
+        self.assertTrue(plan["windows"])
+        self.assertFalse(any(plan[lane] for lane in ("android", "ios", "smoke", "packages", "windows-package")))
+        self.assertTrue(v.select([*paths, "crates/iptv-app/src/play_bar.rs"])["smoke"])
+
+    def test_leaf_workflow_edits_exercise_their_lane(self):
+        for path, selected in v.LANE_WORKFLOWS.items():
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertEqual([lane for lane in v.LANES if plan[lane]], [selected])
+                self.assertTrue(plan["helpers_full"])
+
     def test_storage_and_epg_changes_keep_large_regressions(self):
         for path in ("crates/iptv-store-sqlite/src/lib.rs", "crates/iptv-import/src/lib.rs", "crates/iptv-epg/src/lib.rs",
                      "crates/iptv-providers/src/xtream/parse.rs", "crates/iptv-guide/src/combined.rs",
@@ -168,6 +183,8 @@ class Aggregate(unittest.TestCase):
         self.plan = v.select([], 'release', candidate_build=True)
         self.needs = {lane: {'result': 'success' if self.plan[lane] else 'skipped'} for lane in v.LANES}
         self.needs.update(plan={'result': 'success'}, helpers={'result': 'success'}, candidate={'result': 'success'})
+        self.needs['credentials'] = {'result': 'skipped'}
+        self.needs['host']['outputs'] = {'credentials-verified': 'true'}
         self.assertEqual(v.gate(self.plan, self.needs), [])
         for result in ('failure', 'skipped', 'cancelled', None):
             self.needs['candidate']['result'] = result
@@ -178,6 +195,25 @@ class Aggregate(unittest.TestCase):
 
     def test_successful_selection_and_deliberate_skips_pass(self):
         self.assertEqual(v.gate(self.plan, self.needs), [])
+
+    def test_host_and_standalone_credential_routing(self):
+        for inputs, on_host in ((["tools/ci/isolated-credentials.py"], False),
+                                (["crates/iptv-store-sqlite/src/lib.rs"], True)):
+            with self.subTest(inputs=inputs):
+                plan = v.select(inputs)
+                self.assertTrue(plan["credentials"])
+                self.assertEqual(plan["credentials_on_host"], on_host)
+                needs = {lane: {"result": "success" if plan[lane] else "skipped"} for lane in v.LANES}
+                needs.update(plan={"result": "success"}, helpers={"result": "success"}, candidate={"result": "skipped"})
+                if on_host:
+                    needs["credentials"]["result"] = "skipped"
+                    self.assertTrue(v.gate(plan, needs))
+                    needs["host"]["outputs"] = {"credentials-verified": "true"}
+                self.assertEqual(v.gate(plan, needs), [])
+                needs["credentials"]["result"] = "failure"
+                self.assertTrue(v.gate(plan, needs))
+                plan["credentials_on_host"] = not on_host
+                self.assertIn("credential check routing is missing or invalid", v.gate(plan, needs))
 
     def test_android_compile_and_windows_failures_block_even_when_packages_skip(self):
         for lane in ("android", "windows"):

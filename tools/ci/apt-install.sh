@@ -7,10 +7,8 @@
 # can cache them. RESTORED=true means that cache was restored for this exact
 # runner image and package list: the install then never contacts the mirror,
 # and any gap in the cache fails straight into the refreshed retry. Package
-# installs are bounded by PATINA_APT_INSTALL_SECONDS and list refreshes and
-# dpkg repairs by PATINA_APT_REFRESH_SECONDS; a stalled or failed attempt is
-# retried once after refreshing the lists. A stalled mirror therefore fails
-# the step within about twenty-two minutes instead of consuming the job's timeout.
+# downloads are bounded independently of dpkg. A failed mirror fetch is
+# retried once using Canonical's archive when the runner uses a cloud mirror.
 set -euo pipefail
 if [ "$#" -lt 3 ]; then
   echo "usage: $0 STATE_DIR RESTORED PACKAGE..." >&2
@@ -20,9 +18,11 @@ state=$1
 restored=$2
 shift 2
 packages=("$@")
-install_seconds=${PATINA_APT_INSTALL_SECONDS:-480}
+download_seconds=${PATINA_APT_DOWNLOAD_SECONDS:-240}
+install_seconds=${PATINA_APT_INSTALL_SECONDS:-180}
 refresh_seconds=${PATINA_APT_REFRESH_SECONDS:-90}
 conf=${PATINA_APT_CONF:-/etc/apt/apt.conf.d/90patina-ci}
+sources=${PATINA_APT_SOURCES:-/etc/apt}
 initramfs_conf=${PATINA_INITRAMFS_CONF:-/etc/initramfs-tools/update-initramfs.conf}
 man_db_trigger=${PATINA_MAN_DB_TRIGGER:-/var/lib/man-db/auto-update}
 
@@ -36,6 +36,34 @@ bounded() {
   as_root timeout --kill-after=15 "$seconds" "$@"
 }
 
+switch_mirror() {
+  local source
+  # Keep the distro, pockets and Signed-By from the image's original entries.
+  local mirror='https?://(azure|([a-z0-9-]+\.)?(ec2|gce))\.archive\.ubuntu\.com/ubuntu([[:space:]/]|$)'
+  local mirrorlist='mirror\+file:/{1,3}etc/apt/apt-mirrors\.txt([[:space:]]|$)'
+  for source in "$sources/sources.list" "$sources/sources.list.d/"*.list "$sources/sources.list.d/"*.sources; do
+    if [ -f "$source" ] && grep -Eq "$mirror|$mirrorlist" "$source"; then
+      as_root sed -i -E \
+        -e "s@${mirror}@https://archive.ubuntu.com/ubuntu\\4@g" \
+        -e "s@${mirrorlist}@https://archive.ubuntu.com/ubuntu\\1@g" "$source"
+      echo "Using archive.ubuntu.com for $source"
+    fi
+  done
+}
+
+fetch_packages() {
+  bounded "$refresh_seconds" apt-get update -q -o APT::Update::Error-Mode=any &&
+    bounded "$download_seconds" apt-get install -q --download-only "${packages[@]}"
+}
+
+install_packages() {
+  bounded "$install_seconds" apt-get install -q --no-download "$@" "${packages[@]}"
+}
+
+repair_packages() {
+  bounded "$refresh_seconds" dpkg --configure -a || true
+}
+
 as_root mkdir -p "$state/lists/partial" "$state/archives/partial"
 # Every later apt call in the job (workflow steps included) shares these
 # lists, retries and timeouts. The HTTP timeouts cover connecting and stalled
@@ -43,7 +71,7 @@ as_root mkdir -p "$state/lists/partial" "$state/archives/partial"
 # The state lives under the runner's home, which apt's _apt sandbox user
 # cannot reach, so downloads run as root on this disposable machine.
 as_root tee "$conf" > /dev/null <<EOF
-Acquire::Retries "3";
+Acquire::Retries "2";
 Acquire::http::Timeout "30";
 Acquire::https::Timeout "30";
 Acquire::GzipIndexes "true";
@@ -68,17 +96,21 @@ if command -v debconf-set-selections > /dev/null 2>&1; then
 fi
 as_root rm -f "$man_db_trigger"
 
-if [ "$restored" = true ] && bounded "$install_seconds" apt-get install -q --no-download "${packages[@]}"; then
-  :
-elif [ "$restored" != true ] && bounded "$refresh_seconds" apt-get update -q &&
-    bounded "$install_seconds" apt-get install -q "${packages[@]}"; then
-  :
-else
-  echo "::warning::apt failed or exceeded its time bound; retrying once with refreshed lists"
-  # A killed install can leave packages unpacked but unconfigured.
-  bounded "$refresh_seconds" dpkg --configure -a || true
-  bounded "$refresh_seconds" apt-get update -q
-  bounded "$install_seconds" apt-get install -q --fix-broken "${packages[@]}"
+if [ "$restored" != true ] || ! install_packages; then
+  if [ "$restored" = true ]; then
+    echo "::warning::cached apt install failed; refreshing the package lists and downloads"
+    repair_packages
+  fi
+  if ! fetch_packages; then
+    echo "::warning::apt fetch failed or timed out; trying the Ubuntu archive"
+    switch_mirror
+    fetch_packages || { status=$?; echo "::error::apt downloads failed after mirror retry ($status)"; exit "$status"; }
+  fi
+  if ! install_packages; then
+    echo "::warning::offline apt install failed; repairing dpkg and retrying"
+    repair_packages
+    install_packages --fix-broken
+  fi
 fi
 # Leave no truncated downloads in the cache, and give its save step (run as
 # the runner user) a tree it can read.

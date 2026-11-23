@@ -79,6 +79,7 @@ jobs:
         timeout-minutes: 25
         with:
           cache: 'false'
+          prerequisites: ${{ matrix.platform == 'android' && 'android' || 'host' }}
           # Linux packaging tools, installed fresh (uncached) and bounded.
           apt-packages: >-
             ${{ matrix.platform == 'linux' && 'ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
@@ -119,10 +120,8 @@ jobs:
       # release.
       - name: Corresponding source of the system libraries bundled in the AppImage
         if: matrix.platform == 'linux'
-        run: |
-          bash tools/ci/enable-deb-src.sh
-          python3 tools/ci/native-sources.py linux target/Patina.AppDir \
-            "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
+        timeout-minutes: 15
+        uses: ./.github/actions/linux-sources
       - name: Prepare unsigned Android artifacts
         if: matrix.platform == 'android'
         run: bash tools/ci/prepare-android.sh
@@ -210,6 +209,7 @@ jobs:
         timeout-minutes: 25
         with:
           cache: 'false'
+          prerequisites: metadata
       - name: Set release metadata
         run: python3 tools/ci/version.py
       - uses: ./.github/actions/cargo-tool

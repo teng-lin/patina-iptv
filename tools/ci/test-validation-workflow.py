@@ -63,10 +63,22 @@ class Workflows(unittest.TestCase):
         self.assertIn("if: always()", aggregate)
         aliases = text.split("  protected-contexts:\n", 1)[1]
         self.assertIn("needs: validation", aliases)
-        self.assertIn("if: always()", aliases)
+        self.assertIn("always() && vars.PATINA_REQUIRE_AGGREGATE_ONLY != 'true'", aliases)
+        self.assertIn("github.event_name == 'pull_request'", aliases)
+        self.assertIn("github.event_name == 'merge_group'", aliases)
         for context in ("test (ubuntu-24.04)", "test (macos-15)", "android"):
             self.assertIn(context, aliases)
         self.assertIn('test "$RESULT" = success', aliases)
+
+    def test_collocated_credentials_report_success_from_linux_only(self):
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("credentials: ${{ needs.plan.outputs.credentials_on_host == 'true' }}", validation)
+        self.assertIn("needs.plan.outputs.credentials_on_host != 'true'", validation)
+        step = host.split("        id: credentials\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: matrix.os == 'ubuntu-24.04' && inputs.credentials", step)
+        self.assertLess(step.index("tools/ci/isolated-credentials.py"), step.index("verified=true"))
+        self.assertIn("credentials-verified: ${{ steps.credentials.outputs.verified }}", host)
 
     def test_release_explicitly_requests_candidate_tier_and_publishes_after_artifact_checks(self):
         text = (ROOT / ".github/workflows/release.yml").read_text()
@@ -108,12 +120,12 @@ class Workflows(unittest.TestCase):
         helpers = text.split('  helpers:\n', 1)[1].split('  host:\n', 1)[0]
         self.assertIn('python3 tools/ci/check-package-lock.py', helpers)
         host = text.split('  host:\n', 1)[1].split('  ios:\n', 1)[0]
-        self.assertIn('needs: [plan, helpers]', host)
+        self.assertIn('needs: plan', host)
         self.assertIn('helpers-checked: true', host)
 
     def test_delegated_helpers_run_every_helper_test_the_host_skips(self):
         # tools/check.sh skips its helper tests when the helpers job ran
-        # them (IPTV_HELPERS_CHECKED): each must be in that job, by name or
+        # them separately (IPTV_HELPERS_CHECKED): each must be in that job, by name or
         # through its tools/ci/test-*.py loop.
         script = (ROOT / 'tools/check.sh').read_text()
         guards = script.split('if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then\n')[1:]

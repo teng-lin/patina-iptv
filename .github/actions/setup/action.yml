@@ -13,9 +13,21 @@ inputs:
   cache-key:
     description: Additional identity for mode-specific build recipes
     default: host-v2
+  cargo-cache:
+    description: Use the shared Cargo cache when the job has no dedicated compiler cache
+    default: 'true'
+  extra-workspaces:
+    description: Additional workspaces whose Cargo artifacts this job produces
+    default: ''
+  prerequisites:
+    description: Native prerequisites for host, android, android-smoke, android-check, store, or metadata jobs
+    default: host
   apt-packages:
     description: Further Linux packages the job needs, installed and cached with the build packages
     default: ''
+  policy-tool:
+    description: Install cargo-deny for jobs that run dependency policy checks
+    default: 'true'
 runs:
   using: composite
   steps:
@@ -33,21 +45,36 @@ runs:
     - shell: bash
       run: mv nsh-source ../nsh-patina
     # Linux packages come from a cache keyed on the runner image and package
-    # list, so most runs never contact the Ubuntu mirror (#159). Shipping
-    # builds (cache: 'false') always install the mirror's current packages.
+    # list, so most runs never contact the Ubuntu mirror (#159).
     - name: Identify the Linux packages
       id: apt
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && inputs.prerequisites != 'metadata'
       shell: bash
       env:
-        APT_PACKAGES: >-
-          libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev
-          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-          pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2
-          ${{ inputs.apt-packages }}
+        PREREQUISITES: ${{ inputs.prerequisites }}
+        EXTRA_PACKAGES: ${{ inputs.apt-packages }}
       run: |
+        case "$PREREQUISITES" in
+          host)
+            packages='libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev
+              libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+              pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2'
+            ;;
+          android|android-smoke)
+            # NSH links and runs the generated describe program on Linux.
+            packages='libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev
+              libgstreamer-plugins-base1.0-dev pkg-config clang cmake ninja-build'
+            if [[ "$PREREQUISITES" == android-smoke ]]; then
+              packages+=" ffmpeg libmpv2"
+            else
+              packages+=" libpipewire-0.3-0t64 libva-drm2 libasound2t64 libpulse0 libva2"
+            fi
+            ;;
+          android-check|store) packages='pkg-config clang cmake ninja-build' ;;
+          *) echo "Unknown build prerequisites: $PREREQUISITES" >&2; exit 1 ;;
+        esac
         # One package per line, whatever block style the caller used.
-        packages=$(tr -s '[:space:]' '\n' <<< "$APT_PACKAGES" | sed '/^$/d' | sort -u | paste -sd ' ' -)
+        packages=$(tr -s '[:space:]' '\n' <<< "$packages $EXTRA_PACKAGES" | sed '/^$/d' | sort -u | paste -sd ' ' -)
         identity=$({ echo "$packages"; cat tools/ci/apt-install.sh; } | sha256sum | cut -c1-16)
         image="${ImageOS:-$(. /etc/os-release && echo "$ID$VERSION_ID")}-${ImageVersion:-unversioned}"
         {
@@ -57,7 +84,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       id: apt-cache
-      if: runner.os == 'Linux' && inputs.cache == 'true'
+      if: steps.apt.outputs.key != '' && inputs.cache == 'true'
       env:
         # A stalled cache download falls back to the mirror instead of hanging.
         SEGMENT_DOWNLOAD_TIMEOUT_MINS: '3'
@@ -65,6 +92,7 @@ runs:
         path: ${{ steps.apt.outputs.state }}
         key: ${{ steps.apt.outputs.key }}
     - name: Install system packages
+      if: inputs.prerequisites != 'metadata'
       shell: bash
       env:
         APT_STATE: ${{ steps.apt.outputs.state }}
@@ -81,7 +109,7 @@ runs:
     # install, not whatever the job's later steps leave behind. The packages
     # are installed by now, so a cache service outage must not fail the job.
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: runner.os == 'Linux' && inputs.cache == 'true' && steps.apt-cache.outputs.cache-hit != 'true'
+      if: steps.apt.outputs.key != '' && inputs.cache == 'true' && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
       continue-on-error: true
       with:
         path: ${{ steps.apt.outputs.state }}
@@ -89,14 +117,14 @@ runs:
     - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
       with:
         toolchain: ${{ steps.pins.outputs.toolchain }}
-        components: clippy, rustfmt
-        targets: wasm32-unknown-unknown
+        components: ${{ inputs.prerequisites == 'host' && 'clippy, rustfmt' || '' }}
+        targets: ${{ inputs.prerequisites == 'host' && 'wasm32-unknown-unknown' || '' }}
     - shell: bash
       run: |
         source tools/ci/locked-build-env.sh
         echo "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" >> "$GITHUB_ENV"
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      if: inputs.cache == 'true'
+      if: inputs.cache == 'true' && inputs.cargo-cache == 'true'
       with:
         cache-on-failure: ${{ inputs.cache-on-failure }}
         key: ${{ inputs.cache-key }}-${{ hashFiles('nsh.rev', 'tools/ci/check-plan.py', '.github/actions/setup/action.yml') }}
@@ -108,7 +136,9 @@ runs:
         workspaces: |
           .
           ../nsh-patina
+          ${{ inputs.extra-workspaces }}
     - name: Install the checksum-pinned guarded player
+      if: inputs.prerequisites == 'host' || inputs.prerequisites == 'android'
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -121,7 +151,18 @@ runs:
         echo "LD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
         echo "IPTV_RS_MPV_LIB_DIR=$destination/lib" >> "$GITHUB_ENV"
         echo "DYLD_LIBRARY_PATH=$destination/lib" >> "$GITHUB_ENV"
+    - name: Link the smoke build's host describe program against Ubuntu libmpv
+      if: inputs.prerequisites == 'android-smoke'
+      shell: bash
+      run: |
+        library=$(dpkg-query -L libmpv2 | awk '/\/libmpv\.so\.2$/ {print; exit}')
+        test -f "$library"
+        directory="$RUNNER_TEMP/patina-describe-lib"
+        mkdir -p "$directory"
+        ln -sfn "$library" "$directory/libmpv.so"
+        echo "LIBRARY_PATH=$directory${LIBRARY_PATH:+:$LIBRARY_PATH}" >> "$GITHUB_ENV"
     - uses: ./.github/actions/cargo-tool
+      if: inputs.policy-tool == 'true' && (inputs.prerequisites == 'host' || inputs.prerequisites == 'android')
       with:
         name: cargo-deny
         version: 0.20.2

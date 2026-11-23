@@ -395,15 +395,15 @@ class Collecting(unittest.TestCase):
 
     def linux_package(self):
         notices = self.root / "AppDir" / sources.NOTICES["linux"]
-        notices.mkdir(parents=True)
+        notices.mkdir(parents=True, exist_ok=True)
         component = {"name": "synthetic-media", "version": "7:1.2-3", "binaries": ["libsynthetic1:amd64"]}
         (notices / "sources.json").write_text(json.dumps(sources.manifest("linux", "9.8.7", [component])))
         (notices / "SOURCE.txt").write_text(sources.source_note("linux", "9.8.7"))
         return self.root / "AppDir"
 
-    def collect_linux(self, apt):
+    def collect_linux(self, apt, cache=None):
         def fetch(component, stage):
-            sources.fetch_ubuntu(component, stage, run=apt, download=self.download)
+            sources.fetch_ubuntu(component, stage, run=apt, download=self.download, cache=cache)
 
         output = self.root / "out" / sources.archive_name("linux", "9.8.7")
         return sources.collect("linux", self.linux_package(), output, fetch=fetch), output
@@ -448,6 +448,16 @@ class Collecting(unittest.TestCase):
             self.assertEqual(archive.getnames(), [
                 "SOURCE.txt", "sources.json", "synthetic-media_1.2-3/synthetic-media_1.2-3.debian.tar.xz",
                 "synthetic-media_1.2-3/synthetic-media_1.2-3.dsc", "synthetic-media_1.2-3/synthetic-media_1.2.orig.tar.xz"])
+        cache = self.root / "cache"
+        self.collect_linux(apt, cache)
+        calls.clear()
+        self.collect_linux(apt, cache)
+        self.assertEqual([call[2] for call in calls], ["--print-uris"])
+        next(cache.iterdir()).write_bytes(b"invalid cache entry")
+        calls.clear()
+        self.collect_linux(apt, cache)
+        self.assertEqual([call[2] for call in calls], ["--print-uris", "--download-only"])
+
         # A file that differs from the signed index is refused.
         files["synthetic-media_1.2.orig.tar.xz"] = b"different bytes"
         original = apt

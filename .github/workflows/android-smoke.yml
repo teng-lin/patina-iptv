@@ -1,7 +1,22 @@
 name: Android smoke
 on:
   workflow_call:
+    inputs:
+      lto:
+        description: LTO setting for the x86_64 smoke APK
+        type: string
+        default: 'off'
   workflow_dispatch:
+    inputs:
+      cold:
+        description: Build without restoring apt, NSH, Gradle or Rust caches
+        type: boolean
+        default: false
+      lto:
+        description: LTO setting for the x86_64 smoke APK
+        type: choice
+        options: ['off', thin]
+        default: 'off'
 
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('android-smoke-pr-{0}', github.event.pull_request.number) || format('android-smoke-run-{0}', github.run_id) }}
@@ -16,6 +31,10 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      PATINA_SMOKE_LTO: ${{ inputs.lto || 'off' }}
+      PATINA_SMOKE_CODEGEN_UNITS: '16'
+      PATINA_SMOKE_DEBUG_ASSERTIONS: 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -23,22 +42,60 @@ jobs:
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
-          cache-key: smoke-v2-${{ hashFiles('tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/android/action.yml', '.github/workflows/android-smoke.yml') }}
+          prerequisites: android-smoke
+          cache: ${{ inputs.cold && 'false' || 'true' }}
+          cargo-cache: 'false'
       - uses: ./.github/actions/android
         with:
           abi: x86_64
+          cache: ${{ !inputs.cold && 'gradle' || '' }}
+      - name: Identify the Android compiler and host libraries
+        id: compiler
+        shell: bash
+        run: |
+          case "$PATINA_SMOKE_LTO" in off|thin) ;; *) echo 'Expected off or thin LTO' >&2; exit 2 ;; esac
+          compiler=$(rustc -vV)
+          ndk=$(cat "$ANDROID_NDK_HOME/source.properties")
+          libraries=$(dpkg-query -W libgtk-4-dev libssl-dev libgstreamer1.0-dev libmpv2)
+          identity=$({
+            printf '%s\n' "$compiler" "$ndk" "$libraries" "$PATINA_SMOKE_LTO" "${ImageOS:-}"
+            printf '%s\n' "$PATINA_SMOKE_CODEGEN_UNITS" "$PATINA_SMOKE_DEBUG_ASSERTIONS"
+          } | sha256sum | cut -c1-16)
+          echo "key=$identity" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        if: inputs.cold != true
+        with:
+          key: android-smoke-x86_64-v4-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'tools/sync-host.sh', 'tools/ci/android-ndk-env.sh', '.github/actions/setup/action.yml', '.github/actions/android/action.yml', '.cargo/config.toml') }}
+          # The checked-in runner lock supplies the identity before NSH generates
+          # the workspace. At save time its graph retains Android-only crates.
+          add-rust-environment-hash-key: 'false'
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-bin: 'false'
+          workspaces: crates/iptv-app/.nsh/rust -> ../../../../target
       # A debug APK for x86_64 emulators whose wizard starts with the mock
       # server's playlist; debug assertions let it reach that private address.
       - name: Build the development APK
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
           ABIS: x86_64
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ env.PATINA_SMOKE_CODEGEN_UNITS }}
+          CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: ${{ env.PATINA_SMOKE_DEBUG_ASSERTIONS }}
+          CARGO_PROFILE_RELEASE_LTO: ${{ env.PATINA_SMOKE_LTO }}
           IPTV_VALIDATION_APP_ID: com.hantekllc.iptvrs.validation
           IPTV_RS_DEV_PLAYLIST: http://10.0.2.2:8089/iptv/playlist.m3u
-          CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: 'true'
+          IPTV_CARGO_TIMINGS: '1'
+          NSH_VERBOSE: '1'
         run: |
           bash tools/sync-host.sh
           (cd hosts/android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug)
+      - name: Rust compilation and linking timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rust-timings-android-smoke
+          path: target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
       - name: Generate the synthetic fixtures
         run: |
           bash tools/make-hls-fixtures.sh --android-smoke

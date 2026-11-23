@@ -26,6 +26,7 @@ BUSY_READER = "store_latency::a_store_read_does_not_wait_for_a_busy_writer"
 GTK_LIFECYCLE = "native_gtk_player_shares_pip_frames_and_recreates_only_after_context_loss"
 COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
 WASM_CLIPPY = ("cargo", "clippy", "--locked", "--target", "wasm32-unknown-unknown", "--", "-D", "warnings")
+PERFORMANCE_HARNESSES = {"app", "native_player"}
 
 
 def workspace_crates(root=ROOT):
@@ -112,7 +113,7 @@ def plan(root=ROOT, release=False, tier="full", host="linux"):
         steps.append(step("runtime-portable-tests", "cargo", "test", "--locked", "-p", "iptv-runtime",
                           "--no-default-features", "--lib", "--", "--format=pretty"))
     steps.extend([
-        step("guide-input-budget", "cargo", "test", *test_args,
+        step("busy-guide-navigation", "cargo", "test", *test_args,
              "--test", "app", LATENCY, "--", "--ignored", "--exact", "--format=pretty"),
         step("busy-store-reader", "cargo", "test", *test_args,
              "--test", "app", BUSY_READER, "--", "--ignored", "--exact", "--format=pretty"),
@@ -139,7 +140,40 @@ def coverage_args(root=ROOT):
     return ["--tests", "--features", COVERAGE_FEATURES, *package_args(workspace_crates(root))]
 
 
-def run(steps, root=ROOT, runner=subprocess.run):
+def record_harnesses(argv, options, output, root):
+    """Keep the workspace test output and record the exact Cargo executables."""
+    separator = argv.index("--")
+    argv = [*argv[:separator], "--message-format=json-render-diagnostics", *argv[separator:]]
+    harnesses = {}
+    with subprocess.Popen(argv, cwd=options["cwd"], env=options.get("env"),
+                          stdout=subprocess.PIPE, text=True) as process:
+        for line in process.stdout:
+            try:
+                message = json.loads(line) if line.startswith("{") else {}
+            except ValueError:
+                message = {}
+            reason = message.get("reason")
+            if reason == "compiler-artifact":
+                target = message["target"]
+                if (target["name"] in PERFORMANCE_HARNESSES and "test" in target["kind"]
+                        and Path(message["manifest_path"]) == root / "crates/iptv-app/Cargo.toml"
+                        and message.get("executable")):
+                    name = target["name"]
+                    executable = message["executable"]
+                    if name in harnesses and harnesses[name] != executable:
+                        raise ValueError(f"Cargo reported two executables for {name}")
+                    harnesses[name] = executable
+            elif reason not in ("build-finished", "build-script-executed", "compiler-message"):
+                print(line, end="", flush=True)
+        status = process.wait()
+    if status == 0:
+        if harnesses.keys() != PERFORMANCE_HARNESSES:
+            raise ValueError("Cargo did not report both Patina performance harnesses")
+        output.write_text(json.dumps(harnesses), encoding="utf-8")
+    return status
+
+
+def run(steps, root=ROOT, runner=subprocess.run, harness_output=None):
     for check in steps:
         print(f"==> {check['name']}", flush=True)
         # This is a display string only; execution always uses the argv array.
@@ -152,13 +186,16 @@ def run(steps, root=ROOT, runner=subprocess.run):
         if sys.platform == "darwin" and (directory := os.environ.get("IPTV_RS_MPV_LIB_DIR")):
             options["env"] = dict(options.get("env", os.environ), DYLD_LIBRARY_PATH=directory)
         try:
-            result = runner(check["argv"], **options)
-        except OSError as error:
+            if harness_output and check["name"] == "workspace-tests":
+                status = record_harnesses(check["argv"], options, harness_output, root)
+            else:
+                status = runner(check["argv"], **options).returncode
+        except (OSError, ValueError) as error:
             print(f"could not start {check['name']}: {error}", file=sys.stderr)
             return 127
-        if result.returncode:
-            print(f"{check['name']} failed (exit {result.returncode})", file=sys.stderr)
-            return result.returncode
+        if status:
+            print(f"{check['name']} failed (exit {status})", file=sys.stderr)
+            return status
     return 0
 
 
@@ -170,6 +207,8 @@ def main(argv=None):
     listing.add_argument("--release", action="store_true", help="build the normal app in release mode")
     running = actions.add_parser("run", help="stream the common Rust checks, failing fast")
     running.add_argument("--release", action="store_true", help="build the normal app in release mode")
+    running.add_argument("--harness-output", type=Path, default=os.environ.get("IPTV_CI_HARNESSES") or None,
+                         help="record workspace test executables for performance journeys")
     for action in (listing, running):
         action.add_argument("--tier", choices=("pr", "full", "native"), default="full")
         action.add_argument("--host", choices=("linux", "macos", "windows"), default="linux")
@@ -189,7 +228,10 @@ def main(argv=None):
     elif options.action == "format":
         return run(format_plan())
     elif options.action == "run":
-        return run(plan(release=options.release, tier=options.tier, host=options.host))
+        if options.harness_output and options.tier == "native":
+            parser.error("the native tier does not build the performance harnesses")
+        return run(plan(release=options.release, tier=options.tier, host=options.host),
+                   harness_output=options.harness_output)
     else:
         checks = plan(release=options.release, tier=options.tier, host=options.host)
         if options.json:

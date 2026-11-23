@@ -17,6 +17,7 @@ jobs:
         timeout-minutes: 25
         with:
           cache-key: ios-compile-v1
+          prerequisites: metadata
       - name: Compile device and simulator adapters without credentials
         env:
           GH_TOKEN: ${{ github.token }}

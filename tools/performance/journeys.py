@@ -271,6 +271,14 @@ def run(args):
     try:
         if args.repetitions < 1 or args.timeout < 1:
             raise ValueError("repetitions and timeout must be positive")
+        if manifest := getattr(args, "harness_manifest", None):
+            harnesses = load(manifest)
+            if not isinstance(harnesses, dict) or harnesses.keys() != {"app", "native_player"}:
+                raise ValueError("expected both Cargo test executables in the harness manifest")
+            args.harness = harnesses["app"]
+            args.native_harness = harnesses["native_player"]
+            if not all(isinstance(path, str) and Path(path).is_file() for path in harnesses.values()):
+                raise ValueError("Cargo test executable is missing")
         harness = args.harness or build_harness()
         with tempfile.TemporaryDirectory(prefix="patina-journeys-") as temporary:
             # Immutable executable: another worktree's build cannot change this run.
@@ -337,6 +345,7 @@ def main():
     runner.add_argument("--output", default="target/performance/summary.json")
     runner.add_argument("--harness")
     runner.add_argument("--native-harness")
+    runner.add_argument("--harness-manifest", type=Path)
     runner.add_argument("--repetitions", type=int)
     runner.add_argument("--timeout", type=int)
     runner.add_argument("--baseline", default=str(HERE / "baseline.json"))

@@ -1,0 +1,33 @@
+name: Corresponding Linux sources
+description: Collect the verified sources of the exact Ubuntu libraries in the AppImage
+runs:
+  using: composite
+  steps:
+    - name: Identify bundled Ubuntu versions
+      id: identity
+      shell: bash
+      run: |
+        versions=$(python3 tools/ci/native-sources.py linux-cache-key target/Patina.AppDir)
+        echo "key=linux-sources-v1-$(dpkg --print-architecture)-$versions" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: sources
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '3'
+      with:
+        path: ${{ runner.temp }}/patina-linux-sources
+        key: ${{ steps.identity.outputs.key }}
+    - name: Collect and verify sources
+      shell: bash
+      env:
+        PATINA_NATIVE_SOURCE_CACHE: ${{ runner.temp }}/patina-linux-sources
+      run: |
+        : "${VERSION:?}"
+        bash tools/ci/enable-deb-src.sh
+        python3 tools/ci/native-sources.py linux target/Patina.AppDir \
+          "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
+    - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      if: github.ref == 'refs/heads/master' && steps.sources.outputs.cache-hit != 'true'
+      continue-on-error: true
+      with:
+        path: ${{ runner.temp }}/patina-linux-sources
+        key: ${{ steps.identity.outputs.key }}

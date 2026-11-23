@@ -32,7 +32,7 @@ jobs:
       - uses: ./.github/actions/setup
         timeout-minutes: 25
         with:
-          cache-key: packages-v2-${{ hashFiles('.github/workflows/package-check.yml', 'tools/ci/package-linux.sh', 'tools/package-macos.sh') }}
+          cargo-cache: 'false'
           # Linux packaging tools; macOS ignores this list.
           apt-packages: >-
             ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
@@ -47,24 +47,51 @@ jobs:
           version: 0.9.3
           features: cli
       - uses: ./.github/actions/nsh-cli
+      - name: Identify the desktop compiler and native libraries
+        id: compiler
+        shell: bash
+        run: |
+          compiler=$(rustc -vV)
+          clang=$(clang --version)
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            libraries=$(brew list --versions)
+            sdk=$(xcrun --sdk macosx --show-sdk-build-version)
+          else
+            libraries=$(dpkg-query -W libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev)
+            sdk=''
+          fi
+          identity=$(printf '%s\n' "$compiler" "$clang" "$libraries" "$sdk" "${ImageVersion:-}" | shasum -a 256 | cut -c1-16)
+          echo "key=$identity" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: desktop-package-v1-${{ matrix.platform }}-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', '.github/workflows/package-check.yml', '.github/actions/setup/action.yml', 'tools/ci/locked-cargo.py', 'tools/ci/package-linux.sh', 'tools/package-macos.sh', 'tools/mpv-runtime-unix/runtime-*.json') }}
+          # The lock above supplies the identity before NSH writes its workspace.
+          add-rust-environment-hash-key: 'false'
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+          cache-on-failure: 'true'
+          cache-bin: 'false'
+          workspaces: crates/iptv-app/.nsh/rust -> ../../../../target/desktop-cargo
       - name: Linux package installation and smoke tests
         if: matrix.platform == 'linux'
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
         run: |
           sudo gem install fpm -v 1.16.0 --no-document
           bash tools/ci/setup-linux-packaging.sh
           export PATH="$RUNNER_TEMP/linux-packaging:$PATH"
-          export APPIMAGE_EXTRACT_AND_RUN=1 CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          export APPIMAGE_EXTRACT_AND_RUN=1
           bash tools/ci/package-linux.sh
           bash tools/ci/check-linux-packages.sh
-          # As in a release: every bundled system library's source must be
-          # fetchable (libmpv's is retained with its pinned runtime release).
-          bash tools/ci/enable-deb-src.sh
-          python3 tools/ci/native-sources.py linux target/Patina.AppDir \
-            "target/native-sources/Patina-$VERSION-linux-native-sources.tar"
+      - name: Corresponding source of the system libraries bundled in the AppImage
+        if: matrix.platform == 'linux'
+        timeout-minutes: 15
+        uses: ./.github/actions/linux-sources
       - name: macOS ad hoc package installation and smoke test
         if: matrix.platform == 'macos'
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
         run: |
           bash tools/package-macos.sh
           bash tools/ci/package-macos.sh
@@ -78,6 +105,13 @@ jobs:
           # fetchable (normally none: libmpv is the pinned runtime).
           python3 tools/ci/native-sources.py macos target/package/Patina.app \
             "target/native-sources/Patina-$VERSION-macos-native-sources.tar"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: rust-timings-desktop-package-${{ matrix.platform }}
+          path: target/desktop-cargo/cargo-timings/*.html
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-packages-${{ matrix.platform }}

@@ -15,6 +15,7 @@ runs:
         distribution: temurin
         java-version: '21'
         cache: ${{ inputs.cache }}
+        cache-read-only: ${{ github.ref != 'refs/heads/master' }}
         cache-dependency-path: |
           hosts/android/**/*.gradle.kts
           hosts/android/gradle.properties
@@ -74,7 +75,8 @@ runs:
         for abi in "${abis[@]}"; do args+=(--abi "$abi"); done
         cargo run --locked -p xtask -- android --release "${args[@]}"
     - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache != '' && steps.runtime.outputs.cache-hit != 'true'
+      if: inputs.cache != '' && steps.runtime.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+      continue-on-error: true
       with:
         path: ${{ steps.identity.outputs.path }}
         key: nsh-android-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.abis }}-${{ steps.identity.outputs.key }}

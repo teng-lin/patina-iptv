@@ -11,6 +11,6 @@ if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
 else
   "${sudo[@]}" sed -i -E 's/^# *(deb-src .*)$/\1/' /etc/apt/sources.list
 fi
-"${sudo[@]}" apt-get update
+"${sudo[@]}" timeout --kill-after=15 120 apt-get update
 # Fails when no source index is configured after all.
-apt-get source --print-uris base-files > /dev/null
+timeout 30 apt-get source --print-uris base-files > /dev/null

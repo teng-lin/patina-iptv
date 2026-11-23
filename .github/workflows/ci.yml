@@ -5,15 +5,27 @@ on:
       helpers-checked:
         type: boolean
         default: false
+      credentials:
+        type: boolean
+        default: false
       tier:
         type: string
         default: full
+    outputs:
+      credentials-verified:
+        description: The Linux production credential check succeeded
+        value: ${{ jobs.test.outputs.credentials-verified }}
   workflow_dispatch:
     inputs:
       tier:
         type: choice
         default: full
         options: [full, pr]
+      app-test-jobs:
+        description: Maximum simultaneous Linux app scenarios
+        type: choice
+        default: '6'
+        options: ['4', '6', '8']
 
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('tests-pr-{0}', github.event.pull_request.number) || format('tests-run-{0}', github.run_id) }}
@@ -30,6 +42,9 @@ jobs:
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    outputs:
+      # Only the Linux matrix job sets this output. Empty outputs are omitted.
+      credentials-verified: ${{ steps.credentials.outputs.verified }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -39,7 +54,8 @@ jobs:
         timeout-minutes: 25
         with:
           cache-on-failure: 'true'
-          apt-packages: xvfb libgl1-mesa-dri
+          apt-packages: xvfb libgl1-mesa-dri ${{ matrix.os == 'ubuntu-24.04' && inputs.credentials && 'gnome-keyring dbus-x11 libglib2.0-bin' || '' }}
+          extra-workspaces: ${{ matrix.os == 'ubuntu-24.04' && 'hosts/tizen-nsh' || '' }}
       - name: Install linters
         if: matrix.os == 'ubuntu-24.04'
         run: |
@@ -61,6 +77,8 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
+            mkdir -p "$RUNNER_TEMP/patina-app-timings"
+            export IPTV_RS_TEST_TIMINGS="$RUNNER_TEMP/patina-app-timings"
             bash tools/check.sh "${{ inputs.tier == 'pr' && 'pr' || 'full' }}"
           else
             python3 tools/ci/check-plan.py run --host macos --tier "${{ inputs.tier == 'pr' && 'native' || 'full' }}"
@@ -70,9 +88,17 @@ jobs:
           IPTV_REQUIRE_PLAYER_TESTS: '1'
           IPTV_TEST_WAIT_SCALE: ${{ matrix.os == 'macos-15' && '2' || '1' }}
           IPTV_REQUIRE_LINTERS: ${{ matrix.os == 'ubuntu-24.04' && '1' || '0' }}
+          IPTV_CI_HARNESSES: ${{ matrix.os == 'ubuntu-24.04' && format('{0}/patina-harnesses.json', runner.temp) || '' }}
+          IPTV_RS_TEST_JOBS: ${{ inputs.app-test-jobs || '6' }}
       - name: Reproducible performance journeys
         if: matrix.os == 'ubuntu-24.04'
-        run: python3 tools/performance/journeys.py run
+        run: python3 tools/performance/journeys.py run --harness-manifest "$RUNNER_TEMP/patina-harnesses.json"
+      - name: Verify production key creation and reopen with disposable credentials
+        id: credentials
+        if: matrix.os == 'ubuntu-24.04' && inputs.credentials
+        run: |
+          python3 tools/ci/isolated-credentials.py
+          echo 'verified=true' >> "$GITHUB_OUTPUT"
       - name: Performance report
         if: always() && matrix.os == 'ubuntu-24.04'
         run: |
@@ -90,4 +116,12 @@ jobs:
           name: rust-timings-${{ matrix.os }}
           path: target/cargo-timings/*.html
           if-no-files-found: warn
+          retention-days: 7
+      - name: App scenario timings
+        if: always() && matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-scenario-timings-linux
+          path: ${{ runner.temp }}/patina-app-timings/*.txt
+          if-no-files-found: ignore
           retention-days: 7

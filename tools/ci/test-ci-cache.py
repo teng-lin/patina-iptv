@@ -103,13 +103,20 @@ class ToolCache(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
         self.assertIn("steps.tool.outputs.cache-hit != 'true'", RECIPE)
 
-    def test_packaging_cache_has_a_master_producer_on_dependency_changes(self):
+    def test_packaging_cache_uses_the_generated_graph_on_previews_and_nightly(self):
         workflow = (ROOT / ".github/workflows/validation.yml").read_text(encoding="utf-8")
-        self.assertIn("  push:\n    branches: [master]", workflow)
+        self.assertIn("  schedule:", workflow)
         self.assertIn("uses: ./.github/workflows/package-check.yml", workflow)
+        package = (ROOT / ".github/workflows/package-check.yml").read_text(encoding="utf-8")
+        self.assertIn("workspaces: crates/iptv-app/.nsh/rust -> ../../../../target/desktop-cargo", package)
+        self.assertEqual(package.count("CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo"), 2)
+        self.assertIn("'tools/ci/package.Cargo.lock'", package)
+        self.assertIn("cargo-cache: 'false'", package)
+        self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", package)
         spec = importlib.util.spec_from_file_location("validation", ROOT / "tools/ci/validation-plan.py")
         validation = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(validation)
+        self.assertTrue(validation.select([], tier="full")["packages"])
         for path in ("Cargo.lock", "nsh.rev", ".github/actions/setup/action.yml"):
             self.assertTrue(validation.select([path])["packages"], path)
 
@@ -196,11 +203,23 @@ class AptInstall(unittest.TestCase):
         self.initramfs.write_text("MODULES=generated\nupdate_initramfs=yes\n")
         self.man_db = self.root / "man-db-auto-update"
         self.man_db.write_text("")
+        sources = self.root / "apt"
+        (sources / "sources.list.d").mkdir(parents=True)
+        self.ubuntu = sources / "sources.list.d/ubuntu.sources"
+        self.ubuntu.write_text(
+            "Types: deb\nURIs: mirror+file:/etc/apt/apt-mirrors.txt\nSuites: noble noble-updates\n"
+            "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
+            "\nTypes: deb\nURIs: http://security.ubuntu.com/ubuntu\nSuites: noble-security\n"
+        )
+        self.legacy = sources / "sources.list"
+        self.legacy.write_text("deb http://us-east-2.ec2.archive.ubuntu.com/ubuntu/ noble main\n")
+        self.other = sources / "sources.list.d/other.list"
+        self.other.write_text("deb https://packages.example.test/ubuntu noble main\n")
         self.environment = {
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_LOG": str(self.log),
             "PATINA_APT_CONF": str(self.root / "apt.conf"), "PATINA_INITRAMFS_CONF": str(self.initramfs),
             "PATINA_MAN_DB_TRIGGER": str(self.man_db), "PATINA_APT_INSTALL_SECONDS": "7",
-            "PATINA_APT_REFRESH_SECONDS": "5",
+            "PATINA_APT_REFRESH_SECONDS": "5", "PATINA_APT_DOWNLOAD_SECONDS": "11", "PATINA_APT_SOURCES": str(sources),
         }
 
     def install(self, restored, fail=""):
@@ -213,20 +232,45 @@ class AptInstall(unittest.TestCase):
     def test_cache_miss_refreshes_lists_once_and_bounds_every_apt_call(self):
         result, calls, raw = self.install("false")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls, ["apt-get update -q", "apt-get install -q generated-a generated-b"])
-        self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 5", "bound 7"])
+        self.assertEqual(calls, ["apt-get update -q -o APT::Update::Error-Mode=any", "apt-get install -q --download-only generated-a generated-b",
+                                 "apt-get install -q --no-download generated-a generated-b"])
+        self.assertEqual([call for call in raw if call.startswith("bound")], ["bound 5", "bound 11", "bound 7"])
 
     def test_cache_hit_installs_without_contacting_the_mirror(self):
         result, calls, _ = self.install("true")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b"])
 
-    def test_a_failed_or_stalled_install_is_retried_once_with_refreshed_lists(self):
+    def test_an_incomplete_cache_falls_back_to_fresh_downloads(self):
         result, calls, _ = self.install("true", fail="1")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("retrying once", result.stdout)
+        self.assertIn("cached apt install failed", result.stdout)
         self.assertEqual(calls, ["apt-get install -q --no-download generated-a generated-b", "dpkg --configure -a",
-                                 "apt-get update -q", "apt-get install -q --fix-broken generated-a generated-b"])
+                                 "apt-get update -q -o APT::Update::Error-Mode=any", "apt-get install -q --download-only generated-a generated-b",
+                                 "apt-get install -q --no-download generated-a generated-b"])
+
+    def test_failed_download_switches_mirrors_before_install(self):
+        result, calls, _ = self.install("false", fail="2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("trying the Ubuntu archive", result.stdout)
+        self.assertEqual(calls, ["apt-get update -q -o APT::Update::Error-Mode=any", "apt-get install -q --download-only generated-a generated-b",
+                                 "apt-get update -q -o APT::Update::Error-Mode=any", "apt-get install -q --download-only generated-a generated-b",
+                                 "apt-get install -q --no-download generated-a generated-b"])
+        changed = self.ubuntu.read_text()
+        self.assertIn("URIs: https://archive.ubuntu.com/ubuntu\n", changed)
+        self.assertIn("URIs: http://security.ubuntu.com/ubuntu\n", changed)
+        self.assertIn("Suites: noble noble-updates\n", changed)
+        self.assertIn("Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n", changed)
+        self.assertEqual(self.legacy.read_text(), "deb https://archive.ubuntu.com/ubuntu/ noble main\n")
+        self.assertEqual(self.other.read_text(), "deb https://packages.example.test/ubuntu noble main\n")
+
+    def test_offline_install_failure_repairs_dpkg_without_another_download(self):
+        result, calls, _ = self.install("false", fail="3")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("offline apt install failed", result.stdout)
+        self.assertEqual(calls[-2:], ["dpkg --configure -a",
+                                      "apt-get install -q --no-download --fix-broken generated-a generated-b"])
+        self.assertEqual(sum("--download-only" in call for call in calls), 1)
 
     def test_the_cache_keeps_no_truncated_downloads(self):
         partial = self.root / "state/archives/partial"
@@ -247,7 +291,7 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         conf = Path(self.environment["PATINA_APT_CONF"]).read_text()
         state = self.root / "state"
-        for line in ('Acquire::Retries "3";', 'Acquire::http::Timeout "30";', 'Acquire::https::Timeout "30";',
+        for line in ('Acquire::Retries "2";', 'Acquire::http::Timeout "30";', 'Acquire::https::Timeout "30";',
                      f'Dir::State::Lists "{state}/lists";', f'Dir::Cache::Archives "{state}/archives";',
                      'Binary::apt-get::APT::Keep-Downloaded-Packages "true";'):
             self.assertIn(line, conf)
@@ -262,7 +306,8 @@ class AptInstall(unittest.TestCase):
         self.assertIn('cat tools/ci/apt-install.sh', SETUP)
         self.assertIn("${{ inputs.apt-packages }}", SETUP)
         # Shipping builds (cache: 'false') never install cached packages.
-        self.assertEqual(SETUP.count("runner.os == 'Linux' && inputs.cache == 'true'"), 2)
+        self.assertEqual(SETUP.count("steps.apt.outputs.key != '' && inputs.cache == 'true'"), 2)
+        self.assertIn("steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'", SETUP)
         self.assertNotIn("sudo apt-get", SETUP)
         self.assertIn("continue-on-error: true", SETUP.split("actions/cache/save", 1)[1].split("- ", 1)[0])
 

@@ -35,6 +35,7 @@ Usage:
 """
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -335,7 +336,10 @@ def dsc_name(name, version):
 # -------------------------------------------------------------- collecting
 
 def run(arguments, cwd=None):
-    return subprocess.run(arguments, cwd=cwd, capture_output=True, text=True)
+    try:
+        return subprocess.run(arguments, cwd=cwd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"timed out collecting source: {' '.join(arguments)}") from None
 
 
 def download(url, destination):
@@ -343,7 +347,7 @@ def download(url, destination):
     result = run(["curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
                   # Also refused and reset connections; the checksum guards what arrives.
                   "--retry-all-errors",
-                  "--connect-timeout", "30", "--max-time", "1800", "--proto", "=https,http",
+                  "--connect-timeout", "20", "--max-time", "120", "--retry-max-time", "120", "--proto", "=https,http",
                   "--proto-redir", "=https,http", "--output", str(destination), url])
     if result.returncode != 0:
         print(f"  could not download {url}: {result.stderr.strip()}", file=sys.stderr)
@@ -428,7 +432,19 @@ def check_file(path, row, label):
                          f"  expected {row['checksum']}\n  received {actual}")
 
 
-def fetch_ubuntu(component, stage, run=run, download=download):
+def cached_source(cache, row, destination):
+    if cache is None:
+        return False
+    entry = cache / f"{row['algorithm']}-{row['checksum']}"
+    try:
+        check_file(entry, row, destination.name)
+    except SystemExit:
+        return False
+    shutil.copyfile(entry, destination)
+    return True
+
+
+def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
     name, version = component["name"], component["version"]
     label = f"{name} {version}"
     directory = stage / f"{name}_{version.split(':', 1)[-1]}"
@@ -436,9 +452,11 @@ def fetch_ubuntu(component, stage, run=run, download=download):
     listed = run(["apt-get", "source", "--print-uris", f"{name}={version}"])
     if listed.returncode == 0:
         files = print_uris(listed.stdout)
-        fetched = run(["apt-get", "source", "--download-only", f"{name}={version}"], cwd=directory)
-        if fetched.returncode != 0:
-            raise SystemExit(f"cannot fetch source of {label}: {fetched.stderr.strip()}")
+        restored = [cached_source(cache, row, directory / row["name"]) for row in files]
+        if not all(restored):
+            fetched = run(["apt-get", "source", "--download-only", f"{name}={version}"], cwd=directory)
+            if fetched.returncode != 0:
+                raise SystemExit(f"cannot fetch source of {label}: {fetched.stderr.strip()}")
         component["origin"] = "apt"
     elif "deb-src" in listed.stderr:
         raise SystemExit("apt has no deb-src entries: run tools/ci/enable-deb-src.sh first")
@@ -451,11 +469,13 @@ def fetch_ubuntu(component, stage, run=run, download=download):
                 f"cannot fetch source of {label}: neither the configured deb-src indexes nor Launchpad have it")
         files = [{"name": description, "size": (directory / description).stat().st_size, "algorithm": "sha256",
                   "checksum": digest(directory / description)}, *dsc_files((directory / description).read_text())]
-        for row in files[1:]:
-            if not download(launchpad_url(name, version, row["name"]), directory / row["name"]):
-                raise SystemExit(f"cannot fetch source of {label}: {row['name']}")
         for row in files:
             row["url"] = launchpad_url(name, version, row["name"])
+        # Fetch the .dsc from Launchpad. Its checksums also authenticate any cached members.
+        for row in files[1:]:
+            destination = directory / row["name"]
+            if not cached_source(cache, row, destination) and not download(row["url"], destination):
+                raise SystemExit(f"cannot fetch source of {label}: {row['name']}")
         component["origin"] = "launchpad"
     component["sources"] = []
     for row in files:
@@ -465,6 +485,19 @@ def fetch_ubuntu(component, stage, run=run, download=download):
     extra = {path.name for path in directory.iterdir()} - {row["name"] for row in files}
     if extra:
         raise SystemExit(f"unexpected files fetched for {label}: {sorted(extra)}")
+    if cache is not None:
+        cache.mkdir(parents=True, exist_ok=True)
+        for row in files:
+            entry = cache / f"{row['algorithm']}-{row['checksum']}"
+            if entry.exists() and entry.stat().st_size == row["size"] and digest(entry, row["algorithm"]) == row["checksum"]:
+                continue
+            shutil.copyfile(directory / row["name"], entry)
+
+
+def linux_cache_key(package):
+    description = json.loads((Path(package) / NOTICES["linux"] / "sources.json").read_text())
+    versions = sorted((row["name"], row["version"]) for row in description["components"])
+    return hashlib.sha256(json.dumps(versions).encode()).hexdigest()
 
 
 def write_archive(stage, output):
@@ -482,7 +515,7 @@ def write_archive(stage, output):
         raise SystemExit(f"{output} exceeds the size GitHub accepts for a release file")
 
 
-def collect(platform, package, output, fetch=None, scratch=None):
+def collect(platform, package, output, fetch=None, scratch=None, source_cache=None):
     package, output = Path(package), Path(output)
     notices = package / NOTICES[platform]
     if platform == "macos" and not (notices / "sources.json").exists():
@@ -494,12 +527,17 @@ def collect(platform, package, output, fetch=None, scratch=None):
         raise SystemExit(f"{notices}/sources.json does not describe bundled {platform} libraries")
     if output.name != description["archive"]:
         raise SystemExit(f"the package names its source archive {description['archive']}, not {output.name}")
-    fetch = fetch or (fetch_homebrew if platform == "macos" else fetch_ubuntu)
+    if fetch is None:
+        def fetch(component, stage):
+            if platform == "macos":
+                fetch_homebrew(component, stage)
+            else:
+                fetch_ubuntu(component, stage, cache=source_cache)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=scratch or output.parent) as directory:
         stage = Path(directory)
         for component in description["components"]:
-            print(f"{component['name']} {component['version']}")
+            print(f"{component['name']} {component['version']}", flush=True)
             fetch(component, stage)
             if not component.get("sources"):
                 raise SystemExit(f"no source fetched for {component['name']} {component['version']}")
@@ -518,6 +556,10 @@ def collect(platform, package, output, fetch=None, scratch=None):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4 or sys.argv[1] not in NOTICES:
+    if len(sys.argv) == 3 and sys.argv[1] == "linux-cache-key":
+        print(linux_cache_key(sys.argv[2]))
+    elif len(sys.argv) == 4 and sys.argv[1] in NOTICES:
+        cache = os.environ.get("PATINA_NATIVE_SOURCE_CACHE")
+        collect(sys.argv[1], sys.argv[2], sys.argv[3], source_cache=Path(cache) if cache else None)
+    else:
         raise SystemExit(__doc__)
-    collect(sys.argv[1], sys.argv[2], sys.argv[3])
