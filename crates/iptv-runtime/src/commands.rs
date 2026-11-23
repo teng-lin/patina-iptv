@@ -2,6 +2,8 @@
 //! module creates database work items.
 use super::store_service::Services;
 use iptv_core::membership::Member;
+use iptv_core::parental::Target;
+use iptv_guide::playback::ResolutionAuthority;
 use iptv_library::{CustomGroupId, SourceId};
 use iptv_providers::ContentId;
 use iptv_store_sqlite::{ChannelQuery, ChannelScope, CustomGroup, Store, StoreError};
@@ -133,7 +135,7 @@ fn channel_native(
     let current = services.clone();
     services.read(move |store| {
         access.access.policy = crate::parental::policy_settings(&current.settings());
-        let target = iptv_core::parental::Target::live(source.0, channel.as_str());
+        let target = Target::live(source.0, channel.as_str());
         if store.guide_channel_blocked(source, channel.as_str())?
             || !crate::parental::native_allowed(store, &target, &access)?
         {
@@ -145,6 +147,63 @@ fn channel_native(
                 channel: row.channel,
                 blocked: row.blocked,
             }))
+    })
+}
+
+/// Parental policy verified against committed storage for external playback.
+pub struct ExternalPlaybackAuthorization {
+    access: crate::parental::Snapshot,
+    grants: Vec<Target>,
+}
+
+impl ExternalPlaybackAuthorization {
+    /// Check immediately before granting the relay admission, without yielding.
+    pub fn is_current(&self) -> bool {
+        self.access.inspection_current(&self.grants)
+    }
+}
+
+pub(crate) fn external_playback_check(
+    store: &Store,
+    authority: &ResolutionAuthority,
+    group: &str,
+    access: crate::parental::Snapshot,
+) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
+    let source = SourceId(authority.source());
+    let channel = &authority.channel().id;
+    let target = Target::live(source.0, channel.as_str());
+    store.read_snapshot(|store| {
+        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
+            return Ok(None);
+        };
+        if !store.source_policy(source)?.enabled
+            || !store
+                .guide_group_preferences(source, group)?
+                .external_player
+            || store.guide_channel_blocked(source, channel.as_str())?
+        {
+            return Ok(None);
+        }
+        let Some(stored) = store.source(source)? else {
+            return Ok(None);
+        };
+        let scope = Kind::group_channels(group);
+        if !store
+            .ordered_guide_channels(source, &scope)?
+            .iter()
+            .any(|row| &row.channel.id == channel)
+        {
+            return Ok(None);
+        }
+        let Some(row) = store.channel(source, channel)? else {
+            return Ok(None);
+        };
+        Ok((!row.blocked
+            && stored.incarnation == authority.incarnation()
+            && &stored.source.config == authority.config()
+            && &row.channel == authority.channel()
+            && access.inspection_current(&grants))
+        .then_some(ExternalPlaybackAuthorization { access, grants }))
     })
 }
 

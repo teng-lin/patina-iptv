@@ -1,68 +1,11 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
+use crate::commands::{ExternalPlaybackAuthorization, external_playback_check};
 use iptv_core::add_playlist::ImportId;
-use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
-
-/// Parental policy verified against committed storage for external playback.
-pub struct ExternalPlaybackAuthorization {
-    access: crate::parental::Snapshot,
-    grants: Vec<Target>,
-}
-
-impl ExternalPlaybackAuthorization {
-    /// Check immediately before granting the relay admission, without yielding.
-    pub fn is_current(&self) -> bool {
-        self.access.inspection_current(&self.grants)
-    }
-}
-
-fn external_playback_check(
-    store: &iptv_store_sqlite::Store,
-    authority: &ResolutionAuthority,
-    group: &str,
-    access: crate::parental::Snapshot,
-) -> iptv_store_sqlite::Result<Option<ExternalPlaybackAuthorization>> {
-    let source = SourceId(authority.source());
-    let channel = &authority.channel().id;
-    let target = Target::live(source.0, channel.as_str());
-    store.read_snapshot(|store| {
-        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
-            return Ok(None);
-        };
-        if !store.source_policy(source)?.enabled
-            || !store
-                .guide_group_preferences(source, group)?
-                .external_player
-            || store.guide_channel_blocked(source, channel.as_str())?
-        {
-            return Ok(None);
-        }
-        let Some(stored) = store.source(source)? else {
-            return Ok(None);
-        };
-        let scope = iptv_library::OrganizationScope::group_channels(group);
-        if !store
-            .ordered_guide_channels(source, &scope)?
-            .iter()
-            .any(|row| &row.channel.id == channel)
-        {
-            return Ok(None);
-        }
-        let Some(row) = store.channel(source, channel)? else {
-            return Ok(None);
-        };
-        Ok((!row.blocked
-            && stored.incarnation == authority.incarnation()
-            && &stored.source.config == authority.config()
-            && &row.channel == authority.channel()
-            && access.inspection_current(&grants))
-        .then_some(ExternalPlaybackAuthorization { access, grants }))
-    })
-}
 
 impl Runtime {
     pub fn browser_generation(&self) -> u64 {
