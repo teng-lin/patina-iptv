@@ -119,7 +119,8 @@ def trusted_commit():
         raise ValueError("NSH CLI publication requires a trusted master Validation run")
     run = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())["workflow_run"]
     if (run["event"] != "push" or run["head_branch"] != "master" or run["path"] != ".github/workflows/validation.yml"
-            or run["head_repository"]["full_name"] != REPOSITORY or not re.fullmatch(r"[a-f0-9]{40}", run["head_sha"])):
+            or run["conclusion"] != "success" or run["head_repository"]["full_name"] != REPOSITORY
+            or not re.fullmatch(r"[a-f0-9]{40}", run["head_sha"])):
         raise ValueError("NSH CLI publication requires a trusted master Validation run")
     return run["head_sha"]
 

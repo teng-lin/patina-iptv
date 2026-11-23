@@ -275,13 +275,14 @@ class ReleaseTests(unittest.TestCase):
         artifact.mkdir()
         self.download(artifact)
         event = self.root / "event.json"
-        run = {"event": "push", "head_branch": "master", "path": ".github/workflows/validation.yml",
+        run = {"event": "push", "conclusion": "success", "head_branch": "master", "path": ".github/workflows/validation.yml",
                "head_repository": {"full_name": releases.REPOSITORY}, "head_sha": "b" * 40}
         with (patch.dict(os.environ, GITHUB_REPOSITORY=releases.REPOSITORY, GITHUB_REF="refs/heads/master",
                          GITHUB_EVENT_NAME="workflow_run", GITHUB_EVENT_PATH=str(event)),
               patch.object(releases, "publish") as publish,
               patch.object(releases, "upstream_license", return_value=self.license.read_bytes()) as license_fetch):
-            for incorrect in ({"event": "pull_request"}, {"head_repository": {"full_name": "fork/patina-iptv"}}):
+            for incorrect in ({"event": "pull_request"}, {"conclusion": "failure"}, {"conclusion": "cancelled"},
+                              {"head_repository": {"full_name": "fork/patina-iptv"}}):
                 event.write_text(json.dumps({"workflow_run": run | incorrect}))
                 with self.assertRaises(ValueError):
                     releases.publish_staged(self.root)
