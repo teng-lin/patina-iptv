@@ -112,6 +112,43 @@ fn series_occurrences_keep_raw_identity_across_padding_cancellation_and_retry() 
             .unwrap(),
         None
     );
+
+    let next_start = original.start + 3_600;
+    let mut next = padded;
+    next.start += 3_600;
+    next.end += 3_600;
+    let now = original.start - 1_000;
+    assert_eq!(
+        store
+            .materialize_recording_rule_at_with_offset(
+                rule.id,
+                JobId(405),
+                &next,
+                next_start,
+                now,
+                Some(-300)
+            )
+            .unwrap(),
+        None
+    );
+    assert!(
+        !store
+            .recording_rule_has_occurrence(rule.id, next_start)
+            .unwrap()
+    );
+    assert_eq!(
+        store
+            .materialize_recording_rule_at_with_offset(
+                rule.id,
+                JobId(405),
+                &next,
+                next_start,
+                now,
+                Some(0)
+            )
+            .unwrap(),
+        Some(JobId(405))
+    );
 }
 
 #[test]

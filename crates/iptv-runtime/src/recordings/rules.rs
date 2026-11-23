@@ -322,7 +322,7 @@ pub(super) async fn materialize(services: &Services) -> Result<(), Error> {
             services
                 .call(move |store| {
                     store
-                        .materialize_recording_rule_at(
+                        .materialize_recording_rule_at_with_offset(
                             id,
                             job,
                             &request,

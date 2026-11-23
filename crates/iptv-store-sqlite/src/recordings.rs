@@ -536,10 +536,29 @@ impl Store {
         request: &Request,
         now: i64,
     ) -> Result<Option<JobId>> {
-        self.materialize_recording_rule_at(rule, id, request, request.start, now, None)
+        self.materialize_recording_rule_at(rule, id, request, request.start, now)
     }
 
     pub fn materialize_recording_rule_at(
+        &mut self,
+        rule: iptv_core::recording::RuleId,
+        id: JobId,
+        request: &Request,
+        occurrence_start: i64,
+        now: i64,
+    ) -> Result<Option<JobId>> {
+        self.materialize_recording_rule_at_with_offset(
+            rule,
+            id,
+            request,
+            occurrence_start,
+            now,
+            None,
+        )
+    }
+
+    /// Rejects materialization from an older group guide projection.
+    pub fn materialize_recording_rule_at_with_offset(
         &mut self,
         rule: iptv_core::recording::RuleId,
         id: JobId,
