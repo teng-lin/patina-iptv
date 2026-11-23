@@ -23,7 +23,11 @@ fn validated(b: &KeyBinding) -> Option<Binding> {
     )
 }
 pub fn keymap() -> Keymap {
-    let mut map = Keymap::for_profile(crate::input::PROFILE);
+    let mut map = if idiom() == nsh_core::platform::Idiom::Tv {
+        Keymap::tv()
+    } else {
+        Keymap::for_profile(crate::input::PROFILE)
+    };
     for b in saved().iter().filter_map(validated) {
         map.set_override(b);
     }

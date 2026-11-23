@@ -1,8 +1,8 @@
 //! A replay's keys on a TV, run headless with the TV idiom: the card
 //! shows the replay's seek bar as its one time line (no second bar, no
 //! action cards), Left/Right (`catchup.seek_keys`' default) choose a seek
-//! shown on it, OK opens the archive there at once, and OK then plays and
-//! pauses.
+//! shown on it, OK opens the archive there at once, and the next OK opens
+//! the shared play bar with Play/pause focused.
 //!
 //! Synthetic data only: a playlist picked from a file, channel one with a
 //! day of catch-up, its guide a local XMLTV file.
@@ -45,7 +45,7 @@ fn guide(now: i64) -> String {
 }
 
 #[test]
-fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
+fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_opens_the_play_bar() {
     let Some(home) = isolated!() else { return };
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -112,12 +112,15 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
     step(app.wait_for_gone("text:/^⇢/", Duration::from_secs(2)));
     step(app.wait_for(&format!("{LINE} >> text:5:00")));
 
-    // Then OK pauses and plays.
+    // The next OK opens the bar. Further presses activate Play/pause.
+    step(app.press_key("enter"));
+    step(app.wait_for("id:play-bar-layer"));
+    step(app.wait_for("text:CATCH-UP"));
     step(app.press_key("enter"));
     step(app.wait_for("text:PAUSED"));
     step(app.press_key("enter"));
     step(app.wait_for("text:CATCH-UP"));
-    assert_eq!(app.screen().count(LINE).unwrap(), 1);
+    assert!(!app.screen().matches(CARD).unwrap());
 
     // The same bar serves seekable TV playback. OK commits before the
     // debounce clock advances and never also pauses the player.
@@ -128,8 +131,6 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_pauses() {
         .find(|n| n.kind == ViewKind::Native)
         .unwrap()
         .id;
-    step(app.press_key("m"));
-    step(app.wait_for("id:play-bar-layer"));
     step(app.press_key("down"));
     assert!(
         app.screen()

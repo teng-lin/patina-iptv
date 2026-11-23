@@ -1,12 +1,12 @@
 //! Player panels over full-screen video for the remote (and keys), as
-//! observed in the reference UX: OK shows a top bar (the playing channel's
+//! available through the info key and custom bindings: a top bar (the playing channel's
 //! group; live state, sleep timer, date and time), the info card (`card`:
 //! logo, number and name, badges, program, one time line, next
-//! program) and the action cards beneath it; Long OK or Menu the control
-//! strip; a channel change a compact banner. The card's time line is the
+//! program), action cards and the legacy control strip. A channel change
+//! shows a compact banner. The card's time line is the
 //! only one: a replay's card shows its seek bar there. A pointer (desktop
-//! mouse, tablet touch) has the play bar instead (`play_bar.rs`, never on
-//! a TV). State lives in `iptv_presentation::panels`; keys in `player_keys.rs`;
+//! mouse, tablet touch) and the default TV keys use the shared play bar
+//! instead (`play_bar.rs`). State lives in `iptv_presentation::panels`; keys in `player_keys.rs`;
 //! this draws them and schedules their idle deadline. Panels are views over
 //! the video SurfaceView. [`status`] draws the waiting and error
 //! states of `player.rs`.

@@ -2,8 +2,8 @@
 //! desktop the mouse moving over the video shows it, on a tablet a tap
 //! (a click on the desktop) shows it and another hides it; it hides after
 //! a few seconds without input, but not while the mouse rests on it nor
-//! while a screen reader runs (`iptv_presentation::play_bar`). A TV opens this same bar with long OK or Menu
-//! and traverses its controls with the D-pad. Short OK keeps the info card.
+//! while a screen reader runs (`iptv_presentation::play_bar`). A TV opens the
+//! same bar with OK or Menu and traverses its controls with the D-pad.
 //!
 //! Above the controls: the channel, program information and stream quality.
 //! Sound and guide navigation sit left of transport. Favorite, picture in
@@ -751,7 +751,7 @@ pub(super) fn activate(
 pub(super) fn focused(ui: Ui, control: Control) -> bool {
     idiom() == Idiom::Tv && ui.keys_shown() && ui.play_bar.with(|b| b.focus == Some(control))
 }
-/// Explicit TV long OK/Menu: keep short OK's info-card semantics intact.
+/// Open the shared bar with Play/pause focused.
 pub fn remote(ui: Ui) {
     show(ui, PlayBar::remote);
 }

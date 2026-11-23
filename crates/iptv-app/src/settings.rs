@@ -97,6 +97,7 @@ pub const COMMANDS: &[&str] = &[
     "recordings.enable_startup",
     "recordings.disable_startup",
     "recordings.alarm_access",
+    "about.privacy_policy",
     "general.backup",
     "general.restore",
     "epg.add_source",

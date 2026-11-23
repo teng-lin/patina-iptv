@@ -1,7 +1,7 @@
 //! The player's keys on a TV, run headless with the TV idiom (keys stand
 //! in for the remote's taps; long presses are the keymap's tests, as a
 //! desktop host reports no releases): entering full screen and zapping
-//! show the compact banner, which hides by itself; OK shows the info card
+//! show the compact banner, which hides by itself; a custom OK binding shows the info card
 //! with its action cards and one time line, OK again hides it; Right
 //! reaches the cards and OK presses one; Menu (`M`) opens the shared play
 //! bar and hides it again; Shift + Right (Long Right) opens history.
@@ -40,7 +40,7 @@ fn count(app: &Headless, selector: &str) -> usize {
 #[test]
 fn the_remote_shows_one_time_line_a_banner_on_zap_the_card_on_ok_and_the_strip_on_menu() {
     let Some(home) = isolated!() else { return };
-    browse_fixture::two_step_preview(home.path());
+    browse_fixture::two_step_preview_with(home.path(), browse_fixture::bind_ok_to_info_card);
     let config = EngineConfig {
         viewport: Size::new(px(960.0), px(540.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())

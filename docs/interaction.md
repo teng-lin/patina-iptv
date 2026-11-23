@@ -218,8 +218,8 @@ visible entry point for touch and pointer users.
   give access to program and group actions from the player list. In the
   guide grid, the program menu also includes actions for its channel and
   group. Menu or M on the single-playlist All channels group adds a
-  playlist. During fullscreen playback, Menu and long OK open the playback bar
-  ([TV controls](tv-controls.md)).
+  playlist. During full-screen TV playback, either OK press and Menu open
+  the play bar ([TV controls](tv-controls.md)).
 - Choose **Channel actions** from a program menu to use that program's
   time block. The channel menu opens on Favorites, followed by the recording
   action for the selected block. A live block can start or stop a recording.

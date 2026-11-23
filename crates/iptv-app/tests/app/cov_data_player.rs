@@ -352,7 +352,7 @@ fn run_published_retries(app: &mut Headless, props: &Props, clock: &Clock, time:
 #[test]
 fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let Some(home) = isolated!() else { return };
-    browse_fixture::two_step_preview(home.path());
+    browse_fixture::two_step_preview_with(home.path(), browse_fixture::bind_ok_to_info_card);
     // Log lines run as in the app, into the test's output and `LOG`.
     log::set_logger(&LOG).expect("this process's only logger");
     log::set_max_level(log::LevelFilter::Info);

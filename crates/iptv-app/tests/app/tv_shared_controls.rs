@@ -509,14 +509,11 @@ fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_z
 }
 
 #[test]
-fn live_player_panels_expire_and_back_dismisses_without_stopping() {
+fn live_play_bar_expires_and_back_dismisses_without_stopping() {
     let Some(home) = isolated!() else { return };
     let mut settings = Settings::new();
     settings
         .set("guide.stay_on_guide", Value::Bool(false))
-        .unwrap();
-    settings
-        .set("player.controls_panel_timeout", Value::secs(5))
         .unwrap();
     settings.set("guide.switch_delay", Value::ms(500)).unwrap();
     let mut fixture = personalization::start(home, settings, true);
@@ -530,18 +527,18 @@ fn live_player_panels_expire_and_back_dismisses_without_stopping() {
     assert!(iptv_app::player_has_source(0));
 
     step(app.press_key("enter"));
-    step(app.wait_for("id:player-card"));
-    step(app.run_for(Duration::from_millis(4_500)));
-    assert!(app.screen().matches("id:player-card").unwrap());
+    step(app.wait_for("id:play-bar-layer"));
+    step(app.run_for(Duration::from_millis(2_500)));
+    assert!(app.screen().matches("id:play-bar-layer").unwrap());
     step(app.run_for(Duration::from_millis(600)));
-    assert!(!app.screen().matches("id:player-card").unwrap());
+    assert!(!app.screen().matches("id:play-bar-layer").unwrap());
     assert_eq!(iptv_app::player_opens(0), playing);
     assert!(iptv_app::player_has_source(0));
 
     step(app.press_key("enter"));
-    step(app.wait_for("id:player-card"));
+    step(app.wait_for("id:play-bar-layer"));
     step(app.back());
-    assert!(!app.screen().matches("id:player-card").unwrap());
+    assert!(!app.screen().matches("id:play-bar-layer").unwrap());
     assert!(iptv_app::player_has_source(0));
 
     step(app.press_key("down"));

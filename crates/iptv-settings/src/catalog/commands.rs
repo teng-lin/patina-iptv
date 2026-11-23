@@ -145,6 +145,12 @@ pub static COMMANDS: &[Command] = &[
         key("Version, licenses and policies."),
     ),
     Command::new(
+        S::About,
+        "",
+        "about.privacy_policy",
+        key("Open the privacy policy in your browser."),
+    ),
+    Command::new(
         S::Playlists,
         "",
         "playlists.manage",

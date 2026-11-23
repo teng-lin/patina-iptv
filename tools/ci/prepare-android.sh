@@ -13,6 +13,11 @@ mkdir -p hosts/android/app/build/nsh/assets/notices
 cp -R target/notices/. hosts/android/app/build/nsh/assets/notices/
 cp -R hosts/android/app/build/reports/dependency-license hosts/android/app/build/nsh/assets/notices/gradle
 (cd hosts/android && ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease bundleRelease)
+# The signed AAB retains the exact R8 map for this build.
+mapping=hosts/android/app/build/outputs/mapping/release/mapping.txt
+bundle=hosts/android/app/build/outputs/bundle/release/app-release.aab
+test -s "$mapping"
+unzip -p "$bundle" BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map | cmp "$mapping" -
 rm -rf target/android-unsigned
 mkdir -p target/android-unsigned
 python3 tools/ci/sbom.py android-classpath \

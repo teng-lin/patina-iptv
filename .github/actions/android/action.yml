@@ -25,7 +25,7 @@ runs:
       env:
         ABI: ${{ inputs.abi }}
       run: |
-        sdkmanager "platforms;android-35" "build-tools;35.0.1" "ndk;30.0.16248370"
+        sdkmanager "platforms;android-36" "build-tools;35.0.1" "ndk;30.0.16248370"
         IFS=, read -ra abis <<< "$ABI"
         for abi in "${abis[@]}"; do
           case "$abi" in

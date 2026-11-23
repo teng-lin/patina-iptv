@@ -524,11 +524,11 @@ fn inactive_player_ui_stays_out_of_accessibility_and_returns_without_recreating_
     exposure.shown(app, "player-controls", false);
     step(app.run_for(Duration::from_secs(4)));
     exposure.shown(app, "player-panels", false);
-    step(app.press_key("enter"));
+    step(app.press_key("i"));
     step(app.wait_for("id:player-card"));
     exposure.shown(app, "player-card", true);
     exposure.shown(app, "player-controls", false);
-    step(app.press_key("m"));
+    step(app.press_key("enter"));
     exposure.shown(app, "player-panels", false);
     exposure.shown(app, "play-bar-layer", true);
     step(app.play_bar_option("Display"));

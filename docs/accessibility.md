@@ -76,7 +76,7 @@ build the [shell probe](../tools/ci/android/AccessibilityActionProbe.java):
 ```sh
 IPTV_A11Y_OUT=/var/tmp/patina-accessibility
 mkdir -p "$IPTV_A11Y_OUT"
-javac --release 11 -cp "$ANDROID_HOME/platforms/android-35/android.jar" \
+javac --release 11 -cp "$ANDROID_HOME/platforms/android-36/android.jar" \
   -d "$IPTV_A11Y_OUT" tools/ci/android/AccessibilityActionProbe.java
 "$ANDROID_HOME/build-tools/35.0.1/d8" --output "$IPTV_A11Y_OUT" \
   "$IPTV_A11Y_OUT/AccessibilityActionProbe.class"

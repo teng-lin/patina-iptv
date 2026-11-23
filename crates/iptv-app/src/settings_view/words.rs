@@ -63,6 +63,7 @@ pub fn section(section: Section) -> &'static str {
         Section::Parental => tr("Parental control"),
         Section::Remote => tr("Remote control"),
         Section::Vod => tr("Movies and series"),
+        Section::About => tr("About"),
     }
 }
 
@@ -146,6 +147,7 @@ pub fn label(key: &str) -> &'static str {
         "general.send_logs" => tr("Send a diagnostic log"),
         "general.check_updates" => tr("Look for a new version"),
         "general.about" => tr("About this app"),
+        "about.privacy_policy" => tr("Privacy policy"),
         "playlists.include_live" => tr("Live channels"),
         "playlists.include_vod" => tr("Movies and series"),
         "playlists.max_connections" => tr("Streams at once"),
@@ -306,6 +308,7 @@ pub fn description(key: &str) -> Option<&'static str> {
         "remote.customize" => {
             tr("Choose a key, press and action per screen; capture keys or restore defaults.")
         }
+        "about.privacy_policy" => tr("Open the privacy policy in your browser."),
         "general.about" => tr(
             "The version of this app. Text is set in Roboto and Roboto Condensed (Google, \
              SIL Open Font License 1.1).",

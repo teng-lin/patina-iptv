@@ -166,10 +166,10 @@ not steady-state measurements.
 
 Hosted runner setup must fail fast, not consume a job's whole timeout (#159).
 `.github/actions/setup` installs Linux packages through `tools/ci/apt-install.sh`.
-Each package install is bounded to four minutes, and each list refresh or dpkg
+Each package install is bounded to eight minutes, and each list refresh or dpkg
 repair to 90 seconds. A failed or stalled install is repaired and retried once
 with refreshed lists, so a stalled Ubuntu mirror fails the step within about
-twelve minutes. apt itself retries downloads and gives up on a connection that
+twenty-two minutes. apt itself retries downloads and gives up on a connection that
 sends nothing for 30 seconds. The script skips the image's initramfs and
 man-db rebuilds, which GTK's udev/systemd upgrade otherwise triggers. Every
 workflow step using the setup action has its own `timeout-minutes`, and a job

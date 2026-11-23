@@ -10,7 +10,7 @@
 # installs are bounded by PATINA_APT_INSTALL_SECONDS and list refreshes and
 # dpkg repairs by PATINA_APT_REFRESH_SECONDS; a stalled or failed attempt is
 # retried once after refreshing the lists. A stalled mirror therefore fails
-# the step within about twelve minutes instead of consuming the job's timeout.
+# the step within about twenty-two minutes instead of consuming the job's timeout.
 set -euo pipefail
 if [ "$#" -lt 3 ]; then
   echo "usage: $0 STATE_DIR RESTORED PACKAGE..." >&2
@@ -20,7 +20,7 @@ state=$1
 restored=$2
 shift 2
 packages=("$@")
-install_seconds=${PATINA_APT_INSTALL_SECONDS:-240}
+install_seconds=${PATINA_APT_INSTALL_SECONDS:-480}
 refresh_seconds=${PATINA_APT_REFRESH_SECONDS:-90}
 conf=${PATINA_APT_CONF:-/etc/apt/apt.conf.d/90patina-ci}
 initramfs_conf=${PATINA_INITRAMFS_CONF:-/etc/initramfs-tools/update-initramfs.conf}
