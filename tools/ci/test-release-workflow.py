@@ -340,7 +340,9 @@ class Workflow(unittest.TestCase):
         step = [part for part in re.split(r"^      - ", self.jobs["plan"], flags=re.M) if "release-plan.py" in part]
         self.assertEqual(len(step), 1)
         values = dict(re.findall(r"^          ([A-Z_]+): \$\{\{(.*)\}\}$", step[0], re.M))
-        self.assertEqual(set(values), {"EVENT_NAME", "REF", "PLATFORMS", "REHEARSAL"})
+        self.assertEqual(set(values), {"EVENT_NAME", "REF", "PLATFORMS", "REHEARSAL", "PROMOTE_TAG", "VALIDATION_RUN"})
+        self.assertEqual(render(evaluate(values["PROMOTE_TAG"], run(**MANUAL))), "")
+        self.assertEqual(render(evaluate(values["VALIDATION_RUN"], run(**MANUAL))), "")
         self.assertEqual(render(evaluate(values["REHEARSAL"], run(**REHEARSAL))), "true")
         for name, scenario in REAL_RUNS.items():
             self.assertEqual(render(evaluate(values["REHEARSAL"], run(**scenario))), "false", name)
@@ -383,7 +385,7 @@ class Workflow(unittest.TestCase):
             self.assertFalse(truthy(evaluate(condition, value)), stage)
             value['needs'][stage]['result'] = 'success'
 
-    def test_only_a_tag_push_is_made_public_and_a_rehearsal_owns_a_throwaway_tag(self):
+    def test_tag_push_and_verified_promotion_publish_and_rehearsal_owns_a_throwaway_tag(self):
         publish = self.jobs["publish"]
         condition = re.search(r"^    if: (.*)$", publish, re.M)[1]
         tag = re.search(r"^      TAG: \$\{\{(.*)\}\}$", publish, re.M)[1]
@@ -391,6 +393,21 @@ class Workflow(unittest.TestCase):
         self.assertIs(truthy(evaluate(condition, run(**TAG_PUSH))), True)
         self.assertIs(truthy(evaluate(condition, run(**REHEARSAL))), True)
         self.assertIs(truthy(evaluate(condition, run(**MANUAL))), False)
+        promoted = run(**MANUAL)
+        promoted["inputs"]["promote_tag"] = "v9.8.7"
+        self.assertIs(truthy(evaluate(condition, promoted)), False, "a requested tag alone cannot publish")
+        promoted["needs"]["plan"]["outputs"] = {"candidate": "17", "commit": "a" * 40}
+        promoted["needs"]["tests"]["result"] = "skipped"
+        promoted["needs"]["package"]["result"] = "skipped"
+        self.assertIs(truthy(evaluate(condition, promoted)), True)
+        self.assertEqual(evaluate(tag, promoted), "v9.8.7")
+        for job in SIGNING_JOBS:
+            gate = re.search(r"^    if: (.*)$", self.jobs[job], re.M)[1]
+            self.assertTrue(truthy(evaluate(gate, promoted)), job)
+        for job in ("verify-windows", "sign", "windows-sign"):
+            promoted["needs"][job]["result"] = "failure"
+            self.assertFalse(truthy(evaluate(condition, promoted)), job)
+            promoted["needs"][job]["result"] = "success"
         self.assertEqual(evaluate(tag, run(**TAG_PUSH)), "v9.8.7")
         self.assertEqual(evaluate(tag, run(**REHEARSAL)), "rehearsal-1001")
         # --rehearsal is what keeps the release a draft (tools/ci/test-publish-release.py).

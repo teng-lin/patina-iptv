@@ -7,7 +7,9 @@ Three kinds of run exist (.github/workflows/release.yml):
 - a pushed `v*` tag: the release. Android and desktop, signed in the protected
   `release` environment and published.
 - a manual run on master without `rehearsal`: the same packaging and signing,
-  with the selected platforms, and no publication.
+  with the selected platforms, and no publication unless promoting a tag.
+- a manual promotion on master: sign and publish the exact Android and desktop
+  artifacts from a successful master validation run for an existing tag.
 - a manual run with `rehearsal`, on any branch: the whole pipeline against a
   throwaway draft release. Its signing jobs run in the `release-rehearsal`
   environment and receive no release credential, so it covers exactly the
@@ -28,6 +30,17 @@ import tomllib
 
 SELECTIONS = ("android-desktop", "android", "desktop", "all")
 REHEARSAL_SELECTION = "android-desktop"
+
+
+def check_promotion(event, ref, selection, rehearsal, tag, run):
+    if not (tag or run):
+        return
+    if (event, ref, selection, rehearsal) != ("workflow_dispatch", "refs/heads/master", "android-desktop", "false"):
+        raise ValueError("promotion requires a manual Android and desktop release on master")
+    if not re.fullmatch(r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag):
+        raise ValueError("promotion requires an existing vMAJOR.MINOR.PATCH tag")
+    if not re.fullmatch(r"[1-9][0-9]*", run):
+        raise ValueError("promotion requires a numeric master Validation run ID")
 
 
 def plan(event, ref, selection, rehearsal):
@@ -82,10 +95,13 @@ def check_changelog(root, ref):
 def main():
     environment = os.environ
     rehearsal = environment.get("REHEARSAL", "")
-    platforms = plan(environment.get("EVENT_NAME", ""), environment.get("REF", ""),
-                     environment.get("PLATFORMS", ""), rehearsal)
-    if rehearsal != "true":
-        check_changelog(Path.cwd(), environment.get("REF", ""))
+    event, ref = environment.get("EVENT_NAME", ""), environment.get("REF", "")
+    selection = environment.get("PLATFORMS", "")
+    tag, run = environment.get("PROMOTE_TAG", ""), environment.get("VALIDATION_RUN", "")
+    check_promotion(event, ref, selection, rehearsal, tag, run)
+    platforms = plan(event, ref, selection, rehearsal)
+    if rehearsal != "true" and not tag:
+        check_changelog(Path.cwd(), ref)
     # Linux packages are not platform-signed; the others pass through the signing job.
     signing = [entry for entry in platforms if entry["platform"] != "linux"]
     desktop = [entry for entry in platforms if entry["platform"] != "android"]
