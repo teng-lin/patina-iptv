@@ -197,7 +197,7 @@ fn phone_channel_list_stays_inside_an_upright_window() {
 }
 
 #[test]
-fn phone_play_bar_keeps_one_row_on_its_side() {
+fn phone_play_bar_keeps_transport_centered_on_its_side() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, lifetime) = preview_fixture_with(home, |settings| {
         settings.set("guide.autoplay", Value::Bool(false)).unwrap();
@@ -230,21 +230,24 @@ fn phone_play_bar_keeps_one_row_on_its_side() {
                 .iter()
                 .filter_map(|id| bounds(app, id))
                 .collect();
-            assert!(rows.len() >= 10, "the bar's controls shown: {what}");
+            assert_eq!(rows.len(), BAR_CONTROLS.len(), "the bar's controls: {what}");
+            let pause = bounds(app, "play-bar-play-pause").expect("play/pause");
+            assert!(
+                (pause[0] + pause[2] / 2.0 - size.0 / 2.0).abs() <= 0.5,
+                "the transport is centered: {pause:?}, {what}"
+            );
             let top = rows.iter().map(|b| b[1]).fold(f32::MAX, f32::min);
             for b in &rows {
-                // One row: a second would start at least a button lower.
                 assert!(
-                    b[1] - top < 22.0,
-                    "every control on one row {rows:?}: {what}"
-                );
-                assert!(
-                    b[0] >= -0.5 && b[0] + b[2] <= size.0 + 0.5,
+                    b[0] >= -0.5
+                        && b[0] + b[2] <= size.0 + 0.5
+                        && b[1] >= -0.5
+                        && b[1] + b[3] <= size.1 + 0.5,
                     "{b:?} inside: {what}"
                 );
                 assert!(b[2] >= 44.0 - 0.5, "a 44-point target {b:?}: {what}");
             }
-            // The channel's name on its own line above the buttons, whole.
+            // The program title sits above the transport and auxiliary actions.
             let title = bounds(app, "bar-title").expect("the title line");
             assert!(title[1] + title[3] <= top + 0.5, "{title:?} above: {what}");
             assert!(

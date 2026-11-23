@@ -163,6 +163,14 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     step(app.press_key("m"));
     step(app.wait_for("id:play-bar-layer"));
     assert!(selected(app, "play-bar-play-pause"));
+    let bounds = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.test_id.as_deref() == Some("play-bar-play-pause"))
+        .expect("the play/pause button")
+        .bounds;
+    assert!((bounds.origin.x.0 + bounds.size.width.0 / 2.0 - 480.0).abs() <= 0.5);
     // Live playback disables seek buttons, so Left skips Rewind to Mute.
     step(app.press_key("left"));
     assert!(selected(app, "play-bar-mute"));
@@ -204,6 +212,20 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
     persistent(app, &lifetime, player);
     step(app.press_key("up"));
     step(app.press_key("enter"));
+    step(app.press_key("m"));
+    step(app.wait_for("id:play-bar-layer"));
+    for _ in 0..12 {
+        if selected(app, "play-bar-guide") {
+            break;
+        }
+        step(app.press_key("right"));
+    }
+    assert!(selected(app, "play-bar-guide"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:guide-preview"));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    persistent(app, &lifetime, player);
+    step(app.press_key("f"));
     step(app.press_key("g"));
     assert!(
         !selected(app, "guide-preview"),

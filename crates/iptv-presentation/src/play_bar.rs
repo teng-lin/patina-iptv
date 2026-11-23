@@ -1,6 +1,6 @@
 //! The pointer's play bar over full-screen video (desktop mouse, tablet
 //! touch and TV remote): when it shows and when it hides on its own,
-//! and where a press on its progress bar seeks to.
+//! and which control the remote has focused.
 //!
 //! The mouse moving over the video shows it; a tap (or a click) on the
 //! video shows it, and another hides it. It hides once nothing happened
@@ -34,7 +34,6 @@ pub enum Control {
     Guide,
     Search,
     Fullscreen,
-    Timeline,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
