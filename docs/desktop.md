@@ -38,7 +38,8 @@ Windows and Command on macOS.
 
 | Keys | Does |
 |---|---|
-| Arrows, Enter | Move and choose; Enter on a channel plays it full screen |
+| Arrows | Move. Up and Down wrap through the TV Guide's channel rows and groups. |
+| Enter | Choose. In TV Guide, a live channel starts in the preview. Press Enter on the active channel to expand it. |
 | Escape or Backspace | One step back ([Getting back](interaction.md#getting-back)) |
 | / or Mod+F | Search |
 | M, Shift+F10 | Menu for the focused program, channel or group |
