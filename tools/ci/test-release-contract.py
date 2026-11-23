@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Changelog, explicit preview policy and candidate-bound provenance contracts."""
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+import zipfile
 
 
 def module(name):
@@ -57,6 +59,17 @@ class Contract(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "tag"):
                 plan.check_changelog(root, "refs/tags/v9.8.8")
 
+    def test_manual_promotion_requires_both_inputs_on_master_without_rehearsal(self):
+        plan = module("release-plan")
+        valid = ("workflow_dispatch", "refs/heads/master", "android-desktop", "false", "v9.8.7", "17")
+        plan.check_promotion(*valid)
+        for index, invalid in ((0, "push"), (1, "refs/heads/topic"), (2, "all"), (3, "true"),
+                               (4, ""), (4, "../v9.8.7"), (5, ""), (5, "17/attempts/1")):
+            with self.subTest(index=index, invalid=invalid), self.assertRaises(ValueError):
+                arguments = list(valid)
+                arguments[index] = invalid
+                plan.check_promotion(*arguments)
+
     def test_explicit_signing_mode_cannot_silently_downgrade_or_accept_partial_secrets(self):
         signing = module("signing-config")
         self.assertTrue(signing.validate("signed", [True] * 6))
@@ -93,7 +106,6 @@ class Contract(unittest.TestCase):
 
 class Candidate(unittest.TestCase):
     def setUp(self):
-        import json
         self.json = json
         self.candidate = module("release-candidate")
         temporary = tempfile.TemporaryDirectory()
@@ -188,7 +200,6 @@ class Candidate(unittest.TestCase):
                 self.candidate.seal(self.directory, {**self.environment, key: value}, self.root)
 
     def test_absent_expired_and_untrusted_runs_fall_back_but_bad_manifest_fails(self):
-        from unittest.mock import patch
         environment = {'CANDIDATE_REUSE': 'true', 'GH_REPO': 'synthetic/repo', 'GITHUB_SHA': 'a' * 40}
         for runs, artifacts in (([], []), ([{**self.run, 'event': 'pull_request'}], []),
                                 ([self.run], [{'name': 'release-candidate', 'expired': True}])):
@@ -201,6 +212,57 @@ class Candidate(unittest.TestCase):
                 patch.object(self.candidate.subprocess, 'run'), patch.object(self.candidate, 'verify', side_effect=ValueError('bad manifest')):
             with self.assertRaisesRegex(ValueError, 'bad manifest'):
                 self.candidate.select(self.directory, environment)
+
+    def test_promotion_reads_only_successful_exact_master_builds_and_their_artifacts(self):
+        self.run["run_attempt"] = 3
+        jobs = {"jobs": [{"name": name, "conclusion": "success"} for name in self.candidate.PROMOTION_JOBS]}
+        artifacts = [{"name": name, "id": index, "expired": False, "digest": "sha256:" + "b" * 64,
+                      "workflow_run": {"id": self.run["id"], "head_sha": self.run["head_sha"]}}
+                     for index, name in enumerate(sorted(self.candidate.REQUIRED), 1)]
+        repository, commit = self.run["head_repository"]["full_name"], self.run["head_sha"]
+
+        def inspect(run, jobs, artifacts):
+            with patch.object(self.candidate, "api", side_effect=[
+                run, jobs, {"artifacts": artifacts, "total_count": len(artifacts)},
+            ]) as api:
+                result = self.candidate.promotion_inputs(repository, str(self.run["id"]), commit)
+                self.assertIn("/attempts/3/jobs?", api.call_args_list[1].args[0])
+                return result
+
+        attempt, checks, inventory = inspect(self.run, jobs, artifacts)
+        self.assertEqual(attempt, 3)
+        self.assertEqual(checks, dict.fromkeys(self.candidate.PROMOTION_JOBS, "success"))
+        self.assertEqual(set(inventory), self.candidate.REQUIRED)
+        for run, job_result, artifact_result in (
+            ({**self.run, "head_sha": "c" * 40}, jobs, artifacts),
+            ({**self.run, "event": "pull_request"}, jobs, artifacts),
+            ({**self.run, "conclusion": "failure"}, jobs, artifacts),
+            (self.run, {"jobs": jobs["jobs"][1:]}, artifacts),
+            (self.run, {"jobs": [{**jobs["jobs"][0], "conclusion": "skipped"}, *jobs["jobs"][1:]]}, artifacts),
+            (self.run, jobs, artifacts[1:]),
+            (self.run, jobs, [*artifacts, artifacts[0]]),
+            (self.run, jobs, [{**artifacts[0], "digest": None}, *artifacts[1:]]),
+            (self.run, jobs, [{**artifacts[0], "expired": True}, *artifacts[1:]]),
+            (self.run, jobs, [{**artifacts[0], "workflow_run": {"id": 99, "head_sha": commit}}, *artifacts[1:]]),
+        ):
+            with self.assertRaises(ValueError):
+                inspect(run, job_result, artifact_result)
+
+    def test_promotion_artifacts_cannot_write_outside_their_group_or_overwrite_members(self):
+        group = self.root / "group"
+        group.mkdir()
+        archive = self.root / "artifact.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            output.writestr("synthetic.bin", b"generated bytes")
+        self.candidate.unpack_zip(archive, group)
+        self.assertEqual((group / "synthetic.bin").read_bytes(), b"generated bytes")
+        with self.assertRaises(FileExistsError):
+            self.candidate.unpack_zip(archive, group)
+        for name in ("../outside", "/outside", "directory/member"):
+            with self.subTest(name=name), zipfile.ZipFile(archive, "w") as output:
+                output.writestr(name, b"generated bytes")
+            with self.assertRaises(ValueError):
+                self.candidate.unpack_zip(archive, group)
 
 
 if __name__ == "__main__":
