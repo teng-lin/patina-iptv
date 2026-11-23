@@ -268,6 +268,21 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
         || favorite_names(&path, beta) == ["Shared"],
     ));
     assert!(favorite_names(&path, alpha).is_empty());
+    step(app.wait_for("id:guide-header-details >> text:★"));
+    let nodes = app.screen().layout_nodes();
+    let bounds = |id| {
+        nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("missing {id}"))
+            .bounds
+    };
+    let star = bounds("guide-header-favorite");
+    let channel = bounds("guide-header-channel");
+    let details = bounds("guide-header-details");
+    assert!((star.origin.y.0 - channel.origin.y.0).abs() < 1.0);
+    let right = |b: nsh_core::Bounds<nsh_core::Points>| b.origin.x.0 + b.size.width.0;
+    assert!((right(star) - right(details)).abs() < 1.0);
 
     let opened: Arc<Mutex<Vec<String>>> = Arc::default();
     let observed = opened.clone();

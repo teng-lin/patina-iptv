@@ -18,9 +18,11 @@ pub fn two_step_preview(home: &std::path::Path) {
 pub fn open_rail_item(app: &mut crate::Headless, label: &str) {
     use crate::personalization::step;
 
-    step(app.press("text:/^☰  /"));
     let item = format!("id:navigation-rail >> label:{label}");
-    step(app.wait_for(&item));
+    if !app.screen().matches(&item).unwrap() {
+        step(app.press("id:guide-list-selector"));
+        step(app.wait_for(&item));
+    }
     step(app.press(&item));
 }
 

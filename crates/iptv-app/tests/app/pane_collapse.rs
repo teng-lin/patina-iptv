@@ -2,8 +2,7 @@
 //! expanded window and compact ones keeps what the viewer chose — the
 //! focused channel or the preview, the poster browser's title, a show's
 //! selected episode — on the same `tv.player`, and sends no playback
-//! command. A compact guide header moves its shortcuts under the preview
-//! (`iptv_app::layout::Shortcuts`), and the video keeps following the
+//! command. The video keeps following the
 //! preview's rectangle.
 //!
 //! Synthetic data only: the personalization playlist, and a generated
@@ -39,18 +38,11 @@ fn resize(app: &mut Headless, (w, h): (f32, f32)) {
     app.settle();
 }
 
-/// The guide's windows: the expanded and compact ones, a medium window too
-/// narrow for three header columns, and short ones where the preview would
-/// otherwise vanish or the corner ‹ land on the shortcuts.
+/// The guide's expanded, compact and short windows.
 const GUIDE: [(f32, f32); 3] = [(560.0, 800.0), (480.0, 240.0), (480.0, 320.0)];
 
 fn guide_sizes() -> impl Iterator<Item = (f32, f32)> {
     sizes().chain(GUIDE).chain([EXPANDED, GUIDE[1], COMPACT[1]])
-}
-
-/// Whether the shortcuts go under the preview, by the app's own policy.
-fn below((w, h): (f32, f32)) -> bool {
-    iptv_app::desktop_guide_header(w, h).shortcuts == iptv_app::layout::Shortcuts::Below
 }
 
 fn by_id(id: &'static str) -> impl Fn(&nsh_testing::LayoutNode) -> bool {
@@ -117,8 +109,7 @@ fn video_follows_the_preview(app: &Headless, player: NodeId, (w, h): (f32, f32))
 }
 
 /// The compact header's parts stay apart and inside the window: the corner
-/// ‹ inside the preview, the shortcuts' row under it, the program's
-/// minutes left on screen (its times line wraps rather than clip).
+/// ‹ inside the preview and the program's minutes left on screen.
 #[track_caller]
 fn header_fits(app: &Headless, (w, h): (f32, f32)) {
     let preview = bounds(app, by_id("guide-preview"));
@@ -128,15 +119,6 @@ fn header_fits(app: &Headless, (w, h): (f32, f32)) {
         assert!(
             back[1] + back[3] <= preview[1] + preview[3] + 0.5,
             "‹ {back:?} inside the preview {preview:?} at {w}x{h}"
-        );
-    }
-    if below((w, h)) {
-        let row = bounds(app, by_id("guide-header-shortcuts"));
-        assert!(row[1] >= preview[1] + preview[3], "row {row:?} at {w}x{h}");
-        let rows = bounds(app, by_id("guide-timeline"));
-        assert!(
-            row[1] + row[3] <= rows[1] + 0.5,
-            "row {row:?} over the rows"
         );
     }
     let left = bounds(app, |n| {
@@ -182,11 +164,6 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
         assert!(!channel_selected(app, "Local B"), "one focus at {size:?}");
         assert!(iptv_app::player_has_source(0), "B plays on at {size:?}");
         assert_eq!(iptv_app::player_opens(0), opens, "no open at {size:?}");
-        assert_eq!(
-            app.screen().matches("id:guide-header-shortcuts").unwrap(),
-            below(size),
-            "shortcuts below the preview by the policy, {size:?}"
-        );
         for shortcut in ["Favorites", "Movies", "Shows", "+ Add playlist"] {
             assert!(
                 !app.screen()
@@ -223,8 +200,8 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
     assert!(!selected(app, "guide-preview"));
     step(app.press_key("tab"));
     assert!(channel_selected(app, "Local C"), "back to the same row");
-    // A tap on a compact header's shortcut still works.
-    step(app.press("id:guide-header-shortcuts >> text:/^☰  /"));
+    // The group selector works at compact widths.
+    step(app.press("id:guide-list-selector"));
     step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);

@@ -2,7 +2,7 @@
 //! layer, the groups column (shown with the rail while either has the
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
-use crate::layout::{GuideHeader, Shortcuts};
+use crate::layout::GuideHeader;
 use iptv_presentation::lists::entry_count;
 use nsh_core::prelude::*;
 
@@ -28,7 +28,7 @@ pub use crate::layout::PREVIEW_MARGIN;
 pub const PREVIEW_RADIUS: f32 = 10.0;
 
 /// The header in the window now (reactive): the guide's scale and the
-/// viewer's text size (the app's and the system's) decide where the shortcuts go and how tall their row is.
+/// viewer's text size decide the layout and how tall the header is.
 pub fn guide_header_now() -> GuideHeader {
     let w = window();
     GuideHeader::of(
@@ -37,11 +37,6 @@ pub fn guide_header_now() -> GuideHeader {
         crate::scale::now(),
         crate::settings::text_factor(),
     )
-}
-
-/// Where the header puts its shortcuts now (reactive).
-pub fn shortcuts_now() -> Shortcuts {
-    guide_header_now().shortcuts
 }
 
 /// The header's height and the preview's width and height now (reactive).
