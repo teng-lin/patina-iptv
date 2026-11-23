@@ -37,9 +37,13 @@ class ToolIdentityTests(unittest.TestCase):
         self.build_tools = self.sdk / "build-tools"
         (self.build_tools / "35.0.1").mkdir(parents=True)
         (self.build_tools / "35.0.1/source.properties").write_text("Pkg.Revision=35.0.1\n")
+        self.ndk = self.sdk / "ndk/synthetic"
+        self.ndk.mkdir(parents=True)
+        (self.ndk / "source.properties").write_text("Pkg.Revision=30.0.0\n")
         self.environment = patch.dict(os.environ, {
             "CARGO_HOME": str(Path(self.temp.name) / "cargo-home"),
             "ANDROID_HOME": str(self.sdk),
+            "ANDROID_NDK_HOME": str(self.ndk),
         })
         self.environment.start()
         self.addCleanup(self.environment.stop)
@@ -92,9 +96,14 @@ class ToolIdentityTests(unittest.TestCase):
         cli, android = module.identity("cli"), module.identity("android")
         Path(".github/actions/android/action.yml").write_text("different NDK or ABI\n")
         self.assertEqual(cli, module.identity("cli"))
-        self.assertNotEqual(android, module.identity("android"))
+        self.assertEqual(android, module.identity("android"))
         Path(".github/actions/nsh-cli/action.yml").write_text("different build profile\n")
-        self.assertNotEqual(cli, module.identity("cli"))
+        self.assertEqual(cli, module.identity("cli"))
+        with patch.dict(module.RECIPE_VERSIONS, cli=2):
+            self.assertNotEqual(cli, module.identity("cli"))
+            self.assertEqual(android, module.identity("android"))
+        (self.ndk / "source.properties").write_text("Pkg.Revision=30.0.1\n")
+        self.assertNotEqual(android, module.identity("android"))
 
     def test_compiler_flags_invalidate_tools(self):
         before = module.identity("cli")

@@ -23,6 +23,8 @@ runs:
         TOOL_NAME: ${{ inputs.name }}
         TOOL_VERSION: ${{ inputs.version }}
         TOOL_FEATURES: ${{ inputs.features }}
+        # Bump when the cargo install command or bootstrap profile changes.
+        TOOL_RECIPE_VERSION: '1'
       run: |
         python3 - <<'PY' >> "$GITHUB_OUTPUT"
         import hashlib, json, os, re, subprocess
@@ -37,7 +39,7 @@ runs:
             'version': os.environ['TOOL_VERSION'],
             'features': os.environ['TOOL_FEATURES'],
             'rustc': subprocess.check_output(['rustc', '-vV'], text=True),
-            'recipe': Path('.github/actions/cargo-tool/action.yml').read_text(),
+            'recipe': os.environ['TOOL_RECIPE_VERSION'],
             'flags': {k: v for k, v in os.environ.items()
                       if k.startswith(('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_BUILD_',
                                        'CARGO_TARGET_', 'CC', 'CFLAGS', 'CXX', 'AR'))},

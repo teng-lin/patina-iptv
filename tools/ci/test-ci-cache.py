@@ -38,6 +38,7 @@ class ToolCache(unittest.TestCase):
             "TOOL_NAME": "cargo-about",
             "TOOL_VERSION": "0.9.3",
             "TOOL_FEATURES": "cli",
+            "TOOL_RECIPE_VERSION": "1",
         }
 
     def identity(self, compiler="generated compiler identity", **environment):
@@ -77,19 +78,20 @@ class ToolCache(unittest.TestCase):
             with self.subTest(environment=environment):
                 self.assertNotEqual(before, self.identity(**environment)["key"])
 
-    def test_recipe_and_global_config_invalidate_the_tool(self):
-        before = self.identity()["key"]
+    def test_recipe_version_and_global_config_invalidate_the_tool(self):
+        before = self.identity(TOOL_RECIPE_VERSION="1")["key"]
         ACTION.write_text(RECIPE + "\n# generated recipe change\n", encoding="utf-8")
-        changed = self.identity()["key"]
+        self.assertEqual(before, self.identity(TOOL_RECIPE_VERSION="1")["key"])
+        changed = self.identity(TOOL_RECIPE_VERSION="2")["key"]
         self.assertNotEqual(before, changed)
         config = Path(self.environment["CARGO_HOME"]) / "config.toml"
         config.parent.mkdir()
         config.write_text('[build]\nrustflags = ["--cfg=generated"]\n')
-        configured = self.identity()["key"]
+        configured = self.identity(TOOL_RECIPE_VERSION="2")["key"]
         self.assertNotEqual(changed, configured)
         Path('.cargo').mkdir()
         Path('.cargo/config.toml').write_text('[build]\nrustflags = ["--cfg=generated_workspace"]\n')
-        self.assertNotEqual(configured, self.identity()["key"])
+        self.assertNotEqual(configured, self.identity(TOOL_RECIPE_VERSION="2")["key"])
 
     def test_invalid_executable_names_are_rejected(self):
         with self.assertRaisesRegex(SystemExit, "invalid Cargo tool name"):
