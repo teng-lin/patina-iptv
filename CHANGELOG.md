@@ -7,6 +7,15 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-22
+
+### Distribution
+
+- Distribution-signed Android APK and AAB for tablets and TVs, Linux packages,
+  an ad hoc signed macOS preview, and an unsigned Windows preview.
+- Catalog schema 26 stores playlist group preferences. Keep a compatible backup
+  before upgrading if you need to return to an older version.
+
 ### Added
 
 - Patina's full interface on Samsung Tizen TVs, built on the NSH platform
@@ -98,14 +107,16 @@ is below 1.0, a minor release may change behavior.
   quitting does; only the recorder runs on. On macOS and Windows a window
   left without a reachable title bar after a display is removed moves onto
   the nearest remaining display.
-- Choosing a channel in the guide now watches it full screen in both guide
-  layouts. One setting, **Keep the guide after choosing**, now applies to both
-  layouts. It replaces the separate setting for the guide drawn over video,
-  which used to be on by default. If you set either one, upgrading keeps the
-  value you chose for the layout you use. If you never changed either
-  setting, choosing a channel now closes the guide in the overlay layout too.
-  Turn **Keep the guide after choosing** on to keep the old behavior.
-  Settings files move to version 3.
+- In the TV Guide with a preview, select a live channel to tune it and select
+  it again to expand the same stream to full screen. Up and Down wrap through
+  channels and groups. The guide drawn over video follows its channel selection
+  setting.
+- The TV Guide shows the selected channel, its favorite status, and its source
+  playlist and group beside the preview. The playlist label identifies the
+  source even when two playlists have channels with the same name.
+- The full-screen play bar shows the current program, its description, what's
+  next, and stream quality above the controls. Play/Pause stays centered on
+  TVs, tablets, and desktops.
 - Empty Movies and Shows screens say why they are empty and offer one action:
   add a playlist, open the playlist's new **Movies and series** switch, retry
   a failed import, or refresh. A movie or series list that fails while live
@@ -440,7 +451,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/teng-lin/patina-iptv/compare/v0.1.5...v0.1.6
 [0.1.3]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/teng-lin/patina-iptv/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/teng-lin/patina-iptv/compare/v0.1.0...v0.1.1
