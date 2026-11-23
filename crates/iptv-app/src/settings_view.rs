@@ -101,7 +101,7 @@ pub static PAGES: &[Page] = &[
     },
     Page {
         key: "about",
-        parts: &[Part::Section(Section::About)],
+        parts: &[Part::Keys(&["general.about", "about.privacy_policy"])],
     },
 ];
 
@@ -577,7 +577,7 @@ mod tests {
                 .any(|p| p.parts.contains(&Part::Section(section)))
         };
         for section in Section::ALL {
-            if section != Section::Playlists {
+            if section != Section::Playlists && !catalog::section(section).is_empty() {
                 assert!(placed(section), "{section:?} has no page");
             }
         }

@@ -108,12 +108,13 @@ pub const COMMANDS: &[&str] = &[
     "playlists.manage",
 ];
 
-/// Rows that display a value without editing it.
-const READ_ONLY: &[&str] = &["general.about", "remote.key_overrides"];
+/// Shown with their value only: the key list has no editor yet.
+const READ_ONLY: &[&str] = &["remote.key_overrides"];
 
 /// Not offered: device-level features of TV boxes (start with the device,
 /// frame-rate switching, decoders, audio passthrough, multicast relay,
-/// voice input, self-update, usage statistics).
+/// voice input, self-update, usage statistics). Also `general.about`,
+/// which the About page shows on its own.
 const NOT_OFFERED: &[&str] = &[
     "general.start_on_boot",
     "general.start_on_wake",
@@ -122,6 +123,7 @@ const NOT_OFFERED: &[&str] = &[
     "general.auto_update",
     "general.beta_updates",
     "general.check_updates",
+    "general.about",
     "playback.video_decoder",
     "playback.audio_decoder",
     "playback.tunneling",

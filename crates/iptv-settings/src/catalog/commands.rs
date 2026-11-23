@@ -139,7 +139,7 @@ pub static COMMANDS: &[Command] = &[
         key("Look for a newer version now."),
     ),
     Command::new(
-        S::About,
+        S::General,
         "",
         "general.about",
         key("Version, licenses and policies."),
