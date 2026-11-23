@@ -24,7 +24,8 @@ permissions:
   actions: read
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('validation-pr-{0}', github.event.pull_request.number) || (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release' && 'validation-master') || format('validation-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release') }}
+  # Finish the running master candidate and keep the newest pending push.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   plan:
     runs-on: ubuntu-24.04
