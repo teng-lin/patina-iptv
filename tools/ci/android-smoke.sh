@@ -351,16 +351,11 @@ fi
 
 step "multiview with a second player"
 if [ "$is_tv" = true ]; then
-  # The live info card begins before the quick-action row. Six Rights reach
-  # More controls (sixth action), including
-  # sleep/audio-delay settings. Its advanced strip has Multiview fourth.
-  # This route is stable even when stream track availability changes the
-  # shared bar's enabled buttons; its bar navigation is checked above and
-  # by the native/headless TV journeys.
+  # The live play bar starts on Play/pause. On the TV image, which has no
+  # PiP, Favorite and Multiview are the next two actions to its right.
   keys KEYCODE_DPAD_CENTER \
-    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT \
-    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER \
-    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
+    KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
+  expect 'iptv play bar: Multiview' 10
 else
   # Tablet remote/keyboard Menu retains the existing advanced strip.
   keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER

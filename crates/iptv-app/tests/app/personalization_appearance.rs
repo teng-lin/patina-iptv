@@ -134,3 +134,20 @@ fn appearance_controls_apply_live_persist_and_change_actual_guide_geometry() {
     step(app.wait(Duration::from_millis(50)));
     assert!(width(app, "guide-channel-number") > 0.0);
 }
+
+#[test]
+fn the_about_page_opens_the_privacy_policy_and_shows_its_address_when_opening_fails() {
+    const URL: &str = "https://teng-lin.github.io/patina-iptv/privacy-policy/";
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    settings(app);
+    step(app.press("text:About"));
+    step(app.press("text:Privacy policy"));
+    assert_eq!(app.screen().opened_urls(), [URL]);
+
+    step(app.fail_open_urls(URL));
+    step(app.press("text:Privacy policy"));
+    step(app.wait_for(&format!("text:{URL}")));
+    assert_eq!(app.screen().opened_urls(), [URL, URL]);
+}
