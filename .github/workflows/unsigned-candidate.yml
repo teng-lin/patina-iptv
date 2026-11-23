@@ -50,7 +50,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-windows
         with:
-          cache: 'false'
+          # A trusted unsigned master build can seed the preview cache from fresh output.
+          cache: ${{ github.ref == 'refs/heads/master' && 'true' || 'false' }}
+          profile: installer
+          cache-lookup-only: 'true'
       - name: Set release metadata
         shell: pwsh
         run: python tools/ci/version.py
@@ -198,6 +201,7 @@ jobs:
         timeout-minutes: 25
         with:
           cache: 'false'
+          prerequisites: ${{ matrix.platform == 'macos' && 'macos-package' || 'host' }}
           # Linux packaging tools, installed fresh (uncached) and bounded.
           apt-packages: >-
             ${{ matrix.platform == 'linux' && 'ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
@@ -213,6 +217,11 @@ jobs:
           python3 tools/ci/version.py
           echo "NSH=$(cd ../nsh-patina && pwd)/target/release/nsh" >> "$GITHUB_ENV"
       - uses: ./.github/actions/nsh-cli
+      - uses: ./.github/actions/desktop-cargo-cache
+        if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'
+        with:
+          platform: macos
+          lookup-only: 'true'
       - name: Linux packages
         if: matrix.platform == 'linux'
         run: |
@@ -233,13 +242,15 @@ jobs:
         timeout-minutes: 15
         uses: ./.github/actions/linux-sources
       # libmpv is the pinned macOS runtime, fetched and verified by hash.
-      - name: Build macOS app without signing credentials
+      - name: Build, bundle and audit the unsigned macOS app
         if: matrix.platform == 'macos'
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-        run: |
-          bash tools/package-macos.sh
-          bash tools/ci/package-macos.sh
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
+          IPTV_CARGO_TIMINGS: '1'
+        run: bash tools/package-macos.sh
+      - name: Check and smoke-test the unsigned macOS DMG
+        if: matrix.platform == 'macos'
+        run: bash tools/ci/package-macos.sh
       # Homebrew libraries the app may still link beside the pinned runtime
       # (normally none, and then there is no archive): publish the sources
       # named by the formulae of the installed versions.

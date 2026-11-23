@@ -33,6 +33,7 @@ jobs:
         timeout-minutes: 25
         with:
           cargo-cache: 'false'
+          prerequisites: ${{ matrix.platform == 'macos' && 'macos-package' || 'host' }}
           # Linux packaging tools; macOS ignores this list.
           apt-packages: >-
             ruby-dev rpm zstd libarchive-tools patchelf file desktop-file-utils
@@ -47,31 +48,9 @@ jobs:
           version: 0.9.3
           features: cli
       - uses: ./.github/actions/nsh-cli
-      - name: Identify the desktop compiler and native libraries
-        id: compiler
-        shell: bash
-        run: |
-          compiler=$(rustc -vV)
-          clang=$(clang --version)
-          host_compiler=$(cc --version)
-          if [[ "$RUNNER_OS" == macOS ]]; then
-            libraries=$(brew list --versions)
-            sdk=$(xcrun --sdk macosx --show-sdk-build-version)
-          else
-            libraries=$(dpkg-query -W libc6-dev libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev)
-            sdk=''
-          fi
-          identity=$(printf '%s\n' "$compiler" "$clang" "$host_compiler" "$libraries" "$sdk" "${ImageOS:-}" | shasum -a 256 | cut -c1-16)
-          echo "key=$identity" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/desktop-cargo-cache
         with:
-          key: desktop-package-v2-${{ matrix.platform }}-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', '.cargo/config.toml', 'tools/ci/locked-cargo.py', 'tools/ci/package-linux.sh', 'tools/package-macos.sh', 'tools/mpv-runtime-unix/runtime-*.json') }}
-          # The lock above supplies the identity before NSH writes its workspace.
-          add-rust-environment-hash-key: 'false'
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-          cache-on-failure: 'true'
-          cache-bin: 'false'
-          workspaces: crates/iptv-app/.nsh/rust -> ../../../../target/desktop-cargo
+          platform: ${{ matrix.platform }}
       - name: Linux package installation and smoke tests
         if: matrix.platform == 'linux'
         env:
@@ -88,13 +67,15 @@ jobs:
         if: matrix.platform == 'linux'
         timeout-minutes: 15
         uses: ./.github/actions/linux-sources
-      - name: macOS ad hoc package installation and smoke test
+      - name: Build, bundle and audit the macOS app
         if: matrix.platform == 'macos'
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
           IPTV_CARGO_TIMINGS: '1'
+        run: bash tools/package-macos.sh
+      - name: Check macOS DMGs and smoke-test the transferred package
+        if: matrix.platform == 'macos'
         run: |
-          bash tools/package-macos.sh
           bash tools/ci/package-macos.sh
           mkdir -p "$RUNNER_TEMP/signing-download"
           COPYFILE_DISABLE=1 tar -cf "$RUNNER_TEMP/signing-download/signing-input.tar" target/package

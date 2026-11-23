@@ -140,7 +140,7 @@ class IdentityStepTests(unittest.TestCase):
             script = "\n".join(line[8:] for line in lines[start:end])
             self.assertEqual(
                 [line.strip() for line in lines if line.strip().startswith("path:")],
-                ["path: ${{ steps.identity.outputs.path }}"] * 2,
+                ["path: ${{ steps.identity.outputs.path }}"] * (3 if action == "nsh-cli" else 2),
             )
             for fake_python in ("exit 1", "echo invalid-key", "exit 0", "echo " + "0" * 64):
                 with self.subTest(action=action, fake_python=fake_python):

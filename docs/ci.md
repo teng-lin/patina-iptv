@@ -55,8 +55,20 @@ targets, and unknown fuzz target names fail before execution.
 Only master refreshes shared Cargo caches. Host, coverage and stress lanes retain
 compiled dependencies when a later assertion or coverage floor fails. Desktop
 previews use a dependency cache for the generated NSH runner workspace. The
-scheduled Validation run warms this cache on master. Master also refreshes
-the exact-key NSH tool and runtime caches and the Gradle dependency cache.
+scheduled Validation run warms this cache on master. Windows native tests and
+installers use separate caches keyed by the MSVC toolset, Windows SDK, Rust
+and dependency inputs. The unsigned Windows installer and macOS package jobs
+on master can seed the preview caches from their fresh builds. Those jobs look
+up cache keys without downloading compiled application dependencies.
+
+The macOS package setup uses the runner's pkg-config and the pinned libmpv
+verified by the package script. Host player tests still have FFmpeg for media
+fixtures. On a macOS tool cache miss, packaging tries a 30-day build artifact
+for the exact NSH CLI or cargo-about identity. It checks that the artifact
+came from a trusted master run and verifies the archive digest before use.
+A missing or invalid artifact triggers the locked source build.
+
+Master also refreshes the exact-key NSH runtime and Gradle dependency caches.
 Unsigned shipping builds use fresh app output directories and may restore
 the pinned tools and runtimes. Android candidates compile ARM64 and ARMv7 in
 parallel, each with its own pinned NSH runtime cache. Both jobs can reuse the

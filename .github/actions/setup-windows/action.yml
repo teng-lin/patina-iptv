@@ -2,8 +2,14 @@ name: Windows build prerequisites
 description: Pinned NSH and Rust for the Windows app
 inputs:
   cache:
-    description: Restore and save the Rust build cache (disabled for release packaging)
+    description: Enable the Rust dependency cache
     default: 'true'
+  profile:
+    description: Cache namespace for native tests or the optimized installer
+    default: native
+  cache-lookup-only:
+    description: Save compiled dependencies from a fresh build without restoring them
+    default: 'false'
   cache-on-failure:
     description: Preserve compiled dependencies after trusted validation failures
     default: 'false'
@@ -37,19 +43,35 @@ runs:
       with:
         toolchain: ${{ steps.pins.outputs.toolchain }}
         targets: wasm32-unknown-unknown
-    # The same cache and policy as the Linux and macOS setup action.
+    - name: Identify the MSVC toolset and Windows SDK
+      id: compiler
+      if: inputs.cache == 'true'
+      shell: pwsh
+      run: |
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if ($LASTEXITCODE -ne 0 -or !$vs) { throw 'Could not find the Visual Studio C++ toolset.' }
+        $vc = (Get-Content -Raw "$vs/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt").Trim()
+        $kits = Get-ItemPropertyValue 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots' KitsRoot10
+        $sdk = @(Get-ChildItem "$kits/Include" -Directory |
+          Where-Object { Test-Path (Join-Path $_.FullName 'um/Windows.h') } |
+          Sort-Object { [version]$_.Name } | Select-Object -ExpandProperty Name)
+        if (!$vc -or !$sdk.Count) { throw 'Could not identify the MSVC or Windows SDK version.' }
+        $bytes = [Text.Encoding]::UTF8.GetBytes("$vc/$($sdk -join ',')/$env:ImageOS")
+        $key = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+        "key=$key" >> $env:GITHUB_OUTPUT
     - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       if: inputs.cache == 'true'
       with:
         cache-on-failure: ${{ inputs.cache-on-failure }}
         cache-bin: 'false'
-        key: host-v2-${{ hashFiles('nsh.rev', 'tools/ci/check-plan.py', 'tools/build-windows.ps1', '.github/actions/setup-windows/action.yml') }}
+        shared-key: windows-${{ inputs.profile }}-v1
+        key: ${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/mpv-runtime/runtime.json') }}
+        lookup-only: ${{ inputs.cache-lookup-only }}
         # Per-PR copies of these gigabyte-sized caches evict each other.
         # PRs can restore master caches; only master refreshes them.
         save-if: ${{ github.ref == 'refs/heads/master' }}
-        workspaces: |
-          .
-          ../nsh-patina
+        workspaces: .
     - name: Install the checksum-pinned guarded player
       shell: pwsh
       env:

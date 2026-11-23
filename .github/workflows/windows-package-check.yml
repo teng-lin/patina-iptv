@@ -14,6 +14,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-windows
+        with:
+          profile: installer
       - name: Set package metadata
         shell: pwsh
         run: python tools/ci/version.py
@@ -27,3 +29,11 @@ jobs:
         run: |
           ./tools/package-windows.ps1
           ./tools/ci/check-windows-package.ps1
+      - name: Rust compilation and linking timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rust-timings-windows-installer
+          path: target/cargo-timings/*.html
+          if-no-files-found: ignore
+          retention-days: 7

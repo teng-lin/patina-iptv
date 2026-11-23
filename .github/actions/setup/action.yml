@@ -20,7 +20,7 @@ inputs:
     description: Additional workspaces whose Cargo artifacts this job produces
     default: ''
   prerequisites:
-    description: Native prerequisites for host, android, android-smoke, android-check, store, or metadata jobs
+    description: Native prerequisites for host, macos-package, android, android-smoke, android-check, store, or metadata jobs
     default: host
   apt-packages:
     description: Further Linux packages the job needs, installed and cached with the build packages
@@ -51,7 +51,7 @@ runs:
     # for the same Ubuntu release, architecture and package list.
     - name: Identify the Linux packages
       id: apt
-      if: runner.os == 'Linux' && inputs.prerequisites != 'metadata'
+      if: runner.os == 'Linux' && inputs.prerequisites != 'metadata' && inputs.prerequisites != 'macos-package'
       shell: bash
       env:
         PREREQUISITES: ${{ inputs.prerequisites }}
@@ -103,16 +103,28 @@ runs:
       if: inputs.prerequisites != 'metadata'
       shell: bash
       env:
+        PREREQUISITES: ${{ inputs.prerequisites }}
         APT_STATE: ${{ steps.apt.outputs.state }}
         APT_RESTORED: ${{ steps.apt-cache.outputs.cache-matched-key != '' }}
         APT_PACKAGES: ${{ steps.apt.outputs.packages }}
       run: |
-        if [ "${RUNNER_OS}" = Linux ]; then
-          read -ra packages <<< "$APT_PACKAGES"
-          bash tools/ci/apt-install.sh "$APT_STATE" "$APT_RESTORED" "${packages[@]}"
-        else
-          brew install mpv pkg-config ffmpeg
-        fi
+        case "$RUNNER_OS:$PREREQUISITES" in
+          macOS:host|macOS:macos-package)
+            command -v pkg-config >/dev/null || brew install pkgconf
+            if [[ "$PREREQUISITES" == host ]]; then
+              command -v ffmpeg >/dev/null || brew install ffmpeg
+            fi
+            ;;
+          Linux:macos-package)
+            echo 'macos-package setup requires macOS' >&2
+            exit 1
+            ;;
+          Linux:*)
+            read -ra packages <<< "$APT_PACKAGES"
+            bash tools/ci/apt-install.sh "$APT_STATE" "$APT_RESTORED" "${packages[@]}"
+            ;;
+          *) echo "Unsupported prerequisites: $RUNNER_OS:$PREREQUISITES" >&2; exit 1 ;;
+        esac
     # Saved here rather than in a post step, so the cache holds exactly this
     # install, not whatever the job's later steps leave behind. The packages
     # are installed by now, so a cache service outage must not fail the job.
@@ -170,7 +182,7 @@ runs:
         ln -sfn "$library" "$directory/libmpv.so"
         echo "LIBRARY_PATH=$directory${LIBRARY_PATH:+:$LIBRARY_PATH}" >> "$GITHUB_ENV"
     - uses: ./.github/actions/cargo-tool
-      if: inputs.policy-tool == 'true' && (inputs.prerequisites == 'host' || inputs.prerequisites == 'android')
+      if: inputs.policy-tool == 'true' && (inputs.prerequisites == 'host' || inputs.prerequisites == 'android' || inputs.prerequisites == 'macos-package')
       with:
         name: cargo-deny
         version: 0.20.2

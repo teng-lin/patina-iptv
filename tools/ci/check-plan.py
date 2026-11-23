@@ -61,9 +61,9 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None)
                      *(["--release"] if release else []))
     if tier == "native":
         return [
-            step("native-test-compilation", "cargo", "check", "--locked", "--workspace", "--all-targets",
+            step("native-test-compilation", "cargo", "check", "--locked", "--timings", "--workspace", "--all-targets",
                  "--features", COVERAGE_FEATURES),
-            step("native-player-tests", "cargo", "test", "--locked", "-p", "iptv-player-mpv", "--lib",
+            step("native-player-tests", "cargo", "test", "--locked", "--timings", "-p", "iptv-player-mpv", "--lib",
                  "--", "--format=pretty"),
             app_build,
         ]

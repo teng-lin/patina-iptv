@@ -103,16 +103,54 @@ class ToolCache(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
         self.assertIn("steps.tool.outputs.cache-hit != 'true'", RECIPE)
 
+    @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "macOS setup uses Bash")
+    def test_mac_packages_use_preinstalled_pkg_config_and_host_tests_keep_ffmpeg(self):
+        section = SETUP.split("    - name: Install system packages\n", 1)[1]
+        script = textwrap.dedent(section.split("      run: |\n", 1)[1].split("    # Saved here", 1)[0])
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        for name, body in (("brew", 'printf "%s\\n" "$*"'), ("pkg-config", "exit 0")):
+            stub = bin_dir / name
+            stub.write_text(f"#!/bin/sh\n{body}\n")
+            stub.chmod(0o755)
+        bash = shutil.which("bash")
+        for mode, expected in (("macos-package", ""), ("host", "install ffmpeg\n")):
+            with self.subTest(mode=mode):
+                output = subprocess.check_output(
+                    [bash, "-euo", "pipefail", "-c", script], text=True,
+                    env=os.environ | {"PATH": str(bin_dir), "RUNNER_OS": "macOS", "PREREQUISITES": mode},
+                )
+                self.assertEqual(output, expected)
+
+    def test_windows_candidate_seeds_the_installer_cache_without_restoring(self):
+        setup = (ROOT / ".github/actions/setup-windows/action.yml").read_text(encoding="utf-8")
+        preview = (ROOT / ".github/workflows/windows-package-check.yml").read_text(encoding="utf-8")
+        candidate = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text(encoding="utf-8")
+        windows = candidate.split("  windows-package:\n", 1)[1].split("  android-native:\n", 1)[0]
+        self.assertIn("profile: installer", preview)
+        self.assertIn("profile: installer", windows)
+        self.assertIn("cache-lookup-only: 'true'", windows)
+        self.assertIn("shared-key: windows-${{ inputs.profile }}-v1", setup)
+        self.assertIn("lookup-only: ${{ inputs.cache-lookup-only }}", setup)
+        self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", setup)
+        self.assertNotIn("'tools/ci/check-plan.py'", setup)
+        self.assertNotIn("'tools/build-windows.ps1'", setup)
+
     def test_packaging_cache_uses_the_generated_graph_on_previews_and_nightly(self):
         workflow = (ROOT / ".github/workflows/validation.yml").read_text(encoding="utf-8")
         self.assertIn("  schedule:", workflow)
         self.assertIn("uses: ./.github/workflows/package-check.yml", workflow)
         package = (ROOT / ".github/workflows/package-check.yml").read_text(encoding="utf-8")
-        self.assertIn("workspaces: crates/iptv-app/.nsh/rust -> ../../../../target/desktop-cargo", package)
+        cache = (ROOT / ".github/actions/desktop-cargo-cache/action.yml").read_text(encoding="utf-8")
+        candidate = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text(encoding="utf-8")
+        self.assertIn("uses: ./.github/actions/desktop-cargo-cache", package)
+        self.assertIn("uses: ./.github/actions/desktop-cargo-cache", candidate)
+        self.assertIn("workspaces: crates/iptv-app/.nsh/rust -> ../../../../target/desktop-cargo", cache)
+        self.assertIn("lookup-only: 'true'", candidate)
         self.assertEqual(package.count("CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo"), 2)
-        self.assertIn("'tools/ci/package.Cargo.lock'", package)
+        self.assertIn("'tools/ci/package.Cargo.lock'", cache)
         self.assertIn("cargo-cache: 'false'", package)
-        self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", package)
+        self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", cache)
         spec = importlib.util.spec_from_file_location("validation", ROOT / "tools/ci/validation-plan.py")
         validation = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(validation)
@@ -132,7 +170,7 @@ class ToolCache(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "composite installation uses Bash")
     def test_tool_install_uses_its_own_root_and_fixed_bootstrap_profile(self):
-        install = re.search(r"(?ms)^      run: \|\n(        args=\(\).*?)(?=^    #)", RECIPE)
+        install = re.search(r"(?ms)^      run: \|\n(        args=\(\).*?)(?=^    (?:- |#))", RECIPE)
         self.assertIsNotNone(install)
         binary = self.root / "bin"
         binary.mkdir()
