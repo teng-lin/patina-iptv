@@ -435,6 +435,34 @@ class AptInstall(unittest.TestCase):
                            env=common | {"ImageVersion": image, "EXTRA_PACKAGES": extra})
             return dict(line.split("=", 1) for line in output.read_text().splitlines())
 
+        snapshot = set(identity("2026.1")["snapshot"].split())
+        for prerequisites in ("host", "android", "android-smoke", "android-check", "store"):
+            output.write_text("")
+            subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=ROOT, check=True,
+                           env=common | {"PREREQUISITES": prerequisites})
+            packages = next(line.removeprefix("packages=") for line in output.read_text().splitlines()
+                            if line.startswith("packages="))
+            self.assertLessEqual(set(packages.split()), snapshot, prerequisites)
+        for workflow in sorted((ROOT / ".github/workflows").glob("*.yml")):
+            lines = workflow.read_text().splitlines()
+            for index, line in enumerate(lines):
+                match = re.match(r"^( +)apt-packages: *(.*)$", line)
+                if match is None:
+                    continue
+                indentation, value = match.groups()
+                if value in (">", ">-", "|", "|-"):
+                    continuation = []
+                    for line in lines[index + 1:]:
+                        if not line.startswith(indentation + " "):
+                            break
+                        continuation.append(line.strip())
+                    value = " ".join(continuation)
+                for expression in re.findall(r"\$\{\{(.*?)\}\}", value):
+                    branches = re.search(r"&&\s*'([^']*)'\s*\|\|\s*'([^']*)'\s*$", expression)
+                    self.assertIsNotNone(branches, f"{workflow.name} uses an unsupported package expression")
+                    value = value.replace("${{" + expression + "}}", " ".join(branches.groups()))
+                self.assertLessEqual(set(value.strip("'\"").split()), snapshot, workflow.name)
+
         old = identity("2026.1")
         new = identity("2026.2")
         self.assertNotEqual(old["key"], new["key"])
