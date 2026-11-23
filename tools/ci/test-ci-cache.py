@@ -487,6 +487,9 @@ class CachePruning(unittest.TestCase):
         self.assertEqual({row["id"] for row in prune.superseded(entries, start, end)}, {1, 7})
         entries.append(entry(9, "apt-v4-ubuntu24.04-amd64-0123456789abcdef-2026.1", "02:10", "02:10"))
         self.assertEqual({row["id"] for row in prune.superseded(entries, start, end)}, {1, 7, 8})
+        next_start = prune.timestamp("2026-01-01T04:00:00Z")
+        next_end = prune.timestamp("2026-01-01T05:00:00Z")
+        self.assertEqual({row["id"] for row in prune.superseded(entries, next_start, next_end)}, {1, 3, 7, 8})
 
 
 def steps(text):

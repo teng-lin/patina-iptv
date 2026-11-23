@@ -38,7 +38,7 @@ def superseded(entries, start, finish):
         if entry['ref'] != MASTER:
             continue
         key = entry['key']
-        if key.startswith(RETIRED) and timestamp(entry['created_at']) < start:
+        if key.startswith(RETIRED) and timestamp(entry['last_accessed_at']) < start:
             retired.append(entry)
         elif group := family(key):
             groups.setdefault(group, []).append(entry)
@@ -46,13 +46,15 @@ def superseded(entries, start, finish):
     for group, caches in groups.items():
         newest = max(caches, key=lambda entry: (timestamp(entry['created_at']), entry['id']))
         replacement = timestamp(newest['created_at'])
-        if not start <= replacement <= finish:
+        # A previous run may have retained a cache active at the time. Revisit
+        # it on subsequent exact hits as well as when a new generation is saved.
+        if replacement > finish:
             continue
         if group == ('apt', 'ubuntu24.04-amd64'):
             apt_replaced = True
         for entry in caches:
             if (timestamp(entry['created_at']) < replacement
-                    and timestamp(entry['last_accessed_at']) < replacement):
+                    and timestamp(entry['last_accessed_at']) < max(start, replacement)):
                 retired.append(entry)
     if apt_replaced:
         retired.extend(entry for entry in entries if entry['ref'] == MASTER

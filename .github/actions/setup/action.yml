@@ -50,8 +50,8 @@ runs:
         persist-credentials: false
     - shell: bash
       run: mv nsh-source ../nsh-patina
-    # Exact image hits install offline. A new image can reuse the archives
-    # for the same Ubuntu release, architecture and package list.
+    # Archives cover the delta from the seed image. On a new image, apt first
+    # tries the shared archives, then fetches any missing packages from a mirror.
     - name: Identify the Linux packages
       id: apt
       if: runner.os == 'Linux' && inputs.prerequisites != 'metadata' && inputs.prerequisites != 'macos-package'
