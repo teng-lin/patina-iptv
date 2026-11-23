@@ -142,6 +142,8 @@ jobs:
           retention-days: 7
   android-package:
     needs: android-native
+    # Reusable callers skip dispatch-plan. Gate assembly on the ABI matrix itself.
+    if: ${{ !cancelled() && needs.android-native.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
