@@ -1,9 +1,62 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
 use iptv_core::add_playlist::ImportId;
+use iptv_core::parental::Target;
+use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
+
+/// Parental policy verified against committed storage for external playback.
+pub struct ExternalPlaybackAuthorization(crate::parental::Snapshot);
+
+impl ExternalPlaybackAuthorization {
+    /// Check immediately before granting the relay admission, without yielding.
+    pub fn is_current(&self) -> bool {
+        self.0.inspection_current(&[])
+    }
+}
+
+fn external_playback_check(
+    store: &iptv_store_sqlite::Store,
+    authority: &ResolutionAuthority,
+    group: &str,
+    access: &crate::parental::Snapshot,
+) -> iptv_store_sqlite::Result<bool> {
+    let source = SourceId(authority.source());
+    let channel = &authority.channel().id;
+    let target = Target::live(source.0, channel.as_str());
+    store.read_snapshot(|store| {
+        if !crate::parental::native_allowed(store, &target, access)?
+            || !store.source_policy(source)?.enabled
+            || !store
+                .guide_group_preferences(source, group)?
+                .external_player
+            || store.guide_channel_blocked(source, channel.as_str())?
+        {
+            return Ok(false);
+        }
+        let Some(stored) = store.source(source)? else {
+            return Ok(false);
+        };
+        let scope = iptv_library::OrganizationScope::group_channels(group);
+        if !store
+            .ordered_guide_channels(source, &scope)?
+            .iter()
+            .any(|row| &row.channel.id == channel)
+        {
+            return Ok(false);
+        }
+        let Some(row) = store.channel(source, channel)? else {
+            return Ok(false);
+        };
+        Ok(!row.blocked
+            && stored.incarnation == authority.incarnation()
+            && &stored.source.config == authority.config()
+            && &row.channel == authority.channel()
+            && access.inspection_current(&[]))
+    })
+}
 
 impl Runtime {
     pub fn browser_generation(&self) -> u64 {
@@ -197,49 +250,32 @@ impl Runtime {
     /// Revalidates the group choice and the exact authority used for a handoff.
     pub async fn external_playback_allowed(
         &self,
-        authority: iptv_guide::playback::ResolutionAuthority,
+        authority: ResolutionAuthority,
         group: String,
     ) -> Result<bool, crate::Error> {
-        let source = SourceId(authority.source());
-        let channel = authority.channel().id.clone();
-        if !matches!(
-            self.live_channel_allowed(source, channel.as_str().to_owned())
-                .await,
-            Ok(true)
-        ) {
-            return Ok(false);
-        }
+        let access = self.parental_snapshot();
         Ok(self
             .services()
-            .read(move |store| {
-                if !store.source_policy(source)?.enabled
-                    || !store
-                        .guide_group_preferences(source, &group)?
-                        .external_player
-                    || store.guide_channel_blocked(source, channel.as_str())?
-                {
-                    return Ok(false);
-                }
-                let Some(stored) = store.source(source)? else {
-                    return Ok(false);
-                };
-                let scope = iptv_library::OrganizationScope::group_channels(&group);
-                if !store
-                    .ordered_guide_channels(source, &scope)?
-                    .iter()
-                    .any(|row| row.channel.id == channel)
-                {
-                    return Ok(false);
-                }
-                let Some(row) = store.channel(source, &channel)? else {
-                    return Ok(false);
-                };
-                Ok(!row.blocked
-                    && stored.incarnation == authority.incarnation()
-                    && &stored.source.config == authority.config()
-                    && &row.channel == authority.channel())
-            })
+            .read(move |store| external_playback_check(store, &authority, &group, &access))
             .await?)
+    }
+
+    /// Orders final admission behind queued parental changes. The returned
+    /// policy revision also detects changes queued after this check.
+    pub async fn authorize_external_playback(
+        &self,
+        authority: ResolutionAuthority,
+        group: String,
+    ) -> Result<Option<ExternalPlaybackAuthorization>, crate::Error> {
+        let access = self.parental_snapshot();
+        let approved = self
+            .services()
+            .call(move |store| {
+                let allowed = external_playback_check(store, &authority, &group, &access)?;
+                Ok(allowed.then_some(ExternalPlaybackAuthorization(access)))
+            })
+            .await?;
+        Ok(approved)
     }
 
     /// Remembers `key` as the last channel of `source` (a zap never waits

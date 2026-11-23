@@ -127,7 +127,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
-    crate::external_player::cancel_pending(ui);
+    crate::external_player::stop(ui);
     crate::interruption::viewer_acted(ui);
     log::info!("iptv player: stopped by the viewer");
     stopped(ui);

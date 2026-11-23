@@ -985,6 +985,83 @@ mod source_tests {
         }
     }
     #[tokio::test(flavor = "current_thread")]
+    async fn external_admission_rejects_committed_blocks_before_cache_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().to_owned(),
+            |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x79; 32])),
+        )));
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.start_services();
+        let services = owner.services();
+        let (authority, group) = services
+            .call(|store| {
+                let id = store.add_source(&source("generated-external-admission"))?;
+                let parsed = iptv_providers::m3u::parse_m3u(concat!(
+                    "#EXTM3U\n",
+                    "#EXTINF:-1 group-title=\"Generated external group\",Generated channel\n",
+                    "https://example.test/channel.ts\n",
+                ));
+                store.replace_catalog(id, &parsed.groups, &parsed.channels.items, &[], &[])?;
+                let channel = &parsed.channels.items[0];
+                let group = channel.groups[0].as_str().to_owned();
+                store.set_guide_group_preference(
+                    id,
+                    &group,
+                    iptv_core::organization::GroupPreference::ExternalPlayer(true),
+                )?;
+                let stored = store.source(id)?.unwrap();
+                let authority = iptv_guide::playback::SourceAuthority::new(
+                    id.0,
+                    stored.incarnation,
+                    stored.source.config,
+                );
+                Ok((authority.resolve(channel), group))
+            })
+            .await
+            .unwrap();
+        let target = Target::live(authority.source(), authority.channel().id.as_str());
+        owner.parental_check(&target).await.unwrap();
+        owner
+            .set_setting("parental.live_enabled", iptv_settings::Value::Bool(true))
+            .unwrap();
+        let approved = owner
+            .authorize_external_playback(authority.clone(), group.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(approved.is_current());
+
+        let block = Target {
+            source: target.source,
+            kind: ContentKind::Group,
+            id: group.clone(),
+        };
+        // Mirror the policy change's writer and deliberately hold back the
+        // separate cache refresh until after checking admission.
+        owner
+            .parental
+            .borrow()
+            .policy_revision
+            .fetch_add(1, Ordering::SeqCst);
+        assert!(!approved.is_current());
+        let pending_block = services.call(move |store| store.set_parental_blocked(&block, true));
+        assert!(
+            owner
+                .authorize_external_playback(authority, group)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        pending_block.await.unwrap();
+        assert!(
+            owner.parental_allowed(&target),
+            "cache still allows the channel"
+        );
+        assert!(owner.drain_services());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn targeted_checks_keep_unrelated_catalog_memberships_out_of_the_read() {
         let directory = tempfile::tempdir().unwrap();
         let owner = std::rc::Rc::new(Runtime::new(crate::Ports::new(

@@ -13,11 +13,17 @@
 //! makes directly; manifest rewriting remains the native load boundary.
 
 use std::{
-    collections::{BTreeMap, HashMap, hash_map::RandomState},
+    collections::{
+        BTreeMap, HashMap,
+        hash_map::{Entry, RandomState},
+    },
     hash::BuildHasher,
     io,
     net::TcpListener,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -29,6 +35,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::{Semaphore, oneshot, watch},
+    time::Instant,
 };
 
 pub(crate) use hls::in_band_closed_captions;
@@ -116,11 +123,12 @@ enum ExternalState {
     Refused,
 }
 
-struct ExternalGate(watch::Sender<ExternalState>);
+struct ExternalGate(watch::Sender<ExternalState>, Arc<AtomicBool>);
 impl ExternalGate {
     async fn admit(&self) -> bool {
         self.0.send_if_modified(|state| {
             if *state == ExternalState::Waiting {
+                self.1.store(true, Ordering::Release);
                 *state = ExternalState::Pending(
                     tokio::time::Instant::now() + EXTERNAL_ADMISSION_TIMEOUT,
                 );
@@ -171,8 +179,13 @@ impl Drop for ExternalGate {
 
 /// Wait for the external application to request the stream before permitting
 /// an upstream connection. Dropping it denies the recorded request.
-pub struct ExternalAdmission(watch::Sender<ExternalState>);
+pub struct ExternalAdmission(watch::Sender<ExternalState>, Arc<AtomicBool>);
 impl ExternalAdmission {
+    /// Whether this relay ever accepted a request from the selected player.
+    pub fn received_request(&self) -> bool {
+        self.1.load(Ordering::Acquire)
+    }
+
     pub async fn connected(&mut self) -> bool {
         let mut state = self.0.subscribe();
         state
@@ -217,11 +230,42 @@ impl Drop for ExternalAdmission {
 #[derive(Default)]
 struct OpaqueRoutes {
     hash: RandomState,
-    targets: HashMap<String, (OpaqueTarget, u64)>,
-    order: BTreeMap<u64, String>,
-    clock: u64,
+    targets: HashMap<String, OpaqueRoute>,
     bytes: usize,
     root_is_playlist: bool,
+}
+
+struct OpaqueRoute {
+    target: OpaqueTarget,
+    rolling: Option<RollingRoute>,
+}
+
+struct RollingRoute {
+    owner: Arc<str>,
+    window: hls::MediaWindow,
+    expires: Option<Instant>,
+}
+
+impl OpaqueRoute {
+    fn expired(&self, now: Instant) -> bool {
+        self.rolling
+            .as_ref()
+            .and_then(|rolling| rolling.expires)
+            .is_some_and(|deadline| now >= deadline)
+    }
+}
+
+impl RollingRoute {
+    fn precedes(&self, window: hls::MediaWindow) -> bool {
+        // A delta update can omit routes that are still inside its media
+        // window. Retire only when the entire window that named them is older.
+        let prior = if window.full {
+            self.window.sequence
+        } else {
+            self.window.last_sequence
+        };
+        prior < window.sequence
+    }
 }
 
 #[derive(Clone)]
@@ -237,14 +281,16 @@ const MAX_OPAQUE_URL: usize = 16 * 1024;
 
 struct RouteBatch {
     hash: RandomState,
+    owner: Arc<str>,
     targets: HashMap<String, OpaqueTarget>,
     bytes: usize,
 }
 
 impl RouteBatch {
-    fn new(hash: RandomState) -> Self {
+    fn new(hash: RandomState, owner: &str) -> Self {
         Self {
             hash,
+            owner: Arc::from(owner),
             targets: HashMap::new(),
             bytes: 0,
         }
@@ -256,8 +302,14 @@ impl RouteBatch {
             return Err(invalid("Playback link exceeds limit"));
         }
         let suffix = media_suffix(&url);
-        let id = format!("{:016x}{suffix}", self.hash.hash_one((key, url.as_str())),);
         let playlist = !key && (playlist || suffix == ".m3u8");
+        // Playlist aliases stay stable across rendition reports in either
+        // direction. Media aliases belong to the playlist that emitted them.
+        let owner = (!playlist).then_some(self.owner.as_ref());
+        let id = format!(
+            "{:016x}{suffix}",
+            self.hash.hash_one((owner, key, url.as_str()))
+        );
         if let Some(existing) = self.targets.get_mut(&id) {
             if existing.key != key || existing.url != url {
                 return Err(invalid("Playback link collision"));
@@ -276,55 +328,103 @@ impl RouteBatch {
 }
 
 impl OpaqueRoutes {
-    fn publish(&mut self, mut batch: RouteBatch) -> Result<(), FetchError> {
-        // Validate every collision before changing the shared table.
+    fn publish(
+        &mut self,
+        batch: RouteBatch,
+        window: Option<hls::MediaWindow>,
+    ) -> Result<(), FetchError> {
+        let now = Instant::now();
+        let mut count = self.targets.len();
+        let mut bytes = self.bytes;
         for (id, target) in &batch.targets {
-            if let Some((prior, _)) = self.targets.get(id)
-                && (prior.key != target.key || prior.url != target.url)
-            {
-                return Err(invalid("Playback link collision"));
+            if let Some(prior) = self.targets.get(id) {
+                if prior.target.key != target.key
+                    || prior.target.url != target.url
+                    || prior
+                        .rolling
+                        .as_ref()
+                        .is_some_and(|rolling| rolling.owner != batch.owner)
+                {
+                    return Err(invalid("Playback link collision"));
+                }
+            } else {
+                count += 1;
+                bytes += target.url.as_str().len();
             }
         }
-        for (id, target) in &mut batch.targets {
-            if let Some((prior, used)) = self.targets.remove(id) {
-                target.playlist |= prior.playlist;
-                self.bytes -= prior.url.as_str().len();
-                self.order.remove(&used);
+        if count > MAX_OPAQUE_ROUTES || bytes > MAX_OPAQUE_BYTES {
+            // Failed publication leaves all existing routes and their
+            // deadlines untouched, even if some expired routes could be removed.
+            let reclaim = |id: &str, route: &OpaqueRoute| {
+                route.expired(now) && !batch.targets.contains_key(id)
+            };
+            for (id, route) in &self.targets {
+                if reclaim(id, route) {
+                    count -= 1;
+                    bytes -= route.target.url.as_str().len();
+                }
+            }
+            if count > MAX_OPAQUE_ROUTES || bytes > MAX_OPAQUE_BYTES {
+                return Err(invalid("Playback playlist exceeds route capacity"));
+            }
+            self.targets.retain(|id, route| !reclaim(id, route));
+        }
+        if let Some(window) = window {
+            for (id, route) in &mut self.targets {
+                if let Some(rolling) = &mut route.rolling
+                    && rolling.owner == batch.owner
+                    && rolling.expires.is_none()
+                    && rolling.precedes(window)
+                    && !batch.targets.contains_key(id)
+                {
+                    // RFC 8216 §6.2.2 keeps the removed segment available
+                    // for its duration plus the longest distributed window.
+                    rolling.expires = now.checked_add(rolling.window.availability);
+                }
             }
         }
-        // A batch already fits the total limit, so only older routes can
-        // be evicted here. No link in this playlist evicts one of its peers.
-        while self.targets.len() + batch.targets.len() > MAX_OPAQUE_ROUTES
-            || self.bytes + batch.bytes > MAX_OPAQUE_BYTES
-        {
-            let (_, id) = self.order.pop_first().expect("routes have access times");
-            let (prior, _) = self.targets.remove(&id).expect("accessed route exists");
-            self.bytes -= prior.url.as_str().len();
-        }
-        self.bytes += batch.bytes;
         for (id, target) in batch.targets {
-            self.clock += 1;
-            self.order.insert(self.clock, id.clone());
-            self.targets.insert(id, (target, self.clock));
+            match self.targets.entry(id) {
+                Entry::Vacant(entry) => {
+                    let rolling = window
+                        .filter(|_| !target.playlist)
+                        .map(|window| RollingRoute {
+                            owner: batch.owner.clone(),
+                            window,
+                            expires: None,
+                        });
+                    entry.insert(OpaqueRoute { target, rolling });
+                }
+                Entry::Occupied(mut entry) => {
+                    let route = entry.get_mut();
+                    route.target.playlist |= target.playlist;
+                    if route.target.playlist || window.is_none() {
+                        route.rolling = None;
+                    } else if let Some((rolling, window)) = route.rolling.as_mut().zip(window) {
+                        rolling.window.sequence = rolling.window.sequence.max(window.sequence);
+                        rolling.window.last_sequence =
+                            rolling.window.last_sequence.max(window.last_sequence);
+                        rolling.window.availability =
+                            rolling.window.availability.max(window.availability);
+                        rolling.expires = None;
+                    }
+                }
+            }
         }
+        self.bytes = bytes;
         Ok(())
     }
 
-    fn target(&mut self, id: &str) -> Option<OpaqueTarget> {
-        let (target, used) = self.targets.get_mut(id)?;
-        self.clock += 1;
-        let previous = std::mem::replace(used, self.clock);
-        if let Some(id) = self.order.remove(&previous) {
-            self.order.insert(self.clock, id);
-        }
-        Some(target.clone())
+    fn target(&self, id: &str) -> Option<OpaqueTarget> {
+        self.targets.get(id).map(|route| route.target.clone())
     }
 
     fn note_playlist(&mut self, route: &str, root: bool) {
         if root {
             self.root_is_playlist = true;
-        } else if let Some((target, _)) = self.targets.get_mut(route) {
-            target.playlist = true;
+        } else if let Some(route) = self.targets.get_mut(route) {
+            route.target.playlist = true;
+            route.rolling = None;
         }
     }
 }
@@ -477,9 +577,10 @@ impl PlaybackRelay {
         policy: PlaybackPolicy,
     ) -> Result<(Self, ExternalAdmission), FetchError> {
         let (state, _) = watch::channel(ExternalState::Waiting);
-        let gate = ExternalGate(state.clone());
+        let requested = Arc::new(AtomicBool::new(false));
+        let gate = ExternalGate(state.clone(), requested.clone());
         let relay = Self::start_inner(url, headers, policy, Some(gate))?;
-        Ok((relay, ExternalAdmission(state)))
+        Ok((relay, ExternalAdmission(state, requested)))
     }
 
     fn start_inner(
@@ -810,6 +911,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     let mut lines = request.split("\r\n");
     let mut first = lines.next().unwrap_or_default().split_whitespace();
     let method = first.next().unwrap_or_default();
+    let head_only = method == "HEAD";
     let path = first.next().unwrap_or_default();
     // `admit` has compared the capability; this only takes it off.
     let path = path.strip_prefix(&session.proxy).unwrap_or(path);
@@ -821,7 +923,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
         let (id, query) = target.split_once('?').unwrap_or((target, ""));
         let suffix = media_suffix(&session.root);
         let root = id.strip_prefix("stream") == Some(suffix);
-        let resolved = routes.lock().ok().and_then(|mut routes| {
+        let resolved = routes.lock().ok().and_then(|routes| {
             if root {
                 Some(OpaqueTarget {
                     key: false,
@@ -833,10 +935,24 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             }
         });
         let Some(mut resolved) = resolved else {
-            return answer(&mut socket, 404, b"Unknown playback link").await;
+            return answer(
+                session,
+                &mut socket,
+                head_only,
+                404,
+                b"Unknown playback link",
+            )
+            .await;
         };
         if resolved.playlist && apply_hls_directives(&mut resolved.url, query).is_err() {
-            return answer(&mut socket, 400, b"Invalid HLS delivery directives").await;
+            return answer(
+                session,
+                &mut socket,
+                head_only,
+                400,
+                b"Invalid HLS delivery directives",
+            )
+            .await;
         }
         opaque_route = Some((id, root));
         (resolved.key, resolved.url)
@@ -845,7 +961,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             .strip_prefix("key/")
             .map_or((false, target), |url| (true, url));
         let Ok(url) = Url::parse(url) else {
-            return answer(&mut socket, 400, b"Invalid target").await;
+            return answer(session, &mut socket, head_only, 400, b"Invalid target").await;
         };
         (is_key, url)
     };
@@ -858,15 +974,29 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             .or_default() += 1;
     }
     if !matches!(method, "GET" | "HEAD") || !matches!(target.scheme(), "http" | "https") {
-        return answer(&mut socket, 400, b"Unsupported request").await;
+        return answer(session, &mut socket, head_only, 400, b"Unsupported request").await;
     }
     if session.root.scheme() == "https" && target.scheme() == "http" {
-        return answer(&mut socket, 502, b"Unencrypted playback downgrade refused").await;
+        return answer(
+            session,
+            &mut socket,
+            head_only,
+            502,
+            b"Unencrypted playback downgrade refused",
+        )
+        .await;
     }
     if let Some(gate) = &session.external_gate
         && !gate.admit().await
     {
-        return answer(&mut socket, 403, b"Playback was not started").await;
+        return answer(
+            session,
+            &mut socket,
+            head_only,
+            403,
+            b"Playback was not started",
+        )
+        .await;
     }
     let mut headers = session
         .headers
@@ -902,14 +1032,21 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     };
     let mut prepared = prepared;
     let Some(mut response) = fetch(session, &prepared).await else {
-        return answer(&mut socket, 502, b"Playback request failed").await;
+        return answer(
+            session,
+            &mut socket,
+            head_only,
+            502,
+            b"Playback request failed",
+        )
+        .await;
     };
     let body_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let mut upstream_length = content_length(&response);
     // HLS key URIs are opaque bytes, even when a valid key is all printable.
     // This context is minted only while rewriting an EXT-X-KEY attribute.
     if session.opaque.is_some() && !response.status().is_success() {
-        return external_failure(session, &mut socket, &response, method == "HEAD").await;
+        return external_failure(session, &mut socket, &response, head_only).await;
     }
     if raw_key || !response.status().is_success() {
         return stream_response(
@@ -918,7 +1055,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             response,
             &[],
             upstream_length,
-            method == "HEAD",
+            head_only,
         )
         .await;
     }
@@ -938,7 +1075,14 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
         prepared.headers.remove("range");
         prepared.headers.remove("if-range");
         let Some(mut full) = fetch(session, &prepared).await else {
-            return answer(&mut socket, 502, b"Playback request failed").await;
+            return answer(
+                session,
+                &mut socket,
+                head_only,
+                502,
+                b"Playback request failed",
+            )
+            .await;
         };
         let full_length = content_length(&full);
         let full_first = if full.status().is_success() {
@@ -959,14 +1103,14 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
                 response,
                 &first,
                 upstream_length,
-                method == "HEAD",
+                head_only,
             )
             .await;
         }
         response = full;
         upstream_length = full_length;
         if session.opaque.is_some() && !response.status().is_success() {
-            return external_failure(session, &mut socket, &response, method == "HEAD").await;
+            return external_failure(session, &mut socket, &response, head_only).await;
         }
         if !response.status().is_success() {
             return stream_response(
@@ -975,12 +1119,19 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
                 response,
                 &[],
                 upstream_length,
-                method == "HEAD",
+                head_only,
             )
             .await;
         }
         if response.status() == 206 {
-            return answer(&mut socket, 502, b"Partial manifest refused").await;
+            return answer(
+                session,
+                &mut socket,
+                head_only,
+                502,
+                b"Partial manifest refused",
+            )
+            .await;
         }
         first = full_first;
         kind = classify(&first);
@@ -992,7 +1143,14 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
         if let Ok(mut error) = session.error.lock() {
             *error = Some(FetchErrorKind::Unsupported);
         }
-        return answer(&mut socket, 415, b"Unsupported playlist format").await;
+        return answer(
+            session,
+            &mut socket,
+            head_only,
+            415,
+            b"Unsupported playlist format",
+        )
+        .await;
     }
     if hls || dash {
         // Across all player surfaces, at most two manifests are buffered or
@@ -1021,32 +1179,51 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
         .await;
         let body = match collected {
             Ok(Ok(body)) => body,
-            Ok(Err(_)) => return answer(&mut socket, 502, b"Manifest exceeds limit").await,
-            Err(_) => return answer(&mut socket, 504, b"Manifest took too long").await,
+            Ok(Err(_)) => {
+                return answer(
+                    session,
+                    &mut socket,
+                    head_only,
+                    502,
+                    b"Manifest exceeds limit",
+                )
+                .await;
+            }
+            Err(_) => {
+                return answer(
+                    session,
+                    &mut socket,
+                    head_only,
+                    504,
+                    b"Manifest took too long",
+                )
+                .await;
+            }
         };
         let rewritten = if hls {
-            let body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&body);
+            let hls_body = body.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&body);
             if let (Some(routes), Some((route, root))) = (&session.opaque, opaque_route) {
                 let hash = routes
                     .lock()
                     .map_err(|_| io::Error::other("Transport unavailable"))?
                     .hash
                     .clone();
-                let mut batch = RouteBatch::new(hash);
+                let mut batch = RouteBatch::new(hash, route);
                 let rewritten =
-                    hls::rewrite_with(body, Some(&final_url), |value, key, playlist| {
+                    hls::rewrite_with(hls_body, Some(&final_url), |value, key, playlist| {
                         let url = resolve_target(&final_url, value)?;
                         let id = batch.add(key, url, playlist)?;
                         Ok(format!("{}{id}", session.prefix))
                     });
                 rewritten.and_then(|body| {
+                    let window = hls::media_window(hls_body);
                     let mut routes = routes.lock().map_err(|_| io_error("lock"))?;
-                    routes.publish(batch)?;
+                    routes.publish(batch, window)?;
                     routes.note_playlist(route, root);
                     Ok(body)
                 })
             } else {
-                rewrite_hls(body, &final_url, &session.prefix)
+                rewrite_hls(hls_body, &final_url, &session.prefix)
             }
         } else if session.opaque.is_some() {
             Err(invalid("DASH is unavailable in external players"))
@@ -1057,7 +1234,14 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             if let Ok(mut error) = session.error.lock() {
                 *error = Some(FetchErrorKind::Unsupported);
             }
-            return answer(&mut socket, 502, b"Unsupported manifest").await;
+            return answer(
+                session,
+                &mut socket,
+                head_only,
+                502,
+                b"Unsupported manifest",
+            )
+            .await;
         };
         let mime = if hls {
             "application/vnd.apple.mpegurl"
@@ -1069,7 +1253,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             body.len()
         );
         send_bytes(session, &mut socket, head.as_bytes()).await?;
-        if method != "HEAD" {
+        if !head_only {
             send_bytes(session, &mut socket, &body).await?;
         }
     } else {
@@ -1079,7 +1263,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             response,
             &first,
             upstream_length,
-            method == "HEAD",
+            head_only,
         )
         .await;
     }
@@ -1344,17 +1528,22 @@ async fn read_request(socket: &mut TcpStream, session: &Session) -> io::Result<S
     String::from_utf8(bytes).map_err(io::Error::other)
 }
 
-async fn answer(socket: &mut TcpStream, status: u16, body: &[u8]) -> io::Result<()> {
-    socket
-        .write_all(
-            format!(
-                "HTTP/1.1 {status} Error\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
-                body.len()
-            )
-            .as_bytes(),
-        )
-        .await?;
-    socket.write_all(body).await
+async fn answer(
+    session: &Session,
+    socket: &mut TcpStream,
+    head_only: bool,
+    status: u16,
+    body: &[u8],
+) -> io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 {status} Error\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    );
+    send_bytes(session, socket, head.as_bytes()).await?;
+    if !head_only {
+        send_bytes(session, socket, body).await?;
+    }
+    Ok(())
 }
 
 async fn external_failure(
@@ -1364,7 +1553,7 @@ async fn external_failure(
     head_only: bool,
 ) -> io::Result<()> {
     if response.status() != reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
-        return answer(socket, 502, b"Playback request failed").await;
+        return answer(session, socket, head_only, 502, b"Playback request failed").await;
     }
     let body = b"Requested range is not satisfiable";
     let mut head = format!(
@@ -1749,35 +1938,155 @@ mod tests {
         .expect("the synthetic upstream received the request")
     }
 
-    #[test]
-    fn opaque_route_batch_rejects_overflow_without_retiring_any_published_route() {
+    #[tokio::test]
+    async fn external_head_errors_send_the_get_headers_without_a_body() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = upstream.local_addr().unwrap();
+        let (relay, mut admission) = PlaybackRelay::start_external(
+            &format!("http://{origin}/fixture.m3u8"),
+            &[],
+            PlaybackPolicy {
+                public_only: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let invalid = format!("{}?_HLS_msn=invalid", relay.url());
+        let head = raw_local_request("HEAD", invalid.clone()).await;
+        let get = raw_local_request("GET", invalid).await;
+        assert!(head.starts_with("HTTP/1.1 400 "));
+        assert_eq!(get, format!("{head}Invalid HLS delivery directives"));
+
+        let head = tokio::spawn(raw_local_request("HEAD", relay.url().into()));
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), admission.connected())
+                .await
+                .unwrap()
+        );
+        assert!(admission.allow());
+        let (mut socket, _) = upstream_request(&upstream).await;
+        let failure = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 16\r\nConnection: close\r\n\r\ngenerated-secret";
+        socket.write_all(failure).await.unwrap();
+        let head = head.await.unwrap();
+        assert!(head.starts_with("HTTP/1.1 502 "));
+
+        let get = tokio::spawn(raw_local_request("GET", relay.url().into()));
+        let (mut socket, _) = upstream_request(&upstream).await;
+        socket.write_all(failure).await.unwrap();
+        assert_eq!(get.await.unwrap(), format!("{head}Playback request failed"));
+    }
+
+    async fn raw_local_request(method: &'static str, target: String) -> String {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let mut socket =
+                TcpStream::connect(Url::parse(&target).unwrap().socket_addrs(|| None).unwrap()[0])
+                    .await
+                    .unwrap();
+            let request = format!("{method} {target} HTTP/1.1\r\nConnection: close\r\n\r\n");
+            socket.write_all(request.as_bytes()).await.unwrap();
+            let mut reply = String::new();
+            socket.read_to_string(&mut reply).await.unwrap();
+            reply
+        })
+        .await
+        .expect("the local relay answered the request")
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn opaque_capacity_preserves_active_renditions_and_reclaims_old_windows() {
         let mut routes = OpaqueRoutes::default();
         let base = Url::parse("https://synthetic.example.test/").unwrap();
-        let mut initial = RouteBatch::new(routes.hash.clone());
-        let old = initial
+        let window = |sequence, full| hls::MediaWindow {
+            sequence,
+            last_sequence: sequence + 10,
+            availability: Duration::from_secs(60),
+            full,
+        };
+        let mut video = RouteBatch::new(routes.hash.clone(), "video");
+        let old = video
             .add(false, base.join("old.ts").unwrap(), false)
             .unwrap();
-        routes.publish(initial).unwrap();
-        let mut full = RouteBatch::new(routes.hash.clone());
-        let ids = (0..MAX_OPAQUE_ROUTES)
-            .map(|number| {
-                full.add(
-                    false,
-                    base.join(&format!("new-{number}.ts")).unwrap(),
-                    false,
-                )
-                .unwrap()
-            })
-            .collect::<Vec<_>>();
+        routes.publish(video, Some(window(1, true))).unwrap();
+        let mut audio = RouteBatch::new(routes.hash.clone(), "audio");
+        let audio_route = audio
+            .add(false, base.join("old.ts").unwrap(), false)
+            .unwrap();
+        assert_ne!(audio_route, old);
+        routes.publish(audio, Some(window(1, true))).unwrap();
+
+        let new_batch = |hash: RandomState, owner| {
+            let mut batch = RouteBatch::new(hash, owner);
+            let id = batch
+                .add(false, base.join("next.ts").unwrap(), false)
+                .unwrap();
+            (batch, id)
+        };
+        let (delta, next) = new_batch(routes.hash.clone(), "video");
+        routes.publish(delta, Some(window(2, false))).unwrap();
+        let pressure = |hash| {
+            let mut batch = RouteBatch::new(hash, "other");
+            let ids: Vec<_> = (0..MAX_OPAQUE_ROUTES - 2)
+                .map(|number| {
+                    batch
+                        .add(
+                            false,
+                            base.join(&format!("new-{number}.ts")).unwrap(),
+                            false,
+                        )
+                        .unwrap()
+                })
+                .collect();
+            (batch, ids)
+        };
+        tokio::time::advance(Duration::from_secs(60)).await;
+        let (full, ids) = pressure(routes.hash.clone());
+        assert!(routes.publish(full, None).is_err());
+        assert!(routes.target(&old).is_some());
+        assert!(routes.target(&audio_route).is_some());
+        assert!(routes.target(&next).is_some());
+        assert!(routes.target(&ids[0]).is_none());
+
+        let (reload, same_next) = new_batch(routes.hash.clone(), "video");
+        assert_eq!(next, same_next);
+        routes.publish(reload, Some(window(2, true))).unwrap();
+        let (full, _) = pressure(routes.hash.clone());
         assert!(
-            full.add(false, base.join("overflow.ts").unwrap(), false)
-                .is_err()
+            routes.publish(full, None).is_err(),
+            "old window is still usable"
         );
         assert!(routes.target(&old).is_some());
-        assert!(routes.target(&ids[0]).is_none());
-        routes.publish(full).unwrap();
+        tokio::time::advance(Duration::from_secs(60)).await;
+        let (full, _) = pressure(routes.hash.clone());
+        routes.publish(full, None).unwrap();
         assert!(routes.target(&old).is_none());
+        assert!(routes.target(&audio_route).is_some());
+        assert!(routes.target(&next).is_some());
         assert!(ids.iter().all(|id| routes.target(id).is_some()));
+    }
+
+    #[test]
+    fn delta_hls_retires_only_routes_older_than_the_whole_window() {
+        let prior = RollingRoute {
+            owner: Arc::from("video"),
+            window: hls::MediaWindow {
+                sequence: 10,
+                last_sequence: 20,
+                availability: Duration::from_secs(60),
+                full: true,
+            },
+            expires: None,
+        };
+        let delta = |sequence| hls::MediaWindow {
+            sequence,
+            last_sequence: sequence + 10,
+            full: false,
+            ..prior.window
+        };
+        assert!(!prior.precedes(delta(11)));
+        assert!(!prior.precedes(delta(20)));
+        assert!(prior.precedes(delta(21)));
     }
 
     #[test]
@@ -1833,8 +2142,10 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_expired_external_admission_cannot_reopen_on_retry() {
         let (state, _) = watch::channel(ExternalState::Waiting);
-        let gate = Arc::new(ExternalGate(state.clone()));
-        let mut admission = ExternalAdmission(state);
+        let requested = Arc::new(AtomicBool::new(false));
+        let gate = Arc::new(ExternalGate(state.clone(), requested.clone()));
+        let mut admission = ExternalAdmission(state, requested);
+        assert!(!admission.received_request());
         let waiting = tokio::spawn({
             let gate = gate.clone();
             async move { gate.admit().await }
@@ -1842,6 +2153,7 @@ mod tests {
         assert!(admission.connected().await);
         tokio::time::advance(EXTERNAL_ADMISSION_TIMEOUT).await;
         assert!(!waiting.await.unwrap());
+        assert!(admission.received_request());
         assert!(!admission.allow());
         assert!(!gate.admit().await);
     }

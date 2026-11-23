@@ -41,8 +41,14 @@ fn wait_for_requests(
 }
 
 fn seed(store: &mut Store, home: &Path, name: &str) -> SourceId {
+    seed_with_channels(store, home, name, "")
+}
+
+fn seed_with_channels(store: &mut Store, home: &Path, name: &str, channels: &str) -> SourceId {
     let playlist = format!(
-        "#EXTM3U\n#EXTINF:-1 tvg-id=\"shared\" group-title=\"News\",Shared\nhttp://stream.example.test/shared\n#EXTINF:-1 group-title=\"News\",Only {name}\nhttp://stream.example.test/{name}\n"
+        "#EXTM3U\n\
+         #EXTINF:-1 tvg-id=\"shared\" group-title=\"News\",Shared\nhttp://stream.example.test/shared\n\
+         #EXTINF:-1 group-title=\"News\",Only {name}\nhttp://stream.example.test/{name}\n{channels}"
     );
     let file = home.join(format!("{name}.m3u"));
     std::fs::write(&file, &playlist).unwrap();
@@ -234,7 +240,12 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     let path = dir.join("iptv.sqlite");
     let mut store = crate::isolated::open_database(&path).unwrap();
     let alpha = seed(&mut store, home.path(), "Alpha");
-    let beta = seed(&mut store, home.path(), "Beta");
+    let beta = seed_with_channels(
+        &mut store,
+        home.path(),
+        "Beta",
+        "#EXTINF:-1 group-title=\"Sports\",Beta Sports\nhttp://stream.example.test/beta-sports\n",
+    );
     store.set_active_source(alpha).unwrap();
     drop(store);
 
@@ -248,7 +259,8 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     step(app.wait_for("text:/^Shared · Beta/"));
     step(app.wait_for_within("text:Alpha bulletin", Duration::from_secs(20)));
     step(app.wait_for_within("text:Beta bulletin", Duration::from_secs(20)));
-    assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 4);
+    step(app.wait_for("id:guide-row >> text:/^Beta Sports · Beta/"));
+    assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 5);
 
     step(app.wait_for("id:guide-header-details >> text:Shared"));
     step(app.wait_for("id:guide-header-details >> text:Alpha · News"));
@@ -267,6 +279,7 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     step(app.wait_for("text:0 selected · 2 matching · 2 total"));
     step(app.wait_for("id:custom-groups-screen >> text:Only Beta"));
     assert!(!app.shows("id:custom-groups-screen >> text:Only Alpha"));
+    assert!(!app.shows("id:custom-groups-screen >> text:Beta Sports"));
     step(app.back());
     step(app.back());
     step(app.wait_for_gone("id:custom-groups-screen", Duration::from_secs(3)));

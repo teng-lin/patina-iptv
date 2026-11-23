@@ -754,6 +754,10 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     {
         return;
     }
+    if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {
+        crate::player_keys::stop_playback(ui);
+        return;
+    }
     if action != Action::Ignore {
         crate::external_player::cancel_pending(ui);
     }

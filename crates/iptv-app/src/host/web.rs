@@ -396,9 +396,6 @@ impl ExternalSession {
 }
 pub(crate) struct ExternalHandoff;
 impl ExternalHandoff {
-    pub(crate) async fn connected(&mut self) -> bool {
-        false
-    }
     pub(crate) fn is_open(&self) -> bool {
         false
     }
@@ -406,12 +403,10 @@ impl ExternalHandoff {
         None
     }
 }
-pub(crate) async fn prepare_external_player(
+pub(crate) async fn connect_external_player(
     _source: iptv_core::playback::PlaySource,
-) -> Option<()> {
-    None
-}
-pub(crate) fn open_external_player(_playback: ()) -> Option<ExternalHandoff> {
+    _before_launch: impl Fn() -> bool,
+) -> Option<ExternalHandoff> {
     None
 }
 pub(crate) fn external_player_returned() {}

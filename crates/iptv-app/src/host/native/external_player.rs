@@ -90,7 +90,8 @@ impl ExternalSession {
     }
 }
 
-pub(crate) struct ExternalPlayback(PlaybackRelay, ExternalAdmission);
+#[cfg(any(target_os = "android", target_os = "linux"))]
+struct ExternalPlayback(PlaybackRelay, ExternalAdmission);
 pub(crate) struct ExternalHandoff {
     admission: Option<ExternalAdmission>,
     session: ExternalSession,
@@ -105,7 +106,8 @@ impl Drop for ExternalHandoff {
 }
 
 impl ExternalHandoff {
-    pub(crate) async fn connected(&mut self) -> bool {
+    #[cfg(any(target_os = "android", target_os = "linux"))]
+    async fn connected(&mut self) -> bool {
         match &mut self.admission {
             Some(admission) => admission.connected().await,
             None => false,
@@ -135,10 +137,8 @@ impl ExternalHandoff {
     }
 }
 
-pub(crate) async fn prepare_external_player(source: PlaySource) -> Option<ExternalPlayback> {
-    if !EXTERNAL_PLAYER {
-        return None;
-    }
+#[cfg(any(target_os = "android", target_os = "linux"))]
+async fn prepare_external_player(source: PlaySource) -> Option<ExternalPlayback> {
     let (send, receive) = futures_channel::oneshot::channel();
     super::background("iptv-external-playback", move || {
         let playback = PlaybackRelay::start_external(
@@ -155,61 +155,189 @@ pub(crate) async fn prepare_external_player(source: PlaySource) -> Option<Extern
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn open_external_player(playback: ExternalPlayback) -> Option<ExternalHandoff> {
+mod linux {
+    use super::{ExternalHandoff, ExternalPlayback, ExternalSession, PlaySource};
     use std::{
         io::Write,
         process::{Command, Stdio},
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
     };
-    let ExternalPlayback(relay, admission) = playback;
-    // The protected playlist keeps the stream capability out of argv.
-    let mut playlist = tempfile::Builder::new().suffix(".m3u").tempfile().ok()?;
-    writeln!(
-        playlist,
-        "#EXTM3U
-{}",
-        relay.url()
-    )
-    .ok()?;
-    let mut mpv_playlist = std::ffi::OsString::from("--playlist=");
-    mpv_playlist.push(playlist.path());
-    for (app, args) in [
-        (
-            "vlc",
-            vec![
-                std::ffi::OsString::from("--no-one-instance"),
-                std::ffi::OsString::from("--"),
-                playlist.path().into(),
-            ],
-        ),
-        ("mpv", vec![mpv_playlist]),
-    ] {
-        let child = Command::new(app)
-            .args(args)
+
+    enum Player {
+        Vlc,
+        Mpv,
+    }
+
+    pub(crate) async fn connect_external_player(
+        source: PlaySource,
+        before_launch: impl Fn() -> bool,
+    ) -> Option<ExternalHandoff> {
+        connect_with(source, before_launch, launch).await
+    }
+
+    async fn connect_with(
+        source: PlaySource,
+        before_launch: impl Fn() -> bool,
+        mut launch: impl FnMut(ExternalPlayback, Player) -> Option<(ExternalHandoff, Arc<AtomicBool>)>,
+    ) -> Option<ExternalHandoff> {
+        for player in [Player::Vlc, Player::Mpv] {
+            let playback = super::prepare_external_player(source.clone()).await?;
+            if !before_launch() {
+                return None;
+            }
+            let Some((mut handoff, exited)) = launch(playback, player) else {
+                continue;
+            };
+            if handoff.connected().await && handoff.is_open() {
+                return Some(handoff);
+            }
+            handoff.session.close_and_wait().await;
+            // Fall back only when the process exited without reaching this
+            // relay. A player that already selected the stream owns the choice.
+            if !exited.load(Ordering::Acquire)
+                || handoff
+                    .admission
+                    .as_ref()
+                    .is_some_and(|admission| admission.received_request())
+            {
+                return None;
+            }
+        }
+        None
+    }
+
+    fn launch(
+        playback: ExternalPlayback,
+        player: Player,
+    ) -> Option<(ExternalHandoff, Arc<AtomicBool>)> {
+        let ExternalPlayback(relay, admission) = playback;
+        // The protected playlist keeps the stream capability out of argv.
+        let mut playlist = tempfile::Builder::new().suffix(".m3u").tempfile().ok()?;
+        writeln!(playlist, "#EXTM3U\n{}", relay.url()).ok()?;
+        let mut command = match player {
+            Player::Vlc => {
+                let mut command = Command::new("vlc");
+                command
+                    .args(["--no-one-instance", "--"])
+                    .arg(playlist.path());
+                command
+            }
+            Player::Mpv => {
+                let mut command = Command::new("mpv");
+                let mut path = std::ffi::OsString::from("--playlist=");
+                path.push(playlist.path());
+                command.arg(path);
+                command
+            }
+        };
+        let mut child = command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn();
-        if let Ok(mut child) = child {
-            let session = ExternalSession::new(relay);
-            let player = session.clone();
-            super::background("iptv-external-player", move || {
-                let _ = child.wait();
-                drop(playlist);
-                player.close_blocking();
-            })
+            .spawn()
             .ok()?;
-            return Some(ExternalHandoff {
+        let session = ExternalSession::new(relay);
+        let watched_session = session.clone();
+        let exited = Arc::new(AtomicBool::new(false));
+        let watched_exit = exited.clone();
+        super::super::background("iptv-external-player", move || {
+            let _ = child.wait();
+            watched_exit.store(true, Ordering::Release);
+            drop(playlist);
+            watched_session.close_blocking();
+        })
+        .ok()?;
+        Some((
+            ExternalHandoff {
                 admission: Some(admission),
                 session,
-            });
+            },
+            exited,
+        ))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::net::TcpStream;
+
+        #[test]
+        fn external_player_retries_an_early_exit_with_a_fresh_capability() {
+            assert_eq!(attempts(false), 2);
+        }
+
+        #[test]
+        fn external_player_keeps_vlc_when_it_connects() {
+            assert_eq!(attempts(true), 1);
+        }
+
+        fn attempts(vlc_connects: bool) -> usize {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let source = PlaySource {
+                    public_only: true,
+                    url: "https://stream.example.test/generated.ts".to_owned(),
+                    headers: Vec::new(),
+                };
+                let mut capabilities = Vec::new();
+                let mut receiver = None;
+                let handoff = connect_with(
+                    source,
+                    || true,
+                    |playback, player| {
+                        let ExternalPlayback(relay, admission) = playback;
+                        let capability = relay.url().to_owned();
+                        let session = ExternalSession::new(relay);
+                        capabilities.push(capability.clone());
+                        let exited = Arc::new(AtomicBool::new(false));
+                        if matches!(player, Player::Vlc) && !vlc_connects {
+                            exited.store(true, Ordering::Release);
+                            session.close();
+                        } else {
+                            let (address, path) = capability
+                                .strip_prefix("http://")
+                                .unwrap()
+                                .split_once('/')
+                                .unwrap();
+                            let mut stream = TcpStream::connect(address).unwrap();
+                            write!(stream, "GET /{path} HTTP/1.1\r\nHost: {address}\r\n\r\n")
+                                .unwrap();
+                            receiver = Some(stream);
+                        }
+                        Some((
+                            ExternalHandoff {
+                                admission: Some(admission),
+                                session,
+                            },
+                            exited,
+                        ))
+                    },
+                )
+                .await
+                .expect("one synthetic player requested the relay");
+                assert!(handoff.is_open());
+                if capabilities.len() == 2 {
+                    assert_ne!(capabilities[0], capabilities[1]);
+                }
+                handoff.session.close_and_wait().await;
+                drop(receiver);
+                capabilities.len()
+            })
         }
     }
-    None
 }
+
+#[cfg(target_os = "linux")]
+pub(crate) use linux::connect_external_player;
 
 #[cfg(target_os = "android")]
 mod android {
-    use super::{ExternalHandoff, ExternalPlayback, ExternalSession};
+    use super::{ExternalHandoff, ExternalPlayback, ExternalSession, PlaySource};
     use jni::{
         JavaVM,
         objects::{GlobalRef, JClass, JValue},
@@ -229,7 +357,19 @@ mod android {
         }
     }
 
-    pub(crate) fn open_external_player(playback: ExternalPlayback) -> Option<ExternalHandoff> {
+    pub(crate) async fn connect_external_player(
+        source: PlaySource,
+        before_launch: impl Fn() -> bool,
+    ) -> Option<ExternalHandoff> {
+        let playback = super::prepare_external_player(source).await?;
+        if !before_launch() {
+            return None;
+        }
+        let mut handoff = open_external_player(playback)?;
+        (handoff.connected().await && handoff.is_open()).then_some(handoff)
+    }
+
+    fn open_external_player(playback: ExternalPlayback) -> Option<ExternalHandoff> {
         let ExternalPlayback(relay, admission) = playback;
         let open = || {
             let (vm, class) = HOST.get()?;
@@ -272,13 +412,15 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-pub(crate) use android::{external_player_returned, open_external_player};
+pub(crate) use android::{connect_external_player, external_player_returned};
 
 #[cfg(not(target_os = "android"))]
 pub(crate) fn external_player_returned() {}
 
 #[cfg(not(any(target_os = "android", target_os = "linux")))]
-pub(crate) fn open_external_player(playback: ExternalPlayback) -> Option<ExternalHandoff> {
-    drop(playback.0);
+pub(crate) async fn connect_external_player(
+    _source: PlaySource,
+    _before_launch: impl Fn() -> bool,
+) -> Option<ExternalHandoff> {
     None
 }

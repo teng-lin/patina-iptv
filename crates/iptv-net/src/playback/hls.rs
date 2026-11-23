@@ -17,11 +17,11 @@
 //!   regular expression, so only quoted values, and also inside what the
 //!   others read as another attribute's value.
 
-use std::{borrow::Cow, collections::HashMap};
+use std::{borrow::Cow, collections::HashMap, time::Duration};
 
 use reqwest::Url;
 
-use super::{MAX_MANIFEST, MAX_OPAQUE_URL, invalid, resolve};
+use super::{MAX_MANIFEST, MAX_OPAQUE_URL, decimal, invalid, resolve};
 use crate::FetchError;
 
 pub(super) fn rewrite_hls(body: &[u8], base: &Url, prefix: &str) -> Result<Vec<u8>, FetchError> {
@@ -63,7 +63,9 @@ pub(super) fn rewrite_with(
             if line.starts_with('#')
                 && (!line.starts_with("#EXT")
                     || line.starts_with("#EXT-X-SESSION-DATA:")
-                    || line.starts_with("#EXT-X-DATERANGE:"))
+                    || line.starts_with("#EXT-X-DATERANGE:")
+                    // The external relay cannot rewrite Steering Manifests.
+                    || line.starts_with("#EXT-X-CONTENT-STEERING:"))
             {
                 continue;
             }
@@ -99,6 +101,63 @@ pub(super) fn rewrite_with(
         }
     }
     Ok(out.into_bytes())
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MediaWindow {
+    pub sequence: u64,
+    pub last_sequence: u64,
+    pub availability: Duration,
+    pub full: bool,
+}
+
+/// Delta updates omit segments that may still be in the sliding window.
+pub(super) fn media_window(body: &[u8]) -> Option<MediaWindow> {
+    let text = std::str::from_utf8(body).ok()?;
+    let mut sequence = None;
+    let mut target = None;
+    let mut skipped = None;
+    let mut segments = 0u64;
+    let mut duration = 0.0;
+    for line in text
+        .lines()
+        .flat_map(|line| line.split('\r'))
+        .map(str::trim)
+    {
+        if line == "#EXT-X-ENDLIST" || line.starts_with("#EXT-X-PLAYLIST-TYPE:") {
+            return None;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-MEDIA-SEQUENCE:") {
+            sequence = Some(decimal(value)?);
+        } else if let Some(value) = line.strip_prefix("#EXT-X-TARGETDURATION:") {
+            target = Some(decimal(value)? as f64);
+        } else if let Some(value) = line.strip_prefix("#EXTINF:") {
+            let seconds: f64 = value.split(',').next()?.parse().ok()?;
+            if !seconds.is_finite() || seconds < 0.0 {
+                return None;
+            }
+            duration += seconds;
+            segments += 1;
+        } else if let Some(value) = line.strip_prefix("#EXT-X-SKIP:") {
+            let attrs = attributes(value).ok()?;
+            let count = attrs.iter().find(|attr| attr.name == "SKIPPED-SEGMENTS")?;
+            skipped = Some(decimal(count.value)?);
+        }
+    }
+    // The extra second bounds rounded segment durations. Two target
+    // durations account for a retiring segment and any trailing parts.
+    let target = target? + 1.0;
+    let skipped_segments = skipped.unwrap_or_default();
+    let seconds = duration + (skipped_segments as f64 + 2.0) * target;
+    let sequence = sequence?;
+    Some(MediaWindow {
+        sequence,
+        // Include the next sequence for parts and preload hints.
+        last_sequence: sequence
+            .checked_add(skipped_segments)?
+            .checked_add(segments)?,
+        availability: Duration::try_from_secs_f64(seconds.max(60.0)).ok()?,
+        full: skipped.is_none(),
+    })
 }
 
 /// Definitions exist only inside this rewrite, so even query-derived values
@@ -447,6 +506,50 @@ mod tests {
                 "{playlist}",
             );
         }
+    }
+
+    #[test]
+    fn external_playlists_omit_steering_but_keep_the_listed_variant() {
+        let playlist = concat!(
+            "#EXTM3U\n",
+            "#EXT-X-CONTENT-STEERING:SERVER-URI=\"steer.json\",PATHWAY-ID=\"a\"\n",
+            "#EXT-X-STREAM-INF:BANDWIDTH=100,PATHWAY-ID=\"a\"\nvariant\n",
+        );
+        let external = rewrite_with(playlist.as_bytes(), Some(&base()), |value, key, variant| {
+            assert_eq!(value, "variant");
+            assert!(variant);
+            assert!(!key);
+            Ok("opaque-variant".into())
+        })
+        .unwrap();
+        assert_eq!(
+            external,
+            b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=100,PATHWAY-ID=\"a\"\nopaque-variant\n"
+        );
+        let native = rewrite_hls(playlist.as_bytes(), &base(), PREFIX).unwrap();
+        assert!(String::from_utf8(native).unwrap().contains(&format!(
+            "#EXT-X-CONTENT-STEERING:SERVER-URI=\"{ON_RELAY}steer.json\""
+        )));
+    }
+
+    #[test]
+    fn media_windows_include_delta_skips_and_bound_route_retention() {
+        let playlist = concat!(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:60\n#EXT-X-MEDIA-SEQUENCE:50\n",
+            "#EXTINF:59.5,\na.ts\n#EXTINF:56,\nb.ts\n",
+        );
+        let full = media_window(playlist.as_bytes()).unwrap();
+        assert!(full.full);
+        assert_eq!(full.sequence, 50);
+        assert_eq!(full.last_sequence, 52);
+        assert!(full.availability >= Duration::from_secs_f64(115.5 + 60.0));
+        let delta = format!("{playlist}#EXT-X-SKIP:SKIPPED-SEGMENTS=2\n");
+        let delta = media_window(delta.as_bytes()).unwrap();
+        assert!(!delta.full);
+        assert_eq!(delta.last_sequence, 54);
+        assert!(delta.availability >= full.availability);
+        let finished = format!("{playlist}#EXT-X-ENDLIST\n");
+        assert!(media_window(finished.as_bytes()).is_none());
     }
 
     #[test]

@@ -1,8 +1,8 @@
 //! Handoff for an explicit channel choice in a group with external playback.
-use crate::{Ui, host, i18n::tr};
-use iptv_core::guide::Program;
+use crate::{Playback, Ui, ViewMode, host, i18n::tr};
+use iptv_core::guide::{Program, Schedule};
 use iptv_core::parental::Target;
-use iptv_guide::playback::{Resolution, StalkerLink};
+use iptv_guide::playback::{Resolution, ResolutionAuthority, StalkerLink};
 use iptv_presentation::lists::{Entry, ListId};
 use std::rc::Rc;
 
@@ -10,7 +10,7 @@ use std::rc::Rc;
 pub(crate) struct Active {
     ticket: u64,
     target: Target,
-    authority: iptv_guide::playback::ResolutionAuthority,
+    authority: ResolutionAuthority,
     group: String,
     session: host::ExternalSession,
 }
@@ -75,9 +75,21 @@ pub(crate) fn handoff_target(ui: Ui) -> Option<Target> {
     })
 }
 
+pub(crate) fn is_playing(ui: Ui) -> bool {
+    ui.external_playback.with_untracked(|state| {
+        state
+            .as_ref()
+            .is_some_and(|active| active.session.is_open())
+    })
+}
+
 pub(crate) fn returned(ui: Ui) {
-    cancel_pending(ui);
+    stop(ui);
     host::external_player_returned();
+}
+
+pub(crate) fn stop(ui: Ui) {
+    cancel_pending(ui);
     if let Some(active) = ui.external_playback.get_untracked() {
         active.session.close();
         crate::runtime().parental_end_transfer(&active.target);
@@ -107,9 +119,22 @@ struct PendingHandoff {
 }
 
 impl PendingHandoff {
-    fn new(ui: Ui, ticket: u64, target: Target, owner: Rc<crate::runtime::Runtime>) -> Self {
-        ui.external_handoff_target.set(Some((ticket, target)));
+    fn new(ui: Ui, ticket: u64, owner: Rc<crate::runtime::Runtime>) -> Self {
         Self { ui, ticket, owner }
+    }
+
+    fn mark(&self, target: Target) {
+        self.ui
+            .external_handoff_target
+            .set(Some((self.ticket, target)));
+    }
+
+    fn return_to_internal(&self, target: &Target) {
+        if pending_target(self.ui).as_ref() == Some(target) {
+            // The existing per-use grant follows the same content back to
+            // the native player. Ui::play still checks its ordinary gates.
+            self.ui.external_handoff_target.set(None);
+        }
     }
 }
 
@@ -118,6 +143,86 @@ impl Drop for PendingHandoff {
         crate::with_runtime(self.owner.clone(), || {
             clear_pending_target(self.ui, Some(self.ticket))
         });
+    }
+}
+
+struct PreviousPlayback {
+    key: String,
+    authority: ResolutionAuthority,
+    archive: Option<crate::player::PendingArchive>,
+    mode: ViewMode,
+}
+
+impl PreviousPlayback {
+    fn capture(ui: Ui) -> Option<Self> {
+        let channel = ui.playing.get_untracked()?;
+        let schedule = crate::schedule();
+        let (epg, local) = iptv_guide::combined::epg_channel(&*schedule, channel)?;
+        let archive = match ui.playback.get_untracked() {
+            Playback::Live => None,
+            Playback::CatchUp { start, offset } => Some(crate::player::PendingArchive::capture(
+                &*schedule, channel, start, offset,
+            )?),
+        };
+        Some(Self {
+            key: schedule.channel_key(channel)?,
+            authority: epg.resolution_authority(local)?,
+            archive,
+            mode: ui.mode.get_untracked(),
+        })
+    }
+
+    fn remap(&self, schedule: &dyn Schedule) -> Option<(usize, Playback)> {
+        let channel = schedule.find_channel(&self.key)?;
+        let (epg, local) = iptv_guide::combined::epg_channel(schedule, channel)?;
+        if epg.resolution_authority(local).as_ref() != Some(&self.authority) {
+            return None;
+        }
+        match &self.archive {
+            Some(archive) => archive.remap(schedule),
+            None => Some((channel, Playback::Live)),
+        }
+    }
+
+    async fn restore(self, pending: &PendingHandoff, current: impl Fn() -> bool) {
+        let source = iptv_library::SourceId(self.authority.source());
+        let channel = self.authority.channel().id.as_str();
+        if !matches!(
+            pending
+                .owner
+                .live_channel_allowed(source, channel.to_owned())
+                .await,
+            Ok(true)
+        ) {
+            return;
+        }
+        let ui = pending.ui;
+        if !current()
+            || ui.playing.get_untracked().is_some()
+            || crate::on_demand::active(ui)
+            || ui.external_playback.get_untracked().is_some()
+        {
+            return;
+        }
+        let Some((channel, playback)) = self.remap(&*crate::schedule()) else {
+            return;
+        };
+        if !crate::player::allow_guide_channel(channel) {
+            return;
+        }
+        let Some(target) = crate::parental_view::live_target(ui, channel) else {
+            return;
+        };
+        if !pending.owner.parental_allowed(&target) {
+            return;
+        }
+        pending.return_to_internal(&target);
+        ui.play(channel, playback);
+        if ui.playing.get_untracked() == Some(channel) {
+            ui.mode.set(self.mode);
+        } else {
+            pending.owner.parental_end_transfer(&target);
+        }
     }
 }
 
@@ -254,29 +359,31 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                 return;
             };
             crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
-            let prepared = host::prepare_external_player(source).await;
+            let pending = PendingHandoff::new(ui, ticket, owner.clone());
+            let handoff = host::connect_external_player(source, || {
+                if current() {
+                    pending.mark(target.clone());
+                    true
+                } else {
+                    false
+                }
+            })
+            .await;
             if !current() {
                 return;
             }
-            let Some(prepared) = prepared else {
+            let Some(handoff) = handoff else {
                 unavailable();
                 return;
             };
-            let _pending = PendingHandoff::new(ui, ticket, target.clone(), owner.clone());
-            let Some(mut handoff) = host::open_external_player(prepared) else {
-                unavailable();
-                return;
-            };
-            if !handoff.connected().await || !current() {
-                return;
-            }
             let verified = owner
                 .external_playback_allowed(expected.clone(), group_id.clone())
                 .await;
-            if !current() || !handoff.is_open() {
+            if !current() {
                 return;
             }
-            if !matches!(verified, Ok(true))
+            if !handoff.is_open()
+                || !matches!(verified, Ok(true))
                 || !owner.parental_allowed(&target)
                 || resolve().is_none()
             {
@@ -286,7 +393,11 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
             if let Some(previous) = ui.external_playback.get_untracked() {
                 previous.session.close_and_wait().await;
                 clear_retired(ui, &previous);
-                if !current() || !handoff.is_open() {
+                if !current() {
+                    return;
+                }
+                if !handoff.is_open() {
+                    unavailable();
                     return;
                 }
             }
@@ -297,26 +408,31 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                 ));
                 return;
             };
+            let previous = PreviousPlayback::capture(ui);
             crate::interruption::viewer_acted(ui);
             crate::player_keys::stopped_for_external(ui, &target);
             owner.retire_viewing_inputs(0).await;
-            if !current() || !handoff.is_open() {
+            if !current() {
                 return;
             }
-            let verified = owner
-                .external_playback_allowed(expected.clone(), group_id.clone())
+            let approval = owner
+                .authorize_external_playback(expected.clone(), group_id.clone())
                 .await;
-            if !current() || !handoff.is_open() {
+            if !current() {
                 return;
             }
-            if !matches!(verified, Ok(true))
-                || !owner.parental_allowed(&target)
-                || resolve().is_none()
+            let session = if handoff.is_open()
+                && owner.parental_allowed(&target)
+                && resolve().is_some()
+                && matches!(approval, Ok(Some(approval)) if approval.is_current())
             {
-                unavailable();
-                return;
-            }
-            if let Some(session) = handoff.allow(lease) {
+                handoff.allow(lease)
+            } else {
+                drop(lease);
+                drop(handoff);
+                None
+            };
+            if let Some(session) = session {
                 let active = Active {
                     ticket,
                     target,
@@ -331,6 +447,9 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                 });
             } else {
                 unavailable();
+                if let Some(previous) = previous {
+                    previous.restore(&pending, current).await;
+                }
             }
         });
     });

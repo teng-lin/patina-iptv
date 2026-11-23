@@ -16,6 +16,66 @@ fn copy_channels_from_the_guide_is_scoped_to_its_group() {
 }
 
 #[test]
+fn guide_group_rename_requires_a_custom_name_and_can_restore_a_provider_name() {
+    let Some(home) = isolated!() else { return };
+    let mut f = launch_prepared(
+        home,
+        Settings::new(),
+        false,
+        |path, source| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .create_custom_group(source, "Generated custom")
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut f.app;
+    step(app.set_environment("desktop", |env| {
+        env.os = nsh_core::platform::Os::Linux;
+        env.idiom = nsh_core::platform::Idiom::Desktop;
+    }));
+    step(app.press("text:/^☰  /"));
+    step(app.right_click("id:guide-groups >> text:Generated custom"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:Generated custom"));
+    step(app.submit("text:Enter text"));
+    step(app.wait_for("id:app-notice >> text:Enter a group name."));
+    assert!(app.screen().matches("text:Display name").unwrap());
+
+    step(app.type_text("text:Enter text", "   "));
+    step(app.press("id:organization-name-sheet >> text:Done"));
+    assert!(app.screen().matches("text:Display name").unwrap());
+    let groups = crate::isolated::open_database(&f.path)
+        .unwrap()
+        .custom_groups(f.source)
+        .unwrap();
+    assert_eq!(groups[0].name, "Generated custom");
+    step(app.clear("text:/^ {3}$/"));
+    step(app.type_text("text:Enter text", "Custom renamed"));
+    step(app.submit("text:Custom renamed"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+
+    step(app.right_click("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:News"));
+    step(app.type_text("text:Empty restores the provider name", "Generated news"));
+    step(app.submit("text:Generated news"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.right_click("id:guide-groups >> text:Generated news"));
+    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.wait_for("text:Display name"));
+    step(app.clear("text:Generated news"));
+    step(app.submit("text:Empty restores the provider name"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.wait_for("id:guide-groups >> text:News"));
+    step(app.wait_for("id:guide-groups >> text:Custom renamed"));
+}
+
+#[test]
 fn custom_groups_filter_select_copy_move_rename_delete_and_restore_focus() {
     let Some(home) = isolated!() else { return };
     let mut f = start(home, Settings::new(), false);

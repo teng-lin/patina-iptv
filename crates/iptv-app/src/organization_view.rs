@@ -848,6 +848,16 @@ fn commit(ui: Ui) {
     let Some(text) = s.editor.text.clone() else {
         return;
     };
+    if matches!(
+        s.placement,
+        Placement::RenameGroup {
+            restore_name: false
+        }
+    ) && text.trim().is_empty()
+    {
+        crate::settings_view::notify(tr("Enter a group name."));
+        return;
+    }
     let target = s.clone();
     let result = crate::runtime::commands::rename_organization_item(
         &crate::runtime(),
@@ -1886,7 +1896,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
                 .child(when(
                     move || state(ui, |s| s.editor.text.is_some()).unwrap_or(false),
-                    move || entry::text_sheet(ui, name_sheet(ui)),
+                    move || {
+                        entry::text_sheet(ui, name_sheet(ui)).test_id("organization-name-sheet")
+                    },
                 ))
         },
     )
