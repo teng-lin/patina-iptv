@@ -70,7 +70,11 @@ object RecordingHost {
         if (preferences.getBoolean(RETIRED, false)) return false
         return try {
             context.getSystemService(AlarmManager::class.java).cancel(alarmIntent(context))
-            preferences.edit().remove("next").putBoolean(RETIRED, true).commit()
+            preferences
+                .edit()
+                .remove("next")
+                .putBoolean(RETIRED, true)
+                .commit()
         } catch (_: RuntimeException) {
             false
         }
@@ -124,7 +128,14 @@ object RecordingHost {
             // This version now owns the alarm: arming replaces any wake an
             // earlier version left, and a retirement retried later must not
             // cancel this one.
-            if (!preferences.edit().putLong("next", wake).putBoolean(RETIRED, true).commit()) return 3
+            if (!preferences
+                    .edit()
+                    .putLong("next", wake)
+                    .putBoolean(RETIRED, true)
+                    .commit()
+            ) {
+                return 3
+            }
             val capability = arm(context, wake)
             if (active) {
                 if (!startService(context)) return 3
