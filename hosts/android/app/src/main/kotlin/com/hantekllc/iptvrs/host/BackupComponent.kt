@@ -3,6 +3,7 @@ package com.hantekllc.iptvrs.host
 import android.app.Activity
 import android.content.ContentResolver
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -34,9 +35,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * messages stay inside the bridge. After an explicit user confirmation, close
  * ends the activity and its process so staged restore activates on next launch.
  * No filesystem permission is needed.
+ *
+ * The component also says which document pickers resolve ([DocumentPickers]):
+ * a `pickers` event with booleans `create` (export) and `open` (import), when
+ * Rust sets or changes `probe` (on mount and when Settings opens) and when the
+ * activity resumes. Rust offers each backup action only where its picker is.
  */
 class BackupComponent(
-    activity: Activity,
+    private val activity: Activity,
     private val nsh: NshComponentContext,
     private val host: BackupHost,
 ) : NshComponent {
@@ -67,13 +73,31 @@ class BackupComponent(
             }
         }
 
+    private val probe = Runnable { probe() }
+
+    init {
+        host.componentCreated(this)
+    }
+
     override fun view(): View = root
+
+    /** Reports which document pickers resolve now. */
+    internal fun probe() {
+        if (destroyed) return
+        val pickers = DocumentPickers.probe(activity.packageManager)
+        nsh.emit("pickers", mapOf("create" to pickers.first, "open" to pickers.second))
+    }
 
     override fun setProp(
         name: String,
         value: Any?,
     ) {
         when (name) {
+            "probe" -> {
+                handler.removeCallbacks(probe)
+                handler.post(probe)
+                return
+            }
             "archivePath" -> archivePath = value as? String
             "requestId" -> requestId = value as? String
             "operation" -> operation = (value as? String) ?: "export"
@@ -106,8 +130,71 @@ class BackupComponent(
     override fun destroy() {
         destroyed = true
         handler.removeCallbacks(launch)
+        handler.removeCallbacks(probe)
         host.componentDestroyed(this)
     }
+}
+
+/**
+ * The Storage Access Framework pickers a backup needs: one that creates a
+ * document (export) and one that opens one (import). Many Android TV devices
+ * ship neither; some answer these intents only with the TV framework's stub
+ * package, whose screen says no app can open them and offers nothing to pick.
+ */
+internal object DocumentPickers {
+    /** Packages that claim document intents without a usable picker. */
+    private val STUBS = setOf("com.android.tv.frameworkpackagestubs")
+
+    fun create(): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, "Patina.patinabackup")
+        }
+
+    fun open(): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            // Some file providers assign a generic MIME to backup files.
+            type = "*/*"
+        }
+
+    /**
+     * The first real picker among the packages whose activities resolve, in
+     * the resolver's order (best first), or null when there is none.
+     */
+    fun choose(packages: Collection<String?>): String? = packages.firstOrNull { it != null && it !in STUBS }
+
+    /** Whether any of the packages whose activities resolve is a real picker. */
+    fun usable(packages: Collection<String?>): Boolean = choose(packages) != null
+
+    /** The package of the best real picker for [intent], or null. */
+    fun picker(
+        manager: PackageManager,
+        intent: Intent,
+    ): String? =
+        try {
+            choose(
+                manager
+                    .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                    .map { it.activityInfo?.packageName },
+            )
+        } catch (_: Exception) {
+            null
+        }
+
+    /**
+     * [intent] aimed at its real picker. The TV stub declares a high intent
+     * priority, so an unaimed intent can open it even where a real picker
+     * resolves too.
+     */
+    fun aimed(
+        manager: PackageManager,
+        intent: Intent,
+    ): Intent = intent.apply { picker(manager, this)?.let { setPackage(it) } }
+
+    /** (create, open): which pickers resolve on this device now. */
+    fun probe(manager: PackageManager): Pair<Boolean, Boolean> = (picker(manager, create()) != null) to (picker(manager, open()) != null)
 }
 
 /** Owns the one document chooser/copy operation for an activity. */
@@ -136,6 +223,7 @@ class BackupHost(
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val components = mutableSetOf<BackupComponent>()
     private var active: Request? = null
     private var destroyed = false
 
@@ -201,14 +289,11 @@ class BackupHost(
         val request = Request(component, id, archive, importing)
         active = request
         try {
-            val action = if (importing) Intent.ACTION_OPEN_DOCUMENT else Intent.ACTION_CREATE_DOCUMENT
             activity.startActivityForResult(
-                Intent(action).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    // Some file providers assign a generic MIME to backup files.
-                    type = if (importing) "*/*" else "application/octet-stream"
-                    if (!importing) putExtra(Intent.EXTRA_TITLE, "Patina.patinabackup")
-                },
+                DocumentPickers.aimed(
+                    activity.packageManager,
+                    if (importing) DocumentPickers.open() else DocumentPickers.create(),
+                ),
                 TRANSFER_BACKUP,
             )
         } catch (_: Exception) {
@@ -357,7 +442,17 @@ class BackupHost(
         }
     }
 
+    internal fun componentCreated(component: BackupComponent) {
+        components.add(component)
+    }
+
+    /** The activity resumed: a picker may have been installed or removed meanwhile. */
+    fun resumed() {
+        for (component in components.toList()) component.probe()
+    }
+
     internal fun componentDestroyed(component: BackupComponent) {
+        components.remove(component)
         val request = active ?: return
         if (request.component !== component) return
         request.canceled.set(true)
@@ -368,6 +463,7 @@ class BackupHost(
 
     fun destroy() {
         destroyed = true
+        components.clear()
         active?.let {
             it.canceled.set(true)
             removePrivateArchive(it)

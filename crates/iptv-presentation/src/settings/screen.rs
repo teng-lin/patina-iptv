@@ -404,10 +404,16 @@ impl Screen {
             return Effect::None;
         }
         // A focused row that left (its visibility changed) counts as the first.
-        let at = self
-            .focus
-            .and_then(|k| keys.iter().position(|x| *x == k))
-            .unwrap_or(0);
+        let at = match self.focus.and_then(|k| keys.iter().position(|x| *x == k)) {
+            Some(at) => at,
+            // Nothing is highlighted: OK shows the focus on the first row
+            // rather than acting on a row nobody saw focused.
+            None if key == Key::Ok => {
+                self.focus = Some(keys[0]);
+                return Effect::None;
+            }
+            None => 0,
+        };
         let step = |by: isize| Some(keys[moved(at, by, keys.len())]);
         match key {
             Key::Up => self.focus = step(-1),

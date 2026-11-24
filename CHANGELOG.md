@@ -40,6 +40,12 @@ is below 1.0, a minor release may change behavior.
   Continue. Movie and series settings are hidden when no enabled playlist can
   supply a catalog.
 
+### Fixed
+
+- Import usable channels from M3U playlists containing malformed or unsupported
+  stream addresses, and report the skipped entries instead of rejecting the
+  whole playlist.
+
 ## [0.1.8] - 2026-11-23
 
 ### Changed

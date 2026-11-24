@@ -194,8 +194,14 @@ fn run(ui: Ui) {
                     let list = ui.list.get_untracked();
                     ui.channels
                         .update(|c| c.iter_mut().for_each(|c| c.follow(channel, &list)));
+                    // A touch's zap always shows its banner (#285).
+                    let touched = ui.touch_zapped.get_untracked();
+                    if touched {
+                        ui.touch_zapped.set(false);
+                    }
                     if ui.mode.get_untracked() == ViewMode::Fullscreen
-                        && crate::settings::flag(keys::INFO_ON_SWITCH)
+                        && (crate::settings::flag(keys::INFO_ON_SWITCH)
+                            || (touched && !untracked(|| crate::play_bar::shows(ui))))
                     {
                         ui.show_playing();
                     }
@@ -284,15 +290,36 @@ pub fn bind(ui: Ui) {
     });
 }
 
+/// The channel a full-screen zap waits to tune (`guide.switch_delay`):
+/// the banner and the play bar name it at once.
+pub(crate) fn pending_channel(ui: Ui) -> Option<usize> {
+    if ui.mode.get() != ViewMode::Fullscreen {
+        return None;
+    }
+    ui.pending_zap.with(|t| {
+        t.as_ref()
+            .filter(|t| t.surface == Surface::Player)
+            .and_then(|t| crate::favorites::channel_of(&t.key))
+    })
+}
+
 /// Debounced full-screen/list zapping; repeated zaps start from the pending
 /// channel rather than reopening the currently playing one repeatedly.
 pub fn zap(ui: Ui, channel: usize) {
+    zap_by(ui, channel, false);
+}
+
+/// [`zap`]; `touch`: a touch's zap (a swipe, a play bar button, a screen
+/// reader's action), whose banner shows when it tunes whatever
+/// `player.info_on_switch` says (`touch_zap.rs`).
+pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
     if ui.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::show_channel(ui, channel);
         select(ui);
         return;
     }
     if let Some(key) = crate::schedule().channel_key(channel) {
+        ui.touch_zapped.set(touch);
         ui.pending_zap.set(Some(Target {
             key,
             source: ui.app.library.shown.get_untracked().map(|s| s.0),
