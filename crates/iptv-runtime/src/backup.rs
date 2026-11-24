@@ -290,7 +290,7 @@ fn referenced_documents(
         // configured guide list has changed. Restore rebases these URLs too.
         if let Some(guide) = snapshot
             .epg_guide(summary.id)
-            .context("Could not check backup guide feeds")?
+            .context("Could not check backup guide sources")?
         {
             for feed in guide.feeds {
                 include(feed.meta.config.url.expose())?;
