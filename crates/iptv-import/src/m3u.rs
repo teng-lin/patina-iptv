@@ -7,12 +7,12 @@
 //! playlist without entries is [`ImportError::Empty`].
 
 use iptv_core::import_limits::{DecodeBuffer, ImportLimits, LimitExceeded, LimitKind};
-use std::io::Write;
+use std::{collections::HashSet, io::Write};
 
 use flate2::write::MultiGzDecoder;
-use iptv_providers::HttpRequest;
 use iptv_providers::m3u::{M3uParser, M3uPlaylist};
 use iptv_providers::model::{Channel, ContentKind, M3uSourceConfig, StreamLocator};
+use iptv_providers::{GroupId, HttpRequest};
 
 use crate::cancel::{CancelToken, check};
 use crate::catalog::{Catalog, SourceMeta};
@@ -37,6 +37,7 @@ pub(crate) struct M3uFeeder {
     bytes: u64,
     parsed: u64,
     unusable_streams: usize,
+    usable_groups: HashSet<GroupId>,
 }
 
 impl M3uFeeder {
@@ -47,6 +48,7 @@ impl M3uFeeder {
             bytes: 0,
             parsed: 0,
             unusable_streams: 0,
+            usable_groups: HashSet::new(),
             head: Vec::new(),
             gzip: None,
             decided: false,
@@ -71,7 +73,7 @@ impl M3uFeeder {
             }
         }
         let mut completed = self.parser.take_channels();
-        self.unusable_streams += retain_usable_streams(&mut completed);
+        self.unusable_streams += retain_usable_streams(&mut completed, &mut self.usable_groups);
         self.parsed += completed.len() as u64;
         self.taken.append(&mut completed);
         Ok(self.parsed)
@@ -124,7 +126,11 @@ impl M3uFeeder {
         if let Some(error) = playlist.error {
             return Err(limit_error(error));
         }
-        self.unusable_streams += retain_usable_streams(&mut playlist.channels.items);
+        self.unusable_streams +=
+            retain_usable_streams(&mut playlist.channels.items, &mut self.usable_groups);
+        playlist
+            .groups
+            .retain(|group| self.usable_groups.contains(&group.id));
         self.taken.append(&mut playlist.channels.items);
         playlist.channels.items = self.taken;
         Ok((playlist, self.sniff, self.unusable_streams))
@@ -134,7 +140,10 @@ impl M3uFeeder {
 /// Discard unsupported protocols and malformed remote addresses before they
 /// reach a private stage. Explicit local destinations still reach the existing
 /// fatal destination-policy checks, as do private HTTP(S) hosts.
-fn retain_usable_streams(channels: &mut Vec<Channel>) -> usize {
+fn retain_usable_streams(
+    channels: &mut Vec<Channel>,
+    usable_groups: &mut HashSet<GroupId>,
+) -> usize {
     let before = channels.len();
     channels.retain(|channel| {
         let StreamLocator::Url { url, .. } = &channel.stream else {
@@ -156,6 +165,11 @@ fn retain_usable_streams(channels: &mut Vec<Channel>) -> usize {
         }
         url::Url::parse(value).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"))
     });
+    for group in channels.iter().flat_map(|channel| &channel.groups) {
+        if !usable_groups.contains(group) {
+            usable_groups.insert(group.clone());
+        }
+    }
     before - channels.len()
 }
 
