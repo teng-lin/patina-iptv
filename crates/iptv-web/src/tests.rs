@@ -376,8 +376,9 @@ fn imports_a_playlist_and_its_guide_then_plays_and_zaps() {
         ("rail".into(), "search".into())
     );
 
-    // Back: groups, then the rail (on TV), where it stays: Back never
-    // leaves the app.
+    // Back: groups, then the rail (on TV). Back there asks the page to
+    // confirm leaving (Samsung's exit confirmation), in the TV's
+    // language, and the rail stays: the page leaves only on Yes.
     key("right");
     key("back");
     let view = last_view(&fake);
@@ -385,10 +386,32 @@ fn imports_a_playlist_and_its_guide_then_plays_and_zaps() {
         (view["grid"]["pane"].clone(), view["grid"]["rail"].clone()),
         ("rail".into(), "tv".into())
     );
+    let asked = |fake: &Fake| {
+        fake.events
+            .borrow()
+            .iter()
+            .filter(|e| e["type"] == "leave")
+            .count()
+    };
+    assert_eq!(asked(&fake), 0);
     key("back");
+    assert_eq!(asked(&fake), 1);
+    assert_eq!(
+        last_of(&fake, "leave"),
+        serde_json::json!({ "type": "leave", "title": "Close Patina?", "no": "No", "yes": "Yes" })
+    );
+    send(serde_json::json!({ "cmd": "locale", "locale": "de-DE" }));
     key("back");
+    assert_eq!(asked(&fake), 2);
+    assert_eq!(
+        last_of(&fake, "leave"),
+        serde_json::json!({ "type": "leave", "title": "Patina schließen?", "no": "Nein", "yes": "Ja" })
+    );
+    // The page's `leave` (Back at the first launch's setup) asks the same.
+    send(serde_json::json!({ "cmd": "leave" }));
+    assert_eq!(asked(&fake), 3);
+    send(serde_json::json!({ "cmd": "locale", "locale": "en" }));
     assert_eq!(last_view(&fake)["grid"]["pane"], "rail");
-    assert!(fake.events.borrow().iter().all(|e| e["type"] != "exit"));
     // OK on TV is the groups column again.
     key("ok");
     assert_eq!(last_view(&fake)["grid"]["pane"], "groups");

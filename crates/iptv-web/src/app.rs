@@ -21,6 +21,7 @@ use iptv_import::{
 use iptv_nav::{Action, Context, HeldPresses, Keymap, Phase as KeyPhase, Press, RemoteKey};
 use iptv_presentation::browse::RailItem;
 use iptv_presentation::guide::{Pane, ProgramSelection};
+use iptv_presentation::i18n::{self, Language};
 use iptv_presentation::lists::{self, ChannelList as Rows, FAVORITES};
 use iptv_presentation::play_bar::{Control, PlayBar};
 use iptv_presentation::reorder::{self, Exit, Reorder};
@@ -153,6 +154,39 @@ pub(crate) struct App {
 
 thread_local! {
     static APP: RefCell<App> = RefCell::new(App::new());
+    /// The interface language: the TV's (the page's `locale` command),
+    /// English until the page has said.
+    static LANGUAGE: Cell<&'static Language> =
+        const { Cell::new(&i18n::LANGUAGES[0]) };
+}
+
+/// The TV's `locale` (the page's `navigator.language`), resolved to an
+/// interface language; on the TV its messages are package files
+/// (`i18n/<tag>.tsv`, written by `hosts/tizen/build.sh`).
+fn set_locale(locale: &str) {
+    #[cfg(target_family = "wasm")]
+    i18n::set_catalog_reader(|tag| {
+        String::from_utf8(crate::package::package_file(&format!("i18n/{tag}.tsv"))?).ok()
+    });
+    LANGUAGE.with(|language| language.set(i18n::resolve("system", Some(locale))));
+}
+
+/// Back on the guide's rail, or at the first launch's setup (the page's
+/// `leave` command): the page asks before the app leaves, with No and
+/// Yes (Samsung's exit confirmation on Return at the app's first screen).
+/// The texts are in the interface language.
+fn ask_to_leave() {
+    let language = LANGUAGE.with(Cell::get);
+    let tr = |source| i18n::translate(language, source);
+    host().emit(
+        &json!({
+            "type": "leave",
+            "title": tr("Close Patina?"),
+            "no": tr("No"),
+            "yes": tr("Yes"),
+        })
+        .to_string(),
+    );
 }
 
 pub(crate) fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> R {
@@ -486,6 +520,7 @@ impl App {
                 info("No favorites yet. Yellow adds the focused channel.");
             }
             GridOutcome::Empty => info("This list has no channels."),
+            GridOutcome::Leave => ask_to_leave(),
         }
     }
 
@@ -1690,6 +1725,8 @@ pub(crate) fn command(text: &str) {
             emit_reply(cmd.get("seq").and_then(Value::as_u64));
         }
         "view" => emit_view(),
+        "locale" => set_locale(cmd.get("locale").and_then(Value::as_str).unwrap_or("")),
+        "leave" => ask_to_leave(),
         "searchText" => {
             let text = cmd.get("text").and_then(Value::as_str).unwrap_or("");
             with_app(|a| a.search_text(text));

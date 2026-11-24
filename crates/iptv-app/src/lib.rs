@@ -1177,6 +1177,32 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     play_bar::pointer_moved(ui);
 }
 
+/// How the host leaves the app after the viewer confirmed it, where it
+/// asks first ([`confirm_leaving`]).
+static LEAVE: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+/// Makes Back at the top level ask before the app leaves: a Yes/No prompt
+/// (No focused; Back closes it), and Yes calls `leave`. For a host whose
+/// platform asks for that (Samsung's Tizen TVs: an exit confirmation on
+/// Return at the app's first screen, `hosts/tizen-nsh`); elsewhere the
+/// platform's Back leaves at once. Only the first call counts; make it
+/// before the app starts.
+pub fn confirm_leaving(leave: fn()) {
+    let _ = LEAVE.set(leave);
+}
+
+/// Whether Back at the top level asks before leaving ([`confirm_leaving`]).
+fn asks_before_leaving() -> bool {
+    LEAVE.get().is_some()
+}
+
+/// Yes in the prompt [`confirm_leaving`] asked for: the host leaves.
+pub(crate) fn leave() {
+    if let Some(leave) = LEAVE.get() {
+        leave();
+    }
+}
+
 /// Back: dialogs close; a full screen window becomes a window again (the
 /// desktop's Escape); player panels or the play bar → hidden; full screen/overlay → guide;
 /// then the guide screen's chain (`browse.rs`): hint card → guide → groups →
@@ -1184,9 +1210,11 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
 /// the platform's Back takes it at once: Android leaves without a second
 /// press and its predictive back gesture shows the way home; a desktop
 /// window stays open (Escape does nothing there, and the window closes
-/// the operating system's way). The release of a Long Back that acted
-/// takes no step (`input::swallow_back`), so a handler stays while one is
-/// pending, even where Back would leave.
+/// the operating system's way). A host that asks before leaving
+/// ([`confirm_leaving`]) keeps the handler there, and Back opens its
+/// prompt. The release of a Long Back that acted takes no step
+/// (`input::swallow_back`), so a handler stays while one is pending, even
+/// where Back would leave.
 fn bind_back(ui: Ui) {
     let back_target = computed(move || {
         let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
@@ -1212,14 +1240,15 @@ fn bind_back(ui: Ui) {
             && !ui.any_overlay_open()
             && !desktop::fullscreen()
             && !ui.back_guard.with(iptv_nav::BackGuard::armed);
-        if !leaves {
+        if !leaves || asks_before_leaving() {
             on_back_press(move || input::swallow_back(ui) || go_back(ui));
         }
     });
 }
 
 /// One step back (the platform's Back, or a key standing in for it);
-/// `false` where Back leaves the app.
+/// `false` where Back leaves the app. Where the host asks before leaving
+/// ([`confirm_leaving`]), that last step opens the prompt instead.
 pub(crate) fn go_back(ui: Ui) -> bool {
     external_player::cancel_pending(ui);
     if ui.channel_number.with(|entry| entry.active()) {
@@ -1304,12 +1333,15 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                     .update(iptv_presentation::play_bar::PlayBar::hide);
                 true
             }
-            // Hint, past program → now, guide → groups → rail → leave.
+            // Hint, past program → now, guide → groups → rail → leave
+            // (or ask first, where the host does).
             (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
                 ui.mode.set(ViewMode::Fullscreen);
                 true
             }
-            (ViewMode::Guide | ViewMode::Overlay, _, _) => lists::back(ui),
+            (ViewMode::Guide | ViewMode::Overlay, _, _) => {
+                lists::back(ui) || (asks_before_leaving() && chooser::ask_to_leave(ui))
+            }
             _ => {
                 ui.mode.set(crate::settings::browse_mode());
                 true

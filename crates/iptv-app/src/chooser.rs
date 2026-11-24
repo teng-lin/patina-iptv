@@ -1,7 +1,9 @@
 //! Translucent choosers over full-screen video: picture size (with "apply
 //! to all channels"), the sleep timer, the video, audio and subtitle
-//! tracks, the audio delay, and the recently watched channels (the History
-//! quick action: the store's watch history, as the Recently watched list).
+//! tracks, the audio delay, the recently watched channels (the History
+//! quick action: the store's watch history, as the Recently watched list),
+//! and the question before leaving where the host asks it
+//! (`crate::confirm_leaving`).
 //! Option sets follow the choosers observed in the reference UX;
 //! wording is ours. Entries are taken when a chooser
 //! opens; Up/Down move, OK (or a tap) picks and closes, Back closes.
@@ -36,6 +38,8 @@ pub enum Kind {
     AudioDelay,
     /// The recently watched channels.
     History,
+    /// No or Yes before the app leaves (`crate::confirm_leaving`).
+    Leave,
 }
 
 /// The open chooser.
@@ -119,6 +123,7 @@ fn title(kind: Kind) -> &'static str {
         Kind::Track(Track::Text) => tr("Subtitles"),
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
+        Kind::Leave => tr("Close Patina?"),
     }
 }
 
@@ -178,6 +183,12 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             (labels, Vec::new(), at.unwrap_or(delays.len() / 2))
         }
         Kind::History => history(ui),
+        // No first, and focused: OK alone never leaves.
+        Kind::Leave => (
+            vec![tr("No").to_owned(), tr("Yes").to_owned()],
+            Vec::new(),
+            0,
+        ),
         Kind::More => (Vec::new(), Vec::new(), 0),
         Kind::Volume => (
             (0..=10).map(|n| format!("{}%", n * 10)).collect(),
@@ -268,6 +279,13 @@ pub fn close(ui: Ui) {
     ui.chooser.set(None);
 }
 
+/// Back at the top level, where the host asks before leaving: No or Yes,
+/// with No focused. Always handled.
+pub(crate) fn ask_to_leave(ui: Ui) -> bool {
+    open(ui, Kind::Leave);
+    true
+}
+
 pub fn move_focus(ui: Ui, step: isize) {
     ui.chooser
         .update(|c| c.iter_mut().for_each(|c| c.list.move_focus(step)));
@@ -315,6 +333,11 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::History => play_recent(ui, &value),
+        Kind::Leave => {
+            if index == 1 {
+                crate::leave();
+            }
+        }
     }
 }
 
@@ -398,7 +421,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
                     let checked = match c.kind {
-                        Kind::History | Kind::More => false,
+                        Kind::History | Kind::More | Kind::Leave => false,
                         Kind::Volume => volume_index(ui) == index,
                         _ => c.list.selected == index,
                     };
@@ -409,8 +432,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         let selected = move || entry().is_some_and(|(_, checked, _)| checked);
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
         let action = move || {
-            ui.chooser
-                .with(|c| c.as_ref().is_some_and(|c| c.kind == Kind::More))
+            ui.chooser.with(|c| {
+                c.as_ref()
+                    .is_some_and(|c| matches!(c.kind, Kind::More | Kind::Leave))
+            })
         };
         list_rows::row(size, ROW, mark)
             .role(move || {
@@ -563,6 +588,7 @@ mod tests {
             Kind::Track(Track::Text),
             Kind::AudioDelay,
             Kind::History,
+            Kind::Leave,
         ];
         let titles: BTreeSet<_> = kinds.iter().map(|k| title(*k)).collect();
         assert_eq!(titles.len(), kinds.len());

@@ -97,3 +97,50 @@ fn overlay_rail_with_nothing_playing_hands_back_to_the_platform() {
         .expect_err("with the number cancelled, Back is the platform's again");
     assert!(handed.contains("nothing to go back from"), "{handed}");
 }
+
+/// Where the host asks before leaving (`iptv_app::confirm_leaving`, the
+/// Tizen NSH host: Samsung's exit confirmation, #277), Back at the top
+/// level stays the app's and opens No/Yes with No focused: OK there, or
+/// Back, closes it and the app stays; Yes leaves.
+#[test]
+fn a_host_that_asks_before_leaving_confirms_back_at_the_top_level() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LEFT: AtomicUsize = AtomicUsize::new(0);
+    let Some(home) = isolated!() else { return };
+    iptv_app::confirm_leaving(|| {
+        LEFT.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut f = start(home, overlay(None), true);
+    let app = &mut f.app;
+    step(app.set_environment("TV remote", |env| {
+        env.idiom = nsh_core::platform::Idiom::Tv;
+    }));
+    // The overlay layout's rail with nothing playing: the top level.
+    step(app.open_guide_groups());
+    step(app.press_key("left"));
+    step(app.press_key("left"));
+    let ask = |app: &mut crate::headless::Headless| {
+        step(app.back());
+        step(app.wait_for("id:chooser-panel >> text:Close Patina?"));
+        assert!(app.shows("No") && app.shows("Yes"));
+    };
+    let gone = |app: &mut crate::headless::Headless| {
+        step(app.wait_for_gone("text:Close Patina?", Duration::from_secs(2)));
+    };
+    ask(app);
+    // No is focused: OK closes the prompt, and the app stays.
+    step(app.press_key("enter"));
+    gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 0);
+    // Back closes it too.
+    ask(app);
+    step(app.back());
+    gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 0);
+    // Down to Yes, then OK: the host leaves.
+    ask(app);
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 1);
+}

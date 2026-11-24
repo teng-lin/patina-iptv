@@ -50,7 +50,12 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   a field's keyboard (Done returns), Save loads it, Back closes it once a
   playlist is saved. Holding OK or Back acts once. The red button opens it
   again later.
-- The remote's Exit key leaves the app from any screen. Back never does.
+- Back on the guide's rail, or on the first launch's playlist setup,
+  asks "Close Patina?" with No focused: Left, Right, Up and Down move
+  between No and Yes, OK chooses, Back closes the question. Only Yes
+  leaves. The remote's Exit key is the system's: it leaves from any
+  screen without asking (Samsung's termination rules; the page does not
+  register it). The question is in the TV's language.
 - The guide screen: the preview of the playing channel at the top left
   ("Nothing playing" until one plays), the focused program beside it
   (title, ★ for a favorite, times, progress, minutes left or until it
@@ -103,7 +108,7 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   tab and the focused result are kept where the new guide still has them.
 - Notices show at the bottom of the guide screen, at the top elsewhere.
   When the core cannot start or stops, its message covers the screen and
-  only Exit works.
+  only the remote's Exit key works.
 
 ## Differences from the Android TV app
 
@@ -117,12 +122,13 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
 - No hint card after a list is chosen, and no program descriptions.
 
 - A tap of Left moves to the previous program when the guide has one.
-  Held Back acts once. The page handles the system Exit key.
+  Held Back acts once. The remote's Exit key is the system's.
 - Programs chosen in Search tune their channel live, including upcoming
   programs. Back returns to the result list. The Recently watched list
   includes channels played from their archive.
 - Page Up and Down fit the time to the destination row's listings. Back
-  on the rail stays in the app.
+  on the rail asks before leaving (Samsung's exit confirmation; Android
+  TV leaves at once).
 
 ## Input and view protocol
 
@@ -150,6 +156,15 @@ Each `play` event carries its source's `session` and its own `id`. The page
 ignores events for replaced sources and defers playback while hidden. On
 failure, the page sends `playFailed` with the playback `id` and the reason.
 The core shows a notice when that playback is still current.
+
+At start the page sends `locale` with `navigator.language`; the core
+resolves it to an interface language (English until then) and reads that
+language's messages from the package (`i18n/<tag>.tsv`, written by
+`build.sh` with `hosts/tizen-nsh/catalog.py`) when it first needs one.
+Back on the rail makes the core send a `leave` event with the question
+and its two answers in that language; the page sends `leave` itself for
+Back on the first launch's setup. The page shows the question, and calls
+`tizen.application.getCurrentApplication().exit()` only on Yes.
 
 ## What is kept on the TV
 

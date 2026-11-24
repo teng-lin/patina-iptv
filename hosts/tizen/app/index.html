@@ -85,6 +85,15 @@
   <p class="muted hint">Later: red changes the playlist, green updates the TV guide, yellow adds or removes a favorite, blue shows Favorites.</p>
 </div>
 
+<!-- Back at the app's first screen: leave? No (focused) or Yes. Over the
+     setup too; its texts come from the core, in the TV's language. -->
+<div id="leave" class="hidden" role="dialog" aria-labelledby="leave-title">
+  <div id="leave-box">
+    <div id="leave-title">Close Patina?</div>
+    <div id="leave-buttons"><span id="leave-no" role="button">No</span><span id="leave-yes" role="button">Yes</span></div>
+  </div>
+</div>
+
 <!-- The core stopped: over everything else, the setup too. -->
 <div id="fatal" class="hidden"><div id="fatal-text"></div></div>
 
