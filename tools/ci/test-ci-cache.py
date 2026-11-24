@@ -166,7 +166,7 @@ class ToolCache(unittest.TestCase):
         validation = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(validation)
         self.assertTrue(validation.select([], tier="full")["packages"])
-        for path in ("Cargo.lock", "nsh.rev", ".github/actions/setup/action.yml"):
+        for path in ("tools/package-macos.sh", "nsh.rev", ".github/actions/setup/action.yml"):
             self.assertTrue(validation.select([path])["packages"], path)
 
     def test_validation_retains_successful_dependency_work_after_test_failure_only_on_master(self):
