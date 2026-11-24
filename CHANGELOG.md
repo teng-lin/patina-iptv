@@ -29,8 +29,8 @@ is below 1.0, a minor release may change behavior.
   "Keep … after choosing" switches on desktops and TVs. "Go full screen after"
   is a TV's only, under Advanced. A compact window shows the guide beside its
   preview and hides the layout and transparency rows. "Show info on a channel
-  change" is hidden on a phone or tablet without a keyboard or D-pad. Back in
-  the guide always returns to the programs on air first.
+  change" is hidden on an Android phone or tablet without a keyboard or D-pad.
+  Back in the guide always returns to the programs on air first.
 - Move the panel timeouts under Playback → Accessibility, and the rewind and
   fast-forward jumps under Advanced. The player's panels and play bar now wait
   at least Android's recommended accessibility timeout, and stay until hidden

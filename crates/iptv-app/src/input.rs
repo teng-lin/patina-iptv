@@ -444,7 +444,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     }
     // Spike shortcuts for the view modes.
     if ui.player_surface == 0 {
-        on_key("o", move |_| ui.toggle(ViewMode::Overlay));
+        on_key("o", move |_| ui.toggle(crate::settings::guide_over_video()));
         on_key("f", move |_| ui.toggle(ViewMode::Fullscreen));
     }
     input
@@ -986,7 +986,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::MoveRight => mv(Move::Right),
         Action::Select => crate::lists::ok(ui),
         Action::ShowGuide => ui.mode.set(match ui.mode.get() {
-            ViewMode::Fullscreen => ViewMode::Overlay,
+            ViewMode::Fullscreen => crate::settings::guide_over_video(),
             _ => crate::settings::browse_mode(),
         }),
         Action::ShowGroups => crate::lists::open_groups(ui),

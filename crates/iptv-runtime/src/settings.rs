@@ -52,7 +52,7 @@ pub(crate) fn load(owner: &super::Runtime) {
 ///   `guide.after_choosing` replaces them. While it is not stored, either
 ///   one on stands for `stay`: the viewer chose to keep a list open, and
 ///   one choice now covers both.
-fn adopt_retired(mut settings: Settings) -> Settings {
+pub(crate) fn adopt_retired(mut settings: Settings) -> Settings {
     let at = Target::Global;
     let stayed = settings.bool(keys::GUIDE_STAY_ON_GUIDE, &at)
         || settings.bool(keys::GUIDE_STAY_ON_LIST, &at);

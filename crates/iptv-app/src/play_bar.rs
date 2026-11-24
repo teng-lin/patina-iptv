@@ -122,7 +122,7 @@ pub fn bind(ui: Ui) {
         let idle = iptv_presentation::play_bar::HIDE_AFTER_MS
             .max(crate::device::recommended().controls_ms);
         if untracked(|| ui.play_bar.with(|b| b.idle_ms() != idle)) {
-            untracked(|| ui.play_bar.update(|b| b.set_idle_ms(idle)));
+            untracked(|| update(ui, |b, now| b.set_idle_ms(idle, now)));
         }
     });
     let popup =

@@ -95,11 +95,16 @@ fn panel_now(ui: Ui) -> ListPanel {
 /// The video's rectangle while the list shows beside it: right of the
 /// list, 16:9, at the top. `None` in the overlay layout, and in a window
 /// with no room beside the list (a phone held upright), where the video
-/// stays full screen under the list.
+/// stays full screen under the list. In a compact window the layout
+/// decides, whatever `guide.list_browse_mode` says (#281): the video goes
+/// beside the list wherever it has room.
 pub fn preview_rect(ui: Ui, width: f32, _height: f32) -> Option<(f32, f32, f32, f32)> {
-    let preview = ui
-        .channels
-        .with(|c| c.is_some_and(|c| c.mode == ListMode::Preview));
+    let preview = ui.channels.with(|c| {
+        c.is_some_and(|c| {
+            c.mode == ListMode::Preview
+                || crate::device::window_class() == crate::layout::Class::Compact
+        })
+    });
     if !preview {
         return None;
     }

@@ -372,3 +372,21 @@ fn panels_stay_while_a_screen_reader_or_switch_access_runs() {
     assert_eq!(p.hide_at_ms(), Some(100 + p.timeouts.controls_ms));
     assert!(p.tick(100 + p.timeouts.controls_ms));
 }
+
+#[test]
+fn a_longer_timeout_applies_to_the_panels_shown_now() {
+    let mut p = Panels::default();
+    let longer = Timeouts {
+        controls_ms: 30_000,
+        ..p.timeouts
+    };
+    p.set_timeouts(longer, 0);
+    assert_eq!(p.hide_at_ms(), None, "hidden panels stay hidden");
+    p.set_timeouts(Timeouts::default(), 0);
+    p.show_controls(0);
+    assert_eq!(p.hide_at_ms(), Some(Timeouts::default().controls_ms));
+    // The system asks for 30 s while the strip shows, without input.
+    p.set_timeouts(longer, 1_000);
+    assert_eq!(p.hide_at_ms(), Some(31_000));
+    assert!(!p.tick(Timeouts::default().controls_ms));
+}

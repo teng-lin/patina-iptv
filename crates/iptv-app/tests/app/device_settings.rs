@@ -259,15 +259,7 @@ fn a_compact_window_shows_the_guide_beside_its_preview() {
     assert!(!choose(app), "the guide stays over the video");
     // The overlay layout (the video fills the window) until the window
     // turns compact, then the preview layout; back again when it widens.
-    let video = |s: &nsh_testing::Screen| {
-        s.layout_nodes()
-            .into_iter()
-            .find(|n| {
-                n.kind == nsh_core::ViewKind::Native
-                    && n.test_id.as_deref() != Some("device-signals")
-            })
-            .map_or(0.0, |n| n.bounds.size.width.0)
-    };
+    let video = video_width;
     assert_eq!(video(app.screen()), 1280.0, "the guide over the video");
     resize(app, (400.0, 700.0));
     step(app.wait_until("the preview layout", WAIT, |s| {
@@ -276,6 +268,36 @@ fn a_compact_window_shows_the_guide_beside_its_preview() {
     }));
     resize(app, (1280.0, 720.0));
     step(app.wait_until("the overlay layout again", WAIT, |s| video(s) == 1280.0));
+}
+
+/// The width of the player's video (0 when none shows).
+fn video_width(s: &nsh_testing::Screen) -> f32 {
+    s.layout_nodes()
+        .into_iter()
+        .find(|n| {
+            n.kind == nsh_core::ViewKind::Native && n.test_id.as_deref() != Some("device-signals")
+        })
+        .map_or(0.0, |n| n.bounds.size.width.0)
+}
+
+#[test]
+fn the_guide_key_over_full_screen_video_shows_the_preview_in_a_compact_window() {
+    fn here() {}
+    let Some(mut fixture) = fixture(std::any::type_name_of_val(&here), Settings::new()) else {
+        return;
+    };
+    let app = &mut fixture.app;
+    report(app, "phone", false, false);
+    crate::browse_fixture::choose_fullscreen(app);
+    step(app.wait_for("id:player-banner"));
+    resize(app, (400.0, 700.0));
+    step(app.wait_until("full screen", WAIT, |s| video_width(s) == 400.0));
+    // The Guide key opens the guide beside its preview, not over the video.
+    step(app.press_key("g"));
+    step(app.wait_until("the preview layout", WAIT, |s| {
+        let w = video_width(s);
+        w > 0.0 && w < 400.0
+    }));
 }
 
 /// Full screen with the control strip open, which hides after 1 s.

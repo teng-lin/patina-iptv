@@ -453,6 +453,16 @@ impl Panels {
         self.assistive
     }
 
+    /// New auto-hide delays (a setting or the system's recommended
+    /// timeout changed): panels shown now restart their delay from
+    /// `now_ms` with them, so a longer one applies at once.
+    pub fn set_timeouts(&mut self, timeouts: Timeouts, now_ms: u64) {
+        self.timeouts = timeouts;
+        if self.hide_at_ms.is_some() {
+            self.touch(now_ms);
+        }
+    }
+
     /// Any input while shown: restart the auto-hide timer.
     pub fn touch(&mut self, now_ms: u64) {
         let t = self.timeouts;

@@ -65,6 +65,7 @@ internal class DeviceComponent(
             }
 
             override fun onDetachedFromWindow() {
+                removeCallbacks(settledReport)
                 accessibility?.removeAccessibilityStateChangeListener(accessibilityChanged)
                 context.contentResolver.unregisterContentObserver(accessibilitySettings)
                 super.onDetachedFromWindow()
@@ -243,13 +244,21 @@ internal object AccessibilitySignals {
         )
 
     /**
+     * The class names of the switch services: Google's Switch Access (in
+     * the Accessibility Suite, `com.google.android.marvin.talkback`, or
+     * its own older package) and Samsung's Universal Switch.
+     */
+    private val SWITCH_SERVICES = setOf("SwitchAccessService", "UniversalSwitchService")
+
+    /**
      * Whether a switch service runs, by the ids (`package/class`) of the
-     * enabled accessibility services: Google's Switch Access and Samsung's
-     * Universal Switch. No service property sets them apart.
+     * enabled accessibility services. A heuristic: no service property
+     * sets a switch service apart, so it matches the services' class names
+     * ([SWITCH_SERVICES]) exactly, whatever their package, and nothing
+     * else that only contains those words.
      */
     fun switchAccess(serviceIds: List<String>): Boolean =
         serviceIds.any { id ->
-            val name = id.lowercase()
-            "switchaccess" in name || "universalswitch" in name
+            id.substringAfter('/').substringAfterLast('.') in SWITCH_SERVICES
         }
 }

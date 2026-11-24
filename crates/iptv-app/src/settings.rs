@@ -25,7 +25,7 @@
 
 use std::sync::Arc;
 
-use iptv_core::capabilities::FormFactor;
+use iptv_core::capabilities::{FormFactor, Platform};
 use iptv_presentation::capabilities::Device;
 use iptv_presentation::layout::Class;
 use iptv_presentation::panels::Timeouts;
@@ -176,7 +176,10 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 /// - `guide.after_choosing`: a phone or a tablet always goes full screen
 ///   ([`stays_after_choosing`]).
 /// - `player.info_on_switch`: it applies to zapping with keys, which a
-///   phone or a tablet has only with a keyboard or a D-pad connected.
+///   phone or a tablet has only with a keyboard or a D-pad connected. An
+///   iPad keeps it: its connected input is not reported yet
+///   (`device::ipad_input_unreported`), so a keyboard there would not
+///   bring the row back.
 fn by_device(device: Device, key: &str) -> Option<Offer> {
     let input = device.input();
     let hidden = match key {
@@ -185,7 +188,12 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
             device.window == Class::Compact
         }
         "guide.fullscreen_timeout" => device.form_factor() != FormFactor::Tv,
-        "player.info_on_switch" => handheld(device.form_factor()) && !input.keyboard && !input.dpad,
+        "player.info_on_switch" => {
+            handheld(device.form_factor())
+                && device.host.platform != Platform::Ipad
+                && !input.keyboard
+                && !input.dpad
+        }
         _ => return None,
     };
     hidden.then_some(Offer::Hidden)
@@ -338,6 +346,13 @@ pub fn browse_mode() -> crate::ViewMode {
     guide_layout(choice(keys::BROWSE_MODE), crate::device::window_class())
 }
 
+/// The guide opened over full-screen video (the Guide key): its overlay
+/// layout, except in a compact window, where the guide shows its preview
+/// as [`browse_mode`] does, so it never draws over the video there.
+pub fn guide_over_video() -> crate::ViewMode {
+    guide_layout("overlay", crate::device::window_class())
+}
+
 fn guide_layout(mode: &str, window: Class) -> crate::ViewMode {
     if mode == "overlay" && window != Class::Compact {
         crate::ViewMode::Overlay
@@ -438,6 +453,15 @@ pub fn bind(ui: Ui) {
             untracked(|| ui.mode.set(layout));
         }
     });
+    // A window that turns compact under the guide's overlay (opened over
+    // full-screen video) shows it beside its preview too.
+    effect(move || {
+        if crate::device::window_class() == Class::Compact
+            && ui.mode.get_untracked() == crate::ViewMode::Overlay
+        {
+            untracked(|| ui.mode.set(crate::ViewMode::Guide));
+        }
+    });
     effect(move || {
         let s = read(ui);
         let theme = theme_of(&s);
@@ -450,7 +474,8 @@ pub fn bind(ui: Ui) {
                 ui.focus.update(|f| f.set_visible(span, &view));
             }
             if ui.panels.with(|p| p.timeouts) != timeouts {
-                ui.panels.update(|p| p.timeouts = timeouts);
+                let now = ui.now_ms();
+                ui.panels.update(|p| p.set_timeouts(timeouts, now));
             }
         });
     });
@@ -600,6 +625,12 @@ mod tests {
             assert_eq!(shown("guide.after_choosing"), !held, "{what}");
             assert_eq!(shown("player.info_on_switch"), !held || keys, "{what}");
         }
+        // An iPad's keyboard is not reported yet: it keeps the row.
+        let ipad = Device {
+            host: iptv_core::capabilities::Host::of(Platform::Ipad),
+            window: Class::Expanded,
+        };
+        assert_eq!(offer(ipad, "player.info_on_switch"), Offer::Active);
     }
 
     #[test]
