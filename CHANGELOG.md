@@ -23,19 +23,6 @@ is below 1.0, a minor release may change behavior.
   future recording, and the recorder login startup and precise wakeup settings
   are hidden. Recordings scheduled earlier stay listed, can be canceled and
   still run. Record now is unchanged.
-- Let the device decide several guide, player and display settings. Phones and
-  tablets follow the system's 12/24-hour clock and go full screen when a channel
-  is chosen from the guide overlay or channel list. On desktops and TVs, one
-  "After choosing a channel" choice replaces the two "Keep … after choosing"
-  switches. "Go full screen after" is on the Advanced page on TVs. A compact
-  window shows the guide beside its preview and hides the layout and transparency
-  rows. "Show info on a channel change" is hidden on an Android phone or tablet
-  without a keyboard or D-pad. Back in the guide always returns to the programs
-  on air first.
-- Move the panel timeouts under Playback → Accessibility, and the rewind and
-  fast-forward jumps to the Advanced page on desktops and TVs. The player's
-  panels and play bar now wait at least Android's recommended accessibility
-  timeout, and stay until hidden while a screen reader or Switch Access runs.
 - Simplify source, guide-data, search and PIN settings (#282). Each
   playlist's Streams at once is set among its actions on the playlists
   screen, with the provider's reported allowance beside it; a value set for
@@ -59,6 +46,19 @@ is below 1.0, a minor release may change behavior.
   only where keys report their release. Guide autoplay and its delay move to
   a new Advanced page on desktop and TV, and on a phone or a tablet show only
   with a keyboard or D-pad, autoplay staying off without one.
+- Let the device decide several guide, player and display settings. Phones and
+  tablets follow the system's 12/24-hour clock and go full screen when a channel
+  is chosen from the guide overlay or channel list. On desktops and TVs, one
+  "After choosing a channel" choice replaces the two "Keep … after choosing"
+  switches. "Go full screen after" is on the Advanced page on TVs. A compact
+  window shows the guide beside its preview and hides the layout and transparency
+  rows. "Show info on a channel change" is hidden on an Android phone or tablet
+  without a keyboard or D-pad. Back in the guide always returns to the programs
+  on air first.
+- Move the panel timeouts under Playback → Accessibility, and the rewind and
+  fast-forward jumps to the Advanced page on desktops and TVs. The player's
+  panels and play bar now wait at least Android's recommended accessibility
+  timeout, and stay until hidden while a screen reader or Switch Access runs.
 - Android TV no longer offers picture in picture: Home during playback returns
   to the launcher and stops the stream, and the control and the
   picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
