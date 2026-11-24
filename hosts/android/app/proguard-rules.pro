@@ -45,8 +45,7 @@
 # invokes these callbacks by name, without a Java caller.
 -keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.RecordingHost {
     static void setLanguage(java.lang.String);
-    static int schedule(long, boolean);
-    static void requestAlarmAccess();
+    static void schedule(boolean);
 }
 -keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.ExternalPlayerHost {
     static boolean open(java.lang.String);

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="recording_channel">Scheduled recordings</string>
+    <string name="recording_channel">Recordings in progress</string>
     <string name="recording_title">Patina is recording</string>
-    <string name="recording_background">Your scheduled recording runs in the background</string>
+    <string name="recording_background">Your recording continues in the background</string>
     <string name="recording_stopped_channel">Recordings stopped early</string>
     <string name="recording_stopped_title">Recording stopped</string>
     <string name="recording_stopped_tv_off">The TV was turned off. What was recorded until then is in Recordings.</string>

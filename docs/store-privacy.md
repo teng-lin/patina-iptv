@@ -13,7 +13,7 @@ the same URL in Play Console and App Store Connect.
 | Playlists, guide, artwork and playback | Imported documents and catalog data are local. Requests go to the configured hosts or content hosts for streams, guide data and artwork. Media3 receives media through an app-local relay. | Same content requests. MPVKit receives media through the app-local relay. |
 | Preferences, favorites, search history, viewing history and playback progress | Stored locally. The watch history database and search terms are not sent to providers. A provider can infer viewing from stream requests. | Same. |
 | Backups and restored data | User-requested exports are unencrypted and may contain provider credentials and history. Android uses the system's document picker. The selected storage provider may receive the file. Automatic app-data backup and device transfer are excluded. | In-app backup and restore are unavailable. Private app data is excluded from automatic system backup. |
-| Recordings | Media on device, with optional user-selected exports and Android alarm and foreground-service support for scheduled recordings. The app fetches media from the selected provider. | Media on device where supported. No Android-style background recording service. |
+| Recordings | Media on device, with optional user-selected exports and a foreground service while a recording runs. Recording starts only when the viewer chooses Record; nothing is scheduled. The app fetches media from the selected provider. | Media on device where supported. No Android-style background recording service. |
 | Diagnostics and accounts | Local app and platform logs. No automatic Patina diagnostics upload, analytics, ads or Patina account. Google may collect diagnostics under its own OS or store settings. | Same app behavior. Apple may collect diagnostics under its own OS or store settings. |
 | Bundled components | NSH, AndroidX/Media3, SQLCipher and Rust libraries. See the Android classpath and Rust SBOMs for the release graph. | NSH, MPVKit (including libmpv and FFmpeg), SQLCipher and Rust libraries. See the verified MPVKit inventory and Rust SBOM. |
 
@@ -29,7 +29,8 @@ providers, provider-selected hosts, external players and storage destinations.
   the user requested. Review the applicable categories for every track and
   feature. Google's exception for an expected user-initiated transfer applies
   to sharing and does not remove collection from the form. Review automatic
-  guide refresh and scheduled recording against that distinction. Provider
+  guide refresh and a recording that runs on in the background against that
+  distinction. Provider
   retention is unknown, so do not assume ephemeral processing. Explicit HTTP
   is supported, so the app cannot declare that all data is encrypted in
   transit. Patina has no account creation or deletion flow.

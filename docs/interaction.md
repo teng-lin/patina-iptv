@@ -272,8 +272,8 @@ visible entry point for touch and pointer users.
   the play bar ([TV controls](tv-controls.md)).
 - Choose **Channel actions** from a program menu to use that program's
   time block. The channel menu opens on Favorites, followed by the recording
-  action for the selected block. A live block can start or stop a recording.
-  An upcoming block can schedule or cancel one. The player list uses the
+  action for the selected block. A live block can start or stop a recording;
+  an upcoming block has no recording action. The player list uses the
   live block. On Linux and macOS, **Open in new window** plays the channel
   live in a separate Patina window.
 - **Reorder channel** and **Reorder channels** open a draft order in the guide
@@ -511,10 +511,10 @@ muted), as the tile's own pause.
   connection (`tests/app/tablet_journey.rs`). The background stop and
   return, and picture in picture, as before (`PlayerComponent.kt`,
   `PipHost.kt`).
-- **Now:** the Recordings screen states what limits a recording in the
-  background, from what the host reports: precise background starts
-  unavailable, a wake that could not be registered, or a device that must
-  stay awake (`iptv_presentation::capabilities::recording_notice`).
+- **Now:** Record now says, as a capture starts, what will stop it on this
+  host: turning an Android TV off under Low Power Standby, Android's
+  six-hour background limit, a metered network, or a desktop that could not
+  be kept awake (`iptv_presentation::capabilities::record_now_notices`).
 - **Now (iPad):** the app runs in either orientation and in Split View,
   Slide Over and Stage Manager windows. Another app taking the focus beside
   Patina leaves the scene visible (inactive): playback carries on, with no

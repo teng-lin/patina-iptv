@@ -354,11 +354,6 @@ pub(crate) fn process_age() -> Option<Duration> {
 
 pub(crate) fn log_library_base() {}
 
-/// Recording is unavailable here; its settings say so.
-pub(crate) fn recording_command(_key: &str) {
-    crate::settings_view::notify(crate::i18n::tr("Recording unavailable"));
-}
-
 /// An image's size from its header (NSH's own probe is native only).
 pub(crate) fn image_extent(bytes: &[u8]) -> super::Extent {
     match imagesize::blob_size(bytes) {

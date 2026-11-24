@@ -21,12 +21,21 @@ is below 1.0, a minor release may change behavior.
 - Stop offering scheduled and repeating recordings: the guide, program menu,
   program details, Record key and Recordings no longer schedule or edit a
   future recording, and the recorder login startup and precise wakeup settings
-  are hidden. Recordings scheduled earlier stay listed, can be canceled and
-  still run. Record now is unchanged.
+  are hidden. Record now is unchanged.
 - Android TV no longer offers picture in picture: Home during playback returns
   to the launcher and stops the stream, and the control and the
   picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
   it, entering on Home only from full-screen playback.
+
+### Removed
+
+- Scheduled and repeating recording: the recording editor with its Repeat and
+  padding, the guide's scheduled mark, and the Background recording
+  requirements, Start recorder at login, Remove recorder login startup, Allow
+  precise recording wakeups and Stop recorder and quit settings. Android no
+  longer asks for exact alarms or starts on boot or after an update; its
+  recording notification no longer mentions scheduling. Record now, its
+  watchdog and the Recordings library are unchanged.
 
 ### Fixed
 

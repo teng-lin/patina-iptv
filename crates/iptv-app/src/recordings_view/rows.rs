@@ -180,8 +180,8 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                     move || control(ui, size, job, Icon::Trash, "Delete recording"),
                 ))
                 // For touch and a pointer: every action of the row (Play
-                // from beginning, Cancel repeating schedule, …) that long
-                // press, right-click and Menu open. Keys hide it.
+                // from beginning, …) that long press, right-click and Menu
+                // open. Keys hide it.
                 .child(when(
                     move || !ui.keys_shown() && job().is_some(),
                     move || {

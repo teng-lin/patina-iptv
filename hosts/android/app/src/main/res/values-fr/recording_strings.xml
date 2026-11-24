@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="recording_channel">Enregistrements programmés</string>
+    <string name="recording_channel">Enregistrements en cours</string>
     <string name="recording_title">Patina enregistre</string>
-    <string name="recording_background">Votre enregistrement programmé continue en arrière-plan</string>
+    <string name="recording_background">Votre enregistrement continue en arrière-plan</string>
     <string name="recording_stopped_channel">Enregistrements arrêtés avant la fin</string>
     <string name="recording_stopped_title">Enregistrement arrêté</string>
     <string name="recording_stopped_tv_off">Le téléviseur a été éteint. Ce qui a été enregistré jusque-là se trouve dans Enregistrements.</string>

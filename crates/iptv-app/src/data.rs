@@ -80,17 +80,8 @@ pub fn start(ui: Ui) {
             .then(|| crate::external_player::handoff_target(ui))
             .flatten();
         crate::runtime().set_foreground_for_external(!background, target.as_ref());
-        if was_background.replace(background) && !background {
-            if crate::host::ANDROID {
-                crate::external_player::returned(ui);
-            }
-            // Returning from host permission settings needs a fresh OS acknowledgement.
-            let owner = crate::runtime();
-            spawn_in_app(async move {
-                if owner.resume_recording_wake().await.is_err() {
-                    log::warn!("iptv recording: wake report unavailable after resume");
-                }
-            });
+        if was_background.replace(background) && !background && crate::host::ANDROID {
+            crate::external_player::returned(ui);
         }
         if background && !crate::runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");

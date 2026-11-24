@@ -61,7 +61,7 @@ an enabled screen-reader run.
    controls must not be reachable. Close nested choosers/PIN/settings with Back
    and verify the origin channel/program rather than a row number.
 4. Set Extra large and system font scale 1.3; repeat PIN/recovery, source setup,
-   recording Save and episode selection. Reach every primary action by D-pad and
+   Record now and episode selection. Reach every primary action by D-pad and
    touch, including after scrolling up again. Repeat over synthetic black/white
    and bright streams. Observe that playback does not restart on modal changes.
 5. Record failures with synthetic labels, the exact transition and expected versus
@@ -119,7 +119,8 @@ Candidate evidence for issue #68 (2026-11-16 UTC):
 - Imported a generated two-channel M3U through the native file chooser and
   activated Add playlist/Watch through accessibility actions. Opened the PIN
   modal, checked its named Cancel button and hidden guide underlay, then
-  activated Cancel through accessibility. Opened a recording draft, moved the
+  activated Cancel through accessibility. Opened a recording draft (the
+  recording editor, removed since with scheduled recording, #273), moved the
   D-pad focus to Save, checked it was inside the scroll viewport and dismissed
   back to the guide. Source fields, submit and Back stayed within the window.
 - Inspected compressed native trees rather than the uncompressed diagnostic

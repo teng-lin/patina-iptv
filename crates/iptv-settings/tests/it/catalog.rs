@@ -430,11 +430,6 @@ const CONDITIONS: &[(&str, &str)] = &[
 /// `(key, flags, resets)` in catalog order; flags: `c` asks for
 /// confirmation, `r` requires a restart.
 const COMMANDS: &[(&str, &str, &[&str])] = &[
-    ("recordings.quit_host", "c", &[]),
-    ("recordings.background_status", "", &[]),
-    ("recordings.enable_startup", "", &[]),
-    ("recordings.disable_startup", "", &[]),
-    ("recordings.alarm_access", "", &[]),
     ("general.backup", "", &[]),
     ("general.restore", "cr", &[]),
     ("general.reset_watch_time", "c", &[]),

@@ -75,7 +75,7 @@ back to live.
 | Menu | The program and channel menu; on the groups column, the group's options | – |
 | Back | Hint card, then back to the programs on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
 | Ch+ / Ch− and Page Up / Down | A page of channels | Repeats |
-| Record | Records or schedules the focused program | – |
+| Record | Records the focused program if it is on now; on another program it says only a program on now can be recorded | – |
 | Guide | – (already the guide) | – |
 | Info | – | – |
 

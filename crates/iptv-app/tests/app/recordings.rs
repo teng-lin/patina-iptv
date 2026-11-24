@@ -172,11 +172,10 @@ fn fixture_in(
     (app, path, source, expected)
 }
 
-/// A one-off job and a series rule (with its first job), stored the way the
-/// runtime stores them, as viewers scheduled them before scheduling was
-/// retired (#273).
+/// Two jobs for later, stored the way the runtime stores them, as an
+/// earlier version scheduled them before scheduling was retired (#273).
 fn seed_scheduled(path: &std::path::Path, source: iptv_library::SourceId) {
-    use iptv_core::recording::{JobId, Repeat, Request, Rule, RuleId};
+    use iptv_core::recording::{JobId, Request};
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -202,20 +201,12 @@ fn seed_scheduled(path: &std::path::Path, source: iptv_library::SourceId) {
             now,
         )
         .unwrap();
-    // No guide program carries the series title, so the recorder adds no
-    // occurrences while the test runs (a daily rule would).
-    let series = request("Generated series recording", now + 7200);
-    let rule = Rule {
-        id: RuleId(1),
-        local_start: series.start,
-        request: series,
-        repeat: Repeat::Series,
-        enabled: true,
-        lead_seconds: 0,
-        trail_seconds: 0,
-    };
     store
-        .schedule_recording_rule_and_first(&rule, JobId(2), now)
+        .schedule_recording(
+            JobId(2),
+            &request("Generated later recording", now + 7200),
+            now,
+        )
         .unwrap();
 }
 
@@ -240,8 +231,8 @@ fn wait_for_jobs(
     }
 }
 
-/// Scheduling is retired (#273): no menu offers it, and jobs and rules
-/// scheduled before stay listed and can be canceled, but not edited.
+/// Scheduling is retired (#273): no menu offers it, and jobs scheduled
+/// before stay listed and can be canceled, but not edited.
 fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     use iptv_core::recording::Status;
     let (mut app, path, source, _) =
@@ -256,36 +247,30 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     seed_scheduled(&path, source);
     crate::browse_fixture::open_rail_item(&mut app, "Recordings");
     step(app.wait_for("id:recordings-screen"));
-    // Newest start first: the series rule's job, then the one-off job.
+    // Newest start first.
     step(app.wait_for_within("id:recording-job >> nth=1", Duration::from_secs(15)));
     assert_eq!(app.screen().count("text:/Scheduled ·/").unwrap(), 2);
     assert!(!app.shows("label:/^Edit recording ·/"));
     if idiom == Idiom::Tv {
         // Select on a scheduled job lists its actions; none edits it.
         step(app.press_key("enter"));
-        step(app.wait_for("text:Cancel repeating schedule"));
+        step(app.wait_for("text:Cancel recording"));
         assert!(!app.shows("text:Edit recording"));
-        step(app.press_key("down"));
+        assert!(!app.shows("text:Cancel repeating schedule"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("role:button[/^More options for Generated series recording/]"));
-        step(app.wait_for("text:Cancel repeating schedule"));
+        step(app.press("role:button[/^More options for Generated later recording/]"));
+        step(app.wait_for("text:Cancel recording"));
         assert!(!app.shows("text:Edit recording"));
-        step(app.press("text:Cancel repeating schedule"));
+        assert!(!app.shows("text:Cancel repeating schedule"));
+        step(app.press("text:Cancel recording"));
     }
-    wait_for_jobs(&mut app, &path, "the series rule is canceled", |jobs| {
+    wait_for_jobs(&mut app, &path, "the later job is canceled", |jobs| {
         jobs.iter()
             .any(|j| j.id.0 == 2 && j.status == Status::Canceled)
     });
-    assert!(
-        crate::isolated::open_database(&path)
-            .unwrap()
-            .recording_rules()
-            .unwrap()
-            .is_empty()
-    );
     if idiom == Idiom::Tv {
-        step(app.wait_for_gone("text:Cancel repeating schedule", Duration::from_secs(5)));
+        step(app.wait_for_gone("text:Cancel recording", Duration::from_secs(5)));
         step(app.press_key("down"));
         step(app.press_key("enter"));
         step(app.wait_for("text:Cancel recording"));

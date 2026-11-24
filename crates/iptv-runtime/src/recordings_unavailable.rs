@@ -1,14 +1,13 @@
 //! Recording, in a runtime built without the `native` feature: unavailable.
 //!
 //! Capture, the recording host and the loopback playback relay are native
-//! (`recordings.rs`, which needs `iptv-net`, OS scheduling and workers). A
-//! browser host keeps the same API: every recording command answers that
-//! recording is unavailable, the capability report grants nothing, and
-//! viewing uses the identity transport (the host's player fetches the
-//! stream itself), so a surface needs no relay and no shared input.
+//! (`recordings.rs`, which needs `iptv-net` and workers). A browser host
+//! keeps the same API: every recording command answers that recording is
+//! unavailable, and viewing uses the identity transport (the host's player
+//! fetches the stream itself), so a surface needs no relay and no shared input.
 use crate::{Error, Runtime};
 use iptv_core::playback::PlaySource;
-use iptv_core::recording::{Job, JobId, RecurrenceTiming, Repeat, Request, Rule, RuleId};
+use iptv_core::recording::{Job, JobId, Request};
 use iptv_library::SourceId;
 use std::path::{Path, PathBuf};
 
@@ -86,25 +85,6 @@ impl Runtime {
     pub async fn schedule_recording(&self, _request: Request) -> Result<JobId, Error> {
         Err(unavailable())
     }
-    /// No background host and no wake registration.
-    pub fn recording_capabilities(&self) -> iptv_core::capabilities::Recording {
-        iptv_core::capabilities::Recording {
-            background: false,
-            wake: None,
-        }
-    }
-    pub fn recording_wake_notice(&self) -> Option<&'static str> {
-        None
-    }
-    pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
-        Ok(())
-    }
-    pub async fn resume_recording_wake(&self) -> Result<(), Error> {
-        Ok(())
-    }
-    pub async fn update_recording(&self, _id: JobId, _request: Request) -> Result<(), Error> {
-        Err(unavailable())
-    }
     pub async fn stop_recording(&self, _id: JobId) -> Result<(), Error> {
         Err(unavailable())
     }
@@ -150,37 +130,6 @@ impl Runtime {
     }
     pub async fn delete_recording(&self, _id: JobId) -> Result<(), Error> {
         Err(unavailable())
-    }
-    pub async fn schedule_repeating_recording(
-        &self,
-        _request: Request,
-        _repeat: Repeat,
-    ) -> Result<JobId, Error> {
-        Err(unavailable())
-    }
-    pub async fn schedule_repeating_recording_with_timing(
-        &self,
-        _request: Request,
-        _repeat: Repeat,
-        _timing: Option<RecurrenceTiming>,
-    ) -> Result<JobId, Error> {
-        Err(unavailable())
-    }
-    pub async fn recording_rules(&self) -> Result<Vec<Rule>, Error> {
-        Ok(Vec::new())
-    }
-    pub async fn set_recording_rule_enabled(
-        &self,
-        _id: RuleId,
-        _enabled: bool,
-    ) -> Result<(), Error> {
-        Err(unavailable())
-    }
-    pub async fn stop_repeating_recording(&self, _job: JobId) -> Result<(), Error> {
-        Err(unavailable())
-    }
-    pub async fn repeating_recording_jobs(&self) -> Result<Vec<JobId>, Error> {
-        Ok(Vec::new())
     }
     /// No shared input outlives a viewer.
     pub fn retire_viewing_inputs(

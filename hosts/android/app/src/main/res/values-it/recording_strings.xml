@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="recording_channel">Registrazioni programmate</string>
+    <string name="recording_channel">Registrazioni in corso</string>
     <string name="recording_title">Patina sta registrando</string>
-    <string name="recording_background">La registrazione programmata continua in background</string>
+    <string name="recording_background">La registrazione continua in background</string>
     <string name="recording_stopped_channel">Registrazioni interrotte in anticipo</string>
     <string name="recording_stopped_title">Registrazione interrotta</string>
     <string name="recording_stopped_tv_off">La TV è stata spenta. Quanto registrato fino ad allora è in Registrazioni.</string>

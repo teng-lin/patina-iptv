@@ -133,10 +133,8 @@ impl State {
             let mut data = self.lock();
             data.stopped = false;
             data.ready = false;
-            // A new native run must acknowledge its own OS registration.
-            data.wake_reported = false;
+            // A new native run tells the host afresh.
             data.published_schedule = None;
-            data.guide_check_at = 0;
         }
         let state = self.clone();
         services.clone().spawn(async move {
@@ -162,7 +160,7 @@ impl Runtime {
         self.recordings.start(Some(&self.services()));
     }
     /// OS hosts must explicitly stop work before process shutdown/restore.
-    /// Accepted future jobs remain durable and are recovered by the next host.
+    /// A capture cut short is recovered by the next host.
     pub fn shutdown_recording_host(&self) -> bool {
         self.recordings.stop()
     }
@@ -172,7 +170,7 @@ impl Runtime {
     }
     pub fn recording_background_needed(&self) -> bool {
         let data = self.recordings.lock();
-        data.recurring || data.jobs.iter().any(|job| job.status.active())
+        data.jobs.iter().any(|job| job.status.active())
     }
 }
 /// Start without constructing a UI or a rendered player. Call off the native

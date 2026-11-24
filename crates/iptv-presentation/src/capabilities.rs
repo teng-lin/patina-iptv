@@ -2,9 +2,8 @@
 
 use crate::layout::Class;
 use crate::pip::Pip;
-use iptv_core::capabilities::{FormFactor, Host, Input, Recording};
+use iptv_core::capabilities::{FormFactor, Host, Input};
 use iptv_core::message::key;
-use iptv_core::recording::WakeCapability;
 
 /// The signals features are gated by, as they are now: the device's form
 /// factor and connected input (`host`, which decide which capabilities and
@@ -211,47 +210,10 @@ pub fn record_now_notices(host: Host, limits: CaptureLimits) -> Vec<&'static str
     notices
 }
 
-/// Message ID for the last recording wake report.
-pub fn recording_notice(recording: Recording) -> Option<&'static str> {
-    match recording.wake {
-        Some(wake @ (WakeCapability::Inexact | WakeCapability::Denied)) => wake.notice(),
-        Some(WakeCapability::AwakeOnly) if recording.background => Some(key(concat!(
-            "Closing the window keeps accepted recordings running. ",
-            "Enable start at login to recover after restart. ",
-            "Linux and macOS cannot wake a sleeping or powered-off computer; leave it awake. ",
-            "Quit stops the recorder.",
-        ))),
-        Some(WakeCapability::AwakeOnly) => Some(key(
-            "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups.",
-        )),
-        None | Some(WakeCapability::Exact) => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use iptv_core::capabilities::Platform;
-
-    #[test]
-    fn recording_wake_notices_distinguish_exact_from_limited_starts() {
-        for wake in [
-            WakeCapability::Exact,
-            WakeCapability::Inexact,
-            WakeCapability::Denied,
-            WakeCapability::AwakeOnly,
-        ] {
-            let state = Recording {
-                background: true,
-                wake: Some(wake),
-            };
-            assert_eq!(
-                recording_notice(state).is_some(),
-                wake != WakeCapability::Exact
-            );
-        }
-        assert!(recording_notice(Recording::default()).is_none());
-    }
 
     #[test]
     fn record_now_and_the_library_follow_the_host_table() {

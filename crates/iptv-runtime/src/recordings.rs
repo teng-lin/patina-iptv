@@ -4,7 +4,6 @@ mod completion;
 pub mod host;
 #[cfg(test)]
 mod recovery_tests;
-mod rules;
 mod shared;
 #[cfg(test)]
 mod shared_tests;
@@ -75,10 +74,6 @@ enum Account {
     // M3U cannot establish account equivalence. Conservatively share a budget.
     Unknown,
 }
-fn stale_guide_time() -> iptv_store_sqlite::StoreError {
-    iptv_store_sqlite::StoreError::Unavailable("Guide time changed. Choose the program again.")
-}
-
 fn account(config: &SourceConfig) -> Account {
     match config {
         SourceConfig::Xtream(c) => Account::Xtream(
@@ -137,46 +132,22 @@ struct Data {
     jobs: Vec<Job>,
     finalization_errors: std::collections::HashSet<JobId>,
     unshareable: shared::Unshareable,
-    wake_capability: iptv_core::recording::WakeCapability,
-    wake_reported: bool,
-    published_schedule: Option<(i64, bool)>,
+    /// What the host was last told ([`State::publish_schedule`]).
+    published_schedule: Option<bool>,
     intent_revision: u64,
-    recurring: bool,
-    guide_check_at: i64,
     ready: bool,
     stopped: bool,
     completed_run: u64,
 }
 impl Data {
-    fn schedule(&self, at: i64) -> (i64, bool) {
-        let next = self
-            .jobs
-            .iter()
-            .filter(|job| job.status == Status::Scheduled)
-            .map(|job| job.request.start)
-            .min()
-            .unwrap_or(0);
-        let next = if self.recurring {
-            // Before the first guide poll, request an immediate wake rather
-            // than postpone a series check by another thirty minutes.
-            let guides = if self.guide_check_at > 0 {
-                self.guide_check_at
-            } else {
-                at
-            };
-            if next > 0 { next.min(guides) } else { guides }
-        } else {
-            next
-        };
-        (
-            next,
-            !self.active.is_empty()
-                || self.jobs.iter().any(|job| {
-                    job.status == Status::Scheduled
-                        && job.request.start <= at
-                        && job.request.end > at
-                }),
-        )
+    /// Whether a capture is running or due at `at`: what the host keeps
+    /// running for (Android's foreground service and watchdog, a desktop's
+    /// idle-sleep hold).
+    fn schedule(&self, at: i64) -> bool {
+        !self.active.is_empty()
+            || self.jobs.iter().any(|job| {
+                job.status == Status::Scheduled && job.request.start <= at && job.request.end > at
+            })
     }
     fn lease(&self, source: i64) -> Lease {
         Lease {
@@ -323,8 +294,8 @@ impl State {
         execution.started && execution.shutdown.is_canceled() && !self.lock().stopped
     }
     fn publish_schedule(&self, services: &Services, revision: u64, force: bool) -> bool {
-        // The common poll must not wait for an unchanged, slow OS permission
-        // refresh before it can start due captures.
+        // The common poll must not wait for an unchanged, slow host call
+        // before it can start due captures.
         if !force {
             let data = self.lock();
             if data.intent_revision == revision
@@ -334,7 +305,7 @@ impl State {
             }
         }
         // UI acknowledgements and native polls publish in order. A late poll
-        // cannot replace the alarm belonging to a newly accepted edit.
+        // cannot replace what a newly accepted capture asked for.
         let _publication = self
             .publication
             .lock()
@@ -349,18 +320,14 @@ impl State {
                 execution.started && execution.shutdown.is_canceled(),
             )
         };
-        let (next, active) = {
+        let active = {
             let data = self.lock();
             if data.intent_revision != revision {
                 return false;
             }
-            // A cold/restarted host first reconciles durable jobs and rules.
-            // An early foreground callback must leave its saved alarm intact.
-            // Its first successful poll will publish after loading the snapshot.
+            // A cold/restarted host first reconciles durable jobs. Its first
+            // successful poll publishes after loading the snapshot.
             if !data.ready || stopping {
-                return true;
-            }
-            if data.recurring && data.guide_check_at <= now() {
                 return true;
             }
             let schedule = data.schedule(now());
@@ -369,16 +336,14 @@ impl State {
             }
             schedule
         };
-        let capability = (services.ports().recording_schedule)(next, active);
+        (services.ports().recording_schedule)(active);
         let execution = self.execution();
         if !services.is_current() || execution.generation != generation {
             return false;
         }
         let mut data = self.lock();
         if data.intent_revision == revision {
-            data.wake_capability = capability;
-            data.wake_reported = true;
-            data.published_schedule = Some((next, active));
+            data.published_schedule = Some(active);
         }
         true
     }
@@ -617,13 +582,14 @@ impl Runtime {
         })
     }
 
+    /// Accepts a recording of `request`, which the recorder starts at its
+    /// start time (Record now asks for now). The app offers nothing that
+    /// starts later: scheduled recording is retired.
     pub async fn schedule_recording(&self, request: Request) -> Result<JobId, Error> {
         request.validate(now()).map_err(Error::unavailable)?;
         let admission = self.recording_admission(&request).await?;
         if self.recordings.is_stopping() || !self.services().is_current() {
-            return Err(Error::unavailable(
-                "Restart Patina before scheduling a recording",
-            ));
+            return Err(Error::unavailable("Recording service unavailable"));
         }
         self.sync_recording_contexts();
         self.start_recordings();
@@ -695,42 +661,13 @@ impl Runtime {
                 data.jobs.retain(|existing| existing.id != id);
                 data.jobs.push(job);
             }
-            self.refresh_recording_wake().await?;
+            self.publish_recording_schedule().await?;
         }
         Ok(())
     }
-    /// Current OS registration, not a promise about content or provider capacity.
-    pub fn recording_capabilities(&self) -> iptv_core::capabilities::Recording {
-        let services = self.services();
-        let background = services.ports().background_recordings;
-        let data = self.recordings.lock();
-        iptv_core::capabilities::Recording {
-            background,
-            wake: (services.is_current() && data.wake_reported && !data.stopped)
-                .then_some(data.wake_capability),
-        }
-    }
-    pub fn recording_wake_notice(&self) -> Option<&'static str> {
-        let data = self.recordings.lock();
-        let active = data.recurring || data.jobs.iter().any(|job| job.status.active());
-        drop(data);
-        active
-            .then(|| {
-                self.recording_capabilities()
-                    .wake
-                    .and_then(|wake| wake.notice())
-            })
-            .flatten()
-    }
-    pub async fn refresh_recording_wake(&self) -> Result<(), Error> {
-        self.refresh_recording_wake_with_notice(true).await
-    }
-    /// Recheck permission on foreground return; the recording screen keeps the
-    /// current explanation visible without repeating a toast on every return.
-    pub async fn resume_recording_wake(&self) -> Result<(), Error> {
-        self.refresh_recording_wake_with_notice(false).await
-    }
-    async fn refresh_recording_wake_with_notice(&self, notify: bool) -> Result<(), Error> {
+    /// Tells the host at once whether a capture is running or due, so it
+    /// keeps running (or lets go) for it.
+    async fn publish_recording_schedule(&self) -> Result<(), Error> {
         let services = self.services();
         loop {
             if !services.is_current() {
@@ -744,32 +681,9 @@ impl Runtime {
                 .await
                 .map_err(|_| Error::unavailable("Recording service unavailable"))?;
             if published && self.recordings.lock().intent_revision == revision {
-                break;
+                return Ok(());
             }
         }
-        if notify && let Some(notice) = self.recording_wake_notice() {
-            self.emit(crate::RuntimeEvent::Notify(notice));
-        }
-        Ok(())
-    }
-    /// Cancels a future job, or requests that an active recording stop and retain media.
-    pub async fn update_recording(&self, id: JobId, request: Request) -> Result<(), Error> {
-        let admission = self.recording_admission(&request).await?;
-        if !self
-            .services()
-            .call(move |store| {
-                store.update_recording_checked(id, &request, now(), |store| {
-                    admission.authorize(store)
-                })
-            })
-            .await?
-        {
-            return Err(Error::unavailable(
-                "This recording has already started or was canceled",
-            ));
-        }
-        self.acknowledge_recording(id).await?;
-        Ok(())
     }
 
     pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
@@ -1245,7 +1159,6 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
         retry = (retry * 2).min(Duration::from_secs(5));
     }
     let mut tasks = tokio::task::JoinSet::new();
-    let mut rules_at = 0;
     loop {
         while tasks.try_join_next().is_some() {}
         state.retire_unused().await;
@@ -1264,46 +1177,6 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
             tokio::time::sleep(Duration::from_millis(100)).await;
             continue;
         };
-        if now() >= state.lock().guide_check_at {
-            if let Ok(rules) = services.read(|store| store.recording_rules()).await {
-                let sources: std::collections::BTreeSet<_> = rules
-                    .into_iter()
-                    .filter(|rule| {
-                        rule.enabled && rule.repeat == iptv_core::recording::Repeat::Series
-                    })
-                    .map(|rule| SourceId(rule.request.source))
-                    .collect();
-                for source in sources {
-                    let work = services.clone();
-                    let cancel = shutdown.clone();
-                    services.submit(false, move || {
-                        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-                        work.block_on(crate::imports::guide_pipeline(
-                            &work,
-                            source,
-                            &tx,
-                            crate::imports::GuideRead::Check,
-                            &cancel,
-                        ));
-                    });
-                }
-            }
-            state.lock().guide_check_at = now().saturating_add(30 * 60);
-        }
-        if now() >= rules_at {
-            let Ok(rules) = services.read(|store| store.recording_rules()).await else {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            };
-            {
-                let mut data = state.lock();
-                if data.intent_revision == revision {
-                    data.recurring = rules.iter().any(|rule| rule.enabled);
-                }
-            }
-            let _ = rules::materialize(&services).await;
-            rules_at = now().saturating_add(30);
-        }
         {
             let mut data = state.lock();
             if data.intent_revision != revision {

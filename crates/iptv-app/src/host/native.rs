@@ -40,7 +40,6 @@ pub(crate) use clock::{offset_minutes, reload_time_zone};
 pub(crate) use platform_data::host_handle;
 pub(crate) use platform_data::{flush_on_host_stop, initialize, resolve_data_dir};
 pub(crate) use process::{log_library_base, process_age};
-pub(crate) use recording_host::command as recording_command;
 
 /// Whether a capture runs while the desktop could not be kept awake
 /// (`keep_awake.rs`).

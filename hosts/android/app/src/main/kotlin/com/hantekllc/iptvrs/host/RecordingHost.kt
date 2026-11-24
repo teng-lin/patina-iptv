@@ -1,29 +1,25 @@
 package com.hantekllc.iptvrs.host
 
-import android.app.Activity
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import android.provider.Settings
 
-/** Scheduling metadata and interface language cross JNI; credentials stay in Rust. */
+/** Whether a capture runs, and the interface language, cross JNI;
+ * credentials stay in Rust. */
 object RecordingHost {
     @Volatile private var desiredActive = false
     private lateinit var context: Context
-    private var activity: java.lang.ref.WeakReference<Activity>? = null
 
     @JvmStatic fun setLanguage(tag: String) {
         main.post {
@@ -34,10 +30,6 @@ object RecordingHost {
                 RecordingService.refresh()
             }
         }
-    }
-
-    @JvmStatic fun requestAlarmAccess() {
-        main.post { activity?.get()?.let { requestExactAlarms(it) } }
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -64,7 +56,6 @@ object RecordingHost {
     @JvmStatic external fun resumeViewing(path: String): Boolean
 
     fun attach(context: Context) {
-        if (context is Activity) activity = java.lang.ref.WeakReference(context)
         this.context = context.applicationContext
         retireSchedules(this.context)
         initialize()
@@ -105,75 +96,49 @@ object RecordingHost {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-    /** Exact wakeups require the user's Special app access approval on Android 12+. */
-    fun exactAlarmsAllowed(context: Context): Boolean =
-        Build.VERSION.SDK_INT < 31 ||
-            context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
-
-    fun requestExactAlarms(activity: Activity) {
-        if (Build.VERSION.SDK_INT >= 31 && !exactAlarmsAllowed(activity)) {
-            val packageUri = Uri.parse("package:${activity.packageName}")
-            val request = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, packageUri)
-            try {
-                activity.startActivity(request)
-            } catch (_: ActivityNotFoundException) {
-                activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri))
-            }
-        }
-    }
-
-    /** Called on Rust's publication worker. Durable OS registration completes
-     * before this returns; the UI engine never waits on Binder or disk itself.
-     * Codes: 1 exact, 2 inexact (permission missing), 3 registration denied. */
+    /** Called on Rust's publication worker whenever whether a capture is
+     * running or due changes; the UI engine never waits on Binder or disk
+     * itself. While one is, the foreground service runs and a 120-second
+     * watchdog alarm restarts it if Android killed it (#275); otherwise the
+     * alarm is disarmed and the service stops. */
     @JvmStatic @Synchronized
-    fun schedule(
-        next: Long,
-        active: Boolean,
-    ): Int {
+    fun schedule(active: Boolean) {
         desiredActive = active
-        return try {
+        try {
             val preferences = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE)
-            val wake =
-                if (active) {
-                    val watchdog = System.currentTimeMillis() / 1000 + 120
-                    if (next > 0) minOf(next, watchdog) else watchdog
-                } else {
-                    next
-                }
+            val wake = if (active) System.currentTimeMillis() / 1000 + 120 else 0
             // This version now owns the alarm: arming replaces any wake an
             // earlier version left, and a retirement retried later must not
             // cancel this one.
-            if (!preferences
-                    .edit()
-                    .putLong("next", wake)
-                    .putBoolean(RETIRED, true)
-                    .commit()
-            ) {
-                return 3
-            }
-            val capability = arm(context, wake)
+            preferences
+                .edit()
+                .putLong("next", wake)
+                .putBoolean(RETIRED, true)
+                .commit()
+            arm(context, wake)
             if (active) {
-                if (!startService(context)) return 3
+                startService(context)
             } else {
                 main.post {
                     // A later accepted record-now may overtake this queued idle.
                     if (!desiredActive) RecordingService.idle(context)
                 }
             }
-            capability
         } catch (_: RuntimeException) {
-            3
         }
     }
 
+    /** Arms the watchdog alarm at `next` (UTC seconds), or disarms it for 0.
+     * Exact where Android allows it without a permission (before Android
+     * 12), otherwise inexact: Patina no longer asks for exact alarms. */
     fun arm(
         context: Context,
         next: Long,
-    ): Int =
+    ) {
         try {
             val alarms = context.getSystemService(AlarmManager::class.java)
             val pending = alarmIntent(context)
-            val exact = exactAlarmsAllowed(context)
+            val exact = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
             alarms.cancel(pending)
             if (next > 0) {
                 val at = maxOf(Math.multiplyExact(next, 1000L), System.currentTimeMillis() + 1000)
@@ -183,17 +148,8 @@ object RecordingHost {
                     alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
                 }
             }
-            if (exact) 1 else 2
         } catch (_: RuntimeException) {
-            3
         }
-
-    /** Rearms the stored wake after a reboot or update. Nothing is scheduled
-     * any more: a stored time is the watchdog of a Record now capture, and
-     * without one there is nothing to start. */
-    fun restore(context: Context) {
-        val next = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE).getLong("next", 0)
-        if (next > 0) arm(context, next)
     }
 
     fun startService(context: Context): Boolean =
@@ -221,14 +177,8 @@ class RecordingAlarm : BroadcastReceiver() {
             RecordingHost.retireSchedules(context)
             return
         }
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED ||
-            intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
-        ) {
-            RecordingHost.restore(context)
-        } else {
-            RecordingHost.startService(context)
-        }
+        // The Record now watchdog: restart the capture's service.
+        RecordingHost.startService(context)
     }
 }
 

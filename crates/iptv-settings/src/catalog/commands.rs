@@ -68,37 +68,6 @@ use Section as S;
 
 pub static COMMANDS: &[Command] = &[
     Command::new(
-        S::Recordings,
-        "",
-        "recordings.quit_host",
-        key("Stop background recording and quit; pending schedules remain saved."),
-    )
-    .confirm(),
-    Command::new(
-        S::Recordings,
-        "",
-        "recordings.background_status",
-        key("Background execution and wake capabilities."),
-    ),
-    Command::new(
-        S::Recordings,
-        "",
-        "recordings.enable_startup",
-        key("Start the recording host at login."),
-    ),
-    Command::new(
-        S::Recordings,
-        "",
-        "recordings.disable_startup",
-        key("Remove the recording host login hook."),
-    ),
-    Command::new(
-        S::Recordings,
-        "",
-        "recordings.alarm_access",
-        key("Allow precise recording wakeups in Android settings."),
-    ),
-    Command::new(
         S::General,
         "privacy",
         "general.backup",

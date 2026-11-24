@@ -71,8 +71,6 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         RecordNow => tr("Record now"),
         CancelRecording => tr("Cancel recording"),
         StopRecording => tr("Stop recording"),
-        ScheduleRecording => tr("Schedule recording"),
-        CustomRecording => tr("Schedule a recording…"),
         Description => tr("Details"),
         ToggleFavorite if favorite => tr("Remove from favorites"),
         ToggleFavorite => tr("Add to favorites"),
@@ -165,9 +163,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             !matches!(
                 row,
                 Row::Action {
-                    item: MenuItem::Record
-                        | MenuItem::ScheduleRecording
-                        | MenuItem::CustomRecording,
+                    item: MenuItem::Record,
                     ..
                 }
             )

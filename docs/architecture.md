@@ -17,7 +17,7 @@ lists each difference and where the piece goes.
 | Term | Meaning |
 | --- | --- |
 | Domain | Facts and rules about the content and the viewer's data. They hold for every entry point: a remote, a touch, the bridge, a background refresh, a scheduled recording. |
-| Operation | Work that achieves a goal: import a playlist, schedule a recording, resolve a stream. It is the same whoever asks, and it checks its own request. |
+| Operation | Work that achieves a goal: import a playlist, start a recording, resolve a stream. It is the same whoever asks, and it checks its own request. |
 | Operation identity | The value that ties a reply to its request. The Application issues it, and it stays unique while the runtime lives. |
 | Host capability | A fact a host reports about itself, as a value: its platform, its decoder slots, whether it can wake to record. The Domain's rules read it. |
 | Message id | A message named by its English source text, as data, marked with `key`. Only the presentation translates or formats one. |

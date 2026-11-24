@@ -65,8 +65,9 @@ custom groups and history.
   and continue to the next episode.
 - **Parental controls:** protect channels, groups, movies and series with a PIN,
   timed or session unlocks, protected settings and a one-time recovery code.
-- **Recording:** record live TV, schedule once, daily, weekly or by program
-  title, and keep captures running independently of the player window. Retained
+- **Recording:** record the live channel you are watching, from the play bar
+  or the guide, and keep the capture running independently of the player
+  window. Patina does not schedule future or repeating recordings. Retained
   recordings support pause, seeking, resume and playback from the beginning.
   MPEG-TS and unencrypted MPEG-TS HLS use private local storage outside backups;
   [background execution depends on the host](#recordings-on-tv-tablet-and-desktop).
@@ -371,42 +372,34 @@ On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
 In the guide, long-press a current program (right-click on desktop) to open
 its menu and choose **Record**, without starting or changing playback.
-Only a program on now can be recorded. Patina no longer schedules future
-programs, repeats recordings or offers the manual recording editor. Recordings
-and repeating schedules created with an earlier version stay in Recordings,
-still run, and can be canceled there.
-The navigation rail's **Recordings** entry manages current, scheduled and
-finished recordings. Tap a finished recording to play or resume it. Back returns
+Only a program on now can be recorded: Patina does not schedule future
+programs, repeat recordings or wake the device to record.
+The navigation rail's **Recordings** entry manages current and finished
+recordings. Tap a finished recording to play or resume it. Back returns
 to Recordings while playback continues; the playing row or **Return to playback**
 returns to the player without reopening the stream. The guide's video preview
 also returns to saved playback.
 
-The row's cancel control cancels a scheduled recording, and its stop control
-retains captured media. The trash icon on the right asks for confirmation.
+The row's stop control ends a recording and retains captured media; a
+recording that has not started yet can be canceled. The trash icon on the right asks for confirmation.
 Canceling leaves playback and the file intact. Confirming deletion automatically
 stops that file if it is playing, then deletes it; other playback is unaffected.
 Remote users can open secondary actions with Menu. A dot marks recording
 programs in the guide.
-
-Daily and weekly schedules created earlier keep their local clock time across
-daylight-saving changes; series rules match the program title on the selected
-channel as guide data arrives. Cancel repeating schedule stops future
-occurrences without deleting finished recordings. If multiple repeating
-schedules share the selected recording, this cancels all of them.
 
 On Android, capture runs in a foreground service with a notification. Android
 force stop prevents execution until Patina is opened again, and Android 15 can
 limit background capture to six hours in a 24-hour period. Device, network and
 storage availability still apply.
 
-On desktop, closing the window keeps the process running while a recording
-runs; **Quit Patina** stops the recorder. The computer has to stay awake.
+On desktop, Patina keeps running while a recording runs and holds the computer
+from idle sleep; quitting stops the recording and keeps what was recorded.
 iPad background recording is not supported.
 
-Scheduled recording is being removed. Upgrading from a version that had it
-cancels its pending jobs and disables its repeating rules before any recorder
-starts, keeps their recordings, and tells you once: Recordings lists what was
-canceled until you close it. A capture the upgrade interrupted is kept as a
+Earlier versions could schedule recordings. Upgrading from one of them cancels
+its pending jobs and disables its repeating rules before any recorder starts,
+keeps their recordings, and tells you once: Recordings lists what was canceled
+until you close it. A capture the upgrade interrupted is kept as a
 partial recording. The first launch also removes what earlier versions
 registered: the Linux autostart entry, the macOS LaunchAgent, the Windows
 "Patina Recorder" task with its wake timer, and Android's pending recording
@@ -414,8 +407,8 @@ alarm. A login launch from one of them removes them and exits.
 
 Finished and partial recordings offer resume and playback from the beginning;
 the player uses its normal pause, rewind, fast-forward and seek bar controls.
-Interrupted jobs retain captured media and recover the remaining window when
-possible; gaps and missed windows are reported. Reminders and network recording
+Interrupted recordings retain captured media and recover the remaining time
+when possible; gaps are reported. Reminders and network recording
 destinations remain outside this feature. Provider accounts need enough
 connections for watching plus recording. **Settings → Other → Streams at once**
 uses the reported provider allowance automatically, or one connection when the
@@ -428,8 +421,9 @@ Media is stored beside the catalog directory, in its `-recordings` sibling,
 with a limit of 8 GiB per recording, four simultaneous recorders and a
 conservative 32 GiB media budget. Recordings are not encrypted with the
 catalog and are excluded from portable and OS backups. Catalog restore drops
-the backup's recording schedules and history and keeps this device's
-recordings, so their media in that directory stays playable.
+the backup's recording jobs and history (including schedules an earlier
+version kept) and keeps this device's recordings, so their media in that
+directory stays playable.
 
 ## Keyboard
 
@@ -462,7 +456,7 @@ recordings, so their media in that directory stays playable.
 | `crates/iptv-search` | Channel and program search |
 | `crates/iptv-library` | Channel organization, custom groups, ordering, favorites and history |
 | `crates/iptv-player-mpv` | libmpv playback adapter for desktop and iPad |
-| `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and scheduler |
+| `crates/iptv-runtime` | Headless application runtime, lanes, background tasks and recorder |
 | `crates/iptv-net` | HTTP adapter (reqwest + rustls) |
 | `crates/iptv-store-sqlite` | SQLite store: encrypted natively, in-memory chunk files in the browser |
 | `crates/iptv-sqlcipher-init` | Native SQLCipher initialization barrier |
