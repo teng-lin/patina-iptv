@@ -1,8 +1,7 @@
 //! The favorites editor for one list: its channels with a star each.
-//! OK toggles the focused channel, Left clears the whole list, Right sets
-//! the whole list (how the reference UX's editor was observed to behave);
-//! changes apply immediately. Channels are catalog indices (the list's
-//! rows when it opened); the shell keeps favorites by channel key.
+//! OK toggles the focused channel and Right sets the whole list.
+//! Bulk removal requires an explicit action and confirmation. Channels are
+//! catalog indices (the list's rows when it opened); the shell keeps favorites by channel key.
 
 use std::collections::BTreeSet;
 
@@ -14,6 +13,10 @@ pub struct FavoritesEditor {
     pub channels: Vec<usize>,
     /// Focused row.
     pub focus: usize,
+    /// Toolbar button, or None while a channel row has focus.
+    pub control: Option<usize>,
+    /// Pending bulk removal; false focuses Cancel, true focuses Remove all.
+    pub clear_confirmation: Option<bool>,
 }
 
 impl FavoritesEditor {
@@ -22,6 +25,8 @@ impl FavoritesEditor {
             group,
             channels,
             focus: 0,
+            control: None,
+            clear_confirmation: None,
         }
     }
 
@@ -57,8 +62,15 @@ impl FavoritesEditor {
         }
     }
 
-    /// Left: no channel of this list stays a favorite.
-    pub fn clear_group(&self, favorites: &mut BTreeSet<usize>) {
+    pub fn request_clear(&mut self) {
+        self.clear_confirmation = Some(false);
+    }
+
+    /// Resolve a pending request. Only explicit confirmation removes favorites.
+    pub fn resolve_clear(&mut self, favorites: &mut BTreeSet<usize>, confirmed: bool) {
+        if self.clear_confirmation.take().is_none() || !confirmed {
+            return;
+        }
         for ch in &self.channels {
             favorites.remove(ch);
         }
@@ -94,8 +106,8 @@ mod tests {
     }
 
     #[test]
-    fn left_and_right_clear_and_set_only_this_group() {
-        let e = FavoritesEditor::new(1, (10..15).collect());
+    fn confirmed_removal_and_add_all_affect_only_this_group() {
+        let mut e = FavoritesEditor::new(1, (10..15).collect());
         let mut fav = BTreeSet::from([3, 11, 40]);
         e.set_group(&mut fav);
         assert_eq!(e.starred(&fav), 5);
@@ -103,14 +115,28 @@ mod tests {
             fav.contains(&3) && fav.contains(&40),
             "other groups untouched"
         );
-        e.clear_group(&mut fav);
+        e.request_clear();
+        e.resolve_clear(&mut fav, true);
         assert_eq!(fav, BTreeSet::from([3, 40]));
-        e.clear_group(&mut fav);
+        e.request_clear();
+        e.resolve_clear(&mut fav, true);
         assert_eq!(
             fav,
             BTreeSet::from([3, 40]),
             "clearing an empty group is harmless"
         );
+    }
+
+    #[test]
+    fn cancelling_or_missing_confirmation_preserves_favorites() {
+        let mut e = FavoritesEditor::new(1, vec![10, 11]);
+        let mut fav = BTreeSet::from([3, 10, 11]);
+        e.resolve_clear(&mut fav, true);
+        e.request_clear();
+        assert_eq!(e.clear_confirmation, Some(false), "Cancel is focused first");
+        e.resolve_clear(&mut fav, false);
+        assert_eq!(fav, BTreeSet::from([3, 10, 11]));
+        assert_eq!(e.clear_confirmation, None);
     }
 
     #[test]
@@ -122,7 +148,8 @@ mod tests {
         e.toggle(&mut fav);
         assert_eq!(fav, BTreeSet::from([3, 17]));
         assert_eq!(e.starred(&fav), 2);
-        e.clear_group(&mut fav);
+        e.request_clear();
+        e.resolve_clear(&mut fav, true);
         assert!(fav.is_empty());
     }
 

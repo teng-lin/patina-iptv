@@ -1253,7 +1253,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             _ if top == Some(Overlay::Settings) => settings_view::back(ui),
             _ if top == Some(Overlay::GuideAssign) => guide_assign_view::back(ui),
             _ if top == Some(Overlay::FavoritesEditor) => {
-                fav_editor::close(ui);
+                fav_editor::key(ui, iptv_nav::Action::Back);
                 true
             }
             _ if top == Some(Overlay::Chooser) => {

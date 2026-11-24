@@ -344,8 +344,8 @@ fn guide_keys(app: &mut Headless) {
     wait_focused(app, "Morning Talk");
 
     // The menu's Manage favorites: the editor takes the keys. OK adds the
-    // focused channel, OK again removes it; Left (remove all) with none
-    // changes nothing; Right adds all, Left removes them; Back closes.
+    // focused channel, OK again removes it; Left preserves favorites;
+    // Right adds all, and explicit confirmed removal clears them; Back closes.
     const STAR: &str = "text:★ Test Channel Four";
     step(app.press_key("m"));
     step(app.wait_for("text:Manage favorites…"));
@@ -360,6 +360,14 @@ fn guide_keys(app: &mut Headless) {
     step(app.press_key("right"));
     step(app.wait_for(STAR));
     step(app.press_key("left"));
+    step(app.wait_for(STAR));
+    step(app.press_key("up"));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    gone(app, "id:favorites-clear-confirmation");
     gone(app, STAR);
     step(app.press_key("backspace"));
     wait_focused(app, "Morning Talk");

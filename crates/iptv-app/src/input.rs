@@ -852,15 +852,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::FavoritesEditor) {
-        match action {
-            Action::MoveUp => crate::fav_editor::move_focus(ui, -1),
-            Action::MoveDown => crate::fav_editor::move_focus(ui, 1),
-            Action::Select => crate::fav_editor::toggle(ui),
-            Action::MoveLeft => crate::fav_editor::clear_group(ui),
-            Action::MoveRight => crate::fav_editor::set_group(ui),
-            Action::Back => crate::fav_editor::close(ui),
-            _ => {}
-        }
+        crate::fav_editor::key(ui, action);
         return;
     }
     if top == Some(Overlay::Chooser) {
