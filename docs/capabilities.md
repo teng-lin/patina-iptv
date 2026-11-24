@@ -44,7 +44,8 @@ alone.
 
 Settings the signals decide (#281, `settings::offer`). The rewind and
 fast-forward jumps (`catchup.forward_step`, `catchup.rewind_step`) are on the
-Advanced page on every device:
+Advanced page on a desktop or a TV; a phone or a tablet, which has no Advanced
+page, keeps them with the replay jumps:
 
 | Setting | Phone, tablet | Desktop | TV | Compact window |
 | --- | --- | --- | --- | --- |

@@ -208,7 +208,8 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 ///   phone, a tablet or a desktop never goes full screen by itself
 ///   ([`fullscreen_timeout_ms`]).
 /// - `catchup.forward_step`, `catchup.rewind_step`: on the Advanced page
-///   on every device.
+///   on a desktop or a TV. A phone or a tablet has no Advanced page
+///   (#280): they stay with the replay jumps there.
 /// - `guide.after_choosing`: a phone or a tablet always goes full screen
 ///   ([`stays_after_choosing`]).
 /// - `player.info_on_switch`: it applies to zapping with keys, which a
@@ -220,7 +221,9 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
     let input = device.input();
     // Advanced settings: on the Advanced page (#281).
     match key {
-        "catchup.forward_step" | "catchup.rewind_step" => return Some(Offer::Advanced),
+        "catchup.forward_step" | "catchup.rewind_step" if !handheld(device.form_factor()) => {
+            return Some(Offer::Advanced);
+        }
         "guide.fullscreen_timeout" if device.form_factor() == FormFactor::Tv => {
             return Some(Offer::Advanced);
         }
@@ -671,9 +674,14 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Active, "{key}");
             }
-            // On the Advanced page on every device (#281).
+            // On the Advanced page on a desktop or a TV; a phone or a
+            // tablet has none (#281, #280).
+            let steps = match device.form_factor() {
+                FormFactor::Phone | FormFactor::Tablet => Offer::Active,
+                FormFactor::Desktop | FormFactor::Tv => Offer::Advanced,
+            };
             for key in ["catchup.forward_step", "catchup.rewind_step"] {
-                assert_eq!(offer(key), Offer::Advanced, "{key}");
+                assert_eq!(offer(key), steps, "{key}");
             }
         }
         offer_pip(false);

@@ -32,7 +32,7 @@ is below 1.0, a minor release may change behavior.
   change" is hidden on an Android phone or tablet without a keyboard or D-pad.
   Back in the guide always returns to the programs on air first.
 - Move the panel timeouts under Playback → Accessibility, and the rewind and
-  fast-forward jumps to the Advanced page. The player's panels and play bar now wait
+  fast-forward jumps to the Advanced page on desktops and TVs. The player's panels and play bar now wait
   at least Android's recommended accessibility timeout, and stay until hidden
   while a screen reader or Switch Access runs.
 - Settings show Keyboard or Remote control only while there are keys to set
