@@ -1,19 +1,16 @@
 //! One recording workflow for remote, touch and pointer input. State is portable;
 //! the shell renders it and sends named runtime commands.
-use crate::i18n::trf;
 use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
 use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
 use iptv_presentation::capabilities::recording_notice;
 use iptv_presentation::menu::{MenuItem, Origin};
-use iptv_presentation::recording::{Draft, status_label};
+use iptv_presentation::recording::status_label;
 use nsh_core::prelude::*;
 use std::time::Duration;
 
-mod draft;
 mod rows;
 mod style;
-use draft::draft_view;
 
 pub fn is_open(ui: Ui) -> bool {
     ui.recordings_open.get()
@@ -24,7 +21,6 @@ pub fn open(ui: Ui) {
         s.error = None;
         s.actions = false;
         s.confirm_delete = false;
-        s.draft = None;
     });
     reload(ui);
 }
@@ -37,9 +33,6 @@ pub fn close(ui: Ui) {
     });
 }
 pub fn back(ui: Ui) -> bool {
-    if draft::cancel_entry(ui) {
-        return true;
-    }
     ui.recordings.update(|s| {
         if s.busy {
             return;
@@ -47,7 +40,6 @@ pub fn back(ui: Ui) -> bool {
         s.error = None;
         if s.confirm_delete {
             s.confirm_delete = false;
-        } else if s.draft.take().is_some() {
         } else if s.actions {
             s.actions = false;
         } else {
@@ -353,11 +345,8 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
     if request.end <= now {
         request.end = now + 3600;
     }
-    let mut draft = Draft::new(request);
-    draft.immediate = true;
-    let target =
-        iptv_core::parental::Target::live(draft.request.source, draft.request.channel.clone());
-    crate::parental_view::request(ui, target, move || save_allowed(ui, draft));
+    let target = iptv_core::parental::Target::live(request.source, request.channel.clone());
+    crate::parental_view::request(ui, target, move || start_request(ui, request));
 }
 fn request(origin: Origin) -> Option<Request> {
     let schedule = crate::schedule();
@@ -488,69 +477,29 @@ pub fn remember(ui: Ui, origin: Origin) {
     let context = request(origin).map(|request| (origin, request));
     ui.recordings.update(|s| s.context = context);
 }
-fn save(ui: Ui) {
-    let draft = ui
-        .recordings
-        .with_untracked(|s| if s.busy { None } else { s.draft.clone() });
-    let Some(draft) = draft else {
-        return;
-    };
-    let target =
-        iptv_core::parental::Target::live(draft.request.source, draft.request.channel.clone());
-    crate::parental_view::request(ui, target, move || save_allowed(ui, draft));
-}
-fn save_allowed(ui: Ui, draft: Draft) {
-    // Only Record now saves. Scheduling or editing a future recording is
-    // retired (#273), whatever opened the form.
-    if !draft.immediate || draft.editing.is_some() {
-        return;
-    }
-    let request = draft.padded(crate::time::wall_unix());
+/// Records `request` now. Scheduling or editing a future recording is retired
+/// (#273), so this is the only way the app creates a job.
+fn start_request(ui: Ui, request: Request) {
     if let Err(message) = request.validate(crate::time::wall_unix()) {
-        if draft.immediate {
-            crate::settings_view::notify(tr(message));
-        }
+        crate::settings_view::notify(tr(message));
         ui.recordings.update(|s| s.error = Some(message.into()));
         return;
     }
     ui.recordings.update(|s| {
         s.busy = true;
         s.error = None;
-        if draft.immediate {
-            s.starting = Some(draft.request.clone());
-        }
+        s.starting = Some(request.clone());
     });
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        let result = match draft.editing {
-            Some(id) => owner.update_recording(id, request).await.map(|()| id),
-            None => {
-                owner
-                    .schedule_repeating_recording_with_timing(
-                        request,
-                        draft.repeat,
-                        (draft.repeat != iptv_core::recording::Repeat::Once).then_some(
-                            iptv_core::recording::RecurrenceTiming {
-                                program_start: draft.program_start.unwrap_or(draft.request.start),
-                                program_end: draft.program_end.unwrap_or(draft.request.end),
-                                guide_offset_seconds: draft.guide_offset_seconds,
-                                lead_seconds: draft.lead_minutes.clamp(0, 60) as u32 * 60,
-                                trail_seconds: draft.trail_minutes.clamp(0, 60) as u32 * 60,
-                            },
-                        ),
-                    )
-                    .await
-            }
-        };
-        if draft.immediate {
-            match &result {
-                Ok(_) => crate::settings_view::notify(tr("Starting recording")),
-                Err(error) => crate::settings_view::notify(translated_reason(
-                    error
-                        .unavailable_reason()
-                        .unwrap_or("Recording action failed"),
-                )),
-            }
+        let result = owner.schedule_recording(request).await;
+        match &result {
+            Ok(_) => crate::settings_view::notify(tr("Starting recording")),
+            Err(error) => crate::settings_view::notify(translated_reason(
+                error
+                    .unavailable_reason()
+                    .unwrap_or("Recording action failed"),
+            )),
         }
         let jobs = if result.is_ok() {
             owner.recording_jobs().await.ok()
@@ -563,25 +512,16 @@ fn save_allowed(ui: Ui, draft: Draft) {
             if let Some(jobs) = jobs {
                 s.reload(jobs);
             }
-            match result {
-                Ok(id) => {
-                    // A play-bar action owns no library presentation. Keep a
-                    // row, editor or confirmation the viewer opened meanwhile.
-                    if !draft.immediate {
-                        s.draft = None;
-                        s.focus = Some(id);
-                        s.actions = false;
-                    }
-                }
-                Err(error) => {
-                    s.error = Some(
-                        error
-                            .unavailable_reason()
-                            .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-                            .unwrap_or("Recording action failed")
-                            .into(),
-                    )
-                }
+            // A play-bar action owns no library presentation: keep a row or
+            // confirmation the viewer opened meanwhile.
+            if let Err(error) = result {
+                s.error = Some(
+                    error
+                        .unavailable_reason()
+                        .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
+                        .unwrap_or("Recording action failed")
+                        .into(),
+                )
             }
         });
         reload(ui);
@@ -853,9 +793,6 @@ pub fn key(ui: Ui, action: Action) {
         }
         return;
     }
-    if draft::key(ui, action) {
-        return;
-    }
     if ui.recordings.with_untracked(|s| s.actions) {
         let length = ui
             .recordings
@@ -981,56 +918,6 @@ fn message(ui: Ui) -> String {
             .map(|message| tr(message).to_owned())
             .unwrap_or_default()
     })
-}
-
-fn schedule_panel(ui: Ui, size: Scale) -> View {
-    view()
-        .absolute()
-        .inset_0()
-        .items_end()
-        .bg(crate::tint(0, 0x55))
-        .child(
-            view()
-                .h_full()
-                .w(move || size.px(400.0))
-                .max_w(percentage(0.9))
-                .accessibility_elements_hidden(move || {
-                    ui.recordings
-                        .with(|s| s.draft.as_ref().is_some_and(|d| d.entry.is_some()))
-                })
-                .pt_safe_area()
-                .pb_safe_area()
-                .bg(rgb(style::PANEL))
-                .child(style::header(ui, size, tr("Schedule a recording…")))
-                .child({
-                    let scrolling = ui_kit::FocusScroll::new();
-                    scrolling
-                        .view()
-                        .test_id("recording-draft-scroll")
-                        .flex_1()
-                        .child(draft_view(ui, size, scrolling))
-                })
-                .child(
-                    ui_kit::body(size, move || message(ui))
-                        .text_color(rgb(ui_kit::ERROR))
-                        .px(move || size.px(24.0)),
-                )
-                .child(
-                    ui_kit::caption(size, move || {
-                        if ui.recordings.with(|s| s.busy) {
-                            tr("Saving…")
-                        } else {
-                            ""
-                        }
-                    })
-                    .px(move || size.px(24.0)),
-                )
-                .child(
-                    ui_kit::caption(size, requirements())
-                        .px(move || size.px(24.0))
-                        .py(move || size.px(16.0)),
-                ),
-        )
 }
 
 fn library_content(ui: Ui, size: Scale) -> View {
@@ -1176,7 +1063,6 @@ fn library(ui: Ui, size: Scale) -> View {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
-    let has_draft = move || ui.recordings.with(|s| s.draft.is_some());
     when(
         move || is_open(ui),
         move || {
@@ -1187,9 +1073,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .accessibility_elements_hidden(move || {
                     crate::overlays::Overlay::Recordings.accessibility_covered(ui)
                 })
-                .child(when(has_draft, move || schedule_panel(ui, size)))
-                .child(when(move || !has_draft(), move || library(ui, size)))
-                .child(draft::entry_layer(ui))
+                .child(library(ui, size))
                 .child(rows::delete_confirmation(ui, size))
         },
     )

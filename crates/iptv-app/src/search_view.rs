@@ -42,7 +42,7 @@ mod pick;
 mod program_index;
 mod view;
 
-pub use pick::open_to_pick;
+pub use pick::{open_to_pick, picking};
 pub use view::layer;
 
 use crate::{Playback, Ui, ViewMode, channel_name, clock};

@@ -94,7 +94,12 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::SourceReady(resume) => crate::player::source_ready(ui, resume),
         RuntimeEvent::SourceChanged => crate::player::source_changed(ui),
-        RuntimeEvent::AccountStreams(limit) => crate::multiview::set_account_streams(limit),
+        RuntimeEvent::AccountStreams(limit) => {
+            crate::multiview::set_account_streams(limit);
+            if ui.app.account_streams.get_untracked() != limit {
+                ui.app.account_streams.set(limit);
+            }
+        }
         RuntimeEvent::ForgetSource(source) => crate::player::forget_source(source),
         RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
         RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
@@ -127,4 +132,11 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
 /// UI context supplied to the runtime's foreground scheduling hint.
 pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
     crate::lists::focused_channel(ui)
+}
+
+/// The headless scenarios' stand-in for an import reporting the shown
+/// account's connection limit (`device.rs`'s test seam).
+#[cfg(feature = "test-support")]
+pub(crate) fn account_streams_reported(limit: Option<u32>) {
+    crate::runtime().emit(RuntimeEvent::AccountStreams(limit));
 }
