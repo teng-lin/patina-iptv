@@ -22,7 +22,7 @@ pub(crate) use review::{RestoreReview, back, is_open, key, layer};
 /// What a backup holds, before its file is chosen.
 const EXPORT_NOTE: &str = crate::i18n::key(
     "The unencrypted backup includes playlist logins and passwords, settings, \
-     channel arrangements, history and cached guide data. \
+     channel arrangements, history and guide setup. Downloaded guide listings are excluded. \
      Keep the file private.",
 );
 /// A restore is already scheduled: what happens to changes until then.

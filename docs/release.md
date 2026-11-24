@@ -14,19 +14,18 @@ smoke is not proof of signed ARM release playback or physical accessibility.
 
 ## Packaging and releases
 
-Desktop Package checks likewise run only for package/build inputs on PRs and
-support manual dispatch. Signed release packaging still runs on tags or manual
-requests.
+Desktop installer checks run on PRs that change packaging recipes, shipped
+resources or bundled runtime inputs. The [validation guide](ci.md) describes lane
+selection and manual dispatch. Signed release packaging runs on tags or manual requests.
 
 Routine PRs compile both ARM targets and build one x86_64 debug APK when emulator
 smoke is selected. `Android packages` can manually build an ARM debug APK for
 investigation; debug AABs are not distribution evidence. Trusted master candidates
 build unsigned release APK/AAB once, checking both ABIs, notices, Gradle unit tests
 and release lint before promotion to isolated signing jobs.
-The upstream NSH checkout at `../nsh-patina` uses the commit in `nsh.rev`.
-GitHub Actions and the Windows build read the pin through `tools/ci/pins.py`.
-`tools/check.sh` checks the local checkout against it. Update `nsh.rev` when
-adopting upstream changes.
+The [Patina NSH fork](nsh.md) at `../nsh-patina` uses the commit in `nsh.rev`.
+GitHub Actions, the Windows build and `tools/check.sh` read the pin through
+`tools/ci/pins.py`. Update `nsh.rev` when adopting changes from the fork.
 
 Local Android builds: `tools/sync-host.sh` first (it builds the Rust library
 and copies it and the app's assets into the Gradle host; Gradle does not run
@@ -70,9 +69,10 @@ or platforms=desktop independently. platforms=all adds an iPad device IPA;
 only that option requires Apple signing secrets and still needs iPad validation.
 
 Linux outputs are .deb, .rpm, .pkg.tar.zst (a pacman package), and .AppImage.
-Native packages depend on system GTK4, mpv and GStreamer. The AppImage bundles
-linked libraries and GTK resources, and uses X11 (XWayland on Wayland desktops).
-Its libmpv, with FFmpeg linked in, is the pinned Linux runtime
+The DEB, RPM and pacman packages use system GTK 4 and GStreamer and bundle
+Patina's pinned libmpv in a private directory. The AppImage bundles the linked
+libraries and GTK resources and uses X11 (XWayland on Wayland desktops).
+All formats use the pinned Linux libmpv runtime with FFmpeg linked in
 (`tools/mpv-runtime-unix`, fetched and verified by hash); packaging checks that
 the bundled `libmpv.so.2` carries that runtime's build ID and that no system
 FFmpeg or libmpv library came along. The other bundled libraries are Ubuntu

@@ -4,7 +4,7 @@
 
 This section describes the native platforms (desktop, iPad, Android). The
 browser build has no SQLCipher; see
-[the SQLite store in the browser](#the-sqlite-store-in-the-browser-nsh-build-in-progress).
+[the SQLite store in the browser](#the-sqlite-store-in-the-browser-nsh-build).
 
 Production opens the catalog through the store worker and `credential_key::open_database`.
 SQLCipher encrypts the complete database, including source credentials, stream and guide

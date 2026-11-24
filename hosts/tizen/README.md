@@ -21,26 +21,8 @@ Patina's own core in WebAssembly:
 | Worker | `app/worker.js` | Runs the core in a Web Worker and performs the HTTP requests it describes, so importing a large guide never blocks the remote. |
 | Page | `app/main.js`, `index.html`, `style.css` | Renders the views, sends remote keys, plays streams with the TV's native player (AVPlay) on the video plane under the page. |
 
-The page and the core exchange JSON messages. The page numbers every `key`
-and `settle` command (`seq`) and sends the next one when the view carrying
-that number arrives (or after a second without it), so a held key never
-queues work in the core; views also arrive for other reasons (the clock,
-search text, the guide) and release nothing. A held key is sent with
-`repeat: true`, and the core decides what holding it does: a Left pressed
-in the guide grid opens the groups column at its first repeat, one pressed
-in full screen does nothing more, anywhere else it is a Left like any
-other. When the held key is released (or the page loses the focus), its
-repeats still waiting are dropped and, if the core put off building a list
-(`pending`), `settle` asks for it; repeats that go on after the page lost
-the focus or was hidden are not sent until the key is pressed again. A
-pressed key drops a play bar timeout (`barTimeout`) still waiting to be
-sent. Each `play` event has an `id`, which the page returns in
-`playFailed` with the player's reason: the core ignores the failure of a
-stream it has replaced since, and for the one that plays it emits the
-notice. The page numbers each `source` it sends (`session`), and every
-`play` carries the number of its source: a play of a source replaced since
-is dropped. A `play` that arrives while the app is hidden is opened when it
-shows again.
+The page and the core exchange JSON messages. See the
+[input and view protocol](#input-and-view-protocol) for remote events.
 
 The core is built for the Wasm features Tizen 5.5 validates: MVP plus
 sign-extension and mutable globals. Stable Rust's standard library uses newer
@@ -77,9 +59,8 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
 - Grid: Up/Down move between channels in the same time column and wrap
   between the first and last rows. Left/Right move between programs
   (Left from the earliest one shows the groups column). Channel Up/Down
-  or Page Up/Down turn a page of 8 channels. Holding Left on the guide
-  screen opens the groups column at once. Holding Left from full screen
-  opens the guide.
+  or Page Up/Down turn a page of 8 channels. Holding Left in the grid for
+  400 ms opens the groups column. From full screen, Left opens the guide.
 - OK on a live program tunes the channel in the preview. OK on the
   playing channel expands the same stream to full screen. An ended
   program with an archive plays from its start. An upcoming or
@@ -135,9 +116,8 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   presses it), and has no pause, seek or track buttons.
 - No hint card after a list is chosen, and no program descriptions.
 
-- Hold Left in the grid for 400 ms to open the groups. A tap moves to the
-  previous program when the guide has one. Held Back acts once. Exit
-  remains a system key handled by the page.
+- A tap of Left moves to the previous program when the guide has one.
+  Held Back acts once. The page handles the system Exit key.
 - Programs chosen in Search tune their channel live, including upcoming
   programs. Back returns to the result list. The Recently watched list
   includes channels played from their archive.
@@ -154,16 +134,22 @@ sends `keyPoll` with the current `atMs`. That lets a remote without
 auto-repeat hold Left and lets the core own the play bar timeout.
 
 The input queue keeps one command in flight and coalesces queued repeats.
-Each key phase, poll, keyboard or cancel command carries a `seq` that
-comes back on its view. A late answer can't release a newer command.
-The page sends `cancelKeys` on blur, hiding, setup and keyboard capture.
-The worker drops the held press and settles the groups list. Installing a
-new source also resets input state. The search keyboard sends `keyboard`
-with `complete: true` for Done or `false` for Back or Cancel.
+Each key phase, poll, keyboard or cancel command carries a `seq`. The page
+sends the next command when its view acknowledges that sequence or after one
+second. On keyup the page drops queued repeats for that key, and the core
+settles the groups list. The page sends `cancelKeys` on blur, hiding, setup
+and keyboard capture. The core clears the held press and settles the list.
+Installing a new source also resets input state. The search keyboard sends
+`keyboard` with `complete: true` for Done or `false` for Back or Cancel.
 
 Views carry guide and player labels, progress, search result times and the
 ruler marks. The worker supplies the UTC offset for each displayed
 instant. The page uses the labels and positions directly when drawing.
+
+Each `play` event carries its source's `session` and its own `id`. The page
+ignores events for replaced sources and defers playback while hidden. On
+failure, the page sends `playFailed` with the playback `id` and the reason.
+The core shows a notice when that playback is still current.
 
 ## What is kept on the TV
 

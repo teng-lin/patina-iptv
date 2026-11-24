@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test of the Android app on an emulator or device, driven by remote
+# Smoke test of the Android app on an owned disposable emulator, driven by remote
 # keys and checked against the app's own log lines (synthetic data only):
 # first run, add the synthetic playlist, confirm favorites edits with remote
 # and touch, play a channel in the guide, full screen, multiview with a second
@@ -25,8 +25,8 @@
 #   python3 -I tools/make-iptv-fixtures.py --channels 300
 #   python3 tools/mock-server.py 8089 fixtures/hls &
 #
-# The app's data on the device is replaced: it is uninstalled first when an
-# APK is given, and cleared otherwise. Logs go to $IPTV_SMOKE_OUT (default
+# The validation app is uninstalled first when an APK is given. Otherwise its
+# data is cleared. Logs go to $IPTV_SMOKE_OUT (default
 # target/android-smoke): the app's log, logcat's crash buffer and a screenshot
 # at each step.
 set -euo pipefail

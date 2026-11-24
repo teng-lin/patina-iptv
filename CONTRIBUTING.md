@@ -13,18 +13,7 @@ You need:
 
 - Rust, the version pinned in `rust-toolchain.toml` (rustup installs it
   automatically), with the `wasm32-unknown-unknown` target.
-- The upstream NSH checked out **next to** this repository, at the exact commit
-  recorded in [`nsh.rev`](nsh.rev):
-
-  ```sh
-  git clone https://github.com/longbridge/nsh.git ../nsh-patina
-  git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
-  (cd ../nsh-patina && cargo build --release -p nsh-cli)
-  ```
-
-  NSH is a path dependency, so `Cargo.lock` cannot pin it. When `nsh.rev`
-  changes, fetch and check out the new commit. `tools/check.sh` stops at once
-  if `../nsh-patina` is at another commit.
+- The pinned [Patina NSH fork and CLI](docs/nsh.md).
 - The platform libraries listed under
   [Build from source](README.md#build-from-source) in the README.
 - `cargo-deny` 0.20.2 for the dependency audit in `tools/check.sh`:
@@ -71,15 +60,12 @@ Two extra checks are worth running when they apply:
 A change to the Android host (`hosts/android`), to the video layer
 (`crates/iptv-app/src/video.rs`, `player.rs`, the `tv.player` contract), to
 input handling on Android, or to threading and storage that Android exercises
-differently needs a run on a real device before it merges: an Android tablet,
-an Android TV box, or both when the change affects both form factors. CI
-launches the app only on emulators (`tools/ci/android-smoke.sh`, which you
-can also run against your own emulator or device), not on real hardware.
-The smoke script reinstalls the app or clears its data, so it erases the
-playlists and settings on that device: run it on a disposable emulator or
-device, or back the app up first. Say in the pull
-request which devices you ran and what you checked, using the synthetic
-playlist (`10.0.2.2` instead of `127.0.0.1` from an emulator).
+differently needs a run on a real device before it merges. Use an Android tablet,
+an Android TV device, or both when the change affects both form factors. Run the
+changed journey manually with a synthetic test profile and record the devices and
+results in the pull request. See [physical-device acceptance](docs/android-validation.md#physical-device-acceptance).
+CI smoke runs on disposable tablet and TV emulators. To run the same checks
+locally, use the [disposable AVD runner](docs/android-validation.md#running-the-emulator).
 
 ## Rules for every change
 

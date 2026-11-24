@@ -1,8 +1,11 @@
 # Patina on browser TVs: target architecture, crates and boundaries
 
-Status: proposed on 2026-11-21; decisions updated after a second round of spikes the same day. Steps 1a to 1e are implemented (see their status lines); step 2 runs Patina on the TV (`hosts/tizen-nsh`); steps 3 and 4 are measured below ("Module size and launch"). Decided on 2026-11-21: on Tizen 5.5 the JavaScript bridge stays the supported app and the NSH package is opt-in (see "Decision on Tizen 5.5"). This is the Patina integration plan that M7 of
-[External NSH TV support](2026-11-15-nsh-tv-platform-support.md) asks for. It is
-based on the current code and on spikes run on a 2020 Samsung TV (Tizen 5.5).
+The plan was proposed on 2026-11-21 and updated after a second round of spikes
+that day on a 2020 Samsung TV. Steps 1a to 1e are implemented, step 2 runs Patina
+on the TV (`hosts/tizen-nsh`), and steps 3 and 4 are measured under
+[Module size and launch](#module-size-and-launch-steps-3-and-4). On Tizen 5.5 the
+JavaScript bridge stays the supported app and the NSH package is opt-in.
+See the [Tizen 5.5 decision](#decision-on-tizen-55-2026-11-21).
 Sections marked **Today** describe the code as it is; everything else is a
 proposal that has not been implemented.
 

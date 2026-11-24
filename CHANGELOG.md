@@ -7,6 +7,11 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+### Fixed
+
+- The backup dialog now explains that exports keep guide setup and exclude
+  downloaded program listings.
+
 ## [0.1.7] - 2026-11-23
 
 ### Added
