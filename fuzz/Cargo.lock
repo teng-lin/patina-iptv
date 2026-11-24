@@ -497,14 +497,14 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iptv-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "zeroize",
 ]
 
 [[package]]
 name = "iptv-epg"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "flate2",
  "iptv-core",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-import"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "flate2",
  "iptv-core",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-library"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "iptv-epg",
  "iptv-providers",
@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-net"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "cookie_store",
  "getrandom 0.4.3",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-providers"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "iptv-core",
  "percent-encoding",
@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-settings"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "serde_json",
 ]
