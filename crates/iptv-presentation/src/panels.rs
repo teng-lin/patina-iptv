@@ -73,12 +73,10 @@ pub enum Control {
     Scaling,
     SleepTimer,
     Favorite,
-    ChannelOptions,
-    Settings,
     Record,
 }
 
-pub const CONTROLS: [Control; 15] = [
+pub const CONTROLS: [Control; 13] = [
     Control::Search,
     Control::ChannelList,
     Control::Recordings,
@@ -91,10 +89,23 @@ pub const CONTROLS: [Control; 15] = [
     Control::Scaling,
     Control::SleepTimer,
     Control::Favorite,
-    Control::ChannelOptions,
-    Control::Settings,
     Control::Record,
 ];
+
+/// The first index of [`CONTROLS`] in `step`'s direction from `from`
+/// (exclusive) whose control is offered.
+fn next_offered(omitted: u16, from: usize, step: isize) -> Option<usize> {
+    let mut at = from as isize;
+    loop {
+        at += step.signum();
+        if at < 0 || at as usize >= CONTROLS.len() {
+            return None;
+        }
+        if omitted & (1 << at) == 0 {
+            return Some(at as usize);
+        }
+    }
+}
 
 /// The one time line a panel shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,8 +159,12 @@ pub struct Panels {
     /// Index into [`QUICK_ACTIONS`] of the focused action card; none until
     /// Left or Right reaches the row.
     pub quick: Option<usize>,
-    /// Index into [`CONTROLS`] of the focused control.
+    /// Index into [`CONTROLS`] of the focused control: always one the
+    /// strip offers ([`Self::offer`]).
     pub focus: usize,
+    /// Controls the host can never offer, by their [`CONTROLS`] index: the
+    /// strip leaves them out rather than drawing them disabled.
+    omitted: u16,
     pub timeouts: Timeouts,
     /// The mouse showed (or last kept) them.
     by_pointer: bool,
@@ -166,6 +181,7 @@ impl Default for Panels {
             shown: Shown::Hidden,
             quick: None,
             focus: 0,
+            omitted: 0,
             timeouts: Timeouts::default(),
             by_pointer: false,
             hide_at_ms: None,
@@ -190,7 +206,7 @@ impl Panels {
     /// control unless it was already open.
     pub fn show_controls(&mut self, now_ms: u64) {
         if self.shown != Shown::Controls {
-            self.focus = 0;
+            self.focus = self.first_offered();
         }
         self.shown = Shown::Controls;
         self.by_pointer = false;
@@ -236,7 +252,7 @@ impl Panels {
     pub fn hide(&mut self) {
         self.shown = Shown::Hidden;
         self.quick = None;
-        self.focus = 0;
+        self.focus = self.first_offered();
         self.by_pointer = false;
         self.hide_at_ms = None;
         self.hold = None;
@@ -266,6 +282,48 @@ impl Panels {
         CONTROLS[self.focus]
     }
 
+    /// Says which controls the strip shows: the rest are left out, as
+    /// controls the host can never offer. A focused control that is left
+    /// out passes the focus to the nearest one shown.
+    pub fn offer(&mut self, offered: impl Fn(Control) -> bool) {
+        self.omitted = CONTROLS
+            .iter()
+            .enumerate()
+            .filter(|&(_, &control)| !offered(control))
+            .fold(0, |mask, (at, _)| mask | (1 << at));
+        if self.omitted & (1 << self.focus) != 0 {
+            self.focus = next_offered(self.omitted, self.focus, -1)
+                .or_else(|| next_offered(self.omitted, self.focus, 1))
+                .unwrap_or(0);
+        }
+    }
+
+    /// The controls the strip shows, in order.
+    pub fn controls(&self) -> impl Iterator<Item = Control> + '_ {
+        CONTROLS
+            .iter()
+            .enumerate()
+            .filter(|&(at, _)| self.omitted & (1 << at) == 0)
+            .map(|(_, &control)| control)
+    }
+
+    /// A pointer or touch focused `control` (if the strip shows it).
+    pub fn focus_control(&mut self, control: Control) {
+        if let Some(at) = CONTROLS.iter().position(|&c| c == control)
+            && self.omitted & (1 << at) == 0
+        {
+            self.focus = at;
+        }
+    }
+
+    fn first_offered(&self) -> usize {
+        if self.omitted & 1 == 0 {
+            0
+        } else {
+            next_offered(self.omitted, 0, 1).unwrap_or(0)
+        }
+    }
+
     pub fn quick_focused(&self) -> Option<QuickAction> {
         self.quick.map(|i| QUICK_ACTIONS[i])
     }
@@ -279,7 +337,14 @@ impl Panels {
             Shown::Card => {
                 self.quick = Some(self.quick.map_or(0, |at| clamp(at, QUICK_ACTIONS.len())));
             }
-            Shown::Controls => self.focus = clamp(self.focus, CONTROLS.len()),
+            Shown::Controls => {
+                for _ in 0..step.unsigned_abs() {
+                    match next_offered(self.omitted, self.focus, step) {
+                        Some(at) => self.focus = at,
+                        None => break,
+                    }
+                }
+            }
             Shown::Hidden | Shown::Banner | Shown::Info => {}
         }
         self.by_pointer = false;

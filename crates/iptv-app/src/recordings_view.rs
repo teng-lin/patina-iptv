@@ -101,11 +101,14 @@ pub fn bind(ui: Ui) {
     });
 }
 
+/// Whether `channel` can be recorded here: on a host with workers (a
+/// browser TV has none, `host::HAS_WORKERS`), from a playlist that owns it.
 pub fn available(channel: usize) -> bool {
-    crate::schedule()
-        .channel_key(channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
-        .is_some()
+    crate::host::HAS_WORKERS
+        && crate::schedule()
+            .channel_key(channel)
+            .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
+            .is_some()
 }
 pub fn try_reserve_viewing(surface: usize, channel: usize, live: bool) -> bool {
     let source = crate::schedule()

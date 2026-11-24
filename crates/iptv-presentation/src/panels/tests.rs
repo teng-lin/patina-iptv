@@ -192,6 +192,55 @@ fn reopening_starts_at_the_first_control_and_no_card() {
 }
 
 #[test]
+fn controls_the_host_never_offers_are_left_out_of_the_strip_and_its_focus() {
+    let never = |c| {
+        !matches!(
+            c,
+            Control::Recordings | Control::Multiview | Control::Record
+        )
+    };
+    let mut p = Panels::default();
+    p.offer(never);
+    assert_eq!(
+        p.controls().collect::<Vec<_>>(),
+        [
+            Control::Search,
+            Control::ChannelList,
+            Control::PictureInPicture,
+            Control::VideoTracks,
+            Control::AudioTracks,
+            Control::AudioOffset,
+            Control::Captions,
+            Control::Scaling,
+            Control::SleepTimer,
+            Control::Favorite,
+        ]
+    );
+    p.show_controls(0);
+    p.move_focus(2, 1);
+    assert_eq!(p.select(2), Pick::Control(Control::PictureInPicture));
+    p.move_focus(-1, 3);
+    assert_eq!(p.focused(), Control::ChannelList, "steps over the omitted");
+    p.move_focus(99, 4);
+    assert_eq!(p.focused(), Control::Favorite, "the last shown, not Record");
+    p.focus_control(Control::Record);
+    assert_eq!(
+        p.focused(),
+        Control::Favorite,
+        "an omitted control takes no focus"
+    );
+
+    // Losing the focused control passes the focus to its neighbor, and a
+    // strip without its first control opens on the first one shown.
+    p.focus_control(Control::Captions);
+    p.offer(|c| c != Control::Captions && c != Control::Search);
+    assert_eq!(p.focused(), Control::AudioOffset);
+    p.hide();
+    p.show_controls(5);
+    assert_eq!(p.focused(), Control::ChannelList);
+}
+
+#[test]
 fn a_held_key_keeps_the_card_until_its_press_is_decided() {
     let mut p = Panels::default();
     p.timeouts.controls_ms = 1_000;

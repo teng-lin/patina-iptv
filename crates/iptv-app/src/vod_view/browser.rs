@@ -86,65 +86,70 @@ fn navigation(ui: Ui, size: Scale) -> View {
             ]
             .into_iter()
             .map(move |(destination, item, label)| {
-                let focused = move || {
-                    ui.vod
-                        .with(|s| s.control == Control::Navigation && s.destination == destination)
-                };
-                view()
-                    .h(move || size.px(52.0))
-                    .mx(move || size.px(6.0))
-                    .items_center()
-                    .justify_center()
-                    .rounded(move || size.px(crate::theme::RADIUS))
-                    .bg(move || {
-                        if focused() {
-                            rgb(crate::theme::FOCUSED_CELL)
-                        } else {
-                            crate::tint(0, 0)
-                        }
-                    })
-                    .role(AccessibilityRole::Tab)
-                    .label(label)
-                    .accessibility_state(move || AccessibilityState {
-                        selected: ui.vod.with(|s| match destination {
-                            Destination::Movies => s.query.kind == Kind::Movie,
-                            Destination::Shows => s.query.kind == Kind::Series,
-                            _ => false,
-                        }),
-                        ..Default::default()
-                    })
-                    .on_press(move || {
-                        ui.touched();
-                        ui.vod.update(|s| s.destination = destination);
-                        activate_navigation(ui);
-                    })
-                    .flex_row()
-                    .gap(move || size.px(14.0))
-                    .child(
-                        svg(crate::rail::icon(item))
-                            .size(move || size.px(26.0))
-                            .text_color(move || {
-                                rgb(if focused() {
-                                    crate::theme::FOCUSED_TEXT
-                                } else {
-                                    crate::theme::LIST_TEXT
-                                })
+                // Only what can show anything here (`Screen::set_navigation`).
+                let offered = move || ui.vod.with(|s| s.destinations().contains(&destination));
+                when(offered, move || {
+                    let focused = move || {
+                        ui.vod.with(|s| {
+                            s.control == Control::Navigation && s.destination == destination
+                        })
+                    };
+                    view()
+                        .h(move || size.px(52.0))
+                        .mx(move || size.px(6.0))
+                        .items_center()
+                        .justify_center()
+                        .rounded(move || size.px(crate::theme::RADIUS))
+                        .bg(move || {
+                            if focused() {
+                                rgb(crate::theme::FOCUSED_CELL)
+                            } else {
+                                crate::tint(0, 0)
+                            }
+                        })
+                        .role(AccessibilityRole::Tab)
+                        .label(label)
+                        .accessibility_state(move || AccessibilityState {
+                            selected: ui.vod.with(|s| match destination {
+                                Destination::Movies => s.query.kind == Kind::Movie,
+                                Destination::Shows => s.query.kind == Kind::Series,
+                                _ => false,
                             }),
-                    )
-                    .child(when(
-                        move || rail_labels(ui),
-                        move || {
-                            ui_kit::label(size, label)
-                                .number_of_lines(1)
+                            ..Default::default()
+                        })
+                        .on_press(move || {
+                            ui.touched();
+                            ui.vod.update(|s| s.destination = destination);
+                            activate_navigation(ui);
+                        })
+                        .flex_row()
+                        .gap(move || size.px(14.0))
+                        .child(
+                            svg(crate::rail::icon(item))
+                                .size(move || size.px(26.0))
                                 .text_color(move || {
                                     rgb(if focused() {
                                         crate::theme::FOCUSED_TEXT
                                     } else {
                                         crate::theme::LIST_TEXT
                                     })
-                                })
-                        },
-                    ))
+                                }),
+                        )
+                        .child(when(
+                            move || rail_labels(ui),
+                            move || {
+                                ui_kit::label(size, label).number_of_lines(1).text_color(
+                                    move || {
+                                        rgb(if focused() {
+                                            crate::theme::FOCUSED_TEXT
+                                        } else {
+                                            crate::theme::LIST_TEXT
+                                        })
+                                    },
+                                )
+                            },
+                        ))
+                })
             }),
         )
         .child(view().flex_1())
@@ -685,6 +690,14 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     effect(move || {
         let compact = compact.get();
         ui.vod.update(|s| s.set_compact(compact));
+    });
+    let offered = computed(move || {
+        ui.app.library.version.get();
+        (!crate::lists::live_only(), crate::host::HAS_WORKERS)
+    });
+    effect(move || {
+        let (catalogs, recordings) = offered.get();
+        ui.vod.update(|s| s.set_navigation(catalogs, recordings));
     });
     let preview = computed(move || ui.vod.with(|s| (s.focused.clone(), s.generation)));
     effect(move || {

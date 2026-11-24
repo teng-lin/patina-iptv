@@ -68,16 +68,13 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         Search => tr("Search"),
         Settings => tr("Settings"),
         StartFromBeginning => tr("Play from the beginning"),
-        ExternalPlayer => tr("Open in another player"),
         WatchInNewWindow => tr("Watch in new window"),
-        Reminder => tr("Remind me"),
         Record => tr("Record"),
         RecordNow => tr("Record now"),
         CancelRecording => tr("Cancel recording"),
         StopRecording => tr("Stop recording"),
         ScheduleRecording => tr("Schedule recording"),
         CustomRecording => tr("Schedule a recording…"),
-        SaveToList => tr("Save to my list"),
         Description => tr("Details"),
         ToggleFavorite if favorite => tr("Remove from favorites"),
         ToggleFavorite => tr("Add to favorites"),
@@ -165,6 +162,20 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             _ => implemented(item, ui.player_surface),
         }
     });
+    if !crate::host::HAS_WORKERS || ui.player_surface != 0 {
+        // Recording never runs here: leave its rows out.
+        rows.retain(|row| {
+            !matches!(
+                row,
+                Row::Action {
+                    item: MenuItem::Record
+                        | MenuItem::ScheduleRecording
+                        | MenuItem::CustomRecording,
+                    ..
+                }
+            )
+        });
+    }
     if group_target(scope.as_ref()).is_none() {
         rows.retain(|row| {
             !matches!(

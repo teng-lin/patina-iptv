@@ -158,6 +158,30 @@ pub fn menu(app: &mut Headless, label: &str) {
     step(app.wait_for("text:Manage favorites…"));
     step(app.press(&format!("text:{label}")));
 }
+/// For [`launch_prepared`]: makes the stored playlist `source` an Xtream
+/// Codes one (at a closed local port, never refreshed), keeping its
+/// channels, so Movies and Shows are offered (an M3U playlist alone
+/// offers neither). With `playlists.include_vod` off its empty catalog
+/// points to the playlist's settings.
+pub fn as_catalog_playlist(path: &Path, source: SourceId) {
+    use iptv_providers::{Secret, model::XtreamCredentials};
+    let mut store = crate::isolated::open_database(path).unwrap();
+    let name = store.source(source).unwrap().expect("stored").source.name;
+    store
+        .update_source(
+            source,
+            &Source {
+                name,
+                config: SourceConfig::Xtream(XtreamCredentials {
+                    server_url: "http://127.0.0.1:9".into(),
+                    username: Secret::new("generated-user"),
+                    password: Secret::new("generated-pass"),
+                    user_agent: None,
+                }),
+            },
+        )
+        .unwrap();
+}
 #[track_caller]
 pub fn group(app: &mut Headless, name: &str) {
     step(app.open_guide_groups());
