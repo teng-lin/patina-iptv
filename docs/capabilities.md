@@ -33,14 +33,65 @@ TV, so gates also take three signals that can change while the app runs
 Android reports the form factor and the input when the app starts and on every
 configuration change; before that report an Android build counts as a tablet
 with neither input. The settings offer check (`settings::offer`), the control
-strip and multiview's decoder count read the signals as they are now, so a
+strip and multiview's offer read the signals as they are now, so a
 change takes effect without a restart. A control that leaves the strip while
 focused passes the focus to its nearest neighbor. The Keyboard or Remote
 settings, and guide autoplay with its delay, follow the form factor and the
 connected input ([TV controls](tv-controls.md)); a settings page without rows
 leaves the list while the screen stays open, and the page shown, or the one in
-its place, keeps the focus. The host profiles above still follow the platform
-alone; Record now and the Recordings library follow the form factor too.
+its place, keeps the focus. Multiview follows the form factor and the window
+(below). The host profiles above still follow the platform alone.
+
+Android also reports its video decoder capacity: the instances the hardware
+H.264 decoder the player picks supports at once
+(`MediaCodecInfo.CodecCapabilities`), or nothing without a hardware H.264
+decoder, when Media3 decodes in software. The
+report can only lower the platform's surface budget, so a device that cannot
+run two hardware decoders at once loses multiview rather than gaining tiles.
+
+These are configured limits and facilities, not certification of a device's
+decoder performance. The profile tests exercise each row without needing that
+OS. Android TV and tablet share the same surface budget; the native PiP report
+also distinguishes a TV, which never has picture in picture on any build: its
+host reports it unsupported and refuses to enter, by request or on Home.
+
+PiP starts unknown until the player reports support; hosts without a native
+implementation (the iPad, browser TVs) acknowledge it as unavailable during
+setup. Where it is unavailable the control strip and the play bar leave the
+control out, rather than show it disabled, and the setting
+`player.pip_on_leave` is hidden. Its button and action
+handler use the same current decision. A denied or changed report takes effect
+without restarting the application. Desktop PiP presents the original player;
+it never reserves another provider stream.
+
+Multiview is offered by device and window size
+([`multiview_offer`](../crates/iptv-presentation/src/capabilities.rs)), the same
+way through the play bar, the control strip and the info card's action card:
+
+| Host | Multiview |
+| --- | --- |
+| Android phone | Two tiles, under the play bar's More only, with the phone on its side (its window wider than tall). Left out upright and at the account's connection limit. No "Sound follows the selected tile" setting. |
+| Android tablet | Two tiles in an expanded window; left out in a medium or compact one (split screen). |
+| Android TV | Two tiles. At the account's connection limit it is shown disabled, and choosing it says why. |
+| iPad | Left out until measured on a device (iPad draws every mpv frame on the main thread), so never in Slide Over or a compact window. |
+| Desktop | Four tiles. |
+| Tizen and other one-decoder hosts | Left out, never drawn disabled. |
+
+The account's connection limit is reached when it allows one stream, the one
+already playing full screen; elsewhere adding a stream past the limit asks
+first. Using the metered-network signal to gate phone multiview remains a
+follow-up. When the window or the device stops offering multiview during a
+session (a tablet's window going to split screen, a phone turned upright), the
+session collapses to the tile being heard, which plays on full screen. When that
+tile plays on the full-screen player (surface 0) it keeps its stream; a tile heard
+on another surface plays on in surface 0, as Exit multiview does, since no player
+view moves. "Sound follows the selected tile" is hidden on phones and wherever
+multiview never exists; its stored value is kept, unused.
+
+Multiview checks the main player, available decoder surfaces and extra player
+windows at both presentation and action time. The provider's connection budget
+and parental authorization remain separate checks at native admission; a
+feature being available grants no permission to play content.
 
 ## Record now and the Recordings library
 
@@ -86,33 +137,10 @@ inexact alarm may neither come on time nor start a foreground service from
 the background, so none is armed there. Nothing restarts a capture after a
 reboot or a force stop.
 
-These are configured limits and facilities, not certification of a device's
-decoder performance. The profile tests exercise each row without needing that
-OS. Android TV and tablet share the same surface budget; the native PiP report
-also distinguishes a TV, which never has picture in picture on any build: its
-host reports it unsupported and refuses to enter, by request or on Home.
-
-PiP starts unknown until the player reports support; hosts without a native
-implementation (the iPad, browser TVs) acknowledge it as unavailable during
-setup. Where it is unavailable the control strip and the play bar leave the
-control out, rather than show it disabled, and the setting
-`player.pip_on_leave` is hidden. Its button and action
-handler use the same current decision. A denied or changed report takes effect
-without restarting the application. Desktop PiP presents the original player;
-it never reserves another provider stream.
-
-Multiview checks the main player, available decoder surfaces and extra player
-windows at both presentation and action time. The provider's connection budget
-and parental authorization remain separate checks at native admission; a
-feature being available grants no permission to play content.
-
-Patina does not schedule recordings, so no host registers a wake, a login
-item or an alarm for one. The recorder tells the host only whether a capture is
-running or due (`Ports::recording_schedule`): Android keeps its foreground
-service and watchdog for it, and a desktop holds the computer from idle sleep.
-Desktop capture can outlive the window while the host process and computer
-remain running. iPad capture requires the app to remain open. Android uses a
-foreground service and is subject to force-stop and OS execution limits. See
+The recorder tells the host whether a capture is running or due
+(`Ports::recording_schedule`). A desktop capture can continue after the
+window closes while the host process and computer stay running. Patina
+registers no wakes, login items or alarms for scheduled recordings. See
 [architecture](architecture.md) and
 [platform installation details](../README.md) for the supported distributions.
 

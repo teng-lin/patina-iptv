@@ -226,6 +226,10 @@ pub struct SharedUi {
     pub library: data::Library,
     /// Bumped when a setting changes; read values with `settings::read`.
     pub settings: Signal<u64>,
+    /// The streams the shown source's account allows at once, when it
+    /// says (the runtime's, `multiview::account_limit`, as a signal for
+    /// the gates that follow it).
+    pub account_streams: Signal<Option<u32>>,
 }
 
 /// One window's presentation. Copying handles is only for regions of that window;
@@ -362,6 +366,7 @@ impl SharedUi {
             picture: signal(PictureSettings::default()),
             library: data::Library::new(),
             settings: signal(0),
+            account_streams: signal(None),
         }
     }
 }

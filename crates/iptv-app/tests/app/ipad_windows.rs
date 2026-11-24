@@ -83,7 +83,8 @@ pub(crate) fn player(app: &Headless) -> NodeId {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.kind == ViewKind::Native)
+        // The device observer (`device.rs`), where simulated, is no player.
+        .filter(|n| n.kind == ViewKind::Native && n.test_id.as_deref() != Some("device-signals"))
         .collect();
     assert_eq!(players.len(), 1, "one persistent player surface");
     players[0].id
