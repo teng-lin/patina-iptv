@@ -4,7 +4,7 @@
 
 pub mod error;
 mod instance;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -205,41 +205,81 @@ fn sync_dir(_: &Path) -> Result<()> {
     Ok(())
 }
 
-fn collect(root: &Path, directory: &Path, names: &mut Vec<String>) -> Result<()> {
-    if !directory.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(directory).context("Could not read local playlist files")? {
-        let entry = entry.context("Could not read local playlist files")?;
-        if super::private_files::temporary_name(&entry.file_name()) {
-            continue;
+// Select from the standalone snapshot, not the live database: its references
+// and its document list must describe the same committed library state.
+fn referenced_documents(root: &Path, files: &Path, snapshot: &Store) -> Result<BTreeSet<String>> {
+    let mut names = BTreeSet::new();
+    let mut include = |location: &str| -> Result<()> {
+        let Some(local) = iptv_providers::content_url::local_path(location)
+            .context("Backup contains an invalid local playlist URL")?
+        else {
+            return Ok(());
+        };
+        let relative = local.strip_prefix(root).context(
+            "A local playlist is outside application storage; add it with the file picker before backing up",
+        )?;
+        let name = relative
+            .to_str()
+            .ok_or("Invalid local playlist path")?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        if !name.starts_with("playlists/")
+            || !allowed(&name)
+            || relative
+                .components()
+                .any(|part| super::private_files::temporary_name(part.as_os_str()))
+        {
+            return Err("Invalid local playlist path".into());
         }
-        let kind = entry
-            .file_type()
-            .context("Could not read local playlist files")?;
-        if kind.is_symlink() {
-            return Err("Linked local playlist files cannot be backed up".into());
-        }
-        if kind.is_dir() {
-            collect(root, &entry.path(), names)?;
-        } else if kind.is_file() {
-            let name = entry
-                .path()
-                .strip_prefix(root)
-                .context("Invalid local playlist path")?
-                .to_str()
-                .ok_or("Invalid local playlist path")?
-                .replace(std::path::MAIN_SEPARATOR, "/");
-            if !allowed(&name) {
+        // Check every component, including the managed directory itself. A
+        // linked parent must not let an otherwise valid reference escape it.
+        let mut path = files.to_owned();
+        for part in relative.components() {
+            path.push(part);
+            let kind = fs::symlink_metadata(&path)
+                .context("A local playlist file is missing; add it again before backing up")?
+                .file_type();
+            if kind.is_symlink() {
+                return Err("Linked local playlist files cannot be backed up".into());
+            }
+            if path == files.join(relative) && !kind.is_file() {
                 return Err("Invalid local playlist path".into());
             }
-            names.push(name);
-            if names.len() > MAX_FILES {
-                return Err("Too many local playlist files".into());
+        }
+        names.insert(name);
+        if names.len() + 2 > MAX_FILES {
+            return Err("Too many local playlist files".into());
+        }
+        Ok(())
+    };
+    for summary in snapshot
+        .sources()
+        .context("Could not check backup sources")?
+    {
+        let source = snapshot
+            .source(summary.id)
+            .context("Could not check backup source")?
+            .ok_or("Backup source is missing")?;
+        if let iptv_providers::model::SourceConfig::M3u(config) = source.source.config {
+            include(config.location.expose())?;
+        }
+        for guide in snapshot
+            .guide_sources(summary.id)
+            .context("Could not check backup guide sources")?
+        {
+            include(guide.url.expose())?;
+        }
+        // Retained feed metadata can still reference a document after the
+        // configured guide list has changed. Restore rebases these URLs too.
+        if let Some(guide) = snapshot
+            .epg_guide(summary.id)
+            .context("Could not check backup guide feeds")?
+        {
+            for feed in guide.feeds {
+                include(feed.meta.config.url.expose())?;
             }
         }
     }
-    Ok(())
+    Ok(names)
 }
 
 /// An online SQLite snapshot includes committed WAL data. The caller first
@@ -383,7 +423,9 @@ fn export(services: &Services, destination: &Path, settings: &str) -> Result<()>
     let snapshot = work.0.join("iptv.sqlite");
     snapshot_library(services, &snapshot)?;
     let mut names = vec!["iptv.sqlite".to_owned(), "settings.json".to_owned()];
-    collect(root, &root.join("playlists"), &mut names)?;
+    let snapshot_store = Store::open(&snapshot).context("Could not check backup sources")?;
+    names.extend(referenced_documents(root, root, &snapshot_store)?);
+    drop(snapshot_store);
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries {
             let entry = entry.context("Could not read application files")?;
@@ -397,31 +439,9 @@ fn export(services: &Services, destination: &Path, settings: &str) -> Result<()>
         }
     }
     names.sort();
-    let snapshot =
-        Store::open(work.0.join("iptv.sqlite")).context("Could not check backup sources")?;
-    for source in snapshot
-        .sources()
-        .context("Could not check backup sources")?
-    {
-        let source = snapshot
-            .source(source.id)
-            .context("Could not check backup source")?
-            .ok_or("Backup source is missing")?;
-        if let iptv_providers::model::SourceConfig::M3u(config) = source.source.config {
-            let location = config.location.expose();
-            if let Some(local) = iptv_providers::content_url::local_path(location)
-                .context("Backup contains an invalid local playlist URL")?
-            {
-                let relative = local.strip_prefix(root).context("A local playlist is outside application storage; add it with the file picker before backing up")?;
-                if !names.iter().any(|entry| Path::new(entry) == relative) {
-                    return Err(
-                        "A local playlist file is missing; add it again before backing up".into(),
-                    );
-                }
-            }
-        }
+    if names.len() > MAX_FILES {
+        return Err("Too many local playlist files".into());
     }
-    drop(snapshot);
     let mut entries = Vec::new();
     let mut total = 0u64;
     for name in &names {
@@ -625,40 +645,7 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     // Check rewritten local references point to files included in this archive.
     let store =
         Store::open(work.0.join("iptv.sqlite")).context("Could not check backup library")?;
-    for source in store.sources().context("Could not check backup sources")? {
-        for guide in store
-            .guide_sources(source.id)
-            .context("Could not check backup guide sources")?
-        {
-            if let Some(local) = iptv_providers::content_url::local_path(guide.url.expose())
-                .context("Backup contains an invalid guide URL")?
-            {
-                let relative = local
-                    .strip_prefix(root)
-                    .context("Backup guide is outside application storage")?;
-                if !work.0.join(relative).is_file() {
-                    return Err("Backup is missing a local guide file".into());
-                }
-            }
-        }
-        let source = store
-            .source(source.id)
-            .context("Could not check backup source")?
-            .ok_or("Backup source is missing")?;
-        if let iptv_providers::model::SourceConfig::M3u(config) = source.source.config {
-            let location = config.location.expose();
-            if let Some(local) = iptv_providers::content_url::local_path(location)
-                .context("Backup contains an invalid local playlist URL")?
-            {
-                let relative = local
-                    .strip_prefix(root)
-                    .context("Backup references a local playlist outside application storage")?;
-                if !work.0.join(relative).is_file() {
-                    return Err("Backup is missing a local playlist file".into());
-                }
-            }
-        }
-    }
+    referenced_documents(root, &work.0, &store)?;
     drop(store);
     // All archive validation and reference rewriting succeeded. Encrypt the
     // persistent pending tree before its rename can make it survive restart.
