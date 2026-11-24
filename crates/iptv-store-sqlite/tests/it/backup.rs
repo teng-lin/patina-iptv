@@ -472,3 +472,86 @@ fn snapshot_drops_downloaded_programs_but_keeps_guide_setup_and_reads_as_never_d
         size(&full)
     );
 }
+
+#[test]
+fn older_untitled_imports_keep_personalization_on_upgrade_restore_and_refresh() {
+    use iptv_providers::m3u::parse_m3u;
+    use iptv_providers::model::StreamLocator;
+
+    let directory = tempfile::tempdir().unwrap();
+    let live = directory.path().join("generated-live.sqlite");
+    let backup = directory.path().join("generated-older-backup.sqlite");
+    let text = "#EXTM3U\nhttp://streams.example.com/12345.ts\nhttp://streams.example.com/12345.ts\n#EXTINF:-1,Explicit title\nhttp://streams.example.com/named.ts\n#EXTINF:-1,http://label.example.com/title\nhttp://streams.example.com/url-label.ts\n#EXTINF:-1 tvg-name=\"56789\",\nhttp://streams.example.com/56789.ts\n";
+    let channels = parse_m3u(text).channels.items;
+    let mut store = Store::open(&live).unwrap();
+    let source = store.add_source(&m3u_source("Generated labels")).unwrap();
+    // Recreate the labels an older parser wrote, keeping its original IDs.
+    let mut old_channels = channels.clone();
+    for channel in old_channels.iter_mut().take(2) {
+        let StreamLocator::Url { url, .. } = &channel.stream else {
+            panic!()
+        };
+        channel.name = iptv_providers::m3u::legacy_fallback_name(url);
+    }
+    store
+        .replace_catalog(source, &[], &old_channels, &[], &[])
+        .unwrap();
+    for (index, channel) in old_channels.iter().take(2).enumerate() {
+        store.set_favorite(source, &channel.id, true).unwrap();
+        store
+            .record_watch(
+                source,
+                &channel.id,
+                ContentKind::Live,
+                12345 + index as i64,
+                Some(17),
+            )
+            .unwrap();
+    }
+    store
+        .rename_channel(source, &old_channels[1].id, Some("My generated label"))
+        .unwrap();
+    store.snapshot_to(&backup).unwrap();
+    drop(store);
+    // This data-only migration leaves schema 26 unchanged, so removing its
+    // ledger entry exactly reconstructs a pre-correction store and snapshot.
+    for path in [&live, &backup] {
+        let db = Connection::open(path).unwrap();
+        db.execute("DELETE FROM schema_migrations WHERE version=27", [])
+            .unwrap();
+        db.pragma_update(None, "user_version", 26).unwrap();
+    }
+    Store::validate_snapshot(&backup).unwrap();
+    for path in [&live, &backup] {
+        let mut restored = Store::open(path).unwrap();
+        let check = |store: &Store| {
+            let rows = store
+                .load_channels(source, &ChannelQuery::default())
+                .unwrap();
+            assert_eq!(rows.len(), channels.len());
+            for (row, channel) in rows.iter().zip(&channels) {
+                assert_eq!(row.channel.id, channel.id);
+                assert_eq!(row.channel.name, channel.name);
+            }
+            assert_eq!(rows[1].name, "My generated label");
+            for channel in channels.iter().take(2) {
+                assert!(store.is_favorite(source, &channel.id).unwrap());
+            }
+            let history = store.recent(Some(source), None, 10).unwrap();
+            assert_eq!(history.len(), 2);
+            assert!(history.iter().all(|row| row.position_secs == Some(17)));
+            assert_eq!(history[0].item_id, channels[1].id);
+            assert_eq!(history[1].item_id, channels[0].id);
+        };
+        check(&restored);
+        // Token rotation and reimport apply the neutral label without changing
+        // either the old identity or the user-owned overlay/history rows.
+        let refreshed = parse_m3u(&text.replace("12345.ts", "12345.ts?token=generated-new"))
+            .channels
+            .items;
+        restored
+            .replace_catalog(source, &[], &refreshed, &[], &[])
+            .unwrap();
+        check(&restored);
+    }
+}

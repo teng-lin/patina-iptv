@@ -1,0 +1,2 @@
+-- Data-only migration: the Rust step in migrate.rs recognizes legacy M3U
+-- fallback labels with the same algorithm used for persisted content IDs.

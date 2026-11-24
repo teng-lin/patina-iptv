@@ -158,6 +158,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "group_context_preferences",
         sql: include_str!("../migrations/0026_group_context_preferences.sql"),
     },
+    Migration {
+        version: 27,
+        name: "neutral_m3u_labels",
+        sql: include_str!("../migrations/0027_neutral_m3u_labels.sql"),
+    },
 ];
 
 /// The schema version this build writes.
@@ -235,6 +240,9 @@ pub(crate) fn migrate_to(conn: &mut Connection, target: u32, now: i64) -> Result
         .filter(|m| m.version > current && m.version <= target)
     {
         let applied = tx.execute_batch(migration.sql).and_then(|()| {
+            if migration.version == 27 {
+                neutral_m3u_labels(&tx)?;
+            }
             tx.execute(
                 "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
                 rusqlite::params![migration.version, migration.name, now],
@@ -249,6 +257,36 @@ pub(crate) fn migrate_to(conn: &mut Connection, target: u32, now: i64) -> Result
     tx.pragma_update(None, "user_version", reached)?;
     tx.commit()?;
     Ok(reached)
+}
+
+// Old imports did not retain title provenance. A title explicitly equal to
+// the URL-derived fallback is indistinguishable from an absent title. Limit
+// correction to M3U rows with exactly that legacy label and no tvg-name;
+// overlays, IDs and all other provider metadata remain unchanged.
+fn neutral_m3u_labels(conn: &Connection) -> rusqlite::Result<()> {
+    let mut query = conn.prepare(
+        "SELECT c.rowid, c.name, c.stream FROM channels c
+         JOIN sources s ON s.id=c.source_id
+         WHERE s.kind='m3u' AND (c.epg_name IS NULL OR c.epg_name='')",
+    )?;
+    let mut rows = query.query([])?;
+    let mut update = conn.prepare("UPDATE channels SET name=?1 WHERE rowid=?2")?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        let stream: String = row.get(2)?;
+        let Ok(iptv_providers::model::StreamLocator::Url { url, .. }) =
+            crate::codec::stream_from_json(&stream)
+        else {
+            continue;
+        };
+        if name == iptv_providers::m3u::legacy_fallback_name(&url) {
+            update.execute(rusqlite::params![
+                iptv_providers::m3u::UNTITLED_CHANNEL_NAME,
+                row.get::<_, i64>(0)?,
+            ])?;
+        }
+    }
+    Ok(())
 }
 
 /// `sqlite_master` DDL in a stable, executable order (tables, then

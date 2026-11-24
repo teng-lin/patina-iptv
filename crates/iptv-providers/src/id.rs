@@ -23,7 +23,8 @@
 //!    [`VOLATILE_QUERY_KEYS`]), query order, and — for Xtream-shaped paths
 //!    (`/live/USER/PASS/ID.ext`, `/USER/PASS/ID`) — the credentials and the
 //!    `.ts`/`.m3u8` extension. Names are trimmed, whitespace-collapsed and
-//!    lowercased.
+//!    lowercased. Untitled M3U entries retain their historical URL-derived
+//!    fallback as the hash input; their neutral display label is independent.
 //! 3. **Duplicates** (two M3U entries with the same normalized URL and name)
 //!    get `~2`, `~3`, … in file order, so every id in one import is unique.
 //!
