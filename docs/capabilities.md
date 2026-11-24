@@ -39,9 +39,10 @@ focused passes the focus to its nearest neighbor. Multiview is the first
 feature these signals gate (below); the other host profiles above still follow
 the platform alone.
 
-Android also reports its video decoder capacity: the most instances its
-hardware H.264 decoders support at once (`MediaCodecInfo.CodecCapabilities`),
-or nothing without a hardware H.264 decoder, when mpv decodes in software. The
+Android also reports its video decoder capacity: the instances the hardware
+H.264 decoder the player picks supports at once
+(`MediaCodecInfo.CodecCapabilities`), or nothing without a hardware H.264
+decoder, when Media3 decodes in software. The
 report can only lower the platform's surface budget, so a device that cannot
 run two hardware decoders at once loses multiview rather than gaining tiles.
 

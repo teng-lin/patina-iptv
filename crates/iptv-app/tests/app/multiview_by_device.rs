@@ -135,6 +135,15 @@ fn a_tablet_collapses_multiview_to_the_heard_tile_in_split_screen() {
     bar(app);
     step(app.wait_for(BAR_MULTIVIEW));
     assert_eq!(iptv_app::player_opens(0), opens);
+
+    // A collapse while the picker chooses a tile closes the picker too.
+    step(app.press(BAR_MULTIVIEW));
+    step(app.wait_for(PICKER));
+    resize(app, (600.0, 720.0));
+    step(app.wait_for_gone(PICKER, Duration::from_secs(2)));
+    assert_eq!(app.screen().count(TILE).unwrap(), 0);
+    assert!(iptv_app::player_has_source(0), "Desk 03 plays on");
+    assert_eq!(iptv_app::player_opens(0), opens, "no stream opened");
 }
 
 #[test]
@@ -182,11 +191,35 @@ fn a_tv_at_the_accounts_limit_shows_multiview_disabled_with_its_reason() {
     account_streams(app, Some(1));
     app.settle();
 
-    // Shown, disabled: a press says why and opens nothing.
+    // Shown, disabled, with its reason. The remote's control strip names
+    // it beside Multiview, and OK there says why and opens nothing.
+    let reason = "Your provider allows one stream at a time";
+    step(app.press_key("m"));
+    step(app.wait_for(&format!("text:Multiview · {reason}")));
+    // Search, Channels, Recordings, then Multiview.
+    for _ in 0..3 {
+        step(app.press_key("right"));
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for(&format!("text:/^{reason}$/")));
+    assert_eq!(app.screen().count(PICKER).unwrap(), 0);
+    assert_eq!(app.screen().count(TILE).unwrap(), 0);
+    step(app.press_key("m"));
+    app.settle();
+
+    // The play bar's Multiview: a screen reader hears why on focus, and a
+    // press says why and opens nothing.
     bar(app);
     step(app.wait_for(BAR_MULTIVIEW));
+    assert_eq!(
+        app.screen()
+            .accessibility_description(BAR_MULTIVIEW)
+            .unwrap()
+            .as_deref(),
+        Some(reason)
+    );
     step(app.press(BAR_MULTIVIEW));
-    step(app.wait_for("text:Your provider allows one stream at a time"));
+    step(app.wait_for(&format!("text:/^{reason}$/")));
     assert_eq!(app.screen().count(PICKER).unwrap(), 0);
     assert_eq!(app.screen().count(TILE).unwrap(), 0);
 

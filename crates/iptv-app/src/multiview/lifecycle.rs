@@ -130,7 +130,8 @@ pub fn bind(ui: Ui) {
 /// 0, the full-screen player (the channel multiview opened with, unless
 /// Listen to this moved the sound); a tile heard on another surface plays
 /// on in surface 0 instead, as Exit multiview does, since only surface 0
-/// is shown full screen and no player view moves. The other surfaces stop.
+/// is shown full screen and no player view moves. The other surfaces stop,
+/// and a list picking a tile closes.
 pub fn collapse(ui: Ui) {
     let heard = ui.multiview.with_untracked(|m| {
         m.as_ref().map(|m| {
@@ -138,6 +139,17 @@ pub fn collapse(ui: Ui) {
             (m.detour().is_some(), tile.channel, tile.surface)
         })
     });
+    if heard.is_none() {
+        return;
+    }
+    // A list picking a tile (Search and add, the channel picker) goes
+    // with the session: a pick would find none.
+    if untracked(|| crate::search_view::picking(ui)) {
+        crate::search_view::close(ui);
+    }
+    if untracked(|| crate::multiview_picker::is_open(ui)) {
+        crate::multiview_picker::close(ui);
+    }
     match heard {
         None => {}
         Some((true, _, _)) => {

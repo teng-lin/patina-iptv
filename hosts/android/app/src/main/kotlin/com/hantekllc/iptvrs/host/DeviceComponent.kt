@@ -109,35 +109,47 @@ internal object DeviceSignals {
         val hardware: Boolean,
         val avc: Boolean,
         val maxInstances: Int,
+        /** Only for protected content (a `.secure` codec): not picked for a clear stream. */
+        val secureOnly: Boolean = false,
+        /** Another name for a codec listed too (Android 10+): Media3 skips it. */
+        val alias: Boolean = false,
     )
 
     /**
-     * The H.264 streams the device decodes in hardware at once: the most
-     * instances any hardware H.264 decoder supports, or null without one
-     * (mpv then decodes in software, which no instance limit bounds). The
-     * app only lowers its two-tile budget by it (`Host::decoder_slots`).
+     * The H.264 streams the device decodes in hardware at once: the
+     * instance limit of the hardware H.264 decoder the player picks for a
+     * clear stream (Media3 takes the first in the codec list's order), or
+     * null without one (Media3 then decodes in software, which no instance
+     * limit bounds) or when it reports no limit. The app only lowers its
+     * two-tile budget by it (`Host::decoder_slots`).
      */
     fun decoders(codecs: List<Decoder>): Int? =
         codecs
-            .filter { !it.encoder && it.hardware && it.avc && it.maxInstances > 0 }
-            .maxOfOrNull { it.maxInstances }
+            .firstOrNull { !it.encoder && !it.alias && !it.secureOnly && it.hardware && it.avc }
+            ?.maxInstances
+            ?.takeIf { it > 0 }
 
-    /** [decoders] on this device's codec list; null if it cannot be read. */
+    /**
+     * [decoders] on this device's codec list; null if any of it cannot be
+     * read. Skipping an unreadable codec could lose the one decoder that
+     * allows two instances, so the budget is then left as it is.
+     */
     fun probeDecoders(): Int? =
         runCatching {
             val codecs =
                 MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.map { info ->
-                    val avc = info.supportedTypes.any { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true) }
+                    // The type as the codec spells it: its capabilities are
+                    // looked up by that exact string.
+                    val avc = info.supportedTypes.firstOrNull { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true) }
+                    val capabilities = if (avc != null && !info.isEncoder) info.getCapabilitiesForType(avc) else null
                     Decoder(
                         encoder = info.isEncoder,
                         hardware = hardware(info),
-                        avc = avc,
-                        maxInstances =
-                            if (avc && !info.isEncoder) {
-                                info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).maxSupportedInstances
-                            } else {
-                                0
-                            },
+                        avc = avc != null,
+                        maxInstances = capabilities?.maxSupportedInstances ?: 0,
+                        secureOnly =
+                            capabilities?.isFeatureRequired(MediaCodecInfo.CodecCapabilities.FEATURE_SecurePlayback) == true,
+                        alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && info.isAlias,
                     )
                 }
             decoders(codecs)

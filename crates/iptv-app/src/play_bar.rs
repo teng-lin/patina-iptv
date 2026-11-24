@@ -540,6 +540,13 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .items_center()
         .justify_center()
         .label(move || label(ui, control))
+        // Why a control drawn disabled cannot act, said on focus (#279).
+        .optional_accessibility_description(move || {
+            (control == Control::Multiview)
+                .then(|| crate::capabilities::multiview_disabled(ui))
+                .flatten()
+                .map(SharedString::from)
+        })
         .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 2)))
         .on_press(move || {
             ui.touched();

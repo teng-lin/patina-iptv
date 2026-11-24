@@ -29,8 +29,35 @@ pub fn multiview_offer_on(ui: Ui, device: Device) -> MultiviewOffer {
     iptv_presentation::capabilities::multiview_offer(
         device,
         w.width.0 > w.height.0,
-        ui.app.account_streams.get(),
+        account_streams(ui),
     )
+}
+
+/// The streams the playing channel's account allows at once, when it
+/// says: the shown source's, or in All playlists the playing channel's
+/// own source's (`data::combined::connection_limit`).
+fn account_streams(ui: Ui) -> Option<u32> {
+    ui.app.account_streams.get().or_else(|| {
+        let channel = ui.playing.get()?;
+        let schedule = crate::schedule();
+        let all = schedule
+            .as_any()?
+            .downcast_ref::<iptv_guide::combined::CombinedSchedule>()?;
+        let (source, _) = all.channel_source(channel)?;
+        crate::data::combined::connection_limit(
+            &crate::runtime(),
+            crate::runtime::model::SourceId(source.id),
+        )
+    })
+}
+
+/// The reason multiview is drawn disabled in `ui`'s window now (a TV at
+/// the account's limit), for the entry points' accessibility descriptions.
+pub fn multiview_disabled(ui: Ui) -> Option<&'static str> {
+    match multiview_offer(ui) {
+        MultiviewOffer::Disabled(why) => Some(reason(why)),
+        _ => None,
+    }
 }
 
 /// Whether multiview can open (or, on a detour, its grid come back) now.

@@ -474,6 +474,13 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
             crate::player_keys::press_quick(ui, action);
         },
     )
+    // Why a dimmed Multiview cannot open, said on focus (#279).
+    .optional_accessibility_description(move || {
+        (action == QuickAction::Multiview)
+            .then(|| crate::capabilities::multiview_disabled(ui))
+            .flatten()
+            .map(SharedString::from)
+    })
 }
 
 /// What the keys do now, under the panels (keys only).

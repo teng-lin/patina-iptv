@@ -28,19 +28,25 @@ class DeviceSignalsTest {
     }
 
     @Test
-    fun theDecoderProbeCountsHardwareH264DecodersOnly() {
+    fun theDecoderProbeReadsTheHardwareH264DecoderThePlayerPicks() {
         fun codec(
             encoder: Boolean = false,
             hardware: Boolean = true,
             avc: Boolean = true,
             max: Int,
-        ) = DeviceSignals.Decoder(encoder, hardware, avc, max)
+            secureOnly: Boolean = false,
+            alias: Boolean = false,
+        ) = DeviceSignals.Decoder(encoder, hardware, avc, max, secureOnly, alias)
         assertEquals(null, DeviceSignals.decoders(emptyList()))
         // Software decoders and encoders do not bound the tiles.
         assertEquals(null, DeviceSignals.decoders(listOf(codec(hardware = false, max = 32), codec(encoder = true, max = 1))))
-        assertEquals(1, DeviceSignals.decoders(listOf(codec(max = 1), codec(hardware = false, max = 32))))
-        assertEquals(16, DeviceSignals.decoders(listOf(codec(max = 2), codec(max = 16), codec(avc = false, max = 64))))
-        assertEquals(null, DeviceSignals.decoders(listOf(codec(max = 0))))
+        assertEquals(1, DeviceSignals.decoders(listOf(codec(hardware = false, max = 32), codec(max = 1))))
+        // The first one listed is picked, not the one with the most.
+        assertEquals(2, DeviceSignals.decoders(listOf(codec(avc = false, max = 64), codec(max = 2), codec(max = 16))))
+        // A secure-only decoder or an alias is never picked for a clear stream.
+        assertEquals(8, DeviceSignals.decoders(listOf(codec(max = 1, secureOnly = true), codec(max = 1, alias = true), codec(max = 8))))
+        // A decoder that reports no limit leaves the budget as it is.
+        assertEquals(null, DeviceSignals.decoders(listOf(codec(max = 0), codec(max = 1))))
     }
 
     @Test
