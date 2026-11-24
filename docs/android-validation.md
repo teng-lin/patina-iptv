@@ -87,9 +87,11 @@ serial; CI never sets the hold.
 The existing smoke script restores changed device settings in its cleanup trap.
 The disposable runner provides containment if that restoration is interrupted.
 Direct smoke invocation requires an explicit emulator serial and the owned
-`IPTV_SMOKE_DISPOSABLE_AVD` name. CI creates a fresh `patina-validation-ci` profile;
-local runs should use the copying runner instead of declaring existing profiles
-owned. Physical-device acceptance is separate and must not use this data-clearing
+`IPTV_SMOKE_DISPOSABLE_AVD` name. CI starts `patina-validation-ci` from a fresh
+AVD or a clean Quick Boot snapshot captured before installing the validation APK.
+Master retains short-lived tablet and TV snapshot artifacts with separate keys
+for their emulator and Android image revisions. Smoke runs disable snapshot
+saving. Local runs should use the copying runner to create an owned profile. Physical-device acceptance is separate and must not use this data-clearing
 emulator harness.
 
 These tools do not claim actual execution, shipping ARM playback, screen-reader
