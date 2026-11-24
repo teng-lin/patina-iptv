@@ -69,3 +69,31 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     assert_eq!(player(app).id, id);
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }
+
+/// Back at the top level is the platform's (#277) in the overlay layout
+/// too: with nothing playing, the rail registers no Back handler, so
+/// Android leaves at once and shows its predictive back. A channel number
+/// being typed there keeps the handler until Back has cancelled it.
+#[test]
+fn overlay_rail_with_nothing_playing_hands_back_to_the_platform() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, overlay(None), true);
+    let app = &mut f.app;
+    step(app.set_environment("TV remote", |env| {
+        env.idiom = nsh_core::platform::Idiom::Tv;
+    }));
+    step(app.open_guide_groups());
+    step(app.press_key("left"));
+    step(app.press_key("left"));
+    let handed = app
+        .back()
+        .expect_err("Back at the overlay layout's rail is the platform's");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
+    // A digit starts a channel number: the first Back cancels it.
+    step(app.press_key("2"));
+    step(app.back());
+    let handed = app
+        .back()
+        .expect_err("with the number cancelled, Back is the platform's again");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
+}

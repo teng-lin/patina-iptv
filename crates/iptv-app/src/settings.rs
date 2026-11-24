@@ -21,7 +21,7 @@
 //! features of TV boxes). Some settings apply here ([`bind`]: colors,
 //! panel timeouts, [`network_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
-//! leaving, channel-change info).
+//! channel-change info).
 
 use std::sync::Arc;
 
@@ -62,7 +62,6 @@ pub const WIRED: &[&str] = &[
     "guide.show_logos",
     "guide.visible_minutes",
     "general.resume_last_channel",
-    "general.confirm_exit",
     "general.user_agent",
     "epg.update_interval",
     "epg.update_on_start",
@@ -115,8 +114,13 @@ const READ_ONLY: &[&str] = &["remote.key_overrides"];
 /// Not offered: device-level features of TV boxes (start with the device,
 /// frame-rate switching, decoders, audio passthrough, multicast relay,
 /// voice input, self-update, usage statistics). Also `general.about`,
-/// which the About page shows on its own.
+/// which the About page shows on its own, and the double-Back confirmation
+/// before leaving (`general.confirm_exit` and its window): each platform's
+/// own Back and exit convention applies instead (#277), and stored values
+/// are kept but ignored.
 const NOT_OFFERED: &[&str] = &[
+    "general.confirm_exit",
+    "general.confirm_exit_window",
     "general.start_on_boot",
     "general.start_on_wake",
     "general.udp_proxy",
