@@ -147,6 +147,9 @@ pub fn open(ui: Ui) {
         return;
     }
     if !is_open(ui) {
+        // A document picker may have been installed or removed since the
+        // host last said which resolve (the backup rows follow).
+        crate::backup::probe_pickers();
         ui.settings_screen
             .set(Some(Screen::new(PAGES, LAST.with(Cell::get))));
     }

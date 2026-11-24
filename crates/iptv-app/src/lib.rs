@@ -37,6 +37,9 @@ mod guide_window_walkthrough;
 pub mod theme;
 
 mod backup;
+/// The document pickers a device has, and the ones headless apps get.
+#[cfg(feature = "test-support")]
+pub use backup::{Pickers, set_pickers_for_test};
 mod browse_playback;
 mod capabilities;
 mod channels_view;
@@ -971,7 +974,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         // Layers, bottom to top: opaque backdrop, video (multiview's other
         // surfaces while their tiles play), UI, full-screen tap catcher.
         // The picture-in-picture window shows only the video (`pip.rs`).
-        .child(backup::service_layer())
+        .child(backup::service_layer(ui))
         .child(keyboard::bridge())
         .child(panels::backdrop(ui))
         .child(video::layer(ui, 0))

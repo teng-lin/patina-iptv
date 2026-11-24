@@ -423,3 +423,134 @@ fn start_app_at(viewport: Size<Points>) -> Headless {
     })
     .unwrap()
 }
+
+/// Opens Settings on its first page (General) from the guide.
+fn open_settings(app: &mut Headless) {
+    step(app.press_key("m"));
+    step(app.wait_for(&message("Manage favorites…")));
+    step(app.press(&message("Settings >> nth=0")));
+    step(app.wait_for(&message("Clear history")));
+}
+
+#[track_caller]
+fn absent(app: &Headless, label: &str) {
+    assert!(
+        app.screen().id(&message(label)).is_err(),
+        "{label} is shown"
+    );
+}
+
+/// The iPad has no backup document transport yet: no Backup or Restore
+/// row, nor their Data and privacy heading.
+#[test]
+fn ipad_settings_show_no_backup_rows() {
+    let Some(home) = isolated!() else { return };
+    iptv_app::set_pickers_for_test(iptv_app::Pickers::of(
+        iptv_core::capabilities::Platform::Ipad,
+    ));
+    let mut fixture = crate::personalization::start(home, Settings::default(), false);
+    let app = &mut fixture.app;
+    open_settings(app);
+    for label in ["Back up", "Restore a backup", "Data and privacy"] {
+        absent(app, label);
+    }
+}
+
+/// A device without document pickers (an Android TV box without a usable
+/// one) offers neither action, yet a restore scheduled earlier stays
+/// reachable: it can be reviewed, kept and canceled, never replaced.
+#[test]
+fn without_pickers_a_scheduled_restore_stays_reviewable_and_cancelable() {
+    let Some(home) = isolated!() else { return };
+    // A backup takes local playlists only from the app's storage.
+    let playlist = home.path().join("synthetic.m3u");
+    let mut fixture = crate::personalization::launch_prepared(
+        home,
+        Settings::default(),
+        false,
+        |path, source| {
+            let stored = path.parent().unwrap().join("playlists/generated/list.m3u");
+            std::fs::create_dir_all(stored.parent().unwrap()).unwrap();
+            std::fs::copy(&playlist, &stored).unwrap();
+            crate::isolated::open_database(path)
+                .unwrap()
+                .update_source(
+                    source,
+                    &Source {
+                        name: "Synthetic personalization".into(),
+                        config: SourceConfig::M3u(M3uSourceConfig {
+                            location: SecretUrl::new(stored.to_string_lossy()),
+                            user_agent: None,
+                            referrer: None,
+                        }),
+                    },
+                )
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    step(fixture.app.open_guide_groups());
+    step(fixture.app.press_key("right"));
+    let pending = fixture.home.data_dir().with_extension("restore-pending");
+    let archive = fixture.home.path().join("generated.patinabackup");
+    {
+        // A desktop's pickers: both actions, under Data and privacy.
+        let app = &mut fixture.app;
+        open_settings(app);
+        step(app.wait_for(&message("Data and privacy")));
+        step(app.on_pick_save_path(Some(archive.clone())));
+        app.on_dialog(|_| DialogAnswer::Press(word("Choose file…")));
+        step(app.press(&message("Back up")));
+        step(app.wait_for_within(&message("Backup saved"), Duration::from_secs(20)));
+        step(app.on_pick_paths(vec![archive.clone()]));
+        schedule(app);
+        assert!(pending.exists());
+    }
+    let crate::personalization::Fixture { app, home, .. } = fixture;
+    drop(app);
+
+    iptv_app::set_pickers_for_test(iptv_app::Pickers::NONE);
+    let mut app = start_app();
+    step(app.wait_for_within("text:★ Local A", Duration::from_secs(20)));
+    step(app.open_guide_groups());
+    step(app.press_key("right"));
+    open_settings(&mut app);
+    step(app.wait_for(&message("Scheduled for next launch")));
+    step(app.wait_for(&message("Data and privacy")));
+    absent(&app, "Back up");
+    let buttons = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = buttons.clone();
+    // The first review keeps the restore, the second cancels it.
+    let mut answers = vec![word("Cancel restore"), word("Keep scheduled")];
+    app.on_dialog(move |dialog| {
+        let texts: Vec<String> = dialog.buttons.iter().map(|b| b.text.clone()).collect();
+        seen.lock().unwrap().push(texts);
+        DialogAnswer::Press(answers.pop().unwrap())
+    });
+    for _ in 0..2 {
+        step(app.press(&message("Restore a backup")));
+        step(app.wait_for(&message(
+            "A restore is already scheduled. Next, choose what happens to it.",
+        )));
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+        step(app.wait_for_gone("id:settings-editor", Duration::from_secs(3)));
+    }
+    step(app.wait_for(&message("Scheduled restore canceled")));
+    assert!(!pending.exists());
+    let buttons = buttons.lock().unwrap().clone();
+    assert_eq!(buttons.len(), 2, "{buttons:?}");
+    for shown in &buttons {
+        assert!(shown.contains(&word("Cancel restore")), "{shown:?}");
+        assert!(
+            !shown.contains(&word("Choose another backup…")),
+            "{shown:?}"
+        );
+    }
+    // Nothing scheduled and no picker: the entry point goes too.
+    step(app.wait_for_gone(&message("Restore a backup"), Duration::from_secs(3)));
+    absent(&app, "Data and privacy");
+    drop(app);
+    drop(home);
+}

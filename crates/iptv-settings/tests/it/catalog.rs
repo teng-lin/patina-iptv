@@ -766,7 +766,10 @@ fn commands_are_the_documented_ones() {
     assert_eq!(restore.label_key(), "settings.remote.restore_defaults");
     assert_eq!(restore.help_key(), "settings.remote.restore_defaults.help");
     assert_eq!(restore.subsection, Some("mapping"));
-    assert_eq!(catalog::command("general.backup").unwrap().subsection, None);
+    assert_eq!(
+        catalog::command("general.backup").unwrap().subsection,
+        Some("privacy")
+    );
 }
 
 #[test]

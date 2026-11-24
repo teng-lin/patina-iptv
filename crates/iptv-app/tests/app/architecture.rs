@@ -8,6 +8,9 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
     ("backup.rs", "REQUEST"),                       // Android document picker signal.
     ("backup.rs", "ANSWER"),                        // Android document picker callback.
+    ("backup.rs", "PROBE"),                         // Android document picker probe request.
+    ("backup.rs", "PICKERS"),                       // The document pickers the host reported.
+    ("backup.rs", "PICKERS_FOR_TEST"),              // Synthetic picker injection (headless tests).
     ("content_image.rs", "CACHE"),                  // Artwork cache.
     ("content_image.rs", "PERMITS"),                // Artwork concurrency limit.
     ("content_image.rs", "CLIENT"),                 // Artwork transport cache.

@@ -602,11 +602,17 @@ fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
         for _ in 0..20 {
             step(app.press_key("up"));
         }
-        step(app.press_key("down")); // Restore: a title plus a second-line note.
-        shown(
-            app,
-            expanded("Replace everything with a backup's contents."),
+        // Restore, under Data and privacy: a title plus a second-line note.
+        let restore = expanded(
+            "Replace current playlists, settings and watch history with a backup's contents.",
         );
+        for _ in 0..20 {
+            if app.shows(restore) {
+                break;
+            }
+            step(app.press_key("down"));
+        }
+        shown(app, restore);
         let rows = app.screen().layout_nodes();
         for source in ["Restore a backup", "Takes effect after a restart"] {
             let label = expanded(source);
@@ -633,7 +639,7 @@ fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
             if app.shows(summary) {
                 break;
             }
-            step(app.press_key("down"));
+            step(app.press_key("up"));
         }
         shown(app, summary);
         let wanted = expanded("Play the last channel on start");

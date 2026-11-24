@@ -79,6 +79,7 @@ pub fn subsection(section: Section, subsection: &str) -> &'static str {
         (Section::Vod, "catalog") => tr("Movies and series"),
         (Section::Vod, "playback") => tr("Series playback"),
         (_, "network") => tr("Network"),
+        (Section::General, "privacy") => tr("Data and privacy"),
         (_, "privacy") => tr("Privacy"),
         (_, "updates") => tr("Updates"),
         (_, "content") => tr("Content"),
