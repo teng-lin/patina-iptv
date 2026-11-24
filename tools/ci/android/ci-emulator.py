@@ -85,11 +85,16 @@ def main():
     parser.add_argument("apk", type=Path)
     args = parser.parse_args()
 
-    sdk = Path(os.environ["ANDROID_HOME"])
-    env = dict(os.environ, PATH=os.pathsep.join((str(sdk / "platform-tools"), os.environ["PATH"])))
+    sdk_path = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if not sdk_path:
+        parser.error("set ANDROID_HOME or ANDROID_SDK_ROOT to the Android SDK")
+    sdk = Path(sdk_path)
+    env = dict(os.environ, ANDROID_HOME=sdk_path,
+               PATH=os.pathsep.join((str(sdk / "platform-tools"), os.environ["PATH"])))
     tools, image = prepare_sdk(sdk, args.target, env)
     for port in (PORT, PORT + 1):
         with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", port))
     output = Path(env.get("IPTV_SMOKE_OUT", "target/android-smoke"))
     output.mkdir(parents=True, exist_ok=True)
@@ -118,7 +123,10 @@ def main():
 
 
 if __name__ == "__main__":
-    def interrupted(signum, frame):
+    def interrupted(signum, _frame):
+        # Let the first interruption stop the owned processes and remove their AVD.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         raise SystemExit(128 + signum)
 
     signal.signal(signal.SIGTERM, interrupted)
