@@ -287,7 +287,11 @@ visible entry point for touch and pointer users.
   the times in a provider group in 15-minute steps. Existing recordings keep
   their accepted capture windows. **Use external player** applies to explicit
   channel choices on Android and Linux. Android offers installed video apps.
-  Linux tries VLC, then mpv.
+  Linux tries VLC, then mpv. The option appears only while such a player is
+  installed, or while it is on, so it can be turned off. A choice made after
+  the player was removed plays in Patina and offers **Turn off external
+  player**. During an Android handoff a media playback foreground service
+  keeps Patina's relay running while the other app plays.
 - **Now:** long press, right-click and the remote's Menu key open guide
   channel and group options. The guide has no overflow buttons in its header
   or groups column. The ruler shows the date and time and offers **Now** after
@@ -482,7 +486,7 @@ pauses and resumes: it never opens, retunes or restarts a stream.
 | A notification's sound | Plays on, quieter (the system ducks it) |
 | Home or another app, picture in picture off | Stops and closes the stream; on return it reopens what played, after fresh admission |
 | Another app beside Patina takes the focus (iPad Split View, Slide Over, Stage Manager; the window stays visible) | Plays on; nothing pauses or reopens |
-| Home with picture in picture on | Plays on in the window, on the same player and stream |
+| Home with picture in picture on (phones and tablets, from full-screen playback only; never a TV) | Plays on in the window, on the same player and stream |
 | The picture-in-picture window closed | Stops as above |
 
 In multiview the policy pauses and resumes the heard tile (the one the

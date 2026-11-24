@@ -153,7 +153,8 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
         // As the device and its window offer it (#279): a phone upright, a
         // tablet in split screen, an iPad and a browser TV leave it out.
         Control::Multiview => main && crate::capabilities::multiview_offer_on(ui, device).shown(),
-        // Shown until the host reports, then only where it can.
+        // Shown until the host reports, then only where it can: never a TV
+        // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
         Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
         _ => true,
     }

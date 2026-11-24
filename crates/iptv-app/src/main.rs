@@ -8,6 +8,7 @@
 #[cfg(target_os = "linux")]
 fn main() -> impl std::process::Termination {
     env_logger::init();
+    iptv_app::exit_background_recorder_launch();
     use nsh_platform_linux as platform;
     platform::set_components(iptv_app::components);
     platform::run_app(
@@ -25,6 +26,7 @@ fn main() -> impl std::process::Termination {
 #[cfg(target_os = "macos")]
 fn main() -> impl std::process::Termination {
     env_logger::init();
+    iptv_app::exit_background_recorder_launch();
     use nsh_platform_macos as platform;
     platform::set_components(iptv_app::components);
     platform::run_app(
@@ -41,6 +43,7 @@ fn main() -> impl std::process::Termination {
 #[cfg(windows)]
 fn main() -> impl std::process::Termination {
     env_logger::init();
+    iptv_app::exit_background_recorder_launch();
     use nsh_platform_windows as platform;
     platform::set_components(iptv_app::components);
     platform::run_app(
