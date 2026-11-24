@@ -1165,11 +1165,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 
 fn recording_list(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
-    effect(move || {
-        if let Some(at) = ui
-            .recordings
+    // A memo: the list follows the focus when it moves, not on every
+    // reload (one a second), which would undo the wheel's scroll.
+    let focused = computed(move || {
+        ui.recordings
             .with(|s| s.visible().position(|j| Some(j.id) == s.focus))
-        {
+    });
+    effect(move || {
+        if let Some(at) = focused.get() {
             rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
         }
     });
