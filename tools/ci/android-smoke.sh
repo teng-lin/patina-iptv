@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Smoke test of the Android app on an emulator or device, driven by remote
 # keys and checked against the app's own log lines (synthetic data only):
-# first run, add the synthetic playlist, play a channel in the guide, full
-# screen, multiview with a second player, background and resume (the players
-# stop and reopen), and back to the guide. Fails on a crash, on a load the
+# first run, add the synthetic playlist, confirm favorites edits with remote
+# and touch, play a channel in the guide, full screen, multiview with a second
+# player, background and resume (the players stop and reopen), and back to
+# the guide. Fails on a crash, on a load the
 # player refused outside its playback relay, or on a step that never happens.
 #
 #   tools/ci/disposable-avd.py ~/.android/avd/tab36.avd <validation-debug.apk>
@@ -46,6 +47,7 @@ fi
 port=${IPTV_SMOKE_PORT:-8089}
 out=${IPTV_SMOKE_OUT:-target/android-smoke}
 adb_guard=$(cd "$(dirname "$0")" && pwd)/android/adb.py
+ui_probe=$(cd "$(dirname "$0")" && pwd)/android/ui-snapshot.py
 phase="device boot"
 # Preserve timeout diagnostics even when an expected adb error is suppressed.
 exec 3>&2
@@ -54,7 +56,11 @@ adb() {
   case "$1" in
     install|push|wait-for-device) limit=120 ;;
     reboot) limit=30 ;;
-    shell) [ "${2:-} ${3:-}" != "am start" ] || limit=60 ;;
+    shell)
+      case "${2:-} ${3:-}" in
+        "am start") limit=60 ;;
+        "uiautomator dump") limit=30 ;;
+      esac ;;
   esac
   case "$phase" in "failure diagnostics"|cleanup) limit=5 ;; esac
   python3 "$adb_guard" --timeout "$limit" --phase "$phase" --category "$1" \
@@ -235,7 +241,7 @@ cleanup() {
   adb shell am force-stop "$pkg" >/dev/null
   if [ "$saved_finish" = 1 ]; then set_always_finish true; else set_always_finish false; fi
   restore_setting global always_finish_activities "$saved_finish"
-  adb shell rm -f "$probe" >/dev/null
+  adb shell rm -f "$probe" /data/local/tmp/patina-smoke-ui.xml >/dev/null
   restore_setting system font_scale "$saved_font"
   restore_setting secure immersive_mode_confirmations "$saved_immersive"
   adb shell appops set "$pkg" PICTURE_IN_PICTURE "$saved_pip" >/dev/null
@@ -295,6 +301,95 @@ shot 03-playlist-added
 keys KEYCODE_DPAD_CENTER                            # Watch
 expect 'iptv wizard: closed' 10
 pause 2
+
+# Observe the real Android accessibility tree; no database keys or test-only
+# app hooks are needed. Before playback, the screen can settle between dumps.
+ui_xml=$out/favorites-ui.xml
+device_ui=/data/local/tmp/patina-smoke-ui.xml
+ui_dump() {
+  adb shell rm -f "$device_ui" || fail "cannot reset native UI snapshot"
+  adb shell uiautomator dump --compressed "$device_ui" >/dev/null || fail "cannot dump native favorites UI"
+  adb exec-out cat "$device_ui" > "$ui_xml" || fail "cannot read native favorites UI"
+}
+ui_count() { python3 "$ui_probe" "$ui_xml" count; }
+ui_confirmation() { python3 "$ui_probe" "$ui_xml" confirmation; }
+ui_tap() {
+  local coordinates tap_x tap_y
+  coordinates=$(python3 "$ui_probe" "$ui_xml" tap "$1") || fail "cannot locate native favorites button: $1"
+  read -r tap_x tap_y <<< "$coordinates"
+  adb shell input tap "$tap_x" "$tap_y"
+}
+assert_favorites() {
+  local counts
+  ui_dump
+  counts=$(ui_count) || fail "cannot observe native favorites count"
+  [ "$counts" = "$1 $favorites_total" ] || fail "native favorites count differs after $2"
+  ! ui_confirmation || fail "confirmation remained open after $2"
+  cp "$ui_xml" "$out/favorites-${2// /-}.xml"
+  echo "  ok: native favorites $1/$favorites_total after $2"
+}
+request_favorites_clear() {
+  keys KEYCODE_DPAD_CENTER
+  ui_dump
+  ui_confirmation || fail "Remove all did not ask for native confirmation"
+}
+
+step "confirm bulk favorites removal with remote and touch"
+mark
+keys KEYCODE_MENU
+# Menu composition depends on the current program. Follow its actual selected
+# accessibility label rather than assuming an action index. Every wait is
+# bounded, including adb's UI-automation idle wait.
+menu_found=false
+for _ in $(seq 1 30); do
+  ui_dump
+  if python3 "$ui_probe" "$ui_xml" selected 'Manage favorites…'; then
+    menu_found=true
+    break
+  fi
+  keys KEYCODE_DPAD_DOWN
+done
+[ "$menu_found" = true ] || fail "cannot reach Manage favorites in native menu"
+keys KEYCODE_DPAD_CENTER
+ui_dump
+counts=$(ui_count) || fail "native favorites editor did not open"
+favorites_total=${counts#* }
+[ "${counts%% *}" = 0 ] && [ "$favorites_total" -gt 0 ] || fail "expected a nonempty list with no favorites"
+keys KEYCODE_DPAD_RIGHT
+assert_favorites "$favorites_total" 'remote Add all'
+keys KEYCODE_DPAD_LEFT
+assert_favorites "$favorites_total" Left
+# The first guide row owns this editor (the wizard has just closed).
+keys KEYCODE_DPAD_UP KEYCODE_DPAD_RIGHT
+request_favorites_clear
+shot 03a-favorites-confirmation
+keys KEYCODE_DPAD_CENTER                           # Cancel is focused by default.
+assert_favorites "$favorites_total" 'default Cancel'
+request_favorites_clear
+keys KEYCODE_BACK                                  # Native Back cancels only the dialog.
+assert_favorites "$favorites_total" Back
+request_favorites_clear
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+assert_favorites 0 'remote confirmation'
+# Native touch targets come from the measured accessibility bounds, so tablet
+# density, safe areas and TV dimensions do not hard-code tap coordinates.
+ui_tap 'Add all'
+assert_favorites "$favorites_total" 'touch Add all'
+ui_tap 'Remove all'
+ui_dump
+ui_confirmation || fail "touch Remove all did not ask for confirmation"
+ui_tap Cancel
+assert_favorites "$favorites_total" 'touch Cancel'
+ui_tap 'Remove all'
+ui_dump
+ui_confirmation || fail "touch Remove all did not reopen confirmation"
+# The toolbar is hidden from accessibility while the modal is open: this is
+# the dialog's explicit destructive action, not the button behind the scrim.
+ui_tap 'Remove all'
+assert_favorites 0 'touch confirmation'
+keys KEYCODE_BACK                                  # Leave the editor on the original guide row.
+adb shell rm -f "$device_ui"
+shot 03b-favorites-cleared
 
 step "play a channel in the guide"
 mark

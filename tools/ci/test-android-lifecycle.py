@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the real smoke wait against synthetic ActivityManager observations."""
 import json
+import importlib.util
 import os
 from pathlib import Path
 import re
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = (ROOT / "tools/ci/android-smoke.sh").read_text()
@@ -39,6 +41,59 @@ calls.write_text(json.dumps(history))
 print(response["text"])
 raise SystemExit(response.get("code", 0))
 '''
+
+
+UI_SPEC = importlib.util.spec_from_file_location("android_ui_snapshot", ROOT / "tools/ci/android/ui-snapshot.py")
+UI = importlib.util.module_from_spec(UI_SPEC)
+UI_SPEC.loader.exec_module(UI)
+
+
+class FavoritesAccessibility(unittest.TestCase):
+    def tree(self, *nodes):
+        root = ET.Element("hierarchy")
+        for attributes in nodes:
+            ET.SubElement(root, "node", attributes)
+        return root
+
+    def test_counts_accept_native_text_and_labels_without_double_counting(self):
+        tree = self.tree({"text": "Favorites · Generated group · 2 of 3"},
+                         {"content-desc": "Favorites · Generated group · 2 of 3"})
+        self.assertEqual(UI.favorites_count(tree), (2, 3))
+        self.assertEqual(UI.favorites_count(self.tree({"text": "Favorites · Generated · 0 of 3"})), (0, 3))
+
+    def test_missing_conflicting_or_invalid_counts_fail_closed(self):
+        for tree in (self.tree(),
+                     self.tree({"text": "Favorites · Generated · 4 of 3"}),
+                     self.tree({"text": "Favorites · Generated · 1 of 3"},
+                               {"text": "Favorites · Other generated · 0 of 2"})):
+            with self.assertRaises(ValueError):
+                UI.favorites_count(tree)
+
+    def test_menu_navigation_observes_actual_selected_item(self):
+        tree = self.tree({"content-desc": "Manage favorites…", "selected": "false"},
+                         {"content-desc": "Generated action", "selected": "true"})
+        self.assertFalse(UI.selected(tree, "Manage favorites…"))
+        tree[0].set("selected", "true")
+        tree[1].set("selected", "false")
+        self.assertTrue(UI.selected(tree, "Manage favorites…"))
+
+    def test_touch_uses_enabled_button_bounds_not_its_child_text(self):
+        tree = self.tree({"content-desc": "Cancel", "clickable": "true", "enabled": "true", "bounds": "[40,80][240,180]"},
+                         {"text": "Cancel", "clickable": "false", "enabled": "true", "bounds": "[80,100][160,160]"})
+        self.assertEqual(UI.button_center(tree, "Cancel"), (140, 130))
+
+    def test_ambiguous_disabled_or_invalid_touch_targets_fail_closed(self):
+        button = {"content-desc": "Remove all", "clickable": "true", "enabled": "true", "bounds": "[10,20][110,120]"}
+        for tree in (self.tree(), self.tree(button, dict(button, bounds="[10,140][110,240]")),
+                     self.tree(dict(button, enabled="false")),
+                     self.tree(dict(button, bounds="[-10,20][0,120]")),
+                     self.tree(dict(button, bounds="[10,20][10,120]"))):
+            with self.assertRaises(ValueError):
+                UI.button_center(tree, "Remove all")
+
+    def test_confirmation_is_distinct_from_toolbar_remove_all(self):
+        self.assertFalse(UI.confirmation_open(self.tree({"content-desc": "Remove all"})))
+        self.assertTrue(UI.confirmation_open(self.tree({"text": UI.CONFIRMATION})))
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "Android smoke uses a Unix host")
