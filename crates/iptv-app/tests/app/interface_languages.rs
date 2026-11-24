@@ -396,7 +396,7 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     );
     step(app.press_key("m"));
     shown(app, &ja.t("Manage favorites…"));
-    step(app.press(&format!("text:{} >> nth=1", ja.t("Settings"))));
+    step(app.press(&format!("text:{} >> nth=0", ja.t("Settings"))));
     shown(app, &ja.t("Back up"));
     // Backing up asks first, in Japanese; the answer here is "Cancel".
     let asked = Arc::new(Mutex::new(Vec::new()));

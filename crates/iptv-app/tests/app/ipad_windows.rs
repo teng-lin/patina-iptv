@@ -601,7 +601,9 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
 // --- Empty Movies and Search in narrow windows ---------------------------
 
 const CLOSE: &str = "id:vod-screen >> label:Close";
-const M3U_ONLY: &str = "Movies and shows come from Xtream Codes and Stalker playlists. M3U playlists have live channels only.";
+/// An Xtream Codes playlist with movie and series imports off (an M3U
+/// playlist alone offers no Movies).
+const IMPORTS_OFF: &str = "Movie and series imports are off for this playlist.";
 
 #[test]
 fn ipad_empty_movies_and_search_fit_split_view_at_large_text() {
@@ -611,10 +613,14 @@ fn ipad_empty_movies_and_search_fit_split_view_at_large_text() {
     settings
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
-    let mut fixture = crate::personalization::launch(
+    settings
+        .set("playlists.include_vod", Value::Bool(false))
+        .unwrap();
+    let mut fixture = crate::personalization::launch_prepared(
         home,
         settings,
         true,
+        crate::personalization::as_catalog_playlist,
         |config| {
             config.viewport = Size::new(px(LANDSCAPE.0), px(LANDSCAPE.1));
             ipad(&mut config.environment);
@@ -623,12 +629,12 @@ fn ipad_empty_movies_and_search_fit_split_view_at_large_text() {
     );
     let app = &mut fixture.app;
     crate::browse_fixture::open_rail_item(app, "Movies");
-    step(app.wait_for(&format!("text:{M3U_ONLY}")));
+    step(app.wait_for(&format!("text:{IMPORTS_OFF}")));
     for text in TEXT {
         for size in WINDOWS {
             present(app, size, text);
             let what = format!("empty Movies at {size:?}, text {text:.2}");
-            step(app.wait_for(&format!("text:{M3U_ONLY}")));
+            step(app.wait_for(&format!("text:{IMPORTS_OFF}")));
             if Class::of(size.0, text) == Class::Compact {
                 assert_eq!(
                     app.screen().count("id:vod-category").unwrap(),
@@ -637,14 +643,14 @@ fn ipad_empty_movies_and_search_fit_split_view_at_large_text() {
                 );
             }
             let message = find(app, |n| {
-                n.text.as_ref().is_some_and(|t| t.text.text == M3U_ONLY)
+                n.text.as_ref().is_some_and(|t| t.text.text == IMPORTS_OFF)
             })
             .unwrap();
             inside(message, size, &format!("the message, {what}"));
             inside(
                 bounds(app, "vod-empty-action", &what),
                 size,
-                &format!("Add playlist, {what}"),
+                &format!("Playlist settings, {what}"),
             );
             // A way out by touch (an iPad has no Back): the rail's Close,
             // or where a compact window closed the categories and a wider
