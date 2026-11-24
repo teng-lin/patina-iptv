@@ -773,7 +773,23 @@ fn build_old_file(path: &Path, v: &Version) {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap()
     });
-    let conn = rusqlite::Connection::open(path).unwrap();
+    // Building the fixture is not the code under test, so it need not be
+    // durable: the connection is closed before the current build opens the
+    // file. In the default rollback-journal mode every autocommit statement
+    // creates, syncs and deletes a journal and syncs the database. That is
+    // about 400 syncs per version, run 27 times by each test that walks
+    // `HISTORY`. A sync costs microseconds on tmpfs but milliseconds on
+    // Windows NTFS, where these tests took minutes. One transaction with
+    // an in-memory journal and no syncs writes the same file. Both pragmas
+    // belong to this connection only: the file keeps its rollback-journal
+    // format, and `Store::open` still migrates it with its own WAL and
+    // `synchronous` settings.
+    let mut conn = rusqlite::Connection::open(path).unwrap();
+    conn.pragma_update(None, "synchronous", "OFF").unwrap();
+    let _mode: String = conn
+        .pragma_update_and_check(None, "journal_mode", "MEMORY", |r| r.get(0))
+        .unwrap();
+    let conn = conn.transaction().unwrap();
     conn.execute_batch(&fixture(&format!("schema_v{}.sql", v.version)))
         .unwrap();
     for (version, name) in names.iter().take(v.version as usize) {
@@ -787,6 +803,7 @@ fn build_old_file(path: &Path, v: &Version) {
     for data in v.data {
         conn.execute_batch(&seed_sql(v.version, data)).unwrap();
     }
+    conn.commit().unwrap();
 }
 
 fn fresh_schema() -> String {
