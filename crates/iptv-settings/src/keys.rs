@@ -72,6 +72,8 @@ pub const UI_TRANSPARENCY: IntKey = IntKey("appearance.ui_transparency");
 // Guide and player behavior.
 pub const BACK_RETURNS_TO_NOW: BoolKey = BoolKey("guide.back_returns_to_now");
 pub const INFO_ON_SWITCH: BoolKey = BoolKey("player.info_on_switch");
+/// A vertical swipe over full-screen live video changes channel (#285).
+pub const SWIPE_TO_ZAP: BoolKey = BoolKey("playback.swipe_to_zap");
 pub const PIP_ON_LEAVE: EnumKey = EnumKey("player.pip_on_leave");
 /// Multiview: focusing a tile makes it heard (#179).
 pub const SOUND_FOLLOWS_TILE: BoolKey = BoolKey("player.sound_follows_tile");
@@ -122,6 +124,7 @@ pub const ALL: &[(&str, &str)] = &[
     (UI_TRANSPARENCY.0, "integer"),
     (BACK_RETURNS_TO_NOW.0, "bool"),
     (INFO_ON_SWITCH.0, "bool"),
+    (SWIPE_TO_ZAP.0, "bool"),
     (PIP_ON_LEAVE.0, "enum"),
     (SOUND_FOLLOWS_TILE.0, "bool"),
     (SEEK_KEYS.0, "enum"),
