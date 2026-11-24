@@ -289,11 +289,9 @@ iptv-app/src/input/keys.rs	Numpad
 # Inline recording action dispatch keys; labels are translated in rows.rs.
 iptv-app/src/recordings_view/rows.rs	Cancel recording
 iptv-app/src/recordings_view/rows.rs	Delete recording
-iptv-app/src/recordings_view/rows.rs	Edit recording
 iptv-app/src/recordings_view/rows.rs	Stop recording
 
 # Original SVG icon geometry.
-iptv-app/src/play_bar/icons.rs	<path d='M4 20l1-5L16 4l4 4L9 19zM13 7l4 4'/>
 iptv-app/src/play_bar/icons.rs	<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>
 iptv-app/src/play_bar/icons.rs	<rect x='5' y='5' width='14' height='14' rx='1' fill='currentColor' stroke='none'/>
 

@@ -12,6 +12,11 @@ is below 1.0, a minor release may change behavior.
 - Simplify the TV Guide header and groups column by removing overflow buttons,
   the duplicate group selector and time-step arrows. Remove the unfinished
   Watchlist destination from the navigation rail.
+- Stop offering scheduled and repeating recordings: the guide, program menu,
+  program details, Record key and Recordings no longer schedule or edit a
+  future recording, and the recorder login startup and precise wakeup settings
+  are hidden. Recordings scheduled earlier stay listed, can be canceled and
+  still run. Record now is unchanged.
 
 ## [0.1.8] - 2026-11-23
 

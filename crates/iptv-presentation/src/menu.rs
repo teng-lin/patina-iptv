@@ -187,11 +187,10 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
         Airing::Live => vec![ExternalPlayer, Record],
         Airing::Ended if in_archive => vec![StartFromBeginning, ExternalPlayer],
         Airing::Ended => vec![],
-        Airing::Upcoming => vec![Reminder, ScheduleRecording],
+        // Recording a future program is retired (#273): no Schedule recording
+        // or Schedule a recording… here. `Record` starts recording now.
+        Airing::Upcoming => vec![Reminder],
     };
-    if program.airing(now) != Airing::Upcoming {
-        items.push(CustomRecording);
-    }
     items.extend([SaveToList, Description]);
     items
 }
@@ -409,39 +408,34 @@ mod tests {
                 StartFromBeginning,
                 ExternalPlayer,
                 Record,
-                CustomRecording,
                 SaveToList,
                 Description
             ]
         );
         assert_eq!(
             program_actions(LIVE, 0, 0),
-            [
-                ExternalPlayer,
-                Record,
-                CustomRecording,
-                SaveToList,
-                Description
-            ]
+            [ExternalPlayer, Record, SaveToList, Description]
         );
         assert_eq!(
             program_actions(ENDED, 3, 0),
-            [
-                StartFromBeginning,
-                ExternalPlayer,
-                CustomRecording,
-                SaveToList,
-                Description
-            ]
+            [StartFromBeginning, ExternalPlayer, SaveToList, Description]
         );
-        assert_eq!(
-            program_actions(ENDED, 0, 0),
-            [CustomRecording, SaveToList, Description]
-        );
+        assert_eq!(program_actions(ENDED, 0, 0), [SaveToList, Description]);
         assert_eq!(
             program_actions(FUTURE, 3, 0),
-            [Reminder, ScheduleRecording, SaveToList, Description]
+            [Reminder, SaveToList, Description]
         );
+    }
+
+    #[test]
+    fn no_program_action_schedules_a_future_recording() {
+        for program in [LIVE, ENDED, FUTURE] {
+            for days in [0, 3] {
+                let items = program_actions(program, days, 0);
+                assert!(!items.contains(&ScheduleRecording), "{program:?}");
+                assert!(!items.contains(&CustomRecording), "{program:?}");
+            }
+        }
     }
 
     #[test]
@@ -452,7 +446,7 @@ mod tests {
         assert!(program_actions(p, 0, 45).contains(&Record));
         assert_eq!(
             program_actions(p, 0, 90),
-            [CustomRecording, SaveToList, Description],
+            [SaveToList, Description],
             "ended, no archive"
         );
     }

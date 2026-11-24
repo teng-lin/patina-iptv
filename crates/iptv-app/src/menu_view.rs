@@ -35,8 +35,6 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
         item,
         MenuItem::Search
             | MenuItem::Record
-            | MenuItem::ScheduleRecording
-            | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
             | MenuItem::BlockChannel
@@ -146,10 +144,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
     let scope = channel_scope(ui, &list);
     let program = schedule.program_at(channel, minute);
     let mut rows = program_menu(program, schedule.catchup_days(channel), now, |item| {
-        if matches!(
-            item,
-            MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording
-        ) {
+        if item == MenuItem::Record {
             return ui.player_surface == 0 && crate::recordings_view::available(channel);
         }
         match item {
@@ -379,10 +374,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     } = target
         && matches!(
             item,
-            MenuItem::RecordNow
-                | MenuItem::ScheduleRecording
-                | MenuItem::CancelRecording
-                | MenuItem::StopRecording
+            MenuItem::RecordNow | MenuItem::CancelRecording | MenuItem::StopRecording
         )
     {
         let Some(origin) = program_origin(&target) else {
@@ -447,11 +439,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 organization_view::open_mode(ui, source, kind, None, mode);
             }
         }
-        MenuItem::Record
-        | MenuItem::CustomRecording
-        | MenuItem::ScheduleRecording
-        | MenuItem::Description
-        | MenuItem::StartFromBeginning => {
+        MenuItem::Record | MenuItem::Description | MenuItem::StartFromBeginning => {
             if let Some(origin) = program_origin(&target) {
                 perform_program(ui, item, origin);
             }
@@ -598,8 +586,6 @@ pub fn perform(ui: Ui, item: MenuItem) {
 fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
     match item {
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
-        MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
-        MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::StartFromBeginning => {
             let schedule = crate::schedule();
@@ -858,10 +844,7 @@ fn action_detail(ui: Ui, item: MenuItem) -> String {
         if let Target::Channel { program, .. } = menu.target
             && matches!(
                 item,
-                MenuItem::RecordNow
-                    | MenuItem::ScheduleRecording
-                    | MenuItem::CancelRecording
-                    | MenuItem::StopRecording
+                MenuItem::RecordNow | MenuItem::CancelRecording | MenuItem::StopRecording
             )
             && let Some(channel) = menu_channel(&menu.target)
         {
@@ -1198,11 +1181,13 @@ fn description(ui: Ui) -> impl IntoElement {
                         )
                         .child(when(
                             move || {
+                                // Only a program on now records (Record now); a
+                                // future one is not scheduled (#273).
+                                ui.guide_data();
+                                let now = ui.focus.with(|focus| focus.now);
                                 ui.player_surface == 0
-                                    && program().is_some_and(|(ch, p)| {
-                                        crate::recordings_view::available(ch)
-                                            && crate::guide::unix_of(&*crate::schedule(), p.end)
-                                                > crate::time::wall_unix()
+                                    && ui.description.get().is_some_and(|origin| {
+                                        crate::recordings_view::can_record_now(origin, now)
                                     })
                             },
                             move || {
@@ -1213,7 +1198,7 @@ fn description(ui: Ui) -> impl IntoElement {
                                     || true,
                                     move || {
                                         if let Some(origin) = ui.description.get_untracked() {
-                                            crate::recordings_view::program(ui, origin, false);
+                                            crate::recordings_view::record_details(ui, origin);
                                         }
                                     },
                                 )
