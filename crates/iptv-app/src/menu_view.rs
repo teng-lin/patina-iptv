@@ -162,7 +162,8 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             _ => implemented(item, ui.player_surface),
         }
     });
-    if !crate::host::HAS_WORKERS || ui.player_surface != 0 {
+    let auxiliary = ui.player_surface != 0;
+    if !crate::host::HAS_WORKERS || auxiliary {
         // Recording never runs here: leave its rows out.
         rows.retain(|row| {
             !matches!(
@@ -171,6 +172,18 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
                     item: MenuItem::Record
                         | MenuItem::ScheduleRecording
                         | MenuItem::CustomRecording,
+                    ..
+                }
+            )
+        });
+    }
+    if auxiliary {
+        // Auxiliary player windows play live streams only.
+        rows.retain(|row| {
+            !matches!(
+                row,
+                Row::Action {
+                    item: MenuItem::StartFromBeginning,
                     ..
                 }
             )
@@ -187,7 +200,9 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             )
         });
     }
+    // Only the main window opens player windows.
     if (crate::host::LINUX || crate::host::MACOS)
+        && !auxiliary
         && program.airing(now) == crate::guide::Airing::Live
     {
         rows.insert(
@@ -227,7 +242,8 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
     };
     let scope = channel_scope(ui, &list);
     let offset = crate::player::guide_offset(&*schedule, channel);
-    let new_window = (crate::host::LINUX || crate::host::MACOS)
+    // Only the main window opens player windows.
+    let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
         .then(|| crate::desktop::player_windows::can_open(ui, channel));
     let rows = channel_menu(
         crate::recordings_view::channel_menu_action(ui, origin),

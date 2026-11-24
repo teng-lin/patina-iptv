@@ -72,8 +72,8 @@ watching, Recently added, Recordings, Playlists and Settings.
   (also with its movie and series import off); once every enabled playlist
   is M3U, which never carries them, they leave the rail and the Movies and
   Shows screen's own navigation. Recordings is left out on a host that
-  cannot record (the browser TV host). Continue watching and Recently added appear when any enabled playlist has
-  movies or series.
+  cannot record (the browser TV host). Continue watching and Recently
+  added appear when any enabled playlist has movies or series.
 - **Planned:** the same destinations in every layout class. A compact window
   may present them differently (for example a collapsed rail), but never drops
   one or reorders it.
@@ -500,7 +500,7 @@ below wins, after "some playlist has titles".
 | Import failed (whole import, or its movie or series list) | Last refresh failed, and why by error kind (no provider text) | Retry: runs that playlist's refresh again |
 | Imports turned off for the source | Movie and series imports are off for this playlist | Playlist settings: opens that playlist's actions at its "Movies and series" switch |
 | Imported, but the catalog is empty | No movies (or shows) found; refresh the playlist to look for new ones | Refresh now |
-| No source can provide movies or series (M3U only, or none) | Movies and shows come from Xtream Codes and Stalker playlists; M3U has live channels only | Add playlist |
+| No source can provide movies or series (no playlist yet; once every enabled playlist is M3U, Movies and Shows are not offered) | Movies and shows come from Xtream Codes and Stalker playlists; M3U has live channels only | Add playlist |
 
 On a remote the action sits where the titles would be: Right from the
 categories, then OK. If the action moves to another playlist while the remote

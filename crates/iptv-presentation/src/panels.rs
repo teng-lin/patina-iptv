@@ -76,6 +76,9 @@ pub enum Control {
     Record,
 }
 
+// [`Panels`] keeps the controls it leaves out as a `u16` mask.
+const _: () = assert!(CONTROLS.len() <= 16 && QUICK_ACTIONS.len() <= 16);
+
 pub const CONTROLS: [Control; 13] = [
     Control::Search,
     Control::ChannelList,
@@ -92,13 +95,16 @@ pub const CONTROLS: [Control; 13] = [
     Control::Record,
 ];
 
-/// The first index of [`CONTROLS`] in `step`'s direction from `from`
-/// (exclusive) whose control is offered.
-fn next_offered(omitted: u16, from: usize, step: isize) -> Option<usize> {
+/// The first index below `len` in `step`'s direction from `from`
+/// (exclusive) that `omitted` (a mask by index) does not leave out.
+fn next_offered(omitted: u16, len: usize, from: usize, step: isize) -> Option<usize> {
+    if step == 0 {
+        return None;
+    }
     let mut at = from as isize;
     loop {
         at += step.signum();
-        if at < 0 || at as usize >= CONTROLS.len() {
+        if at < 0 || at as usize >= len {
             return None;
         }
         if omitted & (1 << at) == 0 {
@@ -292,10 +298,42 @@ impl Panels {
             .filter(|&(_, &control)| !offered(control))
             .fold(0, |mask, (at, _)| mask | (1 << at));
         if self.omitted & (1 << self.focus) != 0 {
-            self.focus = next_offered(self.omitted, self.focus, -1)
-                .or_else(|| next_offered(self.omitted, self.focus, 1))
+            self.focus = next_offered(self.omitted, CONTROLS.len(), self.focus, -1)
+                .or_else(|| next_offered(self.omitted, CONTROLS.len(), self.focus, 1))
                 .unwrap_or(0);
         }
+        let quick = self.quick_omitted();
+        if let Some(at) = self.quick
+            && quick & (1 << at) != 0
+        {
+            self.quick = next_offered(quick, QUICK_ACTIONS.len(), at, -1)
+                .or_else(|| next_offered(quick, QUICK_ACTIONS.len(), at, 1));
+        }
+    }
+
+    /// Whether the action cards show `action`: Multiview only where the
+    /// strip offers it ([`Self::offer`]).
+    pub fn offers_quick(&self, action: QuickAction) -> bool {
+        match action {
+            QuickAction::Multiview => self.offers(Control::Multiview),
+            _ => true,
+        }
+    }
+
+    fn offers(&self, control: Control) -> bool {
+        CONTROLS
+            .iter()
+            .position(|&c| c == control)
+            .is_some_and(|at| self.omitted & (1 << at) == 0)
+    }
+
+    /// The action cards left out, by their [`QUICK_ACTIONS`] index.
+    fn quick_omitted(&self) -> u16 {
+        QUICK_ACTIONS
+            .iter()
+            .enumerate()
+            .filter(|&(_, &action)| !self.offers_quick(action))
+            .fold(0, |mask, (at, _)| mask | (1 << at))
     }
 
     /// The controls the strip shows, in order.
@@ -320,7 +358,7 @@ impl Panels {
         if self.omitted & 1 == 0 {
             0
         } else {
-            next_offered(self.omitted, 0, 1).unwrap_or(0)
+            next_offered(self.omitted, CONTROLS.len(), 0, 1).unwrap_or(0)
         }
     }
 
@@ -331,15 +369,24 @@ impl Panels {
     /// Moves focus within the row that has it (clamped, no wrap); the
     /// first press over the card focuses its first action.
     pub fn move_focus(&mut self, step: isize, now_ms: u64) {
-        let clamp =
-            |at: usize, len: usize| (at as isize + step).clamp(0, len as isize - 1) as usize;
         match self.shown {
-            Shown::Card => {
-                self.quick = Some(self.quick.map_or(0, |at| clamp(at, QUICK_ACTIONS.len())));
-            }
+            // Guide, the first card, is always offered.
+            Shown::Card => match self.quick {
+                None => self.quick = Some(0),
+                Some(mut at) => {
+                    let quick = self.quick_omitted();
+                    for _ in 0..step.unsigned_abs() {
+                        match next_offered(quick, QUICK_ACTIONS.len(), at, step) {
+                            Some(next) => at = next,
+                            None => break,
+                        }
+                    }
+                    self.quick = Some(at);
+                }
+            },
             Shown::Controls => {
                 for _ in 0..step.unsigned_abs() {
-                    match next_offered(self.omitted, self.focus, step) {
+                    match next_offered(self.omitted, CONTROLS.len(), self.focus, step) {
                         Some(at) => self.focus = at,
                         None => break,
                     }

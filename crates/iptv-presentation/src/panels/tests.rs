@@ -241,6 +241,29 @@ fn controls_the_host_never_offers_are_left_out_of_the_strip_and_its_focus() {
 }
 
 #[test]
+fn the_multiview_card_follows_the_strip() {
+    let mut p = Panels::default();
+    p.show_card(0);
+    p.move_focus(1, 1);
+    p.move_focus(4, 2);
+    assert_eq!(p.quick_focused(), Some(QuickAction::Multiview));
+    // The host can never offer it: the card goes and takes no focus.
+    p.offer(|c| c != Control::Multiview);
+    assert!(!p.offers_quick(QuickAction::Multiview));
+    assert_eq!(p.quick_focused(), Some(QuickAction::Favorite));
+    p.move_focus(1, 3);
+    assert_eq!(
+        p.quick_focused(),
+        Some(QuickAction::Controls),
+        "steps over it"
+    );
+    p.move_focus(-1, 4);
+    assert_eq!(p.quick_focused(), Some(QuickAction::Favorite));
+    p.offer(|_| true);
+    assert!(p.offers_quick(QuickAction::Multiview));
+}
+
+#[test]
 fn a_held_key_keeps_the_card_until_its_press_is_decided() {
     let mut p = Panels::default();
     p.timeouts.controls_ms = 1_000;

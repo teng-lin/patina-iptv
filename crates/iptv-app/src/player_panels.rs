@@ -15,7 +15,7 @@ use crate::i18n::{tr, trf};
 use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
-use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
+use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, QuickAction, Shown};
 use iptv_presentation::player_info::date_time;
 use iptv_presentation::sound::delay_label;
 use iptv_presentation::tracks::{audio_layout_in, summary_in};
@@ -431,30 +431,34 @@ fn quick_row(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElem
         .bg(panel)
         .children(QUICK_ACTIONS.iter().enumerate().map(move |(i, action)| {
             let action = *action;
-            let focused = move || {
-                ui.keys_shown()
-                    && ui
-                        .panels
-                        .with(|p| p.shown == Shown::Card && p.quick == Some(i))
-            };
-            pill(
-                ui,
-                move || {
-                    let detour = crate::multiview::detour(ui);
-                    words::quick_label(action, is_favorite(ui), detour).to_owned()
-                },
-                focused,
-                move || {
-                    action == iptv_presentation::panels::QuickAction::Multiview
-                        && ui.playing.get().is_none()
-                },
-                move || {
-                    ui.panels.update(|p| p.quick = Some(i));
-                    crate::player_keys::press_quick(ui, action);
-                },
-            )
+            // Multiview only where the strip offers it (`offered`).
+            let offered = move || ui.panels.with(|p| p.offers_quick(action));
+            when(offered, move || quick_card(ui, i, action))
         }))
         .self_start()
+}
+
+/// Action card `i` of [`QUICK_ACTIONS`].
+fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
+    let focused = move || {
+        ui.keys_shown()
+            && ui
+                .panels
+                .with(|p| p.shown == Shown::Card && p.quick == Some(i))
+    };
+    pill(
+        ui,
+        move || {
+            let detour = crate::multiview::detour(ui);
+            words::quick_label(action, is_favorite(ui), detour).to_owned()
+        },
+        focused,
+        move || action == QuickAction::Multiview && ui.playing.get().is_none(),
+        move || {
+            ui.panels.update(|p| p.quick = Some(i));
+            crate::player_keys::press_quick(ui, action);
+        },
+    )
 }
 
 /// What the keys do now, under the panels (keys only).
@@ -509,25 +513,26 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     });
     let count = computed(move || ui.panels.with(|p| p.controls().count()));
     virtual_list(count, move |at| {
-        let index = at.index();
+        // A recycled cell takes another row: read its index each time.
         let control = computed(move || {
-            ui.panels
-                .with(|p| p.controls().nth(index))
-                .unwrap_or(CONTROLS[0])
+            let index = at.index();
+            ui.panels.with(|p| p.controls().nth(index))
         });
         let focused = move || {
             ui.keys_shown()
                 && ui
                     .panels
-                    .with(|p| p.shown == Shown::Controls && p.focused() == control.get())
+                    .with(|p| p.shown == Shown::Controls && control.get() == Some(p.focused()))
         };
         pill(
             ui,
-            move || label(ui, control.get()),
+            move || control.get().map(|c| label(ui, c)).unwrap_or_default(),
             focused,
-            move || !enabled(ui, control.get()),
+            move || !control.get().is_some_and(|c| enabled(ui, c)),
             move || {
-                let control = control.get_untracked();
+                let Some(control) = control.get_untracked() else {
+                    return;
+                };
                 ui.panels.update(|p| p.focus_control(control));
                 crate::player_keys::press_control(ui, control);
             },
