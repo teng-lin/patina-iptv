@@ -224,11 +224,11 @@ fn favorites(app: &mut Headless) {
     step(app.wait_for("text:/^Favorites · .* · 1 of 2$/"));
     step(app.wait_for("text:Tap a channel to add or remove it"));
     assert!(app.screen().matches("role:checkbox").unwrap());
-    // Keys: Left removes all, Right adds all, OK toggles the focused one.
+    // Left preserves favorites; Right adds all, OK toggles the focused one.
     step(app.press_key("left"));
-    step(app.wait_for("text:/ · 0 of 2$/"));
+    step(app.wait_for("text:/ · 1 of 2$/"));
     step(app.wait_for(
-        "text:OK add or remove   ◀ remove all in this list   ▶ add all in this list   Back done",
+        "text:OK add or remove   ▲ toolbar above first channel   ▶ add all in this list   Back done",
     ));
     step(app.press_key("right"));
     step(app.wait_for("text:/ · 2 of 2$/"));
@@ -240,6 +240,20 @@ fn favorites(app: &mut Headless) {
     step(app.press("text:☆"));
     step(app.wait_for("text:/ · 2 of 2$/"));
     step(app.press("text:Remove all"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    step(app.wait_for("text:/ · 2 of 2$/"));
+    step(app.press("id:favorites-clear-confirmation >> text:Cancel"));
+    step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));
+    step(app.wait_for("text:/ · 2 of 2$/"));
+    step(app.press("text:Remove all"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    step(app.back());
+    step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));
+    step(app.wait_for("text:/ · 2 of 2$/"));
+    step(app.press("text:Remove all"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    step(app.press("id:favorites-clear-confirmation >> text:Remove all"));
+    step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));
     step(app.wait_for("text:/ · 0 of 2$/"));
     step(app.press("text:Add all"));
     step(app.wait_for("text:/ · 2 of 2$/"));
@@ -632,4 +646,46 @@ fn leaving(app: &mut Headless) {
     step(app.press_key("backspace"));
     step(app.wait(Duration::from_millis(300)));
     assert!(!app.shows("Press Back again to leave"));
+}
+
+#[test]
+fn favorites_bulk_removal_keeps_other_lists() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture =
+        crate::personalization::start(home, iptv_settings::Settings::default(), false);
+    let app = &mut fixture.app;
+    crate::personalization::menu(app, "Manage favorites…");
+    step(app.wait_for("text:/ · 0 of 3$/"));
+    step(app.press("text:Add all"));
+    step(app.wait_for("text:/ · 3 of 3$/"));
+    step(app.back());
+    crate::personalization::group(app, "News");
+    crate::personalization::menu(app, "Manage favorites…");
+    step(app.wait_for("text:/ · 2 of 2$/"));
+    step(app.press_key("left"));
+    step(app.wait_for("text:/ · 2 of 2$/"));
+    // Up from the first row reaches Add all, then Right reaches Remove all.
+    step(app.press_key("up"));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    // Default OK cancels, without modifying either list.
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));
+    step(app.wait_for("text:/ · 2 of 2$/"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));
+    step(app.wait_for("text:/ · 0 of 2$/"));
+    step(app.back());
+    crate::personalization::group(app, "All channels");
+    crate::personalization::menu(app, "Manage favorites…");
+    step(app.wait_for("text:/ · 1 of 3$/"));
+    step(app.press("text:Done"));
+    crate::personalization::group(app, "Favorites");
+    step(app.wait_for("text:Local C"));
+    assert!(!app.shows("text:Local A"));
+    assert!(!app.shows("text:Local B"));
 }

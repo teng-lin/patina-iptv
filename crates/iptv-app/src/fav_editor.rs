@@ -1,7 +1,7 @@
 //! The favorites editor overlay for the list on screen (from the menu's
-//! "Manage favorites…"): a star per channel, OK toggles, Left removes the
-//! whole list, Right adds it, Back leaves; persistent hints and, for touch,
-//! a tap per row plus "Add all" / "Remove all" buttons. Changes are saved
+//! "Manage favorites…"): a star per channel, OK toggles, Right adds the
+//! list, Back leaves. Up from the first row focuses the toolbar.
+//! "Remove all" asks for confirmation with Cancel focused. Changes are saved
 //! by channel key (`favorites.rs`) at once.
 
 use crate::i18n::{tr, trf};
@@ -61,8 +61,73 @@ pub fn toggle(ui: Ui) {
     with_favorites(ui, |e, fav| e.toggle(fav));
 }
 
-pub fn clear_group(ui: Ui) {
-    with_favorites(ui, |e, fav| e.clear_group(fav));
+pub fn request_clear(ui: Ui) {
+    ui.editor.update(|editor| {
+        if let Some(editor) = editor {
+            editor.request_clear();
+        }
+    });
+}
+
+fn resolve_clear(ui: Ui, confirmed: bool) {
+    if let Some(mut editor) = ui.editor.get_untracked() {
+        if confirmed {
+            crate::favorites::edit(ui, |fav| editor.resolve_clear(fav, true));
+        } else {
+            editor.clear_confirmation = None;
+        }
+        ui.editor.set(Some(editor));
+    }
+}
+
+pub fn key(ui: Ui, action: iptv_nav::Action) {
+    use iptv_nav::Action;
+    let Some(editor) = ui.editor.get_untracked() else {
+        return;
+    };
+    if let Some(remove) = editor.clear_confirmation {
+        match action {
+            Action::MoveUp | Action::MoveDown | Action::MoveLeft | Action::MoveRight => {
+                ui.editor
+                    .update(|e| e.as_mut().unwrap().clear_confirmation = Some(!remove));
+            }
+            Action::Select => resolve_clear(ui, remove),
+            Action::Back => resolve_clear(ui, false),
+            _ => {}
+        }
+    } else if let Some(control) = editor.control {
+        match action {
+            Action::MoveLeft | Action::MoveRight => {
+                let next = if action == Action::MoveLeft {
+                    control.saturating_sub(1)
+                } else {
+                    (control + 1).min(2)
+                };
+                ui.editor
+                    .update(|e| e.as_mut().unwrap().control = Some(next));
+            }
+            Action::MoveDown => ui.editor.update(|e| e.as_mut().unwrap().control = None),
+            Action::Select => match control {
+                0 => set_group(ui),
+                1 => request_clear(ui),
+                _ => close(ui),
+            },
+            Action::Back => close(ui),
+            _ => {}
+        }
+    } else {
+        match action {
+            Action::MoveUp if editor.focus == 0 => {
+                ui.editor.update(|e| e.as_mut().unwrap().control = Some(0));
+            }
+            Action::MoveUp => move_focus(ui, -1),
+            Action::MoveDown => move_focus(ui, 1),
+            Action::Select => toggle(ui),
+            Action::MoveRight => set_group(ui),
+            Action::Back => close(ui),
+            _ => {}
+        }
+    }
 }
 
 pub fn set_group(ui: Ui) {
@@ -99,8 +164,20 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             })
         })
     };
-    let button = move |label: &'static str, act: fn(Ui)| {
-        crate::ui_kit::button(ui, size, move || tr(label), || false, move || act(ui))
+    let button = move |label: &'static str, control: usize, act: fn(Ui)| {
+        crate::ui_kit::button(
+            ui,
+            size,
+            move || tr(label),
+            move || {
+                ui.editor.with(|e| {
+                    e.as_ref().is_some_and(|e| {
+                        e.control == Some(control) && e.clear_confirmation.is_none()
+                    })
+                })
+            },
+            move || act(ui),
+        )
     };
     let row = move |at: Position| {
         let channel = move || {
@@ -109,7 +186,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         };
         let starred =
             move || channel().is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)));
-        let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
+        let focused = move || {
+            ui.keys_shown()
+                && focus.get() == Some(at.index())
+                && ui.editor.with(|e| {
+                    e.as_ref()
+                        .is_some_and(|e| e.control.is_none() && e.clear_confirmation.is_none())
+                })
+        };
         let mark = move || Mark::of(focused(), false);
         list_rows::row(size, ROW, mark)
             .role(AccessibilityRole::Checkbox)
@@ -127,8 +211,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .gap(px(16.0))
             .on_press(move || {
                 ui.touched();
-                ui.editor
-                    .update(|e| e.iter_mut().for_each(|e| e.focus = at.index()));
+                ui.editor.update(|e| {
+                    e.iter_mut().for_each(|e| {
+                        e.focus = at.index();
+                        e.control = None;
+                    })
+                });
                 toggle(ui);
             })
             .child(
@@ -174,6 +262,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         })
         .child(
             view()
+                .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
                 .flex_row()
                 .items_center()
                 .gap(px(12.0))
@@ -184,14 +273,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         .text_size(move || size.text_px(TITLE))
                         .text_color(rgb(LIST_TEXT)),
                 )
-                .child(button("Add all", set_group))
-                .child(button("Remove all", clear_group))
-                .child(button("Done", close)),
+                .child(button("Add all", 0, set_group))
+                .child(button("Remove all", 1, request_clear))
+                .child(button("Done", 2, close)),
         )
         .child(
             text(move || {
                 if ui.keys_shown() {
-                    tr("OK add or remove   ◀ remove all in this list   ▶ add all in this list   Back done")
+                    tr("OK add or remove   ▲ toolbar above first channel   ▶ add all in this list   Back done")
                 } else {
                     tr("Tap a channel to add or remove it")
                 }
@@ -202,8 +291,54 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         )
         .child(
             virtual_list(count, row)
+                .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
                 .estimated_item_size(list_rows::pitch(size, ROW))
                 .element_ref(&list)
                 .flex_1(),
         )
+        .child(clear_confirmation(ui, size))
+}
+
+fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
+    when(
+        move || {
+            ui.editor
+                .with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))
+        },
+        move || {
+            let (outer, card) = crate::wizard_view::entry::frame(ui, size);
+            outer.test_id("favorites-clear-confirmation").child(
+                card.child(crate::ui_kit::title(size, move || {
+                    tr("Remove all favorites in this list?")
+                }))
+                .child(crate::ui_kit::body(size, move || {
+                    tr("Only channels in this list will be removed from favorites.")
+                }))
+                .child(crate::ui_kit::button(
+                    ui,
+                    size,
+                    move || tr("Cancel"),
+                    move || {
+                        ui.editor.with(|e| {
+                            e.as_ref()
+                                .is_some_and(|e| e.clear_confirmation == Some(false))
+                        })
+                    },
+                    move || resolve_clear(ui, false),
+                ))
+                .child(crate::ui_kit::button(
+                    ui,
+                    size,
+                    move || tr("Remove all"),
+                    move || {
+                        ui.editor.with(|e| {
+                            e.as_ref()
+                                .is_some_and(|e| e.clear_confirmation == Some(true))
+                        })
+                    },
+                    move || resolve_clear(ui, true),
+                )),
+            )
+        },
+    )
 }
