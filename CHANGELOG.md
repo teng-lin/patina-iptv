@@ -18,6 +18,10 @@ is below 1.0, a minor release may change behavior.
   picture and Multiview where the device can never offer them, and the
   browser TV host shows no recording rows, buttons or Recordings entry.
 - Movies and Shows are no longer offered when every enabled playlist is M3U.
+- Android TV no longer offers picture in picture: Home during playback returns
+  to the launcher and stops the stream, and the control and the
+  picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
+  it, entering on Home only from full-screen playback.
 
 ## [0.1.8] - 2026-11-23
 
