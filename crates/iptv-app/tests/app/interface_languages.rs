@@ -188,7 +188,9 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
         exposure.action_label(app, "guide-header-program", "longpress"),
         Some("More options".into())
     );
-    for _ in 0..3 {
+    // The chooser, then the settings; Back at the guide's top level is the
+    // platform's.
+    for _ in 0..2 {
         step(app.back());
     }
     step(app.wait_for_within("text:★ Local A", Duration::from_secs(5)));
