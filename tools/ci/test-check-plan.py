@@ -41,9 +41,15 @@ class Parts(unittest.TestCase):
                 self.assertEqual(sorted(app + core),
                                  sorted([name for name in whole if name != "workspace-tests"] + ["app-tests", "core-tests"]))
                 self.assertEqual(app, list(checks.APP_PART_STEPS))
-                # The strict timing gates still run alone, after the tests that build their harness.
+                # The strict timing gates still run alone, after the tests that build their harness
+                # and the moved lints, never alongside them.
                 self.assertEqual(app[0], "app-tests")
+                gates = [app.index(name) for name in ("busy-guide-navigation", "busy-store-reader")]
+                self.assertTrue(all(app.index(lint) < min(gates) for lint in checks.APP_STACK_LINTS))
                 self.assertEqual(core[-1], "app-build")
+                # Every moved lint exists in the Linux plan, so the split cannot silently drop one.
+                self.assertTrue(set(checks.APP_STACK_LINTS) <= set(whole))
+                self.assertFalse(set(checks.APP_STACK_LINTS) & set(core))
 
     def test_parts_build_the_same_graph_as_the_whole_test_step(self):
         whole = next(check["argv"] for check in checks.plan(tier="pr") if check["name"] == "workspace-tests")

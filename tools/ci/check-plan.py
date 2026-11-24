@@ -28,11 +28,15 @@ COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
 WASM_CLIPPY = ("cargo", "clippy", "--locked", "--target", "wasm32-unknown-unknown", "--", "-D", "warnings")
 PERFORMANCE_HARNESSES = {"app", "native_player"}
 # CI can run the plan as two parallel parts. The app part owns iptv-app's two
-# integration harnesses and everything that reuses them; the core part runs
-# every other check. Together they run exactly the full plan.
+# integration harnesses and everything that reuses them, plus the browser
+# application-stack lints to even out the two jobs; the core part runs every
+# other check. Together they run exactly the full plan. Listed in plan order.
 PARTS = ("app", "core")
 APP_HARNESSES = ("app", "native_player")
-APP_PART_STEPS = ("app-tests", "busy-guide-navigation", "busy-store-reader", "native-gtk-lifecycle")
+# Measured on master and PRs (2026-11-24): core 10.0-14.1 min, app 9.6-10.3 min.
+# The four lints below average about 40 s on the core part.
+APP_STACK_LINTS = ("runtime-wasm", "app-wasm", "web-adapters-wasm", "tizen-nsh-wasm")
+APP_PART_STEPS = ("app-tests", *APP_STACK_LINTS, "busy-guide-navigation", "busy-store-reader", "native-gtk-lifecycle")
 HARNESS_STEPS = ("workspace-tests", "app-tests")
 
 
