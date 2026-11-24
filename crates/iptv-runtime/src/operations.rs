@@ -223,6 +223,28 @@ impl Runtime {
         crate::settings::set_in(self, key, &at, value)
     }
 
+    /// The streams at once `source`'s provider reported for its account
+    /// (an Xtream account's `max_connections`), if an import of this
+    /// session read it. A playlist's own `playlists.max_connections`
+    /// overrides it; the playlists screen shows both.
+    pub fn reported_streams(&self, source: SourceId) -> Option<u32> {
+        if self.shown.get() == Some(source)
+            && let Some(limit) = self.account_streams.get()
+        {
+            return Some(limit);
+        }
+        if let Some(Some(limit)) = self.limits.borrow().get(&source) {
+            return Some(*limit);
+        }
+        if let Some(single) = self.single.borrow().as_ref()
+            && single.source == source
+            && single.limit.is_some()
+        {
+            return single.limit;
+        }
+        self.recorded_provider_limit(source)
+    }
+
     /// Sets playlist `source`'s own streams-at-once ceiling, or (`None`)
     /// removes it so the allowance its provider reports applies.
     pub fn set_connection_limit(

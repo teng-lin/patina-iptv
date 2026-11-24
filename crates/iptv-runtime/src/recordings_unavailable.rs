@@ -70,6 +70,10 @@ pub mod host {
 }
 
 impl Runtime {
+    /// No recording host here learns a provider's allowance.
+    pub(crate) fn recorded_provider_limit(&self, _source: SourceId) -> Option<u32> {
+        None
+    }
     pub fn start_recordings(&self) {}
     pub fn sync_recording_contexts(&self) {}
     /// No recording competes for the account's connections.
