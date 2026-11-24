@@ -668,8 +668,10 @@ fn favorites_bulk_removal_keeps_other_lists() {
     step(app.press_key("enter"));
     step(app.wait_for("id:favorites-clear-confirmation"));
     // The modal blocks touches on channels and toolbar actions behind it.
-    assert!(app.press("id:favorites-editor >> text:Local A").is_err());
-    assert!(app.press("id:favorites-editor >> text:Add all").is_err());
+    step(app.press("id:favorites-editor >> text:Local A"));
+    step(app.press("id:favorites-editor >> text:Add all"));
+    step(app.wait_for("id:favorites-clear-confirmation"));
+    step(app.wait_for("text:/ · 2 of 2$/"));
     // Default OK cancels, without modifying either list.
     step(app.press_key("enter"));
     step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));
