@@ -655,8 +655,6 @@ fn favorites_bulk_removal_keeps_other_lists() {
         crate::personalization::start(home, iptv_settings::Settings::default(), false);
     let app = &mut fixture.app;
     crate::personalization::menu(app, "Manage favorites…");
-    step(app.wait_for("text:/ · 0 of 3$/"));
-    step(app.press("text:Add all"));
     step(app.wait_for("text:/ · 3 of 3$/"));
     step(app.back());
     crate::personalization::group(app, "News");
@@ -669,6 +667,9 @@ fn favorites_bulk_removal_keeps_other_lists() {
     step(app.press_key("right"));
     step(app.press_key("enter"));
     step(app.wait_for("id:favorites-clear-confirmation"));
+    // The modal blocks touches on channels and toolbar actions behind it.
+    assert!(app.press("id:favorites-editor >> text:Local A").is_err());
+    assert!(app.press("id:favorites-editor >> text:Add all").is_err());
     // Default OK cancels, without modifying either list.
     step(app.press_key("enter"));
     step(app.wait_for_gone("id:favorites-clear-confirmation", GONE));

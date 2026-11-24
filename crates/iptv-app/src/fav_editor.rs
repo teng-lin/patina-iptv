@@ -263,6 +263,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(
             view()
                 .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
+                .pointer_events(move || {
+                    if ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_none())) {
+                        PointerEvents::Auto
+                    } else {
+                        PointerEvents::None
+                    }
+                })
                 .flex_row()
                 .items_center()
                 .gap(px(12.0))
@@ -287,11 +294,19 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             })
             .font_family(SANS)
             .text_size(move || size.text_px(CAPTION))
-            .text_color(Mark::Plain.secondary()),
+            .text_color(Mark::Plain.secondary())
+            .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some()))),
         )
         .child(
             virtual_list(count, row)
                 .accessibility_elements_hidden(move || ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_some())))
+                .pointer_events(move || {
+                    if ui.editor.with(|e| e.as_ref().is_some_and(|e| e.clear_confirmation.is_none())) {
+                        PointerEvents::Auto
+                    } else {
+                        PointerEvents::None
+                    }
+                })
                 .estimated_item_size(list_rows::pitch(size, ROW))
                 .element_ref(&list)
                 .flex_1(),
@@ -307,38 +322,41 @@ fn clear_confirmation(ui: Ui, size: Scale) -> impl IntoElement {
         },
         move || {
             let (outer, card) = crate::wizard_view::entry::frame(ui, size);
-            outer.test_id("favorites-clear-confirmation").child(
-                card.child(crate::ui_kit::title(size, move || {
-                    tr("Remove all favorites in this list?")
-                }))
-                .child(crate::ui_kit::body(size, move || {
-                    tr("Only channels in this list will be removed from favorites.")
-                }))
-                .child(crate::ui_kit::button(
-                    ui,
-                    size,
-                    move || tr("Cancel"),
-                    move || {
-                        ui.editor.with(|e| {
-                            e.as_ref()
-                                .is_some_and(|e| e.clear_confirmation == Some(false))
-                        })
-                    },
-                    move || resolve_clear(ui, false),
-                ))
-                .child(crate::ui_kit::button(
-                    ui,
-                    size,
-                    move || tr("Remove all"),
-                    move || {
-                        ui.editor.with(|e| {
-                            e.as_ref()
-                                .is_some_and(|e| e.clear_confirmation == Some(true))
-                        })
-                    },
-                    move || resolve_clear(ui, true),
-                )),
-            )
+            outer
+                .on_press(|| {})
+                .test_id("favorites-clear-confirmation")
+                .child(
+                    card.child(crate::ui_kit::title(size, move || {
+                        tr("Remove all favorites in this list?")
+                    }))
+                    .child(crate::ui_kit::body(size, move || {
+                        tr("Only channels in this list will be removed from favorites.")
+                    }))
+                    .child(crate::ui_kit::button(
+                        ui,
+                        size,
+                        move || tr("Cancel"),
+                        move || {
+                            ui.editor.with(|e| {
+                                e.as_ref()
+                                    .is_some_and(|e| e.clear_confirmation == Some(false))
+                            })
+                        },
+                        move || resolve_clear(ui, false),
+                    ))
+                    .child(crate::ui_kit::button(
+                        ui,
+                        size,
+                        move || tr("Remove all"),
+                        move || {
+                            ui.editor.with(|e| {
+                                e.as_ref()
+                                    .is_some_and(|e| e.clear_confirmation == Some(true))
+                            })
+                        },
+                        move || resolve_clear(ui, true),
+                    )),
+                )
         },
     )
 }
