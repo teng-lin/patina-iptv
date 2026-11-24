@@ -11,7 +11,8 @@
 //! The recorder's schedule publication ([`super::recording_host::schedule`])
 //! holds it while a capture runs and releases it when none does; the
 //! process ending releases it too. None of these keeps the display on or
-//! stops a sleep the viewer asks for (closing a laptop's lid).
+//! stops a laptop's lid from sleeping it; logind's lock may make a suspend
+//! chosen from the menu ask first.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -195,6 +196,8 @@ mod macos {
             // on success. The strings are released after the call, which
             // keeps its own references.
             let result = unsafe { IOPMAssertionCreateWithName(kind, ON, name, &mut id) };
+            // SAFETY: both strings were created above, are owned here and
+            // are released once; the assertion keeps its own references.
             unsafe {
                 CFRelease(name);
                 CFRelease(kind);

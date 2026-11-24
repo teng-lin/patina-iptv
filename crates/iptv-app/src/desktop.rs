@@ -43,10 +43,11 @@ thread_local! {
 /// Whether closing the main window during a capture keeps recording with
 /// the window hidden (macOS, with its Dock icon) rather than asking
 /// whether to stop recording and quit (Windows, Linux). The headless
-/// scenarios run on Linux keep the macOS behavior unless
-/// `IPTV_TEST_CLOSE_ASKS` is set (`desktop_workflows.rs`).
+/// scenarios keep the macOS behavior on every desktop unless
+/// `IPTV_TEST_CLOSE_ASKS` is set, which asks on every desktop
+/// (`desktop_workflows.rs`).
 fn close_keeps_recording() -> bool {
-    if cfg!(feature = "test-support") && !crate::host::MACOS {
+    if cfg!(feature = "test-support") {
         return std::env::var_os("IPTV_TEST_CLOSE_ASKS").is_none();
     }
     crate::host::MACOS
@@ -125,12 +126,16 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
     }
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        let running: Vec<_> = owner
-            .recording_snapshot()
-            .into_iter()
-            .filter(|job| job.status.active())
-            .map(|job| job.id)
-            .collect();
+        // Only what records now: a job not started yet stays as it is.
+        let recording = |owner: &crate::runtime::Runtime| {
+            owner
+                .recording_snapshot()
+                .into_iter()
+                .filter(|job| job.status == iptv_core::recording::Status::Recording)
+                .map(|job| job.id)
+                .collect::<Vec<_>>()
+        };
+        let running = recording(&owner);
         for id in running {
             if owner.stop_recording(id).await.is_err() {
                 log::warn!("iptv recordings: a recording did not stop before quitting");
@@ -139,7 +144,7 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
         // A stopped capture finishes its file before the recorder shuts
         // down, or it would be kept to resume at the next start.
         for _ in 0..50 {
-            if !owner.recording_background_needed() {
+            if recording(&owner).is_empty() {
                 break;
             }
             timer(std::time::Duration::from_millis(200)).await;
