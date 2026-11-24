@@ -6,19 +6,21 @@
 //! the app asks it to open one now ([`Pip::request`]: the control strip's
 //! button) or to open one by itself when the viewer leaves the app
 //! ([`Pip::auto_enter`]: Home while a channel plays full screen, setting
-//! [`OnLeave`]). While Android's window is open the app shows only the
-//! video ([`Pip::ui_shown`]); the desktops' window is one of the app's own
-//! beside its main window ([`Pip::separate`], `pip_window`), whose UI
-//! stays.
+//! [`OnLeave`]). A TV never has it, whatever its host reports: Android TV's
+//! guidelines keep media playback out of its picture in picture, and Home
+//! there returns to the launcher with playback stopped. While Android's
+//! window is open the app shows only the video ([`Pip::ui_shown`]); the
+//! desktops' window is one of the app's own beside its main window
+//! ([`Pip::separate`], `pip_window`), whose UI stays.
 
 /// `player.pip_on_leave`: whether leaving the app while a channel plays
 /// full screen opens the picture-in-picture window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnLeave {
-    /// On phones and tablets, not on a TV: there Home goes to a launcher
-    /// that plays its own previews (the window would sit over them, and a
-    /// TV box's few decoders and the account's streams stay taken).
+    /// On phones and tablets (a TV has no window at all).
     Auto,
+    /// The same as [`OnLeave::Auto`] now that a TV has no window; kept so
+    /// a stored choice still reads.
     Always,
     Never,
 }
@@ -49,8 +51,9 @@ pub enum Change {
 pub struct Pip {
     /// A native host has reported support (false support is distinct from no report).
     pub reported: bool,
-    /// The host can open a picture-in-picture window (Android with the
-    /// system feature; never the desktop players today).
+    /// The host can open a picture-in-picture window: Android phones and
+    /// tablets with the system feature, the desktops' window of their own;
+    /// never a TV ([`Pip::report`]).
     pub supported: bool,
     /// The device is a TV (Android's leanback feature).
     pub tv: bool,
@@ -64,10 +67,11 @@ pub struct Pip {
 }
 
 impl Pip {
-    /// The host's report: `supported`, `tv`, `active`.
+    /// The host's report: `supported`, `tv`, `active`. A TV is never
+    /// supported, whatever its system feature says.
     pub fn report(&mut self, supported: bool, tv: bool, active: bool) -> Change {
         self.reported = true;
-        self.supported = supported;
+        self.supported = supported && !tv;
         self.tv = tv;
         let was = std::mem::replace(&mut self.active, active);
         match (was, active) {
@@ -92,14 +96,12 @@ impl Pip {
         true
     }
 
-    /// Whether leaving the app opens the window by itself now.
+    /// Whether leaving the app opens the window by itself now: `playing`
+    /// is a channel playing full screen (not the guide's preview), and
+    /// never on a TV.
     pub fn auto_enter(&self, on_leave: OnLeave, playing: bool) -> bool {
-        let wanted = match on_leave {
-            OnLeave::Auto => !self.tv,
-            OnLeave::Always => true,
-            OnLeave::Never => false,
-        };
-        self.reported && self.supported && playing && wanted
+        let wanted = on_leave != OnLeave::Never;
+        self.reported && self.supported && !self.tv && playing && wanted
     }
 
     /// Whether the app's UI shows over the video: not in Android's
@@ -129,7 +131,15 @@ mod tests {
         assert!(!Pip::default().can_enter(true), "no host support");
         assert!(!host(false).can_enter(false), "nothing plays");
         assert!(host(false).can_enter(true));
-        assert!(host(true).can_enter(true), "TVs too, from the button");
+        assert!(!host(true).can_enter(true), "never on a TV");
+    }
+
+    #[test]
+    fn a_tv_reports_no_window_and_takes_no_request() {
+        let mut pip = host(true);
+        assert!(pip.reported && pip.tv && !pip.supported);
+        assert!(!pip.request(true));
+        assert_eq!(pip.requests, 0);
     }
 
     #[test]
@@ -146,11 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn leaving_enters_by_default_on_tablets_not_on_tvs() {
+    fn leaving_enters_by_default_on_tablets_never_on_tvs() {
         assert!(host(false).auto_enter(OnLeave::Auto, true));
+        assert!(host(false).auto_enter(OnLeave::Always, true));
         assert!(!host(true).auto_enter(OnLeave::Auto, true));
-        assert!(host(true).auto_enter(OnLeave::Always, true));
-        assert!(!host(false).auto_enter(OnLeave::Never, true));
+        assert!(
+            !host(true).auto_enter(OnLeave::Always, true),
+            "a stored choice from before does not bring it back"
+        );
+        assert!(!host(false).auto_enter(OnLeave::Never, true), "opted out");
         assert!(
             !host(false).auto_enter(OnLeave::Always, false),
             "nothing plays"

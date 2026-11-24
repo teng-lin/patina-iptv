@@ -163,6 +163,11 @@ pub(crate) const MIGRATIONS: &[Migration] = &[
         name: "neutral_m3u_labels",
         sql: include_str!("../migrations/0027_neutral_m3u_labels.sql"),
     },
+    Migration {
+        version: 28,
+        name: "retire_scheduled_recordings",
+        sql: include_str!("../migrations/0028_retire_scheduled_recordings.sql"),
+    },
 ];
 
 /// The schema version this build writes.

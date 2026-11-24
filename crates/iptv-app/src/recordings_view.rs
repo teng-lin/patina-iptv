@@ -72,12 +72,17 @@ fn reload(ui: Ui) {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
         let repeating = owner.repeating_recording_jobs().await.unwrap_or_default();
+        let retired = owner
+            .retired_recording_schedules()
+            .await
+            .unwrap_or_default();
         let background_notice = recording_notice(owner.recording_capabilities()).map(str::to_owned);
         ui.recordings.update(|s| {
             if s.read_generation != generation {
                 return;
             }
             s.repeating = repeating;
+            s.retired = retired;
             s.background_notice = background_notice;
             match result {
                 Ok(jobs) => {
@@ -89,8 +94,43 @@ fn reload(ui: Ui) {
         });
     });
 }
+/// Scheduled recording is retired. Tells the viewer once that the upgrade
+/// canceled what an earlier version had scheduled; Recordings lists it until
+/// the viewer has opened and closed that screen.
+fn announce_retired(ui: Ui) {
+    crate::data::spawn_in_app(async move {
+        if crate::runtime()
+            .announce_retired_recordings()
+            .await
+            .unwrap_or(false)
+        {
+            crate::settings_view::notify(tr(
+                "Scheduled recording was removed. Open Recordings to see what was canceled.",
+            ));
+        }
+    });
+    effect(move || {
+        if ui.recordings_open.get() {
+            return;
+        }
+        untracked(|| {
+            if ui.recordings.with(|s| s.retired.is_empty()) {
+                return;
+            }
+            ui.recordings.update(|s| s.retired.clear());
+            crate::data::spawn_in_app(async move {
+                // On failure the list stays stored and shows again next time.
+                if let Err(error) = crate::runtime().dismiss_retired_recording_schedules().await {
+                    log::warn!("iptv recordings: keeping the retired schedule list: {error:?}");
+                }
+            });
+        });
+    });
+}
+
 pub fn bind(ui: Ui) {
     crate::runtime().start_recordings();
+    announce_retired(ui);
     // This one-second UI reload is unrelated to a guide/player action. Keep
     // the real native recorder running in explicitly opted-in work-counter runs.
     #[cfg(feature = "test-support")]
@@ -1039,6 +1079,10 @@ fn library_content(ui: Ui, size: Scale) -> View {
                 .child(ui_kit::title(size, tr("Recordings"))),
         )
         .child(rows::now_playing(ui, size))
+        .child(when(
+            move || ui.recordings.with(|s| !s.retired.is_empty()),
+            move || retired_schedules(ui, size),
+        ))
         .child(
             ui_kit::body(size, move || message(ui))
                 .text_color(rgb(ui_kit::ERROR))
@@ -1072,6 +1116,55 @@ fn library_content(ui: Ui, size: Scale) -> View {
                 .px(move || size.px(24.0))
                 .py(move || size.px(16.0)),
         )
+}
+
+/// What the upgrade that retired scheduled recording canceled. Read-only
+/// text: nothing here takes focus or acts.
+fn retired_schedules(ui: Ui, size: Scale) -> View {
+    view()
+        .test_id("retired-schedules")
+        .px(move || size.px(24.0))
+        .py(move || size.px(12.0))
+        .gap(move || size.px(6.0))
+        .child(ui_kit::label(size, tr("Scheduled recording was removed")))
+        .child(ui_kit::caption(
+            size,
+            tr("These schedules were canceled. Recordings already made are kept."),
+        ))
+        .child(ui_kit::caption(size, move || {
+            ui.recordings.with(|s| {
+                // A bounded list keeps the recordings below it in view.
+                let mut lines = s
+                    .retired
+                    .iter()
+                    .take(RETIRED_LINES)
+                    .map(retired_line)
+                    .collect::<Vec<_>>();
+                if s.retired.len() > RETIRED_LINES {
+                    lines.push(format!("+{}", s.retired.len() - RETIRED_LINES));
+                }
+                lines.join("\n")
+            })
+        }))
+}
+
+const RETIRED_LINES: usize = 8;
+
+fn retired_line(schedule: &iptv_core::recording::RetiredSchedule) -> String {
+    use iptv_core::recording::Repeat;
+    format!(
+        "{} · {} · {} {} · {}",
+        schedule.title,
+        schedule.channel_name,
+        crate::time::date_only(schedule.start),
+        crate::time::time_only(schedule.start),
+        match schedule.repeat {
+            Repeat::Once => tr("Once"),
+            Repeat::Daily => tr("Every day"),
+            Repeat::Weekly => tr("Every week"),
+            Repeat::Series => tr("Every matching program"),
+        }
+    )
 }
 
 fn library(ui: Ui, size: Scale) -> View {

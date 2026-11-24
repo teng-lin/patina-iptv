@@ -2436,6 +2436,7 @@ dependencies = [
  "iptv-settings",
  "proptest",
  "serde_json",
+ "url",
 ]
 
 [[package]]

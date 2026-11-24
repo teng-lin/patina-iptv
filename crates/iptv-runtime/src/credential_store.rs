@@ -33,6 +33,17 @@ mod test_support_tests {
     }
 }
 
+/// Gives a validated, encrypted pending restore this host's recording rows.
+#[cfg(not(test))]
+pub(crate) fn adopt_host_recordings(
+    ports: &crate::Ports,
+    host: &Path,
+    pending: &Path,
+) -> Result<(), StoreError> {
+    let mut store = Store::open_encrypted(pending, &database_key(ports, pending)?)?;
+    store.adopt_host_recordings_encrypted(host, &database_key(ports, host)?)
+}
+
 fn seal_documents(store: Store, path: &Path) -> Result<Store, StoreError> {
     super::private_files::prepare_store(store, path)
 }

@@ -25,6 +25,24 @@ pub(crate) fn schedule(next: i64, active: bool) -> iptv_core::recording::WakeCap
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod startup;
+
+/// Scheduled recording is retired. On the first launch of this version, and
+/// on every launch by an earlier version's login item or task
+/// (`background`), removes the login and wake registrations earlier
+/// versions made. A failure is retried at the next launch.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn retire_registrations(directory: &std::path::Path, background: bool) {
+    if !background && directory.join(startup::RETIRED).exists() {
+        return;
+    }
+    match startup::retire(directory, &startup::Registrations::current()) {
+        Ok(()) => log::info!("iptv recordings: login and wake registrations removed"),
+        Err(error) => log::warn!(
+            "iptv recordings: removing login and wake registrations failed ({:?}); retrying at the next launch",
+            error.kind()
+        ),
+    }
+}
 pub(crate) fn command(key: &str) {
     if key == "recordings.background_status" {
         let capability = crate::runtime().recording_capabilities();

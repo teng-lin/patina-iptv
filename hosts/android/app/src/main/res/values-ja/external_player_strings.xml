@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="external_channel">他のアプリで再生</string>
+    <string name="external_title">Patina がチャンネルを送信中</string>
+    <string name="external_background">他のアプリが Patina のチャンネルを再生しています</string>
+</resources>
