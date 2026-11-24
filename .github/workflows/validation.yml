@@ -1,6 +1,8 @@
 name: Validation
 on:
   pull_request:
+    # A draft defers its heavy lanes; marking it ready runs them.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
   merge_group:
@@ -62,6 +64,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           TIER: ${{ inputs.tier == 'candidate' && 'release' || inputs.tier || (github.event_name == 'push' && github.ref == 'refs/heads/master' && 'release') || (github.event_name == 'schedule' && 'full') || 'pr' }}
           CANDIDATE_BUILD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.tier != 'release') || (github.event_name == 'workflow_dispatch' && inputs.tier == 'candidate') }}
+          DRAFT: ${{ github.event.pull_request.draft || false }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 tools/ci/validation-plan.py plan >> "$GITHUB_OUTPUT"
