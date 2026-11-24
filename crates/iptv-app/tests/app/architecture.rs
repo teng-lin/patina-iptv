@@ -11,12 +11,16 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("capture_limits.rs", "REPORTED"),              // The host's report of what can stop a capture.
     ("host/native/keep_awake.rs", "HELD"),          // The OS idle-sleep hold while a capture runs.
     ("host/native/keep_awake.rs", "FAILED"),        // That hold failed, for the start notice.
+    ("backup.rs", "PROBE"),                         // Android document picker probe request.
+    ("backup.rs", "PICKERS"),                       // The document pickers the host reported.
+    ("backup.rs", "PICKERS_FOR_TEST"),              // Synthetic picker injection (headless tests).
     ("content_image.rs", "CACHE"),                  // Artwork cache.
     ("content_image.rs", "PERMITS"),                // Artwork concurrency limit.
     ("content_image.rs", "CLIENT"),                 // Artwork transport cache.
     ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
     ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
+    ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
     ("custom_groups.rs", "GENERATION"),             // Discard stale dialog replies.
     ("data.rs", "APP_OWNER"),                       // UI root owner for detached local tasks.
@@ -24,6 +28,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("desktop.rs", "POINTER"),                      // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.
     ("desktop.rs", "TRAVELED"),                     // Last pointer place, for Keys to Pointer.
+    ("desktop.rs", "QUITTING"),                     // Stop and quit in progress (no second ask).
     ("device.rs", "REPORTED"),                      // Reactive handle of the host's device report.
     ("fonts.rs", "FITTED"),                         // Font measurement cache.
     ("fonts.rs", "FONTS_IN"),                       // Font registration flag.
@@ -49,9 +54,10 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("seek.rs", "PRESSES"),                             // Key gesture state.
     ("seek.rs", "HOLD"),                                // Held-key gesture state.
     ("settings.rs", "REVISION"),                        // Reactive settings subscription handle.
-    ("settings_view.rs", "PAGES"),                      // Immutable screen definitions.
-    ("settings_view.rs", "LAST"),                       // Last selected settings tab.
-    ("settings_view.rs", "NOTICE"),                     // Toast signal handle.
+    ("settings.rs", "PIP"), // The host's picture-in-picture report, for the settings offer.
+    ("settings_view.rs", "PAGES"), // Immutable screen definitions.
+    ("settings_view.rs", "LAST"), // Last selected settings tab.
+    ("settings_view.rs", "NOTICE"), // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.

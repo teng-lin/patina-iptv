@@ -38,6 +38,9 @@ pub struct Screen {
     pub starting: Option<Request>,
     pub error: Option<String>,
     pub background_notice: Option<String>,
+    /// Schedules the retirement of scheduled recording canceled, listed
+    /// read-only until the viewer has seen them.
+    pub retired: Vec<iptv_core::recording::RetiredSchedule>,
     pub draft: Option<Draft>,
     pub busy: bool,
     pub read_generation: u64,

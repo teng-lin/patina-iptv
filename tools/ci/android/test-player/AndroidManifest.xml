@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A synthetic external player for validating Patina's handoff on an
+     emulator. Never install it on a viewer's device. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.example.testplayer"
+    android:versionCode="1"
+    android:versionName="1">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application android:label="Test player" android:usesCleartextTraffic="true">
+        <activity android:name=".PlayerActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <!-- As players declare it: since Android 12 an app's query for
+                     an http view intent leaves out handlers that are neither
+                     approved for the host nor browsable without one. -->
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

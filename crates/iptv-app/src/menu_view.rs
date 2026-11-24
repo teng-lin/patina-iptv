@@ -102,6 +102,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         ResetGroupName => tr("Restore group name"),
         ShowFavoritesOnly => tr("Show favorites only"),
         GroupExternalPlayer => tr("Use external player"),
+        StopExternalPlayer => tr("Turn off external player"),
         GroupEpgOffset => tr("Guide time offset"),
         DecreaseEpgOffset => tr("15 minutes earlier"),
         IncreaseEpgOffset => tr("15 minutes later"),
@@ -522,7 +523,10 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::GroupOptions => {
             show_group_options(ui, list);
         }
-        MenuItem::ShowFavoritesOnly | MenuItem::GroupExternalPlayer | MenuItem::SaveEpgOffset => {
+        MenuItem::ShowFavoritesOnly
+        | MenuItem::GroupExternalPlayer
+        | MenuItem::StopExternalPlayer
+        | MenuItem::SaveEpgOffset => {
             if let Some(target) = group_target(scope.as_ref()) {
                 let current = list_preferences(&list);
                 let preference = match (item, offset) {
@@ -532,6 +536,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                     (MenuItem::GroupExternalPlayer, _) => {
                         GroupPreference::ExternalPlayer(!current.external_player)
                     }
+                    (MenuItem::StopExternalPlayer, _) => GroupPreference::ExternalPlayer(false),
                     (MenuItem::SaveEpgOffset, Some(offset)) => {
                         GroupPreference::EpgOffsetMinutes(offset)
                     }
@@ -783,7 +788,14 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
     let rows = group_options(|item| match item {
         RenameGroup | BlockGroup | HideGroup | ShowFavoritesOnly => named,
         ResetGroupName | GroupEpgOffset => matches!(kind, Kind::GroupChannels(_)),
-        GroupExternalPlayer => named && crate::host::EXTERNAL_PLAYER,
+        // Hidden without a player to hand streams to, unless it is on:
+        // then turning it off stays reachable.
+        GroupExternalPlayer => {
+            named
+                && crate::host::EXTERNAL_PLAYER
+                && (list_preferences(&list).external_player
+                    || crate::host::external_player_available())
+        }
         ReorderGroups => reorderable,
         ManageGroups => !reorderable && *kind != Kind::Favorites,
         SortChannels => *kind != Kind::Favorites,
@@ -791,6 +803,16 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
     });
     ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
     true
+}
+
+/// Offers to turn off `list`'s external player after a channel chosen in
+/// it played here because no player could take it.
+pub(crate) fn offer_external_player_reset(ui: Ui, list: ListId) {
+    let rows = vec![Row::Action {
+        item: MenuItem::StopExternalPlayer,
+        enabled: true,
+    }];
+    ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
 }
 
 fn list_preferences(list: &ListId) -> GroupPreferences {

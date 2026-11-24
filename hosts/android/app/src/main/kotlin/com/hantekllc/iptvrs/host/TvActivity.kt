@@ -112,6 +112,12 @@ class TvActivity : Activity() {
         for (p in players.toList()) p.foreground(allowed)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The backup rows follow the document pickers that resolve now.
+        backups.resumed()
+    }
+
     override fun onStop() {
         started = false
         for (p in players.toList()) p.background()

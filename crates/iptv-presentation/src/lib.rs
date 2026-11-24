@@ -44,9 +44,11 @@ pub mod wizard;
 pub mod browse;
 pub mod channel_list;
 pub mod channel_picker;
+pub mod drag;
 pub mod guide;
 pub mod listings;
 pub mod lists;
+pub mod touch_zap;
 pub mod zap;
 
 pub mod clock;
