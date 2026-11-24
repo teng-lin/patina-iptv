@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Check invalidation boundaries without compiling or downloading the toolchain."""
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -338,6 +340,45 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Tool releases still pending: failed"):
                 releases.publish_staged(self.root)
         self.assertEqual(publish.call_count, 2)
+
+    def test_failed_gh_create_reports_command_status_and_stderr(self):
+        output = io.StringIO()
+
+        def command(args, **kwargs):
+            self.assertTrue(kwargs["capture_output"])
+            if args[1:3] == ["release", "view"]:
+                return subprocess.CompletedProcess(args, 1, stderr="release not found")
+            self.assertEqual(args[1:3], ["release", "create"])
+            return subprocess.CompletedProcess(args, 1, stderr="HTTP 422: synthetic validation failure\nsecond line")
+
+        with (patch.object(releases, "trusted_commit", return_value="b" * 40),
+              patch.object(releases, "staged", return_value=[(self.tag, self.root)]),
+              patch.object(releases.subprocess, "run", side_effect=command), redirect_stdout(output)):
+            with self.assertRaisesRegex(RuntimeError, "Tool releases still pending"):
+                releases.publish_staged(self.root)
+        message = output.getvalue()
+        self.assertIn(f"gh release create {self.tag} --draft", message)
+        self.assertIn("exit code 1", message)
+        self.assertIn("HTTP 422: synthetic validation failure%0Asecond line", message)
+
+    def test_failed_gh_restore_reports_diagnostics_and_keeps_cache_fallback(self):
+        output = io.StringIO()
+        result = self.root / "output"
+
+        def command(args, **kwargs):
+            return subprocess.CompletedProcess(args, 4, stderr="HTTP 403: synthetic-token denied")
+
+        with (patch.dict(os.environ, GH_TOKEN="synthetic-token", GITHUB_OUTPUT=str(result)),
+              patch("sys.argv", ["nsh-cli-release.py", "restore", self.platform, self.key, str(self.root / "bin/nsh")]),
+              patch.object(releases.subprocess, "run", side_effect=command), redirect_stdout(output)):
+            releases.main()
+        message = output.getvalue()
+        self.assertIn(f"gh release view {self.tag}", message)
+        self.assertIn("exit code 4", message)
+        self.assertIn("HTTP 403: *** denied", message)
+        self.assertNotIn("synthetic-token", message)
+        self.assertIn("trying the cache", message)
+        self.assertEqual(result.read_text(), "restored=false\n")
 
     def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
         artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
