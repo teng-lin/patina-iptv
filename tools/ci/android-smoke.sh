@@ -373,6 +373,21 @@ keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 assert_favorites 0 'remote confirmation'
 # Native touch targets come from the measured accessibility bounds, so tablet
 # density, safe areas and TV dimensions do not hard-code tap coordinates.
+# With no favorites, a leaked Add all touch would be visible after Cancel.
+# Keep its coordinates from before the toolbar becomes inaccessible, and
+# refuse a point that would instead activate either real dialog action.
+cp "$ui_xml" "$out/favorites-before-covered-touch.xml"
+ui_tap 'Remove all'
+ui_dump
+ui_confirmation || fail "covered-touch test did not open confirmation"
+covered_coordinates=$(python3 "$ui_probe" "$ui_xml" covered-tap 'Add all' \
+  --before "$out/favorites-before-covered-touch.xml") || fail "cannot measure a covered toolbar touch"
+read -r covered_x covered_y <<< "$covered_coordinates"
+adb shell input tap "$covered_x" "$covered_y"
+ui_dump
+ui_confirmation || fail "covered toolbar touch dismissed confirmation"
+ui_tap Cancel
+assert_favorites 0 'blocked underlying Add all touch'
 ui_tap 'Add all'
 assert_favorites "$favorites_total" 'touch Add all'
 ui_tap 'Remove all'

@@ -91,6 +91,17 @@ class FavoritesAccessibility(unittest.TestCase):
             with self.assertRaises(ValueError):
                 UI.button_center(tree, "Remove all")
 
+    def test_covered_toolbar_touch_keeps_its_pre_modal_measured_point(self):
+        before = self.tree({"content-desc": "Add all", "clickable": "true", "enabled": "true", "bounds": "[40,30][240,90]"})
+        modal = self.tree({"text": UI.CONFIRMATION},
+                          {"content-desc": "Cancel", "clickable": "true", "bounds": "[40,140][240,200]"},
+                          {"content-desc": "Remove all", "clickable": "true", "bounds": "[40,220][240,280]"})
+        self.assertEqual(UI.covered_button_center(before, modal, "Add all"), (140, 60))
+        for invalid in (self.tree(), self.tree({"text": UI.CONFIRMATION},
+                        {"content-desc": "Cancel", "clickable": "true", "bounds": "[40,30][240,90]"})):
+            with self.assertRaises(ValueError):
+                UI.covered_button_center(before, invalid, "Add all")
+
     def test_confirmation_is_distinct_from_toolbar_remove_all(self):
         self.assertFalse(UI.confirmation_open(self.tree({"content-desc": "Remove all"})))
         self.assertTrue(UI.confirmation_open(self.tree({"text": UI.CONFIRMATION})))
