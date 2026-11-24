@@ -10,6 +10,9 @@ on:
         default: true
   workflow_call:
     inputs:
+      prepared-linux-tools:
+        type: boolean
+        default: false
       desktop-matrix:
         type: string
         required: true
@@ -41,7 +44,7 @@ jobs:
           echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
           echo "android=$android" >> "$GITHUB_OUTPUT"
   windows-package:
-    if: inputs.windows
+    if: ${{ !cancelled() && inputs.windows }}
     runs-on: windows-2025
     timeout-minutes: 120
     steps:
@@ -60,8 +63,10 @@ jobs:
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-about
+          cache: 'false'
           version: 0.9.3
           features: cli
+          stage-release: 'true'
       - name: Build Windows installer
         shell: pwsh
         run: ./tools/package-windows.ps1
@@ -110,6 +115,8 @@ jobs:
           policy-tool: ${{ matrix.abi == 'arm64-v8a' && 'true' || 'false' }}
       - uses: ./.github/actions/android
         with:
+          stage-release: 'true'
+          prepared: ${{ inputs.prepared-linux-tools && 'true' || 'false' }}
           abi: ${{ matrix.abi }}
       - name: Build and stage the Android native library
         env:
@@ -124,6 +131,7 @@ jobs:
         if: matrix.abi == 'arm64-v8a'
         with:
           name: cargo-about
+          cache: 'false'
           version: 0.9.3
           features: cli
       - name: Generate Rust and NSH notices
@@ -214,6 +222,7 @@ jobs:
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-about
+          cache: 'false'
           version: 0.9.3
           features: cli
       - name: Set release metadata
@@ -224,6 +233,7 @@ jobs:
       - uses: ./.github/actions/nsh-cli
         with:
           stage-release: 'true'
+          prepared: ${{ inputs.prepared-linux-tools && matrix.platform == 'linux' }}
       - uses: ./.github/actions/desktop-cargo-cache
         if: (matrix.platform == 'linux' || matrix.platform == 'macos') && github.ref == 'refs/heads/master'
         with:
@@ -325,6 +335,7 @@ jobs:
           # The members are compressed archives already.
           compression-level: 0
   sbom:
+    if: ${{ !cancelled() }}
     # No signing material and no publication rights: only the dependency graph.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -342,6 +353,7 @@ jobs:
       - uses: ./.github/actions/cargo-tool
         with:
           name: cargo-cyclonedx
+          cache: 'false'
           version: 0.5.10
       - name: Write the CycloneDX SBOM for the locked Rust graph
         run: python3 tools/ci/sbom.py "dist/Patina-$VERSION-sbom.cdx.json"

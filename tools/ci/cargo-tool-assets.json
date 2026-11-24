@@ -1,0 +1,50 @@
+{
+  "cargo-about:0.9.3:cli:Linux-X64": {
+    "sha256": "3ad1e94ea1e63d69d1961f4fb15ccbbe9575d906111f96d2cb4dce6df48f71b4",
+    "url": "https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.3/cargo-about-0.9.3-x86_64-unknown-linux-musl.tar.gz"
+  },
+  "cargo-about:0.9.3:cli:macOS-ARM64": {
+    "sha256": "45520df8680978a6e7c4023ace0e3f311c73efc208cd68e5a7f4ed4822fa0349",
+    "url": "https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.3/cargo-about-0.9.3-aarch64-apple-darwin.tar.gz"
+  },
+  "cargo-cyclonedx:0.5.10::Linux-X64": {
+    "sha256": "528be9dd99ae522c3ee14fb881fd0cbf51767e8f12b74248f437e6a66b1a3c1b",
+    "url": "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.10/cargo-cyclonedx-x86_64-unknown-linux-musl.tar.xz"
+  },
+  "cargo-cyclonedx:0.5.10::Windows-X64": {
+    "sha256": "b0cdf58875a4b3c83e13fbea19eb6a85d63498aeab90f50456179173c370b3ce",
+    "url": "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.10/cargo-cyclonedx-x86_64-pc-windows-msvc.zip"
+  },
+  "cargo-cyclonedx:0.5.10::macOS-ARM64": {
+    "sha256": "4c39e13494d51c9d7f63e2923e7afdb5648a7a806a9ed7684dbe3786d2e2d1da",
+    "url": "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.10/cargo-cyclonedx-aarch64-apple-darwin.tar.xz"
+  },
+  "cargo-deny:0.20.2::Linux-X64": {
+    "sha256": "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f",
+    "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz"
+  },
+  "cargo-deny:0.20.2::macOS-ARM64": {
+    "sha256": "fe67d82a10d8597a3549364cb733a3f9cc1bfff9031b7ae46384a9f2a72090c3",
+    "url": "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-aarch64-apple-darwin.tar.gz"
+  },
+  "cargo-fuzz:0.13.2::Linux-X64": {
+    "sha256": "b5b704018b63e0f151c17a057ac53b5111e1db545d1b9f72fee79f08a545931c",
+    "url": "https://github.com/rust-fuzz/cargo-fuzz/releases/download/0.13.2/cargo-fuzz-0.13.2-x86_64-unknown-linux-musl.tar.gz"
+  },
+  "cargo-fuzz:0.13.2::Windows-X64": {
+    "sha256": "c4282b9f938368f711c0d959e7fcf1cd52fc40e233425c334f16012f5a7457a8",
+    "url": "https://github.com/rust-fuzz/cargo-fuzz/releases/download/0.13.2/cargo-fuzz-0.13.2-x86_64-pc-windows-msvc.zip"
+  },
+  "cargo-llvm-cov:0.9.1::Linux-X64": {
+    "sha256": "3fca950394a3c49457657c158b1619cec8dfd2647ae5b48746734c0ab969a522",
+    "url": "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-unknown-linux-musl.tar.gz"
+  },
+  "cargo-llvm-cov:0.9.1::Windows-X64": {
+    "sha256": "656590cfa13bb7478595bbfdd3bc6bc075a4f7f3f0df5a439c1856cb03c5a4d2",
+    "url": "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-x86_64-pc-windows-msvc.zip"
+  },
+  "cargo-llvm-cov:0.9.1::macOS-ARM64": {
+    "sha256": "7e821a6c90c0884f79f759f5d9be50799ade67bb82515186d922f26032ef43b8",
+    "url": "https://github.com/taiki-e/cargo-llvm-cov/releases/download/v0.9.1/cargo-llvm-cov-aarch64-apple-darwin.tar.gz"
+  }
+}
