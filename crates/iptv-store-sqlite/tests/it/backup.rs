@@ -32,9 +32,27 @@ fn wal_snapshot_preserves_credentials_organization_history_and_cached_catalog() 
     let combined_key = format!("source:{}:{}", id.0, last.as_str());
     store.set_all_playlists(true).unwrap();
     store.set_combined_last_channel(&combined_key).unwrap();
+    // This device's list of retired schedules is not part of a backup.
+    Connection::open(&live)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO retired_recording_schedules(channel_name,title,starts_at,ends_at,repeat)
+             VALUES('Generated channel','Generated retired program',1800000000,1800000060,'once');
+             INSERT INTO store_meta(key,value) VALUES('retired_recording_notice','pending');",
+        )
+        .unwrap();
     assert_eq!(store.journal_mode().unwrap(), "wal");
     assert!(live.with_extension("sqlite-wal").exists());
     store.snapshot_to(&archive).unwrap();
+    assert_eq!(store.retired_recording_schedules().unwrap().len(), 1);
+    {
+        let archived = Connection::open(&archive).unwrap();
+        assert_eq!(rows(&archived, "retired_recording_schedules"), 0);
+        assert_eq!(
+            rows(&archived, "store_meta WHERE key='retired_recording_notice'"),
+            0
+        );
+    }
     // Subsequent writes never leak into the completed snapshot.
     store.rename_source(id, "Changed after backup").unwrap();
     store.set_all_playlists(false).unwrap();

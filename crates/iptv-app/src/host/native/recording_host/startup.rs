@@ -88,6 +88,9 @@ const WINDOWS_TASK: &str = "Patina Recorder";
 pub(super) struct Registrations {
     /// The Linux autostart entry.
     autostart: Option<PathBuf>,
+    /// The entry under `~/.config` when `XDG_CONFIG_HOME` names another
+    /// directory: an earlier install may have run without it.
+    default_autostart: Option<PathBuf>,
     /// The macOS LaunchAgent.
     launch_agent: Option<PathBuf>,
     /// The Windows task, with its logon and time triggers and wake flag.
@@ -105,10 +108,16 @@ impl Registrations {
             .map(PathBuf::from)
             .filter(|config| config.is_absolute())
             .or_else(|| home.as_ref().map(|home| home.join(".config")));
+        let entry = |config: PathBuf| config.join("autostart/patina-recorder.desktop");
+        let linux = cfg!(target_os = "linux");
+        let default_autostart = home
+            .as_ref()
+            .map(|home| home.join(".config"))
+            .filter(|default| linux && config.as_ref() != Some(default))
+            .map(entry);
         Self {
-            autostart: config
-                .filter(|_| cfg!(target_os = "linux"))
-                .map(|config| config.join("autostart/patina-recorder.desktop")),
+            autostart: config.filter(|_| linux).map(entry),
+            default_autostart,
             launch_agent: home
                 .filter(|_| cfg!(target_os = "macos"))
                 .map(|home| home.join("Library/LaunchAgents/com.hantekllc.patina.recorder.plist")),
@@ -130,6 +139,7 @@ impl Registrations {
     pub(super) fn under(root: &Path) -> Self {
         Self {
             autostart: Some(root.join("autostart/patina-recorder.desktop")),
+            default_autostart: None,
             launch_agent: Some(root.join("LaunchAgents/com.hantekllc.patina.recorder.plist")),
             windows_task: false,
         }
@@ -153,9 +163,13 @@ pub(super) fn retire(directory: &Path, registrations: &Registrations) -> io::Res
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut result = Ok(());
-    for path in [&registrations.autostart, &registrations.launch_agent]
-        .into_iter()
-        .flatten()
+    for path in [
+        &registrations.autostart,
+        &registrations.default_autostart,
+        &registrations.launch_agent,
+    ]
+    .into_iter()
+    .flatten()
     {
         result = result.and(remove_if_present(path));
     }

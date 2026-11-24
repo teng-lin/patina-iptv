@@ -150,6 +150,9 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
                 .unwrap()
         );
     }
+    let media = iptv_runtime::recordings::media_directory(&target_root);
+    fs::create_dir_all(&media).unwrap();
+    fs::write(media.join(format!("{}.ts", kept.0)), [0x47; 376]).unwrap();
     let wrong_events = Rc::new(RefCell::new(0));
     let wrong = wrong_events.clone();
     target.bind(move |event| {
@@ -256,6 +259,11 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
     let channels = store.load_channels(source, &Default::default()).unwrap();
     assert_eq!(channels[0].name, "Generated backed up channel");
     assert!(store.is_favorite(source, &channels[0].channel.id).unwrap());
+    // Its media, beside the catalog directory, still opens.
+    assert_eq!(
+        fs::read(block_on(restarted.recording_file(kept)).unwrap()).unwrap(),
+        [0x47; 376]
+    );
     let recording = store.recording_job(kept).unwrap().unwrap();
     assert_eq!(
         (recording.status, recording.bytes),

@@ -61,8 +61,9 @@ object RecordingHost {
     /** Scheduled recording is retired. Once per install, before Rust can
      * publish again: cancel the wake an earlier version armed for a scheduled
      * job and forget its stored time. A Record now capture this version
-     * starts arms its own watchdog through [schedule]. Returns whether this
-     * call retired them; a failure is retried on the next launch or broadcast. */
+     * starts arms its own watchdog through [schedule], which also ends the
+     * retirement. Returns whether this call retired them; a failure is
+     * retried on the next launch or broadcast until [schedule] has run. */
     @JvmStatic @Synchronized
     fun retireSchedules(context: Context): Boolean {
         val preferences = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE)
@@ -120,7 +121,10 @@ object RecordingHost {
                 } else {
                     next
                 }
-            if (!preferences.edit().putLong("next", wake).commit()) return 3
+            // This version now owns the alarm: arming replaces any wake an
+            // earlier version left, and a retirement retried later must not
+            // cancel this one.
+            if (!preferences.edit().putLong("next", wake).putBoolean(RETIRED, true).commit()) return 3
             val capability = arm(context, wake)
             if (active) {
                 if (!startService(context)) return 3

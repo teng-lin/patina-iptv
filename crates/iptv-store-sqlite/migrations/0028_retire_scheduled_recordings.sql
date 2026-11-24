@@ -5,7 +5,9 @@
 -- * every scheduled job without media is canceled;
 -- * an interrupted capture with media, a recording row without a completion
 --   receipt or a scheduled row resuming one, becomes a partial recording,
---   which the recorder's recovery finalizes instead of resuming.
+--   which the recorder's recovery finalizes instead of resuming. So does a
+--   resuming row whose repeating rule was canceled: that left it canceled
+--   with its bytes, and unplayable.
 -- What was canceled is listed for the viewer until they have seen it.
 CREATE TABLE retired_recording_schedules (
     id INTEGER PRIMARY KEY,
@@ -28,6 +30,7 @@ UPDATE recording_jobs SET status='canceled',message='Scheduled recording was rem
 WHERE status='scheduled' AND bytes=0;
 UPDATE recording_jobs SET status='partial',message='Interrupted when the app closed'
 WHERE status='scheduled'
+OR (status='canceled' AND bytes>0)
 OR (status='recording'
     AND NOT EXISTS(SELECT 1 FROM recording_completions c WHERE c.job_id=recording_jobs.id));
 INSERT INTO store_meta(key,value)

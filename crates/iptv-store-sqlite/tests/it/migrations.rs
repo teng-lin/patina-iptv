@@ -300,7 +300,12 @@ fn upgrading_retires_scheduled_recordings_and_keeps_captures() {
                  ends_at,status,bytes,source_incarnation)
              SELECT 49,source_id,channel_id,channel_name,title,starts_at+172800,ends_at+172800,
                  'scheduled',0,source_incarnation FROM recording_jobs WHERE id=41;
-             INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(49,71,1800172800);",
+             INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(49,71,1800172800);
+             INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,message,source_incarnation)
+             SELECT 51,source_id,channel_id,channel_name,'Generated rule canceled mid-capture',
+                 starts_at+900,ends_at+900,'canceled',188,'Recurring schedule disabled',
+                 source_incarnation FROM recording_jobs WHERE id=41;",
         )
         .unwrap();
         drop(conn);
@@ -317,6 +322,10 @@ fn upgrading_retires_scheduled_recordings_and_keeps_captures() {
         assert_eq!((resuming.status, resuming.bytes), (Status::Partial, 376));
         assert_eq!(resuming.message, "Interrupted when the app closed");
         assert_eq!(job(&store, 48).status, Status::Partial);
+        // An earlier build canceled a resuming capture with its rule and kept
+        // its bytes: it becomes a partial recording too.
+        let stranded = job(&store, 51);
+        assert_eq!((stranded.status, stranded.bytes), (Status::Partial, 188));
         // A synced capture keeps its receipt, so recovery publishes it.
         assert_eq!(job(&store, 42).status, Status::Recording);
         assert!(store.recording_completion(JobId(42)).unwrap().is_some());
