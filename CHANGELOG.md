@@ -19,6 +19,12 @@ is below 1.0, a minor release may change behavior.
   browser TV host shows no recording rows, buttons or Recordings entry.
 - Movies and Shows are no longer offered when every enabled playlist is M3U.
 
+### Fixed
+
+- Import usable channels from M3U playlists containing malformed or unsupported
+  stream addresses, and report the skipped entries instead of rejecting the
+  whole playlist.
+
 ## [0.1.8] - 2026-11-23
 
 ### Changed

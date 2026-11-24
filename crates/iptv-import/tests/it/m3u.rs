@@ -332,10 +332,142 @@ fn warnings_from_skipped_lines_are_kept() {
 }
 
 #[test]
+fn unusable_stream_entries_do_not_reject_other_channels() {
+    let text = concat!(
+        "#EXTM3U\n",
+        "#EXTINF:-1 group-title=\"Generated\",First generated channel\n",
+        "https://media.example.test/first.m3u8\n",
+        "#EXTINF:-1,Unsupported generated stream\n",
+        "rtsp://media.example.test/live\n",
+        "#EXTINF:-1,Another unsupported generated stream\n",
+        "rtmp://media.example.test/live\n",
+        "#EXTINF:-1,Generated placeholder\n",
+        "not-a-stream-address\n",
+        "#EXTINF:-1,Malformed generated address\n",
+        "https://\n",
+        "#EXTINF:-1 group-title=\"Generated\",Last generated channel\n",
+        "https://media.example.test/last.m3u8\n",
+    );
+    let assert_summary = |catalog: &iptv_import::Catalog| {
+        assert_eq!(catalog.stats.content_items, 2);
+        assert_eq!(catalog.stats.skipped, 4);
+        assert_eq!(catalog.warning_count(), 1);
+        assert_eq!(catalog.warnings[0].step, Step::Playlist);
+        assert!(!catalog.warnings[0].message.contains("example.test"));
+        assert!(!catalog.warnings[0].message.contains("not-a-stream-address"));
+    };
+    let assert_channels = |channels: &[iptv_providers::model::Channel]| {
+        let names: Vec<_> = channels
+            .iter()
+            .map(|channel| channel.name.as_str())
+            .collect();
+        assert_eq!(names, ["First generated channel", "Last generated channel"]);
+    };
+    let memory = import_m3u_text(text.as_bytes(), &mut NoProgress, &CancelToken::new()).unwrap();
+    assert_summary(&memory);
+    assert_channels(&memory.channels);
+    let buffered = run(&FakeFetch::body(text)).unwrap();
+    assert_summary(&buffered);
+    assert_channels(&buffered.channels);
+
+    #[derive(Default)]
+    struct Stage {
+        channels: Vec<iptv_providers::model::Channel>,
+        finished: bool,
+    }
+    impl iptv_import::CatalogSink for Stage {
+        fn push(&mut self, row: iptv_import::CatalogRow) -> Result<(), iptv_import::SinkError> {
+            if let iptv_import::CatalogRow::Channel(channel) = row {
+                self.channels.push(channel);
+            }
+            Ok(())
+        }
+        fn end_step(&mut self, success: bool) -> Result<(), iptv_import::SinkError> {
+            assert!(success);
+            Ok(())
+        }
+        fn finish(&mut self) -> Result<(), iptv_import::SinkError> {
+            self.finished = true;
+            Ok(())
+        }
+    }
+    let mut stage = Stage::default();
+    let mut fetch = FakeFetch::body(text);
+    fetch.chunk = 19;
+    let streamed = block_on(iptv_import::import_source_into(
+        &fetch,
+        &config(URL),
+        &ImportOptions::new(synth::NOW),
+        &mut NoProgress,
+        &CancelToken::new(),
+        &mut stage,
+    ))
+    .unwrap();
+    assert!(stage.finished);
+    assert_summary(&streamed);
+    assert_channels(&stage.channels);
+    assert!(
+        streamed.channels.is_empty(),
+        "rows went to the private stage"
+    );
+
+    let private =
+        format!("{text}#EXTINF:-1,Generated private destination\nhttp://127.0.0.1/private\n");
+    let mut stage = Stage::default();
+    assert!(matches!(
+        block_on(iptv_import::import_source_into(
+            &FakeFetch::body(private),
+            &config(URL),
+            &ImportOptions::new(synth::NOW),
+            &mut NoProgress,
+            &CancelToken::new(),
+            &mut stage,
+        )),
+        Err(ImportError::InvalidConfig(_))
+    ));
+    assert!(
+        !stage.finished,
+        "an unsafe destination cannot publish a stage"
+    );
+    assert_channels(&stage.channels);
+}
+
+#[test]
+fn all_unusable_stream_entries_report_no_usable_entries() {
+    // The final malformed entry has no newline, so it completes at EOF.
+    let text = concat!(
+        "#EXTM3U\n#EXTINF:-1,Unsupported generated stream\n",
+        "rtmp://media.example.test/live\n",
+        "#EXTINF:-1,Generated placeholder\nnot-a-stream-address",
+    );
+    let matches_failure = |error: ImportError| {
+        assert!(matches!(
+            error,
+            ImportError::Parse {
+                step: Step::Playlist,
+                problem: ParseProblem::NoUsableEntries { skipped: 2 },
+            }
+        ));
+    };
+    matches_failure(
+        import_m3u_text(text.as_bytes(), &mut NoProgress, &CancelToken::new()).unwrap_err(),
+    );
+    matches_failure(run(&FakeFetch::body(text)).unwrap_err());
+}
+
+#[test]
 fn embedded_local_and_private_destinations_fail_without_a_partial_catalog() {
     for url in [
         "file:///etc/hosts",
+        "file://[invalid]/generated.ts",
+        "FiLe://localhost:80/generated.ts",
         "/etc/hosts",
+        "./generated.ts",
+        "../generated.ts",
+        ".\\generated.ts",
+        "..\\generated.ts",
+        "C:\\Synthetic\\generated.ts",
+        "C:/Synthetic/generated.ts",
         "http://127.0.0.1/private",
         "http://10.0.0.1/private",
         "http://[::1]/private",
@@ -345,6 +477,10 @@ fn embedded_local_and_private_destinations_fail_without_a_partial_catalog() {
                 "#EXTM3U url-tvg=\"{url}\"\n#EXTINF:-1,Synthetic\nhttps://media.example.test/live\n"
             ),
             format!("#EXTM3U\n#EXTINF:-1,Synthetic\n{url}\n"),
+            format!(
+                "#EXTM3U\n#EXTINF:-1,Generated valid channel\nhttps://media.example.test/live\n\
+                 #EXTINF:-1,Generated rejected destination\n{url}\n"
+            ),
         ] {
             assert!(matches!(
                 import_m3u_text(text.as_bytes(), &mut NoProgress, &CancelToken::new()),
