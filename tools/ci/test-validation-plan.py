@@ -253,6 +253,48 @@ class Aggregate(unittest.TestCase):
     def test_successful_selection_and_deliberate_skips_pass(self):
         self.assertEqual(v.gate(self.plan, self.needs), [])
 
+    def test_a_draft_defers_heavy_lanes_and_never_passes_the_gate(self):
+        # A shared CI input selects every lane, heavy ones included.
+        ready = v.select([".github/actions/setup/action.yml"])
+        draft = v.select([".github/actions/setup/action.yml"], draft=True)
+        self.assertFalse(ready["draft"])
+        self.assertEqual(ready["deferred"], [])
+        self.assertEqual(draft["deferred"], list(v.DRAFT_DEFERRED))
+        for lane in v.DRAFT_DEFERRED:
+            self.assertTrue(ready[lane], lane)
+            self.assertFalse(draft[lane], lane)
+        self.assertEqual(draft["package_matrix"], {"include": []})
+        # Fast lanes are unchanged, and macOS host checks move off the deferred packaging job.
+        for lane in ("host", "windows", "android", "ios", "credentials", "stress", "fuzz"):
+            self.assertEqual(draft[lane], ready[lane], lane)
+        self.assertEqual(ready["macos_host"], "packages")
+        self.assertEqual(draft["macos_host"], "host")
+        # Every selected lane passing still fails a draft, naming what it deferred, so a
+        # draft's result can never satisfy required checks on the commit once it is ready.
+        errors = v.gate(draft, self.successful_needs(draft))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("draft pull request", errors[0])
+        self.assertIn("packages, windows-package, coverage, smoke", errors[0])
+        self.assertEqual(v.gate(ready, self.successful_needs(ready)), [])
+        # A failing lane is still reported beside the draft notice.
+        needs = self.successful_needs(draft)
+        needs["host"]["result"] = "failure"
+        self.assertIn("selected host: failure", v.gate(draft, needs))
+        # A draft whose change selects no heavy lane still says it is a draft.
+        docs = v.select(["crates/iptv-core/src/guide.rs"], draft=True)
+        self.assertEqual(docs["deferred"], [x for x in v.DRAFT_DEFERRED if self.plan[x]])
+
+    def test_draft_selection_is_validated(self):
+        for tier in ("full", "release"):
+            with self.assertRaises(ValueError):
+                v.select([], tier, draft=True)
+        with self.assertRaises(ValueError):
+            v.select([], draft="true")
+        for plan in ({**self.plan, "draft": "yes"}, {**self.plan, "deferred": ["host"]},
+                     {**self.plan, "deferred": ["smoke"]}):
+            self.assertIn("draft selection is missing or invalid", v.gate(plan, self.needs))
+        self.assertEqual(v.gate({k: x for k, x in self.plan.items() if k not in ("draft", "deferred")}, self.needs), [])
+
     def test_mac_and_ios_evidence_must_come_from_the_selected_package_runner(self):
         plan = v.select(["Cargo.lock", "tools/package-macos.sh"])
         needs = self.successful_needs(plan)

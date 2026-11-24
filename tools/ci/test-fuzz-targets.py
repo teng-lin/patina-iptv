@@ -60,7 +60,11 @@ class Runner(unittest.TestCase):
             (root / "fuzz/corpus/imports/kept-from-an-earlier-run").write_text("synthetic")
             tools = root / "bin"
             tools.mkdir()
-            (tools / "rustup").write_text('#!/bin/sh\necho "/synthetic/$3/bin/cargo"\n')
+            compiler = root / "toolchains/nightly-synthetic/bin"
+            compiler.mkdir(parents=True)
+            (compiler / "rustc").write_text('#!/bin/sh\n[ "$*" = "--print host-tuple" ] && echo x86_64-unknown-linux-gnu\n')
+            (compiler / "rustc").chmod(0o755)
+            (tools / "rustup").write_text('#!/bin/sh\nprintf "%s/%s/bin/cargo\\n" "$STUB_TOOLCHAINS" "$3"\n')
             (tools / "cargo-fuzz").write_text(
                 '#!/bin/sh\n'
                 'if [ "$1" = list ]; then printf "%s\\n" "$STUB_LISTED"; exit; fi\n'
@@ -70,7 +74,7 @@ class Runner(unittest.TestCase):
                 tool.chmod(0o755)
             log = root / "calls.log"
             environment = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"], STUB_LOG=str(log),
-                               STUB_LISTED=listed, STUB_CRASHING=crashing, IPTV_FUZZ_TOOLCHAIN="nightly-synthetic",
+                               STUB_TOOLCHAINS=str(compiler.parent.parent), STUB_LISTED=listed, STUB_CRASHING=crashing, IPTV_FUZZ_TOOLCHAIN="nightly-synthetic",
                                IPTV_FUZZ_JOBS=workers)
             result = subprocess.run(["bash", str(root / "tools/ci/fuzz-imports.sh"), *arguments],
                                     env=environment, capture_output=True, text=True)
@@ -81,9 +85,11 @@ class Runner(unittest.TestCase):
     def test_all_listed_targets_run_with_the_pinned_nightly_and_seeds(self):
         result, calls, corpus = self.run_script("60")
         self.assertEqual(result.returncode, 0, result.stderr)
-        prefix = "nightly-synthetic /synthetic/nightly-synthetic/bin/cargo run "
-        self.assertEqual(calls, [prefix + f"{target} -- -max_total_time=60 -max_len=65537 -rss_limit_mb=1024 -malloc_limit_mb=512"
-                                 for target in ("imports", "manifests")])
+        self.assertTrue(all(call.startswith("nightly-synthetic ") for call in calls))
+        self.assertEqual([call.split("/nightly-synthetic/bin/cargo ")[1] for call in calls], [
+            f"run {target} --target x86_64-unknown-linux-gnu -- -max_total_time=60 -max_len=65537 -rss_limit_mb=1024 -malloc_limit_mb=512"
+            for target in ("imports", "manifests")
+        ])
         self.assertEqual(corpus, ["kept-from-an-earlier-run", "seed-synthetic"])
 
     def test_named_target_runs_alone_and_unknown_one_is_refused(self):
@@ -105,7 +111,7 @@ class Runner(unittest.TestCase):
     def test_parallel_targets_share_one_build_and_report_every_crash(self):
         result, calls, _ = self.run_script("300", workers="3", crashing="imports")
         self.assertNotEqual(result.returncode, 0)
-        self.assertTrue(calls[0].endswith("cargo build"))
+        self.assertTrue(calls[0].endswith("cargo build --target x86_64-unknown-linux-gnu"))
         self.assertEqual({call.split(" run ")[1].split()[0] for call in calls[1:]}, {"imports", "manifests"})
         self.assertTrue(all("-max_total_time=300" in call for call in calls[1:]))
         self.assertIn("fuzzing failed for: imports", result.stderr)

@@ -71,7 +71,7 @@ class Workflows(unittest.TestCase):
         text = (ROOT / ".github/workflows/validation.yml").read_text()
         aggregate = text.split("  validation:\n", 1)[1].split("  protected-contexts:", 1)[0]
         needs = re.search(r"needs: \[(.*?)\]", aggregate)[1].split(", ")
-        self.assertEqual(set(needs), {"plan", "helpers", "candidate", *plan.LANES})
+        self.assertEqual(set(needs), {"plan", "helpers", "candidate", "tools", *plan.LANES})
         self.assertIn("if: always()", aggregate)
         aliases = text.split("  protected-contexts:\n", 1)[1]
         self.assertIn("needs: validation", aliases)
@@ -180,13 +180,27 @@ class Workflows(unittest.TestCase):
                 continue
             self.assertIn(f'python3 {test}\n', helpers, test)
 
+    def test_reusable_lanes_can_run_without_the_optional_shared_builder(self):
+        for filename, jobs in {
+            "package-check.yml": ("desktop-packages",),
+            "android-smoke.yml": ("build", "smoke"),
+            "unsigned-candidate.yml": ("windows-package", "sbom"),
+        }.items():
+            workflow = (ROOT / ".github/workflows" / filename).read_text()
+            for job in jobs:
+                guard = workflow.split(f"\n  {job}:\n", 1)[1].splitlines()[0]
+                self.assertIn("if:", guard)
+                self.assertIn("!cancelled()", guard)
+        smoke = (ROOT / ".github/workflows/android-smoke.yml").read_text()
+        self.assertIn("!cancelled() && needs.build.result == 'success'", smoke)
+
     def test_master_candidate_owns_shipping_builds_and_release_uses_same_recipe(self):
         text = (ROOT / '.github/workflows/validation.yml').read_text()
         self.assertIn("&& 'validation-master'", text)
         self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", text)
         self.assertIn("inputs.tier != 'release'", text)
         candidate = text.split('  candidate:\n', 1)[1].split('  seal-candidate:', 1)[0]
-        self.assertIn('needs: plan', candidate)
+        self.assertIn('needs: [plan, tools]', candidate)
         self.assertIn("needs.plan.outputs.candidate_build == 'true'", candidate)
         self.assertIn('needs: [plan, validation, candidate]', text)
         self.assertIn('uses: ./.github/workflows/unsigned-candidate.yml', candidate)
@@ -275,6 +289,34 @@ class Workflows(unittest.TestCase):
         self.assertIn("--test memory", script)
         self.assertIn("--include-ignored", script)
         self.assertNotIn("catalog_stream_memory::", script)
+
+    def test_linux_tools_are_built_once_for_consumers_and_never_in_release_validation(self):
+        expressions = module('test-release-workflow')
+        files = ROOT / '.github/workflows'
+        validation = expressions.jobs(files / 'validation.yml')
+        tools = validation['tools']
+        self.assertIn("inputs.tier != 'release'", tools)
+        self.assertIn('uses: ./.github/workflows/ci-tools.yml', tools)
+        self.assertIn("needs.plan.outputs.linux-cli-ready != 'true'", tools)
+        for lane in ('packages', 'smoke', 'candidate'):
+            self.assertIn('needs: [plan, tools]', validation[lane])
+            self.assertIn("prepared-linux-tools: ${{ needs.tools.outputs.cli-ready == 'true' }}", validation[lane])
+            self.assertIn("!cancelled()", validation[lane])
+            self.assertNotIn("needs.tools.result == 'success'", validation[lane])
+        builder = (files / 'ci-tools.yml').read_text()
+        self.assertIn("continue-on-error: true", builder)
+        self.assertIn("uses: ./.github/actions/nsh-cli", builder)
+        self.assertNotIn("uses: ./.github/actions/android", builder)
+        for name in ('nsh-cli', 'android', 'cargo-tool'):
+            action = (ROOT / f'.github/actions/{name}/action.yml').read_text()
+            self.assertIn("github.workflow != 'Release'", action)
+
+    def test_candidate_notices_and_sbom_build_tools_from_source(self):
+        candidate = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text()
+        tool_steps = re.findall(r"uses: \./\.github/actions/cargo-tool\n(.*?)(?=\n      - |$)", candidate, flags=re.DOTALL)
+        self.assertEqual(len(tool_steps), 4)
+        for step in tool_steps:
+            self.assertIn("cache: 'false'", step)
 
     def test_real_gtk_lifecycle_is_in_ordinary_linux_pr_validation(self):
         checks = module("check-plan")

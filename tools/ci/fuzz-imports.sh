@@ -19,6 +19,10 @@ workers=${IPTV_FUZZ_JOBS:-1}
 case "$workers" in 1|2|3) ;; *) echo "unsupported fuzz worker count: $workers" >&2; exit 2 ;; esac
 export IPTV_REAL_CARGO
 IPTV_REAL_CARGO=$(rustup which --toolchain "$RUSTUP_TOOLCHAIN" cargo)
+# Upstream cargo-fuzz may itself use musl. Use the pinned compiler's host
+# target for ASan, including when it differs from the executable's target.
+fuzz_host=$("$(dirname "$IPTV_REAL_CARGO")/rustc" --print host-tuple)
+[ -n "$fuzz_host" ] || { echo "could not determine the fuzz compiler's host" >&2; exit 1; }
 fuzz_bin=$(mktemp -d)
 trap 'rm -rf "$fuzz_bin"' EXIT
 ln -s "$PWD/tools/ci/locked-cargo.py" "$fuzz_bin/cargo"
@@ -53,7 +57,7 @@ run_target() {
   # One input may allocate at most 512 MiB (a decompression bomb still fails);
   # the process may grow to 1 GiB, as ASan quarantines up to 256 MiB of freed
   # memory while it replays the corpus earlier runs accumulated.
-  cargo-fuzz run "$target" -- -max_total_time="$seconds" -max_len=65537 \
+  cargo-fuzz run "$target" --target "$fuzz_host" -- -max_total_time="$seconds" -max_len=65537 \
     -rss_limit_mb=1024 -malloc_limit_mb=512
 }
 
@@ -71,7 +75,7 @@ finish_batch() {
 if [ "$workers" -gt 1 ] && [ "${#targets[@]}" -gt 1 ]; then
   # Build the instrumented targets once before starting up to three distinct
   # libFuzzer processes. Each process owns its corpus and crash directory.
-  cargo-fuzz build
+  cargo-fuzz build --target "$fuzz_host"
   for target in "${targets[@]}"; do
     run_target "$target" &
     pids+=("$!")

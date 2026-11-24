@@ -13,6 +13,9 @@ inputs:
   cache:
     description: Restore and save the finished tool (disabled for release builds)
     default: 'true'
+  stage-release:
+    description: Stage a Windows cargo-about build for trusted publication
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -42,9 +45,9 @@ runs:
             'recipe': os.environ['TOOL_RECIPE_VERSION'],
             'flags': {k: v for k, v in os.environ.items()
                       if k.startswith(('RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_BUILD_',
-                                       'CARGO_TARGET_', 'CC', 'CFLAGS', 'CXX', 'AR'))},
-            'config': {str(path): path.read_text() if path.exists() else None
-                       for directory in (cargo_home, Path('.cargo'))
+                                       'CARGO_PROFILE_', 'CARGO_TARGET_', 'CC', 'CFLAGS', 'CXX', 'AR'))},
+            'config': {f'{scope}/{name}': path.read_text() if path.exists() else None
+                       for scope, directory in (('cargo-home', cargo_home), ('workspace', Path('.cargo')))
                        for name in ('config', 'config.toml')
                        for path in (directory / name,)},
         }
@@ -54,14 +57,31 @@ runs:
         print(f'root={root}')
         print(f'path={root / "bin" / executable}')
         PY
+    - name: Restore an upstream executable with a pinned checksum
+      id: upstream
+      if: inputs.cache == 'true' && github.workflow != 'Release'
+      shell: bash
+      env:
+        TOOL_KEY: ${{ inputs.name }}:${{ inputs.version }}:${{ inputs.features }}:${{ runner.os }}-${{ runner.arch }}
+        TOOL_PATH: ${{ steps.identity.outputs.path }}
+      run: python3 tools/ci/restore-cargo-tool.py "$TOOL_KEY" "$TOOL_PATH"
+    - name: Restore immutable Windows cargo-about release
+      id: durable
+      if: inputs.cache == 'true' && github.workflow != 'Release' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TOOL_KEY: ${{ steps.identity.outputs.key }}
+        TOOL_PATH: ${{ steps.identity.outputs.path }}
+      run: python3 tools/ci/nsh-cli-release.py restore Windows-X64 "$TOOL_KEY" "$TOOL_PATH" --kind cargo-about
     - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      if: inputs.cache == 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && !(github.event_name == 'push' && github.ref == 'refs/heads/master' && inputs.stage-release == 'true')
       id: tool
       with:
         path: ${{ steps.identity.outputs.path }}
         key: cargo-tool-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
     - name: Restore the retained macOS tool
-      if: inputs.cache == 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && steps.tool.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && steps.tool.outputs.cache-hit != 'true'
       id: retained
       shell: bash
       env:
@@ -70,7 +90,7 @@ runs:
         TOOL_PATH: ${{ steps.identity.outputs.path }}
       run: python3 tools/ci/restore-macos-tool.py "$TOOL_ARTIFACT" "$TOOL_PATH"
     - name: Build the pinned tool
-      if: steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
+      if: steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
       shell: bash
       env:
         TOOL_NAME: ${{ inputs.name }}
@@ -85,7 +105,7 @@ runs:
         if [ -n "$TOOL_FEATURES" ]; then args+=(--features "$TOOL_FEATURES"); fi
         cargo install "$TOOL_NAME" --version "$TOOL_VERSION" --locked --root "$TOOL_ROOT" "${args[@]}"
     - name: Retain the macOS tool independently of the dependency cache
-      if: inputs.cache == 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && runner.os == 'macOS' && inputs.name == 'cargo-about' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true' && steps.retained.outputs.restored != 'true'
       continue-on-error: true
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
@@ -93,9 +113,26 @@ runs:
         path: ${{ steps.identity.outputs.path }}
         if-no-files-found: error
         retention-days: 30
+    - name: Check the Windows executable before staging it
+      id: stage
+      if: inputs.stage-release == 'true' && github.workflow != 'Release' && github.event_name == 'push' && github.ref == 'refs/heads/master' && runner.os == 'Windows' && runner.arch == 'X64' && inputs.name == 'cargo-about' && inputs.version == '0.9.3' && inputs.features == 'cli' && steps.durable.outputs.restored != 'true'
+      shell: bash
+      env:
+        TOOL_BIN: ${{ steps.identity.outputs.path }}
+      run: '"$TOOL_BIN" --version'
+    - name: Stage Windows cargo-about for trusted publication
+      if: steps.stage.outcome == 'success'
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      continue-on-error: true
+      with:
+        name: patina-cargo-about-release-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
+        path: ${{ steps.identity.outputs.path }}
+        if-no-files-found: error
+        retention-days: 7
+        overwrite: true
     # A later test/package failure must not discard a successful tool build.
     - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-      if: inputs.cache == 'true' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true'
+      if: inputs.cache == 'true' && github.workflow != 'Release' && steps.upstream.outputs.restored != 'true' && steps.durable.outputs.restored != 'true' && github.ref == 'refs/heads/master' && steps.tool.outputs.cache-hit != 'true'
       with:
         path: ${{ steps.identity.outputs.path }}
         key: cargo-tool-${{ runner.os }}-${{ runner.arch }}-${{ steps.identity.outputs.key }}
