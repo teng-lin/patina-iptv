@@ -28,6 +28,10 @@
   runs ordinary tests with `--tests`, and runs doctests separately. Run strict
   timing gates alone through the shared CI plan, reusing the same harness. The
   target budget is enforced by `tools/ci/test-check-plan.py`.
+- **Draft pull requests.** Open pull requests as drafts while pushing fixups
+  (`gh pr create --draft`). Mark them ready (`gh pr ready`) once the change is
+  complete; that starts the complete validation run. A draft run always fails
+  its gate on purpose, listing the lanes it deferred.
 - **Video layer.** One persistent player surface under the UI; modes change
   layout only. Never hide, detach or re-parent the player view: on Android
   hiding or detaching it destroys its video surface.

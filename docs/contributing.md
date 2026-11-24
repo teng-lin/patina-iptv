@@ -8,6 +8,11 @@ Setup, contribution policy and physical-device validation requirements remain
 in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Validation scheduling and required-check behavior are documented in [CI tiers](ci.md).
+Open pull requests as drafts while pushing fixups (`gh pr create --draft`).
+Once the change is complete, mark it ready (`gh pr ready`) to start the complete
+validation run. A draft run always fails its gate on purpose and lists the
+heavy lanes it deferred.
+
 The [documentation map](index.md), [NSH pin](nsh.md),
 [disposable emulator runbook](android-validation.md) and
 [release recovery procedure](release.md#release-contract-and-recovery) cover
