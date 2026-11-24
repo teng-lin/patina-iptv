@@ -10,7 +10,7 @@ use nsh_core::{Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[test]
-fn cached_playlist_still_downloads_its_guide_when_epg_startup_refresh_is_enabled() {
+fn cached_playlist_still_downloads_its_missing_guide_when_updates_are_on_request() {
     let Some(home) = isolated!() else { return };
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();

@@ -55,7 +55,7 @@ pub static EPG: &[Setting] = &[
     // values, which nothing reads. A guide now always updates after its
     // playlist changes, keeps descriptions wherever the host stores the
     // guide on disk, and keeps finished programs for the longest catch-up
-    // archive of the stored channels (at least a day, for search).
+    // archive of the stored channels (at least a week, at most 14 days).
     epg(
         "updates",
         "epg.update_interval",

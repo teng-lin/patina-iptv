@@ -504,7 +504,7 @@ fn activate(ui: Ui, index: usize) {
         }),
         9 => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.input.erase();
+                o.dialog.erase();
             }
         }),
         10 => ui.parental.update(|o| {

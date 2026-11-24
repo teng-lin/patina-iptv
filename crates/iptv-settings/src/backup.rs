@@ -105,8 +105,9 @@ pub static MIGRATIONS: &[Migration] = &[
 ///   could wait for the next timer. Both old entries are removed; an
 ///   explicit `epg.update` already in the layer wins.
 /// - `vod.sort`: `last_modified` becomes `date_added` (both were shown
-///   newest first) and `playlist_order` (shown by name) is dropped, which
-///   leaves the default, by name.
+///   newest first) and `playlist_order` (shown by name) becomes `name`:
+///   explicit in a playlist's or group's layer, so it does not inherit
+///   the global order, and no entry globally, where it is the default.
 ///
 /// The other settings #282 retired keep their entries: they stay readable
 /// and are ignored.
@@ -139,12 +140,20 @@ fn v5_guide_update_and_catalog_sort(doc: &mut Map<String, Json>) {
             Some("last_modified") => {
                 layer.insert("vod.sort".to_owned(), Json::from("date_added"));
             }
+            // Shown by name: an override says so, so it does not inherit
+            // another order from the layer above.
             Some("playlist_order") => {
-                layer.remove("vod.sort");
+                layer.insert("vod.sort".to_owned(), Json::from("name"));
             }
             _ => {}
         }
     });
+    // Globally, by name is the default: no entry.
+    if let Some(Json::Object(global)) = doc.get_mut("global")
+        && global.get("vod.sort").and_then(Json::as_str) == Some("name")
+    {
+        global.remove("vod.sort");
+    }
 }
 
 /// "Sound follows the selected tile" (#179) is new and off by default.

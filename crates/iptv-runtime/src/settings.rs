@@ -303,7 +303,7 @@ pub(crate) fn adopt_global_connection_limit(
 /// provider's allowance applies).
 pub(crate) fn set_own(
     owner: &std::rc::Rc<super::Runtime>,
-    key: &str,
+    key: &'static str,
     at: &Target,
     value: Option<Value>,
 ) -> Result<(), SaveError> {
@@ -312,9 +312,22 @@ pub(crate) fn set_own(
     if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
         return Err(SaveError::ParentalLocked);
     }
-    apply(owner, key, |next| match value {
-        Some(value) => next.set_in(key, at, value),
-        None => next.clear_in(key, at),
+    apply(owner, key, |next| {
+        let before = next.stored(key, at).cloned();
+        let mut changes = match value {
+            Some(value) => next.set_in(key, at, value)?,
+            None => next.clear_in(key, at)?,
+        };
+        // The resolved value can stay the same (Automatic to an explicit
+        // value equal to the default): what is stored changed, so the
+        // views that show it still hear of it.
+        if changes.is_empty() && next.stored(key, at) != before.as_ref() {
+            changes.push(iptv_settings::Change {
+                key,
+                target: at.clone(),
+            });
+        }
+        Ok(changes)
     })
 }
 

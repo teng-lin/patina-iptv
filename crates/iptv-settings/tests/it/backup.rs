@@ -423,7 +423,11 @@ fn version_5_merges_the_guide_update_and_narrows_the_catalog_sort() {
     assert_eq!(st.choice(keys::EPG_UPDATE, G), "every_12_hours");
     assert_eq!(st.choice(keys::VOD_SORT, G), "date_added");
     let (pl1, pl2) = (Target::playlist("pl-1"), Target::playlist("pl-2"));
-    assert_eq!(st.stored("vod.sort", &pl1), None, "shown by name: default");
+    assert_eq!(
+        st.choice(keys::VOD_SORT, &pl1),
+        "name",
+        "shown by name, not the global order"
+    );
     assert_eq!(st.choice(keys::VOD_SORT, &pl2), "rating");
     // Retired rows keep their stored values; the runtime moves the global
     // streams-at-once value to each playlist.

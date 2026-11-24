@@ -32,11 +32,13 @@ is below 1.0, a minor release may change behavior.
   the guide's update interval and update-at-start switch; guides always update
   after their playlist changes, keep descriptions where the guide is stored on
   disk, and keep finished programs for the longest catch-up archive (at least a
-  day). Search always ranks favorites first, returns to the results after
-  watching one, and offers finished programs without replay as a filter in its
-  results. In the PIN prompt, OK submits once enough digits are entered and
-  otherwise presses the focused key. Movie and series settings are hidden when
-  no enabled playlist can supply a catalog.
+  week, at most 14 days). Search always ranks favorites first, returns to the
+  results after watching one, and offers finished programs without replay as a
+  filter in its results. In the PIN prompt, OK on a digit submits after digits
+  typed on number keys; on the on-screen keypad it presses the focused key, so
+  a PIN of any length can be entered with arrows and OK and submitted with
+  Continue. Movie and series settings are hidden when no enabled playlist can
+  supply a catalog.
 
 ## [0.1.8] - 2026-11-23
 

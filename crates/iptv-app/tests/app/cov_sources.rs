@@ -255,6 +255,12 @@ fn user_agent_refresh_and_keys(t: &mut T) {
     t.wait("text:Cancel", 2);
     assert_eq!(t.field(), "Synthetic/1", "the User-Agent was kept");
     t.press("text:Cancel");
+    // Streams at once (#282): Automatic, then an explicit one, shown at
+    // once though it equals the default ceiling, then on.
+    t.press("text:Streams at once: Automatic");
+    t.wait("text:Streams at once: 1", 2);
+    t.press("text:Streams at once: 1");
+    t.wait("text:Streams at once: 2", 2);
     t.press("text:Refresh now");
     t.gone("text:Show this playlist", 2);
     t.press("text:Refresh all playlists");

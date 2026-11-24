@@ -215,10 +215,10 @@ pub static PARENTAL: &[Setting] = &[
         key("What the PIN guards: blocked content only, or settings as well."),
     )
     .depends(IF_PARENTAL),
-    // Retired (#282): OK in the PIN prompt submits once enough digits are
-    // entered and otherwise presses the focused key, and number keys type
-    // digits, whatever this says. Not offered or read; a stored value is
-    // kept.
+    // Retired (#282): after digits typed on number keys, OK on a digit
+    // key in the PIN prompt submits; after keypad presses it presses the
+    // focused key (Continue submits), whatever this says. Not offered or
+    // read; a stored value is kept.
     parental(
         "scope",
         "parental.pin_input",

@@ -402,9 +402,6 @@ impl SearchState {
             self.channels.clear();
             self.programs.clear();
             self.remembered = [None, None];
-            if self.focus == Focus::Filter {
-                self.focus = Focus::Input;
-            }
             SearchEffect::None
         } else {
             self.phase = Phase::Typing;

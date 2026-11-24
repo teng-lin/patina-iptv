@@ -74,6 +74,12 @@ impl Dialog {
             self.keyed = false;
         }
     }
+    /// Delete on the on-screen keypad: removes the last digit, and the
+    /// viewer is on the keypad now, so OK goes on pressing its keys.
+    pub fn erase(&mut self) {
+        self.input.erase();
+        self.keyed = false;
+    }
     /// A digit typed with a number key or a keyboard.
     pub fn key_digit(&mut self, digit: u8) {
         if !self.busy {
@@ -268,6 +274,15 @@ mod dialog_tests {
         let mut d = Dialog::new(Phase::Unlock);
         key(&mut d, "1234");
         enter(&mut d, "5");
+        assert!(!d.ok_submits());
+        // A digit typed by mistake on number keys and removed with the
+        // keypad's Delete: OK presses keys again.
+        let mut d = Dialog::new(Phase::Unlock);
+        enter(&mut d, "1234");
+        key(&mut d, "9");
+        assert!(d.ok_submits());
+        d.erase();
+        assert_eq!(d.input.len(), 4);
         assert!(!d.ok_submits());
         // Setting a new six-digit PIN, by keypad then by number keys.
         let mut setup = Dialog::new(Phase::New);
