@@ -98,7 +98,15 @@ impl Section {
             Section::Appearance => &["colors", "text", "motion"],
             Section::Guide => &["browsing", "content", "emphasis", "switching"],
             Section::Logos => &[],
-            Section::Player => &["panels", "info", "clock", "buttons", "pip", "multiview"],
+            Section::Player => &[
+                "panels",
+                "info",
+                "clock",
+                "buttons",
+                "pip",
+                "multiview",
+                "accessibility",
+            ],
             Section::Playback => &[
                 "switching",
                 "decoding",

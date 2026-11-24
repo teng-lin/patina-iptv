@@ -54,9 +54,10 @@ pub fn language() -> &'static Language {
 }
 
 /// How dates and times are written now: the interface language's names,
-/// and the clock of **Settings → General → Clock**. Left on automatic, the
-/// clock is the convention of the device's locale when the language
-/// follows the device, and of the chosen language otherwise.
+/// and the clock. A phone or a tablet follows the system's 24-hour
+/// setting (#281). Elsewhere the clock is **Settings → General → Clock**;
+/// left on automatic, it is the convention of the device's locale when
+/// the language follows the device, and of the chosen language otherwise.
 pub fn clock_style() -> Style {
     crate::settings::observe();
     let settings = preferences();
@@ -65,7 +66,14 @@ pub fn clock_style() -> Style {
         "system" => system().unwrap_or("en"),
         chosen => chosen,
     };
-    let hours = HourCycle::from_preference(settings.choice(keys::CLOCK, &Target::Global), locale);
+    let system_clock = crate::settings::handheld(crate::device::host().form_factor)
+        .then(crate::device::system_24_hour)
+        .flatten();
+    let hours = match system_clock {
+        Some(true) => HourCycle::H24,
+        Some(false) => HourCycle::H12,
+        None => HourCycle::from_preference(settings.choice(keys::CLOCK, &Target::Global), locale),
+    };
     Style::new(i18n::resolve(&preference, system()), hours)
 }
 

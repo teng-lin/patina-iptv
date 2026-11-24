@@ -70,6 +70,8 @@ fn current(ui: Ui) -> Option<Target> {
 fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     let s = crate::settings::read(ui);
     let at = &iptv_settings::Target::Global;
+    // The form factor only: a resized window changes nothing here.
+    let form_factor = crate::device::host().form_factor;
     Policy {
         // Off while its row is not offered (a phone or a tablet with no
         // keyboard or D-pad, #280), whatever is stored.
@@ -82,12 +84,15 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         fullscreen_ms: if surface == Some(Surface::Player) {
             0
         } else {
-            s.duration_ms(keys::FULLSCREEN_TIMEOUT, at).max(0) as u64
+            crate::settings::fullscreen_timeout_ms(&s, form_factor)
         },
+        // The preview layout decides on every device (d77033af): the first
+        // choice tunes the preview, choosing the playing channel again goes
+        // full screen. The guide over the video and the channel list
+        // follow `guide.after_choosing`.
         stay: match surface {
             Some(Surface::Guide | Surface::Player) => true,
-            Some(Surface::Overlay) => s.bool(keys::GUIDE_STAY_ON_GUIDE, at),
-            _ => s.bool(keys::GUIDE_STAY_ON_LIST, at),
+            _ => crate::settings::stays_after_choosing(&s, form_factor),
         },
     }
 }

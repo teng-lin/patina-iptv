@@ -59,4 +59,35 @@ class DeviceSignalsTest {
         assertFalse(DeviceSignals.dpad(Configuration.NAVIGATION_DPAD, Configuration.NAVIGATIONHIDDEN_YES))
         assertFalse(DeviceSignals.dpad(Configuration.NAVIGATION_NONAV, Configuration.NAVIGATIONHIDDEN_NO))
     }
+
+    @Test
+    fun switchServicesAreToldFromOtherAccessibilityServices() {
+        assertTrue(
+            AccessibilitySignals.switchAccess(
+                listOf("com.google.android.marvin.talkback/com.google.android.accessibility.switchaccess.SwitchAccessService"),
+            ),
+        )
+        assertTrue(
+            AccessibilitySignals.switchAccess(
+                listOf("com.samsung.accessibility/.universalswitch.UniversalSwitchService"),
+            ),
+        )
+        assertTrue(
+            AccessibilitySignals.switchAccess(
+                listOf("com.google.android.accessibility.switchaccess/com.android.switchaccess.SwitchAccessService"),
+            ),
+        )
+        // A screen reader alone, a password manager, a lookalike, or nothing.
+        assertFalse(
+            AccessibilitySignals.switchAccess(
+                listOf(
+                    "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
+                    "org.example.passwords/.AutofillAccessibilityService",
+                    "org.example.switchaccessibility/.ReaderService",
+                    "org.example.reader/.SwitchAccessServiceHelper",
+                ),
+            ),
+        )
+        assertFalse(AccessibilitySignals.switchAccess(emptyList()))
+    }
 }

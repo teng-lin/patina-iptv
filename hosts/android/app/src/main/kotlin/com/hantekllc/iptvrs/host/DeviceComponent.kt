@@ -1,11 +1,14 @@
 package com.hantekllc.iptvrs.host
 
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.database.ContentObserver
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
@@ -16,10 +19,12 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityManager
 import com.longbridge.nsh.NshComponent
 import com.longbridge.nsh.NshComponentContext
 
@@ -31,8 +36,16 @@ import com.longbridge.nsh.NshComponentContext
  * (the activity handles `keyboard`, `keyboardHidden`, `navigation`,
  * `screenSize` and `smallestScreenSize` itself, so its views receive them).
  *
- * It also reports what can stop a capture ([CaptureLimits]) as a `limits`
- * event: then, and when the default network or Low Power Standby changes.
+ * Also the accessibility settings that panels hiding by themselves follow,
+ * as an `accessibility` event, `{"controls_ms", "text_ms",
+ * "switch_access"}`: the timeouts `AccessibilityManager` recommends (the
+ * "time to take action" setting) and whether Switch Access runs. They are
+ * reported when it attaches, whenever accessibility is switched on or off
+ * or its services or timeouts change, and when the window regains the
+ * focus (back from the system's settings).
+ *
+ * It reports what can stop a capture ([CaptureLimits]) as a `limits` event
+ * on attach and when the default network or Low Power Standby changes.
  */
 internal class DeviceComponent(
     private val context: NshComponentContext,
@@ -42,8 +55,15 @@ internal class DeviceComponent(
     }
 
     private var reported: Map<String, Any>? = null
+    private var reportedAccessibility: Map<String, Any>? = null
     private var limits: Map<String, Any>? = null
     private val main = Handler(Looper.getMainLooper())
+    private val accessibility = context.context.getSystemService(AccessibilityManager::class.java)
+    private val accessibilityChanged = AccessibilityManager.AccessibilityStateChangeListener { reportAccessibilitySoon() }
+    private val accessibilitySettings =
+        object : ContentObserver(main) {
+            override fun onChange(selfChange: Boolean) = reportAccessibilitySoon()
+        }
     private val network =
         object : ConnectivityManager.NetworkCallback() {
             override fun onCapabilitiesChanged(
@@ -72,15 +92,31 @@ internal class DeviceComponent(
             override fun onAttachedToWindow() {
                 super.onAttachedToWindow()
                 report(resources.configuration)
+                accessibility?.addAccessibilityStateChangeListener(accessibilityChanged)
+                for (name in AccessibilitySignals.SETTINGS) {
+                    context.contentResolver.registerContentObserver(
+                        Settings.Secure.getUriFor(name),
+                        false,
+                        accessibilitySettings,
+                    )
+                }
+                reportAccessibility()
                 watchLimits(true)
                 reportLimits()
             }
 
             override fun onDetachedFromWindow() {
+                accessibility?.removeAccessibilityStateChangeListener(accessibilityChanged)
+                context.contentResolver.unregisterContentObserver(accessibilitySettings)
                 watchLimits(false)
-                // A network change posted before detaching reports nothing.
+                // Drop accessibility and network reports queued before detaching.
                 main.removeCallbacksAndMessages(null)
                 super.onDetachedFromWindow()
+            }
+
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                super.onWindowFocusChanged(hasWindowFocus)
+                if (hasWindowFocus) reportAccessibility()
             }
 
             override fun onConfigurationChanged(config: Configuration) {
@@ -112,7 +148,44 @@ internal class DeviceComponent(
         }
     }
 
+    /**
+     * A settings change reaches this observer before `AccessibilityManager`
+     * has its new values (seen on the emulator: a timeout or a service
+     * switched on read as before), so read now and again once they settled.
+     */
+    private fun reportAccessibilitySoon() {
+        if (!observer.isAttachedToWindow) return
+        reportAccessibility()
+        main.removeCallbacks(settledReport)
+        main.postDelayed(settledReport, AccessibilitySignals.SETTLE_MS)
+    }
+
+    private val settledReport = Runnable { reportAccessibility() }
+
+    private fun reportAccessibility() {
+        val manager = accessibility ?: return
+        val recommended = { flags: Int ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) manager.getRecommendedTimeoutMillis(0, flags) else 0
+        }
+        val services =
+            manager
+                .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                .mapNotNull { it.id }
+        val next =
+            mapOf(
+                "controls_ms" to recommended(AccessibilitySignals.CONTROLS),
+                "text_ms" to recommended(AccessibilitySignals.TEXT),
+                "switch_access" to AccessibilitySignals.switchAccess(services),
+            )
+        if (next != reportedAccessibility) {
+            Log.i("nsh", "iptv accessibility: $next")
+            reportedAccessibility = next
+            context.emit("accessibility", next)
+        }
+    }
+
     private fun reportLimits() {
+        if (!observer.isAttachedToWindow) return
         val next = CaptureLimits.report(observer.context)
         if (next != limits) {
             limits = next
@@ -280,4 +353,53 @@ internal object DeviceSignals {
             }
         return (minOf(width, height) / density).toInt()
     }
+}
+
+/**
+ * What Android's accessibility settings ask of panels that hide by
+ * themselves (`device.rs`'s `Recommended` and `assistive`). The content
+ * flags are API 29's constants, inlined at compile time and passed only to
+ * the API 29 call that reads them.
+ */
+@SuppressLint("InlinedApi")
+internal object AccessibilitySignals {
+    /** Panels with controls: the control strip, the card's actions, the play bar. */
+    const val CONTROLS = AccessibilityManager.FLAG_CONTENT_CONTROLS or AccessibilityManager.FLAG_CONTENT_TEXT
+
+    /** How long after a change its new values are read again (ms). */
+    const val SETTLE_MS = 1_000L
+
+    /** Panels to read: the banner after a channel change, the info card. */
+    const val TEXT = AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_ICONS
+
+    /**
+     * The secure settings whose change can change a report: the enabled
+     * services, and the interactive and non-interactive timeouts behind
+     * `getRecommendedTimeoutMillis` (named as `Settings.Secure` keeps them).
+     */
+    val SETTINGS =
+        listOf(
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            "accessibility_interactive_ui_timeout_ms",
+            "accessibility_non_interactive_ui_timeout_ms",
+        )
+
+    /**
+     * The class names of the switch services: Google's Switch Access (in
+     * the Accessibility Suite, `com.google.android.marvin.talkback`, or
+     * its own older package) and Samsung's Universal Switch.
+     */
+    private val SWITCH_SERVICES = setOf("SwitchAccessService", "UniversalSwitchService")
+
+    /**
+     * Whether a switch service runs, by the ids (`package/class`) of the
+     * enabled accessibility services. A heuristic: no service property
+     * sets a switch service apart, so it matches the services' class names
+     * ([SWITCH_SERVICES]) exactly, whatever their package, and nothing
+     * else that only contains those words.
+     */
+    fun switchAccess(serviceIds: List<String>): Boolean =
+        serviceIds.any { id ->
+            id.substringAfter('/').substringAfterLast('.') in SWITCH_SERVICES
+        }
 }

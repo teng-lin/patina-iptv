@@ -10,7 +10,8 @@ fn preview(app: &crate::headless::Headless) -> bool {
     app.screen()
         .layout_nodes()
         .iter()
-        .find(|n| n.kind == ViewKind::Native)
+        // The player: not the device observer (`tv.device`), which has no size.
+        .find(|n| n.kind == ViewKind::Native && n.test_id.as_deref() != Some("device-signals"))
         .unwrap()
         .bounds
         .size
@@ -108,12 +109,18 @@ fn guide_activates_a_live_channel_twice_and_wraps_rows_and_groups() {
 }
 #[test]
 fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullscreen_timeout() {
-    let Some(home) = isolated!() else { return };
+    // On a TV: elsewhere a preview never goes full screen by itself (#281).
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
     let mut s = Settings::new();
     for (k, v) in [
         ("guide.autoplay", Value::Bool(true)),
-        ("guide.stay_on_guide", Value::Bool(true)),
-        ("guide.stay_on_list", Value::Bool(true)),
+        ("guide.after_choosing", Value::choice("stay")),
         ("guide.fullscreen_timeout", Value::secs(2)),
     ] {
         s.set(k, v).unwrap();
@@ -138,6 +145,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
         });
     });
     let app = &mut f.app;
+    crate::device_settings::report(app, "tv", false, true);
     step(app.run_for(Duration::from_millis(600)));
     loaded_stream(app, &opened, "http://example.test/a");
     assert!(preview(app));

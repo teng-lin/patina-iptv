@@ -29,8 +29,9 @@
 
 use std::sync::Arc;
 
-use iptv_core::capabilities::FormFactor;
+use iptv_core::capabilities::{FormFactor, Platform};
 use iptv_presentation::capabilities::{Device, Keys};
+use iptv_presentation::layout::Class;
 use iptv_presentation::panels::Timeouts;
 use iptv_presentation::settings::screen::Offer;
 use iptv_settings::keys;
@@ -39,6 +40,7 @@ use iptv_settings::{Settings, Target, Value};
 use nsh_core::prelude::*;
 
 use crate::Ui;
+use crate::device::Recommended;
 use crate::theme::{ACCENTS, BACKGROUNDS, Theme};
 
 /// The settings the app acts on.
@@ -55,8 +57,7 @@ pub const WIRED: &[&str] = &[
     "guide.autoplay",
     "guide.switch_delay",
     "guide.fullscreen_timeout",
-    "guide.stay_on_guide",
-    "guide.stay_on_list",
+    "guide.after_choosing",
     "guide.browse_mode",
     "guide.list_browse_mode",
     "appearance.font_size",
@@ -66,7 +67,6 @@ pub const WIRED: &[&str] = &[
     "general.resume_last_channel",
     "general.user_agent",
     "epg.update",
-    "guide.back_returns_to_now",
     "appearance.accent",
     "appearance.background",
     "appearance.ui_transparency",
@@ -192,6 +192,75 @@ const NOT_OFFERED: &[&str] = &[
     "playlists.max_connections",
 ];
 
+/// Retired (#281): fixed behavior replaced them. They stay in the catalog,
+/// so stored values and backups from any device still load, and are never
+/// offered. `guide.stay_on_guide` and `guide.stay_on_list` are read once
+/// more when the settings load, into `guide.after_choosing` while that is
+/// not stored (`iptv_runtime::settings`); `guide.back_returns_to_now` is
+/// always on.
+const RETIRED: &[&str] = &[
+    "guide.stay_on_guide",
+    "guide.stay_on_list",
+    "guide.back_returns_to_now",
+];
+
+/// A phone or a tablet: the device is held, and touched first.
+pub fn handheld(form_factor: FormFactor) -> bool {
+    matches!(form_factor, FormFactor::Phone | FormFactor::Tablet)
+}
+
+/// The rows the device decides (#281): `Some(Offer::Hidden)` where it
+/// hides them, `Some(Offer::Advanced)` where they go to the Advanced page;
+/// `None` leaves them to the other rules.
+///
+/// - `general.clock`: a phone or a tablet follows the system's 24-hour
+///   setting ([`crate::i18n::clock_style`]).
+/// - `appearance.ui_transparency`, `guide.browse_mode`,
+///   `guide.list_browse_mode`: in a compact window the layout decides (the
+///   guide shows its preview, [`browse_mode`]; the channel list has no
+///   room for the video beside it), so the guide never draws over video.
+/// - `guide.fullscreen_timeout`: a TV's only, on the Advanced page. A
+///   phone, a tablet or a desktop never goes full screen by itself
+///   ([`fullscreen_timeout_ms`]).
+/// - `catchup.forward_step`, `catchup.rewind_step`: on the Advanced page
+///   on a desktop or a TV. A phone or a tablet has no Advanced page
+///   (#280): they stay with the replay jumps there.
+/// - `guide.after_choosing`: a phone or a tablet always goes full screen
+///   ([`stays_after_choosing`]).
+/// - `player.info_on_switch`: it applies to zapping with keys, which a
+///   phone or a tablet has only with a keyboard or a D-pad connected. An
+///   iPad keeps it: its connected input is not reported yet
+///   (`device::ipad_input_unreported`), so a keyboard there would not
+///   bring the row back.
+fn by_device(device: Device, key: &str) -> Option<Offer> {
+    let input = device.input();
+    // Advanced settings: on the Advanced page (#281).
+    match key {
+        "catchup.forward_step" | "catchup.rewind_step" if !handheld(device.form_factor()) => {
+            return Some(Offer::Advanced);
+        }
+        "guide.fullscreen_timeout" if device.form_factor() == FormFactor::Tv => {
+            return Some(Offer::Advanced);
+        }
+        _ => {}
+    }
+    let hidden = match key {
+        "general.clock" | "guide.after_choosing" => handheld(device.form_factor()),
+        "appearance.ui_transparency" | "guide.browse_mode" | "guide.list_browse_mode" => {
+            device.window == Class::Compact
+        }
+        "guide.fullscreen_timeout" => device.form_factor() != FormFactor::Tv,
+        "player.info_on_switch" => {
+            handheld(device.form_factor())
+                && device.host.platform != Platform::Ipad
+                && !input.keyboard
+                && !input.dpad
+        }
+        _ => return None,
+    };
+    hidden.then_some(Offer::Hidden)
+}
+
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 
 thread_local! {
@@ -267,8 +336,11 @@ pub fn offer(device: Device, key: &str) -> Offer {
     // Leaving the app into a picture-in-picture window: Android phones and
     // tablets only, once the host says it has the window.
     let pip = host.automatic_pip() && PIP.get();
-    if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) {
+    if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) || RETIRED.contains(&key) {
         return Offer::Hidden;
+    }
+    if let Some(offer) = by_device(device, key) {
+        return offer;
     }
     // No enabled playlist can supply movies or series: their settings go
     // as the rail's Movies and Shows do (`lists::live_only`).
@@ -363,11 +435,44 @@ pub fn network_config() -> crate::runtime::network::NetworkConfig {
     crate::runtime::settings::network_config(&get())
 }
 
+/// The guide's layout outside full screen: `guide.browse_mode`, except in
+/// a compact window, where the layout decides and the guide shows its
+/// preview (reactive: the window's size class).
 pub fn browse_mode() -> crate::ViewMode {
-    if choice(keys::BROWSE_MODE) == "overlay" {
+    guide_layout(choice(keys::BROWSE_MODE), crate::device::window_class())
+}
+
+/// The guide opened over full-screen video (the Guide key): its overlay
+/// layout, except in a compact window, where the guide shows its preview
+/// as [`browse_mode`] does, so it never draws over the video there.
+pub fn guide_over_video() -> crate::ViewMode {
+    guide_layout("overlay", crate::device::window_class())
+}
+
+fn guide_layout(mode: &str, window: Class) -> crate::ViewMode {
+    if mode == "overlay" && window != Class::Compact {
         crate::ViewMode::Overlay
     } else {
         crate::ViewMode::Guide
+    }
+}
+
+/// Whether choosing a channel in the guide over the video or in the
+/// channel list keeps it open (`guide.after_choosing`) on a device of
+/// `form_factor`. A phone or a tablet always goes full screen. The guide's
+/// preview layout does not ask: there the first choice tunes the preview,
+/// and choosing the playing channel goes full screen (`browse_playback`).
+pub fn stays_after_choosing(s: &Settings, form_factor: FormFactor) -> bool {
+    !handheld(form_factor) && s.choice(keys::GUIDE_AFTER_CHOOSING, &Target::Global) == "stay"
+}
+
+/// `guide.fullscreen_timeout` on a device of `form_factor`, in ms: a
+/// TV's only; elsewhere 0 (never).
+pub fn fullscreen_timeout_ms(s: &Settings, form_factor: FormFactor) -> u64 {
+    if form_factor == FormFactor::Tv {
+        u64::try_from(s.duration_ms(keys::FULLSCREEN_TIMEOUT, &Target::Global)).unwrap_or(0)
+    } else {
+        0
     }
 }
 
@@ -395,14 +500,20 @@ pub fn theme_of(s: &Settings) -> Theme {
     }
 }
 
-/// The player panels' auto-hide delays.
-pub fn timeouts_of(s: &Settings) -> Timeouts {
+/// The player panels' auto-hide delays: the panel timeouts under
+/// Accessibility, never shorter than the system recommends to this viewer
+/// ([`Recommended`], Android's accessibility timeout): the banner and the
+/// info card by its time to read, the card's actions, the control strip
+/// and the mouse's card by its time to act.
+pub fn timeouts_of(s: &Settings, recommended: Recommended) -> Timeouts {
     let ms = |key| u64::try_from(s.duration_ms(key, &Target::Global)).unwrap_or(0);
+    let fixed = Timeouts::default();
     Timeouts {
-        info_ms: ms(keys::INFO_PANEL_TIMEOUT),
-        controls_ms: ms(keys::CONTROLS_PANEL_TIMEOUT),
+        banner_ms: fixed.banner_ms.max(recommended.text_ms),
+        info_ms: ms(keys::INFO_PANEL_TIMEOUT).max(recommended.text_ms),
+        controls_ms: ms(keys::CONTROLS_PANEL_TIMEOUT).max(recommended.controls_ms),
         // Not a setting: the desktop's controls hide soon after the mouse rests.
-        ..Timeouts::default()
+        pointer_ms: fixed.pointer_ms.max(recommended.controls_ms),
     }
 }
 
@@ -420,12 +531,37 @@ pub fn bind(ui: Ui) {
     if crate::host::NOTIFICATIONS_FOLLOW_LANGUAGE {
         effect(move || crate::host::language_changed(crate::i18n::language().tag));
     }
-    let last_mode = std::cell::Cell::new(None);
+    // The guide's layout follows the setting and the window's class: it
+    // changes when either changes it, and never in full screen.
+    let layout = computed(move || {
+        let s = read(ui);
+        guide_layout(
+            s.choice(keys::BROWSE_MODE, &Target::Global),
+            crate::device::window_class(),
+        )
+    });
+    let last_layout = std::cell::Cell::new(None);
+    effect(move || {
+        let layout = layout.get();
+        if last_layout.replace(Some(layout)) != Some(layout)
+            && ui.mode.get_untracked() != crate::ViewMode::Fullscreen
+        {
+            untracked(|| ui.mode.set(layout));
+        }
+    });
+    // A window that turns compact under the guide's overlay (opened over
+    // full-screen video) shows it beside its preview too.
+    effect(move || {
+        if crate::device::window_class() == Class::Compact
+            && ui.mode.get_untracked() == crate::ViewMode::Overlay
+        {
+            untracked(|| ui.mode.set(crate::ViewMode::Guide));
+        }
+    });
     effect(move || {
         let s = read(ui);
-        let (theme, timeouts) = (theme_of(&s), timeouts_of(&s));
-        let mode = s.choice(keys::BROWSE_MODE, &Target::Global);
-        let changed = last_mode.replace(Some(mode)) != Some(mode);
+        let theme = theme_of(&s);
+        let timeouts = timeouts_of(&s, crate::device::recommended());
         let span = s.int(iptv_settings::keys::GUIDE_VISIBLE_MINUTES, &Target::Global) as i32;
         untracked(|| {
             ui.app.theme.set(theme);
@@ -433,15 +569,9 @@ pub fn bind(ui: Ui) {
                 let view = crate::lists::view(ui);
                 ui.focus.update(|f| f.set_visible(span, &view));
             }
-            if changed && ui.mode.get_untracked() != crate::ViewMode::Fullscreen {
-                ui.mode.set(if mode == "overlay" {
-                    crate::ViewMode::Overlay
-                } else {
-                    crate::ViewMode::Guide
-                });
-            }
             if ui.panels.with(|p| p.timeouts) != timeouts {
-                ui.panels.update(|p| p.timeouts = timeouts);
+                let now = ui.now_ms();
+                ui.panels.update(|p| p.set_timeouts(timeouts, now));
             }
         });
     });
@@ -516,8 +646,9 @@ mod tests {
 
     #[test]
     fn what_the_app_offers() {
-        // The rows that follow the connected input are checked below
-        // (`keys_and_zapping_follow_the_connected_input`).
+        // What no signal changes. The rows that follow the connected
+        // input are checked below (`keys_and_zapping_follow_the_connected_input`,
+        // `the_device_decides_guide_player_and_display_rows`).
         // Picture in picture on leaving: not before the host says it has
         // the window, never off Android (nor on a TV, whose host reports
         // none).
@@ -568,6 +699,33 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
+            // Retired by fixed behavior (#281), on every device.
+            for key in [
+                "guide.stay_on_guide",
+                "guide.stay_on_list",
+                "guide.back_returns_to_now",
+            ] {
+                assert_eq!(offer(key), Offer::Hidden, "{key}");
+            }
+            // Kept on every device, the timeouts under Accessibility
+            // (#281).
+            for key in [
+                "player.info_panel_timeout",
+                "player.controls_panel_timeout",
+                "catchup.timebar_step",
+                "guide.visible_minutes",
+            ] {
+                assert_eq!(offer(key), Offer::Active, "{key}");
+            }
+            // On the Advanced page on a desktop or a TV; a phone or a
+            // tablet has none (#281, #280).
+            let steps = match device.form_factor() {
+                FormFactor::Phone | FormFactor::Tablet => Offer::Active,
+                FormFactor::Desktop | FormFactor::Tv => Offer::Advanced,
+            };
+            for key in ["catchup.forward_step", "catchup.rewind_step"] {
+                assert_eq!(offer(key), steps, "{key}");
+            }
             // Sound follows the selected tile: never on a phone (#279);
             // elsewhere where this build has multiview.
             let follows = device.form_factor() != iptv_core::capabilities::FormFactor::Phone
@@ -584,6 +742,77 @@ mod tests {
         }
         offer_pip(false);
         assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);
+    }
+
+    /// What the device decides (#281), for every combination of the
+    /// signals.
+    #[test]
+    fn the_device_decides_guide_player_and_display_rows() {
+        for device in devices() {
+            let shown = |key| offer(device, key) == Offer::Active;
+            let form = device.form_factor();
+            let held = matches!(form, FormFactor::Phone | FormFactor::Tablet);
+            let compact = device.window == Class::Compact;
+            let keys = device.input().keyboard || device.input().dpad;
+            let what = format!("{device:?}");
+            assert_eq!(shown("general.clock"), !held, "{what}");
+            for key in [
+                "appearance.ui_transparency",
+                "guide.browse_mode",
+                "guide.list_browse_mode",
+            ] {
+                assert_eq!(shown(key), !compact, "{key}: {what}");
+            }
+            assert_eq!(
+                offer(device, "guide.fullscreen_timeout"),
+                if form == FormFactor::Tv {
+                    Offer::Advanced
+                } else {
+                    Offer::Hidden
+                },
+                "{what}"
+            );
+            assert_eq!(shown("guide.after_choosing"), !held, "{what}");
+            assert_eq!(shown("player.info_on_switch"), !held || keys, "{what}");
+        }
+        // An iPad's keyboard is not reported yet: it keeps the row.
+        let ipad = Device {
+            host: iptv_core::capabilities::Host::of(Platform::Ipad),
+            window: Class::Expanded,
+        };
+        assert_eq!(offer(ipad, "player.info_on_switch"), Offer::Active);
+    }
+
+    #[test]
+    fn the_stay_choice_and_the_full_screen_timeout_follow_the_device() {
+        let mut s = Settings::new();
+        s.set("guide.after_choosing", Value::choice("stay"))
+            .unwrap();
+        s.set("guide.fullscreen_timeout", Value::secs(5)).unwrap();
+        for (form, stays, timeout) in [
+            (FormFactor::Phone, false, 0),
+            (FormFactor::Tablet, false, 0),
+            (FormFactor::Desktop, true, 0),
+            (FormFactor::Tv, true, 5_000),
+        ] {
+            assert_eq!(stays_after_choosing(&s, form), stays, "{form:?}");
+            assert_eq!(fullscreen_timeout_ms(&s, form), timeout, "{form:?}");
+        }
+        // The default goes full screen everywhere.
+        let s = Settings::new();
+        assert!(!stays_after_choosing(&s, FormFactor::Tv));
+        assert!(!stays_after_choosing(&s, FormFactor::Desktop));
+    }
+
+    #[test]
+    fn a_compact_window_shows_the_guide_beside_its_preview() {
+        use crate::ViewMode::{Guide, Overlay};
+        assert_eq!(guide_layout("overlay", Class::Expanded), Overlay);
+        assert_eq!(guide_layout("overlay", Class::Medium), Overlay);
+        assert_eq!(guide_layout("overlay", Class::Compact), Guide);
+        for window in [Class::Compact, Class::Medium, Class::Expanded] {
+            assert_eq!(guide_layout("preview", window), Guide);
+        }
     }
 
     /// #280: the keyboard or remote settings exist while there are keys;
@@ -650,19 +879,43 @@ mod tests {
 
     #[test]
     fn panel_timeouts_follow_the_player_settings() {
+        let none = Recommended::default();
         let mut s = Settings::new();
-        assert_eq!(timeouts_of(&s), Timeouts::default());
+        assert_eq!(timeouts_of(&s, none), Timeouts::default());
         s.set("player.info_panel_timeout", Value::secs(9)).unwrap();
         s.set("player.controls_panel_timeout", Value::secs(20))
             .unwrap();
         assert_eq!(
-            timeouts_of(&s),
+            timeouts_of(&s, none),
             Timeouts {
                 info_ms: 9_000,
                 controls_ms: 20_000,
                 ..Timeouts::default()
             }
         );
+    }
+
+    #[test]
+    fn panel_timeouts_wait_as_long_as_the_system_recommends() {
+        // Android's "time to take action": 30 s to act, 10 s to read.
+        let recommended = Recommended {
+            controls_ms: 30_000,
+            text_ms: 10_000,
+        };
+        let mut s = Settings::new();
+        assert_eq!(
+            timeouts_of(&s, recommended),
+            Timeouts {
+                banner_ms: 10_000,
+                info_ms: 10_000,
+                controls_ms: 30_000,
+                pointer_ms: 30_000,
+            }
+        );
+        // A longer timeout of the viewer's own still wins.
+        s.set("player.controls_panel_timeout", Value::secs(60))
+            .unwrap();
+        assert_eq!(timeouts_of(&s, recommended).controls_ms, 60_000);
     }
 
     #[test]

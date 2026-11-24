@@ -109,12 +109,22 @@ pub fn bind(ui: Ui) {
             ui.play_bar.update(PlayBar::hide);
         }
     });
-    // A screen reader's user moves from control to control by swipes,
-    // slower than the delay: the bar stays until it is hidden.
+    // A screen reader's user moves from control to control by swipes, a
+    // switch user by switch, slower than the delay: the bar stays until
+    // it is hidden.
     effect(move || {
-        let reader = screen_reader();
+        let reader = crate::device::assistive();
         if untracked(|| ui.play_bar.with(|b| b.reader != reader)) {
             untracked(|| update(ui, |b, now| b.screen_reader(reader, now)));
+        }
+    });
+    // Otherwise it waits at least as long as the system recommends for
+    // controls (Android's accessibility timeout).
+    effect(move || {
+        let idle = iptv_presentation::play_bar::HIDE_AFTER_MS
+            .max(crate::device::recommended().controls_ms);
+        if untracked(|| ui.play_bar.with(|b| b.idle_ms() != idle)) {
+            untracked(|| update(ui, |b, now| b.set_idle_ms(idle, now)));
         }
     });
     let popup =

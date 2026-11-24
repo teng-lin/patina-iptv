@@ -146,8 +146,10 @@ A custom remote binding can open the info card with action cards. The cards capt
 | Menu | The play bar | – |
 | Back | Hides the card | Stops playback |
 
-The card hides by itself after `player.controls_panel_timeout`; a key keeps
-it up.
+The card hides by itself after `player.controls_panel_timeout` (under
+**Playback → Accessibility**), or Android's recommended accessibility timeout
+when that is longer; a key keeps it up. While a screen reader or Switch
+Access runs it stays until hidden.
 
 ## Replay and seekable video on demand
 

@@ -878,6 +878,81 @@ fn a_backup_from_before_us_spelling_restores_favorites_and_settings() {
     );
 }
 
+/// A backup from another device with the rows #281 retired or hides
+/// restores cleanly; its disagreeing stay switches become the one "keep it
+/// open" choice as the restored settings load, and the hidden rows keep
+/// their values.
+#[test]
+fn a_backup_with_retired_and_hidden_rows_restores_and_carries_the_stay_choice() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("live");
+    seed(&root, "Generated");
+    let old = dir.path().join("v24.sqlite");
+    v24_library(&old);
+    let global = |extra: serde_json::Value| {
+        let mut values = json!({
+            "guide.stay_on_guide": true,
+            "guide.stay_on_list": false,
+            "guide.back_returns_to_now": false,
+            "general.clock": "h24",
+            "guide.fullscreen_timeout": 5_000,
+            "guide.browse_mode": "overlay",
+            "guide.list_browse_mode": "preview",
+            "appearance.ui_transparency": 40,
+            "player.info_on_switch": false,
+            "player.info_panel_timeout": 9_000,
+            "player.controls_panel_timeout": 20_000,
+            "catchup.forward_step": 60_000,
+            "catchup.rewind_step": 15_000
+        });
+        values.as_object_mut().unwrap().extend(
+            extra
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone())),
+        );
+        json!({
+            "format": iptv_settings::backup::FORMAT,
+            "version": iptv_settings::backup::VERSION,
+            "global": values
+        })
+        .to_string()
+    };
+    let at = &iptv_settings::Target::Global;
+    for (extra, expected) in [
+        (json!({}), "stay"),
+        (
+            json!({"guide.after_choosing": "full_screen"}),
+            "full_screen",
+        ),
+    ] {
+        stage(
+            &root,
+            &mut packed(vec![
+                ("iptv.sqlite", fs::read(&old).unwrap()),
+                ("settings.json", global(extra).into_bytes()),
+            ])
+            .as_slice(),
+        )
+        .unwrap();
+        activate(&root).unwrap();
+        let (restored, report) =
+            Settings::from_json(&fs::read_to_string(root.join("settings.json")).unwrap()).unwrap();
+        assert!(report.is_clean(), "{report:?}");
+        let restored = crate::settings::adopt_retired(restored);
+        assert_eq!(
+            restored.choice(iptv_settings::keys::GUIDE_AFTER_CHOOSING, at),
+            expected
+        );
+        assert_eq!(restored.choice(iptv_settings::keys::CLOCK, at), "h24");
+        assert_eq!(
+            restored.get("appearance.ui_transparency").unwrap(),
+            iptv_settings::Value::Int(40)
+        );
+    }
+}
+
 /// Migrating an older settings document does not relax the other rules: an
 /// unknown key or an invalid value still refuses the restore.
 #[test]

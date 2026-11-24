@@ -41,6 +41,7 @@ mod cov_settings_wizard;
 mod cov_sources;
 mod cov_sources_assign;
 mod desktop_workflows;
+mod device_settings;
 mod device_signals;
 mod foundation_inspection;
 mod foundation_repair;

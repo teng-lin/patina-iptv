@@ -217,6 +217,21 @@ impl PlayBar {
         self.hold_until_ms.is_some()
     }
 
+    /// Changes the idle delay (a system's recommended accessibility
+    /// timeout, for one). A bar shown now restarts its delay from `now_ms`
+    /// with it, so a longer one applies at once.
+    pub fn set_idle_ms(&mut self, idle_ms: u64, now_ms: u64) {
+        self.idle_ms = idle_ms;
+        if self.hide_at_ms.is_some() {
+            self.restart(now_ms);
+        }
+    }
+
+    /// The idle delay.
+    pub fn idle_ms(&self) -> u64 {
+        self.idle_ms
+    }
+
     fn restart(&mut self, now_ms: u64) {
         self.hide_at_ms = Some(now_ms.saturating_add(self.idle_ms));
     }
@@ -225,6 +240,20 @@ impl PlayBar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_longer_idle_delay_applies_to_the_bar_shown_now() {
+        let mut bar = PlayBar::default();
+        bar.set_idle_ms(30_000, 0);
+        assert_eq!(bar.hide_at_ms(), None, "a hidden bar stays hidden");
+        bar.set_idle_ms(HIDE_AFTER_MS, 0);
+        bar.remote(0);
+        assert_eq!(bar.hide_at_ms(), Some(HIDE_AFTER_MS));
+        // The system asks for 30 s while the bar shows, without input.
+        bar.set_idle_ms(30_000, 1_000);
+        assert_eq!(bar.hide_at_ms(), Some(31_000));
+        assert!(!bar.tick(HIDE_AFTER_MS));
+    }
 
     #[test]
     fn a_held_key_keeps_the_bar_until_its_press_is_decided() {

@@ -24,6 +24,12 @@
 //! Every value is reactive: a closure that reads one runs again when it
 //! changes, so gates follow a foldable opening, a resized window or a
 //! keyboard attached during a session without a rebuild.
+//!
+//! Beside them, what the system's accessibility settings ask of panels
+//! that hide by themselves ([`recommended`], [`assistive`]): Android's
+//! recommended timeouts and whether Switch Access runs, which the same
+//! observer reports, and whether a screen reader runs, which NSH reports
+//! on every host.
 
 use std::cell::Cell;
 
@@ -50,8 +56,52 @@ struct Report {
     decoders: Option<usize>,
 }
 
+/// How long the system asks panels that hide by themselves to stay, at
+/// least, for this viewer (ms; 0 where it asks nothing): Android's
+/// `AccessibilityManager.getRecommendedTimeoutMillis`, set in its
+/// accessibility settings as the time to take action.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Recommended {
+    /// For panels with controls (`FLAG_CONTENT_CONTROLS`).
+    pub controls_ms: u64,
+    /// For panels to read (`FLAG_CONTENT_TEXT`).
+    pub text_ms: u64,
+}
+
+/// The system's accessibility settings, as the host reported them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Accessibility {
+    recommended: Recommended,
+    /// Switch Access (or another switch service) runs: its user steps
+    /// through the controls by switch, as slowly as they need.
+    switch_access: bool,
+}
+
 thread_local! {
     static REPORTED: Cell<Option<Signal<Report>>> = const { Cell::new(None) };
+    static ACCESSIBILITY: Cell<Option<Signal<Accessibility>>> = const { Cell::new(None) };
+}
+
+fn accessibility() -> Accessibility {
+    ACCESSIBILITY
+        .with(Cell::get)
+        .map(|a| a.get())
+        .unwrap_or_default()
+}
+
+/// The panels' timeouts the system recommends now (reactive; nothing
+/// until the host reports, and nothing off Android).
+pub fn recommended() -> Recommended {
+    accessibility().recommended
+}
+
+/// Whether assistive technology that moves through the controls at its
+/// own pace runs now (reactive): a screen reader (TalkBack, VoiceOver,
+/// Narrator, Orca, as NSH reports it) or Android's Switch Access. Panels
+/// then stay until the viewer hides them rather than on a timer. iPadOS's
+/// Switch Control is not reported yet (NSH reads VoiceOver only).
+pub fn assistive() -> bool {
+    screen_reader() || accessibility().switch_access
 }
 
 /// The host now (reactive): the build's platform, with the form factor
@@ -98,6 +148,18 @@ pub fn window_class() -> Class {
         window().width.0,
         crate::scale::now() * crate::settings::text_factor(),
     )
+}
+
+/// Whether the system's clock counts 24 hours (reactive): Android's
+/// 24-hour setting, else its locale's, and iPadOS's, as NSH receives them.
+/// `None` before the root mounts and off the UI thread, where the system's
+/// settings cannot be read.
+pub fn system_24_hour() -> Option<bool> {
+    REPORTED.with(Cell::get)?;
+    Some(matches!(
+        locale_settings().hour_cycle,
+        nsh_core::platform::HourCycle::H23 | nsh_core::platform::HourCycle::H24
+    ))
 }
 
 /// The build's host; in the headless scenarios of other platforms' gates,
@@ -158,13 +220,33 @@ fn parse(data: &nsh_core::JsonValue, before: Report) -> Report {
     }
 }
 
-/// Keeps the device's reports for [`host`]: on Android, a zero-size
-/// native view (`tv.device`, `DeviceComponent.kt`) that reports the form
-/// factor and the input when it attaches and on every configuration
-/// change. Mount once, in the main window's root.
+/// The host's accessibility report `data`: `{"controls_ms": number,
+/// "text_ms": number, "switch_access": bool}`; a field missing or not
+/// understood keeps what was reported before.
+fn parse_accessibility(data: &nsh_core::JsonValue, before: Accessibility) -> Accessibility {
+    let ms = |name: &str, before: u64| data[name].as_u64().unwrap_or(before);
+    Accessibility {
+        recommended: Recommended {
+            controls_ms: ms("controls_ms", before.recommended.controls_ms),
+            text_ms: ms("text_ms", before.recommended.text_ms),
+        },
+        switch_access: data["switch_access"]
+            .as_bool()
+            .unwrap_or(before.switch_access),
+    }
+}
+
+/// Keeps the device's reports for [`host`] and [`recommended`]: on
+/// Android, a zero-size native view (`tv.device`, `DeviceComponent.kt`)
+/// that reports the form factor and the input when it attaches and on
+/// every configuration change, and the accessibility settings when it
+/// attaches and whenever they change. Mount once, in the main window's
+/// root.
 pub(crate) fn bridge() -> impl IntoElement {
     let reported = signal(Report::default());
     REPORTED.with(|cell| cell.set(Some(reported)));
+    let accessibility = signal(Accessibility::default());
+    ACCESSIBILITY.with(|cell| cell.set(Some(accessibility)));
     let observed = observed();
     let probe = cfg!(feature = "test-support") && observed && !crate::host::ANDROID;
     view()
@@ -183,6 +265,20 @@ pub(crate) fn bridge() -> impl IntoElement {
                     .pointer_events(PointerEvents::None)
                     .accessibility_elements_hidden(true)
                     .on_native_event(move |event: &NativeEvent| {
+                        if event.name.as_ref() == "accessibility" {
+                            let next =
+                                parse_accessibility(&event.data, accessibility.get_untracked());
+                            if next != accessibility.get_untracked() {
+                                log::info!(
+                                    "iptv accessibility: controls={}ms text={}ms switch_access={}",
+                                    next.recommended.controls_ms,
+                                    next.recommended.text_ms,
+                                    next.switch_access,
+                                );
+                                accessibility.set(next);
+                            }
+                            return;
+                        }
                         // What can stop a capture (`capture_limits.rs`).
                         if event.name.as_ref() == "limits" {
                             crate::capture_limits::report(&event.data);
@@ -225,6 +321,47 @@ pub(crate) fn bridge() -> impl IntoElement {
                     .absolute()
             },
         ))
+        // The settings rows the device decides (#281), as offered now.
+        .child(when(
+            move || probe,
+            move || {
+                text(move || offered_rows(current()))
+                    .test_id("device-rows-now")
+                    .absolute()
+            },
+        ))
+}
+
+/// The rows the device decides and their neighbours (#281), as the
+/// settings screen offers them on `device`: `rows: general.clock …` (a
+/// headless probe; the screen's own rows are a virtual list).
+fn offered_rows(device: Device) -> String {
+    const ROWS: &[&str] = &[
+        "general.clock",
+        "appearance.ui_transparency",
+        "guide.browse_mode",
+        "guide.list_browse_mode",
+        "guide.visible_minutes",
+        "guide.after_choosing",
+        "guide.fullscreen_timeout",
+        "player.info_on_switch",
+        "player.info_panel_timeout",
+        "player.controls_panel_timeout",
+        "catchup.forward_step",
+        "catchup.rewind_step",
+    ];
+    use iptv_presentation::settings::screen::Offer;
+    // A row on the Advanced page counts as offered.
+    let offered = ROWS.iter().copied().filter(|key| {
+        matches!(
+            crate::settings::offer(device, key),
+            Offer::Active | Offer::Advanced
+        )
+    });
+    std::iter::once("rows:")
+        .chain(offered)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The signals in words: `tablet medium keyboard dpad` (a headless probe).
@@ -288,6 +425,28 @@ mod tests {
         assert_eq!(third.form_factor, second.form_factor);
         assert_eq!(parse(&json(r#"{"form":"tv"}"#), third).decoders, Some(3));
         assert_eq!(parse(&json(r#"{"decoders":-1}"#), third).decoders, Some(3));
+    }
+
+    #[test]
+    fn an_accessibility_report_replaces_what_it_names() {
+        let first = parse_accessibility(
+            &json(r#"{"controls_ms":30000,"text_ms":10000,"switch_access":true}"#),
+            Accessibility::default(),
+        );
+        assert_eq!(
+            first,
+            Accessibility {
+                recommended: Recommended {
+                    controls_ms: 30_000,
+                    text_ms: 10_000,
+                },
+                switch_access: true,
+            }
+        );
+        // A field missing or not understood keeps what came before.
+        let second = parse_accessibility(&json(r#"{"switch_access":false,"text_ms":-1}"#), first);
+        assert_eq!(second.recommended, first.recommended);
+        assert!(!second.switch_access);
     }
 
     #[test]

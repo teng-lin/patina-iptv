@@ -100,9 +100,14 @@ In the guide:
 - **Now:** choosing a live channel in TV Guide tunes it in the preview.
   Choose the active channel again to expand the same stream. Up and Down
   wrap between the first and last channel rows and between the first and last
-  displayed groups. In the overlay layout, **Keep the guide overlay after
-  choosing** (`guide.stay_on_guide`, off by default) keeps the guide open
-  after tuning. A replay goes full screen. `guide.autoplay` tunes the focused
+  displayed groups; this is the same on every device. In the overlay layout
+  and the channel list, **After choosing a channel** (`guide.after_choosing`,
+  on desktops and TVs; **Go full screen** by default) can keep the guide or
+  the list open after tuning. A phone or a tablet always goes full screen.
+  It replaced `guide.stay_on_guide` and `guide.stay_on_list` (#281): either
+  one stored on reads as **Keep it open** while the new choice is not
+  stored. In a compact window the guide always shows its preview layout. A
+  replay goes full screen. `guide.autoplay` tunes the focused
   channel while browsing, without a choice.
 - **Now:** opening a program's details or menu never starts playback. A
   long press or right-click on the program title in the header opens its
@@ -129,7 +134,11 @@ In the guide:
   key off a TV) instead of hiding after its few seconds: moving from
   control to control by swipes takes longer than that (WCAG 2.2.1,
   `iptv_presentation::play_bar`). Multiview's pointer chrome, on the bar's timer,
-  stays the same way.
+  stays the same way. So do the remote's panels (the banner, the info card
+  and the control strip, `iptv_presentation::panels`), and all of them stay
+  the same way while Android's Switch Access runs. Otherwise they never
+  hide sooner than Android's recommended accessibility timeout; their own
+  timeouts are under **Playback → Accessibility** on every host.
 
 ### Touch gestures in the guide
 
@@ -241,9 +250,9 @@ and focus on a live channel follows the clock to the program now on air.
   guide, another title's details, settings), playback stops as after the
   viewer's Stop, and the series' card and Continue watching hold the next
   episode. A PIN for it is asked for only when the viewer plays it (#187).
-- **Now:** with `guide.back_returns_to_now` (on by default), Back with focus on a
-  past or upcoming program in the guide first returns to the programs on
-  air, after any dialog or hint card closes.
+- **Now:** Back with focus on a past or upcoming program in the guide first
+  returns to the programs on air, after any dialog or hint card closes.
+  (`guide.back_returns_to_now` is retired and its stored value ignored, #281.)
 - **Now:** visible Back and Close follow the input mode on hosts with a remote
   Back key: a TV used by touch or a pointer shows them, and a remote key hides
   them again. Tablets and desktops always show them, keyboard users included.

@@ -117,6 +117,13 @@ pub static BROWSE_MODE: Choices = Choices {
     variants: &["preview", "overlay"],
 };
 
+/// What choosing a channel does in the guide over full-screen video and
+/// in the channel list.
+pub static AFTER_CHOOSING: Choices = Choices {
+    family: "after_choosing",
+    variants: &["full_screen", "stay"],
+};
+
 pub static NOW_HIGHLIGHT: Choices = Choices {
     family: "now_highlight",
     variants: &["plain", "color", "progress_only"],
@@ -236,6 +243,7 @@ pub static ALL: &[&Choices] = &[
     &LEVEL,
     &SELECTION_STYLE,
     &BROWSE_MODE,
+    &AFTER_CHOOSING,
     &NOW_HIGHLIGHT,
     &CORNER,
     &LOGO_SOURCE,

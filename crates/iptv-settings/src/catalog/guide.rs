@@ -309,6 +309,19 @@ pub static GUIDE: &[Setting] = &[
             "Wait before tuning after a channel change, so fast zapping skips channels; cancelable.",
         ),
     ),
+    // default: ours. One choice for the guide over full-screen video and
+    // the channel list (#281); the preview layout's choosing does not
+    // follow it. While it is not stored, a stored `guide.stay_on_guide` or
+    // `guide.stay_on_list` that is on stands for `stay` when the settings
+    // load (`iptv_runtime::settings::adopt_retired`).
+    guide(
+        "switching",
+        "guide.after_choosing",
+        choice(&AFTER_CHOOSING, "full_screen"),
+        key(
+            "What choosing a channel in the guide over the video or in the channel list does: go full screen, or keep it open.",
+        ),
+    ),
     // default: ours
     guide(
         "switching",
@@ -316,21 +329,23 @@ pub static GUIDE: &[Setting] = &[
         secs(0, 60, 1, 0),
         key("Go full screen after a preview has played this long without input; 0 never does."),
     ),
-    // default: ours
+    // default: ours. Retired (#281): `guide.after_choosing` replaces it;
+    // kept so stored values and backups load.
     guide(
         "switching",
         "guide.stay_on_list",
         boolean(false),
         key("Keep the channel list open after choosing a channel."),
     ),
-    // default: ours
+    // default: ours. Retired (#281), as `guide.stay_on_list`.
     guide(
         "switching",
         "guide.stay_on_guide",
         boolean(false),
         key("Keep the guide overlay open after choosing a channel."),
     ),
-    // default: ours
+    // default: ours. Retired (#281): always on; kept so stored values and
+    // backups load.
     guide(
         "switching",
         "guide.back_returns_to_now",

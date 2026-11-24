@@ -208,6 +208,16 @@ fn events(hidden: bool, open: PointerEvents) -> PointerEvents {
 }
 
 pub(crate) fn bind_auto_hide(ui: Ui) {
+    // A screen reader's or switch user moves through the panels at their
+    // own pace: while one runs they stay until hidden (WCAG 2.2.1); the
+    // play bar does the same (`play_bar::bind`).
+    effect(move || {
+        let on = crate::device::assistive();
+        if untracked(|| ui.panels.with(|p| p.waits_for_assistive() != on)) {
+            let now = ui.now_ms();
+            untracked(|| ui.panels.update(|p| p.assistive(on, now)));
+        }
+    });
     // A channel change can publish the deadline from a debounce whose
     // owner is disposed when playback updates the focused target. Bind
     // to the window so the deadline remains armed through that change.

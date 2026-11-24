@@ -49,6 +49,38 @@ decoder, when Media3 decodes in software. The
 report can only lower the platform's surface budget, so a device that cannot
 run two hardware decoders at once loses multiview rather than gaining tiles.
 
+Settings the signals decide (#281, `settings::offer`). The rewind and
+fast-forward jumps (`catchup.forward_step`, `catchup.rewind_step`) are on the
+Advanced page on a desktop or a TV; a phone or a tablet, which has no Advanced
+page, keeps them with the replay jumps:
+
+| Setting | Phone, tablet | Desktop | TV | Compact window |
+| --- | --- | --- | --- | --- |
+| `general.clock` | Hidden: the system's 24-hour setting decides | Shown | Shown | As the device |
+| `appearance.ui_transparency`, `guide.browse_mode`, `guide.list_browse_mode` | Shown | Shown | Shown | Hidden: the guide, the Guide key over full-screen video included, shows its preview; the channel list puts the video beside it wherever it has room |
+| `guide.fullscreen_timeout` | Hidden, never | Hidden, never | On the Advanced page | As the device |
+| `guide.after_choosing` | Hidden: the guide over the video and the channel list always go full screen | Shown | Shown | As the device |
+| `player.info_on_switch` | Hidden on Android unless a keyboard or a D-pad is connected; shown on an iPad, whose input is not reported yet | Shown | Shown | As the device |
+
+Android's activity also reports its accessibility settings: the timeouts
+`AccessibilityManager.getRecommendedTimeoutMillis` gives for controls and for
+text, and whether Switch Access (or Samsung's Universal Switch) runs. Switch
+Access is recognized heuristically, by the class names of the enabled
+accessibility services (`SwitchAccessService`, `UniversalSwitchService`),
+since no service property marks a switch service. The
+player's panels and the play bar never hide sooner than the recommended
+timeout, and stay until the viewer hides them while a screen reader (as NSH
+reports it, on every host) or Switch Access runs. iPadOS's Switch Control is
+not detected: NSH reports VoiceOver only.
+
+Every row above stays in the settings catalog, so its stored value loads and
+restores on any device. A hidden row's value is kept and applies again on a
+device that offers it (a TV's Clock restored on a phone is ignored there, and
+kept). The retired `guide.stay_on_guide` and
+`guide.stay_on_list` are carried into `guide.after_choosing` when the settings
+load, at startup and so after a restore, while that is not stored; the retired
+`guide.back_returns_to_now` is ignored (always on).
+
 These are configured limits and facilities, not certification of a device's
 decoder performance. The profile tests exercise each row without needing that
 OS. Android TV and tablet share the same surface budget; the native PiP report
