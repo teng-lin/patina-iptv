@@ -277,22 +277,46 @@ fn policy_and_storage_from_settings() {
         RefreshPolicy::default()
     );
     assert_eq!(
-        store_options(&settings, &at),
+        store_options(),
         StoreOptions {
-            store_descriptions: true,
-            past_days_to_keep: Some(7),
+            store_descriptions: !cfg!(target_family = "wasm"),
+            past_days_to_keep: Some(KEEP_PAST_MAX_DAYS),
         }
     );
     settings
-        .set("epg.update_interval", Value::Duration(0))
-        .unwrap();
-    settings
-        .set("epg.update_on_start", Value::Bool(false))
-        .unwrap();
-    settings
-        .set("epg.store_descriptions", Value::Bool(false))
+        .set("epg.update", Value::choice("on_request"))
         .unwrap();
     let p = RefreshPolicy::from_settings(&settings, &at);
-    assert_eq!((p.interval, p.on_start), (None, false));
-    assert!(!store_options(&settings, &at).store_descriptions);
+    assert_eq!(p.interval, None);
+    assert!(p.on_start && p.on_playlist_change, "no longer switches");
+    settings
+        .set("epg.update", Value::choice("every_6_hours"))
+        .unwrap();
+    assert_eq!(
+        RefreshPolicy::from_settings(&settings, &at).interval,
+        Some(6 * HOUR)
+    );
+    // The retired switches change nothing any more (#282).
+    for (key, value) in [
+        ("epg.update_on_start", Value::Bool(false)),
+        ("epg.update_on_playlist_change", Value::Bool(false)),
+        ("epg.update_interval", Value::Duration(0)),
+        ("epg.store_descriptions", Value::Bool(false)),
+    ] {
+        settings.set(key, value).unwrap();
+    }
+    let p = RefreshPolicy::from_settings(&settings, &at);
+    assert_eq!(p.interval, Some(6 * HOUR));
+    assert!(p.on_start && p.on_playlist_change);
+    for choice in ["daily", "every_12_hours", "every_2_days", "weekly"] {
+        assert!(update_interval(choice).is_some(), "{choice}");
+    }
+}
+
+#[test]
+fn finished_programs_follow_the_longest_archive_within_bounds() {
+    assert_eq!(keep_past_days(0), KEEP_PAST_MIN_DAYS, "search keeps a day");
+    assert_eq!(keep_past_days(3), 3);
+    assert_eq!(keep_past_days(7), 7);
+    assert_eq!(keep_past_days(30), KEEP_PAST_MAX_DAYS);
 }

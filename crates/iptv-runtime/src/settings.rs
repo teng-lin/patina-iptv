@@ -227,8 +227,9 @@ pub(crate) fn forget_playlist(
 /// every playlist in `playlists`, or (`None`) of every playlist not in
 /// `kept`, is removed: a deletion whose settings save was lost (the app
 /// stopped first, or the save failed) must not hand it to a new playlist
-/// given the same id. Only this switch: the app sets no other playlist
-/// value, and others may be prepared for a playlist before it is added.
+/// given the same id. Only this switch: other playlist values (its
+/// streams at once among them) may be prepared for a playlist before it is
+/// added.
 pub(crate) fn forget_import_switches(
     owner: &std::rc::Rc<super::Runtime>,
     playlists: Option<&[iptv_library::SourceId]>,
@@ -261,6 +262,59 @@ pub(crate) fn forget_import_switches(
             changes.extend(next.clear_in(key, at)?);
         }
         Ok(changes)
+    })
+}
+
+/// Before #282 one streams-at-once ceiling (a global
+/// `playlists.max_connections`) applied to every playlist. Each stored
+/// playlist in `stored` without its own value takes it, then the global
+/// value goes, so a playlist added later starts from its provider's
+/// allowance. Runs when the library opens, so a value from a restored
+/// backup (of any version, from any device) moves the same way. With no
+/// playlist stored the global value stays until one is.
+pub(crate) fn adopt_global_connection_limit(
+    owner: &std::rc::Rc<super::Runtime>,
+    stored: &[iptv_library::SourceId],
+) -> Result<(), SaveError> {
+    let key = iptv_settings::keys::PLAYLISTS_MAX_CONNECTIONS.as_str();
+    let settings = owner.settings();
+    let Some(global) = settings.stored(key, &Target::Global).cloned() else {
+        return Ok(());
+    };
+    if stored.is_empty() {
+        return Ok(());
+    }
+    apply(owner, key, |next| {
+        let mut changes = Vec::new();
+        for id in stored {
+            let at = Target::playlist(id.0.to_string());
+            if next.stored(key, &at).is_none() {
+                changes.extend(next.set_in(key, &at, global.clone())?);
+            }
+        }
+        changes.extend(next.clear_in(key, &Target::Global)?);
+        Ok(changes)
+    })
+}
+
+/// Stores `value` as `at`'s own value of `key`, even when it equals what
+/// `at` would inherit, or (`None`) removes it. For a value whose absence
+/// means something else (a playlist's streams at once: without one, the
+/// provider's allowance applies).
+pub(crate) fn set_own(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    at: &Target,
+    value: Option<Value>,
+) -> Result<(), SaveError> {
+    let protect_all = owner.settings().get("parental.require_pin_for").ok()
+        == Some(Value::Enum("blocked_content_and_settings".into()));
+    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
+        return Err(SaveError::ParentalLocked);
+    }
+    apply(owner, key, |next| match value {
+        Some(value) => next.set_in(key, at, value),
+        None => next.clear_in(key, at),
     })
 }
 

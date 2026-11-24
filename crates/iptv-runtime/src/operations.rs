@@ -223,6 +223,21 @@ impl Runtime {
         crate::settings::set_in(self, key, &at, value)
     }
 
+    /// Sets playlist `source`'s own streams-at-once ceiling, or (`None`)
+    /// removes it so the allowance its provider reports applies.
+    pub fn set_connection_limit(
+        self: &Rc<Self>,
+        source: SourceId,
+        limit: Option<u32>,
+    ) -> Result<(), crate::settings::SaveError> {
+        crate::settings::set_own(
+            self,
+            iptv_settings::keys::PLAYLISTS_MAX_CONNECTIONS.as_str(),
+            &iptv_settings::Target::playlist(source.0.to_string()),
+            limit.map(|n| iptv_settings::Value::Int(i64::from(n))),
+        )
+    }
+
     /// Revalidates the group choice and the exact authority used for a handoff.
     pub async fn external_playback_allowed(
         &self,

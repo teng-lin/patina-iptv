@@ -164,7 +164,7 @@ pub(super) async fn after_commit(
         if !current_operation() {
             return;
         }
-        let keep = stored::keep_past_days(&owner.settings());
+        let keep = stored::stored_past_days();
         let read = id.clone();
         let published = owner
             .services()

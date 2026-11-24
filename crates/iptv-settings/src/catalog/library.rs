@@ -95,7 +95,8 @@ pub static SEARCH: &[Setting] = &[
         boolean(false),
         key("Open search with voice input focused instead of the text field."),
     ),
-    // default: ours
+    // Retired (#282): favorites always rank first. Not offered or read; a
+    // stored value is kept.
     search(
         "search.favorites_first",
         boolean(true),
@@ -107,13 +108,15 @@ pub static SEARCH: &[Setting] = &[
         boolean(true),
         key("Offer earlier queries before typing starts."),
     ),
-    // default: ours
+    // Retired (#282): the results offer this as a filter instead. Not
+    // offered or read; a stored value is kept.
     search(
         "search.include_past_without_catchup",
         boolean(false),
         key("Also match finished programs that cannot be replayed."),
     ),
-    // default: ours
+    // Retired (#282): Back from a chosen result always returns to the
+    // results. Not offered or read; a stored value is kept.
     search(
         "search.stay_on_search",
         boolean(false),
@@ -212,7 +215,10 @@ pub static PARENTAL: &[Setting] = &[
         key("What the PIN guards: blocked content only, or settings as well."),
     )
     .depends(IF_PARENTAL),
-    // default: ours
+    // Retired (#282): OK in the PIN prompt submits once enough digits are
+    // entered and otherwise presses the focused key, and number keys type
+    // digits, whatever this says. Not offered or read; a stored value is
+    // kept.
     parental(
         "scope",
         "parental.pin_input",
@@ -285,11 +291,12 @@ pub static VOD: &[Setting] = &[
         choice(&CARD_STYLE, "poster"),
         key("Shape of movie and series tiles."),
     ),
-    // default: ours
+    // default: ours. The catalog's Sort writes it (#282); the settings
+    // screen no longer offers it.
     vod(
         "catalog",
         "vod.sort",
-        choice(&VOD_SORT, "playlist_order"),
+        choice(&VOD_SORT, "name"),
         key("Order of movies and series; a playlist may override it."),
     )
     .scope(Scope::Playlist),

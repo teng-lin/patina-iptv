@@ -12,7 +12,7 @@ static PAGES: &[Page] = &[
     },
     Page {
         key: "playlists",
-        parts: &[Part::Keys(&["playlists.update_all"])],
+        parts: &[Part::Keys(&["playlists.update_all", "general.user_agent"])],
     },
     Page {
         key: "epg",
@@ -137,12 +137,14 @@ fn rows_leave_out_what_is_not_offered() {
         !general.contains(&"general.confirm_exit_window"),
         "advanced"
     );
+    // The default User-Agent is filed with the playlists (#282).
+    assert!(!general.contains(&"general.user_agent"));
     let other = keys_of(&rows(page("other"), &ctx(&s)));
     assert!(!other.contains(&"search.prefer_voice"));
     // Named rows are shown in their order.
     assert_eq!(
         keys_of(&rows(page("playlists"), &ctx(&s))),
-        ["playlists.update_all"]
+        ["playlists.update_all", "general.user_agent"]
     );
 }
 
@@ -511,7 +513,7 @@ fn text_is_kept_only_when_valid() {
         settings: &s,
         offer: &everything,
     };
-    let mut screen = Screen::new(PAGES, "general");
+    let mut screen = Screen::new(PAGES, "playlists");
     assert_eq!(screen.tap_row("general.user_agent", &c), Effect::None);
     screen.set_text("SyntheticPlayer/1.0");
     assert_eq!(
@@ -588,11 +590,12 @@ fn editors_name_what_they_edit() {
     for key in ["catchup.seek_keys", "catchup.forward_step"] {
         assert_eq!(opened(&mut screen, key), (key, Some(key)));
     }
-    let mut screen = Screen::new(PAGES, "general");
+    let mut screen = Screen::new(PAGES, "playlists");
     assert_eq!(
         opened(&mut screen, "general.user_agent"),
         ("general.user_agent", Some("general.user_agent"))
     );
+    let mut screen = Screen::new(PAGES, "general");
     assert_eq!(
         opened(&mut screen, "general.restore"),
         ("general.restore", None),

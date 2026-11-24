@@ -14,7 +14,8 @@
 //! 4. Nothing stored yet ([`RefreshReason::NeverFetched`]) or the feeds'
 //!    settings changed ([`RefreshReason::FeedsChanged`]): refresh. This is
 //!    not an "update", so it happens even with the interval at 0.
-//! 5. With `on_playlist_change`: a [`Trigger::PlaylistChanged`], or stored
+//! 5. With `on_playlist_change` (always, from the settings): a
+//!    [`Trigger::PlaylistChanged`], or stored
 //!    bindings matched from other channels or overrides
 //!    ([`RefreshReason::ChannelsChanged`]; matching needs the XMLTV channel
 //!    list, which is not stored).
@@ -23,7 +24,7 @@
 //!    ([`RefreshReason::RunningOut`], at most once per
 //!    `retry_after_failure`). At [`Trigger::Startup`] only with `on_start`.
 
-use iptv_epg::{DAY, Override, Overrides, StoreOptions, UnixTime};
+use iptv_epg::{Override, Overrides, StoreOptions, UnixTime};
 use iptv_providers::model::Channel;
 use iptv_settings::{Settings, Target, keys};
 
@@ -31,15 +32,15 @@ use crate::epg::EpgSourceConfig;
 
 const HOUR: i64 = 3600;
 
-/// Refresh settings (`epg.update_*`).
+/// Refresh settings (`epg.update`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RefreshPolicy {
     /// Download again after this many seconds; `None` updates only on
-    /// request (`epg.update_interval` = 0).
+    /// request (`epg.update` = `on_request`).
     pub interval: Option<i64>,
-    /// Allow a stale-guide refresh at app start (`epg.update_on_start`).
+    /// Allow a stale-guide refresh at app start (always, with an interval).
     pub on_start: bool,
-    /// Refresh after the playlist changed (`epg.update_on_playlist_change`).
+    /// Refresh after the playlist changed (always, from the settings).
     pub on_playlist_change: bool,
     /// After a failed attempt, automatic triggers wait this long (seconds).
     pub retry_after_failure: i64,
@@ -62,25 +63,59 @@ impl Default for RefreshPolicy {
 }
 
 impl RefreshPolicy {
-    /// From the `epg.update_*` settings at `at` (usually the playlist).
+    /// From the `epg.update` choice at `at` (usually the playlist). A
+    /// guide always updates after its playlist changed, and a stale one at
+    /// startup (#282 retired the switches for both).
     pub fn from_settings(settings: &Settings, at: &Target) -> Self {
-        let interval = settings.duration_ms(keys::EPG_UPDATE_INTERVAL, at) / 1000;
         Self {
-            interval: (interval > 0).then_some(interval),
-            on_start: settings.bool(keys::EPG_UPDATE_ON_START, at),
-            on_playlist_change: settings.bool(keys::EPG_UPDATE_ON_PLAYLIST_CHANGE, at),
+            interval: update_interval(settings.choice(keys::EPG_UPDATE, at)),
+            on_start: true,
+            on_playlist_change: true,
             ..Self::default()
         }
     }
 }
 
-/// Storage options for an import from `epg.store_descriptions` and
-/// `epg.keep_past` (whole days, rounded up).
-pub fn store_options(settings: &Settings, at: &Target) -> StoreOptions {
-    let keep = settings.duration_ms(keys::EPG_KEEP_PAST, at) / 1000;
+/// The period of an `epg.update` choice, in seconds; `None` for
+/// `on_request` (and, defensively, anything unknown keeps the default).
+pub fn update_interval(choice: &str) -> Option<i64> {
+    let hours = match choice {
+        "on_request" => return None,
+        "every_6_hours" => 6,
+        "every_12_hours" => 12,
+        "every_2_days" => 48,
+        "weekly" => 168,
+        _ => 24,
+    };
+    Some(hours * HOUR)
+}
+
+/// The most days of finished programs a guide keeps: the old
+/// `epg.keep_past` setting's ceiling.
+pub const KEEP_PAST_MAX_DAYS: u32 = 14;
+/// The fewest: a day of finished programs stays for search's past
+/// listings and the guide's look back, also without any catch-up.
+pub const KEEP_PAST_MIN_DAYS: u32 = 1;
+
+/// Days of finished programs to keep when the longest catch-up archive of
+/// the stored channels is `longest_archive_days` (0 without catch-up):
+/// that archive, within [`KEEP_PAST_MIN_DAYS`]..=[`KEEP_PAST_MAX_DAYS`].
+/// Replaces the `epg.keep_past` setting (#282).
+pub fn keep_past_days(longest_archive_days: u32) -> u32 {
+    longest_archive_days.clamp(KEEP_PAST_MIN_DAYS, KEEP_PAST_MAX_DAYS)
+}
+
+/// Storage options of a guide download. Descriptions are kept wherever
+/// the guide is stored on disk; browser builds hold it in memory and a
+/// small IndexedDB quota, where they would take more than half of it
+/// (#282 retired `epg.store_descriptions`). The download keeps up to
+/// [`KEEP_PAST_MAX_DAYS`] of finished programs; the store then prunes to
+/// [`keep_past_days`]. Fixed, so the stored feed settings stay equal and a
+/// new catch-up archive does not count as changed feeds.
+pub fn store_options() -> StoreOptions {
     StoreOptions {
-        store_descriptions: settings.bool(keys::EPG_STORE_DESCRIPTIONS, at),
-        past_days_to_keep: Some(u32::try_from((keep + DAY - 1) / DAY).unwrap_or(u32::MAX)),
+        store_descriptions: !cfg!(target_family = "wasm"),
+        past_days_to_keep: Some(KEEP_PAST_MAX_DAYS),
     }
 }
 

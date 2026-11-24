@@ -238,7 +238,7 @@ fn version_1_documents_are_migrated() {
     });
     let (st, report) = load(v1);
     assert_eq!(report.version, 1);
-    assert_eq!(report.migrations, [1, 2, 3, 4]);
+    assert_eq!(report.migrations, [1, 2, 3, 4, 5]);
     assert!(report.unknown.is_empty());
     assert_eq!(st.duration_ms(keys::CONTROLS_PANEL_TIMEOUT, G), 9_000);
     assert!(st.bool(keys::AUTOPLAY, G));
@@ -294,7 +294,7 @@ fn version_2_folds_the_overlay_stay_choice_into_one() {
     })));
 
     let (st, report) = load(v2(json!({"guide.stay_on_guide_overlay": false})));
-    assert_eq!(report.migrations, [2, 3, 4]);
+    assert_eq!(report.migrations, [2, 3, 4, 5]);
     assert!(report.unknown.is_empty(), "the old key is gone, not kept");
     let saved = st.to_json();
     assert!(saved["global"].get("guide.stay_on_guide_overlay").is_none());
@@ -318,7 +318,7 @@ fn version_3_documents_keep_their_choices_in_us_spelling() {
     });
     let (st, report) = load(v3);
     assert_eq!(report.version, 3);
-    assert_eq!(report.migrations, [3, 4]);
+    assert_eq!(report.migrations, [3, 4, 5]);
     assert!(report.unknown.is_empty(), "{:?}", report.unknown);
     // Both settings are global only: the overrides are kept (renamed) but
     // not applied, as for any override at a level a setting does not allow.
@@ -362,7 +362,7 @@ fn version_3_documents_keep_their_choices_in_us_spelling() {
 }
 
 /// A document from before "Sound follows the selected tile" (#179) keeps
-/// its choices and loads with it off; choosing it saves version 5.
+/// its choices and loads with it off; choosing it saves the current version.
 #[test]
 fn version_4_documents_load_with_the_sound_not_following_the_tile() {
     let v4 = json!({
@@ -372,13 +372,13 @@ fn version_4_documents_load_with_the_sound_not_following_the_tile() {
     });
     let (mut st, report) = load(v4);
     assert_eq!(report.version, 4);
-    assert_eq!(report.migrations, [4]);
+    assert_eq!(report.migrations, [4, 5]);
     assert!(report.unknown.is_empty() && report.rejected.is_empty());
     assert!(!st.bool(keys::SOUND_FOLLOWS_TILE, G));
     assert!(st.bool(keys::AUTOPLAY, G));
     assert!(!st.bool(keys::INFO_ON_SWITCH, G));
     let saved = st.to_json();
-    assert_eq!(saved["version"], json!(5));
+    assert_eq!(saved["version"], json!(VERSION));
     assert!(saved["global"].get("player.sound_follows_tile").is_none());
     assert!(load(saved).1.is_clean());
 
@@ -389,6 +389,89 @@ fn version_4_documents_load_with_the_sound_not_following_the_tile() {
     let (again, report) = load(saved);
     assert!(report.is_clean());
     assert!(again.bool(keys::SOUND_FOLLOWS_TILE, G));
+}
+
+/// #282: the guide's interval and start switch become one choice, the
+/// catalog's Sort keeps its four orders, and the retired rows keep their
+/// stored values (read by nothing) so the document stays clean.
+#[test]
+fn version_5_merges_the_guide_update_and_narrows_the_catalog_sort() {
+    let v5 = json!({
+        "format": FORMAT,
+        "version": 5,
+        "global": {
+            "epg.update_interval": 8 * 3_600_000,
+            "epg.update_on_start": false,
+            "epg.update_on_playlist_change": false,
+            "epg.keep_past": 2 * 86_400_000,
+            "epg.store_descriptions": false,
+            "search.favorites_first": false,
+            "search.include_past_without_catchup": true,
+            "search.stay_on_search": true,
+            "parental.pin_input": "number_keys",
+            "playlists.max_connections": 3,
+            "vod.sort": "last_modified"
+        },
+        "playlists": {
+            "pl-1": {"vod.sort": "playlist_order"},
+            "pl-2": {"vod.sort": "rating"}
+        }
+    });
+    let (st, report) = load(v5);
+    assert_eq!(report.migrations, [5]);
+    assert!(report.unknown.is_empty() && report.rejected.is_empty());
+    assert_eq!(st.choice(keys::EPG_UPDATE, G), "every_12_hours");
+    assert_eq!(st.choice(keys::VOD_SORT, G), "date_added");
+    let (pl1, pl2) = (Target::playlist("pl-1"), Target::playlist("pl-2"));
+    assert_eq!(st.stored("vod.sort", &pl1), None, "shown by name: default");
+    assert_eq!(st.choice(keys::VOD_SORT, &pl2), "rating");
+    // Retired rows keep their stored values; the runtime moves the global
+    // streams-at-once value to each playlist.
+    for (key, value) in [
+        ("epg.update_on_playlist_change", Value::Bool(false)),
+        ("epg.keep_past", Value::ms(2 * 86_400_000)),
+        ("epg.store_descriptions", Value::Bool(false)),
+        ("search.favorites_first", Value::Bool(false)),
+        ("search.include_past_without_catchup", Value::Bool(true)),
+        ("search.stay_on_search", Value::Bool(true)),
+        ("parental.pin_input", Value::choice("number_keys")),
+        ("playlists.max_connections", Value::Int(3)),
+    ] {
+        assert_eq!(st.stored(key, G), Some(&value), "{key}");
+    }
+    let saved = st.to_json();
+    assert_eq!(saved["version"], json!(VERSION));
+    for gone in ["epg.update_interval", "epg.update_on_start"] {
+        assert!(saved["global"].get(gone).is_none(), "{gone}");
+    }
+    assert!(load(saved).1.is_clean());
+
+    let period = |interval_ms: i64, existing: Option<&str>| {
+        let mut global = json!({"epg.update_interval": interval_ms});
+        if let Some(choice) = existing {
+            global["epg.update"] = json!(choice);
+        }
+        let doc = json!({"format": FORMAT, "version": 5, "global": global});
+        load(doc).0.choice(keys::EPG_UPDATE, G)
+    };
+    assert_eq!(period(0, None), "on_request");
+    assert_eq!(period(3_600_000, None), "every_6_hours");
+    assert_eq!(period(24 * 3_600_000, None), "daily");
+    assert_eq!(period(25 * 3_600_000, None), "every_2_days");
+    assert_eq!(period(100 * 3_600_000, None), "weekly");
+    assert_eq!(period(168 * 3_600_000, None), "weekly");
+    assert_eq!(
+        period(0, Some("weekly")),
+        "weekly",
+        "an explicit choice wins"
+    );
+    // Without an interval the start switch alone leaves the default.
+    let doc = json!({"format": FORMAT, "version": 5,
+        "global": {"epg.update_on_start": false}});
+    let (st, report) = load(doc);
+    assert!(report.unknown.is_empty());
+    assert_eq!(st.choice(keys::EPG_UPDATE, G), "daily");
+    assert_eq!(st.source("epg.update", G), Ok(None));
 }
 
 #[test]
@@ -595,7 +678,7 @@ fn migrations_reach_every_layer() {
         "groups": {"pl-1": {"grp-1": {"player.panel_timeout_secs": 6}}}
     });
     let (st, report) = load(v1);
-    assert_eq!(report.migrations, [1, 2, 3, 4]);
+    assert_eq!(report.migrations, [1, 2, 3, 4, 5]);
     // The renamed key is global-only, so the overrides are kept but not
     // applied, under the new name.
     let rejected: Vec<&Entry> = report.rejected.iter().map(|(e, _)| e).collect();

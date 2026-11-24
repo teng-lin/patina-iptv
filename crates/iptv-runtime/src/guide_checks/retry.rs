@@ -87,7 +87,7 @@ fn an_unreadable_store_arms_no_check_when_guide_updates_are_manual() {
     let directory = tempfile::tempdir().unwrap();
     let mut settings = iptv_settings::Settings::new();
     settings
-        .set("epg.update_interval", iptv_settings::Value::ms(0))
+        .set("epg.update", iptv_settings::Value::choice("on_request"))
         .unwrap();
     std::fs::write(
         directory.path().join("settings.json"),
@@ -215,7 +215,7 @@ fn an_unreadable_guide_state_makes_up_no_check_when_guide_updates_are_manual() {
     let directory = tempfile::tempdir().unwrap();
     let mut settings = iptv_settings::Settings::new();
     settings
-        .set("epg.update_interval", iptv_settings::Value::ms(0))
+        .set("epg.update", iptv_settings::Value::choice("on_request"))
         .unwrap();
     std::fs::write(
         directory.path().join("settings.json"),

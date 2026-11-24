@@ -39,9 +39,25 @@ pub enum Act {
     /// Link, server and login, or portal and MAC address.
     Details,
     UserAgent,
+    /// Its streams-at-once ceiling: Automatic (the allowance its provider
+    /// reports) or a number; each OK moves to the next ([`next_streams`]).
+    Streams,
     /// Its guide sources (the guide sources screen).
     Guides,
     Delete,
+}
+
+/// The streams-at-once values the action steps through after Automatic
+/// (`None`); `playlists.max_connections` allows 1 to 20.
+pub const STREAMS: [u32; 10] = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20];
+
+/// The value after `current`: Automatic, then each of [`STREAMS`], then
+/// Automatic again. A value between two steps goes on to the larger.
+pub fn next_streams(current: Option<u32>) -> Option<u32> {
+    match current {
+        None => Some(STREAMS[0]),
+        Some(n) => STREAMS.into_iter().find(|step| *step > n),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -120,6 +136,9 @@ pub enum Effect {
     /// Import these new details; they replace the stored ones if they work.
     TryDetails(SourceId, Box<Source>),
     SetUserAgent(SourceId, Option<String>),
+    /// Move `id`'s streams-at-once ceiling on ([`next_streams`] of its own
+    /// value, which the app reads).
+    CycleStreams(SourceId),
     Close,
 }
 
@@ -246,6 +265,7 @@ impl Screen {
         if row.kind != SourceKind::Stalker {
             acts.push(Act::UserAgent);
         }
+        acts.push(Act::Streams);
         acts.push(Act::Guides);
         acts.push(Act::CustomGroups);
         acts.push(Act::Delete);
@@ -375,6 +395,7 @@ impl Screen {
                 Some(Effect::Policy(id, policy))
             }
             Act::OnDemand => Some(Effect::ToggleOnDemand(id)),
+            Act::Streams => Some(Effect::CycleStreams(id)),
             Act::CustomGroups => Some(Effect::CustomGroups(id)),
             Act::Channels | Act::Groups => Some(Effect::Organize(id, act == Act::Groups)),
             Act::Show => to_list(self, Effect::Show(id)),
@@ -645,6 +666,34 @@ mod tests {
         );
     }
 
+    /// #282: each playlist sets its own streams at once, every kind.
+    #[test]
+    fn streams_at_once_step_from_automatic_through_the_values() {
+        let mut s = Screen::new(rows(), Some(A));
+        assert!(s.acts(A).contains(&Act::Streams));
+        assert_eq!(s.act(A, Act::Streams), Some(Effect::CycleStreams(A)));
+        assert_eq!(
+            s.layer(),
+            Layer::Actions {
+                id: A,
+                focus: Act::Streams
+            },
+            "the sheet stays on the action"
+        );
+        let mut seen = vec![None];
+        let mut at = None;
+        loop {
+            at = next_streams(at);
+            if at.is_none() {
+                break;
+            }
+            seen.push(at);
+        }
+        assert_eq!(seen.len(), STREAMS.len() + 1);
+        assert_eq!(next_streams(Some(7)), Some(8), "between two steps");
+        assert_eq!(next_streams(Some(20)), None, "back to Automatic");
+    }
+
     #[test]
     fn ok_opens_the_actions_and_show_closes_them() {
         let mut s = Screen::new(rows(), Some(A));
@@ -670,6 +719,7 @@ mod tests {
                 Act::Groups,
                 Act::Details,
                 Act::UserAgent,
+                Act::Streams,
                 Act::Guides,
                 Act::CustomGroups,
                 Act::Delete

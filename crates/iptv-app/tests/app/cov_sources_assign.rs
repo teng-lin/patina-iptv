@@ -124,7 +124,7 @@ fn open_guide_settings(t: &mut T) {
     t.key("left");
     t.press("text:Settings >> nth=0");
     t.press("text:TV guide data");
-    t.wait("text:Update when the app starts", 2);
+    t.wait("text:Update guide", 2);
 }
 
 /// Back: the guide sources, the settings page, the settings; then from

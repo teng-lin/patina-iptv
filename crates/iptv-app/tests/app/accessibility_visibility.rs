@@ -648,9 +648,6 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     let observed = exposure.clone();
     let mut settings = Settings::new();
     settings.set("guide.switch_delay", Value::ms(0)).unwrap();
-    settings
-        .set("epg.update_on_start", Value::Bool(true))
-        .unwrap();
     let guide_file = home.path().join("screen-reader-guide.xml");
     std::fs::write(
         &guide_file,

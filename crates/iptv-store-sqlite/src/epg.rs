@@ -26,7 +26,7 @@
 //!     Some(c) => c.epg_sources(1)?,
 //!     None => stored.as_ref().map(StoredGuide::configs).unwrap_or_default(),
 //! };
-//! let opts = store_options(&settings, &at);                  // descriptions, keep_past
+//! let opts = store_options();                                // descriptions, past days
 //! configs.iter_mut().for_each(|c| c.store = opts);
 //! let fp = matching_fingerprint(&channels, &overrides);
 //! let policy = RefreshPolicy::from_settings(&settings, &at);

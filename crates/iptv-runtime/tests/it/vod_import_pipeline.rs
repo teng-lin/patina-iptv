@@ -199,10 +199,7 @@ impl Host {
         });
         let mut settings = Settings::new();
         settings
-            .set("epg.update_on_start", Value::Bool(false))
-            .unwrap();
-        settings
-            .set("epg.update_on_playlist_change", Value::Bool(false))
+            .set("epg.update", Value::choice("on_request"))
             .unwrap();
         std::fs::write(
             directory.path().join("settings.json"),

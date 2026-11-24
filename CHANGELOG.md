@@ -23,6 +23,20 @@ is below 1.0, a minor release may change behavior.
   future recording, and the recorder login startup and precise wakeup settings
   are hidden. Recordings scheduled earlier stay listed, can be canceled and
   still run. Record now is unchanged.
+- Simplify source, guide-data, search and PIN settings (#282). Each
+  playlist's Streams at once is set among its actions on the playlists
+  screen, with the provider's reported allowance beside it; a value set for
+  all playlists before moves to each stored playlist. The User-Agent setting
+  is the Default User-Agent on the Playlists page. The movie and series
+  catalog keeps the order its Sort chose. One "Update guide" choice replaces
+  the guide's update interval and update-at-start switch; guides always update
+  after their playlist changes, keep descriptions where the guide is stored on
+  disk, and keep finished programs for the longest catch-up archive (at least a
+  day). Search always ranks favorites first, returns to the results after
+  watching one, and offers finished programs without replay as a filter in its
+  results. In the PIN prompt, OK submits once enough digits are entered and
+  otherwise presses the focused key. Movie and series settings are hidden when
+  no enabled playlist can supply a catalog.
 
 ## [0.1.8] - 2026-11-23
 

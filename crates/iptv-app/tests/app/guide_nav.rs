@@ -165,13 +165,16 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     assert_eq!(iptv_app::player_opens(0), 0);
     step(app.back());
 
-    // Day steps reach the oldest retained page. Instead of trying to
-    // browse before it, Left opens the groups and then the rail.
+    // Day steps reach the oldest retained page: the guide keeps finished
+    // programs for the longest catch-up archive, here a day (#282), so
+    // "Show -32" is the oldest. Instead of trying to browse before it,
+    // Left opens the groups and then the rail.
     for _ in 0..3 {
         step(app.press_key("mod+left"));
     }
-    step(app.wait_for("text:Show -95"));
-    assert!(focused(&app, "Show -95"), "{:?}", app.screen().texts());
+    step(app.wait_for("text:Show -32"));
+    assert!(focused(&app, "Show -32"), "{:?}", app.screen().texts());
+    assert!(!app.screen().matches("text:Show -33").unwrap(), "pruned");
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.press_key("enter"));

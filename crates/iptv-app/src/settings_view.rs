@@ -54,10 +54,11 @@ pub static PAGES: &[Page] = &[
             Part::Section(Section::History),
         ],
     },
-    // The playlists screen (another workstream) is the whole page.
+    // The playlists screen, which holds each playlist's own settings,
+    // and the User-Agent its requests send unless the playlist names one.
     Page {
         key: "playlists",
-        parts: &[Part::Keys(&["playlists.manage"])],
+        parts: &[Part::Keys(&["playlists.manage", "general.user_agent"])],
     },
     Page {
         key: "epg",
@@ -93,7 +94,6 @@ pub static PAGES: &[Page] = &[
         parts: &[
             Part::Section(Section::Search),
             Part::Section(Section::Recordings),
-            Part::Keys(&["playlists.max_connections"]),
             Part::Section(Section::Vod),
         ],
     },

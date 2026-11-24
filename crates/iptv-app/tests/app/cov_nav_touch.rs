@@ -384,7 +384,8 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
     step(app.press("text:Close"));
     gone(app, FIELD);
 
-    // A program on now: it plays full screen and the screen closes.
+    // A program on now: it plays full screen; the screen waits under it
+    // with its query (#282: always, Back returns to the results).
     open_search(app);
     step(app.type_text(FIELD, "Morning"));
     step(app.wait_for("text:On now · ↺ replay"));
@@ -400,12 +401,15 @@ fn search_by_touch(app: &mut Headless, data: &std::path::Path) {
 
     // A past program with replay plays from its start.
     open_search(app);
+    step(app.wait_for("text:On now · ↺ replay"));
+    step(app.clear(FIELD));
     step(app.type_text(FIELD, "Recital"));
     step(app.wait_for("text:Earlier · ↺ replay"));
     step(app.press("text:Earlier · ↺ replay"));
     gone(app, FIELD);
     // Searching the playing channel: a favorite, "Playing" under it.
     open_search(app);
+    step(app.clear(FIELD));
     step(app.type_text(FIELD, "Test Channel One"));
     step(app.wait_for("text:1   ★ Test Channel One"));
     step(app.wait_for("text:Playing"));

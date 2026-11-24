@@ -3,7 +3,7 @@
 //! ```json
 //! {
 //!   "format": "iptv-rs.settings",
-//!   "version": 5,
+//!   "version": 6,
 //!   "global":    { "player.info_panel_timeout": 5000 },
 //!   "playlists": { "<playlist id>": { "channels.group_sort": "name" } },
 //!   "groups":    { "<playlist id>": { "<group id>": { "channels.channel_sort": "manual" } } }
@@ -51,7 +51,7 @@ use crate::value::{KeyBinding, PressKind, Value};
 
 pub const FORMAT: &str = "iptv-rs.settings";
 /// The version [`Settings::to_json`] writes.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 const RESERVED: [&str; 5] = ["format", "version", "global", "playlists", "groups"];
 
@@ -87,7 +87,65 @@ pub static MIGRATIONS: &[Migration] = &[
         summary: "player.sound_follows_tile added, off unless chosen",
         apply: v4_sound_follows_tile,
     },
+    Migration {
+        from: 5,
+        summary: "epg.update_interval and epg.update_on_start fold into epg.update; \
+                  vod.sort keeps the catalog's own four orders",
+        apply: v5_guide_update_and_catalog_sort,
+    },
 ];
+
+/// Settings that #282 merged or narrowed.
+///
+/// - `epg.update_interval` (hours, 0 = only on request) and
+///   `epg.update_on_start` become one `epg.update` choice: 0 is
+///   `on_request`, any other interval the shortest period at least as
+///   long (a week at most). The start switch is not carried over: a guide
+///   older than its period now always updates at startup, where before it
+///   could wait for the next timer. Both old entries are removed; an
+///   explicit `epg.update` already in the layer wins.
+/// - `vod.sort`: `last_modified` becomes `date_added` (both were shown
+///   newest first) and `playlist_order` (shown by name) is dropped, which
+///   leaves the default, by name.
+///
+/// The other settings #282 retired keep their entries: they stay readable
+/// and are ignored.
+fn v5_guide_update_and_catalog_sort(doc: &mut Map<String, Json>) {
+    const HOUR_MS: i64 = 3_600_000;
+    const PERIODS: [(i64, &str); 5] = [
+        (6, "every_6_hours"),
+        (12, "every_12_hours"),
+        (24, "daily"),
+        (48, "every_2_days"),
+        (168, "weekly"),
+    ];
+    for_each_layer(doc, &mut |layer| {
+        let interval = layer.remove("epg.update_interval");
+        layer.remove("epg.update_on_start");
+        if let Some(ms) = interval.as_ref().and_then(Json::as_i64)
+            && !layer.contains_key("epg.update")
+        {
+            let choice = if ms <= 0 {
+                "on_request"
+            } else {
+                PERIODS
+                    .iter()
+                    .find(|(hours, _)| ms <= hours * HOUR_MS)
+                    .map_or("weekly", |(_, name)| name)
+            };
+            layer.insert("epg.update".to_owned(), Json::from(choice));
+        }
+        match layer.get("vod.sort").and_then(Json::as_str) {
+            Some("last_modified") => {
+                layer.insert("vod.sort".to_owned(), Json::from("date_added"));
+            }
+            Some("playlist_order") => {
+                layer.remove("vod.sort");
+            }
+            _ => {}
+        }
+    });
+}
 
 /// "Sound follows the selected tile" (#179) is new and off by default.
 /// Defaults are never written, so a document from before it has no entry

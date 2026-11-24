@@ -1248,7 +1248,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
     settings
-        .set("epg.update_interval", Value::Duration(0))
+        .set("epg.update", Value::choice("on_request"))
         .unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
     let mut store = crate::isolated::open_database(dir.join("iptv.sqlite")).unwrap();

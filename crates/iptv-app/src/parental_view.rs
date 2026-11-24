@@ -420,9 +420,14 @@ pub fn remote(ui: Ui, key: RemoteKey) {
                     .parental
                     .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
                 activate(ui, at);
-            } else if crate::settings::choice(iptv_settings::keys::PARENTAL_PIN_INPUT)
-                == "number_keys"
-            {
+            } else if ui.parental.with_untracked(|o| {
+                // One rule whatever entered the digits (#282): on a digit
+                // key with enough digits entered, OK submits; anywhere else
+                // it presses the focused key (erase, OK, recovery, cancel).
+                o.as_ref().is_some_and(|o| {
+                    matches!(o.dialog.focus, 0..=8 | 10) && o.dialog.enough_digits()
+                })
+            }) {
                 submit(ui);
             } else {
                 let at = ui

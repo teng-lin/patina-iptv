@@ -8,6 +8,12 @@
 //! answers to an older query. Focus is kept by result identity, so it
 //! survives new results, "play and come back" ([`SearchState::resume`])
 //! and tab switches.
+//!
+//! Where the app offers it ([`SearchState::with_filter`]), a filter row
+//! below the tabs decides whether program results include finished
+//! programs that cannot be replayed ([`SearchState::past_without_replay`];
+//! off at first, kept while the screen is open). It replaced the
+//! `search.include_past_without_catchup` setting (#282).
 
 use iptv_epg::UnixTime;
 
@@ -69,6 +75,8 @@ pub enum Focus {
     History(String),
     /// The Channels / Programs tab row.
     Tabs,
+    /// The filter row below the tabs: finished programs without replay.
+    Filter,
     Result(ResultId),
 }
 
@@ -119,6 +127,8 @@ pub struct SearchState {
     /// Last focused result per tab.
     remembered: [Option<ResultId>; 2],
     history: SearchHistory,
+    filter: bool,
+    past_without_replay: bool,
 }
 
 impl SearchState {
@@ -133,7 +143,34 @@ impl SearchState {
             programs: Vec::new(),
             remembered: [None, None],
             history,
+            filter: false,
+            past_without_replay: false,
         }
+    }
+
+    /// Offers the filter row ([`Focus::Filter`]) below the tabs.
+    pub fn with_filter(mut self) -> Self {
+        self.filter = true;
+        self
+    }
+
+    /// Program results include finished programs that cannot be replayed.
+    pub fn past_without_replay(&self) -> bool {
+        self.past_without_replay
+    }
+
+    /// The filter row is shown: offered, and there is a query.
+    pub fn filter_shown(&self) -> bool {
+        self.filter && self.phase != Phase::Idle
+    }
+
+    fn toggle_filter(&mut self) -> SearchEffect {
+        if !self.filter_shown() {
+            return SearchEffect::None;
+        }
+        self.past_without_replay = !self.past_without_replay;
+        self.phase = Phase::Typing;
+        SearchEffect::Search(self.query.clone())
     }
 
     pub fn query(&self) -> &str {
@@ -240,7 +277,11 @@ impl SearchState {
         }
         match self.focus.clone() {
             Focus::Result(_) | Focus::Tabs if self.phase == Phase::NoResults => {
-                self.focus = Focus::Input
+                self.focus = if self.filter {
+                    Focus::Filter
+                } else {
+                    Focus::Input
+                }
             }
             Focus::Result(_) => self.enter_results(),
             Focus::Input if !self.keyboard => self.enter_results(),
@@ -316,7 +357,12 @@ impl SearchState {
                 self.keyboard = false;
                 self.ok()
             }
-            Focus::History(_) | Focus::Tabs => SearchEffect::None,
+            Focus::Filter if self.filter_shown() => {
+                self.keyboard = false;
+                self.focus = Focus::Filter;
+                self.toggle_filter()
+            }
+            Focus::History(_) | Focus::Tabs | Focus::Filter => SearchEffect::None,
         }
     }
 
@@ -356,6 +402,9 @@ impl SearchState {
             self.channels.clear();
             self.programs.clear();
             self.remembered = [None, None];
+            if self.focus == Focus::Filter {
+                self.focus = Focus::Input;
+            }
             SearchEffect::None
         } else {
             self.phase = Phase::Typing;
@@ -383,6 +432,7 @@ impl SearchState {
                 self.enter_results();
                 SearchEffect::None
             }
+            Focus::Filter => self.toggle_filter(),
             Focus::Result(id) => {
                 self.history.push(&self.query);
                 SearchEffect::Play(id)
@@ -411,6 +461,7 @@ impl SearchState {
                 }
             }
             Focus::Input if dir > 0 && has_results => self.focus = Focus::Tabs,
+            Focus::Input if dir > 0 && self.filter_shown() => self.focus = Focus::Filter,
             Focus::Input => {}
             Focus::History(e) => {
                 let entries = self.history.entries();
@@ -421,10 +472,16 @@ impl SearchState {
                 };
             }
             Focus::Tabs if dir < 0 => self.focus = Focus::Input,
+            Focus::Tabs if self.filter => self.focus = Focus::Filter,
             Focus::Tabs => self.enter_results(),
+            Focus::Filter if dir < 0 && has_results => self.focus = Focus::Tabs,
+            Focus::Filter if dir < 0 => self.focus = Focus::Input,
+            Focus::Filter if self.count(self.tab) > 0 => self.enter_results(),
+            Focus::Filter => {}
             Focus::Result(id) => {
                 let i = self.position(self.tab, &id).unwrap_or(0);
                 match i.checked_add_signed(dir) {
+                    None if self.filter => self.focus = Focus::Filter,
                     None => self.focus = Focus::Tabs,
                     Some(j) => {
                         if let Some(next) = self.id_at(self.tab, j) {

@@ -138,6 +138,21 @@ impl Dialog {
         self.notice(code);
         true
     }
+    /// Whether enough digits are entered for OK to submit rather than
+    /// press the focused keypad key (#282: one rule for every remote, in
+    /// place of the `parental.pin_input` setting). Enough is the new PIN's
+    /// length while confirming it, else the shortest PIN (four digits).
+    pub fn enough_digits(&self) -> bool {
+        match self.phase {
+            Phase::Unlock | Phase::Old | Phase::New => self.input.valid(),
+            Phase::Confirm => self
+                .new
+                .as_ref()
+                .is_some_and(|pin| self.input.len() >= pin.len()),
+            Phase::Recovery | Phase::RecoveryNotice => false,
+        }
+    }
+
     pub fn submit(&mut self) -> Submission {
         if self.busy {
             return Submission::None;
@@ -216,6 +231,29 @@ mod dialog_tests {
         for digit in text.bytes() {
             dialog.digit(digit - b'0');
         }
+    }
+    #[test]
+    fn ok_submits_once_enough_digits_are_entered() {
+        let mut d = Dialog::new(Phase::Unlock);
+        enter(&mut d, "123");
+        assert!(!d.enough_digits(), "OK still presses the focused key");
+        enter(&mut d, "4");
+        assert!(d.enough_digits());
+        let mut setup = Dialog::new(Phase::New);
+        enter(&mut setup, "123456");
+        assert!(setup.enough_digits());
+        setup.submit();
+        assert_eq!(setup.phase, Phase::Confirm);
+        enter(&mut setup, "1234");
+        assert!(
+            !setup.enough_digits(),
+            "confirming takes the new PIN's length"
+        );
+        enter(&mut setup, "56");
+        assert!(setup.enough_digits());
+        let mut recovery = Dialog::new(Phase::Unlock);
+        recovery.recover();
+        assert!(!recovery.enough_digits());
     }
     #[test]
     fn setup_requires_confirmation_and_clears_mismatch() {

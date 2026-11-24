@@ -92,7 +92,7 @@ impl Section {
     pub const fn subsections(self) -> &'static [&'static str] {
         match self {
             Section::General => &["startup", "language", "network", "privacy", "updates"],
-            Section::Playlists => &["content", "updates"],
+            Section::Playlists => &["content", "network", "updates"],
             Section::Channels => &["sorting", "categories", "names"],
             Section::Epg => &["updates", "storage", "matching"],
             Section::Appearance => &["colors", "text", "motion"],
