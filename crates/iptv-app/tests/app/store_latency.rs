@@ -135,6 +135,12 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
         restyled_empty += timing.lock().unwrap().2;
     }
     let at_us = journey.elapsed();
+    // The writer was locked for every press above: had any of them waited
+    // for it, the favorite could not still be pending.
+    let pending: i64 = lock
+        .query_row("SELECT count(*) FROM favorites", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(pending, 0, "the writer stayed locked during navigation");
     app.idle(Duration::from_millis(500)).unwrap();
     journey.observe("key_to_mounted_frame_max_us", maximum.as_micros() as u64);
     journey.finish_at(
@@ -152,6 +158,17 @@ fn guide_input_stays_under_budget_while_the_database_writer_is_locked() {
     assert_eq!(
         restyled_empty, 0,
         "navigation must not restyle unused slots"
+    );
+    // Input that waited for the locked writer would take at least SQLite's
+    // busy timeout (5 s). This bound sits far above runner noise (observed
+    // up to ~90 ms on macOS) and far below that wait, so it detects waiting
+    // without depending on the runner's speed; the 50 ms responsiveness
+    // budget is enforced only on a controlled performance host.
+    let waiting =
+        crate::isolated::scaled_duration(Duration::from_secs(1)).min(Duration::from_secs(4));
+    assert!(
+        maximum < waiting,
+        "guide input waited for the locked writer: {maximum:?}"
     );
     if std::env::var("IPTV_STRICT_GUIDE_LATENCY").as_deref() == Ok("1") {
         assert!(
