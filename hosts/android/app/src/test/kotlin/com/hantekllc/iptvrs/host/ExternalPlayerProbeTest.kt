@@ -11,6 +11,8 @@ class ExternalPlayerProbeTest {
     @Test fun anotherInstalledPlayerTakesTheHandoff() {
         assertTrue(ExternalPlayerHost.player("org.example.player", own))
         assertTrue(ExternalPlayerHost.player("org.example.frameworkpackagestubs.player", own))
+        // Only the exact framework stub packages are left out.
+        assertTrue(ExternalPlayerHost.player("org.example.frameworkpackagestubs", own))
     }
 
     @Test fun patinaAndTheTvFrameworkStubsAreNotPlayers() {

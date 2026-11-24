@@ -219,20 +219,32 @@ mod linux {
         }
     }
 
-    /// Whether VLC or mpv is an executable file on `PATH`, the players a
-    /// handoff launches.
+    /// Whether VLC or mpv is a file on `PATH` that Patina may execute, the
+    /// players a handoff launches.
     pub(super) fn player_installed() -> bool {
         std::env::var_os("PATH").is_some_and(|path| installed_in(&path))
     }
 
     fn installed_in(path: &std::ffi::OsStr) -> bool {
-        use std::os::unix::fs::PermissionsExt;
         std::env::split_paths(path).any(|dir| {
-            Player::ALL.iter().any(|player| {
-                std::fs::metadata(dir.join(player.program()))
-                    .is_ok_and(|file| file.is_file() && file.permissions().mode() & 0o111 != 0)
-            })
+            Player::ALL
+                .iter()
+                .any(|player| executable(&dir.join(player.program())))
         })
+    }
+
+    /// A regular file this process may execute: `access(2)` checks the
+    /// caller's own permission and a `noexec` mount, not just a mode bit.
+    fn executable(file: &std::path::Path) -> bool {
+        use std::os::unix::ffi::OsStrExt;
+        if !std::fs::metadata(file).is_ok_and(|metadata| metadata.is_file()) {
+            return false;
+        }
+        let Ok(file) = std::ffi::CString::new(file.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `file` is a NUL-terminated path that outlives the call.
+        unsafe { libc::access(file.as_ptr(), libc::X_OK) == 0 }
     }
 
     struct LaunchedPlayer {

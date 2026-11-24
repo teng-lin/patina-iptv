@@ -15,15 +15,19 @@ sdk=${ANDROID_HOME:-$HOME/Android/Sdk}
 tools=$(ls -d "$sdk"/build-tools/* | sort -V | tail -n 1)
 platform=$(ls -d "$sdk"/platforms/android-* | sort -V | tail -n 1)
 keystore=${DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}
-rm -rf "$out" && mkdir -p "$out/classes"
-javac --release 11 -classpath "$platform/android.jar" -d "$out/classes" \
+# Built in a private staging directory; only the APK is written to OUT_DIR.
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+mkdir -p "$stage/classes" "$out"
+javac --release 11 -classpath "$platform/android.jar" -d "$stage/classes" \
   "$here"/src/org/example/testplayer/*.java
 "$tools/d8" --release --min-api 26 --lib "$platform/android.jar" \
-  --output "$out" "$out"/classes/org/example/testplayer/*.class
-"$tools/aapt2" link -o "$out/unsigned.apk" -I "$platform/android.jar" \
+  --output "$stage" "$stage"/classes/org/example/testplayer/*.class
+"$tools/aapt2" link -o "$stage/unsigned.apk" -I "$platform/android.jar" \
   --manifest "$here/AndroidManifest.xml"
-(cd "$out" && zip -q unsigned.apk classes.dex)
-"$tools/zipalign" -f 4 "$out/unsigned.apk" "$out/aligned.apk"
+(cd "$stage" && zip -q unsigned.apk classes.dex)
+"$tools/zipalign" -f 4 "$stage/unsigned.apk" "$stage/aligned.apk"
 "$tools/apksigner" sign --ks "$keystore" --ks-pass pass:android \
-  --out "$out/test-player.apk" "$out/aligned.apk"
+  --out "$stage/test-player.apk" "$stage/aligned.apk"
+cp "$stage/test-player.apk" "$out/test-player.apk"
 echo "$out/test-player.apk"

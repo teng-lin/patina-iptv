@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -74,11 +73,8 @@ internal object ExternalPlayerHost {
                 throw error
             }
             true
-        } catch (_: ActivityNotFoundException) {
-            false
-        } catch (_: SecurityException) {
-            false
         } catch (_: RuntimeException) {
+            // No activity found, refused (SecurityException) or a stale intent.
             false
         }
     }
@@ -102,9 +98,13 @@ internal object ExternalPlayerHost {
     private fun stubs(context: Context, video: Intent): List<ComponentName> =
         handlers(context, video).filter { stub(it.packageName) }
 
-    /** Android TV's framework package stubs answer every view intent with a
-     * message that no app can do it; they are not a player. */
-    fun stub(handler: String): Boolean = handler.endsWith(".frameworkpackagestubs")
+    /** The framework package stubs (AOSP's `FrameworkPackageStubs`, on
+     * Android TV and some other images) answer every view intent with a
+     * message that no app can do it; they are not a player. Only these exact
+     * system packages are left out, never another app with a similar name. */
+    private val stubPackages = setOf("com.android.tv.frameworkpackagestubs", "com.android.frameworkpackagestubs")
+
+    fun stub(handler: String): Boolean = handler in stubPackages
 
     /** Only another app that plays video counts: a handoff never comes back
      * to Patina, and a framework stub plays nothing. */
@@ -190,11 +190,12 @@ class ExternalPlaybackService : Service() {
         private var holds = 0
         private var running: ExternalPlaybackService? = null
 
-        /** Counts a handoff and starts the service for the first one, before
-         * the other app's activity takes the foreground from Patina. */
+        /** Counts a handoff and starts the service for it, before the other
+         * app's activity takes the foreground from Patina. Every handoff
+         * starts it, so one whose start failed does not leave later ones
+         * without the service. */
         @Synchronized fun hold(context: Context) {
             holds += 1
-            if (holds > 1) return
             try {
                 val application = context.applicationContext
                 val intent = Intent(application, ExternalPlaybackService::class.java)
