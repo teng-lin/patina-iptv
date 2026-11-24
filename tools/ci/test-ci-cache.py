@@ -197,7 +197,11 @@ class ToolCache(unittest.TestCase):
         self.assertEqual(package.count("CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo"), 2)
         self.assertEqual(candidate.count("CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo"), 2)
         self.assertIn("add-job-id-key: 'false'", cache)
-        self.assertIn("if: (matrix.platform == 'linux' || matrix.platform == 'macos') && github.ref == 'refs/heads/master'", candidate)
+        for workflow, condition in ((package, "if: matrix.platform == 'macos'"),
+                                    (candidate, "if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'")):
+            cache_steps = [step for step in steps(workflow) if "uses: ./.github/actions/desktop-cargo-cache" in step]
+            self.assertEqual(len(cache_steps), 1)
+            self.assertIn(condition + "\n", cache_steps[0])
         self.assertIn("format('desktop-package-macos-v3-{0}-{1}', steps.compiler.outputs.key,", cache)
         self.assertIn("format('desktop-package-v2-linux-{0}-{1}', steps.compiler.outputs.key,", cache)
         self.assertIn("'tools/ci/package.Cargo.lock'", cache)
@@ -541,6 +545,19 @@ class AptInstall(unittest.TestCase):
 
 
 class CachePruning(unittest.TestCase):
+    def test_retired_linux_package_cache_keeps_recent_accesses_and_other_refs(self):
+        spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
+        prune = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(prune)
+        old = {"id": 1, "key": "v0-rust-desktop-package-v2-linux-0123456789abcdef-app-Linux-x64",
+               "ref": prune.MASTER, "created_at": "2026-01-01T01:00:00Z", "last_accessed_at": "2026-01-01T01:10:00Z"}
+        entries = [old, {**old, "id": 2, "last_accessed_at": "2026-01-01T02:20:00Z"},
+                   {**old, "id": 3, "ref": "refs/pull/7/merge"},
+                   {**old, "id": 4, "key": "v0-rust-desktop-package-macos-v3-0123456789abcdef-app-Darwin-arm64"}]
+        start = prune.timestamp("2026-01-01T02:00:00Z")
+        end = prune.timestamp("2026-01-01T03:00:00Z")
+        self.assertEqual([row["id"] for row in prune.superseded(entries, start, end)], [1])
+
     def test_keep_the_replacement_recently_used_caches_tools_and_other_refs(self):
         spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
         prune = importlib.util.module_from_spec(spec)
