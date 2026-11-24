@@ -207,7 +207,8 @@ pub struct Channel {
     pub stream: StreamLocator,
     /// XMLTV channel id (`tvg-id`, Xtream `epg_channel_id`, Stalker `xmltv_id`).
     pub epg_id: Option<String>,
-    /// M3U `tvg-name`, used as a secondary EPG match key.
+    /// Secondary EPG match key: M3U `tvg-name`, or the historical
+    /// URL-derived name when an untitled entry has a neutral display label.
     pub epg_name: Option<String>,
     /// M3U `tvg-shift` (hours, may be fractional) converted to minutes.
     pub epg_shift_minutes: Option<i32>,

@@ -219,7 +219,8 @@ fn plain_url_lists_without_header_import() {
     let body = "http://fixture.example.test:8089/ch0/index.m3u8\nhttp://fixture.example.test:8089/ch1/index.m3u8\n";
     let catalog = run(&FakeFetch::body(body)).unwrap();
     assert_eq!(catalog.channels.len(), 2);
-    assert_eq!(catalog.channels[1].name, "index");
+    assert_eq!(catalog.channels[1].name, "Unnamed channel");
+    assert_eq!(catalog.channels[1].epg_name.as_deref(), Some("index"));
 }
 
 #[test]

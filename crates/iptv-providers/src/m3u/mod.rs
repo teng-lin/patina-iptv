@@ -347,12 +347,18 @@ impl M3uParser {
                 .map(|(_, v)| v.as_str())
                 .filter(|v| !v.is_empty())
         };
-        let name = p
+        let supplied_name = p
             .title
             .clone()
-            .or_else(|| attr("tvg-name").map(str::to_owned))
-            .unwrap_or_else(|| fallback_name(url));
-        let id = self.dedup.unique(ContentId::from_m3u(url, &name));
+            .or_else(|| attr("tvg-name").map(str::to_owned));
+        let generated_name = supplied_name.is_none();
+        // Persisted identities predate the neutral display label. Keep the
+        // original fallback as the identity input so refresh keeps overlays.
+        let identity_name = supplied_name
+            .clone()
+            .unwrap_or_else(|| legacy_fallback_name(url));
+        let id = self.dedup.unique(ContentId::from_m3u(url, &identity_name));
+        let name = supplied_name.unwrap_or_else(|| UNTITLED_CHANNEL_NAME.to_owned());
 
         let mut groups = Vec::new();
         let titles: Vec<&str> = match attr("group-title") {
@@ -411,7 +417,9 @@ impl M3uParser {
             logo: attr("tvg-logo").or(attr("logo")).map(str::to_owned),
             groups,
             epg_id: attr("tvg-id").map(str::to_owned),
-            epg_name: attr("tvg-name").map(str::to_owned),
+            epg_name: attr("tvg-name")
+                .map(str::to_owned)
+                .or_else(|| generated_name.then(|| identity_name.clone())),
             epg_shift_minutes: shift
                 .filter(|h| h.abs() <= 24.0)
                 .map(|h| (h * 60.0).round() as i32),
@@ -490,8 +498,12 @@ fn parse_number(s: &str) -> Option<u32> {
     })
 }
 
-/// Name for a URL-only entry: the last path segment without extension.
-fn fallback_name(url: &str) -> String {
+/// Display label for M3U entries with no title or `tvg-name`.
+pub const UNTITLED_CHANNEL_NAME: &str = "Unnamed channel";
+
+/// Legacy URL-derived name, retained only as an input to persisted content IDs
+/// and to recognize old imported labels during database upgrade.
+pub fn legacy_fallback_name(url: &str) -> String {
     let path = url.split(['?', '#']).next().unwrap_or(url);
     let last = path
         .trim_end_matches('/')

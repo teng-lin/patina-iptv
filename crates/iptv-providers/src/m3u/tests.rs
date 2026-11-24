@@ -76,8 +76,8 @@ fn parses_sample_playlist() {
     let grouped = pl.groups.iter().find(|g| g.name == "Grouped").unwrap();
     assert_eq!(three.groups, vec![grouped.id.clone()]);
 
-    // Bare URL entry named after its file.
-    assert_eq!(ch[3].name, "four");
+    // Bare URL entries use a neutral display label.
+    assert_eq!(ch[3].name, "Unnamed channel");
     assert!(ch[3].groups.is_empty());
 
     let names: Vec<&str> = pl.groups.iter().map(|g| g.name.as_str()).collect();
@@ -284,4 +284,40 @@ fn parses_vod_type_and_catchup_correction() {
         "per-channel overrides the header"
     );
     assert_eq!(cu[2].correction_secs, 0, "outside −12…+14 h is ignored");
+}
+
+#[test]
+fn untitled_entries_have_neutral_labels_and_keep_legacy_ids() {
+    let playlist = parse_m3u(
+        "#EXTM3U\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1,\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1,12345\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1 tvg-name=\"Provided label\",\n\
+http://streams.example.com/another.ts\n\
+",
+    );
+    let channels = &playlist.channels.items;
+    let legacy = ContentId::from_m3u("http://streams.example.com/12345.ts", "12345");
+    assert_eq!(channels[0].name, "Unnamed channel");
+    assert_eq!(channels[0].epg_name.as_deref(), Some("12345"));
+    assert_eq!(channels[0].id, legacy);
+    assert_eq!(channels[1].name, "Unnamed channel");
+    assert_eq!(channels[1].id.as_str(), format!("{legacy}~2"));
+    assert_eq!(channels[2].name, "12345");
+    assert_eq!(channels[2].epg_name, None);
+    assert_eq!(channels[2].id.as_str(), format!("{legacy}~3"));
+    assert_eq!(channels[3].name, "Provided label");
+}
+
+#[test]
+fn explicit_url_looking_title_is_preserved() {
+    let channels = parse_m3u(
+        "#EXTINF:-1,http://label.example.com/named.ts\nhttp://streams.example.com/generated.ts\n",
+    )
+    .channels
+    .items;
+    assert_eq!(channels[0].name, "http://label.example.com/named.ts");
 }
