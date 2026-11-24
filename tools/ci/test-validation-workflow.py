@@ -314,6 +314,19 @@ class Workflows(unittest.TestCase):
         self.assertLess(guide, smoke.index('tools/mock-server.py 8089 fixtures/hls'))
         self.assertIn('path: hosts/android/app/build/outputs/apk/debug\n', smoke)
 
+    def test_draft_reminder_only_comments_on_ready_pull_requests(self):
+        text = (ROOT / '.github/workflows/draft-reminder.yml').read_text()
+        self.assertIn('types: [opened, reopened]', text)
+        self.assertIn('!github.event.pull_request.draft', text)
+        self.assertIn('github.event.pull_request.head.repo.full_name == github.repository', text)
+        # It asks; it never converts, closes or relabels the pull request.
+        self.assertIn('gh pr comment', text)
+        for action in ('gh pr ready --undo"', 'gh pr close', 'gh pr edit', 'convertPullRequestToDraft'):
+            self.assertNotIn(action, text.replace('`gh pr ready --undo`', ''))
+        self.assertIn('permissions: {}', text)
+        self.assertEqual(re.findall(r'^      ([a-z-]+): write$', text, re.M), ['pull-requests'])
+        self.assertNotIn('pull_request_target', text)
+
     def test_large_epg_case_is_not_silently_omitted(self):
         script = (ROOT / "tools/ci/import-stress.sh").read_text()
         self.assertIn("--release", script)

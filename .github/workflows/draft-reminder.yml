@@ -1,0 +1,29 @@
+name: Draft reminder
+# Pull requests open as drafts while fixups are pushed (AGENTS.md, docs/ci.md):
+# Validation then runs only the fast lanes until `gh pr ready`. This only
+# comments on a pull request opened ready; it changes nothing.
+on:
+  pull_request:
+    types: [opened, reopened]
+permissions: {}
+jobs:
+  remind:
+    # Forks get a read-only token, and Dependabot's updates are single pushes.
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Ask for a draft next time
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body "This pull request was opened ready for review, so every push runs the complete validation, including packaging, the Windows installer, coverage and emulator smoke when selected.
+
+          While you are still pushing fixups, convert it with \`gh pr ready --undo\`: a draft runs only the fast lanes. Run \`gh pr ready\` when it is complete; that starts the one complete run. Next time, open it with \`gh pr create --draft\`. See [validation tiers](https://github.com/$REPO/blob/master/docs/ci.md)."
