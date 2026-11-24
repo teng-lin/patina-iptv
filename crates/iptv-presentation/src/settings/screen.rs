@@ -10,7 +10,11 @@
 //! conditions fail, advanced settings, and rows the app does not offer
 //! ([`Offer::Hidden`]) are left out. Every other setting and command
 //! takes the focus, also those the app cannot act on yet ([`Status`]), so
-//! the UI can say why OK does nothing there.
+//! the UI can say why OK does nothing there. Rows the app moves to the
+//! advanced settings on this device ([`Offer::Advanced`]) leave their
+//! section for [`Part::Advanced`]. The pages list leaves out a page
+//! without rows ([`Screen::refresh`]), so a page can come and go with
+//! what the app offers (a keyboard attached).
 //!
 //! Keys. Pages: Up/Down choose (the rows follow), Right or OK enter the
 //! rows, Back closes. Rows: Up/Down move, Page keys move five, Left or
@@ -39,6 +43,9 @@ const BIG_STEP: i64 = 10;
 pub enum Offer {
     /// It acts on the value, or runs the command.
     Active,
+    /// As [`Offer::Active`], shown with the advanced settings
+    /// ([`Part::Advanced`]) instead of in its section.
+    Advanced,
     /// It shows the value (or runs nothing); there is nothing to change.
     ReadOnly,
     /// Not done yet.
@@ -69,6 +76,9 @@ pub enum Part {
     /// Settings or commands by key, in this order (shown whatever their
     /// [`Offer`]).
     Keys(&'static [&'static str]),
+    /// Every setting and command the app offers as advanced
+    /// ([`Offer::Advanced`]), under its section's name, in catalog order.
+    Advanced,
 }
 
 /// One entry of the pages list.
@@ -117,7 +127,7 @@ impl Ctx<'_> {
             Offer::ReadOnly | Offer::Hidden => Status::ReadOnly,
             Offer::NotYet => Status::NotYet,
             Offer::Later => Status::Later,
-            Offer::Active => match row {
+            Offer::Active | Offer::Advanced => match row {
                 Row::Setting(s) if matches!(s.ty, ValueType::KeyBindings { .. }) => {
                     Status::ReadOnly
                 }
@@ -134,8 +144,13 @@ impl Ctx<'_> {
         }
     }
 
+    /// Shown in its section: offered, and not with the advanced settings.
     fn offered(&self, key: &str) -> bool {
-        (self.offer)(key) != Offer::Hidden
+        !matches!((self.offer)(key), Offer::Hidden | Offer::Advanced)
+    }
+
+    fn advanced(&self, key: &str) -> bool {
+        (self.offer)(key) == Offer::Advanced
     }
 
     fn value(&self, s: &Setting) -> Value {
@@ -153,6 +168,10 @@ pub fn rows(page: &Page, ctx: &Ctx) -> Vec<Row> {
     let mut rows = Vec::new();
     for part in page.parts {
         let section = match part {
+            Part::Advanced => {
+                rows.extend(advanced_rows(ctx));
+                continue;
+            }
             Part::Keys(keys) => {
                 rows.extend(keys.iter().filter_map(|k| {
                     catalog::setting(k)
@@ -202,6 +221,52 @@ pub fn rows(page: &Page, ctx: &Ctx) -> Vec<Row> {
         }
     }
     rows
+}
+
+/// The rows of [`Part::Advanced`]: each section's advanced rows under
+/// its name.
+fn advanced_rows(ctx: &Ctx) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for node in catalog::tree(true) {
+        let visible = |s: &&&Setting| {
+            ctx.advanced(s.key)
+                && ctx
+                    .settings
+                    .is_visible(s.key, &Target::Global)
+                    .unwrap_or(false)
+        };
+        let items: Vec<Row> = node
+            .groups
+            .iter()
+            .flat_map(|group| {
+                group
+                    .settings
+                    .iter()
+                    .filter(visible)
+                    .map(|s| Row::Setting(s))
+                    .chain(
+                        group
+                            .commands
+                            .iter()
+                            .filter(|c| ctx.advanced(c.key))
+                            .map(|c| Row::Command(c)),
+                    )
+            })
+            .collect();
+        if !items.is_empty() {
+            rows.push(Row::Heading {
+                section: node.section,
+                subsection: None,
+            });
+            rows.extend(items);
+        }
+    }
+    rows
+}
+
+/// Whether `page` has a row that takes the focus.
+fn has_rows(page: &Page, ctx: &Ctx) -> bool {
+    rows(page, ctx).iter().any(|r| r.key().is_some())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -290,7 +355,10 @@ pub enum Effect {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Screen {
-    pages: &'static [Page],
+    /// Every page the app has.
+    all: &'static [Page],
+    /// The pages shown: those of `all` with rows ([`Screen::refresh`]).
+    pages: Vec<Page>,
     page: usize,
     pane: Pane,
     focus: Option<&'static str>,
@@ -302,10 +370,13 @@ fn moved(at: usize, by: isize, len: usize) -> usize {
 }
 
 impl Screen {
-    /// Opens on the page `key` (else the first), focus in the pages list.
+    /// Opens on the page `key` (else the first), focus in the pages list,
+    /// with every page shown until [`Screen::refresh`] leaves out those
+    /// without rows.
     pub fn new(pages: &'static [Page], key: &str) -> Screen {
         Screen {
-            pages,
+            all: pages,
+            pages: pages.to_vec(),
             page: pages.iter().position(|p| p.key == key).unwrap_or(0),
             pane: Pane::Pages,
             focus: None,
@@ -313,11 +384,70 @@ impl Screen {
         }
     }
 
-    pub fn pages(&self) -> &'static [Page] {
-        self.pages
+    /// [`Screen::new`], showing only the pages with rows now.
+    pub fn opened(pages: &'static [Page], key: &str, ctx: &Ctx) -> Screen {
+        let mut screen = Screen::new(pages, key);
+        screen.refresh(ctx);
+        screen
     }
 
-    pub fn page(&self) -> &'static Page {
+    /// The pages shown.
+    pub fn pages(&self) -> &[Page] {
+        &self.pages
+    }
+
+    /// Shows the pages with rows under what the app offers now (when the
+    /// screen opens, and when an offer changes: a keyboard attached or
+    /// detached), keeping the focus on something that is still there.
+    /// The page shown stays chosen; if it went, the page that took its
+    /// place in the list is chosen, with the focus in the pages list. A
+    /// focused row that went passes the focus to the first row the app
+    /// acts on, and an editor of a row that went closes.
+    pub fn refresh(&mut self, ctx: &Ctx) {
+        let shown: Vec<Page> = self
+            .all
+            .iter()
+            .filter(|page| has_rows(page, ctx))
+            .copied()
+            .collect();
+        if !shown.is_empty() && shown != self.pages {
+            let current = self.page().key;
+            if let Some(at) = shown.iter().position(|p| p.key == current) {
+                self.page = at;
+            } else {
+                // The pages before the one that went keep their place.
+                let before = self.all.iter().position(|p| p.key == current);
+                self.page = before
+                    .map(|end| self.all[..end].iter().filter(|p| shown.contains(p)).count())
+                    .unwrap_or(0)
+                    .min(shown.len() - 1);
+                self.pane = Pane::Pages;
+                self.focus = None;
+                self.editor = None;
+            }
+            self.pages = shown;
+        }
+        self.keep_focus(ctx);
+    }
+
+    /// A focused row or an open editor whose row went (see
+    /// [`Screen::refresh`]).
+    fn keep_focus(&mut self, ctx: &Ctx) {
+        let rows = self.rows(ctx);
+        let there = |key: &str| rows.iter().any(|r| r.key() == Some(key));
+        if self.editor.as_ref().is_some_and(|e| !there(e.key())) {
+            self.editor = None;
+        }
+        if self.pane == Pane::Rows && self.focus.is_some_and(|k| !there(k)) {
+            self.focus = None;
+            self.enter_rows(ctx);
+            if self.focus.is_none() {
+                self.pane = Pane::Pages;
+            }
+        }
+    }
+
+    pub fn page(&self) -> &Page {
         &self.pages[self.page]
     }
 

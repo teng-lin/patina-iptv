@@ -19,7 +19,7 @@ const WAIT: Duration = Duration::from_secs(5);
 /// The strip's hint line: the strip is open.
 const STRIP: &str = "text:/M or Esc hide/";
 
-fn node(app: &Headless, test_id: &str) -> NodeId {
+pub(crate) fn node(app: &Headless, test_id: &str) -> NodeId {
     app.screen()
         .layout_nodes()
         .into_iter()
@@ -30,7 +30,7 @@ fn node(app: &Headless, test_id: &str) -> NodeId {
 
 /// The host reports `form` with this input, as Android's activity does
 /// when the observer attaches and on each configuration change.
-fn report(app: &mut Headless, form: &str, keyboard: bool, dpad: bool) {
+pub(crate) fn report(app: &mut Headless, form: &str, keyboard: bool, dpad: bool) {
     app.engine().control().dispatch_event(
         node(app, "device-signals"),
         EventKind::NativeEvent,

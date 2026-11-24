@@ -35,8 +35,12 @@ configuration change; before that report an Android build counts as a tablet
 with neither input. The settings offer check (`settings::offer`), the control
 strip and multiview's decoder count read the signals as they are now, so a
 change takes effect without a restart. A control that leaves the strip while
-focused passes the focus to its nearest neighbor. No gate changes what it offers
-by these signals yet; the host profiles above still follow the platform alone.
+focused passes the focus to its nearest neighbor. The Keyboard or Remote
+settings, and guide autoplay with its delay, follow the form factor and the
+connected input ([TV controls](tv-controls.md)); a settings page without rows
+leaves the list while the screen stays open, and the page shown, or the one in
+its place, keeps the focus. The host profiles above still follow the platform
+alone.
 
 These are configured limits and facilities, not certification of a device's
 decoder performance. The profile tests exercise each row without needing that

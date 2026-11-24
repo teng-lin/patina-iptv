@@ -274,12 +274,6 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
             GL,
             "",
         ),
-        (
-            "catchup.seek_keys",
-            choice(&c::SEEK_KEYS, "left_right"),
-            GL,
-            "",
-        ),
         ("catchup.forward_step", secs(5, 600, 5, 30), GL, ""),
         ("catchup.rewind_step", secs(5, 600, 5, 10), GL, ""),
         ("catchup.timebar_step", mins(1, 60, 1, 5), GL, ""),
@@ -360,6 +354,13 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         (
             "remote.player_up_down",
             choice(&c::PLAYER_UP_DOWN, "switch_channels"),
+            GL,
+            "",
+        ),
+        // With the keyboard or remote settings (#280).
+        (
+            "catchup.seek_keys",
+            choice(&c::SEEK_KEYS, "left_right"),
             GL,
             "",
         ),

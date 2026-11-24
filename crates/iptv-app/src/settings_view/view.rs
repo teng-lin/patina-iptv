@@ -78,6 +78,35 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         .unwrap_or_default()
     });
     let editing = computed(move || state(ui, |s| s.editor().is_some()).unwrap_or(false));
+    // The pages with rows (reactive: a keyboard or D-pad attached or
+    // detached, a setting that shows or hides rows). The list follows
+    // only when they change, not when keys or touch are used, so a screen
+    // reader's place in it holds.
+    let shown = computed(move || {
+        let settings = crate::settings::read(ui);
+        let ctx = Ctx {
+            settings: &settings,
+            offer: &crate::settings::offer_now,
+        };
+        PAGES
+            .iter()
+            .filter(|page| {
+                iptv_presentation::settings::screen::rows(page, &ctx)
+                    .iter()
+                    .any(|row| row.key().is_some())
+            })
+            .map(|page| page.key)
+            .collect::<Vec<_>>()
+    });
+    effect(move || {
+        shown.with(|_| ());
+        untracked(|| {
+            update(ui, |screen, ctx| {
+                screen.refresh(ctx);
+                Effect::None
+            })
+        });
+    });
     view()
         .test_id("settings-screen")
         .absolute()
@@ -160,7 +189,7 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
         }
     });
     let entry = move |at: Position| {
-        let page = move || PAGES.get(at.index());
+        let page = move || state(ui, |s| s.pages().get(at.index()).copied()).flatten();
         let is_chosen = move || chosen.get() == Some(at.index());
         let focused = move || {
             ui.keys_shown()
@@ -189,13 +218,13 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
                         match mark() {
                             Mark::Focused => Mark::Focused.text(),
                             Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
-                            Mark::Plain if page().is_some_and(lit_page) => rgb(LIST_TEXT),
+                            Mark::Plain if page().is_some_and(|p| lit_page(&p)) => rgb(LIST_TEXT),
                             Mark::Plain => tint(WHITE, DIM_ALPHA),
                         }
                     }),
             )
     };
-    virtual_list(|| PAGES.len(), entry)
+    virtual_list(move || state(ui, |s| s.pages().len()).unwrap_or(0), entry)
         .estimated_item_size(list_rows::pitch(size, ROW))
         .element_ref(&list)
         .w(move || size.px(PAGES_W))

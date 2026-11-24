@@ -5,7 +5,18 @@ are in the [interaction contract](interaction.md). This page is the remote's
 key table: what each key does on each surface, a tap and a hold. It describes
 the code as it is (`iptv_nav::Keymap::defaults`, `crates/iptv-app/src/input.rs`,
 `player_keys.rs`, `play_bar.rs`); a viewer can rebind keys in Settings → Remote
-(`remote_editor.rs`), which this table does not cover.
+control (`remote_editor.rs`), which this table does not cover.
+
+That page, which also holds the replay seek keys (`catchup.seek_keys`), exists
+while there are keys to set up (`settings::keys`): always on a TV (Remote
+control) and a desktop (Keyboard, without the keys only a remote has: the
+colour keys, Play, Pause, Stop and Record). A phone or a tablet shows it only
+while a hardware keyboard (Keyboard) or a D-pad or game controller (Remote
+control) is connected, by the connected input the device reports, not the input
+used last. Single-key shortcuts work on an Android keyboard, so they stay
+remappable while one is attached (WCAG 2.1.4). The long-press time and a hold
+in the editor are offered only where keys report their release. The changed
+keys have no row of their own; the editor's row sums them up.
 
 ## Taps and holds
 
@@ -81,7 +92,10 @@ back to live.
 
 Moving the focus never tunes a channel unless **Autoplay** (`guide.autoplay`)
 is on; it then tunes the focused live channel after `guide.switch_delay`, and
-moving on before then cancels it.
+moving on before then cancels it. On a desktop and a TV both are under
+Settings → Advanced. A phone or a tablet shows them with the guide's settings
+only while a keyboard or D-pad is connected; without one, autoplay is off
+whatever is stored, and the stored values are kept.
 
 ### Mini-player in the guide
 

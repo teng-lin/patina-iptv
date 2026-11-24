@@ -1,11 +1,16 @@
 //! Live, validated remote overrides. Editor/menu input stays at defaults.
+//!
+//! The keys offered follow the keys connected now (`settings::keys`): a
+//! keyboard's leave out the keys only a remote has. A hold is offered
+//! only where keys report their release (`input::long_press`).
 use crate::i18n::{tr, trf};
 
 use crate::scale::Scale;
-use crate::settings_view::remote_keys::{KEYBOARD_KEYS, KEYS, action_name, context_name, key_name};
+use crate::settings_view::remote_keys::{action_name, context_name, editable, key_name};
 use crate::{Ui, settings, ui_kit};
 use iptv_nav::remap::{self, Confirm, Editor, FIELDS, Field};
 use iptv_nav::{Action, Binding, Context, Keymap, Press, RemoteKey};
+use iptv_presentation::capabilities::Keys;
 use iptv_settings::{KeyBinding, PressKind, Target, Value, keys};
 use nsh_core::prelude::*;
 
@@ -39,8 +44,51 @@ pub fn overridden(context: Context, key: RemoteKey) -> bool {
         .filter_map(validated)
         .any(|b| b.context == Some(context) && b.key == key)
 }
+/// The keys set up now: a remote's where none are connected (the
+/// editor opens only from the keys' page).
+fn keys_now() -> Keys {
+    settings::keys_now().unwrap_or(Keys::Remote)
+}
+
+/// The keys the editor cycles through now.
+fn keys() -> Vec<RemoteKey> {
+    editable(keys_now())
+}
+
+/// Whether the editor offers a hold: where keys report their release.
+fn holds() -> bool {
+    crate::input::long_press()
+}
+
+/// The editor's fields shown: without the press where a hold cannot be
+/// told from a tap.
+fn fields() -> impl Iterator<Item = Field> {
+    FIELDS
+        .iter()
+        .copied()
+        .filter(|field| *field != Field::Press || holds())
+}
+
 pub fn open(ui: Ui) {
-    ui.remote_editor.set(Some(Editor::default()));
+    let mut editor = Editor::default();
+    // A key this keyboard does not have starts on its first one.
+    let keys = keys();
+    if !keys.contains(&editor.key) {
+        editor.key = keys[0];
+    }
+    ui.remote_editor.set(Some(editor));
+}
+
+/// Moves the focus `by` fields, past one not shown.
+fn step(s: &mut Editor, by: isize) {
+    s.step(by);
+    if s.focus == Field::Press && !holds() {
+        s.step(by);
+        // At an end, stay on the field the focus came from.
+        if s.focus == Field::Press {
+            s.step(-by);
+        }
+    }
 }
 pub fn is_open(ui: Ui) -> bool {
     ui.remote_editor.with(Option::is_some)
@@ -96,16 +144,8 @@ fn change(ui: Ui, by: isize) {
     }
     update(ui, |s| match s.focus {
         Field::Context => s.context = cycle(s.context, remap::CONTEXTS, by),
-        Field::Key => {
-            let keys: Vec<_> = KEYS
-                .iter()
-                .chain(KEYBOARD_KEYS.iter())
-                .copied()
-                .chain((0..=9).map(RemoteKey::Digit))
-                .collect();
-            s.key = cycle(s.key, &keys, by);
-        }
-        Field::Press => {
+        Field::Key => s.key = cycle(s.key, &keys(), by),
+        Field::Press if holds() => {
             s.press = if s.press == Press::Short {
                 Press::Long
             } else {
@@ -194,8 +234,8 @@ fn activate(ui: Ui, field: Field) {
 }
 pub fn key(ui: Ui, action: Action) {
     match action {
-        Action::MoveUp => update(ui, |s| s.step(-1)),
-        Action::MoveDown => update(ui, |s| s.step(1)),
+        Action::MoveUp => update(ui, |s| step(s, -1)),
+        Action::MoveDown => update(ui, |s| step(s, 1)),
         Action::MoveLeft => change(ui, -1),
         Action::MoveRight => change(ui, 1),
         Action::Select => {
@@ -328,6 +368,14 @@ fn confirm_sheet(ui: Ui, size: Scale) -> impl IntoElement {
         )
 }
 
+/// The editor's title, after the keys it sets up.
+fn title() -> &'static str {
+    match keys_now() {
+        Keys::Keyboard => tr("Keyboard shortcuts"),
+        Keys::Remote => tr("Remote bindings"),
+    }
+}
+
 fn contents_hidden(ui: Ui) -> bool {
     state(ui, |screen| screen.confirm.is_some()).unwrap_or(false)
 }
@@ -343,7 +391,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     crate::overlays::Overlay::RemoteEditor.accessibility_covered(ui)
                 })
                 .child(
-                    ui_kit::header(ui, size, tr("Remote bindings"), close)
+                    ui_kit::header(ui, size, title(), close)
                         .accessibility_elements_hidden(move || contents_hidden(ui)),
                 )
                 .child(
@@ -354,12 +402,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     ui_kit::body(size, move || status(ui))
                         .accessibility_elements_hidden(move || contents_hidden(ui)),
                 )
-                .children(
-                    FIELDS
-                        .iter()
-                        .copied()
-                        .map(move |field| field_row(ui, size, field)),
-                )
+                .children(fields().map(move |field| field_row(ui, size, field)))
                 .child(when(
                     move || state(ui, |s| s.confirm.is_some()).unwrap_or(false),
                     move || confirm_sheet(ui, size),

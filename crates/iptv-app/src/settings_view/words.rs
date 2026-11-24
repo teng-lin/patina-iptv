@@ -20,9 +20,16 @@ pub fn save_failure(failure: crate::runtime::settings::SaveFailure) -> &'static 
     }
 }
 
-/// The name of a settings page (`settings_view::PAGES`).
+/// Whether the keys set up now are a keyboard's (`settings::keys`).
+fn keyboard() -> bool {
+    crate::settings::keys_now() == Some(iptv_presentation::capabilities::Keys::Keyboard)
+}
+
+/// The name of a settings page (`settings_view::PAGES`). The keys' page
+/// is named after the keys connected now (reactive).
 pub fn page(key: &str) -> &'static str {
     match key {
+        "remote" if keyboard() => tr("Keyboard"),
         "general" => tr("General"),
         "playlists" => tr("Playlists"),
         "epg" => tr("TV guide data"),
@@ -31,6 +38,7 @@ pub fn page(key: &str) -> &'static str {
         "remote" => tr("Remote control"),
         "parental" => tr("Parental control"),
         "other" => tr("Other"),
+        "advanced" => tr("Advanced"),
         "about" => tr("About"),
         _ => "",
     }
@@ -283,6 +291,7 @@ pub fn label(key: &str) -> &'static str {
         "remote.digit_timeout" => tr("Channel number pause"),
         "remote.player_up_down" => tr("Up and Down in the player"),
         "remote.key_overrides" => tr("Changed keys"),
+        "remote.customize" if keyboard() => tr("Edit keyboard shortcuts"),
         "remote.customize" => tr("Edit remote bindings"),
         "remote.restore_defaults" => tr("Restore the original keys"),
         "vod.movies_by_category" => tr("Movies by category"),
