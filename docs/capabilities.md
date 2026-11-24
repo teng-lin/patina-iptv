@@ -75,10 +75,13 @@ it ([`record_now_notices`](../crates/iptv-presentation/src/capabilities.rs),
 | Desktop | The idle-sleep inhibitor (IOKit assertion, logind or portal inhibitor, `SetThreadExecutionState`) could not be taken | Keep the computer awake | — |
 
 The iPad has no metered-network signal here; it does not record, so nothing is
-checked. While a capture runs on Android, the 120-second watchdog alarm restarts
-its foreground service if Android killed it; with no capture running no alarm
-is armed. Patina does not ask for exact alarms: the watchdog is exact only
-before Android 12, and Android does not rearm it after a reboot.
+checked. While a capture runs on Android, its foreground service is sticky: if
+Android kills the process, it restarts the service, which resumes the capture
+from what was written. Before Android 12 a 120-second exact watchdog alarm
+also restarts it. Patina does not ask for exact alarms, and from Android 12 an
+inexact alarm may neither come on time nor start a foreground service from
+the background, so none is armed there. Nothing restarts a capture after a
+reboot or a force stop.
 
 These are configured limits and facilities, not certification of a device's
 decoder performance. The profile tests exercise each row without needing that

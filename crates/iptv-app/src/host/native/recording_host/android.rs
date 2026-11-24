@@ -37,9 +37,10 @@ pub(crate) fn set_language(tag: &str) {
 }
 
 /// Whether a capture is running or due. While one is, `RecordingHost`
-/// keeps the foreground service running and arms the 120-second watchdog
-/// alarm that restarts it if Android killed it; otherwise it disarms the
-/// alarm and lets the service stop (#275).
+/// keeps the sticky foreground service running, which Android restarts if
+/// it killed the process, and before Android 12 also arms a 120-second
+/// watchdog alarm; otherwise it disarms the alarm and lets the service stop
+/// (#275).
 pub(crate) fn schedule(active: bool) {
     let Some((vm, class)) = HOST.get() else {
         return;

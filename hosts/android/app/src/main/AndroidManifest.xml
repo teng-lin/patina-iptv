@@ -51,7 +51,8 @@
             android:stopWithTask="false" android:foregroundServiceType="dataSync" />
         <service android:name=".ExternalPlaybackService" android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
-        <!-- Only the Record now watchdog alarm (RecordingHost.arm) reaches it. -->
+        <!-- Only the Record now watchdog alarm (RecordingHost.arm, before Android 12)
+             and an earlier version's pending alarm, which it retires, reach it. -->
         <receiver android:name=".RecordingAlarm" android:exported="false" />
         <provider
             android:name="com.longbridge.nsh.FilesProvider"

@@ -139,7 +139,7 @@ recordings keep the app running, as it already did when quitting.
 | Closing the main window while a recording runs, on macOS | The main window hides and **every** player stops: main, multiview, picture-in-picture and player windows. The recorder runs on with the Dock icon; opening Patina again shows the main window. Nothing plays meanwhile, and guide autoplay waits until the viewer moves to another channel |
 | Closing the main window while a recording runs, on Windows and Linux | Patina asks "Patina is recording": **Stop recording and quit** ends each recording as Stop does (what it holds is kept) and quits; **Keep recording** or Back leaves the window and everything in it as it was. No recorder runs without a window |
 | Quit (the menu's Quit or the platform's quit key) while recordings run | The same question first, the window shown again if it was hidden |
-| The system ending the session | Recordings stop with the recorder; what they hold is kept, and the next start finishes them as partial recordings |
+| The system ending the session | Recordings stop with the recorder; what they hold is kept. The next start resumes one whose program is still on and finishes the others as partial recordings |
 
 While a capture runs, Patina keeps the computer from idle sleep without root:
 an IOKit `PreventUserIdleSystemSleep` assertion on macOS, a logind

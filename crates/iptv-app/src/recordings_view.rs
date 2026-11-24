@@ -441,8 +441,12 @@ pub fn remember(ui: Ui, origin: Origin) {
     ui.recordings.update(|s| s.context = context);
 }
 /// Starts recording `request` now, once the parental check has passed.
-fn start(ui: Ui, request: Request) {
-    if let Err(message) = request.validate(crate::time::wall_unix()) {
+fn start(ui: Ui, mut request: Request) {
+    // A parental PIN may have been entered since the request was made: the
+    // capture starts now, or the runtime would count the wait as a gap.
+    let now = crate::time::wall_unix();
+    request.start = request.start.max(now);
+    if let Err(message) = request.validate(now) {
         crate::settings_view::notify(tr(message));
         ui.recordings.update(|s| s.error = Some(message.into()));
         return;

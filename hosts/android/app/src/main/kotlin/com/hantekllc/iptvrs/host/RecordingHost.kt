@@ -98,9 +98,10 @@ object RecordingHost {
 
     /** Called on Rust's publication worker whenever whether a capture is
      * running or due changes; the UI engine never waits on Binder or disk
-     * itself. While one is, the foreground service runs and a 120-second
-     * watchdog alarm restarts it if Android killed it (#275); otherwise the
-     * alarm is disarmed and the service stops. */
+     * itself. While one is, the foreground service runs; otherwise it stops.
+     * If Android kills the process mid-capture, the service is sticky, so
+     * Android restarts it and it resumes the capture from its spool; before
+     * Android 12 a 120-second [WATCHDOG] alarm also restarts it (#275). */
     @JvmStatic @Synchronized
     fun schedule(active: Boolean) {
         desiredActive = active
@@ -128,9 +129,15 @@ object RecordingHost {
         }
     }
 
-    /** Arms the watchdog alarm at `next` (UTC seconds), or disarms it for 0.
-     * Exact where Android allows it without a permission (before Android
-     * 12), otherwise inexact: Patina no longer asks for exact alarms. */
+    /** Whether the watchdog alarm is armed at all. From Android 12 only an
+     * exact alarm, which needs a permission Patina no longer asks for, may
+     * start a foreground service from the background: an inexact one would
+     * fire up to an hour late and then be refused, retrying every minute.
+     * There the sticky [RecordingService] is the recovery instead. */
+    val WATCHDOG = Build.VERSION.SDK_INT < 31
+
+    /** Arms the watchdog alarm at `next` (UTC seconds) where [WATCHDOG]
+     * allows it, or disarms it for 0. */
     fun arm(
         context: Context,
         next: Long,
@@ -138,15 +145,10 @@ object RecordingHost {
         try {
             val alarms = context.getSystemService(AlarmManager::class.java)
             val pending = alarmIntent(context)
-            val exact = Build.VERSION.SDK_INT < 31 || alarms.canScheduleExactAlarms()
             alarms.cancel(pending)
-            if (next > 0) {
+            if (next > 0 && WATCHDOG) {
                 val at = maxOf(Math.multiplyExact(next, 1000L), System.currentTimeMillis() + 1000)
-                if (exact) {
-                    alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
-                } else {
-                    alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
-                }
+                alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
             }
         } catch (_: RuntimeException) {
         }
@@ -178,8 +180,8 @@ object RecordingHost {
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
             true
         } catch (_: RuntimeException) {
-            // Android may refuse a non-exact background launch. Retry through
-            // the registered alarm; the catalog retains the accepted job.
+            // Android may refuse a background launch. Before Android 12 the
+            // watchdog retries it; the catalog retains the accepted job.
             arm(context, System.currentTimeMillis() / 1000 + 60)
             false
         }

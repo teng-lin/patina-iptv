@@ -34,8 +34,11 @@ is below 1.0, a minor release may change behavior.
   requirements, Start recorder at login, Remove recorder login startup, Allow
   precise recording wakeups and Stop recorder and quit settings. Android no
   longer asks for exact alarms or starts on boot or after an update; its
-  recording notification no longer mentions scheduling. Record now, its
-  watchdog and the Recordings library are unchanged.
+  recording notification no longer mentions scheduling. From Android 12 a
+  capture whose process Android killed is restarted by its sticky foreground
+  service rather than by the watchdog alarm, which stays only before
+  Android 12. Record now and the Recordings library are otherwise
+  unchanged.
 
 ### Fixed
 
