@@ -26,7 +26,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-  actions: read
 # Launches the app on a tablet and a TV emulator and drives it with remote keys
 # (tools/ci/android-smoke.sh): first run, the synthetic playlist, a channel in
 # the guide, full screen, multiview, background and resume. Path-filtered and
@@ -121,6 +120,9 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     env:
       SNAPSHOT_AVD: patina-validation-ci-snapshot
       AVD_API: '36'
@@ -162,7 +164,7 @@ jobs:
         run: |
           set -euo pipefail
           image="system-images;android-$AVD_API;$AVD_TARGET;$AVD_ARCH"
-          sdkmanager --install emulator "$image" < /dev/null > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator "$image" < /dev/null > /dev/null
           identity=$({
             cat "$ANDROID_HOME/emulator/source.properties"
             cat "$ANDROID_HOME/system-images/android-$AVD_API/$AVD_TARGET/$AVD_ARCH/source.properties"
@@ -191,7 +193,7 @@ jobs:
             | [.id, .workflow_run.id] | @tsv' <<< "$records")
           while read -r artifact_id run_id; do
             [[ "$artifact_id" =~ ^[0-9]+$ && "$run_id" =~ ^[0-9]+$ ]] || continue
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id") || continue
             if jq -e '
               .head_branch == "master" and
               ((.path == ".github/workflows/validation.yml" and (.event == "push" or .event == "schedule" or .event == "workflow_dispatch")) or
@@ -298,6 +300,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           IPTV_SMOKE_DISPOSABLE_AVD: ${{ env.SNAPSHOT_AVD }}
+          IPTV_SMOKE_QUICK_BOOT: 'true'
         with:
           avd-name: ${{ env.SNAPSHOT_AVD }}
           emulator-port: 5556
@@ -312,6 +315,9 @@ jobs:
           emulator-options: ${{ env.AVD_OPTIONS }} -no-snapshot-save
           # Retry an Android system death once. Application failures remain failures.
           script: &android-smoke-script >-
+            if [ "${IPTV_SMOKE_QUICK_BOOT:-}" = true ]; then
+            python3 tools/ci/android/adb.py --phase "Quick Boot readiness" --category shell --timeout 15 -- adb -s "$ANDROID_SERIAL" shell pm path android | grep -q '^package:' || exit 1;
+            fi;
             touch "$RUNNER_TEMP/android-smoke-started" &&
             (bash tools/ci/android-smoke.sh "$ANDROID_SERIAL" hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
             grep -q DeadSystemException target/android-smoke/crash.log &&

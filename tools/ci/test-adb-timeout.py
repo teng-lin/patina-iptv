@@ -189,6 +189,21 @@ class Integration(unittest.TestCase):
             if re.search(r"\badb (?:reboot|wait-for-device)\b", line):
                 self.assertIn("python3 tools/ci/android/adb.py", line)
 
+    def test_quick_boot_fallback_preserves_failures_after_the_test_starts(self):
+        workflow = (ROOT / ".github/workflows/android-smoke.yml").read_text()
+        step = workflow.split("      - name: Check whether Quick Boot failed before testing\n", 1)[1]
+        guard, cold = step.split("      - name: Smoke test on the", 1)
+        self.assertIn("if: steps.warm-smoke.outcome == 'failure'", guard)
+        self.assertIn("if: steps.warm-smoke.outcome != 'success'", cold)
+        command = "\n".join(line[10:] for line in guard.split("        run: |\n", 1)[1].splitlines())
+        with tempfile.TemporaryDirectory() as directory:
+            environment = dict(os.environ, RUNNER_TEMP=directory)
+            before = subprocess.run(["bash", "-ec", command], env=environment, capture_output=True, timeout=5)
+            (Path(directory) / "android-smoke-started").touch()
+            after = subprocess.run(["bash", "-ec", command], env=environment, capture_output=True, timeout=5)
+        self.assertEqual(before.returncode, 0, before.stderr)
+        self.assertEqual(after.returncode, 1, after.stderr)
+
     @unittest.skipUnless(os.name == "posix", "the action uses sh -c")
     def test_every_upstream_split_script_is_valid_sh_and_system_recovery_is_guarded(self):
         script = self.action_script()
@@ -216,20 +231,23 @@ touch second-run
                 adb = binary / "adb"
                 adb.write_text(f"#!{sys.executable}\n" + '''import json, sys
 with open("adb-calls.jsonl", "a") as stream: stream.write(json.dumps(sys.argv[1:]) + "\\n")
+if sys.argv[3:] == ["shell", "pm", "path", "android"]:
+    print("package:/system/framework/framework-res.apk")
 ''')
                 adb.chmod(0o755)
                 result = subprocess.run(["sh", "-c", commands[0]], cwd=root, capture_output=True,
                                         env={"PATH": str(binary) + os.pathsep + os.environ["PATH"],
-                                             "RUNNER_TEMP": str(root), "ANDROID_SERIAL": "emulator-5554"},
+                                             "RUNNER_TEMP": str(root), "ANDROID_SERIAL": "emulator-5554",
+                                             "IPTV_SMOKE_QUICK_BOOT": "true"},
                                         timeout=5, check=False)
                 self.assertEqual(result.returncode, 0 if system_crash else 1, result.stderr)
                 self.assertTrue((root / "android-smoke-started").exists())
                 self.assertEqual((root / "second-run").exists(), system_crash)
+                calls = [json.loads(line) for line in (root / "adb-calls.jsonl").read_text().splitlines()]
+                expected = [["-s", "emulator-5554", "shell", "pm", "path", "android"]]
                 if system_crash:
-                    calls = [json.loads(line) for line in (root / "adb-calls.jsonl").read_text().splitlines()]
-                    self.assertEqual(calls, [["-s", "emulator-5554", "reboot"], ["-s", "emulator-5554", "wait-for-device"]])
-                else:
-                    self.assertFalse((root / "adb-calls.jsonl").exists())
+                    expected.extend([["-s", "emulator-5554", "reboot"], ["-s", "emulator-5554", "wait-for-device"]])
+                self.assertEqual(calls, expected)
 
 
 @unittest.skipUnless(shutil.which("javac") and shutil.which("java"), "requires a JDK")
