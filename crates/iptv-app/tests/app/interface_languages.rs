@@ -448,11 +448,11 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     }
     shown(app, &ja.t("Clock"));
     shown(app, &ja.t("12-hour"));
-    // The remote-key editor.
-    press(app, &ja.t("Remote control"));
-    press(app, &ja.t("Edit remote bindings"));
+    // The keyboard's shortcut editor (a desktop's keys).
+    press(app, &ja.t("Keyboard"));
+    press(app, &ja.t("Edit keyboard shortcuts"));
     step(app.wait_for("id:remote-editor-screen"));
-    shown(app, &ja.t("Remote bindings"));
+    shown(app, &ja.t("Keyboard shortcuts"));
     shown(
         app,
         &ja.t("Up/Down chooses a row; Left/Right or tap changes it. Save applies immediately. Back remains available."),
@@ -462,11 +462,6 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
         app,
         &ja.f("Context: {context}", &[("context", guide.as_str().into())]),
     );
-    let short = ja.t("Short");
-    shown(
-        app,
-        &ja.f("Press: {press}", &[("press", short.as_str().into())]),
-    );
     // "Currently: … · default binding", whatever the key does.
     let now = ja.f(
         "Currently: {action} · default binding",
@@ -474,14 +469,8 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     );
     let (before, after) = now.split_once('\u{1}').unwrap();
     step(app.wait_for(&format!("text:/^{}.*{}$/", pattern(before), pattern(after))));
-    // The press kind changes with a tap: "Hold", in Japanese.
-    step(app.press("id:remote-Press"));
-    let hold = ja.t("Hold");
-    shown(
-        app,
-        &ja.f("Press: {press}", &[("press", hold.as_str().into())]),
-    );
-    assert!(!app.shows("Press: Hold"));
+    // A desktop's keys report no hold: the editor offers none (#280).
+    assert!(!app.screen().matches("id:remote-Press").unwrap());
 }
 
 /// A real failed settings publication rolls the live value back and reports

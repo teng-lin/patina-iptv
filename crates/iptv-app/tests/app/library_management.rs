@@ -78,7 +78,15 @@ fn saved_bindings(
 }
 #[test]
 fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted() {
-    let Some(home) = isolated!() else { return };
+    fn here() {}
+    // A D-pad's report (Android's observer simulated): the remote's
+    // bindings, with every remote key (#280).
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("iptv.sqlite");
@@ -312,6 +320,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     }
     step(app.press_key("enter"));
     step(app.wait_for_within("text:Local A", Duration::from_secs(20)));
+    crate::device_signals::report(&mut app, "tv", false, true);
     rail(&mut app);
     step(app.press("text:Settings >> nth=0"));
     step(app.wait_for("text:Remote control"));
@@ -343,9 +352,10 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
         saved_bindings(&mut app, &dir, |bindings| bindings.len() == 1).len(),
         1
     );
+    // A hold is offered only where keys report their release
+    // (`keyboard_remote_settings` binds one): not this desktop's.
     step(app.press("id:remote-Context"));
-    step(app.wait_for("id:remote-Press"));
-    step(app.press("id:remote-Press"));
+    assert!(!app.screen().matches("id:remote-Press").unwrap());
     step(app.wait_for("id:remote-Capture"));
     step(app.press("id:remote-Capture"));
     step(app.press_remote(nsh_tv::RemoteKey::Green));
@@ -360,7 +370,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     assert_eq!(saved.len(), 2);
     assert!(saved.iter().any(|b| b.context.as_deref() == Some("groups")
         && b.key == "green"
-        && b.press == iptv_settings::PressKind::Long));
+        && b.press == iptv_settings::PressKind::Short));
     step(app.press("id:remote-Capture"));
     step(app.press_remote(nsh_tv::RemoteKey::Back)); // Android then delivers its platform Back event.
     step(app.back());

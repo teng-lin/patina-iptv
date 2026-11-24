@@ -3,6 +3,9 @@ package com.hantekllc.iptvrs.host
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
+import android.media.MediaFormat
 import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
@@ -12,9 +15,10 @@ import com.longbridge.nsh.NshComponent
 import com.longbridge.nsh.NshComponentContext
 
 /**
- * Reports the device's form factor and connected input to the Rust app
- * (`device.rs`) as a `device` event, `{"form", "keyboard", "dpad"}`: when
- * it attaches, and again on each configuration change that alters them
+ * Reports the device's form factor, connected input and video decoder
+ * capacity to the Rust app (`device.rs`) as a `device` event, `{"form",
+ * "keyboard", "dpad", "decoders"?}`: when it attaches, and again on each
+ * configuration change that alters them
  * (the activity handles `keyboard`, `keyboardHidden`, `navigation`,
  * `screenSize` and `smallestScreenSize` itself, so its views receive them).
  */
@@ -26,6 +30,9 @@ internal class DeviceComponent(
     }
 
     private var reported: Map<String, Any>? = null
+
+    /** Read once: the codecs do not change while the app runs. */
+    private val decoders: Int? by lazy { DeviceSignals.probeDecoders() }
     private val observer =
         object : View(context.context) {
             override fun onAttachedToWindow() {
@@ -48,11 +55,12 @@ internal class DeviceComponent(
         val tv = DeviceSignals.tv(config.uiMode, leanback)
         val display = DeviceSignals.displaySmallestDp(host, config)
         val next =
-            mapOf(
-                "form" to DeviceSignals.form(tv, display),
-                "keyboard" to DeviceSignals.keyboard(config.keyboard, config.hardKeyboardHidden),
-                "dpad" to DeviceSignals.dpad(config.navigation, config.navigationHidden),
-            )
+            buildMap {
+                put("form", DeviceSignals.form(tv, display))
+                put("keyboard", DeviceSignals.keyboard(config.keyboard, config.hardKeyboardHidden))
+                put("dpad", DeviceSignals.dpad(config.navigation, config.navigationHidden))
+                decoders?.let { put("decoders", it) }
+            }
         Log.i("nsh", "iptv device: $next (display ${display}dp, window ${config.smallestScreenWidthDp}dp)")
         if (next != reported) {
             reported = next
@@ -93,6 +101,68 @@ internal object DeviceSignals {
             tv -> "tv"
             displaySmallestDp in 1 until PHONE_MAX_DP -> "phone"
             else -> "tablet"
+        }
+
+    /** What the decoder probe reads of one codec. */
+    data class Decoder(
+        val encoder: Boolean,
+        val hardware: Boolean,
+        val avc: Boolean,
+        val maxInstances: Int,
+        /** Only for protected content (a `.secure` codec): not picked for a clear stream. */
+        val secureOnly: Boolean = false,
+        /** Another name for a codec listed too (Android 10+): Media3 skips it. */
+        val alias: Boolean = false,
+    )
+
+    /**
+     * The H.264 streams the device decodes in hardware at once: the
+     * instance limit of the hardware H.264 decoder the player picks for a
+     * clear stream (Media3 takes the first in the codec list's order), or
+     * null without one (Media3 then decodes in software, which no instance
+     * limit bounds) or when it reports no limit. The app only lowers its
+     * two-tile budget by it (`Host::decoder_slots`).
+     */
+    fun decoders(codecs: List<Decoder>): Int? =
+        codecs
+            .firstOrNull { !it.encoder && !it.alias && !it.secureOnly && it.hardware && it.avc }
+            ?.maxInstances
+            ?.takeIf { it > 0 }
+
+    /**
+     * [decoders] on this device's codec list; null if any of it cannot be
+     * read. Skipping an unreadable codec could lose the one decoder that
+     * allows two instances, so the budget is then left as it is.
+     */
+    fun probeDecoders(): Int? =
+        runCatching {
+            val codecs =
+                MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.map { info ->
+                    // The type as the codec spells it: its capabilities are
+                    // looked up by that exact string.
+                    val avc = info.supportedTypes.firstOrNull { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true) }
+                    val capabilities = if (avc != null && !info.isEncoder) info.getCapabilitiesForType(avc) else null
+                    Decoder(
+                        encoder = info.isEncoder,
+                        hardware = hardware(info),
+                        avc = avc != null,
+                        maxInstances = capabilities?.maxSupportedInstances ?: 0,
+                        secureOnly =
+                            capabilities?.isFeatureRequired(MediaCodecInfo.CodecCapabilities.FEATURE_SecurePlayback) == true,
+                        alias = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && info.isAlias,
+                    )
+                }
+            decoders(codecs)
+        }.onFailure { Log.w("nsh", "iptv device: decoder probe failed", it) }
+            .getOrNull()
+
+    /** A hardware codec: as Android 10 reports it, before that by the software codecs' names. */
+    private fun hardware(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.isHardwareAccelerated
+        } else {
+            val name = info.name.lowercase()
+            !name.startsWith("omx.google.") && !name.startsWith("c2.android.")
         }
 
     /** A hardware keyboard with keys for text is attached and not hidden (a folded-away keyboard is). */
