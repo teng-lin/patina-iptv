@@ -147,14 +147,11 @@ fn native_pip_reports_revoke_and_restore_controls_without_reopening_playback() {
             },
         );
         if supported {
-            step(app.wait_for_gone(
-                "text:/Picture in picture is unavailable on this device/",
-                Duration::from_secs(3),
-            ));
+            step(app.wait_for(PIP));
         } else {
-            step(app.wait_for("text:/Picture in picture is unavailable on this device/"));
-            step(app.press("text:/^Picture in picture/"));
-            app.settle();
+            // A host that cannot offer it gets no permanently disabled
+            // control: the strip leaves it out.
+            step(app.wait_for_gone(PIP, Duration::from_secs(3)));
             assert!(
                 !pip_open(app),
                 "unsupported native reports revoke action admission"

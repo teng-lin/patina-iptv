@@ -93,6 +93,8 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
         .unwrap();
     store.set_active_source(source).unwrap();
     drop(store);
+    // As an Xtream Codes playlist it offers Movies and Shows.
+    crate::personalization::as_catalog_playlist(&root.join("iptv.sqlite"), source);
     // This fixture intentionally plays three independent synthetic channels.
     settings
         .set_in(

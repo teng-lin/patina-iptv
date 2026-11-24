@@ -192,6 +192,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
             iptv_presentation::browse::rail_items(iptv_presentation::browse::VodAvailability {
                 shown: true,
                 any: true,
+                live_only: false,
             })
             .into_iter()
             .filter(move |i| i.at_bottom() == bottom)
