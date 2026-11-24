@@ -260,7 +260,18 @@ pub static REMOTE: &[Setting] = &[
             "What Up and Down do over full-screen video: switch channels or open the channel list.",
         ),
     ),
-    // default: ours — empty: only the built-in map applies
+    // default: ours. Shown with the keyboard or remote settings (#280),
+    // where the keys that seek are set up; the key keeps its original
+    // name, so stored values and backups still read.
+    Setting::new(
+        Section::Remote,
+        "mapping",
+        "catchup.seek_keys",
+        choice(&SEEK_KEYS, "left_right"),
+        key("Which keys seek while replaying: Left/Right, Down/Up, or the transport keys."),
+    ),
+    // default: ours — empty: only the built-in map applies. No row shows
+    // it (#280): the bindings editor's row sums it up.
     remote(
         "mapping",
         "remote.key_overrides",
