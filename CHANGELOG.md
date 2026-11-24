@@ -39,6 +39,10 @@ is below 1.0, a minor release may change behavior.
   a PIN of any length can be entered with arrows and OK and submitted with
   Continue. Movie and series settings are hidden when no enabled playlist can
   supply a catalog.
+- Android TV no longer offers picture in picture: Home during playback returns
+  to the launcher and stops the stream, and the control and the
+  picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
+  it, entering on Home only from full-screen playback.
 
 ### Fixed
 

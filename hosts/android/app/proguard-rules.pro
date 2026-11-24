@@ -50,4 +50,6 @@
 }
 -keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.ExternalPlayerHost {
     static boolean open(java.lang.String);
+    static boolean available();
+    static void released();
 }

@@ -1,9 +1,31 @@
 //! Availability of playback features in the current presentation.
 
+use crate::layout::Class;
 use crate::pip::Pip;
-use iptv_core::capabilities::{Host, Recording};
+use iptv_core::capabilities::{FormFactor, Host, Input, Recording};
 use iptv_core::message::key;
 use iptv_core::recording::WakeCapability;
+
+/// The signals features are gated by, as they are now: the device's form
+/// factor and connected input (`host`, which decide which capabilities and
+/// settings exist), and the window's size class (which decides layouts).
+/// All three can change while the app runs, so gates take a `Device`
+/// rather than reading a build constant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Device {
+    pub host: Host,
+    pub window: Class,
+}
+
+impl Device {
+    pub fn form_factor(self) -> FormFactor {
+        self.host.form_factor
+    }
+
+    pub fn input(self) -> Input {
+        self.host.input
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
@@ -115,22 +137,26 @@ mod tests {
     fn live_player_reports_replace_unknown_support_and_revoke_actions() {
         let mut state = Pip::default();
         assert_eq!(pip(&state, true).reason(), Some(Reason::WaitingForPlayer));
-        state.report(false, true, false);
+        state.report(false, false, false);
         assert_eq!(pip(&state, true).reason(), Some(Reason::UnsupportedPip));
-        state.report(true, true, false);
+        state.report(true, false, false);
         assert_eq!(pip(&state, false).reason(), Some(Reason::PlaybackRequired));
         assert!(pip(&state, true).available());
-        state.report(true, true, true);
+        state.report(true, false, true);
         assert_eq!(pip(&state, true).reason(), Some(Reason::PipAlreadyActive));
-        state.report(false, true, false);
+        state.report(false, false, false);
         assert!(!pip(&state, true).available());
+        state.report(true, true, false);
+        assert_eq!(
+            pip(&state, true).reason(),
+            Some(Reason::UnsupportedPip),
+            "a TV never has it"
+        );
     }
 
     #[test]
     fn multiview_checks_device_and_current_presentation_without_granting_streams() {
-        let host = Host {
-            platform: Platform::Android,
-        };
+        let host = Host::of(Platform::Android);
         assert!(multiview(host, true, true, false).available());
         assert_eq!(
             multiview(host, false, true, false).reason(),

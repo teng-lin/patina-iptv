@@ -85,6 +85,18 @@ pub enum Repeat {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct RuleId(pub i64);
 
+/// A scheduled job or repeating rule an earlier version accepted, which the
+/// upgrade that retired scheduled recording canceled. Shown read-only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetiredSchedule {
+    pub channel_name: String,
+    pub title: String,
+    pub start: i64,
+    pub end: i64,
+    /// [`Repeat::Once`] for a single job.
+    pub repeat: Repeat,
+}
+
 /// A guide occurrence is identified by its original start, independently of
 /// padding or a record-now capture that begins after the program started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

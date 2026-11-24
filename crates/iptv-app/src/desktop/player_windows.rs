@@ -471,7 +471,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
                     .child(crate::search_view::layer(local))
                     .child(crate::menu_view::layer(local))
                     .child(crate::organization_view::layer(local))
-                    .child(crate::chooser::layer(local))
+                    .child(crate::chooser::layer(local, false))
                     .child(crate::play_bar::layer(local))
             },
         ))

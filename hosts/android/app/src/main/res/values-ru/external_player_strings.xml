@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="external_channel">Воспроизведение в другом приложении</string>
+    <string name="external_title">Patina передаёт канал</string>
+    <string name="external_background">Другое приложение воспроизводит канал из Patina</string>
+</resources>

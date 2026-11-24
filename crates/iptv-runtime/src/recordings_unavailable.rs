@@ -115,6 +115,18 @@ impl Runtime {
     pub async fn recording_jobs(&self) -> Result<Vec<Job>, Error> {
         Ok(Vec::new())
     }
+    /// This build never scheduled recordings, so none were retired.
+    pub async fn announce_retired_recordings(&self) -> Result<bool, Error> {
+        Ok(false)
+    }
+    pub async fn retired_recording_schedules(
+        &self,
+    ) -> Result<Vec<iptv_core::recording::RetiredSchedule>, Error> {
+        Ok(Vec::new())
+    }
+    pub async fn dismiss_retired_recording_schedules(&self) -> Result<(), Error> {
+        Ok(())
+    }
     pub async fn open_recording(&self, _id: JobId) -> Result<PlaySource, Error> {
         Err(unavailable())
     }

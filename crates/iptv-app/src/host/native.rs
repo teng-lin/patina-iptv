@@ -54,7 +54,7 @@ pub(crate) const IMPORTS: bool = true;
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
-    ports.background_recordings = crate::capabilities::HOST.background_recordings();
+    ports.background_recordings = crate::capabilities::BUILT.background_recordings();
     ports.recording_schedule = recording_host::schedule;
     ports.exclude_from_backup = platform_data::exclude_from_backup;
     ports.startup_mark = |phase, detail| crate::startup::mark_with(phase, detail);
@@ -103,6 +103,7 @@ pub mod exports {
     /// Explicit synthetic-key injection for the headless test binary only.
     #[cfg(feature = "test-support")]
     pub use super::credential_key::install_test_key;
+    pub use super::platform_data::exit_background_recorder_launch;
     /// Use a fresh explicit synthetic profile without changing the process home.
     #[cfg(feature = "test-support")]
     pub use super::platform_data::install_test_data_dir;

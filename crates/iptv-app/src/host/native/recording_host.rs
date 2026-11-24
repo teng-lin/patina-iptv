@@ -20,6 +20,24 @@ pub(crate) fn schedule(next: i64, _active: bool) -> iptv_core::recording::WakeCa
 
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod startup;
+
+/// Scheduled recording is retired. On the first launch of this version, and
+/// on every launch by an earlier version's login item or task
+/// (`background`), removes the login and wake registrations earlier
+/// versions made. A failure is retried at the next launch.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub(crate) fn retire_registrations(directory: &std::path::Path, background: bool) {
+    if !background && directory.join(startup::RETIRED).exists() {
+        return;
+    }
+    match startup::retire(directory, &startup::Registrations::current()) {
+        Ok(()) => log::info!("iptv recordings: login and wake registrations removed"),
+        Err(error) => log::warn!(
+            "iptv recordings: removing login and wake registrations failed ({:?}); retrying at the next launch",
+            error.kind()
+        ),
+    }
+}
 pub(crate) fn command(key: &str) {
     if key == "recordings.background_status" {
         let capability = crate::runtime().recording_capabilities();
@@ -28,7 +46,7 @@ pub(crate) fn command(key: &str) {
             return;
         }
         crate::settings_view::notify(crate::i18n::tr(
-            if crate::capabilities::HOST.alarm_permission() {
+            if crate::capabilities::host().alarm_permission() {
                 "Android keeps capture in a foreground service. Exact alarms need Special app access. Force stop prevents recordings; Android may limit background recording to six hours."
             } else if !capability.background {
                 "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups."

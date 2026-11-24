@@ -56,7 +56,8 @@ custom groups and history.
   per-channel guide choice, catch-up playback where the provider offers it.
 - **Watching:** guide over live video, channel list beside the video,
   multiview (up to four tiles on desktop, two on Android),
-  picture-in-picture on the desktops, track and picture-size choice.
+  picture-in-picture on the desktops and Android phones and tablets, track
+  and picture-size choice.
 - **Library:** favorites, custom groups, reordering, hiding, history and
   channel/program search.
 - **Movies and series:** browse provider catalogs by playlist and category,
@@ -377,18 +378,23 @@ channel as guide data arrives. Cancel repeating schedule stops future
 occurrences without deleting finished recordings. If multiple repeating
 schedules share the selected recording, this cancels all of them.
 
-On Android, capture runs in a foreground service with a notification. Boot and
-package updates restore the wakeups of recordings scheduled earlier. Android
+On Android, capture runs in a foreground service with a notification. Android
 force stop prevents execution until Patina is opened again, and Android 15 can
 limit background capture to six hours in a 24-hour period. Device, network and
 storage availability still apply.
 
-On desktop, closing the window keeps the process running when recordings or
-repeating rules need it; **Quit Patina** stops the recorder. Linux and macOS
-require an awake computer. Windows includes an experimental scheduled-task wake
-hook, subject to the system's wake-timer settings; it does not power on a
-shut-down computer.
+On desktop, closing the window keeps the process running while a recording
+runs; **Quit Patina** stops the recorder. The computer has to stay awake.
 iPad background recording is not supported.
+
+Scheduled recording is being removed. Upgrading from a version that had it
+cancels its pending jobs and disables its repeating rules before any recorder
+starts, keeps their recordings, and tells you once: Recordings lists what was
+canceled until you close it. A capture the upgrade interrupted is kept as a
+partial recording. The first launch also removes what earlier versions
+registered: the Linux autostart entry, the macOS LaunchAgent, the Windows
+"Patina Recorder" task with its wake timer, and Android's pending recording
+alarm. A login launch from one of them removes them and exits.
 
 Finished and partial recordings offer resume and playback from the beginning;
 the player uses its normal pause, rewind, fast-forward and seek bar controls.
@@ -406,9 +412,9 @@ are unknown and are counted conservatively against other streams.
 Media is stored beside the catalog directory, in its `-recordings` sibling,
 with a limit of 8 GiB per recording, four simultaneous recorders and a
 conservative 32 GiB media budget. Recordings are not encrypted with the
-catalog and are excluded from portable and OS backups. Catalog restore
-clears recording schedules/history; existing media files remain in that
-directory and are never overwritten by restored recording identities.
+catalog and are excluded from portable and OS backups. Catalog restore drops
+the backup's recording schedules and history and keeps this device's
+recordings, so their media in that directory stays playable.
 
 ## Keyboard
 

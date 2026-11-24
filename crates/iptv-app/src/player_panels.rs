@@ -15,6 +15,7 @@ use crate::i18n::{tr, trf};
 use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
+use iptv_presentation::capabilities::Device;
 use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, QuickAction, Shown};
 use iptv_presentation::player_info::date_time;
 use iptv_presentation::sound::delay_label;
@@ -129,16 +130,20 @@ fn is_favorite(ui: Ui) -> bool {
         .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
 }
 
-/// Whether the strip shows a control at all. What this host (or this
-/// player window) can never do is left out rather than drawn disabled; a
-/// control shows disabled only while the viewer can change its condition.
-pub(crate) fn offered(ui: Ui, control: Control) -> bool {
+/// Whether the strip shows `control` at all on `device` as it is now.
+/// What this host (or this player window) can never do is left out
+/// rather than drawn disabled, and the focus moves off a control that
+/// leaves (`Panels::offer`); a control shows disabled only while the
+/// viewer can change its condition. The features that follow the
+/// device's form factor and input are left out here.
+pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
     let main = ui.player_surface == 0;
     match control {
         Control::Record | Control::Recordings => crate::host::HAS_WORKERS && main,
         Control::Search => main,
-        Control::Multiview => main && crate::capabilities::HOST.decoder_slots() > 1,
-        // Shown until the host reports, then only where it can.
+        Control::Multiview => main && device.host.decoder_slots() > 1,
+        // Shown until the host reports, then only where it can: never a TV
+        // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
         Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
         _ => true,
     }
@@ -490,12 +495,23 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
 /// ([`offered`]) that keeps the focused control on screen.
 fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     let list = element_ref();
-    // Follows the host's report (picture in picture); the rest is fixed.
+    // Follows the device's signals (`device.rs`) and the host's picture in
+    // picture report: a control that leaves while focused passes the focus
+    // to its nearest neighbor shown.
     effect(move || {
+        let device = crate::device::current();
         let shown: Vec<Control> = CONTROLS
             .into_iter()
-            .filter(|&control| offered(ui, control))
+            .filter(|&control| offered(ui, device, control))
             .collect();
+        // A resize or a report that leaves the strip as it is does not
+        // touch the panels, whose readers would otherwise all run again.
+        if ui
+            .panels
+            .with_untracked(|p| p.controls().eq(shown.iter().copied()))
+        {
+            return;
+        }
         untracked(|| {
             ui.panels
                 .update(|p| p.offer(|control| shown.contains(&control)))

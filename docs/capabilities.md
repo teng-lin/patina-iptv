@@ -16,13 +16,39 @@ native services report what the operating system actually accepted.
 | iPad | 4 | No | No | No |
 | Unknown | 1 | No | No | No |
 
+## Device signals
+
+The operating system alone cannot tell an Android phone from a tablet or a
+TV, so gates also take three signals that can change while the app runs
+([portable model](../crates/iptv-core/src/capabilities.rs),
+[`Device`](../crates/iptv-presentation/src/capabilities.rs),
+[shell adapter](../crates/iptv-app/src/device.rs)):
+
+| Signal | Source | Gates |
+| --- | --- | --- |
+| Form factor: phone, tablet, TV or desktop | Android: the TV UI mode or the leanback feature, otherwise the physical display's smallest width (under 600 dp is a phone), never the window's, so a tablet in split screen stays a tablet ([`DeviceComponent.kt`](../hosts/android/app/src/main/kotlin/com/hantekllc/iptvrs/host/DeviceComponent.kt)). iPad: the system's idiom. Desktops: the build. Tizen: a TV. | Which capabilities exist |
+| Window size class: compact, medium or expanded | The [layout class](../crates/iptv-presentation/src/layout.rs) of the current window at the guide's scale and text size | Layouts |
+| Connected input: a hardware keyboard, a D-pad | Android: `Configuration.keyboard` and `navigation`, unless hidden. Desktops: a keyboard. Tizen: its remote's D-pad. iPad: none yet (`GCKeyboard` is not read). | Keyboard and remote features |
+
+Android reports the form factor and the input when the app starts and on every
+configuration change; before that report an Android build counts as a tablet
+with neither input. The settings offer check (`settings::offer`), the control
+strip and multiview's decoder count read the signals as they are now, so a
+change takes effect without a restart. A control that leaves the strip while
+focused passes the focus to its nearest neighbor. No gate changes what it offers
+by these signals yet; the host profiles above still follow the platform alone.
+
 These are configured limits and facilities, not certification of a device's
 decoder performance. The profile tests exercise each row without needing that
 OS. Android TV and tablet share the same surface budget; the native PiP report
-also distinguishes a TV for the existing automatic-entry preference.
+also distinguishes a TV, which never has picture in picture on any build: its
+host reports it unsupported and refuses to enter, by request or on Home.
 
 PiP starts unknown until the player reports support; hosts without a native
-implementation acknowledge it as unavailable during setup. Its button and action
+implementation (the iPad, browser TVs) acknowledge it as unavailable during
+setup. Where it is unavailable the control strip and the play bar leave the
+control out, rather than show it disabled, and the setting
+`player.pip_on_leave` is hidden. Its button and action
 handler use the same current decision. A denied or changed report takes effect
 without restarting the application. Desktop PiP presents the original player;
 it never reserves another provider stream.

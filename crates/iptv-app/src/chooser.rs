@@ -1,7 +1,9 @@
 //! Translucent choosers over full-screen video: picture size (with "apply
 //! to all channels"), the sleep timer, the video, audio and subtitle
-//! tracks, the audio delay, and the recently watched channels (the History
-//! quick action: the store's watch history, as the Recently watched list).
+//! tracks, the audio delay, the recently watched channels (the History
+//! quick action: the store's watch history, as the Recently watched list),
+//! and the question before leaving where the host asks it
+//! (`crate::confirm_leaving`).
 //! Option sets follow the choosers observed in the reference UX;
 //! wording is ours. Entries are taken when a chooser
 //! opens; Up/Down move, OK (or a tap) picks and closes, Back closes.
@@ -36,6 +38,8 @@ pub enum Kind {
     AudioDelay,
     /// The recently watched channels.
     History,
+    /// No or Yes before the app leaves (`crate::confirm_leaving`).
+    Leave,
 }
 
 /// The open chooser.
@@ -119,6 +123,7 @@ fn title(kind: Kind) -> &'static str {
         Kind::Track(Track::Text) => tr("Subtitles"),
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
+        Kind::Leave => tr("Close Patina?"),
     }
 }
 
@@ -178,6 +183,12 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             (labels, Vec::new(), at.unwrap_or(delays.len() / 2))
         }
         Kind::History => history(ui),
+        // No first, and focused: OK alone never leaves.
+        Kind::Leave => (
+            vec![tr("No").to_owned(), tr("Yes").to_owned()],
+            Vec::new(),
+            0,
+        ),
         Kind::More => (Vec::new(), Vec::new(), 0),
         Kind::Volume => (
             (0..=10).map(|n| format!("{}%", n * 10)).collect(),
@@ -268,6 +279,13 @@ pub fn close(ui: Ui) {
     ui.chooser.set(None);
 }
 
+/// Back at the top level, where the host asks before leaving: No or Yes,
+/// with No focused. Always handled.
+pub(crate) fn ask_to_leave(ui: Ui) -> bool {
+    open(ui, Kind::Leave);
+    true
+}
+
 pub fn move_focus(ui: Ui, step: isize) {
     ui.chooser
         .update(|c| c.iter_mut().for_each(|c| c.list.move_focus(step)));
@@ -315,6 +333,11 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::History => play_recent(ui, &value),
+        Kind::Leave => {
+            if index == 1 {
+                crate::leave();
+            }
+        }
     }
 }
 
@@ -350,8 +373,23 @@ fn start_sleep(ui: Ui, minutes: u32) {
     });
 }
 
-pub fn layer(ui: Ui) -> impl IntoElement {
-    let open = move || ui.chooser.with(Option::is_some);
+/// Whether a chooser is open in the layer of the question before leaving
+/// (`leave`, over every screen) or in the one of the others (over the
+/// video, under the play bar).
+pub(crate) fn is_open(ui: Ui, leave: bool) -> bool {
+    ui.chooser
+        .with(|c| c.as_ref().is_some_and(|c| (c.kind == Kind::Leave) == leave))
+}
+
+/// The choosers' layer: `leave` for the question before leaving, over
+/// every screen; else the others, over the video. Each shows only its own.
+pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
+    let open = move || is_open(ui, leave);
+    let overlay = if leave {
+        crate::overlays::Overlay::Leave
+    } else {
+        crate::overlays::Overlay::Chooser
+    };
     let width = signal(None);
     effect(move || {
         let stale = ui.chooser.with(|chooser| {
@@ -366,14 +404,24 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         });
         // Keep row identities stable for an in-flight press. A change in
         // availability or fit dismisses the old list before it can be used.
-        if stale {
+        if stale && !leave {
             close(ui);
         }
     });
-    let count = move || ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len));
+    let count = move || {
+        if open() {
+            ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len))
+        } else {
+            0
+        }
+    };
     let size = Scale::new();
     let list = element_ref();
-    let focus = computed(move || ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)));
+    let focus = computed(move || {
+        open()
+            .then(|| ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)))
+            .flatten()
+    });
     effect(move || {
         if let Some(i) = focus.get() {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
@@ -398,7 +446,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
                     let checked = match c.kind {
-                        Kind::History | Kind::More => false,
+                        Kind::History | Kind::More | Kind::Leave => false,
                         Kind::Volume => volume_index(ui) == index,
                         _ => c.list.selected == index,
                     };
@@ -409,8 +457,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         let selected = move || entry().is_some_and(|(_, checked, _)| checked);
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
         let action = move || {
-            ui.chooser
-                .with(|c| c.as_ref().is_some_and(|c| c.kind == Kind::More))
+            ui.chooser.with(|c| {
+                c.as_ref()
+                    .is_some_and(|c| matches!(c.kind, Kind::More | Kind::Leave))
+            })
         };
         list_rows::row(size, ROW, mark)
             .role(move || {
@@ -446,7 +496,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .text_color(move || mark().text()),
             )
     };
-    let kind = move || ui.chooser.with(|c| c.as_ref().map(|c| c.kind));
+    let kind = move || {
+        open()
+            .then(|| ui.chooser.with(|c| c.as_ref().map(|c| c.kind)))
+            .flatten()
+    };
     // Mounted while closed: nothing in it says `PointerEvents::Auto`
     // (`channels_view::layer`).
     view()
@@ -473,10 +527,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 40.0
             })
         })
-        .test_id("chooser-layer")
-        .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Chooser.accessibility_hidden(ui)
+        .test_id(if leave {
+            "leave-layer"
+        } else {
+            "chooser-layer"
         })
+        .accessibility_elements_hidden(move || overlay.accessibility_hidden(ui))
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {
@@ -499,7 +555,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         )
         .child(
             view()
-                .test_id("chooser-panel")
+                .test_id(if leave {
+                    "leave-panel"
+                } else {
+                    "chooser-panel"
+                })
                 // Never wider than the window (an iPad's narrowest windows).
                 .max_w(percentage(1.0))
                 // Nor taller than the room between the safe area and the
@@ -526,7 +586,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     virtual_list(count, row)
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
-                        .test_id("chooser-items")
+                        .test_id(if leave {
+                            "leave-items"
+                        } else {
+                            "chooser-items"
+                        })
                         .flex_shrink(1.0)
                         .min_h(px(0.0))
                         .h(move || {
@@ -563,6 +627,7 @@ mod tests {
             Kind::Track(Track::Text),
             Kind::AudioDelay,
             Kind::History,
+            Kind::Leave,
         ];
         let titles: BTreeSet<_> = kinds.iter().map(|k| title(*k)).collect();
         assert_eq!(titles.len(), kinds.len());

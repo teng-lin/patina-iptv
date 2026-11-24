@@ -166,7 +166,7 @@ pub(crate) fn offered(key: &str) -> bool {
 /// and Settings').
 pub(crate) fn available() -> bool {
     matches!(
-        crate::settings::offer("general.restore"),
+        crate::settings::offer_now("general.restore"),
         iptv_presentation::settings::screen::Offer::Active
     )
 }

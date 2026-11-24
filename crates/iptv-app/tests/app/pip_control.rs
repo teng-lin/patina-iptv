@@ -86,7 +86,7 @@ fn back_in_app(app: &mut Headless) {
 }
 
 #[test]
-fn native_pip_reports_revoke_and_restore_controls_without_reopening_playback() {
+fn native_pip_reports_remove_and_restore_the_control_without_reopening_playback() {
     use nsh_core::{EventKind, EventPayload, MountItem};
     use std::sync::{Arc, Mutex};
 
@@ -137,21 +137,28 @@ fn native_pip_reports_revoke_and_restore_controls_without_reopening_playback() {
         .unwrap()
         .expect("the persistent player was observed");
     let opens = iptv_app::player_opens(0);
-    for supported in [false, true, false, true] {
+    // A host without the window, or a TV whatever it says: the strip has
+    // no such control at all, not a disabled one.
+    for (supported, tv) in [(false, false), (true, false), (true, true), (true, false)] {
         app.engine().control().dispatch_event(
             node,
             EventKind::NativeEvent,
             EventPayload::Native {
                 name: "pip".into(),
-                data: serde_json::json!({"supported":supported,"tv":false,"active":false}),
+                data: serde_json::json!({"supported":supported,"tv":tv,"active":false}),
             },
         );
-        if supported {
+        if supported && !tv {
             step(app.wait_for(PIP));
         } else {
-            // A host that cannot offer it gets no permanently disabled
-            // control: the strip leaves it out.
+            // A host that cannot offer it, or a TV, gets no permanently
+            // disabled control: the strip leaves it out.
             step(app.wait_for_gone(PIP, Duration::from_secs(3)));
+            assert!(
+                !app.screen()
+                    .shows("Picture in picture is unavailable on this device"),
+                "no placeholder"
+            );
             assert!(
                 !pip_open(app),
                 "unsupported native reports revoke action admission"
