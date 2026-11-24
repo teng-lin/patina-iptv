@@ -12,6 +12,17 @@ is below 1.0, a minor release may change behavior.
 - Simplify the TV Guide header and groups column by removing overflow buttons,
   the duplicate group selector and time-step arrows. Remove the unfinished
   Watchlist destination from the navigation rail.
+- Remove placeholder controls: the program menu's Save to my list, Remind me
+  and Open in another player, and the control strip's Channel options and
+  Settings. The control strip leaves out Record, Recordings, Picture in
+  picture and Multiview where the device can never offer them, and the
+  browser TV host shows no recording rows, buttons or Recordings entry.
+- Movies and Shows are no longer offered when every enabled playlist is M3U.
+- Stop offering scheduled and repeating recordings: the guide, program menu,
+  program details, Record key and Recordings no longer schedule or edit a
+  future recording, and the recorder login startup and precise wakeup settings
+  are hidden. Recordings scheduled earlier stay listed, can be canceled and
+  still run. Record now is unchanged.
 
 ## [0.1.8] - 2026-11-23
 

@@ -229,7 +229,6 @@ pub fn press_control(ui: Ui, control: Control) {
                 crate::favorites::toggle(ui, ch);
             }
         }
-        other => log::info!("iptv control {other:?} not implemented yet"),
     }
 }
 

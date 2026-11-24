@@ -870,11 +870,12 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::Description) {
-        if ui.player_surface == 0
-            && matches!(action, Action::Select | Action::Record)
+        // Select and Record press the details' Record button, which only a
+        // program on now shows (`recordings_view::record_details`).
+        if matches!(action, Action::Select | Action::Record)
             && let Some(origin) = ui.description.get_untracked()
         {
-            crate::recordings_view::program(ui, origin, false);
+            crate::recordings_view::record_details(ui, origin);
             return;
         }
         // Back (or Menu) closes program details.

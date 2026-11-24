@@ -50,20 +50,40 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
     ui.list.with(|l| l.number_of(channel, &*catalog))
 }
 
-/// Catalogs stay visible; discovery shelves follow enabled playlists
-/// with imported movies or shows.
+/// Catalogs stay visible unless every enabled playlist is M3U; discovery
+/// shelves follow enabled playlists with imported movies or shows.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
-    rail_items(VodAvailability {
+    ui.app.library.version.get();
+    rail_of(VodAvailability {
         shown: ui.app.has_vod.get(),
         any: ui.app.any_vod.get(),
+        live_only: live_only(),
     })
 }
 
 fn rail_untracked(ui: Ui) -> Vec<RailItem> {
-    rail_items(VodAvailability {
+    rail_of(VodAvailability {
         shown: ui.app.has_vod.get_untracked(),
         any: ui.app.any_vod.get_untracked(),
+        live_only: live_only(),
     })
+}
+
+/// A host without workers never records: no Recordings entry there.
+fn rail_of(vod: VodAvailability) -> Vec<RailItem> {
+    let mut items = rail_items(vod);
+    if !crate::host::HAS_WORKERS {
+        items.retain(|&item| item != RailItem::Recordings);
+    }
+    items
+}
+
+/// Whether every enabled playlist is M3U ([`iptv_presentation::browse::live_only`]),
+/// as the library last loaded them (none while it loads). Callers that
+/// follow it track `Library::version`.
+pub fn live_only() -> bool {
+    let playlists = crate::runtime().playlists().unwrap_or_default();
+    iptv_presentation::browse::live_only(playlists.iter().map(|p| (p.kind, p.policy.enabled)))
 }
 
 /// Localize built-in lists by identity; provider group names are opaque.
@@ -627,6 +647,7 @@ mod identity_tests {
             restored.retain_rail(&rail_items(VodAvailability {
                 shown: true,
                 any: true,
+                live_only: false,
             }));
             assert_eq!(restored.rail, item);
             restored.retain_rail(&rail_items(VodAvailability::default()));

@@ -188,7 +188,9 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
         exposure.action_label(app, "guide-header-program", "longpress"),
         Some("More options".into())
     );
-    for _ in 0..3 {
+    // The chooser, then the settings; Back at the guide's top level is the
+    // platform's.
+    for _ in 0..2 {
         step(app.back());
     }
     step(app.wait_for_within("text:★ Local A", Duration::from_secs(5)));
@@ -396,7 +398,7 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     );
     step(app.press_key("m"));
     shown(app, &ja.t("Manage favorites…"));
-    step(app.press(&format!("text:{} >> nth=1", ja.t("Settings"))));
+    step(app.press(&format!("text:{} >> nth=0", ja.t("Settings"))));
     shown(app, &ja.t("Back up"));
     // Backing up asks first, in Japanese; the answer here is "Cancel".
     let asked = Arc::new(Mutex::new(Vec::new()));
@@ -543,19 +545,6 @@ fn a_settings_write_failure_is_localized_once_and_keeps_the_previous_value() {
         "one localized announcement"
     );
     assert!(!app.shows("Could not save settings"));
-}
-
-#[test]
-fn custom_recording_menu_uses_the_selected_interface_language() {
-    let Some(home) = isolated!() else { return };
-    let mut fixture = start_in(home, "es", "h24");
-    let words = Words::of("es");
-    personalization::group(&mut fixture.app, "News");
-    step(fixture.app.press_key("m"));
-    let schedule = words.t("Schedule a recording…");
-    shown(&mut fixture.app, &schedule);
-    step(fixture.app.press(&format!("text:{schedule}")));
-    shown(&mut fixture.app, &words.t("Save recording"));
 }
 
 /// Real catalog bindings with a deliberately doubled/accented test fixture.

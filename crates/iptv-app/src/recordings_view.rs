@@ -138,11 +138,14 @@ pub fn bind(ui: Ui) {
     });
 }
 
+/// Whether `channel` can be recorded here: on a host with workers (a
+/// browser TV has none, `host::HAS_WORKERS`), from a playlist that owns it.
 pub fn available(channel: usize) -> bool {
-    crate::schedule()
-        .channel_key(channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
-        .is_some()
+    crate::host::HAS_WORKERS
+        && crate::schedule()
+            .channel_key(channel)
+            .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
+            .is_some()
 }
 pub fn try_reserve_viewing(surface: usize, channel: usize, live: bool) -> bool {
     let source = crate::schedule()
@@ -213,13 +216,36 @@ pub fn current(ui: Ui) {
         channel,
         program_start: ui.focus.with_untracked(|f| f.cursor),
     };
-    remember(ui, origin);
-    let selected = crate::schedule().program_at(channel, origin.program_start);
-    match selected.airing(crate::time::now_minute()) {
-        crate::guide::Airing::Live => record_origin(ui, origin),
-        crate::guide::Airing::Upcoming => schedule_program(ui, origin),
-        crate::guide::Airing::Ended => program(ui, origin, false),
+    // Record starts recording a program on now. A future or ended one is not
+    // scheduled: recording future programs is retired (#273).
+    if !can_record_now(origin, crate::time::now_minute()) {
+        crate::settings_view::notify(tr("Only a program on now can be recorded"));
+        return;
     }
+    remember(ui, origin);
+    record_origin(ui, origin);
+}
+
+/// Whether the program at `origin` is on at guide minute `now` on a channel
+/// that can be recorded, so Record can start recording it now.
+pub fn can_record_now(origin: Origin, now: i32) -> bool {
+    available(origin.channel)
+        && crate::schedule()
+            .program_at(origin.channel, origin.program_start)
+            .airing(now)
+            == crate::guide::Airing::Live
+}
+
+/// The program details' Record button (and Select or Record over the
+/// details): records a program on now from its menu context. It checks the
+/// clock itself, not the guide's cached minute: a program that has just ended
+/// must not fall back to recording the next hour under its title.
+pub fn record_details(ui: Ui, origin: Origin) {
+    if ui.player_surface != 0 || !can_record_now(origin, crate::time::now_minute()) {
+        return;
+    }
+    ui.description.set(None);
+    record_origin(ui, origin);
 }
 
 fn playing_channel(ui: Ui) -> Option<(i64, String)> {
@@ -430,12 +456,9 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
         };
         return Some((item, Some(job)));
     }
-    let item = match program.airing(crate::time::now_minute()) {
-        crate::guide::Airing::Live => MenuItem::RecordNow,
-        crate::guide::Airing::Upcoming => MenuItem::ScheduleRecording,
-        crate::guide::Airing::Ended => return None,
-    };
-    Some((item, None))
+    // A future program is not scheduled (#273); only one on now records.
+    (program.airing(crate::time::now_minute()) == crate::guide::Airing::Live)
+        .then_some((MenuItem::RecordNow, None))
 }
 
 pub fn channel_menu_action(ui: Ui, origin: Origin) -> Option<MenuItem> {
@@ -453,126 +476,15 @@ pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
         (MenuItem::StopRecording, Some(job)) => execute(ui, job, false, "Stop recording"),
         (MenuItem::CancelRecording, Some(job)) => execute(ui, job, false, "Cancel recording"),
         (MenuItem::RecordNow, _) => start_origin(ui, origin, false),
-        (MenuItem::ScheduleRecording, _) => {
-            if let Some(request) = request(origin) {
-                schedule_window(ui, request);
-            }
-        }
         _ => return false,
     }
     true
-}
-
-fn schedule_window(ui: Ui, request: Request) {
-    let target = iptv_core::parental::Target::live(request.source, request.channel.clone());
-    crate::parental_view::request(ui, target, move || {
-        if ui.recordings.with_untracked(|state| state.busy) {
-            return;
-        }
-        ui.recordings.update(|state| state.busy = true);
-        let owner = crate::runtime();
-        crate::data::spawn_in_app(async move {
-            let result = owner.schedule_recording(request).await;
-            ui.recordings.update(|state| state.busy = false);
-            let message = match &result {
-                Ok(_) => tr("Recording scheduled"),
-                Err(error) => translated_reason(
-                    error
-                        .unavailable_reason()
-                        .unwrap_or("Recording action failed"),
-                ),
-            };
-            crate::settings_view::notify(message);
-            reload(ui);
-        });
-    });
 }
 
 pub fn remember(ui: Ui, origin: Origin) {
     let context = request(origin).map(|request| (origin, request));
     ui.recordings.update(|s| s.context = context);
 }
-/// EPG scheduling needs no manual date/time form: retain the selected occurrence.
-pub fn schedule_program(ui: Ui, origin: Origin) {
-    if ui.recordings.with_untracked(|s| s.busy) {
-        return;
-    }
-    if !prepare_program(ui, origin, false) {
-        return;
-    }
-    let draft = ui.recordings.with_untracked(|s| s.draft.clone());
-    if draft.is_some() {
-        save(ui);
-        ui.recordings.update(|s| s.draft = None);
-    }
-}
-pub fn program(ui: Ui, origin: Origin, custom: bool) {
-    prepare_program(ui, origin, custom);
-}
-fn prepare_program(ui: Ui, origin: Origin, custom: bool) -> bool {
-    if ui.recordings.with_untracked(|s| s.busy) {
-        return false;
-    }
-    let request = ui
-        .recordings
-        .with_untracked(|s| {
-            s.context
-                .as_ref()
-                .filter(|(saved, _)| *saved == origin)
-                .map(|(_, request)| request.clone())
-        })
-        .or_else(|| request(origin));
-    let Some(mut request) = request else {
-        return false;
-    };
-    // A future program keeps its actual window when opened from its context menu.
-    let custom = custom && request.start <= crate::time::wall_unix();
-    if custom {
-        request.start = crate::time::wall_unix();
-        request.end = request.start + 3600;
-    }
-    let program = if custom {
-        None
-    } else {
-        let schedule = crate::schedule();
-        let program = schedule.program_at(origin.channel, origin.program_start);
-        Some((
-            crate::guide::unix_of(&*schedule, program.start),
-            crate::guide::unix_of(&*schedule, program.end),
-            i64::from(crate::player::guide_offset(&*schedule, origin.channel)) * 60,
-        ))
-    };
-    ui.menu.set(None);
-    ui.description.set(None);
-    ui.recordings.update(|s| {
-        s.open = true;
-        s.error = None;
-        s.actions = false;
-        s.confirm_delete = false;
-        let existing = s.jobs.iter().find(|j| {
-            j.status.active()
-                && j.source_current
-                && j.request.source == request.source
-                && j.request.channel == request.channel
-                && j.request.start < request.end
-                && j.request.end > request.start
-        });
-        if !custom && let Some(job) = existing {
-            s.focus = Some(job.id);
-            s.actions = true;
-            s.action = 0;
-            s.draft = None;
-        } else {
-            let mut draft = Draft::new(request);
-            draft.program_start = program.map(|(start, _, _)| start);
-            draft.program_end = program.map(|(_, end, _)| end);
-            draft.guide_offset_seconds = program.map(|(_, _, offset)| offset);
-            s.draft = Some(draft);
-        }
-    });
-    true
-}
-
 fn save(ui: Ui) {
     let draft = ui
         .recordings
@@ -585,6 +497,11 @@ fn save(ui: Ui) {
     crate::parental_view::request(ui, target, move || save_allowed(ui, draft));
 }
 fn save_allowed(ui: Ui, draft: Draft) {
+    // Only Record now saves. Scheduling or editing a future recording is
+    // retired (#273), whatever opened the form.
+    if !draft.immediate || draft.editing.is_some() {
+        return;
+    }
     let request = draft.padded(crate::time::wall_unix());
     if let Err(message) = request.validate(crate::time::wall_unix()) {
         if draft.immediate {
@@ -702,8 +619,6 @@ fn activate_job(ui: Ui, id: JobId) {
         .with_untracked(|r| r.as_ref().is_some_and(|(playing, _)| playing.id == id))
     {
         return_to_player(ui);
-    } else if job.status == Status::Scheduled {
-        execute(ui, job, false, "Edit recording");
     } else if matches!(job.status, Status::Completed | Status::Partial) && job.bytes > 0 {
         ui.recordings.update(|s| {
             s.focus = Some(id);
@@ -758,7 +673,8 @@ fn confirm_delete(ui: Ui) {
 }
 fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
     let mut actions = match job.status {
-        Status::Scheduled => vec!["Edit recording", "Cancel recording"],
+        // A scheduled job is not edited (#273); it can still be canceled.
+        Status::Scheduled => vec!["Cancel recording"],
         Status::Recording => vec!["Stop recording"],
         Status::Completed | Status::Partial if job.bytes > 0 => {
             vec![
@@ -814,17 +730,6 @@ fn perform(ui: Ui, index: usize) {
 fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
     if action == "Stop playback" {
         crate::player_keys::stop_playback(ui);
-        return;
-    }
-    if action == "Edit recording" {
-        ui.recordings.update(|s| {
-            s.focus = Some(job.id);
-            s.confirm_delete = false;
-            let mut d = Draft::new(job.request);
-            d.editing = Some(job.id);
-            s.draft = Some(d);
-            s.actions = false;
-        });
         return;
     }
     if action == "Delete recording" && !confirm {
@@ -1126,26 +1031,63 @@ fn schedule_panel(ui: Ui, size: Scale) -> View {
 }
 
 fn library_content(ui: Ui, size: Scale) -> View {
-    view().absolute().inset_0().pt_safe_area().pb_safe_area().bg(rgb(style::WINDOW))
-        .child(view().flex_row().items_center().px(move || size.px(24.0))
-            .min_h(move || size.px(72.0))
-            .child(when(move || ui.recordings.with(|s| !s.actions), move || style::action(ui, size, tr("Close"), || false, move || close(ui))))
-            .child(view().flex_1())
-            .child(ui_kit::title(size, tr("Recordings"))))
+    view()
+        .absolute()
+        .inset_0()
+        .pt_safe_area()
+        .pb_safe_area()
+        .bg(rgb(style::WINDOW))
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .px(move || size.px(24.0))
+                .min_h(move || size.px(72.0))
+                .child(when(
+                    move || ui.recordings.with(|s| !s.actions),
+                    move || style::action(ui, size, tr("Close"), || false, move || close(ui)),
+                ))
+                .child(view().flex_1())
+                .child(ui_kit::title(size, tr("Recordings"))),
+        )
         .child(rows::now_playing(ui, size))
-        .child(when(move || ui.recordings.with(|s| !s.retired.is_empty()), move || retired_schedules(ui, size)))
-        .child(ui_kit::body(size, move || message(ui)).text_color(rgb(ui_kit::ERROR))
-            .px(move || size.px(24.0)))
-        .child(when(move || ui.recordings.with(|s| s.visible().next().is_none()), move || {
-            ui_kit::body(size, tr(
-                "No recordings here. Choose a program in the guide, then Record or Schedule a recording."
-            )).px(move || size.px(24.0)).py(move || size.px(24.0))
-        }))
+        .child(when(
+            move || ui.recordings.with(|s| !s.retired.is_empty()),
+            move || retired_schedules(ui, size),
+        ))
+        .child(
+            ui_kit::body(size, move || message(ui))
+                .text_color(rgb(ui_kit::ERROR))
+                .px(move || size.px(24.0)),
+        )
+        .child(when(
+            move || ui.recordings.with(|s| s.visible().next().is_none()),
+            move || {
+                ui_kit::body(
+                    size,
+                    tr("No recordings here. Choose a program on now in the guide, then Record."),
+                )
+                .px(move || size.px(24.0))
+                .py(move || size.px(24.0))
+            },
+        ))
         .child(recording_list(ui, size))
-        .child(ui_kit::caption(size, move || ui.recordings.with(|s| {
-            s.background_notice.as_ref().map(|message| tr(message).to_owned()).unwrap_or_default()
-        })).px(move || size.px(24.0)))
-        .child(ui_kit::caption(size, requirements()).px(move || size.px(24.0)).py(move || size.px(16.0)))
+        .child(
+            ui_kit::caption(size, move || {
+                ui.recordings.with(|s| {
+                    s.background_notice
+                        .as_ref()
+                        .map(|message| tr(message).to_owned())
+                        .unwrap_or_default()
+                })
+            })
+            .px(move || size.px(24.0)),
+        )
+        .child(
+            ui_kit::caption(size, requirements())
+                .px(move || size.px(24.0))
+                .py(move || size.px(16.0)),
+        )
 }
 
 /// What the upgrade that retired scheduled recording canceled. Read-only

@@ -35,8 +35,6 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
         item,
         MenuItem::Search
             | MenuItem::Record
-            | MenuItem::ScheduleRecording
-            | MenuItem::CustomRecording
             | MenuItem::Settings
             | MenuItem::Description
             | MenuItem::BlockChannel
@@ -68,16 +66,13 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         Search => tr("Search"),
         Settings => tr("Settings"),
         StartFromBeginning => tr("Play from the beginning"),
-        ExternalPlayer => tr("Open in another player"),
         WatchInNewWindow => tr("Watch in new window"),
-        Reminder => tr("Remind me"),
         Record => tr("Record"),
         RecordNow => tr("Record now"),
         CancelRecording => tr("Cancel recording"),
         StopRecording => tr("Stop recording"),
         ScheduleRecording => tr("Schedule recording"),
         CustomRecording => tr("Schedule a recording…"),
-        SaveToList => tr("Save to my list"),
         Description => tr("Details"),
         ToggleFavorite if favorite => tr("Remove from favorites"),
         ToggleFavorite => tr("Add to favorites"),
@@ -146,10 +141,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
     let scope = channel_scope(ui, &list);
     let program = schedule.program_at(channel, minute);
     let mut rows = program_menu(program, schedule.catchup_days(channel), now, |item| {
-        if matches!(
-            item,
-            MenuItem::Record | MenuItem::ScheduleRecording | MenuItem::CustomRecording
-        ) {
+        if item == MenuItem::Record {
             return ui.player_surface == 0 && crate::recordings_view::available(channel);
         }
         match item {
@@ -165,6 +157,33 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             _ => implemented(item, ui.player_surface),
         }
     });
+    let auxiliary = ui.player_surface != 0;
+    if !crate::host::HAS_WORKERS || auxiliary {
+        // Recording never runs here: leave its rows out.
+        rows.retain(|row| {
+            !matches!(
+                row,
+                Row::Action {
+                    item: MenuItem::Record
+                        | MenuItem::ScheduleRecording
+                        | MenuItem::CustomRecording,
+                    ..
+                }
+            )
+        });
+    }
+    if auxiliary {
+        // Auxiliary player windows play live streams only.
+        rows.retain(|row| {
+            !matches!(
+                row,
+                Row::Action {
+                    item: MenuItem::StartFromBeginning,
+                    ..
+                }
+            )
+        });
+    }
     if group_target(scope.as_ref()).is_none() {
         rows.retain(|row| {
             !matches!(
@@ -176,7 +195,9 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             )
         });
     }
+    // Only the main window opens player windows.
     if (crate::host::LINUX || crate::host::MACOS)
+        && !auxiliary
         && program.airing(now) == crate::guide::Airing::Live
     {
         rows.insert(
@@ -216,7 +237,8 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
     };
     let scope = channel_scope(ui, &list);
     let offset = crate::player::guide_offset(&*schedule, channel);
-    let new_window = (crate::host::LINUX || crate::host::MACOS)
+    // Only the main window opens player windows.
+    let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
         .then(|| crate::desktop::player_windows::can_open(ui, channel));
     let rows = channel_menu(
         crate::recordings_view::channel_menu_action(ui, origin),
@@ -379,10 +401,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     } = target
         && matches!(
             item,
-            MenuItem::RecordNow
-                | MenuItem::ScheduleRecording
-                | MenuItem::CancelRecording
-                | MenuItem::StopRecording
+            MenuItem::RecordNow | MenuItem::CancelRecording | MenuItem::StopRecording
         )
     {
         let Some(origin) = program_origin(&target) else {
@@ -447,11 +466,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 organization_view::open_mode(ui, source, kind, None, mode);
             }
         }
-        MenuItem::Record
-        | MenuItem::CustomRecording
-        | MenuItem::ScheduleRecording
-        | MenuItem::Description
-        | MenuItem::StartFromBeginning => {
+        MenuItem::Record | MenuItem::Description | MenuItem::StartFromBeginning => {
             if let Some(origin) = program_origin(&target) {
                 perform_program(ui, item, origin);
             }
@@ -598,8 +613,6 @@ pub fn perform(ui: Ui, item: MenuItem) {
 fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
     match item {
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
-        MenuItem::CustomRecording => crate::recordings_view::program(ui, origin, true),
-        MenuItem::ScheduleRecording => crate::recordings_view::schedule_program(ui, origin),
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::StartFromBeginning => {
             let schedule = crate::schedule();
@@ -858,10 +871,7 @@ fn action_detail(ui: Ui, item: MenuItem) -> String {
         if let Target::Channel { program, .. } = menu.target
             && matches!(
                 item,
-                MenuItem::RecordNow
-                    | MenuItem::ScheduleRecording
-                    | MenuItem::CancelRecording
-                    | MenuItem::StopRecording
+                MenuItem::RecordNow | MenuItem::CancelRecording | MenuItem::StopRecording
             )
             && let Some(channel) = menu_channel(&menu.target)
         {
@@ -1198,11 +1208,13 @@ fn description(ui: Ui) -> impl IntoElement {
                         )
                         .child(when(
                             move || {
+                                // Only a program on now records (Record now); a
+                                // future one is not scheduled (#273).
+                                ui.guide_data();
+                                let now = ui.focus.with(|focus| focus.now);
                                 ui.player_surface == 0
-                                    && program().is_some_and(|(ch, p)| {
-                                        crate::recordings_view::available(ch)
-                                            && crate::guide::unix_of(&*crate::schedule(), p.end)
-                                                > crate::time::wall_unix()
+                                    && ui.description.get().is_some_and(|origin| {
+                                        crate::recordings_view::can_record_now(origin, now)
                                     })
                             },
                             move || {
@@ -1213,7 +1225,7 @@ fn description(ui: Ui) -> impl IntoElement {
                                     || true,
                                     move || {
                                         if let Some(origin) = ui.description.get_untracked() {
-                                            crate::recordings_view::program(ui, origin, false);
+                                            crate::recordings_view::record_details(ui, origin);
                                         }
                                     },
                                 )

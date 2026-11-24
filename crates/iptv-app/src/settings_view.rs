@@ -11,8 +11,7 @@
 //! device-level features of TV boxes are left out (`settings::offer`). Remote: Up/Down move, Right/OK
 //! enter a page, OK changes a row, Left/Back go back, Back on the pages
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
-//! own (`words`). Also the short notices of the app (`notify`), such as
-//! the second Back that leaves (`may_leave`).
+//! own (`words`). Also the short notices of the app (`notify`).
 
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
@@ -25,7 +24,6 @@ mod words;
 pub use view::layer;
 pub(crate) use view::notice_layer;
 
-use nsh_core::time::Instant;
 use std::cell::Cell;
 use std::time::Duration;
 
@@ -34,7 +32,7 @@ use iptv_presentation::settings::screen::{
     Ctx, Editor, Effect, Key, Page, Pane, Part, Row, Screen, Status,
 };
 use iptv_settings::schema::ValueType;
-use iptv_settings::{Section, Settings, Target, Value, keys};
+use iptv_settings::{Section, Settings, Value};
 use nsh_core::prelude::*;
 
 use crate::data::stored::{self, GuideStatus};
@@ -110,8 +108,6 @@ thread_local! {
     static LAST: Cell<&'static str> = const { Cell::new("general") };
     /// The notice line of the layer made last (made with it, under its owner).
     static NOTICE: Cell<Option<Notice>> = const { Cell::new(None) };
-    /// When Back last asked whether to leave.
-    static LEAVE_ASKED: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
 /// The settings layer's notice line: its text, how many notices it has
@@ -304,10 +300,7 @@ fn run(ui: Ui, key: &'static str) {
         "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
         "recordings.quit_host" => crate::desktop::quit(ui),
-        "recordings.background_status"
-        | "recordings.enable_startup"
-        | "recordings.disable_startup"
-        | "recordings.alarm_access" => crate::host::recording_command(key),
+        "recordings.background_status" => crate::host::recording_command(key),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
             crate::data::spawn_in_app(async move {
@@ -512,31 +505,6 @@ pub fn notify(text: &str) {
     });
 }
 
-/// Whether a Back press may leave the app (`general.confirm_exit`): the
-/// first press asks for a second one within `general.confirm_exit_window`.
-pub fn may_leave() -> bool {
-    let s = crate::settings::get();
-    let at = &Target::Global;
-    if !s.bool(keys::CONFIRM_EXIT, at) {
-        return true;
-    }
-    let window = Duration::from_millis(
-        u64::try_from(s.duration_ms(keys::CONFIRM_EXIT_WINDOW, at)).unwrap_or(0),
-    );
-    let now = Instant::now();
-    let asked = LEAVE_ASKED.with(|a| a.replace(Some(now)));
-    if second_press(asked, now, window) {
-        LEAVE_ASKED.with(|a| a.set(None));
-        return true;
-    }
-    notify(tr("Press Back again to leave"));
-    false
-}
-
-fn second_press(asked: Option<Instant>, now: Instant, window: Duration) -> bool {
-    asked.is_some_and(|t| now.duration_since(t) <= window)
-}
-
 #[cfg(test)]
 mod tests {
     use iptv_settings::catalog;
@@ -628,22 +596,5 @@ mod tests {
         // Only the two enable switches and PIN command are visible by default;
         // dependent preferences appear after live or VOD protection is enabled.
         assert_eq!(counts(parental), (3, 3));
-    }
-
-    #[test]
-    fn leaving_needs_a_second_back_in_time() {
-        let t = Instant::now();
-        let window = Duration::from_millis(2_000);
-        assert!(!second_press(None, t, window));
-        assert!(second_press(
-            Some(t),
-            t + Duration::from_millis(1_500),
-            window
-        ));
-        assert!(!second_press(
-            Some(t),
-            t + Duration::from_millis(2_500),
-            window
-        ));
     }
 }

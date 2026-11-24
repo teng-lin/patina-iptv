@@ -57,7 +57,9 @@ pub static GENERAL: &[Setting] = &[
         boolean(true),
         key("Start playing the channel that was on when the app was last closed."),
     ),
-    // default: ours
+    // default: ours. Neither this nor its window is offered or read any
+    // more: each platform's Back and exit convention applies (#277). The
+    // keys stay so stored values still load.
     general(
         "startup",
         "general.confirm_exit",

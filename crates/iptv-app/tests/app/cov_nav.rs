@@ -286,21 +286,16 @@ fn guide_keys(app: &mut Headless) {
     step(app.wait_for(FIELD));
     assert!(app.screen().matches("role:grid[News]").unwrap());
     close_search(app);
-    // From Search down past TV, Movies and Shows stay reachable even
-    // without a VOD catalog; Recordings, Playlists and Settings follow.
+    // From Search down past TV: with only an M3U playlist, which never
+    // carries movies or shows, Movies and Shows are not offered;
+    // Recordings, Playlists and Settings follow.
     const PLAYLISTS: &str = "text:▲▼ choose   OK actions   Back close";
     const SETTINGS: &str = "text:▲▼ page   ▶ OK its settings   Back close";
+    assert!(!app.shows("id:navigation-rail >> label:Movies"));
+    assert!(!app.shows("id:navigation-rail >> label:Shows"));
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("down")); // Live TV
-    for _ in 0..2 {
-        step(app.press_key("down"));
-        step(app.press_key("enter"));
-        step(app.wait_for("text:Movies and shows come from Xtream Codes and Stalker playlists. M3U playlists have live channels only."));
-        step(app.back()); // Categories to the library's navigation.
-        step(app.back()); // Return to the same rail destination.
-        gone(app, "id:vod-screen");
-    }
     step(app.press_key("down"));
     step(app.press_key("enter"));
     step(app.wait_for("id:recordings-screen"));
@@ -331,7 +326,7 @@ fn guide_keys(app: &mut Headless) {
     gone(app, SETTINGS);
     // Up to TV, OK: the groups; Up shows All channels, OK takes it (the
     // hint again, which the next key but Back dismisses).
-    for _ in 0..5 {
+    for _ in 0..3 {
         step(app.press_key("up"));
     }
     step(app.press_key("enter"));

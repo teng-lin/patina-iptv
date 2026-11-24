@@ -336,6 +336,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     let both = VodAvailability {
         shown: true,
         any: true,
+        live_only: false,
     };
     assert_eq!(
         rail_items(none),
@@ -353,11 +354,31 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
         rail_items(VodAvailability {
             shown: false,
             any: true,
+            live_only: false,
         }),
         [
             Search, Tv, Movies, Shows, Continue, Recent, Recordings, Playlists, Settings
         ]
     );
+    // Every enabled playlist is M3U: no catalog can fill, so Movies and
+    // Shows leave the rail (`live_only` is false before the first playlist
+    // and with an Xtream or Stalker one, also with its import off).
+    assert_eq!(
+        rail_items(VodAvailability {
+            live_only: true,
+            ..none
+        }),
+        [Search, Tv, Recordings, Playlists, Settings]
+    );
+    use iptv_providers::model::SourceKind::{M3u, Stalker, Xtream};
+    assert!(!live_only([]), "before the first playlist");
+    assert!(live_only([(M3u, true), (M3u, false)]));
+    assert!(
+        live_only([(M3u, true), (Xtream, false)]),
+        "only enabled count"
+    );
+    assert!(!live_only([(M3u, true), (Xtream, true)]));
+    assert!(!live_only([(Stalker, true)]));
     assert!(Settings.at_bottom() && Playlists.at_bottom() && !Search.at_bottom());
     assert!(!Continue.at_bottom());
     let mut f = Focus::at(0);
@@ -585,10 +606,12 @@ fn dynamic_shelves_preserve_recordings_and_settings_action_identity() {
             VodAvailability {
                 shown: false,
                 any: true,
+                live_only: false,
             },
             VodAvailability {
                 shown: true,
                 any: true,
+                live_only: false,
             },
             VodAvailability::default(),
         ] {
