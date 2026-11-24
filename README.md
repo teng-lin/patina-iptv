@@ -354,45 +354,40 @@ On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
 In the guide, long-press a current program (right-click on desktop) to open
 its menu and choose **Record**, without starting or changing playback.
-For a future program, right-click on desktop or long-press on touch/TV, then
-choose **Schedule recording**. It schedules that program immediately using its
-guide times, without a form. Choose **Edit recording** in Recordings for adjustments.
-For channels without guide data, **Schedule a recording…** opens the manual editor.
-On a TV, Menu/long OK also opens the program menu. Up/Down chooses a form row,
-Left/Right changes its value, and Select opens an exact date/time/name editor.
-Touch and mouse users tap a field to edit it. Repeat and padding are under
-**Recording options**.
+Only a program on now can be recorded. Patina no longer schedules future
+programs, repeats recordings or offers the manual recording editor. Recordings
+and repeating schedules created with an earlier version stay in Recordings,
+still run, and can be canceled there.
 The navigation rail's **Recordings** entry manages current, scheduled and
 finished recordings. Tap a finished recording to play or resume it. Back returns
 to Recordings while playback continues; the playing row or **Return to playback**
 returns to the player without reopening the stream. The guide's video preview
 also returns to saved playback.
 
-The row's pencil edits a schedule, its cancel control cancels it, and its stop
-control retains captured media. The trash icon on the right asks for confirmation.
+The row's cancel control cancels a scheduled recording, and its stop control
+retains captured media. The trash icon on the right asks for confirmation.
 Canceling leaves playback and the file intact. Confirming deletion automatically
 stops that file if it is playing, then deletes it; other playback is unaffected.
 Remote users can open secondary actions with Menu. A dot marks recording
 programs in the guide.
 
-Use **Repeat** to choose once, daily, weekly or series. Daily and weekly
-schedules keep their local clock time across daylight-saving changes; series
-rules match the program title on the selected channel as guide data arrives.
-An accepted individual job keeps its start/end times. Cancel repeating schedule
-stops future occurrences without deleting finished recordings. If multiple
-repeating schedules share the selected recording, this cancels all of them.
+Daily and weekly schedules created earlier keep their local clock time across
+daylight-saving changes; series rules match the program title on the selected
+channel as guide data arrives. Cancel repeating schedule stops future
+occurrences without deleting finished recordings. If multiple repeating
+schedules share the selected recording, this cancels all of them.
 
-On Android, capture runs in a foreground service with a notification. Allow
-precise wakeups in Recordings settings for scheduled starts; boot and package
-updates restore pending wakeups. Android force stop prevents execution until
-Patina is opened again, and Android 15 can limit background capture to six
-hours in a 24-hour period. Device, network and storage availability still apply.
+On Android, capture runs in a foreground service with a notification. Boot and
+package updates restore the wakeups of recordings scheduled earlier. Android
+force stop prevents execution until Patina is opened again, and Android 15 can
+limit background capture to six hours in a 24-hour period. Device, network and
+storage availability still apply.
 
 On desktop, closing the window keeps the process running when recordings or
-repeating rules need it. **Start recorder at login** enables recovery after
-sign-in; **Quit Patina** stops the recorder. Linux and macOS require an awake
-computer. Windows includes an experimental scheduled-task wake hook, subject
-to the system's wake-timer settings; it does not power on a shut-down computer.
+repeating rules need it; **Quit Patina** stops the recorder. Linux and macOS
+require an awake computer. Windows includes an experimental scheduled-task wake
+hook, subject to the system's wake-timer settings; it does not power on a
+shut-down computer.
 iPad background recording is not supported.
 
 Finished and partial recordings offer resume and playback from the beginning;

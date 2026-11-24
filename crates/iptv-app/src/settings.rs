@@ -93,9 +93,6 @@ pub const COMMANDS: &[&str] = &[
     "parental.change_pin",
     "recordings.quit_host",
     "recordings.background_status",
-    "recordings.enable_startup",
-    "recordings.disable_startup",
-    "recordings.alarm_access",
     "about.privacy_policy",
     "general.backup",
     "general.restore",
@@ -138,6 +135,12 @@ const NOT_OFFERED: &[&str] = &[
     "playback.afr_resolution",
     "playback.afr_50_60_only",
     "search.prefer_voice",
+    // They exist for scheduled recordings, which are retired (#273): login
+    // startup for the background recorder and Android's exact alarms.
+    // Background status and Quit stay while pending jobs can still run.
+    "recordings.enable_startup",
+    "recordings.disable_startup",
+    "recordings.alarm_access",
 ];
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
@@ -189,16 +192,6 @@ pub fn offer(key: &str) -> Offer {
         return Offer::Hidden;
     }
     if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
-        return Offer::Hidden;
-    }
-    if key == "recordings.alarm_access" && !crate::capabilities::HOST.alarm_permission() {
-        return Offer::Hidden;
-    }
-    if matches!(
-        key,
-        "recordings.enable_startup" | "recordings.disable_startup"
-    ) && !crate::capabilities::HOST.startup_registration()
-    {
         return Offer::Hidden;
     }
     // Leaving the app into a picture-in-picture window: Android only.
@@ -400,6 +393,14 @@ mod tests {
         assert_eq!(offer("parental.change_pin"), Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::Hidden);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
+        // Scheduled recording is retired (#273).
+        for key in [
+            "recordings.enable_startup",
+            "recordings.disable_startup",
+            "recordings.alarm_access",
+        ] {
+            assert_eq!(offer(key), Offer::Hidden, "{key}");
+        }
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {

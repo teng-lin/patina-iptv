@@ -300,10 +300,7 @@ fn run(ui: Ui, key: &'static str) {
         "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
         "recordings.quit_host" => crate::desktop::quit(ui),
-        "recordings.background_status"
-        | "recordings.enable_startup"
-        | "recordings.disable_startup"
-        | "recordings.alarm_access" => crate::host::recording_command(key),
+        "recordings.background_status" => crate::host::recording_command(key),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
             crate::data::spawn_in_app(async move {
