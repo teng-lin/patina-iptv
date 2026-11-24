@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import subprocess
 import tempfile
 from urllib.request import urlopen
@@ -29,6 +30,18 @@ FIELDS = "tagName,isDraft,isImmutable,isPrerelease,assets"
 
 def gh(*args):
     return subprocess.run(["gh", *args, "--repo", REPOSITORY], capture_output=True, text=True, timeout=90)
+
+
+def error_details(error):
+    details = type(error).__name__
+    if isinstance(error, subprocess.CalledProcessError):
+        command = error.cmd if isinstance(error.cmd, str) else shlex.join(error.cmd)
+        details += f": {command}; exit code {error.returncode}; stderr: {error.stderr or '(empty)'}"
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        if token := os.environ.get(name):
+            details = details.replace(token, "***")
+    # Keep multiline stderr inside one Actions annotation, including literal %.
+    return details.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
 def lookup(tag):
@@ -208,7 +221,7 @@ def publish_staged(root):
         try:
             publish(tag, directory, commit)
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-            print(f"::error::Could not publish {tag} ({type(error).__name__})")
+            print(f"::error::Could not publish {tag} ({error_details(error)})")
             failures.append(tag)
     if failures:
         raise RuntimeError(f"Tool releases still pending: {', '.join(failures)}")
@@ -247,7 +260,7 @@ def main():
     try:
         restored = restore(options.platform, options.key, options.path, options.kind)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-        print(f"::warning::CI tool release restore failed ({type(error).__name__}); trying the cache")
+        print(f"::warning::CI tool release restore failed ({error_details(error)}); trying the cache")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
         print(f"restored={str(restored).lower()}", file=output)
 
