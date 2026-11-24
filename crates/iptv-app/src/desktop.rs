@@ -126,16 +126,14 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
     }
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        // Only what records now: a job not started yet stays as it is.
-        let recording = |owner: &crate::runtime::Runtime| {
-            owner
-                .recording_snapshot()
-                .into_iter()
-                .filter(|job| job.status == iptv_core::recording::Status::Recording)
-                .map(|job| job.id)
-                .collect::<Vec<_>>()
-        };
-        let running = recording(&owner);
+        // Every job still to record: with scheduling retired (#273), each
+        // is a Record now, running or waiting for a connection.
+        let running: Vec<_> = owner
+            .recording_snapshot()
+            .into_iter()
+            .filter(|job| job.status.active())
+            .map(|job| job.id)
+            .collect();
         for id in running {
             if owner.stop_recording(id).await.is_err() {
                 log::warn!("iptv recordings: a recording did not stop before quitting");
@@ -144,7 +142,7 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
         // A stopped capture finishes its file before the recorder shuts
         // down, or it would be kept to resume at the next start.
         for _ in 0..50 {
-            if recording(&owner).is_empty() {
+            if !owner.recording_background_needed() {
                 break;
             }
             timer(std::time::Duration::from_millis(200)).await;
