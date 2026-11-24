@@ -98,7 +98,8 @@ In the guide:
   channel while browsing, without a choice.
 - **Now:** opening a program's details or menu never starts playback. A
   long press or right-click on the program title in the header opens its
-  program menu. On channel names and timeline cells, those gestures open
+  program menu. Screen readers offer its **More options** action. On
+  channel names and timeline cells, those gestures open
   channel options. A
   long press or right-click moves the focus to what it opens the menu for;
   `guide.autoplay` then holds on that channel, after the menu or its details

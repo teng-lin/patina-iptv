@@ -705,6 +705,34 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
         env.idiom = Idiom::Pad;
         env.screen_reader = true;
     }));
+    // VoiceOver exposes custom actions only when explicitly declared;
+    // its native adapter does not infer them from long-press handlers.
+    let title = app.screen().id("id:guide-header-program").unwrap();
+    assert!(
+        exposure.0.lock().unwrap().views[&title]
+            .accessibility
+            .actions
+            .iter()
+            .any(|action| action.name.as_ref() == "program_menu"
+                && action.label.as_deref() == Some("More options")),
+        "the program title exposes a localized menu action to screen readers"
+    );
+    app.engine().control().dispatch_event(
+        title,
+        nsh_core::EventKind::AccessibilityAction,
+        nsh_core::EventPayload::Map(vec![(
+            "actionName",
+            nsh_core::PayloadValue::Str("program_menu".into()),
+        )]),
+    );
+    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+    assert_eq!(iptv_app::player_opens(0), 0, "a menu never tunes");
+    step(app.back());
+    step(app.wait_for_gone(
+        "id:menu-panel >> text:Manage favorites…",
+        Duration::from_secs(3),
+    ));
+    exposure.shown(app, "menu-panel", false);
     // A channel row plays in the guide, then its second activation expands it.
     let row = app.screen().id("role:button[/^Local B$/]").unwrap();
     activate(app, row);

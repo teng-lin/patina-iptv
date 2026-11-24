@@ -288,6 +288,16 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .test_id("guide-header-program")
                     .on_long_press(open_program_menu)
                     .on_context_menu(move |_: &nsh_core::ContextMenuEvent| open_program_menu())
+                    .accessibility_actions(vec![nsh_core::AccessibilityActionDef {
+                        name: "program_menu".into(),
+                        label: Some(tr("More options").into()),
+                    }])
+                    .on_accessibility_action(move |action: &str| {
+                        if action == "program_menu" {
+                            open_program_menu();
+                        }
+                    })
+                    .accessibility_elements_hidden(move || program.with(Option::is_none))
                     .flex_1()
                     .min_w(px(0.0))
                     .number_of_lines(1)

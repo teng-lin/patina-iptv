@@ -298,7 +298,7 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
     step(app.press_key("down"));
     assert!(channel_selected(app, "Local C"));
     present(app, (375.0, 820.0), TEXT[1]);
-    step(app.open_guide_groups());
+    step(app.press("id:guide-corner-back >> label:Groups"));
     step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
