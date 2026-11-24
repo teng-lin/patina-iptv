@@ -1180,10 +1180,13 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
 /// Back: dialogs close; a full screen window becomes a window again (the
 /// desktop's Escape); player panels or the play bar → hidden; full screen/overlay → guide;
 /// then the guide screen's chain (`browse.rs`): hint card → guide → groups →
-/// rail → leave the app (no handler, so the platform's Back leaves; with
-/// `general.confirm_exit` the first press only asks for a second). The
-/// release of a Long Back that acted takes no step (`input::swallow_back`),
-/// so a handler stays while one is pending, even where Back would leave.
+/// rail → leave the app. Where Back leaves no handler is registered, so
+/// the platform's Back takes it at once: Android leaves without a second
+/// press and its predictive back gesture shows the way home; a desktop
+/// window stays open (Escape does nothing there, and the window closes
+/// the operating system's way). The release of a Long Back that acted
+/// takes no step (`input::swallow_back`), so a handler stays while one is
+/// pending, even where Back would leave.
 fn bind_back(ui: Ui) {
     let back_target = computed(move || {
         let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
@@ -1198,15 +1201,18 @@ fn bind_back(ui: Ui) {
         (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu)
     });
     effect(move || {
-        let leaves = matches!(back_target.get(), (ViewMode::Guide, Pane::Rail, false))
+        // The guide's rail, or the overlay layout's with nothing playing
+        // (there Back would otherwise go back to the video); a channel
+        // number being typed is cancelled first.
+        let leaves = match back_target.get() {
+            (ViewMode::Guide, Pane::Rail, false) => true,
+            (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
+            _ => false,
+        } && !ui.channel_number.with(|entry| entry.active())
             && !ui.any_overlay_open()
             && !desktop::fullscreen()
             && !ui.back_guard.with(iptv_nav::BackGuard::armed);
-        let confirm = settings::read(ui).bool(
-            iptv_settings::keys::CONFIRM_EXIT,
-            &iptv_settings::Target::Global,
-        );
-        if !leaves || confirm {
+        if !leaves {
             on_back_press(move || input::swallow_back(ui) || go_back(ui));
         }
     });
@@ -1298,15 +1304,12 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                     .update(iptv_presentation::play_bar::PlayBar::hide);
                 true
             }
-            // Hint, past program → now, guide → groups → rail → leave
-            // (`general.confirm_exit`: only after a second press).
+            // Hint, past program → now, guide → groups → rail → leave.
             (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
                 ui.mode.set(ViewMode::Fullscreen);
                 true
             }
-            (ViewMode::Guide | ViewMode::Overlay, _, _) => {
-                lists::back(ui) || !settings_view::may_leave()
-            }
+            (ViewMode::Guide | ViewMode::Overlay, _, _) => lists::back(ui),
             _ => {
                 ui.mode.set(crate::settings::browse_mode());
                 true

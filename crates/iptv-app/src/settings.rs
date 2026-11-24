@@ -21,7 +21,7 @@
 //! features of TV boxes). Some settings apply here ([`bind`]: colors,
 //! panel timeouts, [`network_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
-//! leaving, channel-change info).
+//! channel-change info).
 
 use std::sync::Arc;
 
@@ -61,7 +61,6 @@ pub const WIRED: &[&str] = &[
     "guide.show_logos",
     "guide.visible_minutes",
     "general.resume_last_channel",
-    "general.confirm_exit",
     "general.user_agent",
     "epg.update_interval",
     "epg.update_on_start",
@@ -94,9 +93,6 @@ pub const COMMANDS: &[&str] = &[
     "parental.change_pin",
     "recordings.quit_host",
     "recordings.background_status",
-    "recordings.enable_startup",
-    "recordings.disable_startup",
-    "recordings.alarm_access",
     "about.privacy_policy",
     "general.backup",
     "general.restore",
@@ -114,8 +110,13 @@ const READ_ONLY: &[&str] = &["remote.key_overrides"];
 /// Not offered: device-level features of TV boxes (start with the device,
 /// frame-rate switching, decoders, audio passthrough, multicast relay,
 /// voice input, self-update, usage statistics). Also `general.about`,
-/// which the About page shows on its own.
+/// which the About page shows on its own, and the double-Back confirmation
+/// before leaving (`general.confirm_exit` and its window): each platform's
+/// own Back and exit convention applies instead (#277), and stored values
+/// are kept but ignored.
 const NOT_OFFERED: &[&str] = &[
+    "general.confirm_exit",
+    "general.confirm_exit_window",
     "general.start_on_boot",
     "general.start_on_wake",
     "general.udp_proxy",
@@ -134,6 +135,12 @@ const NOT_OFFERED: &[&str] = &[
     "playback.afr_resolution",
     "playback.afr_50_60_only",
     "search.prefer_voice",
+    // They exist for scheduled recordings, which are retired (#273): login
+    // startup for the background recorder and Android's exact alarms.
+    // Background status and Quit stay while pending jobs can still run.
+    "recordings.enable_startup",
+    "recordings.disable_startup",
+    "recordings.alarm_access",
 ];
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
@@ -199,16 +206,6 @@ pub fn offer(key: &str) -> Offer {
         return Offer::Hidden;
     }
     if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
-        return Offer::Hidden;
-    }
-    if key == "recordings.alarm_access" && !crate::capabilities::HOST.alarm_permission() {
-        return Offer::Hidden;
-    }
-    if matches!(
-        key,
-        "recordings.enable_startup" | "recordings.disable_startup"
-    ) && !crate::capabilities::HOST.startup_registration()
-    {
         return Offer::Hidden;
     }
     // Leaving the app into a picture-in-picture window: Android phones and
@@ -411,6 +408,14 @@ mod tests {
         assert_eq!(offer("parental.change_pin"), Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::Hidden);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
+        // Scheduled recording is retired (#273).
+        for key in [
+            "recordings.enable_startup",
+            "recordings.disable_startup",
+            "recordings.alarm_access",
+        ] {
+            assert_eq!(offer(key), Offer::Hidden, "{key}");
+        }
         // Not before the host says it has the window, never off Android
         // (nor on a TV, whose host reports none).
         assert_eq!(offer("player.pip_on_leave"), Offer::Hidden);

@@ -427,7 +427,8 @@ fn the_wheel_right_click_and_hover_never_tune_and_context_menus_target_their_row
     step(app.wait_for(more));
     step(app.press(more));
     step(app.wait_for("text:Cancel recording >> nth=0"));
-    step(app.wait_for("text:Edit recording >> nth=0"));
+    // A scheduled job is canceled, not edited (#273).
+    assert!(!app.shows("text:Edit recording"));
     step(app.back());
     let row = "id:recording-job >> nth=1";
     step(app.right_click(row));

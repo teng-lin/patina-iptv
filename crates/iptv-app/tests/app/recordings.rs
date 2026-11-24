@@ -1,6 +1,6 @@
-//! Synthetic scheduling through the real shell: one workflow for keys and touch.
+//! Synthetic recording through the real shell: one workflow for keys and touch.
 use crate::headless::Headless;
-use crate::personalization::{self, step};
+use crate::personalization::step;
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -172,118 +172,148 @@ fn fixture_in(
     (app, path, source, expected)
 }
 
+/// A one-off job and a series rule (with its first job), stored the way the
+/// runtime stores them, as viewers scheduled them before scheduling was
+/// retired (#273).
+fn seed_scheduled(path: &std::path::Path, source: iptv_library::SourceId) {
+    use iptv_core::recording::{JobId, Repeat, Request, Rule, RuleId};
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let mut store = crate::isolated::open_database(path).unwrap();
+    let channel = store.load_channels(source, &Default::default()).unwrap()[0]
+        .channel
+        .id
+        .as_str()
+        .to_owned();
+    let request = |title: &str, start: i64| Request {
+        source: source.0,
+        channel: channel.clone(),
+        channel_name: "Generated channel".into(),
+        title: title.into(),
+        start,
+        end: start + 1800,
+    };
+    store
+        .schedule_recording(
+            JobId(1),
+            &request("Generated scheduled recording", now + 3600),
+            now,
+        )
+        .unwrap();
+    // No guide program carries the series title, so the recorder adds no
+    // occurrences while the test runs (a daily rule would).
+    let series = request("Generated series recording", now + 7200);
+    let rule = Rule {
+        id: RuleId(1),
+        local_start: series.start,
+        request: series,
+        repeat: Repeat::Series,
+        enabled: true,
+        lead_seconds: 0,
+        trail_seconds: 0,
+    };
+    store
+        .schedule_recording_rule_and_first(&rule, JobId(2), now)
+        .unwrap();
+}
+
+fn jobs(path: &std::path::Path) -> Vec<iptv_core::recording::Job> {
+    crate::isolated::open_database(path)
+        .unwrap()
+        .recording_jobs()
+        .unwrap()
+}
+
+#[track_caller]
+fn wait_for_jobs(
+    app: &mut Headless,
+    path: &std::path::Path,
+    what: &str,
+    done: impl Fn(&[iptv_core::recording::Job]) -> bool,
+) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    while !done(&jobs(path)) {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        app.idle(Duration::from_millis(200)).unwrap();
+    }
+}
+
+/// Scheduling is retired (#273): no menu offers it, and jobs and rules
+/// scheduled before stay listed and can be canceled, but not edited.
 fn exercise(home: crate::isolated::Home, idiom: Idiom) {
+    use iptv_core::recording::Status;
     let (mut app, path, source, _) =
         fixture(&home, idiom, "https://example.test/generated.ts", None);
-    // The custom form works without guide data, with the selected channel retained.
-    if idiom == Idiom::Tv {
-        step(app.press_key("m"));
-        for _ in 0..30 {
-            if app
-                .screen()
-                .accessibility_state("label:Schedule a recording…")
-                .unwrap()
-                .selected
-            {
-                break;
-            }
-            step(app.press_key("down"));
-        }
-        assert!(
-            app.screen()
-                .accessibility_state("label:Schedule a recording…")
-                .unwrap()
-                .selected
-        );
-        step(app.press_key("enter"));
-    } else {
-        personalization::menu(&mut app, "Schedule a recording…");
-    }
+    step(app.press_key("m"));
+    step(app.wait_for("text:Manage favorites…"));
+    assert!(!app.shows("text:Schedule a recording…"));
+    assert!(!app.shows("text:Schedule recording"));
+    step(app.back());
+    step(app.wait_for_gone("text:Manage favorites…", Duration::from_secs(2)));
+
+    seed_scheduled(&path, source);
+    crate::browse_fixture::open_rail_item(&mut app, "Recordings");
     step(app.wait_for("id:recordings-screen"));
-    step(app.wait_for("text:Save recording"));
-    // Calendar and clock values are separate, and touch opens an exact editor.
-    step(app.wait_for("label:/^Start day · [^:]+$/"));
-    step(app.wait_for("label:/^Start time · .*:/"));
-    // Move the recording to tomorrow through a visible touch/pointer control.
+    // Newest start first: the series rule's job, then the one-off job.
+    step(app.wait_for_within("id:recording-job >> nth=1", Duration::from_secs(15)));
+    assert_eq!(app.screen().count("text:/Scheduled ·/").unwrap(), 2);
+    assert!(!app.shows("label:/^Edit recording ·/"));
     if idiom == Idiom::Tv {
-        for _ in 0..5 {
-            step(app.press_key("up"));
-        }
-        step(app.press_key("right"));
-        for _ in 0..5 {
-            step(app.press_key("down"));
-        }
+        // Select on a scheduled job lists its actions; none edits it.
         step(app.press_key("enter"));
-    } else {
-        step(app.press("label:/^Start day ·/"));
-        step(app.wait_for("id:recording-day-option"));
-        step(app.press("id:recording-day-option >> nth=1"));
-        step(app.press("label:/^Start time ·/"));
-        step(app.wait_for("id:recording-entry"));
-        step(app.clear("id:recording-entry"));
-        step(app.type_text("id:recording-entry", "18:05"));
-        step(app.press("id:recording-entry >> text:Done"));
-        step(app.wait_for("label:/^Start time · (18:05|6:05 PM)$/"));
-        step(app.press("label:/^Duration ·/"));
-        step(app.wait_for("id:recording-entry"));
-        step(app.clear("id:recording-entry"));
-        step(app.type_text("id:recording-entry", "1:10"));
-        step(app.press("id:recording-entry >> text:Done"));
-        step(app.press("label:/^Name ·/"));
-        step(app.wait_for("id:recording-entry"));
-        step(app.clear("id:recording-entry"));
-        step(app.type_text("id:recording-entry", "Generated scheduled recording"));
-        step(app.press("id:recording-entry >> text:Done"));
-        step(app.press("id:recording-options"));
-        for minutes in ["5", "0"] {
-            step(app.press("label:/^Start early ·/"));
-            step(app.wait_for("id:recording-entry"));
-            step(app.clear("id:recording-entry"));
-            step(app.type_text("id:recording-entry", minutes));
-            step(app.press("id:recording-entry >> text:Done"));
-        }
-        step(app.wait_for("label:Start early · 0 min"));
-        step(app.press("text:Save recording"));
-    }
-    step(app.wait_for_within("text:/Scheduled ·/", Duration::from_secs(15)));
-    let store = crate::isolated::open_database(&path).unwrap();
-    let jobs = store.recording_jobs().unwrap();
-    assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].request.source, source.0);
-    assert_eq!(jobs[0].status, iptv_core::recording::Status::Scheduled);
-    if idiom != Idiom::Tv {
-        assert_eq!(jobs[0].request.title, "Generated scheduled recording");
-        assert_eq!(jobs[0].request.end - jobs[0].request.start, 70 * 60);
-        assert_eq!(jobs[0].request.start.rem_euclid(60), 0);
-    }
-    drop(store);
-    if idiom == Idiom::Tv {
-        step(app.press_key("m"));
-        step(app.wait_for("text:Cancel recording"));
+        step(app.wait_for("text:Cancel repeating schedule"));
+        assert!(!app.shows("text:Edit recording"));
         step(app.press_key("down"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("label:/^Cancel recording ·/"));
+        step(app.press("role:button[/^More options for Generated series recording/]"));
+        step(app.wait_for("text:Cancel repeating schedule"));
+        assert!(!app.shows("text:Edit recording"));
+        step(app.press("text:Cancel repeating schedule"));
     }
-    step(app.wait_for_within("text:/Canceled ·/", Duration::from_secs(10)));
+    wait_for_jobs(&mut app, &path, "the series rule is canceled", |jobs| {
+        jobs.iter()
+            .any(|j| j.id.0 == 2 && j.status == Status::Canceled)
+    });
+    assert!(
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .recording_rules()
+            .unwrap()
+            .is_empty()
+    );
+    if idiom == Idiom::Tv {
+        step(app.wait_for_gone("text:Cancel repeating schedule", Duration::from_secs(5)));
+        step(app.press_key("down"));
+        step(app.press_key("enter"));
+        step(app.wait_for("text:Cancel recording"));
+        assert!(!app.shows("text:Edit recording"));
+        step(app.press_key("enter"));
+    } else {
+        step(app.press("label:/^Cancel recording · Generated scheduled recording/"));
+    }
+    wait_for_jobs(&mut app, &path, "the one-off job is canceled", |jobs| {
+        jobs.iter()
+            .any(|j| j.id.0 == 1 && j.status == Status::Canceled)
+    });
+    step(app.wait_until(
+        "both jobs show as canceled",
+        Duration::from_secs(10),
+        |screen| screen.count("text:/Canceled ·/").is_ok_and(|n| n == 2),
+    ));
     if idiom == Idiom::Tv {
         step(app.press_key("m"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("label:/^Delete recording ·/"));
+        step(app.press("label:/^Delete recording · Generated scheduled recording/"));
     }
     step(app.wait_for("id:recording-delete-confirmation"));
     // Back cancels and a later attempt needs its own confirmation.
     step(app.back());
     step(app.wait_for_gone("id:recording-delete-confirmation", Duration::from_secs(2)));
-    assert_eq!(
-        crate::isolated::open_database(&path)
-            .unwrap()
-            .recording_jobs()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert_eq!(jobs(&path).len(), 2);
     if idiom == Idiom::Tv {
         step(app.press_key("m"));
         step(app.press_key("enter"));
@@ -291,38 +321,42 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
         step(app.press_key("right"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("label:/^Delete recording ·/"));
+        step(app.press("label:/^Delete recording · Generated scheduled recording/"));
         step(app.press("id:recording-delete-confirmation >> text:Delete recording"));
     }
-    step(app.wait_for_within("text:/No recordings here/", Duration::from_secs(10)));
+    wait_for_jobs(&mut app, &path, "the one-off job is deleted", |jobs| {
+        jobs.len() == 1 && jobs[0].id.0 == 2
+    });
     step(app.back());
     step(app.wait_for_gone("id:recordings-screen", Duration::from_secs(2)));
 }
 
 #[test]
-fn tv_schedules_and_cancels_without_a_keyboard_or_touch_requirement() {
+fn tv_lists_and_cancels_scheduled_jobs_without_editing_them() {
     let Some(home) = isolated!() else {
         return;
     };
     exercise(home, Idiom::Tv);
 }
 #[test]
-fn tablet_schedules_cancels_and_confirms_deletion() {
+fn tablet_lists_cancels_and_deletes_scheduled_jobs_without_editing_them() {
     let Some(home) = isolated!() else {
         return;
     };
     exercise(home, Idiom::Pad);
 }
 #[test]
-fn desktop_schedules_cancels_and_confirms_deletion() {
+fn desktop_lists_cancels_and_deletes_scheduled_jobs_without_editing_them() {
     let Some(home) = isolated!() else {
         return;
     };
     exercise(home, Idiom::Desktop);
 }
 
+/// A future program offers no way to record it: not its menu, not the
+/// Record key, not its details.
 fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixture) {
-    let (mut app, path, source, expected) = fixture(
+    let (mut app, path, _, _) = fixture(
         &home,
         idiom,
         "https://example.test/generated.ts",
@@ -350,67 +384,55 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixtu
         .expect("focused future program")
         .id;
     let cell = format!("view:{selected}");
-    let open_menu = |app: &mut Headless| {
-        if idiom == Idiom::Desktop {
-            step(app.right_click(&cell));
-        } else {
-            step(app.long_press(&cell));
-        }
-    };
-    let schedule = "id:menu-panel >> text:Schedule recording";
-    open_menu(&mut app);
-    step(app.wait_for(schedule));
-    assert!(
-        !app.screen()
-            .matches("id:menu-panel >> text:Record")
-            .unwrap()
-    );
-    step(app.press(schedule));
-    assert!(
-        !app.screen().matches("text:Save recording").unwrap(),
-        "guide scheduling must skip the custom form"
-    );
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
-    step(app.wait_for_within(
-        "id:app-notice >> text:Recording scheduled",
-        Duration::from_secs(15),
-    ));
-    let jobs = crate::isolated::open_database(&path)
-        .unwrap()
-        .recording_jobs()
-        .unwrap();
-    assert_eq!(jobs.len(), 1);
-    assert_eq!(jobs[0].request.source, source.0);
-    assert_eq!(jobs[0].status, iptv_core::recording::Status::Scheduled);
-    assert_eq!(jobs[0].request.title, title);
-    assert!(
-        jobs[0].request.start > now,
-        "future program must not become record-now"
-    );
-    assert_eq!(
-        (jobs[0].request.start, jobs[0].request.end),
-        expected.unwrap()
-    );
-    // Reopening the menu offers cancellation for this occurrence.
-    open_menu(&mut app);
-    let cancel = "id:menu-panel >> text:Cancel recording";
-    step(app.wait_for(cancel));
-    assert!(!app.shows(schedule));
+    // The channel menu of a future program neither records nor schedules it.
+    if idiom == Idiom::Desktop {
+        step(app.right_click(&cell));
+    } else {
+        step(app.long_press(&cell));
+    }
+    let favorite = "id:menu-panel >> text:Add to favorites";
+    step(app.wait_for(favorite));
+    for item in ["Schedule recording", "Record now"] {
+        assert!(
+            !app.screen()
+                .matches(&format!("id:menu-panel >> label:/^{item}/"))
+                .unwrap(),
+            "{item}"
+        );
+    }
     step(app.back());
-    step(app.wait_for_gone(cancel, Duration::from_secs(3)));
-
-    crate::browse_fixture::open_rail_item(&mut app, "Recordings");
-    step(app.wait_for_within("text:/Scheduled ·/", Duration::from_secs(15)));
-    step(app.press("id:recording-job"));
-    step(app.wait_for("text:Save recording"));
-    step(app.press("text:Close"));
+    step(app.wait_for_gone(favorite, Duration::from_secs(2)));
+    // Nor does its program menu.
+    step(app.press_key("m"));
+    let details = "id:menu-panel >> text:Details";
+    step(app.wait_for(details));
+    for item in ["Schedule recording", "Schedule a recording…", "Record"] {
+        assert!(
+            !app.screen()
+                .matches(&format!("id:menu-panel >> text:{item}"))
+                .unwrap(),
+            "{item}"
+        );
+    }
+    // The details offer no Record button, and Select and Record do nothing.
+    step(app.press(details));
+    step(app.wait_for(&format!("id:description-layer >> text:{title}")));
+    assert!(!app.shows("id:description-layer >> text:Record"));
+    step(app.press_remote(nsh_tv::RemoteKey::Record));
+    step(app.press_key("enter"));
+    step(app.back());
+    // The Record key on a future program explains instead of scheduling.
+    step(app.press_remote(nsh_tv::RemoteKey::Record));
+    step(app.wait_for_within(
+        "id:app-notice >> text:Only a program on now can be recorded",
+        Duration::from_secs(5),
+    ));
+    assert!(!app.screen().matches("id:recordings-screen").unwrap());
+    assert!(jobs(&path).is_empty(), "no job is scheduled");
 }
 
 #[test]
-fn right_click_on_a_future_program_schedules_without_a_form() {
+fn right_click_on_a_future_program_offers_no_scheduling() {
     let Some(home) = isolated!() else { return };
     future_program(
         home,
@@ -420,13 +442,13 @@ fn right_click_on_a_future_program_schedules_without_a_form() {
 }
 
 #[test]
-fn long_press_on_a_future_program_schedules_without_a_form() {
+fn long_press_on_a_future_program_offers_no_scheduling() {
     let Some(home) = isolated!() else { return };
     future_program(home, Idiom::Pad, GuideFixture::Listing("Loading…"));
 }
 
 #[test]
-fn recording_a_guide_gap_keeps_its_display_name() {
+fn a_future_guide_gap_offers_no_scheduling() {
     let Some(home) = isolated!() else { return };
     future_program(home, Idiom::Desktop, GuideFixture::Gap);
 }
@@ -485,6 +507,43 @@ fn long_press_on_a_current_program_offers_record_now_in_the_channel_menu() {
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     step(app.back());
     step(app.wait_for_gone(record_now, Duration::from_secs(2)));
+}
+
+#[test]
+fn details_record_on_a_current_program_records_now_without_a_form() {
+    let Some(home) = isolated!() else { return };
+    let (url, server) = local_capture();
+    let (mut app, path, _, _) = fixture(
+        &home,
+        Idiom::Pad,
+        &url,
+        Some(GuideFixture::Listing("Generated future program")),
+    );
+    step(app.wait_for("text:Generated live program"));
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    step(app.press_key("m"));
+    step(app.press("id:menu-panel >> text:Details"));
+    let record = "id:description-layer >> text:Record";
+    step(app.wait_for(record));
+    step(app.press(record));
+    assert!(!app.screen().matches("text:Save recording").unwrap());
+    wait_for_jobs(&mut app, &path, "Record starts a job now", |jobs| {
+        jobs.len() == 1 && jobs[0].status.active()
+    });
+    let job = jobs(&path).remove(0);
+    assert_eq!(job.request.title, "Generated live program");
+    assert!(job.request.start <= started + 60, "it records now");
+    assert!(!app.screen().matches("id:recordings-screen").unwrap());
+    crate::browse_fixture::open_rail_item(&mut app, "Recordings");
+    step(app.wait_for_within("label:/^Stop recording ·/", Duration::from_secs(15)));
+    step(app.press("label:/^Stop recording ·/"));
+    wait_for_jobs(&mut app, &path, "the recording stops", |jobs| {
+        !jobs[0].status.active()
+    });
+    server.join().unwrap();
 }
 
 struct CaptureServer {

@@ -18,7 +18,6 @@ pub enum Icon {
     Check,
     Warning,
     Trash,
-    Edit,
     Stop,
     Forward,
     Star,
@@ -68,7 +67,6 @@ fn body(icon: Icon) -> &'static str {
             "<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy='17.5' r='1' fill='currentColor'/>"
         }
         Icon::Trash => "<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>",
-        Icon::Edit => "<path d='M4 20l1-5L16 4l4 4L9 19zM13 7l4 4'/>",
         Icon::Stop => {
             "<rect x='5' y='5' width='14' height='14' rx='1' fill='currentColor' stroke='none'/>"
         }

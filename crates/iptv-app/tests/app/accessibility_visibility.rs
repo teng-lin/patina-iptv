@@ -309,44 +309,6 @@ fn largest_text_pin_keeps_cancel_visible_and_dpad_has_no_invisible_stop() {
 }
 
 #[test]
-fn recording_dpad_reveals_save_with_largest_text_and_back_restores_content() {
-    let Some(home) = isolated!() else { return };
-    let (mut fixture, exposure) = fixture_with_settings(home, large_text());
-    let app = &mut fixture.app;
-    step(
-        app.set_environment("TV screen reader and enlarged system text", |env| {
-            env.idiom = Idiom::Tv;
-            env.screen_reader = true;
-            env.font_scale = 1.3;
-        }),
-    );
-    step(app.set_viewport(Size::new(px(960.0), px(540.0))));
-    step(app.press_key("down"));
-    step(app.press_key("m"));
-    step(app.press("text:Schedule a recording…"));
-    step(app.wait_for("id:recording-save"));
-    exposure.shown(app, "guide-ui", false);
-    exposure.shown(app, "recordings-screen", true);
-    for _ in 0..6 {
-        step(app.press_key("down"));
-    }
-    step(app.wait_until(
-        "focused Save is in its scroll viewport",
-        Duration::from_secs(3),
-        |screen| inside(screen, "recording-save", "recording-draft-scroll"),
-    ));
-    assert!(
-        app.screen()
-            .matches("role:button[/Save recording/]")
-            .unwrap()
-    );
-    step(app.back());
-    step(app.back());
-    exposure.shown(app, "guide-ui", true);
-    exposure.selected_channel(app, "Local B");
-}
-
-#[test]
 fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, exposure) = fixture(home);

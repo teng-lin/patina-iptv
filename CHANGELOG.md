@@ -18,6 +18,11 @@ is below 1.0, a minor release may change behavior.
   picture and Multiview where the device can never offer them, and the
   browser TV host shows no recording rows, buttons or Recordings entry.
 - Movies and Shows are no longer offered when every enabled playlist is M3U.
+- Stop offering scheduled and repeating recordings: the guide, program menu,
+  program details, Record key and Recordings no longer schedule or edit a
+  future recording, and the recorder login startup and precise wakeup settings
+  are hidden. Recordings scheduled earlier stay listed, can be canceled and
+  still run. Record now is unchanged.
 - Android TV no longer offers picture in picture: Home during playback returns
   to the launcher and stops the stream, and the control and the
   picture-in-picture-on-leaving setting are gone there. Phones and tablets keep

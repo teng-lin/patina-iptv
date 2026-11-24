@@ -196,8 +196,18 @@ Back always dismisses the nearest surface, one step per press
    stream keeps playing in the mini-player or behind the guide.
 7. In the guide over the video, back to the video.
 8. In the guide: the hint card, the programs on air, the groups column,
-   the rail, then leave (after a confirmation when `general.confirm_exit` is
-   on).
+   the rail, then leave.
+
+At the top level (the rail, with nothing open, nothing playing behind
+the overlay layout's guide and no channel number being typed) the app
+registers no Back handler, so Back follows the platform's convention
+(#277): Android TV returns to the launcher in one press, and Android
+phones and tablets show the predictive back animation (on Android 15 and
+later; on Android 14 only with the developer option "Predictive back
+animations"). No second press is asked for. On a desktop, Escape there
+does nothing; the window closes the operating system's way. The former `general.confirm_exit` and
+`general.confirm_exit_window` settings are no longer offered, and stored
+values are ignored.
 
 Closing a chooser, menu, PIN prompt or settings screen restores focus by
 content identity (the control, program or channel), not by row position,
