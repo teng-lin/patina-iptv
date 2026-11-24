@@ -320,6 +320,13 @@ impl Keymap {
         self.overrides.push(binding);
     }
 
+    /// Removes the default bindings of `action`, for a host that does not
+    /// offer it: its key then falls through to the global binding, if any,
+    /// or does nothing. User overrides stay.
+    pub fn unbind_defaults(&mut self, action: Action) {
+        self.defaults.retain(|binding| binding.action != action);
+    }
+
     pub fn clear_overrides(&mut self) {
         self.overrides.clear();
     }
@@ -838,6 +845,34 @@ mod tests {
         assert_eq!(
             k.resolve(Guide, RemoteKey::Back, Press::Long),
             Some(Action::ReturnToPlayer)
+        );
+    }
+
+    #[test]
+    fn a_host_without_an_action_unbinds_its_default_keys_only() {
+        let mut k = Keymap::defaults();
+        assert_eq!(
+            k.resolve(Player, RemoteKey::Record, Press::Short),
+            Some(Action::Record)
+        );
+        k.set_override(Binding {
+            context: Some(Guide),
+            key: RemoteKey::Green,
+            press: Press::Short,
+            action: Action::Record,
+        });
+        k.unbind_defaults(Action::Record);
+        for context in [Guide, Player] {
+            assert_eq!(k.resolve(context, RemoteKey::Record, Press::Short), None);
+        }
+        assert_eq!(
+            k.resolve(Guide, RemoteKey::Green, Press::Short),
+            Some(Action::Record),
+            "a user's own binding stays"
+        );
+        assert_eq!(
+            k.resolve(Guide, RemoteKey::Red, Press::Short),
+            Some(Action::ToggleFavorite)
         );
     }
 

@@ -6,7 +6,7 @@
 //! full screen" and do nothing.
 
 use crate::i18n::tr;
-use nsh_core::prelude::{effect, px, untracked};
+use nsh_core::prelude::{effect, px, timer, untracked};
 
 use std::cell::{Cell, RefCell};
 
@@ -18,6 +18,7 @@ use crate::Ui;
 mod display_bounds;
 pub mod pip_window;
 pub mod player_windows;
+pub(crate) mod quit_confirm;
 /// The desktop backends, where the app owns the window and the sound:
 /// Linux, macOS and Windows.
 pub const DESKTOP: bool = crate::host::LINUX || crate::host::MACOS || crate::host::WINDOWS;
@@ -34,6 +35,18 @@ thread_local! {
     static POINTER: Cell<Option<(f32, f32)>> = const { Cell::new(None) };
 }
 
+/// Whether closing the main window during a capture keeps recording with
+/// the window hidden (macOS, with its Dock icon) rather than asking
+/// whether to stop recording and quit (Windows, Linux). The headless
+/// scenarios run on Linux keep the macOS behavior unless
+/// `IPTV_TEST_CLOSE_ASKS` is set (`desktop_workflows.rs`).
+fn close_keeps_recording() -> bool {
+    if cfg!(feature = "test-support") && !crate::host::MACOS {
+        return std::env::var_os("IPTV_TEST_CLOSE_ASKS").is_none();
+    }
+    crate::host::MACOS
+}
+
 /// Keeps the app's window; call while the app renders.
 pub fn bind(ui: Ui) {
     let window = current_window();
@@ -46,9 +59,14 @@ pub fn bind(ui: Ui) {
     window.set(attributes);
     let close_window = window.clone();
     window.on_close_press(move |reason| {
-        if reason != nsh_core::desktop::CloseReason::System
-            && crate::runtime().recording_background_needed()
-        {
+        let recording = reason != nsh_core::desktop::CloseReason::System
+            && crate::runtime().recording_background_needed();
+        // Windows and Linux ask first, so no recorder runs without a
+        // window (#275); macOS keeps recording with its Dock icon and asks
+        // on Quit.
+        if recording && !close_keeps_recording() {
+            quit_confirm::open(ui);
+        } else if recording {
             // One contract with or without recordings (`docs/desktop.md`,
             // "Closing"): closing the main window ends every viewing
             // window's playback, as quitting does. Only the recorder runs on.
@@ -66,9 +84,54 @@ pub fn bind(ui: Ui) {
         }
     });
     keep_reachable(window.clone());
+    // Quit (the menu's, the platform's key) asks first during a capture.
+    nsh_core::element::desktop::on_quit_request(move || {
+        if crate::runtime().recording_background_needed() {
+            quit_confirm::open(ui);
+        } else {
+            quit(ui);
+        }
+    });
     if recorder_only_startup() {
         window.hide();
     }
+}
+
+/// Shows the main window, in front, also when closing it hid it.
+pub(crate) fn show_main() {
+    with_window(|window| {
+        window.show();
+        window.focus();
+    });
+}
+
+/// Stop and quit (`quit_confirm`): ends each running capture as the
+/// viewer's Stop does, keeping what was recorded, waits briefly for them
+/// to close their files, then quits.
+pub(crate) fn stop_recordings_and_quit(ui: Ui) {
+    let owner = crate::runtime();
+    crate::data::spawn_in_app(async move {
+        let running: Vec<_> = owner
+            .recording_snapshot()
+            .into_iter()
+            .filter(|job| job.status.active())
+            .map(|job| job.id)
+            .collect();
+        for id in running {
+            if owner.stop_recording(id).await.is_err() {
+                log::warn!("iptv recordings: a recording did not stop before quitting");
+            }
+        }
+        // A stopped capture finishes its file before the recorder shuts
+        // down, or it would be kept to resume at the next start.
+        for _ in 0..50 {
+            if !owner.recording_background_needed() {
+                break;
+            }
+            timer(std::time::Duration::from_millis(200)).await;
+        }
+        quit(ui);
+    });
 }
 
 /// Whether the host reports and honors window positions: macOS and
@@ -321,6 +384,9 @@ pub(crate) fn quit(ui: Ui) {
     if crate::runtime().shutdown_recording_host() {
         crate::player::watch_time::flush(ui);
         with_window(WindowRef::close);
+        // The window may be hidden (macOS), and closing it alone would
+        // leave the app running: quit the app too.
+        nsh_core::element::desktop::quit();
     } else {
         crate::settings_view::notify(tr(
             "The recording host is still closing; try quitting again",

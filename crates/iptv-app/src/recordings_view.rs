@@ -19,6 +19,11 @@ pub fn is_open(ui: Ui) -> bool {
     ui.recordings_open.get()
 }
 pub fn open(ui: Ui) {
+    // Not on a device that does not show the library (yet): its entries
+    // are gone, and a key bound to it does nothing.
+    if !crate::capabilities::recordings_library_untracked(ui) {
+        return;
+    }
     ui.recordings.update(|s| {
         s.open = true;
         s.error = None;
@@ -167,6 +172,10 @@ pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static
     })
 }
 pub fn current(ui: Ui) {
+    // The Record key does nothing where Record now is not offered.
+    if !untracked(crate::capabilities::record_now).offered() {
+        return;
+    }
     if ui.mode.get_untracked() == crate::ViewMode::Fullscreen {
         toggle_current(ui);
         return;
@@ -204,11 +213,21 @@ pub fn can_record_now(origin: Origin, now: i32) -> bool {
 /// clock itself, not the guide's cached minute: a program that has just ended
 /// must not fall back to recording the next hour under its title.
 pub fn record_details(ui: Ui, origin: Origin) {
-    if ui.player_surface != 0 || !can_record_now(origin, crate::time::now_minute()) {
+    if ui.player_surface != 0
+        || !details_button()
+        || !can_record_now(origin, crate::time::now_minute())
+    {
         return;
     }
     ui.description.set(None);
     record_origin(ui, origin);
+}
+
+/// Whether the program details show Record (and Select or Record over
+/// them press it): only where Record now is offered directly
+/// (`capabilities::record_now`).
+pub fn details_button() -> bool {
+    crate::capabilities::record_now() == iptv_presentation::capabilities::RecordNow::Direct
 }
 
 fn playing_channel(ui: Ui) -> Option<(i64, String)> {
@@ -279,7 +298,9 @@ pub fn record_origin(ui: Ui, origin: Origin) {
     start_origin(ui, origin, true);
 }
 fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
-    if ui.recordings.with_untracked(|s| s.busy) {
+    if ui.recordings.with_untracked(|s| s.busy)
+        || !untracked(crate::capabilities::record_now).offered()
+    {
         return;
     }
     let context = remembered
@@ -419,9 +440,12 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
         };
         return Some((item, Some(job)));
     }
-    // A future program is not scheduled (#273); only one on now records.
-    (program.airing(crate::time::now_minute()) == crate::guide::Airing::Live)
-        .then_some((MenuItem::RecordNow, None))
+    // A future program is not scheduled (#273); only one on now records,
+    // where the device offers Record now. A recording already running or
+    // carried over can still be stopped or canceled above.
+    (program.airing(crate::time::now_minute()) == crate::guide::Airing::Live
+        && crate::capabilities::record_now().offered())
+    .then_some((MenuItem::RecordNow, None))
 }
 
 pub fn channel_menu_action(ui: Ui, origin: Origin) -> Option<MenuItem> {
@@ -504,7 +528,8 @@ fn save_allowed(ui: Ui, draft: Draft) {
         };
         if draft.immediate {
             match &result {
-                Ok(_) => crate::settings_view::notify(tr("Starting recording")),
+                // What can stop it, said as it starts (#275).
+                Ok(_) => crate::settings_view::notify(&crate::capture_limits::start_notice()),
                 Err(error) => crate::settings_view::notify(translated_reason(
                     error
                         .unavailable_reason()

@@ -166,6 +166,10 @@ impl Runtime {
     pub fn shutdown_recording_host(&self) -> bool {
         self.recordings.stop()
     }
+    /// [`stop_captures`] for this runtime's recordings.
+    pub fn stop_captures(&self, why: EarlyStop) -> usize {
+        self.recordings.stop_captures(why)
+    }
     pub fn recording_background_needed(&self) -> bool {
         let data = self.recordings.lock();
         data.recurring || data.jobs.iter().any(|job| job.status.active())
@@ -202,6 +206,56 @@ pub fn stop_background_host(directory: &Path) -> bool {
         .get(directory)
         .cloned();
     state.is_none_or(|state| state.stop())
+}
+
+/// Why a host stops running captures early ([`stop_captures`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EarlyStop {
+    /// The TV turned off, and its Low Power Standby cuts the network.
+    TvOff,
+    /// The operating system's limit on background work was reached
+    /// (Android's six hours a day for a data-sync service).
+    BackgroundLimit,
+}
+
+impl EarlyStop {
+    /// The message the recording keeps.
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::TvOff => "Recording stopped when the TV was turned off",
+            Self::BackgroundLimit => {
+                "Recording stopped: Android's background time limit was reached"
+            }
+        }
+    }
+}
+
+/// Stops every capture running for the data directory `directory`, for
+/// `why`: each closes its file and is kept as a partial recording that
+/// gives the reason. Returns how many were running.
+pub fn stop_captures(directory: &Path, why: EarlyStop) -> usize {
+    let state = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned();
+    state.map_or(0, |state| state.stop_captures(why))
+}
+
+impl State {
+    pub(crate) fn stop_captures(&self, why: EarlyStop) -> usize {
+        let mut data = self.lock();
+        let running: Vec<_> = data
+            .active
+            .iter()
+            .map(|(id, (_, stop))| (*id, stop.clone()))
+            .collect();
+        for (id, stop) in &running {
+            data.stop_reasons.insert(*id, why.reason());
+            stop.cancel();
+        }
+        running.len()
+    }
 }
 
 /// Called only after native mobile players have closed their connections.

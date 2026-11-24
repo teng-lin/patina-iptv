@@ -333,6 +333,71 @@ async fn record_now_uses_the_reported_spare_connection_and_preserves_viewing() {
 }
 
 #[tokio::test]
+async fn record_now_says_a_full_library_before_it_starts() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    let owner = owner(&root);
+    let mut request = seed(&owner, &server()).await;
+    // A sparse file takes the library to its budget without using the disk.
+    let media = media_directory(&root);
+    std::fs::create_dir_all(&media).unwrap();
+    std::fs::File::create(media.join("1.ts"))
+        .unwrap()
+        .set_len(iptv_core::recording::LIBRARY_BYTES - iptv_core::recording::MAX_BYTES + 188)
+        .unwrap();
+    request.start = now();
+    request.end = request.start + 20;
+    let error = owner.schedule_recording(request.clone()).await.unwrap_err();
+    assert_eq!(
+        error.unavailable_reason(),
+        Some("The recordings library is full. Delete recordings to record more.")
+    );
+    assert!(
+        owner.recording_snapshot().is_empty(),
+        "nothing was accepted"
+    );
+    // Room again: the same request starts.
+    std::fs::remove_file(media.join("1.ts")).unwrap();
+    let id = owner.schedule_recording(request).await.unwrap();
+    owner.stop_recording(id).await.unwrap();
+    assert!(owner.drain_services());
+}
+
+#[test]
+fn space_admission_counts_a_library_not_created_yet_as_empty() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    std::fs::create_dir_all(&root).unwrap();
+    assert_eq!(space_admission(&root, &[], 60), Ok(()));
+    // A day at the estimated rate is capped at one recording's maximum,
+    // which a real temporary directory may or may not hold: either answer
+    // is the free-space check, never a storage failure.
+    if let Err(reason) = space_admission(&root, &[], iptv_core::recording::MAX_DURATION) {
+        assert!(reason.contains("free space"), "{reason}");
+    }
+}
+
+#[tokio::test]
+async fn a_capture_the_host_stops_early_keeps_its_partial_file_and_the_reason() {
+    let directory = tempfile::tempdir().unwrap();
+    let owner = owner(&directory.path().join("generated-app"));
+    let mut request = seed(&owner, &server()).await;
+    request.start = now();
+    request.end = request.start + 60;
+    let id = owner.schedule_recording(request).await.unwrap();
+    until(&owner, id, |job| {
+        job.status == Status::Recording && job.bytes > 0
+    })
+    .await;
+    assert_eq!(owner.stop_captures(host::EarlyStop::TvOff), 1);
+    let job = until(&owner, id, |job| job.status == Status::Partial).await;
+    assert!(job.bytes >= 188, "the partial file is kept");
+    assert_eq!(job.message, host::EarlyStop::TvOff.reason());
+    assert!(owner.recordings.lock().stop_reasons.is_empty());
+    assert!(owner.drain_services());
+}
+
+#[tokio::test]
 async fn a_reused_playlist_id_does_not_inherit_an_old_connection_allowance() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(&directory.path().join("generated-app"));

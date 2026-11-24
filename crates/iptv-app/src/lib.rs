@@ -39,6 +39,7 @@ pub mod theme;
 mod backup;
 mod browse_playback;
 mod capabilities;
+mod capture_limits;
 mod channels_view;
 mod chooser;
 mod content_image;
@@ -297,6 +298,9 @@ pub struct Ui {
     /// The add-playlist wizard, when open.
     pub wizard: Signal<Option<wizard_view::Open>>,
     restore_review: Signal<Option<backup::RestoreReview>>,
+    /// The question before quitting during a capture, with its focused
+    /// answer (`desktop::quit_confirm`).
+    quit_confirm: Signal<Option<desktop::quit_confirm::Choice>>,
     store_startup_failure: Signal<Option<startup::StoreFailure>>,
     store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
@@ -429,6 +433,7 @@ impl Ui {
                 None,
                 nsh_core::element::SignalEquals::Never,
             ),
+            quit_confirm: signal(None),
             store_startup_failure: signal(None),
             store_failure_scroll: ui_kit::FocusScroll::new(),
             playlists: signal(None),
@@ -1106,6 +1111,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(backup::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup::store_failure_layer(ui))
+        .child(desktop::quit_confirm::layer(ui))
         .child(settings_view::notice_layer())
 }
 
@@ -1242,6 +1248,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
+            _ if top == Some(Overlay::QuitConfirm) => desktop::quit_confirm::back(ui),
             _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);

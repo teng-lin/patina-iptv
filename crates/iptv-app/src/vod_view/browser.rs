@@ -693,7 +693,10 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     });
     let offered = computed(move || {
         ui.app.library.version.get();
-        (!crate::lists::live_only(), crate::host::HAS_WORKERS)
+        (
+            !crate::lists::live_only(),
+            crate::capabilities::recordings_library(ui),
+        )
     });
     effect(move || {
         let (catalogs, recordings) = offered.get();

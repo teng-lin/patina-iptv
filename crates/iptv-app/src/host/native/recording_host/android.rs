@@ -45,6 +45,11 @@ pub(crate) fn schedule(next: i64, active: bool) -> iptv_core::recording::WakeCap
         return WakeCapability::Denied;
     };
     let class: &JClass = class.as_obj().into();
+    // Scheduled recording is retired: the alarm is only the 120-second
+    // watchdog that restarts an active capture's service if Android killed
+    // it (`RecordingHost.schedule`). With no capture running, nothing is
+    // armed, whatever a carried-over job asks for (#275).
+    let next = if active { next } else { 0 };
     let result = env
         .call_static_method(
             class,
@@ -99,6 +104,32 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stop(
             ));
         }
     }));
+}
+
+/// Stops every running capture early (#275), each kept as a partial
+/// recording with the reason: `why` 1, the TV was turned off under Low
+/// Power Standby; 2, Android's background time limit. Returns how many were
+/// running.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stopCaptures(
+    mut env: jni::JNIEnv,
+    _class: JClass,
+    path: JString,
+    why: jni::sys::jint,
+) -> jni::sys::jint {
+    use crate::runtime::recordings::host::{EarlyStop, stop_captures};
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let why = match why {
+            1 => EarlyStop::TvOff,
+            2 => EarlyStop::BackgroundLimit,
+            _ => return 0,
+        };
+        let Ok(path) = env.get_string(&path) else {
+            return 0;
+        };
+        stop_captures(std::path::Path::new(&String::from(path)), why) as jni::sys::jint
+    }))
+    .unwrap_or(0)
 }
 
 pub(super) fn request_alarm_access() {

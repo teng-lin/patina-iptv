@@ -8,6 +8,9 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
     ("backup.rs", "REQUEST"),                       // Android document picker signal.
     ("backup.rs", "ANSWER"),                        // Android document picker callback.
+    ("capture_limits.rs", "REPORTED"),              // The host's report of what can stop a capture.
+    ("host/native/keep_awake.rs", "HELD"),          // The OS idle-sleep hold while a capture runs.
+    ("host/native/keep_awake.rs", "FAILED"),        // That hold failed, for the start notice.
     ("content_image.rs", "CACHE"),                  // Artwork cache.
     ("content_image.rs", "PERMITS"),                // Artwork concurrency limit.
     ("content_image.rs", "CLIENT"),                 // Artwork transport cache.

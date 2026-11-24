@@ -789,6 +789,10 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     use crate::overlays::Overlay;
     let top = ui.top_overlay();
     let mv = |m: Move| crate::lists::navigate(ui, m);
+    if top == Some(Overlay::QuitConfirm) {
+        crate::desktop::quit_confirm::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::StoreStartupFailure) {
         crate::startup::store_failure_key(ui, action);
         return;

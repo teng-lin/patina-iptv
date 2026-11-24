@@ -3,4 +3,8 @@
     <string name="recording_channel">預約錄影</string>
     <string name="recording_title">Patina 正在錄影</string>
     <string name="recording_background">預約錄影正在背景執行</string>
+    <string name="recording_stopped_channel">提前停止的錄影</string>
+    <string name="recording_stopped_title">錄影已停止</string>
+    <string name="recording_stopped_tv_off">電視已關閉。此前錄下的內容在「錄影」中。</string>
+    <string name="recording_stopped_background_limit">已達到 Android 的背景時間限制。此前錄下的內容在「錄影」中。</string>
 </resources>

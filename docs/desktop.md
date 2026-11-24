@@ -136,11 +136,24 @@ recordings keep the app running, as it already did when quitting.
 | The main window's picture-in-picture: ✕ | Playback stops |
 | Minimizing the main window | Everything keeps playing |
 | Closing the main window, no recordings scheduled or running | Patina quits: every window closes |
-| Closing the main window while recordings are scheduled or running | The main window hides and **every** player stops: main, multiview, picture-in-picture and player windows. The recorder runs on; opening Patina again shows the main window. Nothing plays meanwhile, and guide autoplay waits until the viewer moves to another channel |
-| Quit (the macOS menu's Quit, or the system ending the session) | Recordings stop with the recorder; scheduled ones stay scheduled for the next start |
+| Closing the main window while recordings are scheduled or running, on macOS | The main window hides and **every** player stops: main, multiview, picture-in-picture and player windows. The recorder runs on with the Dock icon; opening Patina again shows the main window. Nothing plays meanwhile, and guide autoplay waits until the viewer moves to another channel |
+| Closing the main window while recordings are scheduled or running, on Windows and Linux | Patina asks "Patina is recording": **Stop recording and quit** ends each recording as Stop does (what it holds is kept) and quits; **Keep recording** or Back leaves the window and everything in it as it was. No recorder runs without a window |
+| Quit (the menu's Quit or the platform's quit key) while recordings run | The same question first, the window shown again if it was hidden |
+| The system ending the session | Recordings stop with the recorder; scheduled ones stay scheduled for the next start |
+
+While a capture runs, Patina keeps the computer from idle sleep without root:
+an IOKit `PreventUserIdleSystemSleep` assertion on macOS, a logind
+`sleep:idle` inhibitor (or the desktop portal's Inhibit request) on Linux,
+`SetThreadExecutionState` on Windows. It is released when no capture runs
+(`host/native/keep_awake.rs`). If it cannot be taken, Record says to keep the
+computer awake. It does not prevent a sleep the viewer asks for, such as
+closing a laptop's lid.
 
 - **Now:** all rows (`crates/iptv-app/src/desktop.rs`,
-  `desktop/player_windows.rs`, `desktop/pip_window.rs`).
+  `desktop/quit_confirm.rs`, `desktop/player_windows.rs`,
+  `desktop/pip_window.rs`). The headless scenarios run on Linux keep the macOS
+  close behavior unless `IPTV_TEST_CLOSE_ASKS` is set
+  (`desktop_workflows.rs`).
 
 ## Displays and hosts
 

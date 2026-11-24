@@ -75,6 +75,8 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus-secret-service = { version = "4.1", features = ["crypto-rust"] }
+# The logind and portal sleep inhibitors while recording (host/native/keep_awake.rs).
+dbus = "0.9"
 nsh-platform-linux.workspace = true
 tempfile = "3"
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }

@@ -350,6 +350,22 @@ cancel recordings that were already authorized.
 Choose **Record** on the play bar to start recording the playing live channel
 immediately; the control turns red while capture is active. Press it again to
 stop recording while playback continues.
+
+Record is offered where you stay with the capture until it ends: on Android TV
+and the desktops in the play bar, the program details and the Record key; on
+Android phones and tablets under the play bar's **More** and in the program
+menu. The iPad and the Samsung TV packages do not record. **Recordings** is in
+the rail on Android TV and the desktops; on Android phones and tablets and on
+the iPad it appears once the library holds a recording. Before a capture starts
+Patina checks the 32 GiB library budget, the free space it needs (about 3.6 GB
+an hour), a free provider connection and, on a phone or a tablet, a metered
+network, and says what will stop it: on Android TV with Low Power Standby,
+turning the TV off (the part recorded is kept); on Android 15 and later, the
+six-hour background limit, after which Patina notifies you. A desktop keeps
+the computer from idle sleep while it records. Closing the window while a
+capture runs asks, on Windows and Linux, whether to stop recording and quit;
+on macOS the recording goes on with the Dock icon and Quit asks first.
+
 On a TV while watching, press Menu or long-press OK to open the control strip,
 then choose **Record**.
 In the guide, long-press a current program (right-click on desktop) to open

@@ -8,7 +8,12 @@ mod windows;
 #[cfg(windows)]
 pub(crate) use windows::activate_existing;
 #[cfg(not(target_os = "android"))]
-pub(crate) fn schedule(next: i64, _active: bool) -> iptv_core::recording::WakeCapability {
+pub(crate) fn schedule(next: i64, active: bool) -> iptv_core::recording::WakeCapability {
+    // A desktop stays awake while a capture runs (#275).
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    super::keep_awake::set(active);
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    let _ = active;
     #[cfg(windows)]
     return windows::schedule(next);
     #[cfg(not(windows))]

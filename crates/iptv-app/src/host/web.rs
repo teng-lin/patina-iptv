@@ -37,6 +37,11 @@ use crate::runtime::network::{Body, Chunks, Client, NetFuture, Network, NetworkC
 pub(crate) const PLATFORM: iptv_core::capabilities::Platform =
     iptv_core::capabilities::Platform::Unknown;
 
+/// A browser TV does not record, so never keeps anything awake.
+pub(crate) fn keep_awake_failed() -> bool {
+    false
+}
+
 /// The cooperative executor has no blocking workers
 /// (`Runtime::has_workers`): no imports, recording or backups yet.
 pub(crate) const HAS_WORKERS: bool = false;

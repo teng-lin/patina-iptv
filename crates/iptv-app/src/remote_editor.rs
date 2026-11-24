@@ -31,7 +31,23 @@ pub fn keymap() -> Keymap {
     for b in saved().iter().filter_map(validated) {
         map.set_override(b);
     }
+    // Where Record now is not offered, nothing is bound to it by default
+    // and a binding saved elsewhere does nothing (`recordings_view::current`).
+    if !untracked(crate::capabilities::record_now).offered() {
+        map.unbind_defaults(Action::Record);
+    }
     map
+}
+
+/// The actions a binding can choose here: not Record where Record now is
+/// not offered.
+fn bindable(editor: &Editor) -> Vec<Action> {
+    let record = untracked(crate::capabilities::record_now).offered();
+    editor
+        .actions()
+        .into_iter()
+        .filter(|&action| record || action != Action::Record)
+        .collect()
 }
 pub fn overridden(context: Context, key: RemoteKey) -> bool {
     saved()
@@ -112,7 +128,7 @@ fn change(ui: Ui, by: isize) {
                 Press::Short
             }
         }
-        Field::Action => s.action = cycle(s.action, &s.actions(), by),
+        Field::Action => s.action = cycle(s.action, &bindable(s), by),
         _ => {}
     });
 }

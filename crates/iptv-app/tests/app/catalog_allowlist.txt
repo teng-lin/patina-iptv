@@ -274,6 +274,13 @@ iptv-app/src/host/native/recording_host/startup.rs	Patina Recorder
 iptv-app/src/host/native/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
 iptv-app/src/host/native/recording_host/windows.rs	Patina Recorder
 iptv-app/src/host/native/recording_host/windows.rs	Patina
+# Sleep inhibitors while recording: D-Bus methods and the reasons the OS shows.
+iptv-app/src/host/native/keep_awake.rs	Close
+iptv-app/src/host/native/keep_awake.rs	Inhibit
+iptv-app/src/host/native/keep_awake.rs	Patina
+iptv-app/src/host/native/keep_awake.rs	Patina is recording a TV program
+iptv-app/src/host/native/keep_awake.rs	PreventUserIdleSystemSleep
+iptv-app/src/host/native/keep_awake.rs	Recording a TV program
 # VOD native reasons are replaced with shell-owned translated messages; headers are wire names.
 iptv-runtime/src/vod.rs	On-demand content unavailable; refresh the playlist and try again
 iptv-runtime/src/vod.rs	Playlist changed

@@ -139,7 +139,10 @@ fn is_favorite(ui: Ui) -> bool {
 pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
     let main = ui.player_surface == 0;
     match control {
-        Control::Record | Control::Recordings => crate::host::HAS_WORKERS && main,
+        // Where the device offers them (`capabilities::record_now` and
+        // `recordings_library`).
+        Control::Record => main && crate::capabilities::record_now().offered(),
+        Control::Recordings => main && crate::capabilities::recordings_library(ui),
         Control::Search => main,
         Control::Multiview => main && device.host.decoder_slots() > 1,
         // Shown until the host reports, then only where it can.
@@ -154,7 +157,7 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
     match control {
         Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Record => {
-            crate::host::HAS_WORKERS
+            crate::capabilities::record_now().offered()
                 && ui.player_surface == 0
                 && ui.playback.get() == crate::Playback::Live
                 && !ui.recordings.with(|s| s.busy || s.starting.is_some())
@@ -163,7 +166,9 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                     .get()
                     .is_some_and(crate::recordings_view::available)
         }
-        Control::Recordings => crate::host::HAS_WORKERS && ui.player_surface == 0,
+        Control::Recordings => {
+            ui.player_surface == 0 && crate::capabilities::recordings_library(ui)
+        }
         Control::Search => ui.player_surface == 0,
         Control::ChannelList | Control::Favorite | Control::Scaling | Control::SleepTimer => true,
         Control::VideoTracks => choice(Track::Video),
