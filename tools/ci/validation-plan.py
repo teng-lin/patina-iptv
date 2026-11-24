@@ -167,7 +167,9 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False, draft=False):
         "packages": bool(platforms),
         "package_matrix": {"include": platforms},
         "windows-package": full or ci or "windows-package" in requested or matches(inputs, WINDOWS_PACKAGE),
-        "coverage": full or ci or "coverage" in requested or matches(inputs, COVERAGE),
+        # Any Rust source change can move a crate below its coverage floor;
+        # catch it before merge instead of on master's gate (#290).
+        "coverage": full or ci or "coverage" in requested or matches(inputs, (*COVERAGE, "crates/**/*.rs")),
         "fuzz": fuzz_targets(inputs, full or ci or "fuzz" in requested, root),
         "smoke": full or ci or "smoke" in requested or matches(production, SMOKE),
         "stress": full or ci or "stress" in requested or matches(inputs, STRESS),

@@ -55,8 +55,10 @@ class Selection(unittest.TestCase):
         plan = v.select(["crates/iptv-core/src/guide.rs"])
         for lane in ("host", "windows", "android"):
             self.assertTrue(plan[lane], lane)
-        for lane in ("android_package", "packages", "windows-package", "coverage", "smoke"):
+        for lane in ("android_package", "packages", "windows-package", "smoke"):
             self.assertFalse(plan[lane], lane)
+        # Rust source changes measure coverage so a floor drop fails the PR, not master.
+        self.assertTrue(plan["coverage"])
         self.assertTrue(plan["fuzz"])
         self.assertTrue(plan["stress"])
 
@@ -76,6 +78,16 @@ class Selection(unittest.TestCase):
                 self.assertEqual(v.select(paths, tier)["macos_host"], job)
         self.assertFalse(v.select(["hosts/ios/Synthetic.swift"])["ios_on_host"])
         self.assertTrue(v.select(["Cargo.lock"])["ios_on_host"])
+
+    def test_rust_sources_and_tests_select_coverage_but_docs_and_manifests_do_not(self):
+        for path in ("crates/iptv-app/src/recordings_view.rs", "crates/iptv-app/tests/app/recordings.rs",
+                     "crates/iptv-store-sqlite/tests/it/migrations.rs", "crates/iptv-web/src/lib.rs"):
+            self.assertTrue(v.select([path])["coverage"], path)
+        for path in ("README.md", "docs/ci.md", "crates/iptv-presentation/src/i18n/messages.tsv",
+                     "hosts/android/app/build.gradle.kts", "Cargo.lock"):
+            self.assertFalse(v.select([path])["coverage"], path)
+        # Drafts still defer it until the pull request is marked ready.
+        self.assertFalse(v.select(["crates/iptv-app/src/recordings_view.rs"], draft=True)["coverage"])
 
     def test_ci_helper_change_does_not_build_installers(self):
         plan = v.select(["tools/ci/test-sbom.py"])
