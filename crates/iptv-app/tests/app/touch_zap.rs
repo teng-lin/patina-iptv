@@ -270,9 +270,20 @@ fn touch(
     );
 }
 
+/// The finger lifts inside the full-screen video, which Android's press
+/// then reports as a tap whatever the finger did (its press ends early
+/// only when the finger leaves the view): a swipe must not be one.
+fn lift_press(app: &mut Headless) {
+    let video = app.screen().id("id:video").unwrap();
+    app.engine()
+        .control()
+        .dispatch_event(video, EventKind::Press, EventPayload::None);
+}
+
 /// A finger on the video goes down at `from`, moves through `through`, 10
-/// dp each 16 ms, and lifts at the last point; the app's clock does not
-/// move meanwhile. `hold`: it stays down at the last point.
+/// dp each 16 ms, and lifts at the last point, its press reported as
+/// Android does ([`lift_press`]); the app's clock does not move
+/// meanwhile. `hold`: it stays down at the last point.
 fn finger(app: &mut Headless, from: (f32, f32), through: &[(f32, f32)], hold: bool) {
     let (target, path) = video_path(app);
     let mut t = 1_000.0;
@@ -292,6 +303,7 @@ fn finger(app: &mut Headless, from: (f32, f32), through: &[(f32, f32)], hold: bo
     }
     if !hold {
         touch(app, TouchPhase::End, target, &path, at, t);
+        lift_press(app);
     }
     app.settle();
 }
@@ -379,7 +391,12 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
         "the banner follows the finger: {low} -> {high}"
     );
     touch(&mut app, TouchPhase::End, target, &path, (from.0, 300.0), t);
+    lift_press(&mut app);
     app.settle();
+    assert!(
+        !app.screen().matches("id:play-bar-layer").unwrap(),
+        "a swipe is no tap: the play bar stays hidden"
+    );
     assert!(!app.screen().matches("id:swipe-preview").unwrap());
     assert!(
         banner_names(&app, 2),
@@ -402,9 +419,12 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     let opened = streams(&tuned).len();
     let mid = (SCREEN.0 / 2.0, 400.0);
     finger(&mut app, mid, &[(mid.0, 100.0), (mid.0, 395.0)], false);
+    // (Each of these three is a tap for Android's press: two of them hide
+    // the play bar again.)
     finger(&mut app, (mid.0, 790.0), &[(mid.0, 300.0)], false);
     finger(&mut app, (mid.0, 12.0), &[(mid.0, 500.0)], false);
     finger(&mut app, mid, &[(mid.0 + 400.0, 450.0)], false);
+    finger(&mut app, mid, &[(mid.0 + 2.0, 400.0)], false);
     assert!(!app.screen().matches("id:swipe-preview").unwrap());
     assert!(!banner_names(&app, 2) && !banner_names(&app, 4));
     quiet(&mut app);

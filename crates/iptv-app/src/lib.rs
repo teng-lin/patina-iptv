@@ -1105,6 +1105,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
 /// it never wraps.
 fn video_catcher(ui: Ui, live: bool) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
+    let swiped = stored(false);
     let catcher = view()
         .test_id("video")
         .accessibility_elements_hidden(move || {
@@ -1121,6 +1122,10 @@ fn video_catcher(ui: Ui, live: bool) -> View {
         })
         .label(move || tr("Video"))
         .on_press(move |e: &PressEvent| {
+            // The finger swiped (`touch_zap.rs`): no tap.
+            if swiped.with(|s| *s) {
+                return;
+            }
             ui.touched();
             toggle_panels(ui);
             // A double click on the desktop: window full screen (the
@@ -1132,7 +1137,7 @@ fn video_catcher(ui: Ui, live: bool) -> View {
     if !live {
         return catcher;
     }
-    touch_zap::watch(catcher, ui)
+    touch_zap::watch(catcher, ui, swiped)
         .accessibility_actions(touch_zap::actions())
         .on_accessibility_action(move |action: &str| touch_zap::act(ui, action))
 }

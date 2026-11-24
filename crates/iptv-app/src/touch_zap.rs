@@ -67,11 +67,14 @@ fn takes_swipes(ui: Ui) -> bool {
 /// while the bar shows).
 pub(crate) fn zap(ui: Ui, direction: Direction) {
     if !untracked(|| live(ui)) {
+        log::info!("iptv touch zap: {direction:?}: no live channel");
         return;
     }
     let Some(to) = untracked(|| crate::player_keys::zap_target(ui, direction.step())) else {
+        log::info!("iptv touch zap: {direction:?}: no channel");
         return;
     };
+    log::info!("iptv touch zap: {direction:?} to {to}");
     crate::browse_playback::zap_by(ui, to, true);
     if untracked(|| crate::play_bar::shows(ui)) {
         crate::play_bar::used(ui);
@@ -89,9 +92,11 @@ fn touched(ui: Ui) {
 }
 
 /// The touches on `video` (the full-screen tap catcher): the first
-/// finger's swipe. A tap still reaches the view's press; a finger that
-/// moves away cancels that press, so a swipe never toggles the panels.
-pub(crate) fn watch<E: Interactive>(video: E, ui: Ui) -> E {
+/// finger's swipe. `swiped` holds from a swipe's first move past the
+/// threshold until the next finger goes down: the view's press, which a
+/// platform may still report when the finger lifts inside the view
+/// (Android's does, the view filling the screen), is then no tap.
+pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, swiped: Stored<bool>) -> E {
     let swipe = stored(Swipe::default());
     // Made again mid-swipe (live video turned into a replay): its banner
     // goes with it.
@@ -108,6 +113,9 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui) -> E {
                     let finger = p.pointer_type == nsh_core::PointerType::Touch;
                     let admitted = finger && untracked(|| takes_swipes(ui));
                     swipe.with(|s| {
+                        if !s.swiping() {
+                            swiped.with(|w| *w = false);
+                        }
                         // Another finger down still cancels a swipe under
                         // way (a pinch is none).
                         if admitted || s.swiping() {
@@ -125,6 +133,9 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui) -> E {
                 nsh_core::TouchPhase::End => swipe.with(|s| s.up(id, at, t)),
                 nsh_core::TouchPhase::Cancel => swipe.with(|s| s.cancel(id)),
             };
+            if matches!(outcome, Outcome::Follow { .. }) {
+                swiped.with(|w| *w = true);
+            }
             apply(ui, outcome, at.1);
         }
     })
@@ -151,12 +162,16 @@ fn apply(ui: Ui, outcome: Outcome, y: f32) {
             }
         }
         Outcome::Commit(direction) => {
+            log::info!("iptv swipe: {direction:?}");
             ui.swipe.set(None);
             touched(ui);
             haptic(Haptic::Impact(HapticImpact::Light));
             zap(ui, direction);
         }
-        Outcome::Cancel => ui.swipe.set(None),
+        Outcome::Cancel => {
+            log::info!("iptv swipe: cancelled");
+            ui.swipe.set(None);
+        }
     }
 }
 

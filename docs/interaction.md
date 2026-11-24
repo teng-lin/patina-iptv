@@ -164,7 +164,10 @@ In the guide:
   channel with a light haptic, and brought back it does nothing. It
   starts only 40 points or more from the screen's edges, which the
   systems keep for their own gestures. A second finger cancels it, and a
-  horizontal drag is left alone (`iptv_presentation::touch_zap`).
+  horizontal drag is left alone (`iptv_presentation::touch_zap`). A
+  swipe is never also a tap on the video: Android reports the video's
+  press when the finger lifts anywhere inside it, and the app drops that
+  press after a swipe.
 - **Now:** a replay, an on-demand title, multiview, the guide's preview
   and anything open over the video take no swipe.
 - **Now:** a touch's zap goes the way Ch± does
