@@ -145,11 +145,10 @@ integration harness are compiled only on Linux; Xvfb/GTK coverage and performanc
 journeys remain Linux lanes. This consolidation adds no Windows decoder/GUI test.
 Packaging/release changes additionally follow the release contract; targeted
 commands do not replace those gates.
-Additional workflows validate Android builds, Windows, coverage, parser fuzzing,
-device smoke and packages when selected. See [coverage and fuzzing](release.md#coverage-and-fuzzing)
-and [Android smoke](release.md#android-smoke-test); passing the host script alone
-does not prove those workflows passed. Provider/parser changes need their
-selected fuzz lane as well as ordinary tests.
+The [validation tiers](ci.md) describe when CI runs additional Android and Windows
+builds, coverage, parser fuzzing, [Android emulator smoke](android-validation.md)
+and package checks. Provider/parser changes need their selected fuzz lane as well
+as ordinary tests.
 
 The portable crates built by the full check are:
 

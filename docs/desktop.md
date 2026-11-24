@@ -6,7 +6,7 @@ windows on Linux, macOS and Windows (#89). It implements the shared
 the wheel, keyboard shortcuts, several windows and several displays.
 
 Each rule is marked **Now** (implemented) or **Planned**, as in the contract.
-[Validation](validation/issue-89-desktop-journey.md) records which host each
+[Validation](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-89-desktop-journey.md) records which host each
 rule was checked on.
 
 ## Pointer and wheel
@@ -172,4 +172,4 @@ recordings keep the app running, as it already did when quitting.
 - App unit tests in `iptv_app::desktop::display_bounds` (display recovery,
   session and sound state) and presentation tests in `iptv_presentation::heard` (the heard
   player and its hand-back).
-- The real-window journey: [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
+- The real-window journey: [issue #89 desktop journey](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-89-desktop-journey.md).

@@ -397,7 +397,11 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
     assert_eq!(title, ja.t("Back up Patina"));
     assert_eq!(
         message,
-        ja.t("The unencrypted backup includes playlist logins and passwords, settings, channel arrangements, history and cached guide data. Keep the file private.")
+        ja.t(
+            "The unencrypted backup includes playlist logins and passwords, settings, \
+             channel arrangements, history and guide setup. Downloaded guide listings are excluded. \
+             Keep the file private."
+        )
     );
     assert_eq!(buttons, [ja.t("Cancel"), ja.t("Choose file…")]);
     // Restoring explains itself before any file is chosen.

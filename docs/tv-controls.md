@@ -241,7 +241,7 @@ Deterministic, run by CI:
 
 Native TV validation sends real key phases on a disposable `tv36` emulator
 with generated playlists and streams; see
-[issue #87 TV journey](validation/issue-87-tv-journey.md). Headless layout and
+[issue #87 TV journey](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-87-tv-journey.md). Headless layout and
 keymap tests do not establish physical-remote or screen-reader speech
 behavior.
 
@@ -261,4 +261,4 @@ skipped disabled live Fast-forward and selected Record. These are native
 input/layout checks; persistent surface identity and stream-open counts are
 asserted by the headless live/replay scenarios. Physical remotes and spoken
 screen-reader output remain unverified. The #87 run is recorded in
-[issue #87 TV journey](validation/issue-87-tv-journey.md).
+[issue #87 TV journey](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-87-tv-journey.md).

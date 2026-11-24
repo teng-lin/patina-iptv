@@ -174,8 +174,7 @@ fn native_source(screen: &nsh_testing::Screen, props: &Props) -> Value {
         .unwrap_or(Value::Null)
 }
 
-fn wait_live_source(app: &mut Headless, props: &Props, channel: &str) {
-    let expected = format!("http://stream.example.test/{channel}.m3u8");
+fn wait_live_source(app: &mut Headless, props: &Props, expected: &str) {
     step(app.wait_until(
         "selected native live source",
         Duration::from_secs(5),
@@ -358,11 +357,17 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
         .as_secs() as i64;
     let guide_path = home.path().join("guide.xml");
     std::fs::write(&guide_path, guide(now)).unwrap();
+    // A local 404 ends the live-input probe. This test supplies the native
+    // player's events itself after source publication.
+    let streams = crate::support::Server::start(&[]);
+    let one = streams.url("/one.m3u8");
+    let two = streams.url("/two.m3u8");
+    let three = streams.url("/three.m3u8");
     let playlist = format!(
         "#EXTM3U url-tvg=\"{}\"\n\
-         #EXTINF:-1 tvg-id=\"one\" group-title=\"News\" catchup=\"shift\" catchup-days=\"3\",Test Channel One\nhttp://stream.example.test/one.m3u8\n\
-         #EXTINF:-1 tvg-id=\"two\" group-title=\"News\",Test Channel Two\nhttp://stream.example.test/two.m3u8\n\
-         #EXTINF:-1 tvg-id=\"three\" group-title=\"News\",Test Channel Three\nhttp://stream.example.test/three.m3u8\n",
+         #EXTINF:-1 tvg-id=\"one\" group-title=\"News\" catchup=\"shift\" catchup-days=\"3\",Test Channel One\n{one}\n\
+         #EXTINF:-1 tvg-id=\"two\" group-title=\"News\",Test Channel Two\n{two}\n\
+         #EXTINF:-1 tvg-id=\"three\" group-title=\"News\",Test Channel Three\n{three}\n",
         guide_path.display()
     );
     let size = Size::new(px(960.0), px(540.0));
@@ -429,7 +434,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
             opens() > before
         }),
     );
-    wait_live_source(&mut app, &props, "one");
+    wait_live_source(&mut app, &props, &one);
     assert_eq!(opens(), before + 1, "one open");
     // No channel played before it: ⏮ does nothing.
     step(app.press_key("p"));
@@ -440,7 +445,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     );
     assert_eq!(opens(), before + 1, "nothing else opened");
     let source = prop(&app, &props, "source");
-    assert_eq!(source["url"], "http://stream.example.test/one.m3u8");
+    assert_eq!(source["url"], one.as_str());
     assert_eq!(
         (&source["live"], &source["reconnect"]),
         (&json!(true), &json!(false))
@@ -670,7 +675,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.press_key("down"));
     step(app.wait_for_gone("text:/^Can't play/", Duration::from_secs(1)));
     step(app.wait_for("id:player-banner >> text:/Test Channel Two$/"));
-    wait_live_source(&mut app, &props, "two");
+    wait_live_source(&mut app, &props, &two);
     state(&mut app, "ready");
 
     // --- Tracks and format -------------------------------------------------
@@ -744,7 +749,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone(STRIP, Duration::from_secs(1)));
     step(app.press_key("up"));
     step(app.wait_for("id:player-banner >> text:/Test Channel One$/"));
-    wait_live_source(&mut app, &props, "one");
+    wait_live_source(&mut app, &props, &one);
     app.settle();
     assert_eq!(prop(&app, &props, "videoTrack"), json!("auto"));
     assert_eq!(prop(&app, &props, "textTrack"), json!("off"));
@@ -753,10 +758,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // Right: the most recent channel (Two); ⏮ (P) the one before (One).
     step(app.press_key("right"));
     step(app.wait_for("id:player-banner >> text:/Test Channel Two$/"));
-    wait_live_source(&mut app, &props, "two");
+    wait_live_source(&mut app, &props, &two);
     step(app.press_key("p"));
     step(app.wait_for("id:player-banner >> text:/Test Channel One$/"));
-    wait_live_source(&mut app, &props, "one");
+    wait_live_source(&mut app, &props, &one);
     // Info, play/pause, and the seek keys, which a live stream ignores.
     step(app.press_key("i"));
     step(app.wait_for(CARD));
@@ -802,10 +807,10 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for_gone("text:PAUSED", Duration::from_secs(1)));
     send(&mut app, "pipAction", json!({ "action": "next" }));
     step(app.wait_for("text:/Test Channel Two$/"));
-    wait_live_source(&mut app, &props, "two");
+    wait_live_source(&mut app, &props, &two);
     send(&mut app, "pipAction", json!({ "action": "previous" }));
     step(app.wait_for("text:/Test Channel One$/"));
-    wait_live_source(&mut app, &props, "one");
+    wait_live_source(&mut app, &props, &one);
     // A button the window does not have does nothing, and is logged like
     // the others.
     let before = opens();
@@ -933,12 +938,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     step(app.wait_for("text:The program has ended"));
     step(app.wait_for("text:Next (⏭) returns to live."));
     step(app.press_key("n"));
-    wait_live_source(&mut app, &props, "one");
+    wait_live_source(&mut app, &props, &one);
     assert_eq!(prop(&app, &props, "source")["live"], json!(true));
-    assert_eq!(
-        prop(&app, &props, "source")["url"],
-        "http://stream.example.test/one.m3u8"
-    );
+    assert_eq!(prop(&app, &props, "source")["url"], one.as_str());
     state(&mut app, "ready");
 
     // --- The card's action cards ------------------------------------------

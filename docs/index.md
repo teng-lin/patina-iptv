@@ -16,7 +16,7 @@ link to them instead of duplicating release or validation instructions.
 | Native framework revision and update policy | [NSH pin](nsh.md) |
 | Encryption, backups and trust boundaries | [Security model](security.md), [vulnerability reporting](../SECURITY.md) |
 | Choosing, watching and returning on every input | [Interaction contract](interaction.md) |
-| Journey evidence for the interaction contract (#86) | [Issue #86 journey validation](validation/issue-86-journey.md) |
+| Archived journey evidence for the interaction contract (#86) | [Issue #86 journey validation](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-86-journey.md) |
 | Remote interaction, accessibility and translations | [TV controls](tv-controls.md), [accessibility](accessibility.md), [localization](localization.md) |
 | Performance and recovery measurements | [Performance journeys](performance-journeys.md), [recovery validation](runtime-recovery-validation.md) |
 

@@ -1,10 +1,26 @@
 # NSH pin
 
-Patina builds against the upstream `longbridge/nsh` revision in
-[`nsh.rev`](../nsh.rev). Use a sibling checkout at `../nsh-patina`. The
-pin covers the framework crates, CLI and Android Java runtime. The current
-migration uses a source commit. When NSH publishes the release with these
-changes, resolve its tag to a commit and use that commit in `nsh.rev`.
+Patina uses the `patina` branch of the `teng-lin/nsh` fork. The exact commit in
+[`nsh.rev`](../nsh.rev) pins the framework crates, CLI and Android Java runtime.
+From the Patina repository root, set up the sibling checkout and build the CLI:
+
+```sh
+git clone --branch patina https://github.com/teng-lin/nsh.git ../nsh-patina
+git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
+```
+
+When the pin changes, fetch the new commit and rebuild the CLI:
+
+```sh
+git -C ../nsh-patina fetch origin "$(cat nsh.rev)"
+git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
+cargo build --release --locked --manifest-path ../nsh-patina/Cargo.toml -p nsh-cli
+```
+
+NSH is a path dependency, so CI and `tools/check.sh` use `nsh.rev` to check the
+checkout. `tools/check.sh` requires a clean checkout at that commit. Set
+`IPTV_ALLOW_NSH_DRIFT=1` only while developing the framework locally.
 
 The [vendored TV input adapter](../vendor/nsh-tv/README.md) consumes NSH's raw
 key events and translates the Android TV scan codes that need transport.

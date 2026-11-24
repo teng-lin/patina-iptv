@@ -90,11 +90,39 @@ Direct smoke invocation requires an explicit emulator serial and the owned
 `IPTV_SMOKE_DISPOSABLE_AVD` name. CI creates a fresh profile in a private
 runner directory and reuses the hosted runner's SDK tools, installing the API 36
 system image when needed. Local runs should use the copying runner to create an
-owned profile. Physical-device acceptance is separate and must not use this data-clearing
-emulator harness.
+owned profile.
 
 These tools do not claim actual execution, shipping ARM playback, screen-reader
 speech, or install-over-previous acceptance. Record each separately against the
 artifact hash and device/OS/configuration. Tests in `test-disposable-avd.py` use
 small generated image files; they verify path/ownership guards and interruption
 cleanup without starting an emulator.
+
+## Physical-device acceptance
+
+Run the affected journey manually on a test tablet or TV with synthetic data.
+Set `ABIS` to the device's ABI when running `tools/sync-host.sh` (`arm64-v8a`
+or `armeabi-v7a` on ARM). Pass the mock server's LAN address and port with
+`--host` when generating the playlist, and use the same address in
+`IPTV_RS_DEV_PLAYLIST`. Follow the
+[fixture build instructions](../tools/ci/android-smoke.sh) to build a debug APK
+with the dedicated validation app ID. Set `serial` to the test device's serial
+and install the APK manually:
+
+```sh
+adb -s "${serial:?}" install -r hosts/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+Record the device model, Android version, ABI, commit and APK hash along with
+the journey and result.
+
+### Signed release acceptance
+
+Install the signed ARM APK on a dedicated test device. Serve the
+[generated fixtures](#fixture-streams-ending-or-looping-live) from a
+tester-controlled public HTTP endpoint backed by `tools/mock-server.py`.
+Pass that endpoint's public hostname and port to `--host` when generating
+the playlist so its guide, artwork and stream URLs use the same address.
+The signed build requires publicly reachable stream addresses. Add the
+printed playlist URL in Patina, run the journey and record the result
+against the signed APK's hash.

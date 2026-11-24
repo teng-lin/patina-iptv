@@ -76,9 +76,9 @@ custom groups and history.
 - **Private by default:** on desktop, iPad and Android the local catalog,
   including credentials, is encrypted with SQLCipher (browser TVs have no
   keystore; see [security](docs/security.md#samsung-tizen-host)); HTTPS is
-  the default transport. On those platforms, whole-app backup and restore
-  to a `.patinabackup` file; backups keep the TV guide's setup but not its
-  downloaded programs, which download again after a restore.
+  the default transport. Desktop and Android support whole-app backup and
+  restore with a `.patinabackup` file. Backups keep the TV guide's setup and
+  the app downloads the guide programs again after a restore.
 
 ## Install
 
@@ -139,29 +139,12 @@ the v0.1.4 exception above remains unverified by the build-provenance command.
 - Rust (the version pinned in `rust-toolchain.toml`) with the
   `wasm32-unknown-unknown` target, and for Android also
   `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`.
-- The Patina NSH fork checked out next to this repository at the commit recorded
-  in [`nsh.rev`](nsh.rev), and its CLI built:
-
-  ```sh
-  git clone https://github.com/teng-lin/nsh.git ../nsh-patina
-  git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
-  (cd ../nsh-patina && cargo build --release -p nsh-cli)
-  ```
-
-  NSH is a path dependency, so `Cargo.lock` cannot record its commit;
-  `nsh.rev` does. CI checks out the same commit, and `tools/check.sh` fails
-  when `../nsh-patina` is at another one (`IPTV_ALLOW_NSH_DRIFT=1` allows it while
-  you develop NSH). After `nsh.rev` changes, fetch and check out the new pin:
-
-  ```sh
-  git -C ../nsh-patina fetch https://github.com/teng-lin/nsh.git "$(cat nsh.rev)"
-  git -C ../nsh-patina checkout --detach "$(cat nsh.rev)"
-  ```
-
+- The pinned [Patina NSH fork and CLI](docs/nsh.md).
 - **Linux:** GTK 4 and libmpv 2 (`mpv` on Arch, `libmpv-dev` on
   Debian/Ubuntu).
 - **macOS:** Xcode command line tools and the pinned libmpv runtime below.
-- **Android:** JDK 21, Android SDK (platform 35, build-tools 35.0.1), NDK 30.
+- **Android:** JDK 21, SDK platforms `android-35` (NSH packaging) and
+  `android-36` (Gradle host), build-tools `35.0.1` and NDK `30.0.16248370`.
 - **iPad:** Xcode. `tools/fetch-mpvkit.sh` downloads the libmpv build.
 - `python3` and `ffmpeg` for the synthetic test streams.
 
@@ -189,8 +172,8 @@ guard is absent. Windows and iPad build scripts fetch the guarded runtime.
 Windows uses NSH's Win32/Direct2D backend. Install Visual Studio
 2022 Build Tools with **Desktop development with C++** and a Windows SDK,
 Rust's MSVC toolchain, and Strawberry Perl on `PATH` (for bundled OpenSSL).
-Keep the NSH checkout next to this repository at the `nsh.rev` commit as
-above; its CLI is not needed for the Windows build.
+The Windows build requires the pinned NSH checkout above. You can skip building
+the NSH CLI.
 
 From PowerShell:
 
@@ -202,10 +185,11 @@ From PowerShell:
 
 The script downloads Patina's checksum-pinned x64 libmpv runtime and copies
 `libmpv-2.dll` beside `iptv-app.exe`. Keep these two files together when
-running the app. Windows release tags and manual desktop releases also build
-`Patina-<version>-windows-x86_64-setup.exe`; PRs run tests but do not build
-the installer. The per-user installer adds a Start menu shortcut, bundles
-libmpv and the VC runtime, and preserves settings and playlists on uninstall.
+running the app. Windows release tags, manual desktop releases and selected
+packaging PRs build `Patina-<version>-windows-x86_64-setup.exe`. See the
+[validation tiers](docs/ci.md) for selection rules. The per-user installer
+adds a Start menu shortcut, bundles libmpv and the VC runtime, and preserves
+settings and playlists on uninstall.
 Windows installers are currently unsigned; no portable app ZIP is produced.
 The runtime has a separate [dependency build workflow](tools/mpv-runtime/README.md)
 with pinned sources, offline compilation, native component notices and retained
@@ -221,10 +205,10 @@ renderer, with output capped at 1920×1080 and scaled by Direct2D. This is
 CPU intensive; high-resolution playback and multiview need performance
 validation. GPU rendering is not yet implemented on Windows.
 
-The Windows CI job and `-Check` command run what `tools/check.sh` runs on
-Linux and macOS: lints, the tests of every library crate and of the app, and
-the WebAssembly builds of the portable crates. `-Check` also needs Python,
-to compare the NSH checkout with `nsh.rev`. A first build also
+The Windows PR job compiles the workspace test targets, runs Windows chrome
+checks and builds the app. Nightly and release CI run the full Windows suite,
+as does `-Check` by default. CI builds the portable WebAssembly targets on Linux.
+`-Check` also needs Python to compare the NSH checkout with `nsh.rev`. A first build
 compiles OpenSSL from source and can take several minutes. For direct Cargo
 commands, put Strawberry Perl's `perl/bin` and `c/bin` directories, plus
 `target/mpv`, on `PATH`.
@@ -262,17 +246,25 @@ The iPad app is complete and runs on devices, but it is not yet
 distributed. It plays video through the same libmpv player as the
 desktops (MPVKit's LGPL build) and adds touch navigation of its own.
 
-```sh
+```bash
+rustup target add aarch64-apple-ios-sim aarch64-apple-ios
 tools/fetch-mpvkit.sh            # libmpv xcframeworks, checksums pinned
-cd crates/iptv-app
-nsh package . --target ios-simulator --icon icon-ios.png -o ../../target/ios-sim
-nsh package . --target ios --icon icon-ios.png -o ../../target/ios \
-  --sign <signing identity SHA-1> --profile <app.mobileprovision>
-xcrun devicectl device install app --device <id> ../../target/ios/Patina.app
+source tools/ci/locked-build-env.sh
+nsh="$PWD/../nsh-patina/target/release/nsh"
+(cd crates/iptv-app && "$nsh" package . --target ios-simulator \
+  --icon icon-ios.png -o ../../target/ios-sim)
 ```
 
 Installing on a device needs Developer Mode on the iPad and a development
-profile for `com.hantekllc.iptvrs`.
+profile for `com.hantekllc.iptvrs`. Set `signing_identity` to the signing
+identity's SHA-1, `provisioning_profile` to the profile's absolute path and
+`device_id` to the iPad's identifier. From the same shell, run the device build:
+
+```bash
+(cd crates/iptv-app && "$nsh" package . --target ios --icon icon-ios.png \
+  -o ../../target/ios --sign "${signing_identity:?}" --profile "${provisioning_profile:?}")
+xcrun devicectl device install app --device "${device_id:?}" target/ios/Patina.app
+```
 
 Desktop packages: `tools/ci/package-linux.sh` and `tools/package-macos.sh`.
 
