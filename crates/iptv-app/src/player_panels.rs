@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
 use iptv_presentation::capabilities::Device;
-use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
+use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, QuickAction, Shown};
 use iptv_presentation::player_info::date_time;
 use iptv_presentation::sound::delay_label;
 use iptv_presentation::tracks::{audio_layout_in, summary_in};
@@ -121,8 +121,6 @@ fn label(ui: Ui, control: Control) -> String {
         ),
         Favorite if is_favorite(ui) => tr("★ Favorite").to_owned(),
         Favorite => tr("☆ Favorite").to_owned(),
-        ChannelOptions => tr("Channel options").to_owned(),
-        Settings => tr("Settings").to_owned(),
     }
 }
 
@@ -132,13 +130,22 @@ fn is_favorite(ui: Ui) -> bool {
         .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
 }
 
-/// Whether the strip shows `control` at all on `device` as it is now:
-/// what can never act there is left out rather than drawn disabled, and
-/// the focus moves off a control that leaves (`Panels::offer`). Every
-/// control is offered on every device for now; the features that follow
-/// the device's form factor and input are left out here.
-pub(crate) fn offered(_ui: Ui, _device: Device, _control: Control) -> bool {
-    true
+/// Whether the strip shows `control` at all on `device` as it is now.
+/// What this host (or this player window) can never do is left out
+/// rather than drawn disabled, and the focus moves off a control that
+/// leaves (`Panels::offer`); a control shows disabled only while the
+/// viewer can change its condition. The features that follow the
+/// device's form factor and input are left out here.
+pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
+    let main = ui.player_surface == 0;
+    match control {
+        Control::Record | Control::Recordings => crate::host::HAS_WORKERS && main,
+        Control::Search => main,
+        Control::Multiview => main && device.host.decoder_slots() > 1,
+        // Shown until the host reports, then only where it can.
+        Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
+        _ => true,
+    }
 }
 
 /// Whether a control can act now; the rest show disabled.
@@ -164,7 +171,6 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
         Control::Captions => choice(Track::Text),
         Control::AudioOffset => crate::media::AUDIO_DELAY && ui.playing.get().is_some(),
         Control::PictureInPicture => crate::pip::can_enter(ui),
-        Control::ChannelOptions | Control::Settings => false,
     }
 }
 
@@ -429,30 +435,34 @@ fn quick_row(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElem
         .bg(panel)
         .children(QUICK_ACTIONS.iter().enumerate().map(move |(i, action)| {
             let action = *action;
-            let focused = move || {
-                ui.keys_shown()
-                    && ui
-                        .panels
-                        .with(|p| p.shown == Shown::Card && p.quick == Some(i))
-            };
-            pill(
-                ui,
-                move || {
-                    let detour = crate::multiview::detour(ui);
-                    words::quick_label(action, is_favorite(ui), detour).to_owned()
-                },
-                focused,
-                move || {
-                    action == iptv_presentation::panels::QuickAction::Multiview
-                        && ui.playing.get().is_none()
-                },
-                move || {
-                    ui.panels.update(|p| p.quick = Some(i));
-                    crate::player_keys::press_quick(ui, action);
-                },
-            )
+            // Multiview only where the strip offers it (`offered`).
+            let offered = move || ui.panels.with(|p| p.offers_quick(action));
+            when(offered, move || quick_card(ui, i, action))
         }))
         .self_start()
+}
+
+/// Action card `i` of [`QUICK_ACTIONS`].
+fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
+    let focused = move || {
+        ui.keys_shown()
+            && ui
+                .panels
+                .with(|p| p.shown == Shown::Card && p.quick == Some(i))
+    };
+    pill(
+        ui,
+        move || {
+            let detour = crate::multiview::detour(ui);
+            words::quick_label(action, is_favorite(ui), detour).to_owned()
+        },
+        focused,
+        move || action == QuickAction::Multiview && ui.playing.get().is_none(),
+        move || {
+            ui.panels.update(|p| p.quick = Some(i));
+            crate::player_keys::press_quick(ui, action);
+        },
+    )
 }
 
 /// What the keys do now, under the panels (keys only).
@@ -484,8 +494,9 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
 /// ([`offered`]) that keeps the focused control on screen.
 fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     let list = element_ref();
-    // Follows the device's signals (`device.rs`): a control that leaves
-    // while focused passes the focus to its nearest neighbor shown.
+    // Follows the device's signals (`device.rs`) and the host's picture in
+    // picture report: a control that leaves while focused passes the focus
+    // to its nearest neighbor shown.
     effect(move || {
         let device = crate::device::current();
         let shown: Vec<Control> = CONTROLS
@@ -517,27 +528,26 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     });
     let count = computed(move || ui.panels.with(|p| p.controls().count()));
     virtual_list(count, move |at| {
-        // NSH recycles a cell for another row by moving its position, so
-        // the index is read inside the memo, not once.
+        // A recycled cell takes another row: read its index each time.
         let control = computed(move || {
             let index = at.index();
-            ui.panels
-                .with(|p| p.controls().nth(index))
-                .unwrap_or(CONTROLS[0])
+            ui.panels.with(|p| p.controls().nth(index))
         });
         let focused = move || {
             ui.keys_shown()
                 && ui
                     .panels
-                    .with(|p| p.shown == Shown::Controls && p.focused() == control.get())
+                    .with(|p| p.shown == Shown::Controls && control.get() == Some(p.focused()))
         };
         pill(
             ui,
-            move || label(ui, control.get()),
+            move || control.get().map(|c| label(ui, c)).unwrap_or_default(),
             focused,
-            move || !enabled(ui, control.get()),
+            move || !control.get().is_some_and(|c| enabled(ui, c)),
             move || {
-                let control = control.get_untracked();
+                let Some(control) = control.get_untracked() else {
+                    return;
+                };
                 ui.panels.update(|p| p.focus_control(control));
                 crate::player_keys::press_control(ui, control);
             },

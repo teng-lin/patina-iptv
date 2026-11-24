@@ -139,18 +139,15 @@ fn open_menu(app: &mut Headless) {
 }
 
 fn menu(app: &mut Headless) {
-    // The menu names the program, the channel and the list; items the
-    // app cannot do yet do nothing.
+    // The menu names the program, the channel and the list; it offers no
+    // placeholder for what the app cannot do.
     open_menu(app);
     assert!(app.screen().matches("role:menuitem").unwrap());
     step(app.wait_for("text:/^Quiet Harbour · /"));
     step(app.wait_for("text:Test Channel One >> nth=1"));
-    step(app.press("text:Open in another player"));
-    step(app.wait(Duration::from_millis(100)));
-    assert!(
-        app.shows("Open in another player"),
-        "a disabled item keeps the menu"
-    );
+    for placeholder in ["Open in another player", "Remind me", "Save to my list"] {
+        assert!(!app.shows(placeholder), "{placeholder} is not offered");
+    }
     // Favorites: added, and the menu then offers to remove it.
     step(app.press("text:Add to favorites"));
     step(app.wait_for_gone("text:Manage favorites…", GONE));
@@ -336,9 +333,8 @@ fn row_value(app: &mut Headless, label: &str, value: &str) {
 
 const PAGES_HINT: &str = "text:▲▼ page   ▶ OK its settings   Back close";
 const ROWS_HINT: &str = "text:▲▼ move   OK change   ◀ Back pages";
-/// The menu's Settings (the player's control strip, mounted while hidden,
-/// has one before it).
-const MENU_SETTINGS: &str = "text:Settings >> nth=1";
+/// The menu's Settings.
+const MENU_SETTINGS: &str = "text:Settings >> nth=0";
 
 fn settings(app: &mut Headless, home: &Path) {
     open_menu(app);

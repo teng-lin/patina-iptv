@@ -1642,7 +1642,11 @@ fn exercise_admission(
 }
 
 #[test]
-fn movies_and_shows_stay_visible_with_an_empty_catalog_on_desktop_and_tv() {
+/// M3U imports never carry movies or shows: with only an M3U playlist the
+/// rail offers neither, on desktop and on TV, rather than a catalog that
+/// can only be empty. (An Xtream Codes playlist beside it, also with its
+/// imports off, keeps them: `the_empty_state_covers_every_playlist_the_catalog_reads`.)
+fn an_m3u_only_library_offers_no_movies_or_shows_on_desktop_and_tv() {
     let Some(home) = isolated!() else { return };
     let mut settings = iptv_settings::Settings::new();
     settings
@@ -1678,29 +1682,23 @@ fn movies_and_shows_stay_visible_with_an_empty_catalog_on_desktop_and_tv() {
             nsh_core::prelude::px(w),
             nsh_core::prelude::px(h),
         )));
-        for label in ["Movies", "Shows"] {
-            crate::browse_fixture::open_rail_item(app, label);
-            step(app.wait_for(M3U_ONLY));
-            step(app.wait_for("id:vod-empty >> label:Add playlist"));
-            step(app.press("id:vod-screen >> label:Close"));
-            step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
-            assert_eq!(player(app), surface);
+        if !app.shows("id:navigation-rail >> label:Search") {
+            step(app.open_guide_groups());
         }
+        step(app.wait_for("id:navigation-rail >> label:Search"));
+        for label in ["Movies", "Shows"] {
+            assert!(
+                !app.shows(&format!("id:navigation-rail >> label:{label}")),
+                "{label} is not offered on {idiom:?}"
+            );
+        }
+        assert_eq!(player(app), surface);
         assert_eq!(
             iptv_app::player_opens(0),
             0,
             "discovery never tunes live video"
         );
     }
-    // On the remote, OK where the titles would be adds a playlist.
-    crate::browse_fixture::open_rail_item(app, "Movies");
-    step(app.wait_for(M3U_ONLY));
-    step(app.press_key("right"));
-    step(app.press_key("enter"));
-    step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
-    step(app.wait_for("id:wizard-form"));
-    step(app.press_key("enter"));
-    step(app.wait_for("text:Xtream Codes login"));
 }
 
 const M3U_ONLY: &str = "text:Movies and shows come from Xtream Codes and Stalker playlists. M3U playlists have live channels only.";
