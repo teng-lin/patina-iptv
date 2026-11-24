@@ -298,6 +298,7 @@ mod tests {
             platform: Platform::Android,
             form_factor,
             input: Input { keyboard, dpad },
+            decoders: None,
         };
         for form in [FormFactor::Phone, FormFactor::Tablet] {
             assert_eq!(keys(host(form, false, false)), None, "{form:?}");
