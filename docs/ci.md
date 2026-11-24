@@ -18,7 +18,7 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | Android compile | Both ARM ABIs for production Rust/dependency/Android changes | Both ARM ABIs | Shipping package jobs compile both |
 | Tablet/TV playback, lifecycle and remote-input smoke | UI/Android/runtime/player/input/network changes | Both forms | Both forms for candidate code |
 | Installers and APK/AAB | Desktop installers for packaging scripts, resources and bundled runtime changes; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
-| Coverage and floors | Coverage/validation infrastructure changes; manual run available | Full workspace | Full report for this candidate SHA |
+| Coverage and floors | Rust source changes and coverage/validation infrastructure changes (deferred on drafts); manual run available | Full workspace | Full report for this candidate SHA |
 | Fuzz | Affected targets, 30 seconds each; common dependency changes select all | All targets, 300 seconds each | All targets, 30 seconds each and retained corpus |
 | Allocation and large EPG/catalog budgets | Storage/import/EPG and their parser, schedule and model dependencies; small functional regressions stay in Linux tests | Full release-mode fixture, including ignored million-program EPG case | Full release-mode fixture |
 
