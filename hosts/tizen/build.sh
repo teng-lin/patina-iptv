@@ -8,8 +8,11 @@
 #
 # Signing uses a local Tizen Studio certificate profile named by
 # TIZEN_SIGNING_PROFILE (Certificate Manager; keep it out of the repository).
-# Requires Tizen Studio's `tizen` CLI and a nightly toolchain with rust-src.
+# Requires Tizen Studio's `tizen` CLI, a nightly toolchain with rust-src,
+# and Python 3 (the interface languages' package files).
 set -euo pipefail
+
+command -v python3 >/dev/null || { echo "build.sh: python3 is needed to write the language files" >&2; exit 1; }
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$root/target/tizen"
@@ -48,6 +51,11 @@ mkdir -p "$stage"
 cp "$root"/hosts/tizen/app/{index.html,main.js,worker.js,style.css} "$stage/"
 cp "$root/art/icon/play-512.png" "$stage/icon.png"
 cp "$root/target/tizen-wasm/wasm32-unknown-unknown/release/iptv_web.wasm" "$stage/"
+# The interface languages' messages as package files, one per language,
+# read by the core when it first words something in that language (the
+# exit prompt): the same files as the NSH host's.
+python3 "$root/hosts/tizen-nsh/catalog.py" "$root/crates/iptv-presentation/src/i18n/messages.tsv" \
+    "$root/crates/iptv-presentation/src/i18n.rs" "$stage/i18n"
 sed "s/__VERSION__/$version/" "$root/hosts/tizen/app/config.xml" >"$stage/config.xml"
 
 if [[ -z "${TIZEN_SIGNING_PROFILE:-}" || -z "$tizen_cli" ]]; then
