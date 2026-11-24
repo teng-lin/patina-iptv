@@ -1,6 +1,7 @@
 //! Program metadata above the transport controls.
 
 use iptv_core::guide::Listing;
+use iptv_presentation::touch_zap::Direction;
 use iptv_presentation::tracks::{fps_label, resolution_class};
 use nsh_core::prelude::*;
 
@@ -27,8 +28,15 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
     if crate::on_demand::active(ui) || ui.playing.get().is_none() {
         return None;
     }
-    let (channel, program) = progress::program(ui);
     let schedule = crate::schedule();
+    // A zap waiting to tune: the channel it goes to, on air now.
+    let (channel, program) = match crate::browse_playback::pending_channel(ui) {
+        Some(channel) => (
+            channel,
+            schedule.program_at(channel, ui.focus.with(|f| f.now)),
+        ),
+        None => progress::program(ui),
+    };
     let next = if ui.playback.get() == Playback::Live {
         let next = schedule.program_at(channel, program.end);
         match schedule.listing(channel, next) {
@@ -107,6 +115,24 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                                         .text_size(px(OSD_DETAIL))
                                         .text_color(secondary),
                                     )
+                                    // Ch± for a finger (#285): live only.
+                                    .child(when(
+                                        move || crate::touch_zap::live(ui),
+                                        move || {
+                                            view()
+                                                .flex_row()
+                                                .flex_shrink_0()
+                                                .gap(px(4.0))
+                                                .child(crate::touch_zap::button(
+                                                    ui,
+                                                    Direction::Previous,
+                                                ))
+                                                .child(crate::touch_zap::button(
+                                                    ui,
+                                                    Direction::Next,
+                                                ))
+                                        },
+                                    ))
                                     .child(badge(
                                         move || {
                                             let label = if ui.paused.get() {
