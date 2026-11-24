@@ -225,6 +225,11 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
             )
     };
     virtual_list(move || state(ui, |s| s.pages().len()).unwrap_or(0), entry)
+        // By page: a page that comes or goes (a keyboard attached) leaves
+        // the others' entries, and a screen reader's place on one, alone.
+        .keys(move || {
+            state(ui, |s| s.pages().iter().map(|p| p.key).collect::<Vec<_>>()).unwrap_or_default()
+        })
         .estimated_item_size(list_rows::pitch(size, ROW))
         .element_ref(&list)
         .w(move || size.px(PAGES_W))
@@ -246,8 +251,9 @@ fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
-    // Another page starts at its top.
-    let page = computed(move || state(ui, Screen::page_index));
+    // Another page starts at its top (by key: the page shown keeps its
+    // place when a page before it comes or goes).
+    let page = computed(move || state(ui, |s| s.page().key));
     effect(move || {
         page.get();
         list.scroll_to_index(0, percentage(0.0), px(0.0), false);

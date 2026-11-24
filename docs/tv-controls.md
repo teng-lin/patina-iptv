@@ -21,8 +21,11 @@ keys have no row of their own; the editor's row sums them up.
 ## Taps and holds
 
 - **Hold** means the key stays down for `remote.long_press` (400 ms by
-  default). Only an Android remote reports holds; a desktop keyboard has
-  Shift and Menu (`M`) stand-ins instead.
+  default). Only keys that report their press and release tell a hold from
+  a tap: an Android remote's or keyboard's and a browser TV's, but not a
+  shortcut with a modifier (`Shift+Left`), which reports its press only and
+  is bound for a tap. A desktop keyboard reports no holds and has Shift and
+  Menu (`M`) stand-ins instead.
 - A key with a hold action on the current surface waits: released earlier,
   it is a tap and acts on release; held to the threshold, its hold action
   acts once, on an auto-repeat or on a timer for remotes that send none. The

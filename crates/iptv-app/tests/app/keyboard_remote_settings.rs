@@ -63,6 +63,16 @@ fn page_gone(app: &mut Headless, selector: &str) {
     step(app.wait_for_gone(selector, WAIT));
 }
 
+/// The view showing the page name `name` in the pages list.
+fn page_node(app: &Headless, name: &str) -> nsh_core::NodeId {
+    app.screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.text.as_ref().is_some_and(|t| t.text.text == name))
+        .unwrap_or_else(|| panic!("no page {name}"))
+        .id
+}
+
 /// The keys' page, tapped: its rows, and the bindings editor's row with
 /// the changed keys summed up (no row of their own).
 fn keys_page(app: &mut Headless, page: &str, edit: &str) {
@@ -148,10 +158,13 @@ fn a_keyboard_attached_to_a_tablet_shows_keyboard_settings_at_once() {
     device_signals::report(app, "tablet", false, false);
     open_settings(app);
     assert!(!shows(app, KEYBOARD), "{:?}", pages(app));
+    let parental = page_node(app, "Parental control");
     // Attached while Settings is open, before any key is pressed: the
     // page comes, after Playback, and the page shown stays chosen.
     device_signals::report(app, "tablet", true, false);
     step(app.wait_for_within(KEYBOARD, WAIT));
+    // The pages after it keep their entries (a screen reader's place).
+    assert_eq!(page_node(app, "Parental control"), parental);
     let listed = pages(app);
     let at = |name: &str| listed.iter().position(|p| p == name);
     assert_eq!(at("Keyboard"), at("Playback").map(|p| p + 1), "{listed:?}");
@@ -164,9 +177,12 @@ fn a_keyboard_attached_to_a_tablet_shows_keyboard_settings_at_once() {
     for remote_only in ["Key: Red", "Key: Green", "Key: Record", "Key: Stop"] {
         assert!(!keys.contains(&remote_only.to_owned()), "{keys:?}");
     }
-    // Detached while its rows are shown: the page goes, and the page in
-    // its place is chosen.
+    // Detached while its editor is open over its rows: the editor closes
+    // with the page, and the page in its place is chosen.
+    step(app.press("text:Edit keyboard shortcuts"));
+    step(app.wait_for_within("id:remote-editor-screen", WAIT));
     device_signals::report(app, "tablet", false, false);
+    step(app.wait_for_gone("id:remote-editor-screen", WAIT));
     page_gone(app, KEYBOARD);
     assert!(!shows(app, SEEK_KEYS));
     assert!(shows(app, "role:tab[Parental control]"));

@@ -60,6 +60,14 @@ fn holds() -> bool {
     crate::input::long_press()
 }
 
+/// A key that reports no hold (a shortcut with a modifier) is bound for
+/// a tap.
+fn tap_only(s: &mut Editor) {
+    if !crate::input::holds(s.key) {
+        s.press = Press::Short;
+    }
+}
+
 /// The editor's fields shown: without the press where a hold cannot be
 /// told from a tap.
 fn fields() -> impl Iterator<Item = Field> {
@@ -127,6 +135,7 @@ pub fn capture(ui: Ui, key: RemoteKey) {
         s.capturing = false;
         if key != RemoteKey::Back {
             s.key = key;
+            tap_only(s);
         }
     });
 }
@@ -144,8 +153,11 @@ fn change(ui: Ui, by: isize) {
     }
     update(ui, |s| match s.focus {
         Field::Context => s.context = cycle(s.context, remap::CONTEXTS, by),
-        Field::Key => s.key = cycle(s.key, &keys(), by),
-        Field::Press if holds() => {
+        Field::Key => {
+            s.key = cycle(s.key, &keys(), by);
+            tap_only(s);
+        }
+        Field::Press if crate::input::holds(s.key) => {
             s.press = if s.press == Press::Short {
                 Press::Long
             } else {
@@ -382,6 +394,18 @@ fn contents_hidden(ui: Ui) -> bool {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
+    // The keys it sets up attached or detached while it is open: it
+    // closes, as the keys' page follows them (#280), so it never offers
+    // keys, or a title, of keys no longer there.
+    let keys = computed(settings::keys_now);
+    effect(move || {
+        keys.with(|_| ());
+        untracked(|| {
+            if is_open(ui) {
+                close(ui);
+            }
+        });
+    });
     when(
         move || is_open(ui),
         move || {
@@ -414,6 +438,30 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A shortcut with a modifier reports its press only: it is bound for
+    /// a tap, whatever the press shown before (#280).
+    #[test]
+    fn a_shortcut_with_a_modifier_is_bound_for_a_tap() {
+        let phases = crate::input::long_press();
+        for key in [RemoteKey::Left, RemoteKey::Red, RemoteKey::Search] {
+            assert_eq!(crate::input::holds(key), phases, "{key:?}");
+        }
+        for key in [
+            RemoteKey::ShiftLeft,
+            RemoteKey::CtrlRight,
+            RemoteKey::ShiftTab,
+        ] {
+            assert!(!crate::input::holds(key), "{key:?}");
+            let mut editor = Editor {
+                key,
+                press: Press::Long,
+                ..Editor::default()
+            };
+            tap_only(&mut editor);
+            assert_eq!(editor.press, Press::Short, "{key:?}");
+        }
+    }
     #[test]
     fn persisted_overrides_cannot_take_editor_input_or_short_back() {
         assert!(validated(&KeyBinding::new(None, "red", PressKind::Short, "stop")).is_none());
