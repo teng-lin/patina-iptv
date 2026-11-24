@@ -70,7 +70,100 @@ pub(crate) fn export_ui() {
     });
 }
 
-/// Whether this host offers the backup document action.
+/// The document pickers a device has: one that creates a file (export)
+/// and one that opens one (import). Each backup action is offered only
+/// where its picker is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pickers {
+    pub create: bool,
+    pub open: bool,
+}
+
+impl Pickers {
+    pub const NONE: Pickers = Pickers {
+        create: false,
+        open: false,
+    };
+    pub const BOTH: Pickers = Pickers {
+        create: true,
+        open: true,
+    };
+
+    /// What `platform` has before (or without) asking the device.
+    pub const fn of(platform: iptv_core::capabilities::Platform) -> Pickers {
+        use iptv_core::capabilities::Platform;
+        match platform {
+            // NSH's save and open dialogs.
+            Platform::Linux | Platform::Macos | Platform::Windows => Pickers::BOTH,
+            // The iPad's document transport is unfinished: no backup rows
+            // until it works.
+            Platform::Ipad => Pickers::NONE,
+            // Android's host says which pickers resolve (`tv.backup`'s
+            // `pickers` event); none until it answers.
+            Platform::Android | Platform::Unknown => Pickers::NONE,
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+static PICKERS_FOR_TEST: std::sync::Mutex<Option<Pickers>> = std::sync::Mutex::new(None);
+
+/// The pickers apps started from now on have, whatever their platform
+/// (headless tests: a device without one, or the iPad's).
+#[cfg(feature = "test-support")]
+pub fn set_pickers_for_test(pickers: Pickers) {
+    *PICKERS_FOR_TEST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pickers);
+}
+
+fn initial_pickers() -> Pickers {
+    #[cfg(feature = "test-support")]
+    if let Some(pickers) = *PICKERS_FOR_TEST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    {
+        return pickers;
+    }
+    Pickers::of(crate::host::PLATFORM)
+}
+
+thread_local! {
+    /// This device's pickers, made with the service layer. Android's host
+    /// reports them when the layer mounts, when Settings opens
+    /// ([`probe_pickers`]) and when the app resumes.
+    static PICKERS: std::cell::Cell<Option<nsh_core::prelude::Signal<Pickers>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// This device's pickers (reactive once the service layer is made).
+pub(crate) fn pickers() -> Pickers {
+    PICKERS
+        .with(std::cell::Cell::get)
+        .map_or_else(initial_pickers, |pickers| pickers.get())
+}
+
+/// Asks the host again which pickers resolve (Settings opening): one may
+/// have been installed, enabled or removed since.
+pub(crate) fn probe_pickers() {
+    #[cfg(target_os = "android")]
+    android::probe();
+}
+
+/// Whether the backup command `key` (`general.backup` or
+/// `general.restore`) can run here. Exporting needs a picker that creates
+/// a file. Restoring needs one that opens a file, except to review, keep
+/// or cancel a restore already scheduled, which needs none.
+pub(crate) fn offered(key: &str) -> bool {
+    let pickers = pickers();
+    match key {
+        "general.backup" => pickers.create,
+        _ => pickers.open || crate::runtime().restore_is_pending(),
+    }
+}
+
+/// Whether this host offers the restore entry point (the welcome screen's
+/// and Settings').
 pub(crate) fn available() -> bool {
     matches!(
         crate::settings::offer_now("general.restore"),
@@ -93,14 +186,19 @@ fn restore_ui(ui: crate::Ui) {
         };
         let root = crate::data::data_dir();
         if crate::runtime().restore_is_pending() {
-            let answer = nsh_base::alert_dialog()
+            let dialog = nsh_base::alert_dialog()
                 .title(tr("Restore scheduled"))
                 .description(tr(PENDING_NOTE))
                 .cancel("keep", tr("Keep scheduled"))
-                .action("cancel", tr("Cancel restore"))
-                .action("replace", tr("Choose another backup…"))
-                .show()
-                .await;
+                .action("cancel", tr("Cancel restore"));
+            // Without a picker that opens files the scheduled restore can be
+            // kept or canceled, not replaced.
+            let dialog = if pickers().open {
+                dialog.action("replace", tr("Choose another backup…"))
+            } else {
+                dialog
+            };
+            let answer = dialog.show().await;
             match answer.ok().and_then(|a| a.action) {
                 Some(action) if action.as_str() == "cancel" => {
                     let result = busy.worker(|archive| archive.cancel()).await;
@@ -181,10 +279,23 @@ mod android {
     thread_local! {
         static REQUEST: Cell<Option<Signal<Value>>> = const { Cell::new(None) };
         static ANSWER: RefCell<Option<(String, futures_channel::oneshot::Sender<Result<Document>>)>> = const { RefCell::new(None) };
+        /// Bumped to have the host report its pickers again.
+        static PROBE: Cell<Option<Signal<u64>>> = const { Cell::new(None) };
     }
-    pub fn layer() -> impl IntoElement {
+    pub fn probe() {
+        if let Some(probe) = PROBE.with(Cell::get) {
+            probe.update(|n| *n += 1);
+        }
+    }
+    pub fn layer(ui: crate::Ui) -> impl IntoElement {
         let request = signal(Value::Null);
         REQUEST.with(|slot| slot.set(Some(request)));
+        let pickers = signal(initial_pickers());
+        PICKERS.with(|slot| slot.set(Some(pickers)));
+        // The host reports its pickers once mounted, and again each time
+        // this changes and each time the app resumes: never per frame.
+        let probe = signal(0u64);
+        PROBE.with(|slot| slot.set(Some(probe)));
         native("tv.backup")
             .absolute()
             .w(px(0.))
@@ -192,7 +303,25 @@ mod android {
             .prop("archivePath", move || request.get()["archivePath"].clone())
             .prop("requestId", move || request.get()["requestId"].clone())
             .prop("operation", move || request.get()["operation"].clone())
+            .prop("probe", move || Value::from(probe.get()))
             .on_native_event(move |event: &NativeEvent| {
+                if event.name.as_ref() == "pickers" {
+                    let found = Pickers {
+                        create: event.data["create"].as_bool() == Some(true),
+                        open: event.data["open"].as_bool() == Some(true),
+                    };
+                    if pickers.get_untracked() != found {
+                        pickers.set(found);
+                        // An open welcome screen follows.
+                        let restore = available();
+                        ui.wizard.update(|open| {
+                            if let Some(open) = open {
+                                open.wizard.set_restore(restore);
+                            }
+                        });
+                    }
+                    return;
+                }
                 if event.name.as_ref() != "complete" {
                     return;
                 }
@@ -264,13 +393,14 @@ async fn save_export(busy: &Busy, root: PathBuf, settings: String) -> Result<boo
     android::save(busy, root, settings).await
 }
 
-pub(crate) fn service_layer() -> impl nsh_core::prelude::IntoElement {
+pub(crate) fn service_layer(ui: crate::Ui) -> impl nsh_core::prelude::IntoElement {
     #[cfg(target_os = "android")]
     {
-        android::layer()
+        android::layer(ui)
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = ui;
         use nsh_core::prelude::*;
         view().absolute().w(px(0.)).h(px(0.))
     }

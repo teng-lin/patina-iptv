@@ -37,6 +37,9 @@ mod guide_window_walkthrough;
 pub mod theme;
 
 mod backup;
+/// The document pickers a device has, and the ones headless apps get.
+#[cfg(feature = "test-support")]
+pub use backup::{Pickers, set_pickers_for_test};
 mod browse_playback;
 mod capabilities;
 mod channels_view;
@@ -112,6 +115,7 @@ mod settings_view;
 mod setup_view;
 pub mod startup;
 pub mod time;
+mod touch_zap;
 mod ui_kit;
 mod video;
 mod wizard_view;
@@ -240,6 +244,13 @@ pub struct Ui {
     pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
     pub(crate) external_playback: Signal<Option<external_player::Active>>,
     pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
+    /// The pending zap is a touch's (a swipe, the play bar's channel
+    /// buttons, a screen reader's action): its banner shows when it tunes,
+    /// whatever `player.info_on_switch` says (`touch_zap.rs`).
+    pub(crate) touch_zapped: Signal<bool>,
+    /// A swipe over full-screen video under way: the banner of the channel
+    /// it would change to, following the finger (`touch_zap.rs`).
+    pub(crate) swipe: Signal<Option<touch_zap::Preview>>,
     /// A timeline pan's hold on the channel whose program on air it
     /// started from: browse playback keeps that channel while the pan
     /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
@@ -367,6 +378,8 @@ impl Ui {
             external_handoff_target: signal(None),
             external_playback: signal(None),
             pending_zap: signal(None),
+            touch_zapped: signal(false),
+            swipe: signal(None),
             pan_anchor: signal(None),
             interruptions: signal(Default::default()),
             list: signal(Rc::new(ChannelList::build(
@@ -972,7 +985,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         // Layers, bottom to top: opaque backdrop, video (multiview's other
         // surfaces while their tiles play), UI, full-screen tap catcher.
         // The picture-in-picture window shows only the video (`pip.rs`).
-        .child(backup::service_layer())
+        .child(backup::service_layer(ui))
         .child(keyboard::bridge())
         .child(device::bridge())
         .child(panels::backdrop(ui))
@@ -1047,33 +1060,15 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
                 ),
         )
         .child(
-            // Full screen: a tap toggles the play bar (the panels where
-            // there is no pointer).
-            view()
-                .test_id("video")
-                .accessibility_elements_hidden(move || {
-                    !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui)
-                })
-                .absolute()
-                .inset_0()
-                .pointer_events(move || {
-                    if fullscreen() {
-                        PointerEvents::Auto
-                    } else {
-                        PointerEvents::None
-                    }
-                })
-                .label(move || tr("Video"))
-                .on_press(move |e: &PressEvent| {
-                    ui.touched();
-                    toggle_panels(ui);
-                    // A double click on the desktop: window full screen (the
-                    // first click's panels go again).
-                    if e.clicks == 2 && desktop::DESKTOP {
-                        desktop::toggle_fullscreen();
-                    }
-                }),
+            // Made again when live video turns into a replay or back: only
+            // live video has the channel actions (`touch_zap.rs`).
+            when(
+                move || touch_zap::changes_channel(ui),
+                move || video_catcher(ui, true),
+            )
+            .otherwise(move || video_catcher(ui, false)),
         )
+        .child(touch_zap::layer(ui))
         // Where the video was while the desktops' picture-in-picture
         // window shows it.
         .child(desktop::pip_window::placeholder(ui))
@@ -1107,6 +1102,51 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(parental_view::layer(ui))
         .child(startup::store_failure_layer(ui))
         .child(settings_view::notice_layer())
+}
+
+/// Full screen: a tap toggles the play bar (the panels where there is no
+/// pointer); over live video a vertical swipe and the accessibility
+/// actions change channel (`touch_zap.rs`). It lies above the video, which
+/// it never wraps.
+fn video_catcher(ui: Ui, live: bool) -> View {
+    let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
+    let swiped = stored(false);
+    let catcher = view()
+        .test_id("video")
+        .accessibility_elements_hidden(move || {
+            !fullscreen() || ui.any_overlay_open() || multiview::is_open(ui)
+        })
+        .absolute()
+        .inset_0()
+        .pointer_events(move || {
+            if fullscreen() {
+                PointerEvents::Auto
+            } else {
+                PointerEvents::None
+            }
+        })
+        .label(move || tr("Video"))
+        .on_press(move |e: &PressEvent| {
+            // The finger swiped (`touch_zap.rs`): its lift is no tap. Only
+            // a pointer's press is the swipe's (a keyboard's or a screen
+            // reader's has no clicks), and only the first one after it.
+            if e.clicks != 0 && swiped.with(std::mem::take) {
+                return;
+            }
+            ui.touched();
+            toggle_panels(ui);
+            // A double click on the desktop: window full screen (the
+            // first click's panels go again).
+            if e.clicks == 2 && desktop::DESKTOP {
+                desktop::toggle_fullscreen();
+            }
+        });
+    if !live {
+        return catcher;
+    }
+    touch_zap::watch(catcher, ui, swiped)
+        .accessibility_actions(touch_zap::actions())
+        .on_accessibility_action(move |action: &str| touch_zap::act(ui, action))
 }
 
 /// A tap on full-screen video: the play bar on a device with a pointer,
