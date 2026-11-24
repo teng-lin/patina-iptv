@@ -103,8 +103,15 @@ class ToolCache(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/unsigned-candidate.yml").read_text()
         candidate = workflow.split("  windows-package:", 1)[1].split("  android-native:", 1)[0]
         self.assertIn("stage-release: 'true'", candidate)
-        self.assertIn("github.workflow != 'Release'", next(
-            line for line in RECIPE.splitlines() if "inputs.stage-release ==" in line))
+        # The candidate builds shipped-notice tools from source, so staging
+        # must not depend on the Actions cache it deliberately disables.
+        self.assertIn("cache: 'false'", candidate)
+        stage = next(step for step in steps(RECIPE) if "id: stage\n" in step)
+        condition = next(line for line in stage.splitlines() if line.strip().startswith("if:"))
+        self.assertIn("inputs.stage-release == 'true'", condition)
+        self.assertNotIn("inputs.cache", condition)
+        self.assertIn("steps.durable.outputs.restored != 'true'", condition)
+        self.assertIn("github.workflow != 'Release'", condition)
         self.assertIn("github.event_name == 'push'", RECIPE)
         self.assertIn("github.ref == 'refs/heads/master'", RECIPE)
         retained = next(step for step in steps(RECIPE) if "name: patina-cargo-about-${{ runner.arch }}" in step)
