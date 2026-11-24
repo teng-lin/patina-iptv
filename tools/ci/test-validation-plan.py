@@ -43,7 +43,7 @@ class Selection(unittest.TestCase):
 
     def test_packaging_helper_dependency_closure(self):
         for path in ("tools/ci/notices.hbs", "tools/ci/component-inventory.py", "tools/ci/crypto-native-notices.py",
-                     "tools/ci/package.Cargo.lock", "tools/ci/check-package-lock.py"):
+                     "tools/ci/check-package-lock.py"):
             plan = v.select([path])
             self.assertTrue(plan["packages"], path)
             self.assertFalse(plan["android_package"], path)
@@ -62,7 +62,7 @@ class Selection(unittest.TestCase):
 
     def test_macos_host_uses_packaging_only_when_both_checks_are_selected(self):
         cases = (
-            (["Cargo.lock"], "pr", "packages"),
+            (["Cargo.lock"], "pr", "host"),
             (["hosts/macos/Synthetic.swift"], "pr", "packages"),
             (["crates/iptv-core/src/guide.rs"], "pr", "host"),
             (["hosts/android/app/build.gradle.kts"], "pr", "skip"),
@@ -91,13 +91,26 @@ class Selection(unittest.TestCase):
             plan = v.select([path])
             self.assertTrue(all(plan[lane] for lane in v.LANES), path)
 
-    def test_dependency_changes_reach_production_packages_and_all_fuzz_targets(self):
-        for path in ("Cargo.lock", "crates/iptv-guide/Cargo.toml", "nsh.rev", "rust-toolchain.toml"):
+    def test_dependency_changes_keep_native_builds_without_desktop_installers(self):
+        for path in ("Cargo.lock", "Cargo.toml", "crates/iptv-guide/Cargo.toml", "nsh.rev", "rust-toolchain.toml",
+                     ".cargo/config.toml", "vendor/nsh-tv/src/lib.rs"):
             plan = v.select([path])
-            for lane in ("host", "windows", "android", "packages", "windows-package", "smoke", "stress"):
+            for lane in ("host", "windows", "android", "smoke", "stress"):
                 self.assertTrue(plan[lane], (path, lane))
             self.assertEqual(plan["fuzz"], v.fuzz_targets([], True))
-            self.assertFalse(plan["coverage"])
+            for lane in ("packages", "windows-package", "coverage"):
+                self.assertFalse(plan[lane], (path, lane))
+            self.assertEqual(plan["package_matrix"]["include"], [], path)
+
+    def test_synchronized_dependency_locks_do_not_select_desktop_installers(self):
+        plan = v.select(["Cargo.lock", "tools/ci/package.Cargo.lock", "fuzz/Cargo.lock", "hosts/tizen-nsh/Cargo.lock"])
+        for lane in ("host", "windows", "android", "helpers_full"):
+            self.assertTrue(plan[lane], lane)
+        self.assertFalse(plan["packages"])
+        self.assertFalse(plan["windows-package"])
+        package_lock_only = v.select(["tools/ci/package.Cargo.lock"])
+        self.assertTrue(package_lock_only["android"])
+        self.assertTrue(package_lock_only["helpers_full"])
 
     def test_native_and_ui_changes_keep_both_form_factors(self):
         for path in ("crates/iptv-app/src/video.rs", "crates/iptv-runtime/src/lib.rs", "hosts/android/app/src/main/Synthetic.kt",
@@ -184,9 +197,12 @@ class Selection(unittest.TestCase):
                 self.assertFalse(plan["android_package"])
     def test_platform_specific_package_changes_do_not_build_the_other_installer(self):
         for path, platform in (("tools/ci/package-linux.sh", "linux"), ("tools/package-macos.sh", "macos")):
-            matrix = v.select([path])["package_matrix"]
-            self.assertEqual([entry["platform"] for entry in matrix["include"]], [platform])
-        self.assertEqual(len(v.select(["Cargo.lock"])["package_matrix"]["include"]), 2)
+            plan = v.select(["Cargo.lock", path])
+            self.assertEqual([entry["platform"] for entry in plan["package_matrix"]["include"]], [platform])
+            self.assertFalse(plan["windows-package"], path)
+        plan = v.select(["Cargo.lock", "tools/package-windows.ps1"])
+        self.assertTrue(plan["windows-package"])
+        self.assertFalse(plan["packages"])
 
 
 
@@ -225,12 +241,21 @@ class Aggregate(unittest.TestCase):
         self.assertEqual(v.gate(self.plan, self.needs), [])
 
     def test_mac_and_ios_evidence_must_come_from_the_selected_package_runner(self):
-        plan = v.select(["Cargo.lock"])
+        plan = v.select(["Cargo.lock", "tools/package-macos.sh"])
         needs = self.successful_needs(plan)
         self.assertEqual(v.gate(plan, needs), [])
         needs["host"]["outputs"].update(needs["packages"].pop("outputs"))
         self.assertIn("macOS host checks did not report success", v.gate(plan, needs))
         self.assertIn("selected ios: missing successful host verification", v.gate(plan, needs))
+
+    def test_dependency_pr_requires_native_evidence_with_both_installers_skipped(self):
+        plan = v.select(["Cargo.toml", "Cargo.lock"])
+        needs = self.successful_needs(plan)
+        self.assertEqual(needs["packages"]["result"], "skipped")
+        self.assertEqual(needs["windows-package"]["result"], "skipped")
+        self.assertEqual(v.gate(plan, needs), [])
+        needs["host"]["outputs"].pop("macos-host-verified")
+        self.assertIn("macOS host checks did not report success", v.gate(plan, needs))
 
     def test_host_and_standalone_routing(self):
         cases = (("credentials", "tools/ci/isolated-credentials.py", False),

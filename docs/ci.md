@@ -17,7 +17,7 @@ subscriptions, so each selected lane runs once. Selection and the aggregate use
 | Reader/writer/analysis independence gates | Exact isolated gates on Linux | Exact gates on every host | Exact gates on every host |
 | Android compile | Both ARM ABIs for production Rust/dependency/Android changes | Both ARM ABIs | Shipping package jobs compile both |
 | Tablet/TV playback, lifecycle and remote-input smoke | UI/Android/runtime/player/input/network changes | Both forms | Both forms for candidate code |
-| Installers and APK/AAB | Desktop installers for actual packaging/runtime/dependency inputs; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
+| Installers and APK/AAB | Desktop installers for packaging scripts, resources and bundled runtime changes; one x86_64 debug APK for selected emulator smoke | Desktop preview formats; ARM compilation and emulator smoke | Unsigned release ARM APK/AAB and desktop installers, built once and retained |
 | Coverage and floors | Coverage/validation infrastructure changes; manual run available | Full workspace | Full report for this candidate SHA |
 | Fuzz | Affected targets, 30 seconds each; common dependency changes select all | All targets, 300 seconds each | All targets, 30 seconds each and retained corpus |
 | Allocation and large EPG/catalog budgets | Storage/import/EPG and their parser, schedule and model dependencies; small functional regressions stay in Linux tests | Full release-mode fixture, including ignored million-program EPG case | Full release-mode fixture |
@@ -33,6 +33,10 @@ and Windows chrome tests, and builds the production app without test-support.
 Nightly and release tiers also execute shared suites on macOS and Windows,
 covering filesystem, process and platform behavior beyond Linux. wasm output
 and ordinary doctests are checked once on Linux rather than on three hosts.
+Cargo manifest and workspace lockfile changes still run native compilation on
+all desktop hosts and Android. The desktop installer jobs run when the PR also
+changes a packaging recipe or a shipped resource. Updating the generated
+package lockfile still runs the lock-graph consistency checks.
 
 Performance journeys retain their approved three repetitions and exact
 store-read/player-open ceilings. Their wall-clock values remain informational.
