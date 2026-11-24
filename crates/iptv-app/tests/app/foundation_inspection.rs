@@ -111,14 +111,14 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     });
     t.wait("text:/Synthetic Viewer/", 10);
-    t.press("text:/^☰  /");
+    t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
     t.press("text:Playlists >> nth=0");
     t.press("text:Synthetic viewer");
     t.press("text:Show this playlist");
     t.wait("text:Synthetic Viewer", 10);
-    t.press("text:/^☰  /");
+    t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
     t.press("text:Playlists >> nth=0");

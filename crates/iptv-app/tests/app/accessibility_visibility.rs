@@ -61,6 +61,31 @@ impl Exposure {
         }
     }
 
+    pub(super) fn action_label(
+        &self,
+        app: &Headless,
+        test_id: &str,
+        action: &str,
+    ) -> Option<String> {
+        let nodes = app.screen().layout_nodes();
+        let id = nodes
+            .iter()
+            .find(|node| node.test_id.as_deref() == Some(test_id))?
+            .id;
+        self.0
+            .lock()
+            .unwrap()
+            .views
+            .get(&id)?
+            .accessibility
+            .actions
+            .iter()
+            .find(|item| item.name.as_ref() == action)?
+            .label
+            .as_deref()
+            .map(str::to_owned)
+    }
+
     #[track_caller]
     pub(super) fn shown(&self, app: &Headless, test_id: &str, expected: bool) {
         let nodes = app.screen().layout_nodes();
@@ -326,13 +351,11 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     let Some(home) = isolated!() else { return };
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
-    step(app.wait_for("label:Go forward 30 minutes"));
     step(app.press_key("down"));
     personalization::menu(app, "Reorder channels");
     step(app.wait_for("id:guide-reorder-handle"));
     exposure.shown(app, "guide-ui", true);
     exposure.shown(app, "guide-program", false);
-    assert!(!app.screen().matches("label:Go forward 30 minutes").unwrap());
     step(app.wait_for("id:guide-row >> nth=1 >> text:★ Local B"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
@@ -556,7 +579,7 @@ fn modal_screens_and_editors_hide_only_their_underlay_and_restore_it_on_back() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press("label:Settings"));
     step(app.wait_for("id:settings-screen"));
@@ -701,12 +724,40 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     let app = &mut fixture.app;
     let live_cell = "id:guide-ui >> role:cell[Local C bulletin]";
     step(app.wait_for_within(live_cell, Duration::from_secs(20)));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     step(app.set_environment("a tablet with TalkBack", |env| {
         env.idiom = Idiom::Pad;
         env.screen_reader = true;
     }));
+    // VoiceOver exposes custom actions only when explicitly declared;
+    // its native adapter does not infer them from long-press handlers.
+    let title = app.screen().id("id:guide-header-program").unwrap();
+    assert!(
+        exposure.0.lock().unwrap().views[&title]
+            .accessibility
+            .actions
+            .iter()
+            .any(|action| action.name.as_ref() == "longpress"
+                && action.label.as_deref() == Some("More options")),
+        "the program title exposes a localized menu action to screen readers"
+    );
+    app.engine().control().dispatch_event(
+        title,
+        nsh_core::EventKind::AccessibilityAction,
+        nsh_core::EventPayload::Map(vec![(
+            "actionName",
+            nsh_core::PayloadValue::Str("longpress".into()),
+        )]),
+    );
+    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+    assert_eq!(iptv_app::player_opens(0), 0, "a menu never tunes");
+    step(app.back());
+    step(app.wait_for_gone(
+        "id:menu-panel >> text:Manage favorites…",
+        Duration::from_secs(3),
+    ));
+    exposure.shown(app, "menu-panel", false);
     // A channel row plays in the guide, then its second activation expands it.
     let row = app.screen().id("role:button[/^Local B$/]").unwrap();
     activate(app, row);

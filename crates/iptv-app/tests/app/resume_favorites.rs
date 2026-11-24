@@ -193,7 +193,7 @@ fn channel_selected(app: &Headless, name: &str) -> bool {
 
 #[track_caller]
 fn lands_in(app: &mut Headless, list: &str, channel: &str) {
-    step(app.wait_for(&format!("text:☰  {list}")));
+    step(app.wait_for(&format!("role:grid[{list}]")));
     assert!(channel_selected(app, channel), "{:?}", app.screen().texts());
 }
 
@@ -232,7 +232,7 @@ fn another_playlists_favorite_returns_to_all_channels() {
     let Some(home) = isolated!() else { return };
     let mut app = resume(&home, Setup::new(Favorite::Elsewhere));
     // The merged list's focus stays where it was, as before.
-    step(app.wait_for("text:☰  All playlists"));
+    step(app.wait_for("role:grid[All playlists]"));
 }
 
 #[test]
@@ -310,7 +310,7 @@ fn a_hidden_resumed_channel_focuses_nothing_in_its_place() {
     );
     playing(&mut app, before);
     to_guide(&mut app);
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
     assert!(
         !app.screen()
             .matches("id:guide-ui >> label:Local C")
@@ -363,7 +363,7 @@ fn a_canceled_pin_leaves_the_guide_on_all_channels() {
         "id:parental-layer >> text:Enter parental PIN",
         Duration::from_secs(5),
     ));
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
     assert_eq!(iptv_app::player_opens(0), before, "nothing plays");
     assert!(!iptv_app::player_has_source(0));
 }

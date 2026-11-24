@@ -141,5 +141,5 @@ fn the_remote_shows_one_time_line_a_banner_on_zap_the_card_on_ok_and_the_strip_o
     );
     // Back with nothing over the video: the guide.
     step(app.press_key("backspace"));
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
 }

@@ -577,7 +577,7 @@ fn tablet_long_press_menus_tune_nothing_until_the_focus_moves() {
         step(app.wait_for(channel_menu));
         step(app.back());
         step(app.wait_for_gone(channel_menu, Duration::from_secs(3)));
-        step(app.press("id:guide-more"));
+        step(app.long_press("id:guide-header-program"));
     };
     let menu = "id:menu-panel >> text:Details";
     open_program_menu(&mut app, "text:C7 P0");

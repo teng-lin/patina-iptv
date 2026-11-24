@@ -170,9 +170,9 @@ fn clicks_reach_the_guide_under_the_hidden_layers() {
     step(app.set_environment("a desktop", |e| e.idiom = Idiom::Desktop));
     step(app.press("text:TV guide"));
 
-    // The list name in the header (under the hidden player panels' top
-    // bar) opens the groups and the rail; a group shows its channels.
-    step(app.press("text:☰  All channels"));
+    // The retained corner Back opens the groups and the rail; a group
+    // shows its channels.
+    step(app.open_guide_groups());
     step(app.wait_for("text:Sport"));
     step(app.press("text:Sport"));
     step(app.wait_for("text:Test Channel Three"));
@@ -501,13 +501,29 @@ fn tablet_back_controls() {
 }
 
 #[test]
+fn tablet_overlay_back_controls() {
+    let Some(home) = isolated!() else { return };
+    back_navigation_with_mode(&home, Idiom::Pad, true);
+}
+
+#[test]
 fn tv_keeps_remote_navigation() {
     let Some(home) = isolated!() else { return };
     back_navigation(&home, Idiom::Tv);
 }
 
 fn back_navigation(home: &crate::isolated::Home, device: Idiom) {
-    crate::browse_fixture::two_step_preview(home.path());
+    back_navigation_with_mode(home, device, false);
+}
+
+fn back_navigation_with_mode(home: &crate::isolated::Home, device: Idiom, overlay: bool) {
+    crate::browse_fixture::two_step_preview_with(home.path(), |settings| {
+        if overlay {
+            settings
+                .set("guide.browse_mode", iptv_settings::Value::choice("overlay"))
+                .unwrap();
+        }
+    });
     let mut config = EngineConfig {
         viewport: Size::new(px(1280.0), px(720.0)),
         ..EngineConfig::new(Root::of::<iptv_app::App>())
@@ -576,4 +592,17 @@ fn back_navigation(home: &crate::isolated::Home, device: Idiom) {
     step(app.wait_for("label:Guide"));
     step(app.press("label:Guide"));
     step(app.wait_for("label:Groups"));
+    step(app.press("id:guide-corner-back >> label:Groups"));
+    step(app.wait_for("text:Sport"));
+    step(app.press("text:Sport"));
+    step(app.wait_for("text:Test Channel Three"));
+    if device == Idiom::Pad {
+        // Tablet group selection leaves the column open until the guide
+        // beside it is tapped. That tap closes it without tuning.
+        step(app.press("id:guide-ui >> role:cell[No information] >> nth=1"));
+    }
+    step(app.wait_for("id:guide-corner-back >> label:Groups"));
+    step(app.press("id:guide-corner-back >> label:Groups"));
+    step(app.press("id:guide-corner-back >> label:Menu"));
+    step(app.wait_for("id:navigation-rail >> label:Settings"));
 }

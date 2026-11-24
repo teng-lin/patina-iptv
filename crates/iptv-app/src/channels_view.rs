@@ -432,8 +432,8 @@ fn entry_row(
         ))
 }
 
-/// The ⋯ on the shown group's row of a groups column (the guide's and the
-/// channel list's), for touch and a pointer: its group options, which
+/// The ⋯ on the shown group's row of the player's channel list, for
+/// touch and a pointer: its group options, which
 /// long press, right-click, Menu and Shift+F10 open. Only the shown row
 /// has one, so the narrow column keeps its names; a click shows another
 /// group, which then has it. Keys hide it.

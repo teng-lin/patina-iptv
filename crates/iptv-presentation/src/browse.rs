@@ -12,8 +12,7 @@
 //!   card. Right goes to the guide without moving the row. A tap selects a
 //!   group as moving onto it does.
 //! - Left from the groups focuses the rail (it expands with labels) on
-//!   Search: Left, Left, OK searches. Items without a screen in this
-//!   build are dimmed and skipped.
+//!   Search: Left, Left, OK searches. Every item opens its screen.
 //! - Back: hint card → guide (a past or future program returns to now
 //!   first, unless [`Columns::back_to_now`] is off) → groups → rail →
 //!   leave the app.
@@ -39,30 +38,12 @@ pub enum RailItem {
     Movies,
     Shows,
     Recordings,
-    MyList,
     /// iptv-rs's own entry: the playlists screen.
     Playlists,
     Settings,
 }
 
 impl RailItem {
-    /// Whether it opens something in this build; the rest are dimmed and
-    /// the focus skips them.
-    pub fn enabled(self) -> bool {
-        matches!(
-            self,
-            RailItem::Search
-                | RailItem::Tv
-                | RailItem::Continue
-                | RailItem::Recent
-                | RailItem::Movies
-                | RailItem::Shows
-                | RailItem::Recordings
-                | RailItem::Playlists
-                | RailItem::Settings
-        )
-    }
-
     /// Kept at the bottom of the rail.
     pub fn at_bottom(self) -> bool {
         matches!(self, RailItem::Playlists | RailItem::Settings)
@@ -96,7 +77,6 @@ pub fn rail_items(vod: VodAvailability) -> Vec<RailItem> {
     }
     items.extend([
         RailItem::Recordings,
-        RailItem::MyList,
         RailItem::Playlists,
         RailItem::Settings,
     ]);
@@ -108,11 +88,7 @@ pub fn rail_home(items: &[RailItem]) -> RailItem {
     if items.contains(&RailItem::Tv) {
         RailItem::Tv
     } else {
-        items
-            .iter()
-            .copied()
-            .find(|item| item.enabled())
-            .unwrap_or(RailItem::Tv)
+        items.first().copied().unwrap_or(RailItem::Tv)
     }
 }
 
@@ -160,9 +136,9 @@ pub enum Outcome {
 
 impl Focus {
     /// Retain the same rail action as shelves appear or disappear. A removed
-    /// or disabled action returns to TV rather than borrowing another row.
+    /// action returns to TV rather than borrowing another row.
     pub fn retain_rail(&mut self, items: &[RailItem]) {
-        if !items.contains(&self.rail) || !self.rail.enabled() {
+        if !items.contains(&self.rail) {
             self.rail = rail_home(items);
         }
     }
@@ -266,7 +242,7 @@ impl Focus {
                     self.pane = Pane::Groups;
                     Outcome::Moved
                 }
-                item if item.enabled() && cols.rail.contains(&item) => Outcome::Open(item),
+                item if cols.rail.contains(&item) => Outcome::Open(item),
                 _ => Outcome::None,
             },
         }
@@ -306,7 +282,7 @@ impl Focus {
     /// Shows the groups column (and the rail beside it) with the focus on
     /// the selected group: Left from the floor program does it in
     /// [`Focus::navigate`]; this is Hold Left, the Groups key or a tap on
-    /// the list's name.
+    /// the guide's corner Back control.
     pub fn open_groups(&mut self) {
         self.hint = false;
         self.pane = Pane::Groups;
@@ -354,7 +330,7 @@ impl Focus {
     /// A tap on a rail item.
     pub fn tap_rail(&mut self, index: usize, cols: &Columns, list: &dyn Schedule) -> Outcome {
         match cols.rail.get(index) {
-            Some(item) if item.enabled() => {
+            Some(item) => {
                 self.pane = Pane::Rail;
                 self.rail = *item;
                 self.ok(cols, list)
@@ -391,19 +367,16 @@ impl Focus {
     }
 }
 
-/// The next enabled rail item from `from` in direction `step`, or `from`.
+/// The next rail item from `from` in direction `step`, or `from`.
 fn rail_step(items: &[RailItem], from: RailItem, step: isize) -> RailItem {
     let Some(position) = items.iter().position(|&item| item == from) else {
         return rail_home(items);
     };
-    let mut i = position as isize + step;
-    while i >= 0 && (i as usize) < items.len() {
-        if items[i as usize].enabled() {
-            return items[i as usize];
-        }
-        i += step;
-    }
-    from
+    position
+        .checked_add_signed(step)
+        .and_then(|i| items.get(i))
+        .copied()
+        .unwrap_or(from)
 }
 
 #[cfg(test)]

@@ -367,7 +367,7 @@ fn adding_playlist_reauthenticates_a_cached_portal_after_startup_auth_failed() {
     ));
     // An enabled Refresh now action confirms the UI has consumed completion:
     // this source is no longer RUNNING, but its cached context is still absent.
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Playlists >> nth=0"));

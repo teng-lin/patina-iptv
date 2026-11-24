@@ -6,10 +6,11 @@
 //! catalog's text for that language, formatted by the core as the app
 //! formats it, so a reworded translation does not fail them and a message
 //! that stayed English does.
+use crate::headless::Headless;
 use crate::personalization::{self, Fixture, step};
 use iptv_presentation::i18n::{self, Arg, Language};
 use iptv_settings::{Settings, Target, Value, keys};
-use nsh_testing::{DialogAnswer, Headless};
+use nsh_testing::DialogAnswer;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
@@ -89,7 +90,7 @@ fn pattern(text: &str) -> String {
 
 /// From the guide to the navigation rail.
 fn rail(app: &mut Headless) {
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
 }
@@ -99,11 +100,19 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     let Some(home) = isolated!() else { return };
     let mut initial = Settings::new();
     initial.set("general.language", Value::text("en")).unwrap();
-    let mut fixture = personalization::start(home, initial, false);
+    let exposure = crate::accessibility_visibility::Exposure::default();
+    let observed = exposure.clone();
+    let mut fixture = personalization::start_with_setup(home, initial, false, move |app| {
+        app.observe(move |_, batch| observed.record(batch));
+    });
     let app = &mut fixture.app;
+    assert_eq!(
+        exposure.action_label(app, "guide-header-program", "longpress"),
+        Some("More options".into())
+    );
     // Keep the navigation rail mounted while settings are open, so a
     // language change must update its existing labels as well.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.wait_for("text:Live TV"));
     step(app.press("label:Settings"));
@@ -122,7 +131,7 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.press("text:/Español/"));
     step(app.wait_for("text:Ajustes"));
     step(app.wait_for("text:Idioma"));
-    step(app.wait_for("text:☰  Todos los canales"));
+    step(app.wait_for("role:grid[Todos los canales]"));
     step(app.wait_for("text:TV en directo"));
     step(app.wait_for("id:navigation-rail >> text:Películas"));
     step(app.wait_for("id:navigation-rail >> text:Series"));
@@ -137,6 +146,11 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("label:Ajustes"));
     step(app.wait_for("label:Vídeo"));
     step(app.wait_for("label:Cerrar el selector"));
+    assert_eq!(
+        exposure.action_label(app, "guide-header-program", "longpress"),
+        Some(Words::of("es").t("More options")),
+        "the existing header's menu action changes language immediately"
+    );
     assert!(!app.screen().matches("label:Close the chooser").unwrap());
     // A second switch while the settings remain mounted must update every
     // bound heading; native language names always remain readable.
@@ -153,6 +167,10 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     shown(app, &Words::of("zh-Hant").t(language_help).replace('`', ""));
     shown(app, &Words::of("zh-Hant").t("Clear history"));
     step(app.wait_for("label:關閉選擇器"));
+    assert_eq!(
+        exposure.action_label(app, "guide-header-program", "longpress"),
+        Some(Words::of("zh-Hant").t("More options"))
+    );
     let path = fixture.path.parent().unwrap().join("settings.json");
     let stored = personalization::saved_settings(app, &path, |settings| {
         settings.text(keys::LANGUAGE, &Target::Global) == "zh-Hant"
@@ -166,6 +184,10 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:Language"));
     step(app.wait_for("text:Settings >> nth=1"));
     step(app.wait_for("label:Close the chooser"));
+    assert_eq!(
+        exposure.action_label(app, "guide-header-program", "longpress"),
+        Some("More options".into())
+    );
     for _ in 0..3 {
         step(app.back());
     }

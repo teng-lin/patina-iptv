@@ -249,7 +249,7 @@ fn deep_focus(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     let mut app = Headless::start(engine(idiom)).unwrap();
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Recently added"));
     step(app.wait_for("text:/^Generated Aurora · Film · Generated alpha/"));
     assert_eq!(app.screen().count("id:vod-previous").unwrap(), 0);
@@ -280,7 +280,7 @@ fn deep_focus(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     drop(store);
     // Reopened, the shelf shows Aurora's page (from the 2,081st title)
     // instead of the newest 40, and does not read the 2,080 above it.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Recently added"));
     step(app.wait_for("text:/^Generated Aurora · Film · Generated alpha/"));
     step(app.wait_for("id:vod-previous"));
@@ -402,7 +402,7 @@ fn rebind(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     let props = observe_props(&mut app);
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Continue watching"));
     step(app.wait_for("text:/^Generated Aurora · Film · Generated edited playlist/"));
     let tv = idiom == nsh_core::platform::Idiom::Tv;
@@ -623,7 +623,7 @@ fn recover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     let props = observe_props(&mut app);
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Continue watching"));
     step(app.wait_for("text:/^Generated Voyage · TV series · Generated retry playlist/"));
     let tv = idiom == nsh_core::platform::Idiom::Tv;
@@ -832,7 +832,7 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
     assert_eq!(app.screen().count("id:vod-screen").unwrap(), 0);
     let surface = player(&app);
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Continue watching"));
     step(app.wait_for("id:vod-screen"));
     step(app.wait_for("text:/^Generated Aurora · Film · Generated beta/"));
@@ -922,7 +922,7 @@ fn discover(home: crate::isolated::Home, idiom: nsh_core::platform::Idiom) {
     assert_eq!(iptv_app::player_opens(0), opens, "Back opens no stream");
     assert_eq!(player(&app), surface);
     // Recently added mixes both playlists' movies and series.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Recently added"));
     step(app.wait_for("text:/^Generated Voyage · TV series · Generated alpha/"));
     assert_eq!(app.screen().count("id:vod-title").unwrap(), 6);
@@ -2021,7 +2021,7 @@ fn the_empty_state_covers_every_playlist_the_catalog_reads() {
     let mut app = Headless::start(engine(nsh_core::platform::Idiom::Desktop)).unwrap();
     step(app.wait_for_within("text:/^Generated local live/", Duration::from_secs(20)));
     // The M3U playlist alone on screen, from the playlists screen.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Playlists >> nth=0"));

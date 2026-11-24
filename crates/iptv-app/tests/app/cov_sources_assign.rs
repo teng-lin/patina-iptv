@@ -119,7 +119,7 @@ fn add_sources(t: &mut T, srv: &Server) {
 
 /// The rail's Settings, its TV guide data page.
 fn open_guide_settings(t: &mut T) {
-    t.press("text:☰  All channels");
+    t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
     t.press("text:Settings >> nth=0");

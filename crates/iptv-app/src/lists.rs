@@ -369,7 +369,7 @@ pub fn back(ui: Ui) -> bool {
     o != Outcome::Leave
 }
 
-/// Shows the groups column (the Groups key, a tap on the list's name).
+/// Shows the groups column (the Groups key or the guide's corner Back control).
 pub fn open_groups(ui: Ui) {
     ui.focus.update(Focus::open_groups);
 }

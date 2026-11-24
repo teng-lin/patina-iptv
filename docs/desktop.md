@@ -13,8 +13,9 @@ rule was checked on.
 
 | Where | Vertical wheel or two-finger swipe | Horizontal swipe, or Shift + wheel | Right-click | Visible way in |
 |---|---|---|---|---|
-| Guide | Moves through the channels | Moves through program time | Channel menu on a channel name or program cell | Program menu via ⋯ after the program's title |
-| Guide's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |
+| Guide | Moves through the channels | Moves through program time | Channel menu on a channel name or program cell | Long press or Menu key |
+| Guide's program title in the header | Nothing | Nothing | Program menu | Long press or Menu key |
+| Guide's groups column | Scrolls the groups | Nothing | Group options | Long press or Menu key |
 | Channel list over the video | Scrolls the channels | Nothing | Channel menu | ⋯ at the end of each row |
 | Channel list's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |
 | Movies and Shows posters | Scrolls the posters | Nothing | Nothing (no menu yet; #90) | — |
@@ -27,7 +28,7 @@ rule was checked on.
   follows. Moving the mouse over full-screen video shows the player's
   controls for a while.
 - **Now:** the ⋯ controls show while touch or a pointer drives the app and
-  hide for keys, which have Menu (M) and Shift+F10. A groups column shows
+  hide for keys, which have Menu (M) and Shift+F10. The player's channel-list groups column shows
   its ⋯ only on the shown group, so a narrow column keeps its names: a
   click shows another group, whose row then has it.
 

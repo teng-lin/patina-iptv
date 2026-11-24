@@ -23,7 +23,7 @@ fn step(result: Result<(), String>) {
     }
 }
 fn rail(app: &mut Headless) {
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
 }
@@ -425,8 +425,8 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press("id:remote-editor-screen >> text:Close"));
     step(app.back());
     step(app.back());
-    step(app.wait_for("text:☰  All channels"));
-    step(app.press("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     step(app.press_remote(nsh_tv::RemoteKey::Red));
     step(app.wait_for("id:search-field"));

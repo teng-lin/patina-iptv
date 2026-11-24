@@ -41,6 +41,24 @@ impl Headless {
         self.0.press(selector)
     }
 
+    /// Open groups through the retained navigation, corner Back or keyboard route.
+    pub fn open_guide_groups(&mut self) -> Result<(), String> {
+        self.ready_for_input()?;
+        if self.screen().layout_nodes().iter().any(|node| {
+            node.test_id.as_deref() == Some("guide-groups") && node.bounds.size.width.0 > 0.0
+        }) {
+            // Live TV is the second rail destination in every language. It
+            // restores group focus and activates the main window without tuning.
+            return self.press("id:navigation-rail >> role:tab >> nth=1");
+        }
+        let back = "id:guide-corner-back >> label:Groups";
+        if self.screen().matches(back)? {
+            self.press(back)
+        } else {
+            self.press_key("tab")
+        }
+    }
+
     pub fn play_bar_option(&mut self, name: &str) -> Result<(), String> {
         let direct = format!("id:play-bar-layer >> label:{name}");
         if self.screen().matches(&direct)? {

@@ -272,7 +272,7 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
     step(app.wait_for_within("text:/^Xtream Channel 1 · /", IMPORT));
     // Explicitly open the account alone: this journey exercises its
     // single-account multiview picker and stream-limit warning.
-    step(app.press("text:☰  All playlists"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Playlists >> nth=0"));
@@ -284,7 +284,7 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
     step(app.wait_for_within("text:Xtream Channel 1", IMPORT));
     // Refresh the account in single-source mode so its session limit is
     // known before opening multiview (a cached mode switch has no account fetch).
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Playlists >> nth=0"));

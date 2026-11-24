@@ -280,7 +280,7 @@ impl Scenario {
     /// From the guide: the first channel's "Choose guide data…", `row`.
     fn choose_guide(&mut self, row: &str) {
         // The groups, then back to the channels beside them.
-        step(self.app.press("text:/^☰  /"));
+        step(self.app.open_guide_groups());
         step(self.app.press_key("right"));
         step(self.app.press_key("m"));
         step(self.app.wait_for("text:Choose guide data…"));

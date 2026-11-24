@@ -147,10 +147,10 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
     }
     assert!(focus < FILLERS);
 
-    // The lists: the groups column (opened from the list's name) and the
+    // The lists: the groups column (opened with the corner Back control) and the
     // player's channel list (mounted while hidden) in the guide's type,
     // full screen and in a smaller window.
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.wait_for("text:News"));
     step(app.press_key("left"));
     step(app.wait_for("id:navigation-rail >> text:Live TV"));

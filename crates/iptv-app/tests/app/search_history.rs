@@ -74,7 +74,7 @@ fn a_recent_search_shows_its_matches_again() {
 /// The rail's Search, from the guide.
 fn open_search(app: &mut Headless) {
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Search >> nth=0"));
@@ -157,8 +157,6 @@ fn keyboard_search_keeps_the_editor_and_reaches_named_results_at_narrow_width() 
     let mut fixture = personalization::start(home, Settings::new(), false);
     let app = &mut fixture.app;
     step(app.set_environment("desktop layout", |env| env.idiom = Idiom::Desktop));
-    step(app.wait_for("role:button[/^Go back 30 minutes$/]"));
-    step(app.wait_for("role:button[/^Go forward 30 minutes$/]"));
     step(app.press_key("mod+f"));
     step(app.wait_for("id:search-field"));
 

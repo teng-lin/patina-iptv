@@ -200,8 +200,8 @@ fn resizing_the_guide_keeps_the_focused_channel_and_the_playing_preview() {
     assert!(!selected(app, "guide-preview"));
     step(app.press_key("tab"));
     assert!(channel_selected(app, "Local C"), "back to the same row");
-    // The group selector works at compact widths.
-    step(app.press("id:guide-list-selector"));
+    // The corner Back control reaches groups at compact widths.
+    step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);

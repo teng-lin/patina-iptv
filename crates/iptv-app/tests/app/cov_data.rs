@@ -158,7 +158,7 @@ pub(super) fn start() -> Headless {
 
 /// The groups, then the rail beside them, then one of its items.
 pub(super) fn rail(app: &mut Headless, item: &str) {
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for(&format!("text:{item} >> nth=0")));

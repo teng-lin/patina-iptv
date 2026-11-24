@@ -110,7 +110,7 @@ fn secondary_screens_use_the_shared_type() {
 /// The groups, then the rail beside them (Left), its labels shown.
 fn open_rail(app: &mut Headless) {
     let step = |r: Result<(), String>| r.unwrap_or_else(|e| panic!("{e}"));
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
 }

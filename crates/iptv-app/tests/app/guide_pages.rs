@@ -84,10 +84,10 @@ fn older_days_are_read_in_when_browsing_back() {
     step(app.wait_for_within("text:Recent Show", IMPORT));
     assert!(!app.shows("text:Archive Show"));
 
-    // Back a day and more (half an hour per step): that day is read in.
+    // Back a day and more (an hour per step): that day is read in.
     let back = |app: &mut Headless| {
-        for _ in 0..54 {
-            step(app.press("text:‹"));
+        for _ in 0..27 {
+            step(app.press_key("shift+left"));
         }
     };
     back(&mut app);
@@ -95,8 +95,8 @@ fn older_days_are_read_in_when_browsing_back() {
     assert!(!app.shows("text:No information"));
 
     // And forward to now again.
-    for _ in 0..54 {
-        step(app.press("text:›"));
+    for _ in 0..27 {
+        step(app.press_key("shift+right"));
     }
     step(app.wait_for_gone("text:Archive Show", Duration::from_secs(2)));
     step(app.wait_for("text:Recent Show"));

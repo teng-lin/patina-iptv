@@ -176,7 +176,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     step(app.wait_for_within("text:★ Channel Two", Duration::from_secs(20)));
     // A first start downloads the guide, which the backup then leaves out.
     wait_for_guide(&mut app, &path, source);
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     step(app.press_key("m"));
     step(app.wait_for(&message("Manage favorites…")));

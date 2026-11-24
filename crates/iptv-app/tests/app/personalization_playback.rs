@@ -73,11 +73,11 @@ fn guide_activates_a_live_channel_twice_and_wraps_rows_and_groups() {
     step(app.press_key("tab"));
     step(app.press_key("up"));
     step(app.press_key("up"));
-    step(app.wait_for("text:☰  Favorites"));
+    step(app.wait_for("role:grid[Favorites]"));
     step(app.press_key("up"));
-    step(app.wait_for("text:☰  Sport"));
+    step(app.wait_for("role:grid[Sport]"));
     step(app.press_key("down"));
-    step(app.wait_for("text:☰  Favorites"));
+    step(app.wait_for("role:grid[Favorites]"));
     step(app.press_key("down"));
     step(app.press_key("down"));
     step(app.press_key("right"));
@@ -187,7 +187,7 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     assert!(!preview(app));
     // Preview list: choosing another channel obeys delay and stays open.
     step(app.press_key("shift+left"));
-    step(app.wait_for("text:/^☰  /"));
+    step(app.wait_for("id:guide-timeline"));
     step(app.press_key("up"));
     opened.lock().unwrap().clear();
     step(app.press_key("enter"));

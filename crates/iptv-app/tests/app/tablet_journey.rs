@@ -25,7 +25,7 @@ use iptv_settings::{Settings, Value};
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{
-    EventKind, EventPayload, ImageData, MountItem, NodeId, Size, ViewKind, element::Root,
+    EventKind, EventPayload, ImageData, MountItem, NodeId, Point, Size, ViewKind, element::Root,
     prelude::*,
 };
 use nsh_engine::EngineConfig;
@@ -328,12 +328,11 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     );
     assert_eq!(sources(&seen).len(), 1, "Back opens nothing");
 
-    // A past program in the archive: the visible ‹ steps back to it,
+    // A past program in the archive: a timeline drag browses back to it,
     // and a tap replays it full screen.
-    for _ in 0..4 {
-        step(app.press("label:Go back 30 minutes"));
-    }
+    step(app.drag_and_hold("id:guide-row >> nth=0", Point::new(px(600.0), px(0.0))));
     step(app.wait_for("text:Recital Replay"));
+    step(app.drop_held());
     step(app.press("text:Recital Replay"));
     full_screen(&mut app, LANDSCAPE.0);
     let replay = sources(&seen);
@@ -353,10 +352,9 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     // An upcoming program's details open by a tap and offer, by
     // visible controls, what its menu holds.
     step(app.press("text:Now"));
-    for _ in 0..4 {
-        step(app.press("label:Go forward 30 minutes"));
-    }
+    step(app.drag_and_hold("id:guide-row >> nth=0", Point::new(px(-600.0), px(0.0))));
     step(app.wait_for("text:Gala Evening"));
+    step(app.drop_held());
     step(app.press("text:Gala Evening"));
     step(app.wait_for("id:description-layer >> text:Gala Evening"));
     assert_eq!(sources(&seen).len(), 2, "details never play");
@@ -610,7 +608,7 @@ fn a_keyboard_over_search_edits_text_without_reaching_the_player() {
             .iter()
             .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
     }));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("text:Search"));
     step(app.wait_for("id:search-field"));
     // The software keyboard comes up over the lower part of the window.
