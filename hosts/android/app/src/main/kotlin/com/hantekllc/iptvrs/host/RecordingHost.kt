@@ -11,6 +11,7 @@ import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -46,6 +47,17 @@ object RecordingHost {
     @JvmStatic external fun start(path: String): Long
 
     @JvmStatic external fun stop(path: String)
+
+    /** Stops running captures early, each kept as a partial recording with
+     * the reason: [STOP_TV_OFF] or [STOP_BACKGROUND_LIMIT]. Returns how many
+     * were running. */
+    @JvmStatic external fun stopCaptures(
+        path: String,
+        why: Int,
+    ): Int
+
+    const val STOP_TV_OFF = 1
+    const val STOP_BACKGROUND_LIMIT = 2
 
     @JvmStatic external fun suspendViewing(path: String)
 
@@ -184,6 +196,26 @@ object RecordingHost {
         if (next > 0) arm(context, next)
     }
 
+    /** The watchdog fired while this process still records: Rust publishes
+     * only when its schedule changes, so the next watchdog is armed here,
+     * or a kill later in a long capture would have none (#275). A new
+     * process starts idle and arms its own once its capture resumes. */
+    @JvmStatic @Synchronized
+    fun renewWatchdog(context: Context) {
+        if (!desiredActive) return
+        try {
+            val wake = System.currentTimeMillis() / 1000 + 120
+            context
+                .getSharedPreferences("recording-host", Context.MODE_PRIVATE)
+                .edit()
+                .putLong("next", wake)
+                .apply()
+            arm(context, wake)
+        } catch (_: RuntimeException) {
+            // The service start below still runs; Rust's next publication rearms.
+        }
+    }
+
     fun startService(context: Context): Boolean =
         try {
             val intent = Intent(context, RecordingService::class.java)
@@ -215,6 +247,7 @@ class RecordingAlarm : BroadcastReceiver() {
         ) {
             RecordingHost.restore(context)
         } else {
+            RecordingHost.renewWatchdog(context)
             RecordingHost.startService(context)
         }
     }
@@ -223,6 +256,27 @@ class RecordingAlarm : BroadcastReceiver() {
 /** Native capture survives activity/engine destruction; it never owns a player view. */
 class RecordingService : Service() {
     private val wakeHandler = Handler(Looper.getMainLooper())
+
+    /** Low Power Standby cuts the network when the TV is turned off: the
+     * capture stops then, keeping what was written, rather than failing
+     * later (#275). Elsewhere the screen turning off changes nothing. */
+    private val screenOff =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) {
+                if (!CaptureLimits.tv(context) || !CaptureLimits.standbyStops(context)) return
+                val path = filesDir.absolutePath
+                worker.execute {
+                    val stopped = RecordingHost.stopCaptures(path, RecordingHost.STOP_TV_OFF)
+                    android.util.Log.i("nsh", "iptv recordings: TV off under Low Power Standby; stopped $stopped")
+                    if (stopped > 0) {
+                        CaptureLimits.notifyStopped(localized(), R.string.recording_stopped_tv_off)
+                    }
+                }
+            }
+        }
     private var wakeLease: RecordingWakeLease? = null
     private val worker =
         java.util.concurrent.Executors
@@ -230,11 +284,16 @@ class RecordingService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
-    fun refreshNotification() {
+    /** This service in the app's interface language. */
+    private fun localized(): Context {
         val tag = getSharedPreferences("recording-host", Context.MODE_PRIVATE).getString("language", "")
         val configuration = android.content.res.Configuration(resources.configuration)
         if (!tag.isNullOrEmpty()) configuration.setLocale(java.util.Locale.forLanguageTag(tag))
-        val localized = createConfigurationContext(configuration)
+        return createConfigurationContext(configuration)
+    }
+
+    fun refreshNotification() {
+        val localized = localized()
         val notifications = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             notifications.createNotificationChannel(
@@ -265,6 +324,15 @@ class RecordingService : Service() {
         super.onCreate()
         running = this
         refreshNotification()
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF))
+            }
+        } catch (_: RuntimeException) {
+            // Without it a standby cut ends the capture as a network failure.
+        }
         val wake =
             getSystemService(PowerManager::class.java)
                 .newWakeLock(
@@ -302,12 +370,21 @@ class RecordingService : Service() {
     }
 
     // Android 15's dataSync budget is six background hours per 24 hours.
-    // Preserve the spool and pending jobs instead of letting the system crash us.
+    // End the running captures as partial recordings that say why, tell the
+    // viewer, and stop instead of letting the system crash us (#275).
     override fun onTimeout(
         startId: Int,
         fgsType: Int,
     ) {
-        worker.execute { RecordingHost.stop(filesDir.absolutePath) }
+        val path = filesDir.absolutePath
+        worker.execute {
+            val stopped = RecordingHost.stopCaptures(path, RecordingHost.STOP_BACKGROUND_LIMIT)
+            android.util.Log.i("nsh", "iptv recordings: background time limit; stopped $stopped")
+            if (stopped > 0) {
+                CaptureLimits.notifyStopped(localized(), R.string.recording_stopped_background_limit)
+            }
+            RecordingHost.stop(path)
+        }
         // Satisfy Android's short timeout immediately. Native cancellation and
         // spool publication finish off the main thread; a process kill still
         // leaves a recoverable Recording row and transport-packet spool.
@@ -315,6 +392,10 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
+        try {
+            unregisterReceiver(screenOff)
+        } catch (_: RuntimeException) {
+        }
         running = null
         wakeLease?.stop()
         wakeLease = null

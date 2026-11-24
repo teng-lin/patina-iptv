@@ -72,6 +72,7 @@ mod personalization_zapping;
 mod phone_windows;
 mod pip_control;
 mod pointer;
+mod record_now_hosts;
 mod recorder_startup;
 mod recordings;
 mod recordings_transport;

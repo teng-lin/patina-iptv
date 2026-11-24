@@ -7,9 +7,9 @@
 //!
 //! Above the controls: the channel, program information and stream quality.
 //! Sound and guide navigation sit left of transport. Favorite, picture in
-//! picture, multiview and display sit to its right. More holds only the
-//! available actions that do not fit, and on a phone multiview always
-//! (#279). The timeline sits below the row.
+//! picture, multiview and display sit to its right. More holds the
+//! available actions that do not fit, plus Record now on Android handhelds
+//! and multiview on Android phones. The timeline sits below the row.
 //! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
 use iptv_nav::{Action, RemoteKey};
+use iptv_presentation::capabilities::RecordNow;
 use iptv_presentation::channel_list::ListMode;
 use iptv_presentation::menu::Origin;
 use iptv_presentation::panels::QuickAction;
@@ -374,10 +375,20 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
     use Control::*;
     let size = target();
     let available = width - 2.0 * (bar_margin() + PANEL_PADDING);
+    // Record now's place follows the device (`capabilities::record_now`):
+    // in the row, under More only, or nowhere.
+    let record = crate::capabilities::record_now();
     let eligible = |c: &Control| match c {
         Pip => crate::pip::supported(ui) && enabled(ui, Pip),
+        Record => record.offered() && enabled(ui, Record),
         More => false,
         _ => shown(ui, *c),
+    };
+    let phone = phone_form();
+    let under_more = |c: &Control| match c {
+        Record => record == RecordNow::UnderMore,
+        Multiview => phone,
+        _ => false,
     };
     let candidates: Vec<_> = LEFT
         .iter()
@@ -386,23 +397,25 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
         .copied()
         .filter(eligible)
         .collect();
-    // A phone keeps multiview under More, whatever room the bar has.
-    let more_only = |c: &Control| *c == Multiview && phone_form();
     let mut row: Vec<_> = candidates
         .iter()
         .copied()
-        .filter(|c| !more_only(c))
+        .filter(|c| !under_more(c))
         .collect();
-    let pinned = row.len() < candidates.len();
-    let mut more = Vec::new();
+    let mut more: Vec<_> = candidates.iter().copied().filter(under_more).collect();
     let needed = |row: &[Control]| {
         group_width(LEFT, row, size)
             + group_width(CENTER, row, size)
             + group_width(RIGHT, row, size)
             + 2.0 * group_gap()
     };
-    if pinned || needed(&row) > available {
+    // What belongs under More alone still needs the button.
+    if !more.is_empty() {
+        row.push(More);
+    }
+    if needed(&row) > available {
         row.clear();
+        more.clear();
         row.push(More);
         // Keep transport direct where it fits, including at widths below
         // the full replay transport. A wide slider can yield to a later icon.
@@ -410,7 +423,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
             PlayPause, Rewind, Forward, Favorite, Guide, Pip, Mute, Multiview, Listen, Record,
             Channels, Tracks, Volume, Details, Picture, Fullscreen,
         ] {
-            if candidates.contains(&control) && !more_only(&control) {
+            if candidates.contains(&control) && !under_more(&control) {
                 row.push(control);
                 if needed(&row) > available {
                     row.pop();

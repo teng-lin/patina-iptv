@@ -1,12 +1,21 @@
 package com.hantekllc.iptvrs.host
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.View
@@ -21,6 +30,9 @@ import com.longbridge.nsh.NshComponentContext
  * configuration change that alters them
  * (the activity handles `keyboard`, `keyboardHidden`, `navigation`,
  * `screenSize` and `smallestScreenSize` itself, so its views receive them).
+ *
+ * It also reports what can stop a capture ([CaptureLimits]) as a `limits`
+ * event: then, and when the default network or Low Power Standby changes.
  */
 internal class DeviceComponent(
     private val context: NshComponentContext,
@@ -30,6 +42,28 @@ internal class DeviceComponent(
     }
 
     private var reported: Map<String, Any>? = null
+    private var limits: Map<String, Any>? = null
+    private val main = Handler(Looper.getMainLooper())
+    private val network =
+        object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities,
+            ) {
+                main.post { reportLimits() }
+            }
+
+            override fun onLost(network: Network) {
+                main.post { reportLimits() }
+            }
+        }
+    private val standby =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) = reportLimits()
+        }
 
     /** Read once: the codecs do not change while the app runs. */
     private val decoders: Int? by lazy { DeviceSignals.probeDecoders() }
@@ -38,11 +72,21 @@ internal class DeviceComponent(
             override fun onAttachedToWindow() {
                 super.onAttachedToWindow()
                 report(resources.configuration)
+                watchLimits(true)
+                reportLimits()
+            }
+
+            override fun onDetachedFromWindow() {
+                watchLimits(false)
+                // A network change posted before detaching reports nothing.
+                main.removeCallbacksAndMessages(null)
+                super.onDetachedFromWindow()
             }
 
             override fun onConfigurationChanged(config: Configuration) {
                 super.onConfigurationChanged(config)
                 report(config)
+                reportLimits()
             }
         }.apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -65,6 +109,38 @@ internal class DeviceComponent(
         if (next != reported) {
             reported = next
             context.emit("device", next)
+        }
+    }
+
+    private fun reportLimits() {
+        val next = CaptureLimits.report(observer.context)
+        if (next != limits) {
+            limits = next
+            Log.i("nsh", "iptv capture limits: $next")
+            context.emit("limits", next)
+        }
+    }
+
+    private fun watchLimits(on: Boolean) {
+        val host = observer.context
+        try {
+            val connectivity = host.getSystemService(ConnectivityManager::class.java)
+            if (on) {
+                connectivity?.registerDefaultNetworkCallback(network)
+                if (Build.VERSION.SDK_INT >= 33) {
+                    host.registerReceiver(
+                        standby,
+                        IntentFilter(PowerManager.ACTION_LOW_POWER_STANDBY_ENABLED_CHANGED),
+                        Context.RECEIVER_NOT_EXPORTED,
+                    )
+                }
+            } else {
+                connectivity?.unregisterNetworkCallback(network)
+                if (Build.VERSION.SDK_INT >= 33) host.unregisterReceiver(standby)
+            }
+        } catch (_: RuntimeException) {
+            // Not registered (or already removed): the report on each
+            // attach and configuration change still applies.
         }
     }
 

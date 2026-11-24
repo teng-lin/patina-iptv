@@ -130,6 +130,10 @@ struct Data {
     inputs: HashMap<u64, shared::Registered>,
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
+    /// Why the host stopped a running capture early ([`host::stop_captures`]):
+    /// it ends as a partial recording with this reason, not as one the
+    /// viewer stopped.
+    stop_reasons: HashMap<JobId, &'static str>,
     jobs: Vec<Job>,
     finalization_errors: std::collections::HashSet<JobId>,
     unshareable: shared::Unshareable,
@@ -640,6 +644,20 @@ impl Runtime {
             .await
             .map_err(|_| Error::unavailable("Recording sources unavailable"))?;
         self.recordings.retire_unused().await;
+        // Say why a capture cannot complete before it starts: the library's
+        // budget and the free space it needs, then a provider connection.
+        if request.start <= now() {
+            let root = self.services().directory().to_owned();
+            let active: Vec<_> = self.recordings.lock().active.keys().copied().collect();
+            let seconds = request.end - now();
+            let checked = self
+                .services()
+                .spawn_blocking(move || space_admission(&root, &active, seconds))
+                .await;
+            if let Ok(Err(reason)) = checked {
+                return Err(Error::unavailable(reason));
+            }
+        }
         if request.start <= now() && !self.recordings.lock().recording_capacity(&request) {
             return Err(Error::unavailable(
                 "No provider connection available; stop another stream or check Streams at once",
@@ -1379,7 +1397,9 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                 struct Release(Arc<State>, JobId);
                 impl Drop for Release {
                     fn drop(&mut self) {
-                        self.0.lock().active.remove(&self.1);
+                        let mut data = self.0.lock();
+                        data.active.remove(&self.1);
+                        data.stop_reasons.remove(&self.1);
                     }
                 }
                 let _release = Release(state.clone(), job.id);
@@ -1670,7 +1690,12 @@ async fn record(
         }
         None => Err("Recording storage unavailable"),
     };
-    if shutdown.is_canceled() && state.background() && job.request.end > now() {
+    // The host stopped it early (`host::stop_captures`): kept as partial with
+    // the reason, also when the recorder's shutdown followed, which would
+    // otherwise keep it to resume.
+    let early = state.lock().stop_reasons.remove(&job.id);
+    let outcome = early.map_or(outcome, Err);
+    if early.is_none() && shutdown.is_canceled() && state.background() && job.request.end > now() {
         let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
         if matches!(
             transition(
@@ -1703,6 +1728,29 @@ async fn record(
 /// Retained bytes plus the unfilled part of every active reservation. Active
 /// spool bytes are already on disk and must not be counted twice.
 fn storage_admission(directory: &Path, active: &[JobId]) -> std::io::Result<()> {
+    if library_bytes(directory, active)? > iptv_core::recording::LIBRARY_BYTES {
+        return Err(std::io::ErrorKind::StorageFull.into());
+    }
+    Ok(())
+}
+
+/// Before a capture of `seconds` starts under data directory `root`:
+/// whether the library's budget and the free space allow it
+/// ([`iptv_core::recording::check_space`]). A library not created yet holds
+/// nothing; its free space is its data directory's.
+fn space_admission(root: &Path, active: &[JobId], seconds: i64) -> Result<(), &'static str> {
+    let directory = media_directory(root);
+    let library = match library_bytes(&directory, active) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+        Err(_) => return Err("Recording storage unavailable"),
+    };
+    let free = available_space(&directory).or_else(|| available_space(root));
+    iptv_core::recording::check_space(seconds, library, free)
+}
+
+/// What the library at `directory` holds and reserves ([`storage_admission`]).
+fn library_bytes(directory: &Path, active: &[JobId]) -> std::io::Result<u64> {
     let mut total = 0u64;
     let mut remaining = active
         .iter()
@@ -1726,13 +1774,9 @@ fn storage_admission(directory: &Path, active: &[JobId]) -> std::io::Result<()> 
             *reserved = reserved.saturating_sub(metadata.len());
         }
     }
-    total = remaining
+    Ok(remaining
         .values()
-        .fold(total, |total, bytes| total.saturating_add(*bytes));
-    if total > 32 * 1024 * 1024 * 1024 {
-        return Err(std::io::ErrorKind::StorageFull.into());
-    }
-    Ok(())
+        .fold(total, |total, bytes| total.saturating_add(*bytes)))
 }
 
 /// Native hosts with statvfs can reject already-exhausted storage. Other hosts

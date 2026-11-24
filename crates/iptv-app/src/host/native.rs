@@ -8,6 +8,7 @@ mod clock;
 mod external_player;
 pub(crate) use external_player::*;
 pub(crate) mod credential_key;
+mod keep_awake;
 pub(crate) mod platform_data;
 mod process;
 pub(crate) mod recording_host;
@@ -40,6 +41,12 @@ pub(crate) use platform_data::host_handle;
 pub(crate) use platform_data::{flush_on_host_stop, initialize, resolve_data_dir};
 pub(crate) use process::{log_library_base, process_age};
 pub(crate) use recording_host::command as recording_command;
+
+/// Whether a capture runs while the desktop could not be kept awake
+/// (`keep_awake.rs`).
+pub(crate) fn keep_awake_failed() -> bool {
+    keep_awake::failed()
+}
 
 /// The execution this host supplies has blocking workers
 /// (`Runtime::has_workers`).

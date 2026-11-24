@@ -889,6 +889,64 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
     );
 }
 
+/// Windows and Linux (#275): closing the main window while recordings run
+/// asks whether to stop recording and quit, so no recorder runs without a
+/// window. Keep recording, or Back, leaves everything as it was; Stop and
+/// quit ends every recording, keeping what it holds, and quits.
+#[test]
+fn closing_the_main_window_during_a_capture_asks_whether_to_stop_and_quit() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_CLOSE_ASKS", "1")],
+    ) else {
+        return;
+    };
+    let database = home.data_dir().join("iptv.sqlite");
+    let active = || {
+        crate::isolated::open_database(&database)
+            .unwrap()
+            .recording_jobs()
+            .unwrap()
+            .iter()
+            .filter(|job| job.status.active())
+            .count()
+    };
+    let mut fixture = start(home, |_| {});
+    let app = &mut fixture.app;
+    play_then_guide(app, 3);
+    for keep in ["id:quit-confirm-keep", "back"] {
+        step(app.press_window_close("main"));
+        step(app.wait_for("id:quit-confirm"));
+        assert!(
+            app.window_state("main").unwrap().unwrap().visible,
+            "the window stays while the viewer decides"
+        );
+        if keep == "back" {
+            step(app.back());
+        } else {
+            step(app.press(keep));
+        }
+        app.settle();
+        assert!(!app.screen().matches("id:quit-confirm").unwrap());
+        assert!(app.window_state("main").unwrap().unwrap().visible);
+        assert!(iptv_app::player_has_source(0), "playback goes on");
+        assert_eq!(active(), RECORDINGS, "the recordings go on");
+    }
+    step(app.press_window_close("main"));
+    step(app.wait_for("id:quit-confirm"));
+    step(app.press("id:quit-confirm-stop"));
+    step(app.wait_until("Patina quits", Duration::from_secs(15), |_| active() == 0));
+    app.idle(Duration::from_millis(500)).unwrap();
+    assert!(
+        app.window_state("main")
+            .ok()
+            .flatten()
+            .is_none_or(|window| !window.visible),
+        "the window closed"
+    );
+}
+
 #[test]
 fn with_autoplay_closing_the_main_window_plays_nothing_until_the_viewer_moves() {
     let Some(home) = isolated!() else { return };

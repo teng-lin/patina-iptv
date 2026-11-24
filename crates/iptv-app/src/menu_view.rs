@@ -1235,6 +1235,7 @@ fn description(ui: Ui) -> impl IntoElement {
                                 ui.guide_data();
                                 let now = ui.focus.with(|focus| focus.now);
                                 ui.player_surface == 0
+                                    && crate::recordings_view::details_button()
                                     && ui.description.get().is_some_and(|origin| {
                                         crate::recordings_view::can_record_now(origin, now)
                                     })
