@@ -12,8 +12,8 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-target/test-player}
 sdk=${ANDROID_HOME:-$HOME/Android/Sdk}
-tools=$(ls -d "$sdk"/build-tools/* | sort -V | tail -n 1)
-platform=$(ls -d "$sdk"/platforms/android-* | sort -V | tail -n 1)
+tools=$(printf '%s\n' "$sdk"/build-tools/* | sort -V | tail -n 1)
+platform=$(printf '%s\n' "$sdk"/platforms/android-* | sort -V | tail -n 1)
 keystore=${DEBUG_KEYSTORE:-$HOME/.android/debug.keystore}
 # Built in a private staging directory; only the APK is written to OUT_DIR.
 stage=$(mktemp -d)
