@@ -8,6 +8,9 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
     ("backup.rs", "REQUEST"),                       // Android document picker signal.
     ("backup.rs", "ANSWER"),                        // Android document picker callback.
+    ("capture_limits.rs", "REPORTED"),              // The host's report of what can stop a capture.
+    ("host/native/keep_awake.rs", "HELD"),          // The OS idle-sleep hold while a capture runs.
+    ("host/native/keep_awake.rs", "FAILED"),        // That hold failed, for the start notice.
     ("backup.rs", "PROBE"),                         // Android document picker probe request.
     ("backup.rs", "PICKERS"),                       // The document pickers the host reported.
     ("backup.rs", "PICKERS_FOR_TEST"),              // Synthetic picker injection (headless tests).
@@ -25,6 +28,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("desktop.rs", "POINTER"),                      // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.
     ("desktop.rs", "TRAVELED"),                     // Last pointer place, for Keys to Pointer.
+    ("desktop.rs", "QUITTING"),                     // Stop and quit in progress (no second ask).
     ("device.rs", "REPORTED"),                      // Reactive handle of the host's device report.
     ("device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
     ("fonts.rs", "FITTED"),         // Font measurement cache.

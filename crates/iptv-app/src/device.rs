@@ -108,7 +108,7 @@ pub fn assistive() -> bool {
 /// and the input the device reports. Off the UI thread, and before the
 /// root mounts, it is the build's ([`crate::capabilities::BUILT`]).
 pub fn host() -> Host {
-    let mut host = crate::capabilities::BUILT;
+    let mut host = built();
     let Some(reported) = REPORTED.with(Cell::get) else {
         return host;
     };
@@ -160,6 +160,25 @@ pub fn system_24_hour() -> Option<bool> {
         locale_settings().hour_cycle,
         nsh_core::platform::HourCycle::H23 | nsh_core::platform::HourCycle::H24
     ))
+}
+
+/// The build's host; in the headless scenarios of other platforms' gates,
+/// the one `IPTV_TEST_PLATFORM` names (`android`, `ipad` or `tizen`), with
+/// the form factor and input reports still applying
+/// (`tests/app/record_now_hosts.rs`).
+fn built() -> Host {
+    #[cfg(feature = "test-support")]
+    if let Some(name) = std::env::var_os("IPTV_TEST_PLATFORM") {
+        use iptv_core::capabilities::Platform;
+        let platform = match name.to_str() {
+            Some("android") => Platform::Android,
+            Some("ipad") => Platform::Ipad,
+            Some("tizen") => Platform::Unknown,
+            _ => panic!("IPTV_TEST_PLATFORM: android, ipad or tizen"),
+        };
+        return Host::of(platform);
+    }
+    crate::capabilities::BUILT
 }
 
 /// All three signals now (reactive).
@@ -258,6 +277,11 @@ pub(crate) fn bridge() -> impl IntoElement {
                                 );
                                 accessibility.set(next);
                             }
+                            return;
+                        }
+                        // What can stop a capture (`capture_limits.rs`).
+                        if event.name.as_ref() == "limits" {
+                            crate::capture_limits::report(&event.data);
                             return;
                         }
                         // The headless scenarios' stand-in for an account's

@@ -1,7 +1,7 @@
 //! One host projection for feature controls and action admission.
 use crate::Ui;
 use iptv_core::capabilities::Host;
-use iptv_presentation::capabilities::{Availability, Device, MultiviewOffer, Reason};
+use iptv_presentation::capabilities::{Availability, Device, MultiviewOffer, Reason, RecordNow};
 
 /// The host as its build describes it, before the device reports its form
 /// factor and input: for the facilities that follow the operating system
@@ -14,6 +14,30 @@ pub const BUILT: Host = Host::of(crate::host::PLATFORM);
 /// read.
 pub fn host() -> Host {
     crate::device::host()
+}
+
+/// Where Record now is offered on the device as it is now (reactive): by
+/// its form factor ([`iptv_presentation::capabilities::record_now`]), and
+/// nowhere on a host without workers, which cannot record.
+pub fn record_now() -> RecordNow {
+    if !crate::host::HAS_WORKERS {
+        return RecordNow::Absent;
+    }
+    iptv_presentation::capabilities::record_now(host())
+}
+
+/// Whether the Recordings library shows on the device as it is now
+/// (reactive): always, never, or once the library's last read found
+/// recordings in it ([`iptv_presentation::capabilities::RecordingsLibrary`]).
+pub fn recordings_library(ui: Ui) -> bool {
+    crate::host::HAS_WORKERS
+        && iptv_presentation::capabilities::recordings_library(host())
+            .shown(ui.recordings.with(|s| !s.jobs.is_empty()))
+}
+
+/// [`recordings_library`], without subscribing.
+pub fn recordings_library_untracked(ui: Ui) -> bool {
+    nsh_core::prelude::untracked(|| recordings_library(ui))
 }
 
 /// How multiview is offered in `ui`'s window now (reactive): the device's

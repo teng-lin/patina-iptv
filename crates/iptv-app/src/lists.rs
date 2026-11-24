@@ -54,25 +54,32 @@ pub fn number(ui: Ui, channel: usize) -> u32 {
 /// shelves follow enabled playlists with imported movies or shows.
 pub fn rail(ui: Ui) -> Vec<RailItem> {
     ui.app.library.version.get();
-    rail_of(VodAvailability {
-        shown: ui.app.has_vod.get(),
-        any: ui.app.any_vod.get(),
-        live_only: live_only(),
-    })
+    rail_of(
+        VodAvailability {
+            shown: ui.app.has_vod.get(),
+            any: ui.app.any_vod.get(),
+            live_only: live_only(),
+        },
+        crate::capabilities::recordings_library(ui),
+    )
 }
 
 fn rail_untracked(ui: Ui) -> Vec<RailItem> {
-    rail_of(VodAvailability {
-        shown: ui.app.has_vod.get_untracked(),
-        any: ui.app.any_vod.get_untracked(),
-        live_only: live_only(),
-    })
+    rail_of(
+        VodAvailability {
+            shown: ui.app.has_vod.get_untracked(),
+            any: ui.app.any_vod.get_untracked(),
+            live_only: live_only(),
+        },
+        crate::capabilities::recordings_library_untracked(ui),
+    )
 }
 
-/// A host without workers never records: no Recordings entry there.
-fn rail_of(vod: VodAvailability) -> Vec<RailItem> {
+/// Recordings only where the device shows the library
+/// (`capabilities::recordings_library`).
+fn rail_of(vod: VodAvailability, recordings: bool) -> Vec<RailItem> {
     let mut items = rail_items(vod);
-    if !crate::host::HAS_WORKERS {
+    if !recordings {
         items.retain(|&item| item != RailItem::Recordings);
     }
     items

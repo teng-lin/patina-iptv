@@ -492,8 +492,10 @@ if [ "$is_tv" = true ]; then
     KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
   expect 'iptv play bar: Multiview' 10
 else
-  # Tablet remote/keyboard Menu retains the existing advanced strip.
-  keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
+  # Tablet remote/keyboard Menu retains the existing advanced strip: Search,
+  # Channels, then Multiview. A tablet shows Recordings only once its library
+  # holds a recording (#275), and this fresh install has none.
+  keys KEYCODE_MENU KEYCODE_DPAD_RIGHT KEYCODE_DPAD_RIGHT KEYCODE_DPAD_CENTER
   expect 'key=menu .*mode=Fullscreen' 10
 fi
 

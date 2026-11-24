@@ -3,4 +3,8 @@
     <string name="recording_channel">Grabaciones programadas</string>
     <string name="recording_title">Patina está grabando</string>
     <string name="recording_background">Tu grabación programada continúa en segundo plano</string>
+    <string name="recording_stopped_channel">Grabaciones detenidas antes de tiempo</string>
+    <string name="recording_stopped_title">Grabación detenida</string>
+    <string name="recording_stopped_tv_off">Se apagó el televisor. Lo grabado hasta entonces está en Grabaciones.</string>
+    <string name="recording_stopped_background_limit">Se alcanzó el límite de tiempo en segundo plano de Android. Lo grabado hasta entonces está en Grabaciones.</string>
 </resources>

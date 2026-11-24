@@ -26,12 +26,12 @@ fn recording_capture_failures_have_translations() {
 }
 
 #[derive(Clone, Copy)]
-enum GuideFixture {
+pub(crate) enum GuideFixture {
     Listing(&'static str),
     Gap,
 }
 
-fn fixture(
+pub(crate) fn fixture(
     home: &crate::isolated::Home,
     idiom: Idiom,
     media_url: &str,
@@ -541,7 +541,7 @@ fn details_record_on_a_current_program_records_now_without_a_form() {
     server.join().unwrap();
 }
 
-struct CaptureServer {
+pub(crate) struct CaptureServer {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -550,7 +550,7 @@ impl CaptureServer {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
         self.thread.take().map_or(Ok(()), |thread| thread.join())
     }
-    fn join(mut self) -> std::thread::Result<()> {
+    pub(crate) fn join(mut self) -> std::thread::Result<()> {
         self.close()
     }
 }
@@ -560,7 +560,7 @@ impl Drop for CaptureServer {
     }
 }
 
-fn local_capture() -> (String, CaptureServer) {
+pub(crate) fn local_capture() -> (String, CaptureServer) {
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},

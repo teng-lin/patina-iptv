@@ -3,6 +3,35 @@
 pub const MAX_DURATION: i64 = 24 * 60 * 60;
 pub const MAX_JOBS: usize = 1000;
 pub const MAX_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+/// The recordings library's budget: the recordings kept, plus [`MAX_BYTES`]
+/// for each capture still running (less what it has written).
+pub const LIBRARY_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+/// What a capture is taken to write each second when checking free space
+/// before it starts: 8 Mbit/s, a high-bitrate HD channel. Lower-rate
+/// channels need less; a 4K channel can need more.
+pub const ESTIMATED_BYTES_PER_SECOND: u64 = 1_000_000;
+
+/// The space a capture of `seconds` is taken to need: at
+/// [`ESTIMATED_BYTES_PER_SECOND`], at most [`MAX_BYTES`].
+pub fn estimated_bytes(seconds: i64) -> u64 {
+    (seconds.max(0) as u64)
+        .saturating_mul(ESTIMATED_BYTES_PER_SECOND)
+        .min(MAX_BYTES)
+}
+
+/// Checks the storage a capture of `seconds` needs before it starts.
+/// `library`: what the recordings library holds and reserves now (see
+/// [`LIBRARY_BYTES`]); `free`: the free space where it writes, `None` where
+/// the host cannot tell (then only the write itself can fail).
+pub fn check_space(seconds: i64, library: u64, free: Option<u64>) -> Result<(), &'static str> {
+    if library.saturating_add(MAX_BYTES) > LIBRARY_BYTES {
+        return Err("The recordings library is full. Delete recordings to record more.");
+    }
+    if free.is_some_and(|free| free < estimated_bytes(seconds)) {
+        return Err("Not enough free space for this recording. Free some storage, then try again.");
+    }
+    Ok(())
+}
 
 /// What the native host actually registered for the next recording wake.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -161,6 +190,40 @@ pub struct Job {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_capture_starts_only_with_room_in_the_library_and_on_the_disk() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        let hour = 3600;
+        // An hour at the estimated rate is 3.6 GB; a day is capped.
+        assert_eq!(estimated_bytes(hour), 3_600_000_000);
+        assert_eq!(estimated_bytes(MAX_DURATION), MAX_BYTES);
+        assert_eq!(estimated_bytes(-5), 0);
+        assert_eq!(check_space(hour, 0, Some(100 * GIB)), Ok(()));
+        // A host that cannot tell its free space leaves it to the write.
+        assert_eq!(check_space(hour, 0, None), Ok(()));
+        // The new capture's reservation must fit the library's budget.
+        assert_eq!(check_space(hour, LIBRARY_BYTES - MAX_BYTES, None), Ok(()));
+        assert!(
+            check_space(hour, LIBRARY_BYTES - MAX_BYTES + 1, Some(100 * GIB))
+                .unwrap_err()
+                .contains("library is full")
+        );
+        // A full library is reported before a full disk.
+        assert!(
+            check_space(hour, LIBRARY_BYTES, Some(0))
+                .unwrap_err()
+                .contains("library is full")
+        );
+        // The disk must hold the estimate for the requested length.
+        assert_eq!(check_space(hour, 0, Some(3_600_000_000)), Ok(()));
+        assert!(
+            check_space(hour, 0, Some(3_599_999_999))
+                .unwrap_err()
+                .contains("free space")
+        );
+        assert_eq!(check_space(600, 0, Some(600_000_000)), Ok(()));
+    }
 
     fn job(id: i64) -> Job {
         Job {

@@ -3,4 +3,8 @@
     <string name="recording_channel">予約録画</string>
     <string name="recording_title">Patina で録画中</string>
     <string name="recording_background">予約録画はバックグラウンドで実行されています</string>
+    <string name="recording_stopped_channel">途中で停止した録画</string>
+    <string name="recording_stopped_title">録画を停止しました</string>
+    <string name="recording_stopped_tv_off">テレビの電源が切れました。それまでに録画した内容は「録画」にあります。</string>
+    <string name="recording_stopped_background_limit">Android のバックグラウンド時間の上限に達しました。それまでに録画した内容は「録画」にあります。</string>
 </resources>

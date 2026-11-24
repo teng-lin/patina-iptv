@@ -2,16 +2,23 @@ package com.hantekllc.iptvrs.host
 
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.database.ContentObserver
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
@@ -36,6 +43,9 @@ import com.longbridge.nsh.NshComponentContext
  * reported when it attaches, whenever accessibility is switched on or off
  * or its services or timeouts change, and when the window regains the
  * focus (back from the system's settings).
+ *
+ * It reports what can stop a capture ([CaptureLimits]) as a `limits` event
+ * on attach and when the default network or Low Power Standby changes.
  */
 internal class DeviceComponent(
     private val context: NshComponentContext,
@@ -46,11 +56,33 @@ internal class DeviceComponent(
 
     private var reported: Map<String, Any>? = null
     private var reportedAccessibility: Map<String, Any>? = null
+    private var limits: Map<String, Any>? = null
+    private val main = Handler(Looper.getMainLooper())
     private val accessibility = context.context.getSystemService(AccessibilityManager::class.java)
     private val accessibilityChanged = AccessibilityManager.AccessibilityStateChangeListener { reportAccessibilitySoon() }
     private val accessibilitySettings =
-        object : ContentObserver(Handler(Looper.getMainLooper())) {
+        object : ContentObserver(main) {
             override fun onChange(selfChange: Boolean) = reportAccessibilitySoon()
+        }
+    private val network =
+        object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities,
+            ) {
+                main.post { reportLimits() }
+            }
+
+            override fun onLost(network: Network) {
+                main.post { reportLimits() }
+            }
+        }
+    private val standby =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) = reportLimits()
         }
 
     /** Read once: the codecs do not change while the app runs. */
@@ -69,12 +101,16 @@ internal class DeviceComponent(
                     )
                 }
                 reportAccessibility()
+                watchLimits(true)
+                reportLimits()
             }
 
             override fun onDetachedFromWindow() {
-                removeCallbacks(settledReport)
                 accessibility?.removeAccessibilityStateChangeListener(accessibilityChanged)
                 context.contentResolver.unregisterContentObserver(accessibilitySettings)
+                watchLimits(false)
+                // Drop accessibility and network reports queued before detaching.
+                main.removeCallbacksAndMessages(null)
                 super.onDetachedFromWindow()
             }
 
@@ -86,6 +122,7 @@ internal class DeviceComponent(
             override fun onConfigurationChanged(config: Configuration) {
                 super.onConfigurationChanged(config)
                 report(config)
+                reportLimits()
             }
         }.apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -117,9 +154,10 @@ internal class DeviceComponent(
      * switched on read as before), so read now and again once they settled.
      */
     private fun reportAccessibilitySoon() {
+        if (!observer.isAttachedToWindow) return
         reportAccessibility()
-        observer.removeCallbacks(settledReport)
-        observer.postDelayed(settledReport, AccessibilitySignals.SETTLE_MS)
+        main.removeCallbacks(settledReport)
+        main.postDelayed(settledReport, AccessibilitySignals.SETTLE_MS)
     }
 
     private val settledReport = Runnable { reportAccessibility() }
@@ -143,6 +181,39 @@ internal class DeviceComponent(
             Log.i("nsh", "iptv accessibility: $next")
             reportedAccessibility = next
             context.emit("accessibility", next)
+        }
+    }
+
+    private fun reportLimits() {
+        if (!observer.isAttachedToWindow) return
+        val next = CaptureLimits.report(observer.context)
+        if (next != limits) {
+            limits = next
+            Log.i("nsh", "iptv capture limits: $next")
+            context.emit("limits", next)
+        }
+    }
+
+    private fun watchLimits(on: Boolean) {
+        val host = observer.context
+        try {
+            val connectivity = host.getSystemService(ConnectivityManager::class.java)
+            if (on) {
+                connectivity?.registerDefaultNetworkCallback(network)
+                if (Build.VERSION.SDK_INT >= 33) {
+                    host.registerReceiver(
+                        standby,
+                        IntentFilter(PowerManager.ACTION_LOW_POWER_STANDBY_ENABLED_CHANGED),
+                        Context.RECEIVER_NOT_EXPORTED,
+                    )
+                }
+            } else {
+                connectivity?.unregisterNetworkCallback(network)
+                if (Build.VERSION.SDK_INT >= 33) host.unregisterReceiver(standby)
+            }
+        } catch (_: RuntimeException) {
+            // Not registered (or already removed): the report on each
+            // attach and configuration change still applies.
         }
     }
 

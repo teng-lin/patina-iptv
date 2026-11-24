@@ -15,6 +15,8 @@ use crate::Ui;
 /// A screen, popup or list that can be open above the guide and the video.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
+    /// The question before quitting during a capture (desktops).
+    QuitConfirm,
     /// The question before leaving (`crate::confirm_leaving`): a chooser
     /// of its own layer, over every screen it can be asked from.
     Leave,
@@ -54,6 +56,7 @@ impl Overlay {
     pub(crate) fn key_context(self) -> iptv_nav::Context {
         use iptv_nav::Context;
         match self {
+            Self::QuitConfirm => Context::Menu,
             Self::StoreStartupFailure
             | Self::RestoreReview
             | Self::Wizard
@@ -80,7 +83,8 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 23] = [
+    pub(crate) const ALL: [Overlay; 24] = [
+        Overlay::QuitConfirm,
         Overlay::Leave,
         Overlay::StoreStartupFailure,
         Overlay::Parental,
@@ -109,6 +113,7 @@ impl Overlay {
     /// Whether it is open (a tracked read, like each screen's `is_open`).
     pub(crate) fn is_open(self, ui: Ui) -> bool {
         match self {
+            Overlay::QuitConfirm => crate::desktop::quit_confirm::is_open(ui),
             Overlay::Leave => crate::chooser::is_open(ui, true),
             Overlay::StoreStartupFailure => ui.store_startup_failure.with(Option::is_some),
             Overlay::Parental => crate::parental_view::is_open(ui),
@@ -156,7 +161,8 @@ impl Overlay {
     /// falls through such a screen's background is not a tap on the video.
     pub(crate) fn covers_video(self) -> bool {
         match self {
-            Overlay::StoreStartupFailure
+            Overlay::QuitConfirm
+            | Overlay::StoreStartupFailure
             | Overlay::Parental
             | Overlay::RestoreReview
             | Overlay::Wizard
@@ -191,7 +197,8 @@ impl Overlay {
     pub(crate) fn keeps_pointer_from_play_bar(self) -> bool {
         match self {
             Overlay::Description => false,
-            Overlay::Leave
+            Overlay::QuitConfirm
+            | Overlay::Leave
             | Overlay::StoreStartupFailure
             | Overlay::Parental
             | Overlay::RestoreReview
@@ -273,7 +280,8 @@ mod tests {
         // A variant missing from `ALL` would not be asked about: the match
         // makes adding one without counting it here a compile error.
         let listed = |overlay: Overlay| match overlay {
-            Overlay::Leave
+            Overlay::QuitConfirm
+            | Overlay::Leave
             | Overlay::StoreStartupFailure
             | Overlay::Parental
             | Overlay::RestoreReview
@@ -298,7 +306,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 23);
+        assert_eq!(Overlay::ALL.len(), 24);
     }
 
     #[test]

@@ -111,8 +111,8 @@ way through the play bar, the control strip and the info card's action card:
 
 The account's connection limit is reached when it allows one stream, the one
 already playing full screen; elsewhere adding a stream past the limit asks
-first. A metered network should also leave multiview out on a phone, but no host
-reports one yet. When the window or the device stops offering multiview during a
+first. Using the metered-network signal to gate phone multiview remains a
+follow-up. When the window or the device stops offering multiview during a
 session (a tablet's window going to split screen, a phone turned upright), the
 session collapses to the tile being heard, which plays on full screen. When that
 tile plays on the full-screen player (surface 0) it keeps its stream; a tile heard
@@ -124,6 +124,46 @@ Multiview checks the main player, available decoder surfaces and extra player
 windows at both presentation and action time. The provider's connection budget
 and parental authorization remain separate checks at native admission; a
 feature being available grants no permission to play content.
+
+## Record now and the Recordings library
+
+Record now is offered only where the viewer stays with the capture and the
+host can keep it running (#275;
+[`record_now`, `recordings_library`](../crates/iptv-presentation/src/capabilities.rs),
+[shell gates](../crates/iptv-app/src/capabilities.rs)):
+
+| Host | Record now | Recordings library |
+| --- | --- | --- |
+| Android TV | Play bar, control strip, program menu and details, Record key | Always |
+| Desktop | Same as Android TV; the computer is kept from idle sleep during capture | Always |
+| Android phone and tablet | Under the play bar's More, control strip, program menu, Record key; not the details' button | Once a read of the library finds recordings (media or carried-over jobs) |
+| iPad | Nowhere | Once a read of the library finds recordings |
+| Tizen (bridge and NSH host) | Nowhere | Never |
+
+Every entry point reads the same gate: the play bar, the control strip, the
+program menu and details, the Record key (its default binding is removed where
+Record now is absent, and the remote editor does not offer it), and Recordings
+in the rail and the on-demand browser's navigation. A recording already running
+or carried over can still be stopped or canceled from the program menu.
+
+Before a capture starts the runtime checks the library's 32 GiB budget and the
+free space for the requested length at 8 Mbit/s
+([`check_space`](../crates/iptv-core/src/recording.rs)), then a free provider
+connection; a refusal says why. As it starts, the viewer is told what will stop
+it ([`record_now_notices`](../crates/iptv-presentation/src/capabilities.rs),
+[`capture_limits.rs`](../crates/iptv-app/src/capture_limits.rs)):
+
+| Host | Signal | Told at start | When it happens |
+| --- | --- | --- | --- |
+| Android TV | Low Power Standby on and Patina not exempt (`PowerManager`, API 33 and 34) | Turning the TV off stops the recording | The screen turning off ends the capture as a partial recording with the reason, and a notification says so |
+| Android phone and tablet | `ConnectivityManager.isActiveNetworkMetered` | A metered network can use several GB an hour | — |
+| Android (TV, phone and tablet), Android 15 and later | The data-sync service's six hours a day | Android stops background recording after six hours | `onTimeout` ends the capture as partial, notifies, and stops the service |
+| Desktop | The idle-sleep inhibitor (IOKit assertion, logind or portal inhibitor, `SetThreadExecutionState`) could not be taken | Keep the computer awake | — |
+
+The iPad has no metered-network signal here; it does not record, so nothing is
+checked. While a capture runs on Android, the 120-second watchdog alarm restarts
+its foreground service if Android killed it; with no capture running no alarm
+is armed.
 
 Recording capabilities report background-host ownership separately from the
 last acknowledged wake registration: unknown, awake-only, exact, inexact or
