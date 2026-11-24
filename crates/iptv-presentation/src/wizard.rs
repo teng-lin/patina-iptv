@@ -434,8 +434,17 @@ impl Wizard {
 
     /// Enables the welcome screen's restore action for a capable host.
     pub fn with_restore(mut self, available: bool) -> Self {
-        self.restore_available = available;
+        self.set_restore(available);
         self
+    }
+
+    /// The host gained or lost the restore action (its document picker);
+    /// the focus leaves an action that is gone.
+    pub fn set_restore(&mut self, available: bool) {
+        self.restore_available = available;
+        if !available && self.welcome_focus == Target::RestoreBackup {
+            self.welcome_focus = Target::AddPlaylist;
+        }
     }
 
     /// From settings: start on the M3U link form.
@@ -954,6 +963,18 @@ mod tests {
         assert_eq!(w.focus(), Some(Target::RestoreBackup));
         assert_eq!(w.handle(E::Tap(Target::AddPlaylist)), None);
         assert_eq!(w.focus(), Some(Target::SourceType));
+    }
+
+    #[test]
+    fn a_restore_action_that_goes_away_takes_its_focus_along() {
+        let mut w = Wizard::first_run();
+        w.set_restore(true);
+        w.handle(E::Down);
+        assert_eq!(w.focus(), Some(Target::RestoreBackup));
+        w.set_restore(false);
+        assert!(!w.can_restore());
+        assert_eq!(w.focus(), Some(Target::AddPlaylist));
+        assert_eq!(w.handle(E::Tap(Target::RestoreBackup)), None);
     }
 
     #[test]

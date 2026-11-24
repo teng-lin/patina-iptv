@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="external_channel">다른 앱에서 재생</string>
+    <string name="external_title">Patina에서 채널을 보내는 중</string>
+    <string name="external_background">다른 앱이 Patina의 채널을 재생하고 있습니다</string>
+</resources>

@@ -80,6 +80,8 @@ pub static PAGES: &[Page] = &[
             Part::Section(Section::Catchup),
         ],
     },
+    // Keyboard or Remote settings (`settings::keys`): shown while there
+    // are keys to set up, named after them (`words::page`).
     Page {
         key: "remote",
         parts: &[Part::Section(Section::Remote)],
@@ -96,6 +98,12 @@ pub static PAGES: &[Page] = &[
             Part::Keys(&["playlists.max_connections"]),
             Part::Section(Section::Vod),
         ],
+    },
+    // What this device keeps out of the way (`Offer::Advanced`); shown
+    // when it has rows.
+    Page {
+        key: "advanced",
+        parts: &[Part::Advanced],
     },
     Page {
         key: "about",
@@ -143,8 +151,11 @@ pub fn open(ui: Ui) {
         return;
     }
     if !is_open(ui) {
-        ui.settings_screen
-            .set(Some(Screen::new(PAGES, LAST.with(Cell::get))));
+        // A document picker may have been installed or removed since the
+        // host last said which resolve (the backup rows follow).
+        crate::backup::probe_pickers();
+        let screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
+        ui.settings_screen.set(Some(screen));
     }
 }
 
@@ -207,7 +218,7 @@ fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
     let settings = crate::settings::get();
     f(&Ctx {
         settings: &settings,
-        offer: &crate::settings::offer,
+        offer: &crate::settings::offer_now,
     })
 }
 
@@ -361,7 +372,7 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 fn status(settings: &Settings, row: &Row) -> Status {
     Ctx {
         settings,
-        offer: &crate::settings::offer,
+        offer: &crate::settings::offer_now,
     }
     .status(row)
 }
@@ -428,6 +439,17 @@ fn command_value(key: &str) -> String {
             }
         },
         "epg.manage_sources" => sources_value(),
+        // The changed keys, which have no row of their own.
+        "remote.customize" => {
+            let setting =
+                iptv_settings::catalog::setting(iptv_settings::keys::KEY_OVERRIDES.as_str());
+            setting.map_or_else(String::new, |setting| {
+                let value = crate::settings::get()
+                    .get(setting.key)
+                    .unwrap_or_else(|_| setting.default_value());
+                words::value(setting, &value)
+            })
+        }
         "general.about" => format!("v{}({})", env!("CARGO_PKG_VERSION"), env!("IPTV_GIT_HASH")),
         _ => String::new(),
     }
@@ -517,7 +539,7 @@ mod tests {
             page,
             &Ctx {
                 settings,
-                offer: &crate::settings::offer,
+                offer: &crate::settings::offer_now,
             },
         )
         .into_iter()
@@ -590,7 +612,8 @@ mod tests {
         let playback = PAGES.iter().find(|p| p.key == "playback").unwrap();
         let (active, _) = counts(playback);
         // Panel timeouts, channel-change info, multiview's sound following
-        // the selected tile, seek keys and three steps.
+        // the selected tile, three steps and swiping to change channel; the
+        // seek keys are with the keyboard or remote settings (#280).
         assert_eq!(active, 8);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
         // Only the two enable switches and PIN command are visible by default;

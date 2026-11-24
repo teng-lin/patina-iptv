@@ -120,6 +120,11 @@ impl Store {
             destination.pragma_update(None, "foreign_keys", true)?;
             destination.execute("DELETE FROM recording_rules", [])?;
             destination.execute("DELETE FROM recording_jobs", [])?;
+            // The list of schedules retired on this device stays here too.
+            destination.execute_batch(
+                "DELETE FROM retired_recording_schedules;
+                 DELETE FROM store_meta WHERE key='retired_recording_notice';",
+            )?;
             // Downloaded programs are a cache the restored app downloads
             // again; they are most of a large library. What the user set up
             // stays: guide sources, matches, repairs, every feed's channel

@@ -24,11 +24,16 @@ import kotlin.math.roundToInt
  * play on ([TvActivity.onStop] stops them: closing the window stops the
  * activity, and so playback).
  *
+ * Phones and tablets only. A TV never enters, by request or on leaving,
+ * on every build: Android TV's guidelines keep media playback out of its
+ * picture in picture and forbid entering by itself, and Home there returns
+ * to the launcher with playback stopped. The host reports it unsupported
+ * there, so the app offers no control or setting for it.
+ *
  * The app's side (`crates/iptv-app/src/pip.rs`), through that player:
  * - prop `pip` `{auto, enter}`: `auto`, whether leaving the activity (Home,
- *   recents) opens the window now (Android 12+: the system's auto-enter,
- *   except on a TV; before, and on a TV: [userLeaving]); a new `enter`
- *   count opens it now ([enter]);
+ *   recents) opens the window now (Android 12+: the system's auto-enter;
+ *   before: [userLeaving]); a new `enter` count opens it now ([enter]);
  * - event `pip` `{supported, tv, active}` once the prop first arrives and
  *   whenever the window opens or closes;
  * - event `pipAction` `{action: play|pause|next|previous}`: the window's
@@ -40,10 +45,13 @@ import kotlin.math.roundToInt
 class PipHost(
     private val activity: Activity,
 ) {
-    private val supported =
-        activity.packageManager
-            .hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
     private val tv = activity.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+
+    /** The window is available here: never on a TV. */
+    private val supported =
+        !tv &&
+            activity.packageManager
+                .hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
     /** The window is open. */
     private var active = false
@@ -136,15 +144,16 @@ class PipHost(
     }
 
     /**
-     * [Activity.onUserLeaveHint]: the viewer is leaving (Home). Where the
-     * system does not enter by itself ([update]), enters when `auto` says.
+     * [Activity.onUserLeaveHint]: the viewer is leaving (Home). Before
+     * Android 12, where the system does not enter by itself ([update]),
+     * enters when `auto` says. Never on a TV ([enter]).
      */
     fun userLeaving() {
         if (auto && !systemAutoEnter()) enter()
     }
 
-    /** Android 12+ enters by itself on leaving; a TV launcher's Home is left to [userLeaving]. */
-    private fun systemAutoEnter() = Build.VERSION.SDK_INT >= 31 && !tv
+    /** Android 12+ enters by itself on leaving, when [params] allow it. */
+    private fun systemAutoEnter() = Build.VERSION.SDK_INT >= 31
 
     /** [Activity.onPictureInPictureModeChanged]. */
     fun modeChanged(inPip: Boolean) {
@@ -185,7 +194,7 @@ class PipHost(
                 .setActions(actions())
         hint()?.let { b.setSourceRectHint(it) }
         if (Build.VERSION.SDK_INT >= 31) {
-            b.setAutoEnterEnabled(auto && systemAutoEnter())
+            b.setAutoEnterEnabled(supported && auto)
             // Video: no cross-fade of the content while the window resizes.
             b.setSeamlessResizeEnabled(false)
         }

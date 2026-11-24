@@ -40,6 +40,10 @@ static PAGES: &[Page] = &[
         key: "other",
         parts: &[Part::Section(Section::Search), Part::Section(Section::Vod)],
     },
+    Page {
+        key: "advanced",
+        parts: &[Part::Advanced],
+    },
 ];
 
 /// What the app offers (a sample of each kind and value type).
@@ -115,7 +119,8 @@ fn row(settings: &Settings, page_key: &str, key: &str) -> Row {
 #[test]
 fn pages_choose_and_back_closes() {
     let s = Settings::new();
-    let mut screen = Screen::new(PAGES, "nothing");
+    // The advanced page has no rows under this offer: it is left out.
+    let mut screen = Screen::opened(PAGES, "nothing", &ctx(&s));
     assert_eq!((screen.page().key, screen.pane()), ("general", Pane::Pages));
     press(&mut screen, &s, &[Key::Up]);
     assert_eq!(screen.page().key, "general", "no wrap at the top");
@@ -256,7 +261,7 @@ fn ok_flips_a_switch() {
 #[test]
 fn a_choice_opens_a_list_on_the_current_value() {
     let s = Settings::new();
-    let mut screen = Screen::new(PAGES, "playback");
+    let mut screen = Screen::new(PAGES, "remote");
     screen.tap_row("catchup.seek_keys", &ctx(&s));
     let Some(Editor::Choice {
         focus, selected, ..
@@ -579,13 +584,16 @@ fn editors_name_what_they_edit() {
         settings: &s,
         offer: &everything,
     };
-    let mut screen = Screen::new(PAGES, "playback");
     let opened = |screen: &mut Screen, key: &str| {
         screen.tap_row(key, &c);
         let editor = screen.editor().cloned().expect("an editor opens");
         (editor.key(), editor.setting().map(|s| s.key))
     };
-    for key in ["catchup.seek_keys", "catchup.forward_step"] {
+    for (page, key) in [
+        ("remote", "catchup.seek_keys"),
+        ("playback", "catchup.forward_step"),
+    ] {
+        let mut screen = Screen::new(PAGES, page);
         assert_eq!(opened(&mut screen, key), (key, Some(key)));
     }
     let mut screen = Screen::new(PAGES, "general");
@@ -728,7 +736,7 @@ fn page_keys_move_further_in_editors() {
 #[test]
 fn ok_keeps_whatever_the_editor_shows() {
     let s = Settings::new();
-    let mut screen = Screen::new(PAGES, "playback");
+    let mut screen = Screen::new(PAGES, "remote");
     screen.tap_row("catchup.seek_keys", &ctx(&s));
     press(&mut screen, &s, &[Key::Down, Key::Down]);
     assert_eq!(
@@ -875,4 +883,179 @@ fn numeric_stepper_accepts_full_width_step_counts() {
         screen.editor(),
         Some(Editor::Number { value: 1_000, .. })
     ));
+}
+
+/// The keyboard or remote page and the advanced settings, as the app
+/// offers them on a device: `keys` while keys are connected, the zapping
+/// rows advanced where `advanced`.
+fn device_offer(keys: bool, advanced: bool) -> impl Fn(&str) -> Offer {
+    move |key: &str| match key {
+        k if k.starts_with("remote.") || k == "catchup.seek_keys" => {
+            if keys {
+                offer(k)
+            } else {
+                Offer::Hidden
+            }
+        }
+        "guide.autoplay" | "guide.switch_delay" if advanced => Offer::Advanced,
+        "guide.autoplay" | "guide.switch_delay" if keys => Offer::Active,
+        "guide.autoplay" | "guide.switch_delay" => Offer::Hidden,
+        k => offer(k),
+    }
+}
+
+fn page_keys(screen: &Screen) -> Vec<&'static str> {
+    screen.pages().iter().map(|p| p.key).collect()
+}
+
+#[test]
+fn a_page_without_rows_is_left_out_and_comes_back() {
+    let s = Settings::new();
+    let touch = device_offer(false, false);
+    let touch = Ctx {
+        settings: &s,
+        offer: &touch,
+    };
+    let keyboard = device_offer(true, false);
+    let keyboard = Ctx {
+        settings: &s,
+        offer: &keyboard,
+    };
+    // Touch only: no keys page, nothing advanced.
+    let mut screen = Screen::opened(PAGES, "remote", &touch);
+    assert!(!page_keys(&screen).contains(&"remote"));
+    assert!(!page_keys(&screen).contains(&"advanced"));
+    // Asked for a page that is not there, it opens on the one in its place.
+    assert_eq!(screen.page().key, "other");
+    // A keyboard attached: the page comes back, the page chosen stays.
+    screen.refresh(&keyboard);
+    assert!(page_keys(&screen).contains(&"remote"));
+    assert_eq!(screen.page().key, "other");
+    // Every row the page shows takes the focus without a key press first.
+    screen.tap_page(
+        page_keys(&screen)
+            .iter()
+            .position(|k| *k == "remote")
+            .unwrap(),
+    );
+    assert_eq!(
+        screen.tap_row("remote.customize", &keyboard),
+        Effect::Run("remote.customize")
+    );
+    // Nothing changed: refreshing keeps the focus where it is.
+    screen.refresh(&keyboard);
+    assert_eq!(
+        (screen.page().key, screen.pane(), screen.focus()),
+        ("remote", Pane::Rows, Some("remote.customize"))
+    );
+    // Detached while its rows have the focus: the page that takes its
+    // place is chosen, the focus back in the pages list.
+    screen.refresh(&touch);
+    assert!(!page_keys(&screen).contains(&"remote"));
+    assert_eq!(
+        (screen.page().key, screen.pane(), screen.focus()),
+        ("other", Pane::Pages, None)
+    );
+}
+
+#[test]
+fn an_editor_closes_when_its_row_goes() {
+    let s = Settings::new();
+    let keyboard = device_offer(true, false);
+    let keyboard = Ctx {
+        settings: &s,
+        offer: &keyboard,
+    };
+    let touch = device_offer(false, false);
+    let touch = Ctx {
+        settings: &s,
+        offer: &touch,
+    };
+    let mut screen = Screen::opened(PAGES, "remote", &keyboard);
+    screen.tap_row("catchup.seek_keys", &keyboard);
+    assert!(screen.editor().is_some());
+    screen.refresh(&touch);
+    assert_eq!(screen.editor(), None);
+}
+
+#[test]
+fn a_focused_row_that_goes_passes_the_focus_on() {
+    let mut s = Settings::new();
+    let c = ctx(&s);
+    let mut screen = Screen::opened(PAGES, "appearance", &c);
+    screen.tap_row("guide.now_highlight_style", &c);
+    assert_eq!(screen.focus(), Some("guide.now_highlight_style"));
+    // Its visibility condition fails: the first row the app acts on.
+    s.set("guide.highlight_now", Value::Bool(false)).unwrap();
+    screen.refresh(&ctx(&s));
+    assert_eq!(screen.pane(), Pane::Rows);
+    assert_eq!(screen.focus(), Some("appearance.accent"));
+}
+
+#[test]
+fn advanced_rows_leave_their_section_for_the_advanced_page() {
+    let s = Settings::new();
+    let advanced = device_offer(true, true);
+    let c = Ctx {
+        settings: &s,
+        offer: &advanced,
+    };
+    let screen = Screen::opened(PAGES, "advanced", &c);
+    assert_eq!(screen.page().key, "advanced");
+    assert_eq!(
+        screen.rows(&c),
+        vec![
+            Row::Heading {
+                section: Section::Guide,
+                subsection: None
+            },
+            Row::Setting(iptv_settings::catalog::setting("guide.autoplay").unwrap()),
+            Row::Setting(iptv_settings::catalog::setting("guide.switch_delay").unwrap()),
+        ]
+    );
+    // An advanced row acts as an active one does.
+    assert_eq!(c.status(&screen.rows(&c)[1]), Status::Active);
+    let appearance = PAGES.iter().find(|p| p.key == "appearance").unwrap();
+    let in_guide: Vec<_> = rows(appearance, &c).iter().filter_map(Row::key).collect();
+    assert!(!in_guide.contains(&"guide.autoplay"), "{in_guide:?}");
+    // Offered in its section, it is not advanced: the page goes.
+    let handheld = device_offer(true, false);
+    let c = Ctx {
+        settings: &s,
+        offer: &handheld,
+    };
+    let screen = Screen::opened(PAGES, "advanced", &c);
+    assert!(!page_keys(&screen).contains(&"advanced"));
+    let in_guide: Vec<_> = rows(appearance, &c).iter().filter_map(Row::key).collect();
+    assert!(in_guide.contains(&"guide.autoplay"), "{in_guide:?}");
+}
+
+#[test]
+fn ok_after_the_focused_row_hides_only_shows_the_focus() {
+    // A command row the viewer acted on disappears (a canceled restore on a
+    // device without a document picker).
+    let s = Settings::new();
+    let mut screen = Screen::new(PAGES, "general");
+    let c = Ctx {
+        settings: &s,
+        offer: &everything,
+    };
+    screen.tap_row("general.restore", &c);
+    screen.key(Key::Back, &c);
+    assert_eq!(screen.focus(), Some("general.restore"));
+    let hidden = |key: &str| {
+        if key == "general.restore" {
+            Offer::Hidden
+        } else {
+            Offer::Active
+        }
+    };
+    let c = Ctx {
+        settings: &s,
+        offer: &hidden,
+    };
+    let first = rows(&PAGES[0], &c).iter().find_map(Row::key).unwrap();
+    assert_eq!(screen.key(Key::Ok, &c), Effect::None);
+    assert_eq!(screen.focus(), Some(first));
+    assert!(screen.editor().is_none());
 }

@@ -15,6 +15,9 @@ use crate::Ui;
 /// A screen, popup or list that can be open above the guide and the video.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Overlay {
+    /// The question before leaving (`crate::confirm_leaving`): a chooser
+    /// of its own layer, over every screen it can be asked from.
+    Leave,
     StoreStartupFailure,
     Parental,
     RestoreReview,
@@ -64,7 +67,8 @@ impl Overlay {
             | Self::RemoteEditor
             | Self::Settings
             | Self::FavoritesEditor => Context::Editor,
-            Self::Parental
+            Self::Leave
+            | Self::Parental
             | Self::Playlists
             | Self::GuideAssign
             | Self::Chooser
@@ -76,7 +80,8 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 22] = [
+    pub(crate) const ALL: [Overlay; 23] = [
+        Overlay::Leave,
         Overlay::StoreStartupFailure,
         Overlay::Parental,
         Overlay::RestoreReview,
@@ -104,6 +109,7 @@ impl Overlay {
     /// Whether it is open (a tracked read, like each screen's `is_open`).
     pub(crate) fn is_open(self, ui: Ui) -> bool {
         match self {
+            Overlay::Leave => crate::chooser::is_open(ui, true),
             Overlay::StoreStartupFailure => ui.store_startup_failure.with(Option::is_some),
             Overlay::Parental => crate::parental_view::is_open(ui),
             Overlay::RestoreReview => crate::backup::is_open(ui),
@@ -120,7 +126,7 @@ impl Overlay {
             Overlay::GuideAssign => crate::guide_assign_view::is_open(ui),
             Overlay::Settings => crate::settings_view::is_open(ui),
             Overlay::FavoritesEditor => ui.editor.with(Option::is_some),
-            Overlay::Chooser => ui.chooser.with(Option::is_some),
+            Overlay::Chooser => crate::chooser::is_open(ui, false),
             Overlay::Description => ui.description.with(Option::is_some),
             Overlay::Menu => ui.menu.with(Option::is_some),
             Overlay::Search => crate::search_view::is_open(ui),
@@ -167,7 +173,8 @@ impl Overlay {
             | Overlay::Settings
             | Overlay::FavoritesEditor
             | Overlay::Search => true,
-            Overlay::Chooser
+            Overlay::Leave
+            | Overlay::Chooser
             | Overlay::Description
             | Overlay::Menu
             | Overlay::ChannelPicker
@@ -184,7 +191,8 @@ impl Overlay {
     pub(crate) fn keeps_pointer_from_play_bar(self) -> bool {
         match self {
             Overlay::Description => false,
-            Overlay::StoreStartupFailure
+            Overlay::Leave
+            | Overlay::StoreStartupFailure
             | Overlay::Parental
             | Overlay::RestoreReview
             | Overlay::Wizard
@@ -265,7 +273,8 @@ mod tests {
         // A variant missing from `ALL` would not be asked about: the match
         // makes adding one without counting it here a compile error.
         let listed = |overlay: Overlay| match overlay {
-            Overlay::StoreStartupFailure
+            Overlay::Leave
+            | Overlay::StoreStartupFailure
             | Overlay::Parental
             | Overlay::RestoreReview
             | Overlay::Wizard
@@ -289,7 +298,7 @@ mod tests {
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 22);
+        assert_eq!(Overlay::ALL.len(), 23);
     }
 
     #[test]
@@ -297,6 +306,7 @@ mod tests {
         // The lists and popups over the picture leave taps to the video;
         // the screens that cover it do not.
         let over_the_picture = [
+            Overlay::Leave,
             Overlay::Chooser,
             Overlay::Description,
             Overlay::Menu,

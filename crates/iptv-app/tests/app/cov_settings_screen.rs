@@ -353,16 +353,32 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.press_key("up"));
     step(app.wait_for(PAGES_HINT));
     step(app.wait_for("text:/^\\d+ of \\d+ settings here can be changed now$/"));
-    // Into the rows: backup is now the first available command. Its
-    // description and Restore's are reachable before the startup switches.
+    // Into the rows: the startup switches come first. Backup and Restore,
+    // under Data and privacy, say what a backup holds and what a restore
+    // replaces; globally unavailable rows do not interrupt navigation.
+    const FIRST: &str = "text:Start playing the channel that was on when the app was last closed.";
+    const BACKUP: &str = "text:Write playlists with their logins, settings and history to an unencrypted backup file.";
     step(app.press_key("right"));
     step(app.wait_for(ROWS_HINT));
-    step(app.wait_for("text:Write settings and customizations to a backup file."));
+    step(app.wait_for(FIRST));
+    for _ in 0..10 {
+        if app.screen().matches(BACKUP).unwrap() {
+            break;
+        }
+        step(app.press_key("down"));
+    }
+    step(app.wait_for(BACKUP));
     step(app.press_key("down"));
-    step(app.wait_for("text:Replace everything with a backup's contents."));
-    // Globally unavailable command rows no longer interrupt navigation.
-    step(app.press_key("down"));
-    step(app.wait_for("text:Start playing the channel that was on when the app was last closed."));
+    step(app.wait_for(
+        "text:Replace all current data, including playlists, settings and watch history, with a backup's contents.",
+    ));
+    for _ in 0..10 {
+        if app.screen().matches(FIRST).unwrap() {
+            break;
+        }
+        step(app.press_key("up"));
+    }
+    step(app.wait_for(FIRST));
     // A failed write is visible and leaves the live setting unchanged.
     let data = crate::isolated::data_dir(home);
     let blocked = data.join("settings.json.tmp");
@@ -418,7 +434,7 @@ fn settings(app: &mut Headless, home: &Path) {
 
     // Back: the rows, then the pages, then the screen closes; it opens on
     // the page shown last.
-    step(app.press("text:Remote control >> nth=0"));
+    step(app.press("text:Keyboard >> nth=0"));
     step(app.press_key("right"));
     step(app.wait_for(ROWS_HINT));
     step(app.back());
@@ -428,9 +444,9 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.wait_for_gone(PAGES_HINT, GONE));
     open_menu(app);
     step(app.press(MENU_SETTINGS));
-    step(app.wait_for("text:Edit remote bindings"));
+    step(app.wait_for("text:Edit keyboard shortcuts"));
     step(app.press_key("backspace"));
-    step(app.wait_for_gone("text:Edit remote bindings", GONE));
+    step(app.wait_for_gone("text:Edit keyboard shortcuts", GONE));
 }
 
 fn appearance(app: &mut Headless, home: &Path) {
@@ -569,12 +585,13 @@ fn other_pages(app: &mut Headless) {
     sheet_closed(app);
     step(app.wait_for("text:Renamed list"));
     back_until(app, |s| shown(s) == 1);
-    // The remote's bindings: its editor opens over the settings (its own
-    // test, tests/app/library_management.rs, edits them); Back closes it.
-    step(app.press("text:Remote control >> nth=0"));
-    step(app.wait_for("text:Edit remote bindings"));
-    step(app.press("text:Edit remote bindings"));
-    step(app.wait_for("text:Remote bindings"));
+    // The keyboard's shortcuts (a desktop's keys): their editor opens over
+    // the settings (its own test, tests/app/library_management.rs, edits
+    // them); Back closes it.
+    step(app.press("text:Keyboard >> nth=0"));
+    step(app.wait_for("text:Edit keyboard shortcuts"));
+    step(app.press("text:Edit keyboard shortcuts"));
+    step(app.wait_for("text:Keyboard shortcuts"));
     step(app.back());
     step(app.wait_for_gone("id:remote-editor-screen", GONE));
     // Pages by keys: Page Down and Up move five.

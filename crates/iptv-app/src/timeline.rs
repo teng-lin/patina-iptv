@@ -19,8 +19,9 @@
 
 use crate::guide::{STEP, VISIBLE, home_window};
 
-/// How far (dp) a finger moves before its drag picks an axis.
-pub const SLOP: f32 = 10.0;
+/// How far (dp) a finger moves before its drag picks an axis, and that
+/// axis (shared with the swipe that changes channel, `touch_zap.rs`).
+pub use iptv_presentation::drag::{Lock, SLOP};
 /// A fling's speed falls by `e^(-FRICTION · seconds)`, so from `v` it
 /// travels `v / FRICTION`: with 2.0 about half a second's worth, as an iOS
 /// list's normal deceleration (0.998 per ms, `-ln 0.998 · 1000` ≈ 2.0)
@@ -38,33 +39,6 @@ pub const STOP_SPEED: f32 = 40.0;
 pub const MARGIN: i32 = STEP;
 /// The minutes a [`Band`] spans.
 pub const BAND: i32 = VISIBLE + 2 * MARGIN;
-
-/// A drag's axis, decided once it moved [`SLOP`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lock {
-    Undecided,
-    /// It pans the timeline.
-    Horizontal,
-    /// It is the channel list's: the timeline ignores it.
-    Vertical,
-}
-
-impl Lock {
-    /// The axis after the finger moved `(dx, dy)` dp from where it went
-    /// down: decided once, by the larger component.
-    pub fn decide(self, dx: f32, dy: f32) -> Lock {
-        match self {
-            Lock::Undecided if dx.hypot(dy) >= SLOP => {
-                if dx.abs() > dy.abs() {
-                    Lock::Horizontal
-                } else {
-                    Lock::Vertical
-                }
-            }
-            decided => decided,
-        }
-    }
-}
 
 /// The panned view: its first minute, its drag or fling.
 #[derive(Clone, Copy, Debug, PartialEq)]

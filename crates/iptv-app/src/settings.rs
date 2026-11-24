@@ -16,15 +16,18 @@
 //! read their global value; a deleted playlist's own values go with it.
 //!
 //! [`offer`] says what the app does with each setting and command: the
-//! ones it acts on ([`WIRED`], [`COMMANDS`]), what it shows read-only,
-//! what comes later, and what it does not offer at all (device-level
-//! features of TV boxes). Some settings apply here ([`bind`]: colors,
+//! ones it acts on ([`WIRED`], [`COMMANDS`]), those it keeps with the
+//! advanced settings on this device, what comes later, and what it does
+//! not offer at all (device-level features of TV boxes, and the keys'
+//! settings while no keys are connected: [`keys`]). Some settings apply here ([`bind`]: colors,
 //! panel timeouts, [`network_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
 //! channel-change info).
 
 use std::sync::Arc;
 
+use iptv_core::capabilities::FormFactor;
+use iptv_presentation::capabilities::{Device, Keys};
 use iptv_presentation::panels::Timeouts;
 use iptv_presentation::settings::screen::Offer;
 use iptv_settings::keys;
@@ -104,8 +107,39 @@ pub const COMMANDS: &[&str] = &[
     "playlists.manage",
 ];
 
-/// Shown with their value only: the key list has no editor yet.
-const READ_ONLY: &[&str] = &["remote.key_overrides"];
+/// Not shown: the changed keys (`remote.key_overrides`), which the
+/// bindings editor's row sums up (`settings_view::command_value`); the
+/// value stays stored and in backups.
+const SUMMED_UP: &[&str] = &["remote.key_overrides"];
+
+/// Guide preview and zapping timing (`browse_playback`): moving the focus
+/// with keys tunes after the delay. On a phone or a tablet they apply
+/// only while keys are connected ([`keys`]); a desktop and a TV keep them
+/// with the advanced settings.
+const ZAPPING: &[&str] = &["guide.autoplay", "guide.switch_delay"];
+
+/// What the keys connected to `device` are set up as, if anything
+/// (`iptv_presentation::capabilities::keys`). An iPad does not report its
+/// keyboard yet (`device::ipad_input_unreported`), and keyboard shortcuts
+/// work there: it keeps the keyboard settings, so a keyboard user can
+/// always remap or turn off a single-key shortcut (WCAG 2.1.4).
+pub fn keys(device: Device) -> Option<Keys> {
+    if crate::host::IPAD && device.form_factor() != FormFactor::Tv {
+        return Some(Keys::Keyboard);
+    }
+    iptv_presentation::capabilities::keys(device.host)
+}
+
+/// [`keys`] now (reactive).
+pub fn keys_now() -> Option<Keys> {
+    keys(crate::device::current())
+}
+
+/// Whether `key` is set up with the keyboard or remote settings: the
+/// remote section, which also holds the keys that seek in replays.
+fn on_keys_page(key: &str) -> bool {
+    key.starts_with("remote.") || key == keys::SEEK_KEYS.as_str()
+}
 
 /// Not offered: device-level features of TV boxes (start with the device,
 /// frame-rate switching, decoders, audio passthrough, multicast relay,
@@ -145,6 +179,19 @@ const NOT_OFFERED: &[&str] = &[
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 
+thread_local! {
+    /// The host can open a picture-in-picture window (`pip.rs`): what
+    /// [`offer`] reads for `player.pip_on_leave`.
+    static PIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the host can open a picture-in-picture window, as it last
+/// reported (`pip.rs`). Settings screens that list rows read `ui.pip` too,
+/// so they follow a later report.
+pub(crate) fn offer_pip(offered: bool) {
+    PIP.set(offered);
+}
+
 pub fn observe() {
     REVISION.with(|v| {
         if let Some(s) = v.get() {
@@ -171,15 +218,23 @@ pub fn text_factor() -> f32 {
     font_factor() * nsh_core::prelude::font_scale()
 }
 
-/// What the app does with the setting or command `key`. The long-press
-/// time matters only where keys report their release (Android), and
-/// picture in picture on leaving only on Android.
-pub fn offer(key: &str) -> Offer {
+/// What the app does with the setting or command `key` on `device` (as it
+/// is now: [`crate::device::current`], so a row can come and go when the
+/// form factor, the window or the connected input changes). The
+/// long-press time matters only where keys report their release
+/// (Android), and picture in picture on leaving only on an Android phone
+/// or tablet whose host reported the window ([`offer_pip`]): never on a TV.
+pub fn offer(device: Device, key: &str) -> Offer {
+    let host = device.host;
     // Recording and backups run on blocking workers; a host without them
-    // offers neither. Imports and guide downloads run where the host can
-    // import (`host::IMPORTS`).
-    if !crate::host::HAS_WORKERS
-        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+    // offers neither. A backup action also needs its document picker
+    // (`backup::offered`; none on the iPad yet). Imports and guide
+    // downloads run where the host can import (`host::IMPORTS`).
+    if !crate::host::HAS_WORKERS && key.starts_with("recordings.") {
+        return Offer::Hidden;
+    }
+    if matches!(key, "general.backup" | "general.restore")
+        && !(crate::host::HAS_WORKERS && crate::backup::offered(key))
     {
         return Offer::Hidden;
     }
@@ -191,30 +246,58 @@ pub fn offer(key: &str) -> Offer {
     {
         return Offer::Hidden;
     }
-    if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
+    if key == "recordings.quit_host" && !host.startup_registration() {
         return Offer::Hidden;
     }
-    // Leaving the app into a picture-in-picture window: Android only.
-    let android = crate::capabilities::HOST.automatic_pip();
-    if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
-        return Offer::NotYet;
-    }
-    if NOT_OFFERED.contains(&key) {
+    // Leaving the app into a picture-in-picture window: Android phones and
+    // tablets only, once the host says it has the window.
+    let pip = host.automatic_pip() && PIP.get();
+    if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) {
         return Offer::Hidden;
+    }
+    // Sound follows the selected tile: not on a phone, nor where multiview
+    // never exists (#279). The stored value is kept, unused.
+    if key == keys::SOUND_FOLLOWS_TILE.as_str()
+        && !iptv_presentation::capabilities::sound_follows_tile(host)
+    {
+        return Offer::Hidden;
+    }
+    // The keyboard or remote settings: only while there are keys (#280).
+    if on_keys_page(key) && keys(device).is_none() {
+        return Offer::Hidden;
+    }
+    if ZAPPING.contains(&key) {
+        return match device.form_factor() {
+            FormFactor::Desktop | FormFactor::Tv => Offer::Advanced,
+            FormFactor::Phone | FormFactor::Tablet if keys(device).is_some() => Offer::Active,
+            FormFactor::Phone | FormFactor::Tablet => Offer::Hidden,
+        };
+    }
+    // Swiping over full-screen video: where a finger may touch it (a TV's
+    // remote has Ch± instead). Outside a running app (the unit tests) no
+    // device is known: it counts as offered.
+    if key == keys::SWIPE_TO_ZAP.as_str() {
+        return if try_os().is_none() || crate::play_bar::pointer_available() {
+            Offer::Active
+        } else {
+            Offer::Hidden
+        };
     }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
         || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())
-        || (key == keys::PIP_ON_LEAVE.as_str() && android)
+        || (key == keys::PIP_ON_LEAVE.as_str() && pip)
     {
         Offer::Active
-    } else if key == keys::PIP_ON_LEAVE.as_str() {
-        Offer::Hidden
-    } else if READ_ONLY.contains(&key) {
-        Offer::ReadOnly
     } else {
         Offer::Hidden
     }
+}
+
+/// [`offer`] on the device as it is now (reactive: a closure that asks
+/// runs again when a signal changes).
+pub fn offer_now(key: &str) -> Offer {
+    offer(crate::device::current(), key)
 }
 
 /// The effective settings of the shell's application owner.
@@ -352,7 +435,7 @@ mod tests {
 
     #[test]
     fn listed_keys_exist() {
-        for key in WIRED.iter().chain(READ_ONLY) {
+        for key in WIRED.iter().chain(SUMMED_UP) {
             assert!(catalog::setting(key).is_some(), "{key}");
         }
         for key in COMMANDS {
@@ -381,32 +464,135 @@ mod tests {
         assert_eq!(own.len(), 1, "the channel's own agent wins");
     }
 
+    use iptv_core::capabilities::FormFactor;
+
+    /// Every combination of the three signals on this build.
+    fn devices() -> Vec<Device> {
+        use iptv_core::capabilities::{FormFactor, Host, Input};
+        use iptv_presentation::layout::Class;
+        let mut all = Vec::new();
+        for form_factor in [
+            FormFactor::Phone,
+            FormFactor::Tablet,
+            FormFactor::Tv,
+            FormFactor::Desktop,
+        ] {
+            for window in [Class::Compact, Class::Medium, Class::Expanded] {
+                for (keyboard, dpad) in [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    all.push(Device {
+                        host: Host {
+                            form_factor,
+                            input: Input { keyboard, dpad },
+                            ..crate::capabilities::BUILT
+                        },
+                        window,
+                    });
+                }
+            }
+        }
+        all
+    }
+
     #[test]
     fn what_the_app_offers() {
-        assert_eq!(offer("epg.keep_past"), Offer::Active);
-        assert_eq!(offer("epg.update_now"), Offer::Active);
-        assert_eq!(offer("epg.manage_sources"), Offer::Active);
-        assert_eq!(offer("epg.add_source"), Offer::Active);
-        assert_eq!(offer("playback.afr"), Offer::Hidden);
-        assert_eq!(offer("vod.sort"), Offer::Active);
-        assert_eq!(offer("parental.live_enabled"), Offer::Active);
-        assert_eq!(offer("parental.change_pin"), Offer::Active);
-        assert_eq!(offer("history.keep_days"), Offer::Hidden);
-        assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
-        // Scheduled recording is retired (#273).
-        for key in [
-            "recordings.enable_startup",
-            "recordings.disable_startup",
-            "recordings.alarm_access",
-        ] {
-            assert_eq!(offer(key), Offer::Hidden, "{key}");
+        // The rows that follow the connected input are checked below
+        // (`keys_and_zapping_follow_the_connected_input`).
+        // Picture in picture on leaving: not before the host says it has
+        // the window, never off Android (nor on a TV, whose host reports
+        // none).
+        for device in devices() {
+            assert_eq!(offer(device, "player.pip_on_leave"), Offer::Hidden);
         }
+        offer_pip(true);
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
             Offer::Hidden
         };
-        assert_eq!(offer("player.pip_on_leave"), pip);
+        for device in devices() {
+            let offer = |key| offer(device, key);
+            assert_eq!(offer("epg.keep_past"), Offer::Active);
+            assert_eq!(offer("epg.update_now"), Offer::Active);
+            assert_eq!(offer("epg.manage_sources"), Offer::Active);
+            assert_eq!(offer("epg.add_source"), Offer::Active);
+            assert_eq!(offer("playback.afr"), Offer::Hidden);
+            assert_eq!(offer("vod.sort"), Offer::Active);
+            assert_eq!(offer("parental.live_enabled"), Offer::Active);
+            assert_eq!(offer("parental.change_pin"), Offer::Active);
+            assert_eq!(offer("history.keep_days"), Offer::Hidden);
+            // The bindings editor's row sums the changed keys up.
+            assert_eq!(offer("remote.key_overrides"), Offer::Hidden);
+            assert_eq!(offer("player.pip_on_leave"), pip);
+            // Scheduled recording is retired (#273).
+            for key in [
+                "recordings.enable_startup",
+                "recordings.disable_startup",
+                "recordings.alarm_access",
+            ] {
+                assert_eq!(offer(key), Offer::Hidden, "{key}");
+            }
+            // Sound follows the selected tile: never on a phone (#279);
+            // elsewhere where this build has multiview.
+            let follows = device.form_factor() != iptv_core::capabilities::FormFactor::Phone
+                && iptv_presentation::capabilities::multiview_exists(device.host);
+            assert_eq!(
+                offer("player.sound_follows_tile"),
+                if follows {
+                    Offer::Active
+                } else {
+                    Offer::Hidden
+                },
+                "{device:?}"
+            );
+        }
+        offer_pip(false);
+        assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);
+    }
+
+    /// #280: the keyboard or remote settings exist while there are keys;
+    /// guide autoplay and its delay too on a phone or a tablet, and with
+    /// the advanced settings on a desktop or a TV.
+    #[test]
+    fn keys_and_zapping_follow_the_connected_input() {
+        let rows = [
+            "remote.digit_timeout",
+            "remote.player_up_down",
+            "remote.customize",
+            "catchup.seek_keys",
+        ];
+        for device in devices() {
+            let offer = |key| offer(device, key);
+            let input = device.input();
+            let has_keys = crate::host::IPAD
+                || match device.form_factor() {
+                    FormFactor::Tv | FormFactor::Desktop => true,
+                    FormFactor::Phone | FormFactor::Tablet => input.keyboard || input.dpad,
+                };
+            let page = if has_keys {
+                Offer::Active
+            } else {
+                Offer::Hidden
+            };
+            for key in rows {
+                assert_eq!(offer(key), page, "{key} on {device:?}");
+            }
+            // A hold only where keys report their release.
+            let hold = if has_keys && crate::input::long_press() {
+                Offer::Active
+            } else {
+                Offer::Hidden
+            };
+            assert_eq!(offer("remote.long_press"), hold, "{device:?}");
+            let zapping = match device.form_factor() {
+                FormFactor::Tv | FormFactor::Desktop => Offer::Advanced,
+                _ => page,
+            };
+            for key in ["guide.autoplay", "guide.switch_delay"] {
+                assert_eq!(offer(key), zapping, "{key} on {device:?}");
+            }
+            assert_eq!(keys(device).is_some(), has_keys, "{device:?}");
+        }
     }
 
     #[test]

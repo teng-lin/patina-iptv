@@ -160,6 +160,16 @@ fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
 /// within the list on screen (from the playing channel's row, else the
 /// focused one); a channel the list does not have zaps within its group.
 pub(crate) fn zap(ui: Ui, step: isize) {
+    let Some(to) = zap_target(ui, step) else {
+        return;
+    };
+    // Hands playback to the viewer once the channel plays (`Ui::play`).
+    crate::browse_playback::zap(ui, to);
+}
+
+/// The channel [`zap`] by `step` goes to, if any: also what a swipe over
+/// the video shows before it is released (`touch_zap.rs`).
+pub(crate) fn zap_target(ui: Ui, step: isize) -> Option<usize> {
     let list = ui.list.get();
     let playing = if ui.mode.get_untracked() != ViewMode::Fullscreen {
         crate::lists::focused_channel(ui)
@@ -175,14 +185,9 @@ pub(crate) fn zap(ui: Ui, step: isize) {
         || ui.focus.with(|f| f.channel),
     );
     let catalog = crate::schedule();
-    let to = zap_from_list(&*catalog, &list, from, step, |channel| {
+    zap_from_list(&*catalog, &list, from, step, |channel| {
         catalog.channel_block(channel) == iptv_core::organization::Block::None
-    });
-    let Some(to) = to else {
-        return;
-    };
-    // Hands playback to the viewer once the channel plays (`Ui::play`).
-    crate::browse_playback::zap(ui, to);
+    })
 }
 
 /// OK (or a tap) on an action card under the info card.
@@ -209,6 +214,13 @@ pub fn press_control(ui: Ui, control: Control) {
     ui.update_panels(|p, now| p.touch(now));
     if !crate::player_panels::enabled(ui, control) {
         log::info!("iptv control {control:?} not available");
+        // Multiview drawn disabled says why (a TV at the account's limit).
+        if control == Control::Multiview
+            && let Some(reason) =
+                nsh_core::prelude::untracked(|| crate::capabilities::multiview(ui)).reason()
+        {
+            crate::settings_view::notify(crate::capabilities::reason(reason));
+        }
         return;
     }
     match control {

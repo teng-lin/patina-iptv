@@ -372,6 +372,23 @@ fn validate_pending(
     super::credential_store::validate_staged_database(ports, path)
 }
 
+#[cfg(test)]
+fn adopt_host_recordings(
+    _: &crate::Ports,
+    host: &Path,
+    pending: &Path,
+) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
+    Store::open(pending)?.adopt_host_recordings(host)
+}
+#[cfg(not(test))]
+fn adopt_host_recordings(
+    ports: &crate::Ports,
+    host: &Path,
+    pending: &Path,
+) -> std::result::Result<(), iptv_store_sqlite::StoreError> {
+    super::credential_store::adopt_host_recordings(ports, host, pending)
+}
+
 fn remove_stale_work(root: &Path) -> Result<()> {
     let Some(parent) = root.parent() else {
         return Ok(());
@@ -810,6 +827,18 @@ fn activate(ports: &crate::Ports, root: &Path) -> Result<()> {
         &pending.join("settings.json"),
         "settings.json",
     )?)?;
+    // Recording media stays beside the catalog directory under this host's
+    // job ids, so the restored library takes this host's recording rows and
+    // keeps reopening it. The backup's own rows were dropped when it was
+    // staged. One transaction on the pending file: rerunning after a crash
+    // gives the same result. A failure keeps the restore and leaves the media
+    // without rows, as before.
+    let host = root.join("iptv.sqlite");
+    if host.is_file()
+        && let Err(error) = adopt_host_recordings(ports, &host, &pending.join("iptv.sqlite"))
+    {
+        log::warn!("iptv backup: keeping this device's recordings failed: {error}");
+    }
     #[cfg(all(test, feature = "native"))]
     tests::crash_boundary("validated");
     if root.exists() {
