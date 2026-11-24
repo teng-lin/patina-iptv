@@ -1,0 +1,3 @@
+-- Schema 27 changes existing M3U labels only, adding no new stored shape.
+-- Generated fallback labels and their personalization are covered by the
+-- upgrade, older-snapshot restore and refresh journey in tests/it/backup.rs.
