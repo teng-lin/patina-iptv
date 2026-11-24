@@ -159,7 +159,7 @@ class Integration(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/android-smoke.yml").read_text()
         # This deliberately accepts only a flat >- block: more-indented or
         # blank lines preserve YAML newlines that upstream executes separately.
-        block = workflow.split("          script: >-\n", 1)[1].split("      - uses:", 1)[0]
+        block = workflow.split("          script: &android-smoke-script >-\n", 1)[1].split("      - ", 1)[0]
         lines = block.splitlines()
         self.assertTrue(lines)
         self.assertTrue(all(line.startswith("            ") and line[12:] == line[12:].lstrip()
@@ -219,9 +219,11 @@ with open("adb-calls.jsonl", "a") as stream: stream.write(json.dumps(sys.argv[1:
 ''')
                 adb.chmod(0o755)
                 result = subprocess.run(["sh", "-c", commands[0]], cwd=root, capture_output=True,
-                                        env={"PATH": str(binary) + os.pathsep + os.environ["PATH"]},
+                                        env={"PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                                             "RUNNER_TEMP": str(root), "ANDROID_SERIAL": "emulator-5554"},
                                         timeout=5, check=False)
                 self.assertEqual(result.returncode, 0 if system_crash else 1, result.stderr)
+                self.assertTrue((root / "android-smoke-started").exists())
                 self.assertEqual((root / "second-run").exists(), system_crash)
                 if system_crash:
                     calls = [json.loads(line) for line in (root / "adb-calls.jsonl").read_text().splitlines()]

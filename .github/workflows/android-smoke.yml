@@ -115,12 +115,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      AVD_NAME: patina-validation-ci
+      SNAPSHOT_AVD: patina-validation-ci-snapshot
       AVD_API: '36'
       AVD_ARCH: x86_64
       AVD_RAM: 4096M
       AVD_DISK: 4096M
       AVD_OPTIONS: -no-window -no-audio -no-boot-anim -gpu swiftshader
+      IPTV_SMOKE_OUT: target/android-smoke
+      IPTV_SMOKE_SETTLE: 45
     strategy:
       fail-fast: false
       matrix:
@@ -153,11 +155,11 @@ jobs:
         run: |
           set -euo pipefail
           image="system-images;android-$AVD_API;$AVD_TARGET;$AVD_ARCH"
-          sdkmanager --install emulator "$image" > /dev/null
+          sdkmanager --install emulator "$image" < /dev/null > /dev/null
           identity=$({
             cat "$ANDROID_HOME/emulator/source.properties"
             cat "$ANDROID_HOME/system-images/android-$AVD_API/$AVD_TARGET/$AVD_ARCH/source.properties"
-            printf '%s\n' "$ImageOS" "$AVD_NAME" "$AVD_PROFILE" "$AVD_RAM" "$AVD_DISK" "$AVD_OPTIONS"
+            printf '%s\n' "$ImageOS" "$HOME" "$ANDROID_HOME" "$SNAPSHOT_AVD" "$AVD_PROFILE" "$AVD_RAM" "$AVD_DISK" "$AVD_OPTIONS"
           } | sha256sum | cut -c1-24)
           echo "name=android-quick-boot-v1-$AVD_ARCH-$AVD_FORM-$identity" >> "$GITHUB_OUTPUT"
       # Snapshot archives can be gigabytes. Use short-lived artifacts so that
@@ -185,7 +187,7 @@ jobs:
             run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")
             if jq -e '
               .head_branch == "master" and
-              ((.path == ".github/workflows/validation.yml" and (.event == "push" or .event == "schedule")) or
+              ((.path == ".github/workflows/validation.yml" and (.event == "push" or .event == "schedule" or .event == "workflow_dispatch")) or
                (.path == ".github/workflows/android-smoke.yml" and .event == "workflow_dispatch"))
               ' <<< "$run" > /dev/null; then
               printf 'artifact=%s\nrun=%s\n' "$artifact_id" "$run_id" >> "$GITHUB_OUTPUT"
@@ -211,8 +213,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HOME/.android/avd"
-          zstd -d -c "$RUNNER_TEMP/quick-boot/avd.tar.zst" | tar -C "$HOME/.android/avd" -xf -
-          test -s "$HOME/.android/avd/$AVD_NAME.avd/snapshots/default_boot/snapshot.pb"
+          staging=$(mktemp -d "$HOME/.android/avd/.quick-boot.XXXXXXXX")
+          trap 'rm -rf -- "$staging"' EXIT
+          zstd -d -c "$RUNNER_TEMP/quick-boot/avd.tar.zst" | tar -C "$staging" -xf -
+          test -s "$staging/$SNAPSHOT_AVD.ini"
+          test -s "$staging/$SNAPSHOT_AVD.avd/snapshots/default_boot/snapshot.pb"
+          mv -- "$staging/$SNAPSHOT_AVD.ini" "$staging/$SNAPSHOT_AVD.avd" "$HOME/.android/avd/"
       # Seed only from master, before fetching the APK or starting the mock server.
       - name: Boot a clean emulator to seed Quick Boot
         id: avd-seed
@@ -224,7 +230,8 @@ jobs:
         timeout-minutes: 6
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
-          avd-name: ${{ env.AVD_NAME }}
+          avd-name: ${{ env.SNAPSHOT_AVD }}
+          emulator-port: 5556
           api-level: ${{ env.AVD_API }}
           target: ${{ matrix.target }}
           arch: ${{ env.AVD_ARCH }}
@@ -236,33 +243,20 @@ jobs:
           disable-animations: true
           emulator-options: ${{ env.AVD_OPTIONS }} -no-snapshot-load
           script: echo "Saving the clean Quick Boot snapshot on exit"
-      - name: Check the Quick Boot snapshot before use
-        id: avd
-        timeout-minutes: 1
-        env:
-          SEED_OUTCOME: ${{ steps.avd-seed.outcome }}
-          RESTORE_OUTCOME: ${{ steps.avd-restore.outcome }}
-        run: |
-          avd="$HOME/.android/avd/$AVD_NAME.avd"
-          if [[ "$SEED_OUTCOME" != skipped ]]; then
-            # The action requests shutdown through adb. Reuse or archive the
-            # profile only after the emulator has closed its disk images.
-            while fuser -s "$avd/multiinstance.lock"; do sleep 1; done
-          fi
-          if [[ "$RESTORE_OUTCOME" == success || "$SEED_OUTCOME" == success ]] &&
-             [[ -s "$avd/snapshots/default_boot/snapshot.pb" ]]; then
-            echo 'ready=true' >> "$GITHUB_OUTPUT"
-          else
-            printf 'ram=%s\ndisk=%s\n' "$AVD_RAM" "$AVD_DISK" >> "$GITHUB_OUTPUT"
-          fi
       - name: Pack the clean snapshot before testing
         id: avd-pack
-        if: steps.avd-seed.outcome == 'success' && steps.avd.outputs.ready == 'true'
+        if: steps.avd-seed.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 2
         run: |
+          set -euo pipefail
           cd "$HOME/.android/avd"
-          tar --sparse -cf - "$AVD_NAME.ini" "$AVD_NAME.avd" |
+          # Wait for the seed emulator to close its disk images before reading them.
+          timeout 30s bash -c 'while fuser -s "$1"; do sleep 1; done' _ "$SNAPSHOT_AVD.avd/multiinstance.lock"
+          test -s "$SNAPSHOT_AVD.ini"
+          test -s "$SNAPSHOT_AVD.avd/snapshots/default_boot/snapshot.pb"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+          tar --sparse -cf - "$SNAPSHOT_AVD.ini" "$SNAPSHOT_AVD.avd" |
             zstd -1 -T2 -o "$RUNNER_TEMP/avd.tar.zst"
       - name: Retain the clean snapshot for smoke jobs
         if: steps.avd-pack.outcome == 'success'
@@ -289,34 +283,62 @@ jobs:
             sleep 0.5
           done
           exit 1
-      - name: Smoke test on the ${{ matrix.form }} emulator
+      - name: Smoke test on the ${{ matrix.form }} Quick Boot emulator
         timeout-minutes: 20
+        id: warm-smoke
+        if: steps.avd-restore.outcome == 'success' || steps.avd-pack.outputs.ready == 'true'
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
-          IPTV_SMOKE_OUT: target/android-smoke
-          IPTV_SMOKE_SETTLE: 45
-          IPTV_SMOKE_DISPOSABLE_AVD: ${{ env.AVD_NAME }}
+          IPTV_SMOKE_DISPOSABLE_AVD: ${{ env.SNAPSHOT_AVD }}
         with:
-          avd-name: ${{ env.AVD_NAME }}
+          avd-name: ${{ env.SNAPSHOT_AVD }}
+          emulator-port: 5556
+          emulator-boot-timeout: 120
           api-level: ${{ env.AVD_API }}
           target: ${{ matrix.target }}
           arch: ${{ env.AVD_ARCH }}
           profile: ${{ matrix.profile }}
-          ram-size: ${{ steps.avd.outputs.ram }}
-          disk-size: ${{ steps.avd.outputs.disk }}
-          force-avd-creation: ${{ steps.avd.outputs.ready != 'true' }}
+          cores: ''
+          force-avd-creation: false
           disable-animations: true
-          emulator-options: ${{ env.AVD_OPTIONS }} ${{ steps.avd.outputs.ready == 'true' && '-no-snapshot-save' || '-no-snapshot' }}
-          # If the emulator's own system dies (not the app: the script fails
-          # at once on an app crash), reboot it and run once more.
-          script: >-
-            bash tools/ci/android-smoke.sh emulator-5554 hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
+          emulator-options: ${{ env.AVD_OPTIONS }} -no-snapshot-save
+          # Retry an Android system death once. Application failures remain failures.
+          script: &android-smoke-script >-
+            touch "$RUNNER_TEMP/android-smoke-started" &&
+            (bash tools/ci/android-smoke.sh "$ANDROID_SERIAL" hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
             grep -q DeadSystemException target/android-smoke/crash.log &&
             echo "emulator system died; rebooting for one more run" &&
-            python3 tools/ci/android/adb.py --phase "system recovery" --category reboot --timeout 30 -- adb -s emulator-5554 reboot &&
-            python3 tools/ci/android/adb.py --phase "system recovery" --category wait-for-device --timeout 120 -- adb -s emulator-5554 wait-for-device &&
-            bash tools/ci/android-smoke.sh emulator-5554 hosts/android/app/build/outputs/apk/debug/app-debug.apk;
-            }
+            python3 tools/ci/android/adb.py --phase "system recovery" --category reboot --timeout 30 -- adb -s "$ANDROID_SERIAL" reboot &&
+            python3 tools/ci/android/adb.py --phase "system recovery" --category wait-for-device --timeout 120 -- adb -s "$ANDROID_SERIAL" wait-for-device &&
+            bash tools/ci/android-smoke.sh "$ANDROID_SERIAL" hosts/android/app/build/outputs/apk/debug/app-debug.apk;
+            })
+      - name: Check whether Quick Boot failed before testing
+        if: steps.warm-smoke.outcome == 'failure'
+        run: |
+          if [[ -e "$RUNNER_TEMP/android-smoke-started" ]]; then
+            echo '::error::Smoke failed after testing began on the Quick Boot emulator.'
+            exit 1
+          fi
+          echo '::warning::Quick Boot failed to start. Using a fresh AVD.'
+      - name: Smoke test on the ${{ matrix.form }} cold emulator
+        timeout-minutes: 20
+        if: steps.warm-smoke.outcome != 'success'
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          IPTV_SMOKE_DISPOSABLE_AVD: patina-validation-ci
+        with:
+          avd-name: patina-validation-ci
+          api-level: ${{ env.AVD_API }}
+          target: ${{ matrix.target }}
+          arch: ${{ env.AVD_ARCH }}
+          profile: ${{ matrix.profile }}
+          ram-size: ${{ env.AVD_RAM }}
+          disk-size: ${{ env.AVD_DISK }}
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: ${{ env.AVD_OPTIONS }} -no-snapshot
+          script: *android-smoke-script
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
