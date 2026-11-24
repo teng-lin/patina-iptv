@@ -1029,3 +1029,33 @@ fn advanced_rows_leave_their_section_for_the_advanced_page() {
     let in_guide: Vec<_> = rows(appearance, &c).iter().filter_map(Row::key).collect();
     assert!(in_guide.contains(&"guide.autoplay"), "{in_guide:?}");
 }
+
+#[test]
+fn ok_after_the_focused_row_hides_only_shows_the_focus() {
+    // A command row the viewer acted on disappears (a canceled restore on a
+    // device without a document picker).
+    let s = Settings::new();
+    let mut screen = Screen::new(PAGES, "general");
+    let c = Ctx {
+        settings: &s,
+        offer: &everything,
+    };
+    screen.tap_row("general.restore", &c);
+    screen.key(Key::Back, &c);
+    assert_eq!(screen.focus(), Some("general.restore"));
+    let hidden = |key: &str| {
+        if key == "general.restore" {
+            Offer::Hidden
+        } else {
+            Offer::Active
+        }
+    };
+    let c = Ctx {
+        settings: &s,
+        offer: &hidden,
+    };
+    let first = rows(&PAGES[0], &c).iter().find_map(Row::key).unwrap();
+    assert_eq!(screen.key(Key::Ok, &c), Effect::None);
+    assert_eq!(screen.focus(), Some(first));
+    assert!(screen.editor().is_none());
+}

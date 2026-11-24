@@ -46,6 +46,11 @@ fn logo_in(schedule: &dyn iptv_core::guide::Schedule, channel: usize) -> Option<
 /// The program on screen: live now, or the replayed one.
 fn program(ui: Ui) -> (usize, Program) {
     ui.guide_data();
+    // A zap waiting to tune: the channel it goes to, on air now.
+    if let Some(channel) = crate::browse_playback::pending_channel(ui) {
+        let now = ui.focus.with(|f| f.now);
+        return (channel, crate::schedule().program_at(channel, now));
+    }
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
         Playback::Live => ui.focus.with(|f| f.now),

@@ -179,6 +179,19 @@ const NOT_OFFERED: &[&str] = &[
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 
+thread_local! {
+    /// The host can open a picture-in-picture window (`pip.rs`): what
+    /// [`offer`] reads for `player.pip_on_leave`.
+    static PIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the host can open a picture-in-picture window, as it last
+/// reported (`pip.rs`). Settings screens that list rows read `ui.pip` too,
+/// so they follow a later report.
+pub(crate) fn offer_pip(offered: bool) {
+    PIP.set(offered);
+}
+
 pub fn observe() {
     REVISION.with(|v| {
         if let Some(s) = v.get() {
@@ -209,14 +222,19 @@ pub fn text_factor() -> f32 {
 /// is now: [`crate::device::current`], so a row can come and go when the
 /// form factor, the window or the connected input changes). The
 /// long-press time matters only where keys report their release
-/// (Android), and picture in picture on leaving only on Android.
+/// (Android), and picture in picture on leaving only on an Android phone
+/// or tablet whose host reported the window ([`offer_pip`]): never on a TV.
 pub fn offer(device: Device, key: &str) -> Offer {
     let host = device.host;
     // Recording and backups run on blocking workers; a host without them
-    // offers neither. Imports and guide downloads run where the host can
-    // import (`host::IMPORTS`).
-    if !crate::host::HAS_WORKERS
-        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+    // offers neither. A backup action also needs its document picker
+    // (`backup::offered`; none on the iPad yet). Imports and guide
+    // downloads run where the host can import (`host::IMPORTS`).
+    if !crate::host::HAS_WORKERS && key.starts_with("recordings.") {
+        return Offer::Hidden;
+    }
+    if matches!(key, "general.backup" | "general.restore")
+        && !(crate::host::HAS_WORKERS && crate::backup::offered(key))
     {
         return Offer::Hidden;
     }
@@ -231,11 +249,9 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if key == "recordings.quit_host" && !host.startup_registration() {
         return Offer::Hidden;
     }
-    // Leaving the app into a picture-in-picture window: Android only.
-    let android = host.automatic_pip();
-    if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
-        return Offer::NotYet;
-    }
+    // Leaving the app into a picture-in-picture window: Android phones and
+    // tablets only, once the host says it has the window.
+    let pip = host.automatic_pip() && PIP.get();
     if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) {
         return Offer::Hidden;
     }
@@ -250,10 +266,20 @@ pub fn offer(device: Device, key: &str) -> Offer {
             FormFactor::Phone | FormFactor::Tablet => Offer::Hidden,
         };
     }
+    // Swiping over full-screen video: where a finger may touch it (a TV's
+    // remote has Ch± instead). Outside a running app (the unit tests) no
+    // device is known: it counts as offered.
+    if key == keys::SWIPE_TO_ZAP.as_str() {
+        return if try_os().is_none() || crate::play_bar::pointer_available() {
+            Offer::Active
+        } else {
+            Offer::Hidden
+        };
+    }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
         || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())
-        || (key == keys::PIP_ON_LEAVE.as_str() && android)
+        || (key == keys::PIP_ON_LEAVE.as_str() && pip)
     {
         Offer::Active
     } else {
@@ -463,8 +489,15 @@ mod tests {
 
     #[test]
     fn what_the_app_offers() {
-        // The rows that follow the signals are checked below
+        // The rows that follow the connected input are checked below
         // (`keys_and_zapping_follow_the_connected_input`).
+        // Picture in picture on leaving: not before the host says it has
+        // the window, never off Android (nor on a TV, whose host reports
+        // none).
+        for device in devices() {
+            assert_eq!(offer(device, "player.pip_on_leave"), Offer::Hidden);
+        }
+        offer_pip(true);
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
@@ -493,6 +526,8 @@ mod tests {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
         }
+        offer_pip(false);
+        assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);
     }
 
     /// #280: the keyboard or remote settings exist while there are keys;

@@ -30,6 +30,16 @@ is below 1.0, a minor release may change behavior.
   only where keys report their release. Guide autoplay and its delay move to
   a new Advanced page on desktop and TV, and on a phone or a tablet show only
   with a keyboard or D-pad, autoplay staying off without one.
+- Android TV no longer offers picture in picture: Home during playback returns
+  to the launcher and stops the stream, and the control and the
+  picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
+  it, entering on Home only from full-screen playback.
+
+### Fixed
+
+- Import usable channels from M3U playlists containing malformed or unsupported
+  stream addresses, and report the skipped entries instead of rejecting the
+  whole playlist.
 
 ## [0.1.8] - 2026-11-23
 

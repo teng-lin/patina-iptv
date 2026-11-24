@@ -376,6 +376,10 @@ fn text_sheet(ui: Ui) -> View {
 /// The question before a command that cannot be undone.
 fn question(key: &str) -> &'static str {
     match key {
+        // Its review keeps, cancels or (with a picker) replaces it.
+        "general.restore" if crate::runtime().restore_is_pending() => {
+            tr("A restore is already scheduled. Next, choose what happens to it.")
+        }
         "general.restore" => tr(
             "Choose a backup to apply when you next open Patina. You can cancel the scheduled restore before closing the app.",
         ),
