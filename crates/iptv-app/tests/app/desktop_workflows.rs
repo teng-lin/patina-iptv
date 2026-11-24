@@ -437,6 +437,12 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
             break;
         }
     }
+    // The list reloads once a second; a reload must not scroll it back to
+    // the focused row. Let one pass before checking.
+    let reload_passed = std::time::Instant::now() + Duration::from_millis(1500);
+    while std::time::Instant::now() < reload_passed {
+        app.idle(Duration::from_millis(200)).unwrap();
+    }
     assert_ne!(
         names(app, "Generated recording "),
         before,
