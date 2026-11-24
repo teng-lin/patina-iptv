@@ -167,7 +167,7 @@ fn fixture_in(
     };
     let mut app = Headless::start(config).unwrap();
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     (app, path, source, expected)
 }
@@ -746,7 +746,7 @@ fn one_recording_list_keeps_scheduled_and_finished_jobs_visible() {
         }
     }
     drop(store);
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Recordings"));
     step(app.wait_for("id:recording-job >> nth=2"));
     assert_eq!(app.screen().count("id:recording-status").unwrap(), 3);

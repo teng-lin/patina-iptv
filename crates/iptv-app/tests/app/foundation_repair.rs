@@ -205,7 +205,7 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
         }
     });
     t.wait("text:/Synthetic Viewer/", 10);
-    t.press("text:/^☰  /");
+    t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
     t.press("text:Playlists >> nth=0");
@@ -253,7 +253,7 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
         state.commands.iter().filter(|id| **id == player).count()
     };
     assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
-    t.press("text:/^☰  /");
+    t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
     t.press("text:Playlists >> nth=0");

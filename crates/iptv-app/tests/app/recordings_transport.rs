@@ -145,7 +145,7 @@ fn saved_fixture_with_protection(
         }
     });
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press("label:Recordings"));
     step(app.wait_for("id:recording-job"));
     (app, database, id, props)
@@ -345,7 +345,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
             (1280.0, 720.0)
         };
         step(app.set_viewport(Size::new(px(w), px(h))));
-        step(app.press("text:/^☰  /"));
+        step(app.open_guide_groups());
         step(app.press_key("left"));
         step(app.press_key("up"));
         assert!(

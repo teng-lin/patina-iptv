@@ -290,7 +290,7 @@ fn the_sound_follows_the_selected_tile_row_works_by_keyboard_and_pointer_and_per
     let seen = fixture.seen.clone();
 
     // The navigation rail's Settings.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press("label:Settings"));
     step(app.wait_for("id:settings-screen"));

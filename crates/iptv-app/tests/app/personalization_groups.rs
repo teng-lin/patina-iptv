@@ -36,7 +36,7 @@ fn guide_group_rename_requires_a_custom_name_and_can_restore_a_provider_name() {
         env.os = nsh_core::platform::Os::Linux;
         env.idiom = nsh_core::platform::Idiom::Desktop;
     }));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.right_click("id:guide-groups >> text:Generated custom"));
     step(app.press("id:menu-panel >> text:Rename group"));
     step(app.wait_for("text:Display name"));
@@ -233,7 +233,7 @@ fn custom_groups_filter_select_copy_move_rename_delete_and_restore_focus() {
     group(app, "My group");
     step(app.wait_for("text:This group has no channels."));
     // An empty custom list remains addressable in the guide and manageable.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.wait_for("text:All channels >> nth=0"));
     step(app.press("text:All channels >> nth=0"));
     step(app.press_key("right"));
@@ -260,7 +260,7 @@ fn a_group_edit_finishes_after_its_editor_is_closed_during_write_contention() {
     step(app.wait_for_gone("id:custom-groups-screen", Duration::from_secs(2)));
     lock.execute_batch("ROLLBACK").unwrap();
     // The late completion must update the guide, without reopening its editor.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.wait_for_within(
         "id:guide-groups >> text:Pending synthetic group",
         Duration::from_secs(10),
@@ -417,7 +417,7 @@ fn a_provider_group_named_other_can_be_reordered() {
         |_| {},
     );
     let app = &mut fixture.app;
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.long_press("id:guide-groups >> text:Other"));
     step(app.wait_for("id:menu-panel >> text:Reorder groups"));
     assert!(!app.shows("id:menu-panel >> text:Manage groups"));
@@ -466,7 +466,7 @@ fn standalone_group_preferences_apply_to_the_selected_group() {
     step(app.wait_for("id:guide-row >> text:Local B"));
     let news = "id:guide-groups >> text:News";
     let menu = "id:menu-panel";
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.long_press(news));
     step(app.wait_for("id:menu-panel >> role:header[News]"));
     assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));

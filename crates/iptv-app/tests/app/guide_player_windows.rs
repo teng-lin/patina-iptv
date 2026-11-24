@@ -221,7 +221,7 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
     step(app.wait_for(channel_menu));
     step(app.back());
     step(app.wait_for_gone(channel_menu, Duration::from_secs(3)));
-    step(app.press("id:guide-ui >> id:guide-more"));
+    step(app.right_click("id:guide-ui >> id:guide-header-program"));
     step(app.press("id:menu-panel >> text:Manage favorites…"));
     step(app.wait_for("text:Tap a channel to add or remove it"));
     step(app.hover("text:Tap a channel to add or remove it"));

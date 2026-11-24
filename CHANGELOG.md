@@ -7,6 +7,12 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+### Changed
+
+- Simplify the TV Guide header and groups column by removing overflow buttons,
+  the duplicate group selector and time-step arrows. Remove the unfinished
+  Watchlist destination from the navigation rail.
+
 ## [0.1.8] - 2026-11-23
 
 ### Changed

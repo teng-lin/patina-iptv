@@ -828,7 +828,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // --- Catch-up ---------------------------------------------------------
     // Stop (long Back): nothing plays, the guide.
     step(app.press_remote(nsh_tv::RemoteKey::Stop));
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
     assert!(!iptv_app::player_has_source(0), "stopped");
     let before = opens();
     step(app.press_remote(nsh_tv::RemoteKey::Stop));
@@ -845,7 +845,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let older_archive = wait_archive_source(&mut app, &props, &before_archive, false);
     state(&mut app, "ready");
     step(app.press_remote(nsh_tv::RemoteKey::Stop));
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
     // Two programs back on channel one, OK replays it.
     step(app.press_key("home"));
     step(app.press_key("left"));

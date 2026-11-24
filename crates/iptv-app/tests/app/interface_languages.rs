@@ -6,10 +6,11 @@
 //! catalog's text for that language, formatted by the core as the app
 //! formats it, so a reworded translation does not fail them and a message
 //! that stayed English does.
+use crate::headless::Headless;
 use crate::personalization::{self, Fixture, step};
 use iptv_presentation::i18n::{self, Arg, Language};
 use iptv_settings::{Settings, Target, Value, keys};
-use nsh_testing::{DialogAnswer, Headless};
+use nsh_testing::DialogAnswer;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
@@ -89,7 +90,7 @@ fn pattern(text: &str) -> String {
 
 /// From the guide to the navigation rail.
 fn rail(app: &mut Headless) {
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
 }
@@ -103,7 +104,7 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     let app = &mut fixture.app;
     // Keep the navigation rail mounted while settings are open, so a
     // language change must update its existing labels as well.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.wait_for("text:Live TV"));
     step(app.press("label:Settings"));
@@ -122,7 +123,7 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.press("text:/Español/"));
     step(app.wait_for("text:Ajustes"));
     step(app.wait_for("text:Idioma"));
-    step(app.wait_for("text:☰  Todos los canales"));
+    step(app.wait_for("role:grid[Todos los canales]"));
     step(app.wait_for("text:TV en directo"));
     step(app.wait_for("id:navigation-rail >> text:Películas"));
     step(app.wait_for("id:navigation-rail >> text:Series"));

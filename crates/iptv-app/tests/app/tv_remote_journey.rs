@@ -101,9 +101,9 @@ fn tv_with(
     );
     let lifetime = lifetime.lock().unwrap().take().unwrap();
     let mut fixture = fixture;
-    // The list's name opens the groups; the remote's Right enters the
+    // The remaining navigation opens groups; the remote's Right enters the
     // guide's channels, focus on Local A.
-    step(fixture.app.press("text:/^☰  /"));
+    step(fixture.app.open_guide_groups());
     step(fixture.app.remote_tap(RemoteKey::Right));
     let player = fixture
         .app
@@ -125,7 +125,7 @@ fn long_ok_on_a_group_reorders_it_in_the_guide() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, _, _) = tv(home, |_| {});
     let app = &mut fixture.app;
-    step(app.press("text:/^☰  /"));
+    hold(app, RemoteKey::Left, 700, true);
     step(app.press("id:guide-groups >> text:Sport"));
     hold(app, RemoteKey::Ok, 700, true);
     step(app.wait_for("id:menu-panel >> role:header[Sport]"));
@@ -1098,7 +1098,7 @@ fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
     let mut fixture =
         personalization::launch_prepared(home, settings, false, protect_local_c, |_| {}, |_| {});
     let app = &mut fixture.app;
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     assert_eq!(iptv_app::keyboard_repeats("enter"), Some(false));
     step(app.press_key("down"));

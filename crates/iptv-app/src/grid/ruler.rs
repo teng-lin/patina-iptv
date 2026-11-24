@@ -1,4 +1,4 @@
-//! The group selector, date and time, window steps and Now button sit over
+//! The date and time and Now button sit over
 //! the channel column. The slot times and the now line's dot slide with
 //! the programs (`pan.rs`).
 
@@ -12,7 +12,7 @@ use super::{NOW_W, Pan, fill};
 use crate::fonts::{RULER, SANS};
 use crate::guide::{PAST, STEP};
 use crate::scale::Scale;
-use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
+use crate::theme::{RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, clock, tint};
 
 /// The ruler's height, the line under it and the now dot's diameter (the
@@ -42,16 +42,8 @@ pub(super) fn ruler(
             .font_family(SANS)
             .text_size(move || size.text_px(RULER))
     };
-    let shift = move |glyph: fn() -> &'static str, name: fn() -> &'static str, minutes: i32| {
-        button(glyph).label(name).on_press(move || {
-            ui.touched();
-            let view = crate::lists::view(ui);
-            ui.focus.update(|f| f.shift_window(minutes, &view));
-        })
-    };
     // Back to now, once the view left it.
     let timeline_controls = move || !crate::organization_view::guide_order_open(ui);
-    let shifts_shown = move || !crate::IOS && timeline_controls();
     let now_button = when(
         move || timeline_controls() && pan.away(),
         move || button(|| tr("Now")).on_press(move || pan.to_now()),
@@ -100,27 +92,15 @@ pub(super) fn ruler(
                 .flex_row()
                 .items_center()
                 .child(
-                    // The date and time, then the touch steps of the window
-                    // (an iPad drags and flings it, Now returns: its ‹ top
-                    // left is the way back).
+                    // Date and time, with Now available after browsing away.
                     view()
                         .w(move || px(column()))
                         .flex_row()
                         .items_center()
                         .gap(move || size.px(6.0))
                         .px(move || size.px(16.0))
-                        .child(when(
-                            move || !crate::organization_view::inline_order_open(ui),
-                            move || list_button(ui, column, size),
-                        ))
                         .child(date_time(ui, size, pan).flex_1().min_w(px(0.0)))
-                        .child(now_button)
-                        .child(when(shifts_shown, move || {
-                            shift(|| "‹", || tr("Go back 30 minutes"), -STEP)
-                        }))
-                        .child(when(shifts_shown, move || {
-                            shift(|| "›", || tr("Go forward 30 minutes"), STEP)
-                        })),
+                        .child(now_button),
                 )
                 .child(
                     view()
@@ -177,27 +157,6 @@ pub(super) fn ruler(
                         ),
                 ),
         )
-}
-
-/// The current list, at the start of the grid it controls.
-fn list_button(ui: Ui, column: fn() -> f32, size: Scale) -> Text {
-    text(move || format!("☰  {}", crate::lists::list_name(ui)))
-        .test_id("guide-list-selector")
-        .role(AccessibilityRole::Button)
-        .px(move || size.px(10.0))
-        .py(move || size.px(4.0))
-        .max_w(move || px(column() * 0.48))
-        .rounded(px(RADIUS))
-        .bg(tint(WHITE, RESTING_ALPHA))
-        .number_of_lines(1)
-        .text_size(move || size.px(15.0))
-        // Keep the selector within the fixed-height ruler at large text sizes.
-        .max_font_size_multiplier(1.3_f32)
-        .text_color(rgb(WHITE))
-        .on_press(move || {
-            ui.touched();
-            crate::lists::open_groups(ui);
-        })
 }
 
 /// The date of the day shown (where now sits in its default window) and

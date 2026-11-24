@@ -89,7 +89,7 @@ fn playlists_and_their_guide_sources() {
 
 /// The rail's Playlists.
 fn open_playlists(t: &mut T) {
-    t.press("text:/^☰  /");
+    t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
     t.press("text:Playlists >> nth=0");

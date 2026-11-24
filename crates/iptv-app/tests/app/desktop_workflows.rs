@@ -1,6 +1,6 @@
 //! The desktop's everyday viewing workflows (#89, `docs/desktop.md`):
 //! the wheel and right-click over the guide, the channel list, the poster
-//! grid and recordings; a visible ⋯ for every secondary action; keyboard
+//! grid and recordings; context menus for guide actions and visible ⋯ controls in lists; keyboard
 //! shortcuts that never reach into a text field or another window's
 //! player; presentation changes (window full screen, resizing, display
 //! scale) that open no stream; and one contract for closing the main
@@ -347,7 +347,7 @@ fn menu_closed(app: &mut Headless) {
 }
 
 #[test]
-fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_in() {
+fn the_wheel_right_click_and_hover_never_tune_and_context_menus_target_their_rows() {
     let Some(home) = isolated!() else { return };
     let mut fixture = start(home, |_| {});
     let app = &mut fixture.app;
@@ -381,45 +381,15 @@ fn the_wheel_right_click_and_hover_never_tune_and_every_menu_has_a_visible_way_i
     menu_closed(app);
     assert_eq!(iptv_app::player_opens(0), opens, "a menu tunes nothing");
 
-    // The guide's groups column: right-click and the shown group's ⋯ open
-    // the same group options.
-    step(app.press("text:/^☰  /"));
+    // The guide's groups column retains group options through right-click.
+    step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> text:Generated news"));
     step(app.press("id:guide-groups >> text:Generated news"));
-    // A click shows the group and closes the column; the shown group's
-    // row has the ⋯ when it opens again.
-    step(app.press("text:/^☰  /"));
-    step(app.wait_for("id:guide-groups >> id:group-more"));
-    assert_eq!(
-        app.screen()
-            .count("id:guide-groups >> id:group-more")
-            .unwrap(),
-        1,
-        "only the shown group's row has a ⋯"
-    );
-    step(app.press("id:guide-groups >> id:group-more"));
-    step(app.wait_for("text:Reorder channels"));
-    step(app.back());
-    menu_closed(app);
+    step(app.open_guide_groups());
     step(app.right_click("id:guide-groups >> text:Generated news"));
     step(app.wait_for("text:Reorder channels"));
     step(app.back());
     menu_closed(app);
-    // Keys hide the ⋯: they have Menu and Shift+F10.
-    step(app.press_key("down"));
-    step(app.wait_for_gone("id:group-more", Duration::from_secs(3)));
-    // Moving the mouse again brings it back, without moving the focus or
-    // tuning anything.
-    let focused = |app: &Headless| {
-        app.screen()
-            .accessibility_state("id:guide-groups >> label:Generated sport")
-            .is_ok_and(|s| s.selected)
-    };
-    let before = focused(app);
-    step(app.hover(&format!("id:guide-ui >> text:{}", channel(24))));
-    step(app.hover(&format!("id:guide-ui >> text:{}", channel(26))));
-    step(app.wait_for("id:guide-groups >> id:group-more"));
-    assert_eq!(focused(app), before, "the mouse moved no focus");
     step(app.press_key("up"));
     assert_eq!(iptv_app::player_opens(0), opens);
 
@@ -786,7 +756,7 @@ fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
     assert_eq!(seen.prop(1, "muted"), json!(true));
 
     // Focusing the main window moves no sound either; its keys are its own.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     assert!(app.window_state("main").unwrap().unwrap().focused);
     step(app.press_key("space"));
     app.settle();
@@ -819,7 +789,7 @@ fn keys_follow_the_focused_window_and_focus_never_moves_the_sound() {
         "one window has the sound"
     );
     assert_eq!(seen.title("player-window-1"), "Desk 05");
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     assert!(app.window_state("main").unwrap().unwrap().focused);
     assert_eq!(
         seen.prop(1, "muted"),

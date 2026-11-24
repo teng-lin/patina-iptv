@@ -326,13 +326,11 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     let Some(home) = isolated!() else { return };
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
-    step(app.wait_for("label:Go forward 30 minutes"));
     step(app.press_key("down"));
     personalization::menu(app, "Reorder channels");
     step(app.wait_for("id:guide-reorder-handle"));
     exposure.shown(app, "guide-ui", true);
     exposure.shown(app, "guide-program", false);
-    assert!(!app.screen().matches("label:Go forward 30 minutes").unwrap());
     step(app.wait_for("id:guide-row >> nth=1 >> text:★ Local B"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
@@ -556,7 +554,7 @@ fn modal_screens_and_editors_hide_only_their_underlay_and_restore_it_on_back() {
     let Some(home) = isolated!() else { return };
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press("label:Settings"));
     step(app.wait_for("id:settings-screen"));
@@ -701,7 +699,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
     let app = &mut fixture.app;
     let live_cell = "id:guide-ui >> role:cell[Local C bulletin]";
     step(app.wait_for_within(live_cell, Duration::from_secs(20)));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     step(app.set_environment("a tablet with TalkBack", |env| {
         env.idiom = Idiom::Pad;

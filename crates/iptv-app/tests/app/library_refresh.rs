@@ -93,7 +93,7 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
     })
     .unwrap();
     step(app.wait_for_within("text:A 0 · Synthetic A", Duration::from_secs(20)));
-    step(app.press("text:☰  All playlists"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Playlists >> nth=0"));
@@ -171,7 +171,7 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
     drop(store);
     // A failed manual update keeps the successful catalog on screen and on disk.
     std::fs::write(&file_a, "#EXTM3U\n").unwrap();
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.wait_for("text:Playlists >> nth=0"));

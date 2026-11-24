@@ -339,14 +339,12 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     };
     assert_eq!(
         rail_items(none),
-        [
-            Search, Tv, Movies, Shows, Recordings, MyList, Playlists, Settings
-        ]
+        [Search, Tv, Movies, Shows, Recordings, Playlists, Settings]
     );
     assert_eq!(
         rail_items(both),
         [
-            Search, Tv, Movies, Shows, Continue, Recent, Recordings, MyList, Playlists, Settings
+            Search, Tv, Movies, Shows, Continue, Recent, Recordings, Playlists, Settings
         ]
     );
     // A live-only playlist on screen while another enabled playlist has
@@ -357,11 +355,11 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
             any: true,
         }),
         [
-            Search, Tv, Movies, Shows, Continue, Recent, Recordings, MyList, Playlists, Settings
+            Search, Tv, Movies, Shows, Continue, Recent, Recordings, Playlists, Settings
         ]
     );
     assert!(Settings.at_bottom() && Playlists.at_bottom() && !Search.at_bottom());
-    assert!(Continue.enabled() && Recent.enabled() && !Continue.at_bottom());
+    assert!(!Continue.at_bottom());
     let mut f = Focus::at(0);
     let items = rail_items(both);
     assert_eq!(

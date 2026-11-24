@@ -211,7 +211,7 @@ fn menu(app: &mut Headless) {
     step(app.wait_for("text:▶"));
     step(app.back());
     step(app.back());
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
 }
 
 /// The favorites editor's title (empty while it is closed).
@@ -591,7 +591,7 @@ fn other_pages(app: &mut Headless) {
 /// With "Press Back twice to leave" (on by default), the first Back at
 /// the top asks for a second.
 fn leaving(app: &mut Headless) {
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.press_key("backspace"));
@@ -640,7 +640,7 @@ fn leaving(app: &mut Headless) {
         .expect("the dimmed guide beside the settings");
     step(app.press(&format!("view:{}", beside.id)));
     step(app.wait_for_gone("text:Press Back twice to leave", GONE));
-    step(app.press("text:☰  All channels"));
+    step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
     step(app.press_key("backspace"));

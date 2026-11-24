@@ -153,7 +153,7 @@ fn tv_can_scroll_long_program_details_and_reopen_at_the_top() {
     let app = &mut fixture.app;
     step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
     step(app.wait_for_within("text:Generated long program", Duration::from_secs(20)));
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     choose_fullscreen(app);
     step(app.press_key("m"));
@@ -433,7 +433,7 @@ fn the_rail_reaches_preview_on_desktop_and_tv_without_reopening_video() {
             nsh_core::prelude::px(w),
             nsh_core::prelude::px(h),
         )));
-        step(app.press("text:/^☰  /"));
+        step(app.open_guide_groups());
         step(app.press("id:guide-groups >> text:Favorites"));
         if idiom == Idiom::Desktop {
             step(app.press_key("tab"));
@@ -582,7 +582,7 @@ fn tv_shows_a_visible_back_once_touch_is_used_and_hides_it_for_keys() {
 
 /// The menu's heading names the channel; Back closes it.
 #[track_caller]
-fn menu_opens_for(app: &mut crate::Headless, channel: &str, program_menu: bool) {
+fn menu_opens_for(app: &mut crate::Headless, channel: &str) {
     let favorite = "id:menu-panel >> text:/^(Add to favorites|Remove from favorites)$/";
     step(app.wait_for(favorite));
     assert!(
@@ -592,17 +592,11 @@ fn menu_opens_for(app: &mut crate::Headless, channel: &str, program_menu: bool) 
         "the menu is for {channel}: {:?}",
         app.screen().texts()
     );
-    if program_menu {
-        step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
-    } else {
-        assert!(!app.shows("id:menu-panel >> text:Search"));
-        assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
-    }
+    assert!(!app.shows("id:menu-panel >> text:Search"));
+    assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
     step(app.back());
     step(app.wait_for_gone(favorite, Duration::from_secs(2)));
 }
-
-const GUIDE_MORE: &str = "id:guide-ui >> label:More options";
 
 #[test]
 fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
@@ -615,42 +609,33 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
         env.idiom = Idiom::Desktop;
     }));
     let opens = iptv_app::player_opens(0);
-    // Keys drive the app: they have Menu, so no ⋯; the title keeps its room.
-    assert!(!app.screen().matches("id:guide-more").unwrap());
-    let room = width(app, "guide-more-slot");
-    assert!(room > 0.0);
-
-    // A tap (here on the idle preview, which does nothing else) shows the
-    // ⋯ by the focused program, on Local A, in that room; it opens the
-    // Menu key's menu.
-    step(app.press("id:guide-preview"));
-    step(app.wait_for("id:guide-more"));
-    assert_eq!(width(app, "guide-more-slot"), room, "no text moves");
-    step(app.press(GUIDE_MORE));
-    menu_opens_for(app, "Local A", true);
-    assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
-
     // Long press and right-click target the channel header or program.
     // Neither gesture starts playback.
     step(app.long_press("id:guide-ui >> label:Local B"));
-    menu_opens_for(app, "Local B", false);
+    menu_opens_for(app, "Local B");
     step(app.right_click("id:guide-ui >> label:Local B"));
-    menu_opens_for(app, "Local B", false);
-    // The ⋯ follows what was tapped: Local B now.
-    step(app.press(GUIDE_MORE));
-    menu_opens_for(app, "Local B", true);
+    menu_opens_for(app, "Local B");
     // The first row's second slot: the hour airing now (the first is the
     // ended hour before it, which this row cannot replay or focus).
     let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
     step(app.right_click(cell));
-    menu_opens_for(app, "Local A", false);
+    menu_opens_for(app, "Local A");
     step(app.long_press(cell));
-    menu_opens_for(app, "Local A", false);
+    menu_opens_for(app, "Local A");
+    // The program title keeps the full program menu reachable after
+    // removal of the header's overflow circle, without a shortcut.
+    let program_menu = "id:menu-panel >> text:Manage favorites…";
+    step(app.long_press("id:guide-header-program"));
+    step(app.wait_for(program_menu));
+    step(app.back());
+    step(app.wait_for_gone(program_menu, Duration::from_secs(2)));
+    step(app.right_click("id:guide-header-program"));
+    step(app.wait_for(program_menu));
+    step(app.back());
+    step(app.wait_for_gone(program_menu, Duration::from_secs(2)));
     assert_eq!(iptv_app::player_opens(0), opens, "a menu never plays");
 
-    // A key goes back to the remote's view.
     step(app.press_key("down"));
-    step(app.wait_for_gone("id:guide-more", Duration::from_secs(2)));
 
     // The player's channel list: a ⋯ per row for channel actions.
     choose_fullscreen(app);
@@ -670,85 +655,8 @@ fn touch_and_pointer_reach_the_menu_without_a_shortcut() {
     );
     let playing = iptv_app::player_opens(0);
     step(app.press("label:More options for Local A"));
-    menu_opens_for(app, "Local A", false);
+    menu_opens_for(app, "Local A");
     step(app.wait(Duration::from_secs(2)));
     assert_eq!(iptv_app::player_opens(0), playing, "a menu never zaps");
     assert!(app.screen().matches("text:2  Local B  ▶").unwrap());
-}
-
-#[test]
-fn a_tablet_shows_the_more_control_before_any_tap() {
-    let Some(home) = isolated!() else { return };
-    let mut fixture = personalization::launch(
-        home,
-        Settings::new(),
-        true,
-        |config| {
-            config.environment.idiom = Idiom::Pad;
-            config.environment.os = nsh_core::platform::Os::Android;
-        },
-        |_| {},
-    );
-    let app = &mut fixture.app;
-    // A tablet is touched first: the ⋯ shows at once, so the first tap
-    // need not land on a program (which would play it).
-    step(app.wait_for("id:guide-more"));
-    step(app.press(GUIDE_MORE));
-    menu_opens_for(app, "Local A", true);
-    assert_eq!(iptv_app::player_opens(0), 0, "a menu never plays");
-    // A key still hides it.
-    step(app.press_key("down"));
-    step(app.wait_for_gone("id:guide-more", Duration::from_secs(2)));
-}
-
-#[test]
-fn a_tv_remote_sees_no_more_control() {
-    let Some(home) = isolated!() else { return };
-    let mut fixture = personalization::launch(
-        home,
-        Settings::new(),
-        true,
-        |config| {
-            config.environment.idiom = Idiom::Tv;
-            config.environment.os = nsh_core::platform::Os::Android;
-        },
-        |_| {},
-    );
-    let app = &mut fixture.app;
-    // A TV starts with its remote: no ⋯ before or after a key.
-    assert!(!app.screen().matches("id:guide-more").unwrap());
-    for key in ["right", "down", "right", "left"] {
-        step(app.press_key(key));
-        assert!(
-            !app.screen().matches("id:guide-more").unwrap(),
-            "the remote has Menu"
-        );
-    }
-    step(app.press_key("m"));
-    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
-    assert!(!app.screen().matches("id:guide-more").unwrap());
-}
-
-#[test]
-fn the_header_more_control_waits_for_an_inline_channel_reorder() {
-    let Some(home) = isolated!() else { return };
-    let mut fixture = personalization::start(home, Settings::new(), true);
-    let app = &mut fixture.app;
-    // A TV reorders inline, in the guide's own columns; touch drives it.
-    step(app.set_environment("TV with touch", |env| {
-        env.os = nsh_core::platform::Os::Android;
-        env.idiom = Idiom::Tv;
-    }));
-    step(app.press("id:guide-preview"));
-    step(app.wait_for("id:guide-more"));
-    // The slot is mounted with the ⋯ only: a TV's title keeps that room.
-    step(app.press_key("tab"));
-    assert!(!app.screen().matches("id:guide-more-slot").unwrap());
-    step(app.long_press("id:guide-groups >> text:News"));
-    step(app.press("id:menu-panel >> text:Reorder channels"));
-    step(app.wait_for("id:organization-screen >> text:Reorder channels"));
-    step(app.wait_for("id:guide-row >> text:/Local B/"));
-    // Touch drives the app, but the guide takes no pointer while the order
-    // is unfinished: no ⋯ that could not be pressed.
-    assert!(!app.screen().matches("id:guide-more").unwrap());
 }

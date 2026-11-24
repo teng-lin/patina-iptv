@@ -272,7 +272,7 @@ fn guide_keys(app: &mut Headless) {
     // which goes by itself (6 s): then Back goes to the groups at once,
     // Back again to the rail on TV, Up to Search, OK searches.
     step(app.press_key("down"));
-    step(app.wait_for("text:☰  News"));
+    step(app.wait_for("role:grid[News]"));
     step(app.press_key("enter"));
     step(app.wait(Duration::from_millis(6500)));
     step(app.press_key("backspace"));
@@ -284,7 +284,7 @@ fn guide_keys(app: &mut Headless) {
     step(app.press_key("up"));
     step(app.press_key("enter"));
     step(app.wait_for(FIELD));
-    assert!(app.screen().matches("text:☰  News").unwrap());
+    assert!(app.screen().matches("role:grid[News]").unwrap());
     close_search(app);
     // From Search down past TV, Movies and Shows stay reachable even
     // without a VOD catalog; Recordings, Playlists and Settings follow.
@@ -336,7 +336,7 @@ fn guide_keys(app: &mut Headless) {
     }
     step(app.press_key("enter"));
     step(app.press_key("up"));
-    step(app.wait_for("text:☰  All channels"));
+    step(app.wait_for("role:grid[All channels]"));
     step(app.press_key("enter"));
     step(app.press_key("right"));
     step(app.press_key("home"));

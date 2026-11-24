@@ -38,7 +38,7 @@ pub fn open_rail_item(app: &mut crate::Headless, label: &str) {
 
     let item = format!("id:navigation-rail >> label:{label}");
     if !app.screen().matches(&item).unwrap() {
-        step(app.press("id:guide-list-selector"));
+        step(app.open_guide_groups());
         step(app.wait_for(&item));
     }
     step(app.press(&item));

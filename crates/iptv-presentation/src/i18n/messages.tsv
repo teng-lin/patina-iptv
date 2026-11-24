@@ -4,7 +4,6 @@ Live TV	TV en directo	TV en direct	Live-TV	TV in diretta	TV em direto	Прямо
 Films	Películas	Films	Filme	Film	Filmes	Фильмы	电影	電影	映画	영화
 Series	Series	Séries	Serien	Serie	Séries	Сериалы	剧集	影集	シリーズ	시리즈
 Recordings	Grabaciones	Enregistrements	Aufnahmen	Registrazioni	Gravações	Записи	录制	錄影	録画	녹화
-Watchlist	Mi lista	À regarder	Merkliste	Da guardare	A minha lista	Список просмотра	待看列表	待看清單	マイリスト	시청 목록
 Playlists	Listas de reproducción	Listes de lecture	Wiedergabelisten	Playlist	Listas de reprodução	Плейлисты	播放列表	播放清單	プレイリスト	재생목록
 General	General	Général	Allgemein	Generali	Geral	Общие	通用	一般	一般	일반
 TV guide data	Datos de la guía	Données du guide TV	TV-Programmdaten	Dati della guida TV	Dados do guia de TV	Данные телепрограммы	电视指南数据	電視指南資料	番組表データ	TV 편성표 데이터
@@ -1537,8 +1536,6 @@ Last watched (oldest first)	Última reproducción (antiguos primero)	Dernier vis
 Watch time (most first)	Tiempo de visualización (mayor primero)	Durée de visionnage (plus longue d’abord)	Wiedergabezeit (längste zuerst)	Tempo di visione (maggiore prima)	Tempo de visualização (maior primeiro)	Время просмотра (сначала большее)	观看时长（由长到短）	觀看時長（由長到短）	視聴時間（長い順）	시청 시간 (긴 순)
 Watch time (least first)	Tiempo de visualización (menor primero)	Durée de visionnage (plus courte d’abord)	Wiedergabezeit (kürzeste zuerst)	Tempo di visione (minore prima)	Tempo de visualização (menor primeiro)	Время просмотра (сначала меньшее)	观看时长（由短到长）	觀看時長（由短到長）	視聴時間（短い順）	시청 시간 (짧은 순)
 Show in guide	Mostrar en la guía	Afficher dans le guide	Im Programmführer anzeigen	Mostra nella guida	Mostrar no guia	Показывать в телегиде	在节目指南中显示	在節目指南中顯示	番組表に表示	프로그램 가이드에 표시
-Go back 30 minutes	Retroceder 30 minutos	Reculer de 30 minutes	30 Minuten zurückspringen	Torna indietro di 30 minuti	Recuar 30 minutos	Перейти на 30 минут назад	后退 30 分钟	倒退 30 分鐘	30分戻る	30분 뒤로 이동
-Go forward 30 minutes	Avanzar 30 minutos	Avancer de 30 minutes	30 Minuten vorspringen	Vai avanti di 30 minuti	Avançar 30 minutos	Перейти на 30 минут вперёд	前进 30 分钟	前進 30 分鐘	30分進む	30분 앞으로 이동
 Edit the query or choose Clear	Edita la búsqueda o selecciona Borrar	Modifiez la recherche ou sélectionnez Effacer	Suchanfrage bearbeiten oder Leeren wählen	Modifica la ricerca o scegli Cancella	Edite a pesquisa ou selecione Limpar	Измените запрос или выберите «Очистить»	修改搜索内容，或选择清除	修改搜尋內容或選擇清除	検索語を編集するか、「クリア」を選択してください	검색어를 수정하거나 지우기를 선택하세요
 Enter edit query   Esc close	Intro editar búsqueda   Esc cerrar	Entrée modifier la recherche   Échap fermer	Eingabe Suche bearbeiten   Esc schließen	Invio modifica ricerca   Esc chiudi	Enter editar pesquisa   Esc fechar	Enter изменить запрос   Esc закрыть	回车修改搜索   Esc 关闭	Enter 修改搜尋   Esc 關閉	Enter 検索語を編集   Esc 閉じる	Enter 검색어 수정   Esc 닫기
 OK edit query   Back close	OK editar búsqueda   Atrás cerrar	OK modifier la recherche   Retour fermer	OK Suche bearbeiten   Zurück schließen	OK modifica ricerca   Indietro chiudi	OK editar pesquisa   Voltar fechar	OK изменить запрос   Назад закрыть	OK 修改搜索   返回关闭	OK 修改搜尋   返回關閉	OK 検索語を編集   戻る 閉じる	OK 검색어 수정   뒤로 닫기

@@ -7,7 +7,7 @@
 //! axis on the platform's thread: past [`SLOP`] horizontally it is ours,
 //! past it vertically first the channel list scrolls); released moving, it
 //! flings on, one step per display frame. Taps stay taps. The view follows
-//! the focus model's window while nothing pans (keys, ‹ ›, Now), and a pan
+//! the focus model's window while nothing pans (keys and Now), and a pan
 //! that came to rest hands its window back to it. Its bounds are the
 //! guide's view ([`view_range`]: as far back as retained listings go).
 //!

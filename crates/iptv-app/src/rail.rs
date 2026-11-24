@@ -1,8 +1,7 @@
 //! The navigation rail left of the groups column, on the panel color: icons while the groups
 //! have the focus, icons with labels while it has the focus itself. Items
-//! without a screen in this build are dimmed and never take the focus
-//! (`iptv_presentation::browse`); the focused one is the light pill the guide's
-//! focused program is. Left from the groups lands on Search. The icons
+//! open their screens (`iptv_presentation::browse`); the focused item uses
+//! the guide's light focus pill. Left from the groups lands on Search. The icons
 //! are our own simple line drawings.
 
 use crate::i18n::tr;
@@ -14,7 +13,7 @@ use nsh_core::prelude::*;
 
 use crate::fonts::LIST_ITEM;
 use crate::scale::Scale;
-use crate::theme::{FOCUSED_CELL, FOCUSED_TEXT, RADIUS, TEXT_DISABLED_ALPHA, TEXT_SECONDARY_ALPHA};
+use crate::theme::{FOCUSED_CELL, FOCUSED_TEXT, RADIUS, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, tint};
 
 const WHITE: u32 = 0xFFFFFF;
@@ -60,7 +59,6 @@ fn label(item: RailItem) -> &'static str {
         RailItem::Movies => tr("Movies"),
         RailItem::Shows => tr("Shows"),
         RailItem::Recordings => tr("Recordings"),
-        RailItem::MyList => tr("Watchlist"),
         RailItem::Playlists => tr("Playlists"),
         RailItem::Settings => tr("Settings"),
     }
@@ -86,7 +84,6 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
         RailItem::Recordings => {
             "<circle cx='12' cy='12' r='8'/><circle cx='12' cy='12' r='3' fill='currentColor'/>"
         }
-        RailItem::MyList => "<path d='M6 3h12v18l-6-4-6 4z'/>",
         RailItem::Playlists => "<path d='M4 6h12M4 11h12M4 16h7'/><path d='M15 14v6l5-3z'/>",
         RailItem::Settings => {
             "<circle cx='12' cy='12' r='3.5'/><path d='M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8'/>"
@@ -110,9 +107,7 @@ fn item_view(ui: Ui, size: Scale, item: RailItem) -> impl IntoElement {
             && ui.focus.with(|f| f.pane == Pane::Rail && f.rail == item)
     };
     let color = move || {
-        if !item.enabled() {
-            tint(WHITE, TEXT_DISABLED_ALPHA / 2)
-        } else if focused() {
+        if focused() {
             rgb(FOCUSED_TEXT)
         } else if item == RailItem::Tv {
             rgb(ui.app.theme.with(|t| t.accent.light))
@@ -187,7 +182,7 @@ pub fn column(ui: Ui) -> impl IntoElement {
         let items = crate::lists::rail(ui);
         if ui
             .focus
-            .with_untracked(|focus| !items.contains(&focus.rail) || !focus.rail.enabled())
+            .with_untracked(|focus| !items.contains(&focus.rail))
         {
             ui.focus.update(|focus| focus.retain_rail(&items));
         }
@@ -233,7 +228,7 @@ mod tests {
     #[test]
     fn a_short_windows_header_leaves_the_rail_its_items() {
         // The guide header's minimum grows it in short windows, but never
-        // so far that the rail's eight items lose their height (as
+        // so far that the rail's items lose their height (as
         // `item_height` measures the room under the header).
         for (w, h, font) in [
             (480.0, 180.0, 1.3),

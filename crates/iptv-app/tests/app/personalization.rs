@@ -72,7 +72,7 @@ pub fn start_with_setup(
 ) -> Fixture {
     let mut fixture = launch(home, settings, manual, |_| {}, setup);
     let app = &mut fixture.app;
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.press_key("right"));
     fixture
 }
@@ -160,8 +160,7 @@ pub fn menu(app: &mut Headless, label: &str) {
 }
 #[track_caller]
 pub fn group(app: &mut Headless, name: &str) {
-    // The list-name button is the only text beginning with this mark.
-    step(app.press("text:/^☰  /"));
+    step(app.open_guide_groups());
     step(app.wait_for(&format!("id:guide-groups >> text:{name}")));
     step(app.press(&format!("id:guide-groups >> text:{name}")));
     step(app.press_key("right"));

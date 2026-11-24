@@ -188,13 +188,6 @@ pub(crate) fn header_fits_as(
         "the preview over the rows: {what}"
     );
     assert_eq!(rows[2], w, "the rows keep the window's width: {what}");
-    let selector = bounds(app, "guide-list-selector", &what);
-    let header = bounds(app, "guide-header", &what);
-    assert!(
-        selector[1] >= header[1] + header[3] - 0.5 && selector[1] + selector[3] <= rows[1] + 0.5,
-        "the group selector {selector:?} between header {header:?} and rows {rows:?}: {what}"
-    );
-    inside(selector, size, &format!("the group selector, {what}"));
     let left = find(app, |n| {
         n.text
             .as_ref()
@@ -298,14 +291,14 @@ fn ipad_guide_keeps_the_focused_channel_and_the_preview_in_every_window() {
 
     // Keys still move the focus in a Split View window (an iPad's keyboard
     // stays in the guide's rows: the preview takes the focus on TVs and
-    // desktops only). The group selector still works by touch.
+    // desktops only). The corner Back control still reaches groups by touch.
     present(app, (375.0, 820.0), TEXT[2]);
     step(app.press_key("up"));
     assert!(channel_selected(app, "Local B"));
     step(app.press_key("down"));
     assert!(channel_selected(app, "Local C"));
     present(app, (375.0, 820.0), TEXT[1]);
-    step(app.press("id:guide-list-selector"));
+    step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> text:Favorites"));
     assert_eq!(iptv_app::player_opens(0), opens);
     persistent(app, &lifetime, player);
@@ -673,8 +666,8 @@ fn ipad_empty_movies_and_search_fit_split_view_at_large_text() {
     step(app.wait_for_gone("id:vod-screen", WAIT));
 
     // Search: the field and the results inside every window.
-    step(app.press("text:/^☰  /"));
-    step(app.press("text:Search"));
+    step(app.open_guide_groups());
+    step(app.press("id:navigation-rail >> label:Search"));
     step(app.wait_for("id:search-field"));
     step(app.type_text("id:search-field", "Local"));
     step(app.wait_for("text:/Channels · /"));

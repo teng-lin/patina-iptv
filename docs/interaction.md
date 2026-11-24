@@ -57,7 +57,7 @@ The app tracks the last input used, not the device type.
 
 The navigation rail holds a stable set of destinations
 (`iptv_presentation::browse::rail_items`): Search, Live TV, Movies, Shows, Continue
-watching, Recently added, Recordings, Watchlist, Playlists and Settings.
+watching, Recently added, Recordings, Playlists and Settings.
 
 - **Now:** Live TV is the start screen. With **Play the last channel on start**
   (`general.resume_last_channel`, on by default) the last channel starts full
@@ -69,7 +69,7 @@ watching, Recently added, Recordings, Watchlist, Playlists and Settings.
   plays (after its PIN, if it has one); later favorite edits and the
   viewer's own choices are left alone. Movies and Shows always appear.
   Continue watching and Recently added appear when any enabled playlist has
-  movies or series. Watchlist is dimmed until #90 ships.
+  movies or series.
 - **Planned:** the same destinations in every layout class. A compact window
   may present them differently (for example a collapsed rail), but never drops
   one or reorders it.
@@ -97,6 +97,9 @@ In the guide:
   after tuning. A replay goes full screen. `guide.autoplay` tunes the focused
   channel while browsing, without a choice.
 - **Now:** opening a program's details or menu never starts playback. A
+  long press or right-click on the program title in the header opens its
+  program menu. On channel names and timeline cells, those gestures open
+  channel options. A
   long press or right-click moves the focus to what it opens the menu for;
   `guide.autoplay` then holds on that channel, after the menu or its details
   close, until the viewer moves the focus to another channel. A choice still
@@ -239,19 +242,15 @@ visible entry point for touch and pointer users.
   their accepted capture windows. **Use external player** applies to explicit
   channel choices on Android and Linux. Android offers installed video apps.
   Linux tries VLC, then mpv.
+- **Now:** long press, right-click and the remote's Menu key open guide
+  channel and group options. The guide has no overflow buttons in its header
+  or groups column. The ruler shows the date and time and offers **Now** after
+  browsing away; drag, wheel or keyboard shortcuts browse program time.
 - **Now:** while touch or a pointer drives the app, a visible "More options"
-  control (⋯) opens the program menu in the guide header after the selected
-  program's title, and the channel menu at the end of each channel list row.
-  The header's ⋯ hides during an inline reorder of channels or groups,
-  and the rows' ⋯ while multiview picks a channel (rows have no menu then).
-  Keys hide it; they have Menu. Where touch or a pointer is usual, the
-  title keeps the ⋯'s room while it is hidden, so switching input moves no
-  text; on TVs and terminals the title uses that room until the ⋯ shows.
-- **Now:** the same control for recordings rows (at the end of each row)
-  and for group options in the guide's groups column and the channel
-  list's groups column (on the shown group's row; a click shows another
-  group). Right-click opens the same options there
-  ([desktop viewing](desktop.md#pointer-and-wheel)).
+  control (⋯) opens actions on channel-list rows and recordings rows, and
+  group options on the shown group in the player's channel list. Keys hide
+  these controls; they have Menu. Channel rows hide their ⋯ while multiview
+  picks a channel (rows have no menu then).
 
 ## Layout classes
 
@@ -284,7 +283,7 @@ what the content needs at the current text size, not from the device type.
   either side, as the rotation lock allows, until portrait has a design of
   its own. Tablets, an unfolded phone and TVs rotate freely.
 - **Now:** the guide's header (`iptv_app::layout::GuideHeader`) puts its
-  group selector under the preview and the focused program in Compact, and
+  date and time ruler under the preview and the focused program in Compact, and
   in Medium wherever the program needs more room. Movies, Shows and Playlists
   are available in the navigation rail. The
   preview keeps its place at the top left and shrinks to leave that row room,
@@ -296,13 +295,12 @@ what the content needs at the current text size, not from the device type.
   giving way first. The
   program's times wrap onto a second line rather than clip, and a part
   wider than the column (large text in a narrow window) wraps within it; its
-  title stays on one line and is truncated. The group-selector row scrolls
-  sideways where the window is narrower than it. The
+  title stays on one line and is truncated. The date stays within the channel column. The
   guide's rows already take the full width below the header in every class.
 - **Now:** a Compact window at least 1.6 times as tall as it is wide (a phone
   held upright, a narrow portrait Split View window) stacks the header: the
   preview spans the window's width inside its margins, the focused program
-  sits under it, then the group-selector row. Beside the program the preview
+  sits under it, then the time ruler. Beside the program the preview
   would be a thumbnail (132 × 74 points at 412 points wide); stacked it is
   388 × 218. The stacked header keeps the same 55% (70%) limit, and a window
   where it would pass that keeps the other arrangement. A small desktop window

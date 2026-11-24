@@ -48,6 +48,8 @@ pub(super) fn trackball(pan: Pan, grid: impl IntoElement + 'static) -> Scroll {
         .content_offset(Point::new(px(PAD), px(0.0)))
         .element_ref(&handle)
         .test_id("guide-timeline")
+        .role(AccessibilityRole::Grid)
+        .label(move || crate::lists::list_name(pan.ui()))
         .on_layout(move |b: &Bounds<Points>| width.set(b.size.width.0))
         .on_scroll(move |e: &ScrollEvent| {
             let x = e.offset.x.0;
