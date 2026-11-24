@@ -205,6 +205,15 @@ pub fn offer(key: &str) -> Offer {
     if NOT_OFFERED.contains(&key) {
         return Offer::Hidden;
     }
+    // Swiping over full-screen video: where a finger may touch it (a TV's
+    // remote has Ch± instead).
+    if key == keys::SWIPE_TO_ZAP.as_str() {
+        return if crate::play_bar::pointer_available() {
+            Offer::Active
+        } else {
+            Offer::Hidden
+        };
+    }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
         || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())

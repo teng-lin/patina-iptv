@@ -39,6 +39,10 @@ pub enum Icon {
     BackToApp,
     /// Three dots in a row (a menu's visible way in for touch and pointer).
     More,
+    /// A chevron up (the next channel, as Ch+).
+    ChannelNext,
+    /// A chevron down (the previous channel, as Ch−).
+    ChannelPrevious,
 }
 
 /// Strokes and fills, as SVG markup.
@@ -125,6 +129,8 @@ fn body(icon: Icon) -> &'static str {
              <circle fill='currentColor' stroke='none' cx='12' cy='12' r='2'/>\
              <circle fill='currentColor' stroke='none' cx='19' cy='12' r='2'/>"
         }
+        Icon::ChannelNext => "<path d='M6 15l6-6 6 6'/>",
+        Icon::ChannelPrevious => "<path d='M6 9l6 6 6-6'/>",
     }
 }
 
