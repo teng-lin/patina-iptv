@@ -7,8 +7,22 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-11-23
+
+### Changed
+
+- Guide navigation and context menus are clearer on TV, tablet and desktop,
+  with a direct group reorder action for named groups.
+- Setup, platform controls, release and validation documentation is updated.
+
 ### Fixed
 
+- Clearing a favorites list requires confirmation, and covered controls cannot
+  change the selection while the confirmation is open.
+- Untitled M3U channels use neutral display names while preserving guide matching.
+- Backups select their documents from the library snapshot and report
+  backup-specific restore validation errors.
+- The recordings list keeps the position selected with the mouse wheel.
 - The backup dialog now explains that exports keep guide setup and exclude
   downloaded program listings.
 
@@ -476,7 +490,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...HEAD
+[0.1.8]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/teng-lin/patina-iptv/compare/v0.1.5...v0.1.6
 [0.1.3]: https://github.com/teng-lin/patina-iptv/compare/v0.1.2...v0.1.3
