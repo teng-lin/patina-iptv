@@ -114,5 +114,15 @@ adb -s "${serial:?}" install -r hosts/android/app/build/outputs/apk/debug/app-de
 ```
 
 Record the device model, Android version, ABI, commit and APK hash along with
-the journey and result. For release acceptance, test the signed ARM artifact on
-hardware reserved for that purpose and record the evidence against its hash.
+the journey and result.
+
+### Signed release acceptance
+
+Install the signed ARM APK on a dedicated test device. Serve the
+[generated fixtures](#fixture-streams-ending-or-looping-live) from a
+tester-controlled public HTTP endpoint backed by `tools/mock-server.py`.
+Pass that endpoint's public hostname and port to `--host` when generating
+the playlist so its guide, artwork and stream URLs use the same address.
+The signed build requires publicly reachable stream addresses. Add the
+printed playlist URL in Patina, run the journey and record the result
+against the signed APK's hash.
