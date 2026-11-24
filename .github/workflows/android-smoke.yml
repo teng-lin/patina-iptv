@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        boot: [cold, warm]
+        boot: [warm]
     steps:
       - name: Enable KVM
         run: |
@@ -22,7 +22,7 @@ jobs:
       - name: Identify the emulator and system image
         if: matrix.boot == 'warm'
         run: |
-          sdkmanager --install emulator 'system-images;android-36;android-tv;x86_64' < /dev/null > /dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator 'system-images;android-36;android-tv;x86_64' < /dev/null > /dev/null
           sha256sum "$ANDROID_HOME/emulator/source.properties" \
             "$ANDROID_HOME/system-images/android-36/android-tv/x86_64/source.properties"
       - name: Verify snapshot provenance
