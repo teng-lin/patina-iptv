@@ -107,6 +107,8 @@ def main():
         with config.open("a") as stream:
             stream.write("\nhw.cpu.ncore=2\nhw.ramSize=4096M\ndisk.dataPartition.size=4096M\n")
 
+        # Start ADB first so the emulator can read the runner's host key at boot.
+        subprocess.run([sdk / "platform-tools/adb", "start-server"], env=env, check=True, timeout=30)
         # The smoke script clears its own *.log files at the start of each attempt.
         with (output / "emulator.txt").open("w") as log:
             emulator = subprocess.Popen([sdk / "emulator/emulator", "-avd", name, "-port", str(PORT), "-no-window",
