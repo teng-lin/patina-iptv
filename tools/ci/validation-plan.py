@@ -49,9 +49,8 @@ LINUX_PACKAGE = ("tools/ci/*linux*.sh", "tools/ci/*linux*.py", "tools/ci/Dockerf
 MACOS_PACKAGE = ("tools/package-macos.sh", "tools/bundle-macos.py", "tools/ci/*macos*.sh", "tools/ci/*macos*.py", "hosts/macos/**")
 # General Rust build inputs already select native compilation on PRs.
 # Run desktop installers for inputs specific to their packaging or shipped resources.
-PACKAGES = (*NOTICES, *LINUX_PACKAGE, *MACOS_PACKAGE, "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
-            "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**", "tools/package-*.sh",
-            "tools/bundle-macos.py", "tools/ci/package-*.sh", "tools/ci/*packages.sh",
+PACKAGES = (*NOTICES, *LINUX_PACKAGE, *MACOS_PACKAGE, "nsh.rev", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
+            "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**",
             "tools/ci/native-sources.py", "tools/ci/smoke-desktop.py", "tools/ci/nsh-tool-key.py",
             "tools/ci/native_candidates.py", "tools/ci/setup-linux-packaging.sh",
             "tools/ci/unpack-signing-input.py", "tools/ci/version.py", "tools/mpv-runtime/**", "tools/mpv-runtime-unix/**")
@@ -60,7 +59,7 @@ WINDOWS_PACKAGE = (*NOTICES, *WINDOWS_RESOURCES, "crates/iptv-app/build.rs", "ho
                     "tools/fetch-mpv-windows.ps1", "tools/ci/*windows*.ps1", "tools/ci/*windows*.py",
                     "tools/ci/windows-notices.py", "tools/ci/windows-installer.iss", "tools/ci/setup-inno.ps1",
                     "tools/ci/version.py", "tools/mpv-runtime/**", "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**")
-SMOKE = (*BUILD, "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
+SMOKE = (*BUILD, "tools/ci/package.Cargo.lock", "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
          "crates/iptv-player-mpv/**", "crates/iptv-net/**", "crates/iptv-nav/**", "tools/sync-host.sh",
          "tools/ci/android/**", "tools/ci/android-smoke.sh", "tools/ci/disposable-avd.py", "tools/ci/*hls-fixtures.py",
          "tools/ci/android-ndk-env.sh", "tools/make-*fixtures*", "tools/mock-server.py", "tools/mpv-runtime/**")

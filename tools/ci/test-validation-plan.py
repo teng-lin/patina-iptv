@@ -92,7 +92,7 @@ class Selection(unittest.TestCase):
             self.assertTrue(all(plan[lane] for lane in v.LANES), path)
 
     def test_dependency_changes_keep_native_builds_without_desktop_installers(self):
-        for path in ("Cargo.lock", "Cargo.toml", "crates/iptv-guide/Cargo.toml", "nsh.rev", "rust-toolchain.toml",
+        for path in ("Cargo.lock", "Cargo.toml", "crates/iptv-guide/Cargo.toml", "rust-toolchain.toml",
                      ".cargo/config.toml", "vendor/nsh-tv/src/lib.rs"):
             plan = v.select([path])
             for lane in ("host", "windows", "android", "smoke", "stress"):
@@ -110,6 +110,7 @@ class Selection(unittest.TestCase):
         self.assertFalse(plan["windows-package"])
         package_lock_only = v.select(["tools/ci/package.Cargo.lock"])
         self.assertTrue(package_lock_only["android"])
+        self.assertTrue(package_lock_only["smoke"])
         self.assertTrue(package_lock_only["helpers_full"])
 
     def test_native_and_ui_changes_keep_both_form_factors(self):
@@ -174,6 +175,18 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["packages"], path)
         self.assertTrue(v.select(["tools/package-windows.ps1"])["windows-package"])
         self.assertTrue(v.select(["hosts/android/app/build.gradle.kts"])["android"])
+
+    def test_nsh_packager_revision_selects_its_desktop_consumers(self):
+        plan = v.select(["nsh.rev"])
+        self.assertEqual([entry["platform"] for entry in plan["package_matrix"]["include"]], ["linux", "macos"])
+        self.assertFalse(plan["windows-package"])
+        self.assertTrue(plan["windows"])
+
+    def test_mobile_packaging_scripts_do_not_select_desktop_installers(self):
+        for path in ("tools/ci/package-android.sh", "tools/ci/package-ios.sh"):
+            plan = v.select([path])
+            self.assertFalse(plan["packages"], path)
+            self.assertFalse(plan["windows-package"], path)
 
     def test_version_stamping_changes_exercise_all_package_consumers(self):
         plan = v.select(["tools/ci/version.py"])
