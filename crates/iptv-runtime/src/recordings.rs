@@ -431,6 +431,15 @@ fn retained_media(services: &Services, id: JobId, partial: bool) -> Option<(Path
 }
 
 impl Runtime {
+    /// The allowance the recording host learned for `source`'s provider.
+    pub(crate) fn recorded_provider_limit(&self, source: SourceId) -> Option<u32> {
+        self.recordings
+            .lock()
+            .provider_limits
+            .get(&source.0)
+            .copied()
+    }
+
     pub fn start_recordings(&self) {
         self.start_recording_host();
     }

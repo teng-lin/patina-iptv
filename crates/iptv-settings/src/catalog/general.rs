@@ -99,14 +99,6 @@ pub static GENERAL: &[Setting] = &[
     // default: observed (07) — not set
     general(
         "network",
-        "general.user_agent",
-        text(TextKind::Plain, 512, ""),
-        key("HTTP User-Agent for provider requests; empty sends the app's own."),
-    )
-    .scope(Scope::Playlist),
-    // default: observed (07) — not set
-    general(
-        "network",
         "general.udp_proxy",
         text(TextKind::HostPort, 261, ""),
         key("Relay that turns multicast UDP streams into HTTP, as host:port; empty plays UDP directly."),
@@ -153,7 +145,11 @@ pub static PLAYLISTS: &[Setting] = &[
         key("Import movies and series from a playlist that offers them."),
     )
     .scope(Scope::Playlist),
-    // default: ours
+    // default: ours. Set per playlist among its actions on the playlists
+    // screen (#282): a playlist's own value overrides the allowance its
+    // provider reports, which applies otherwise. A global value stored by
+    // an earlier version is copied to each playlist at startup, then
+    // cleared.
     playlists(
         "content",
         "playlists.max_connections",
@@ -169,6 +165,18 @@ pub static PLAYLISTS: &[Setting] = &[
         choice(&PLAYLIST_SORT, "manual"),
         key("Order of playlists in lists that show several."),
     ),
+    // default: observed (07) — not set. The default for every request
+    // to a provider: portals, guide feeds, movies and series, recordings.
+    // An M3U or Xtream playlist's own User-Agent (provider details, not a
+    // setting) replaces it for that playlist's requests. Shown on the
+    // Playlists page; the key keeps its original name.
+    playlists(
+        "network",
+        "general.user_agent",
+        text(TextKind::Plain, 512, ""),
+        key("Sent with requests to providers, guide sources and recordings; a playlist's own User-Agent replaces it. Empty sends the app's own."),
+    )
+    .scope(Scope::Playlist),
     // default: ours
     playlists(
         "updates",

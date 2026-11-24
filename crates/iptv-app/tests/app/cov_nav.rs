@@ -2,7 +2,8 @@
 //! guide (arrows, Page Up/Down, Ch+/Ch-, Tab, Menu, Info), the search
 //! screen (typing, digits, the tabs, a live result, an upcoming one's
 //! details, a past one replayed, the recent searches, and the screen
-//! coming back after watching with `search.stay_on_search`), the player's
+//! coming back after watching, also with the retired
+//! `search.stay_on_search` stored off), the player's
 //! channel list over and beside the video (its groups column, paging,
 //! zapping, an empty Favorites list), and multiview on a TV (the arrows
 //! between tiles, its menu's Add screen, Change channel, Enlarge, Full
@@ -158,8 +159,9 @@ fn keys_drive_the_guide_search_the_channel_list_and_multiview() {
         .set("guide.stay_on_list", Value::Bool(true))
         .unwrap();
     settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    // Retired (#282): a stored "off" no longer closes search after a result.
     settings
-        .set("search.stay_on_search", Value::Bool(true))
+        .set("search.stay_on_search", Value::Bool(false))
         .unwrap();
     let data = home.data_dir();
     std::fs::create_dir_all(&data).unwrap();
@@ -368,20 +370,21 @@ fn guide_keys(app: &mut Headless) {
     wait_focused(app, "Morning Talk");
 }
 
-/// Search by keys, with `search.stay_on_search`: watching a result keeps
-/// the screen, which comes back when full screen is left.
+/// Search by keys: watching a result keeps the screen, which comes back
+/// when full screen is left (whatever `search.stay_on_search` stored).
 fn search_keys(app: &mut Headless) {
     step(app.press_key("/"));
     step(app.wait_for(FIELD));
     step(app.wait_for("text:No recent searches yet"));
     // An upcoming program (the only result: its tab shows): Back takes
     // the keyboard down, Down to the tabs, Right (no other tab with
-    // results), Down to it, OK: its details.
+    // results), Down past the filter row to it, OK: its details.
     step(app.type_text(FIELD, "Gala"));
     step(app.wait_for("text:/^Programs · 1$/"));
     step(app.back());
     step(app.press_key("down"));
     step(app.press_key("right"));
+    step(app.press_key("down"));
     step(app.press_key("down"));
     assert_eq!(times(app), 1, "the result's line");
     step(app.press_key("enter"));
@@ -400,11 +403,31 @@ fn search_keys(app: &mut Headless) {
     step(app.back());
     step(app.press_key("down"));
     step(app.press_key("down"));
+    step(app.press_key("down"));
     step(app.press_key("enter"));
     gone(app, FIELD);
     step(app.press_key("o"));
     step(app.wait_for(FIELD));
     step(app.wait_for("text:Recital Replay"));
+    // Finished programs without replay are a filter in the results (#282):
+    // nothing found, then Down to the filter row and OK lists the concert;
+    // OK again leaves them out.
+    step(app.clear(FIELD));
+    step(app.type_text(FIELD, "Old Concert"));
+    step(app.wait_for("text:Nothing found for “Old Concert”"));
+    step(app.back());
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:/^Programs · 1$/"));
+    assert_eq!(
+        app.screen()
+            .accessibility_state("id:search-filter-past")
+            .unwrap()
+            .checked,
+        Some(nsh_core::Checked::True)
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Nothing found for “Old Concert”"));
     // A channel by its number (programs match it too; the programs'
     // tab stays chosen): Right and Left switch the tabs; the channel plays
     // live. Search over the video brings the waiting screen back at once.
@@ -420,6 +443,7 @@ fn search_keys(app: &mut Headless) {
     step(app.wait_for("text:Show 3"));
     step(app.press_key("right"));
     step(app.wait_for("text:3   Test Channel Three"));
+    step(app.press_key("down"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
     gone(app, FIELD);

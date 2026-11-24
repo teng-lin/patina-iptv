@@ -22,6 +22,22 @@ is below 1.0, a minor release may change behavior.
   program details, Record key and Recordings no longer schedule or edit a
   future recording, and the recorder login startup and precise wakeup settings
   are hidden. Record now is unchanged.
+- Simplify source, guide-data, search and PIN settings (#282). Each
+  playlist's Streams at once is set among its actions on the playlists
+  screen, with the provider's reported allowance beside it; a value set for
+  all playlists before moves to each stored playlist. The User-Agent setting
+  is the Default User-Agent on the Playlists page. The movie and series
+  catalog keeps the order its Sort chose. One "Update guide" choice replaces
+  the guide's update interval and update-at-start switch; guides always update
+  after their playlist changes, keep descriptions where the guide is stored on
+  disk, and keep finished programs for the longest catch-up archive (at least a
+  week, at most 14 days). Search always ranks favorites first, returns to the
+  results after watching one, and offers finished programs without replay as a
+  filter in its results. In the PIN prompt, OK on a digit submits after digits
+  typed on number keys; on the on-screen keypad it presses the focused key, so
+  a PIN of any length can be entered with arrows and OK and submitted with
+  Continue. Movie and series settings are hidden when no enabled playlist can
+  supply a catalog.
 - Settings show Keyboard or Remote control only while there are keys to set
   up: always on a TV and a desktop, and on a phone or a tablet while a
   hardware keyboard or a D-pad is connected. The page holds the replay seek

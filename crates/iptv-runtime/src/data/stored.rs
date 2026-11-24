@@ -69,8 +69,8 @@ pub fn refresh_status(owner: &std::rc::Rc<crate::Runtime>) {
 const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub use crate::stored::{
-    begin_update, configs, end_update, guide_edit_is_current, keep_past_days, next_guide_edit,
-    note_shown, shown_sources, unwinding_updates, update_current, updating, with_storage,
+    begin_update, configs, end_update, guide_edit_is_current, next_guide_edit, note_shown,
+    shown_sources, stored_past_days, unwinding_updates, update_current, updating, with_storage,
 };
 
 /// Fetch descriptions on the shared worker; a bounded cache makes later renders synchronous.
@@ -275,9 +275,8 @@ fn start_update(
                         .as_ref()
                         .map(StoredGuide::configs)
                         .unwrap_or_default(),
-                    &owner.settings(),
                 )),
-                Ok((_, sources)) => Ok(configs(&owner.settings(), &sources)),
+                Ok((_, sources)) => Ok(configs(&sources)),
                 Err(error) => Err(error),
             };
             let (tx, mut rx) = unbounded_channel();

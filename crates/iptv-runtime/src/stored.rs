@@ -18,20 +18,28 @@ use iptv_store_sqlite::{
 use std::cell::Cell;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
-/// (`epg.keep_past`, whole days rounded up).
-pub fn keep_past_days(settings: &Settings) -> u32 {
-    store_options(settings, &Target::Global)
-        .past_days_to_keep
-        .unwrap_or(u32::MAX)
+/// How many days of finished programs reads of the stored guide reach:
+/// as far as any guide keeps them ([`iptv_import::KEEP_PAST_MAX_DAYS`]).
+/// What is stored is pruned to the longest catch-up archive
+/// (`prune_before`), so a read finds no more than that.
+pub fn stored_past_days() -> u32 {
+    iptv_import::KEEP_PAST_MAX_DAYS
 }
 
-/// The guides' storage options from the settings (`epg.keep_past`,
-/// `epg.store_descriptions`).
-pub fn with_storage(
-    mut configs: Vec<EpgSourceConfig>,
-    settings: &Settings,
-) -> Vec<EpgSourceConfig> {
-    let store = store_options(settings, &Target::Global);
+/// When finished programs stop being kept: [`iptv_import::keep_past_days`]
+/// of the longest catch-up archive of the stored channels before `now`.
+/// Replaces the `epg.keep_past` setting (#282).
+pub(crate) fn prune_before(store: &Store, now: UnixTime) -> Result<UnixTime, StoreError> {
+    let longest = store.longest_catchup_days(iptv_providers::m3u::DEFAULT_CATCHUP_WINDOW_DAYS)?;
+    let keep = iptv_import::keep_past_days(longest);
+    Ok(now.saturating_sub(i64::from(keep).saturating_mul(DAY)))
+}
+
+/// The guides' storage options ([`store_options`]: descriptions where the
+/// host keeps the guide on disk, finished programs up to the most any
+/// guide keeps).
+pub fn with_storage(mut configs: Vec<EpgSourceConfig>) -> Vec<EpgSourceConfig> {
+    let store = store_options();
     for c in &mut configs {
         c.store = store;
     }
@@ -84,7 +92,7 @@ pub(crate) fn load_guide(
     source: SourceId,
     now: UnixTime,
 ) -> Option<GuideStore> {
-    let window = super::paging::window(now, keep_past_days(&services.settings()));
+    let window = super::paging::window(now, stored_past_days());
     read_guide(services, source, &super::paging::store_window(window))
 }
 
@@ -96,7 +104,7 @@ pub(crate) fn try_load_guide(
     source: SourceId,
     now: UnixTime,
 ) -> Result<GuideStore, StoreError> {
-    let window = super::paging::window(now, keep_past_days(&services.settings()));
+    let window = super::paging::window(now, stored_past_days());
     services
         .blocking_read(move |store| store.load_epg(source, &super::paging::store_window(window)))
 }
@@ -141,20 +149,19 @@ pub(crate) fn guide_sources(services: &Services, source: SourceId) -> Vec<GuideS
 
 /// The download configs of `sources` (those switched on), with the storage
 /// settings of now (a stored config has those it was fetched with).
-pub fn configs(settings: &Settings, sources: &[GuideSource]) -> Vec<EpgSourceConfig> {
+pub fn configs(sources: &[GuideSource]) -> Vec<EpgSourceConfig> {
     let template = EpgSourceConfig::new(iptv_epg::FeedId(0), SecretUrl::new(""));
-    let template = with_storage(vec![template], settings).remove(0);
+    let template = with_storage(vec![template]).remove(0);
     guides::configs_of(sources, &template)
 }
 
 /// An Xtream XMLTV endpoint is derived from the user-entered account, rather
 /// than read from response content. Its explicit origin remains trusted.
 pub fn configs_for(
-    settings: &Settings,
     sources: &[GuideSource],
     source: &iptv_providers::model::SourceConfig,
 ) -> Vec<EpgSourceConfig> {
-    let mut configs = configs(settings, sources);
+    let mut configs = configs(sources);
     if let iptv_providers::model::SourceConfig::Xtream(credentials) = source
         && let Ok(client) = iptv_providers::xtream::XtreamClient::from_credentials(credentials)
     {
@@ -206,12 +213,7 @@ pub(crate) fn guide_inputs(
             ))
         })?;
     Ok(GuideInputs {
-        guides: configs_from_sources(
-            &services.settings(),
-            &sources,
-            state.as_ref(),
-            config.as_ref(),
-        ),
+        guides: configs_from_sources(&sources, state.as_ref(), config.as_ref()),
         state,
         groups,
         channels,
@@ -232,18 +234,17 @@ pub(crate) fn matching_inputs(
 }
 
 pub(crate) fn configs_from_sources(
-    settings: &Settings,
     sources: &[GuideSource],
     state: Option<&StoredGuide>,
     source: Option<&iptv_providers::model::SourceConfig>,
 ) -> Vec<EpgSourceConfig> {
     if sources.is_empty() {
         let stored = state.map(StoredGuide::configs).unwrap_or_default();
-        return with_storage(stored, settings);
+        return with_storage(stored);
     }
     match source {
-        Some(source) => configs_for(settings, sources, source),
-        None => configs(settings, sources),
+        Some(source) => configs_for(sources, source),
+        None => configs(sources),
     }
 }
 
@@ -364,7 +365,8 @@ pub fn check_at(decision: Decision, now: UnixTime) -> Option<UnixTime> {
 pub(crate) const RETRY_DUE: i64 = 3600;
 
 /// Replaces `source`'s stored guide with `guide` (the feeds that loaded)
-/// and drops programs older than [`keep_past_days`]. A feed that failed
+/// and drops programs older than the longest catch-up archive wants
+/// ([`prune_before`]). A feed that failed
 /// is recorded, so automatic refreshes back off; each feed's result is
 /// kept for the guide sources screen.
 ///
@@ -380,7 +382,6 @@ pub(crate) fn replace(
 ) -> Result<EpgCounts, StoreError> {
     let feeds = EpgFeedMeta::from_import(&guide.import, configs, now);
     let fingerprint = matching.fingerprint();
-    let keep = keep_past_days(&services.settings());
     let stops = Stops::of(stops);
     services.blocking(move |store| {
         if stops.superseded() {
@@ -396,7 +397,7 @@ pub(crate) fn replace(
             .collect();
         store.record_epg_feed_results(source, &results)?;
 
-        let pruned = store.prune_epg(now.saturating_sub(i64::from(keep).saturating_mul(DAY)))?;
+        let pruned = store.prune_epg(prune_before(store, now)?)?;
         if let Some(Err(e)) = import
             .sources
             .iter()
@@ -448,9 +449,7 @@ pub(crate) async fn replace_published(
             input: Some((import, stage)),
             results,
             first_error,
-            prune_before: now.saturating_sub(
-                i64::from(keep_past_days(&services.settings())).saturating_mul(DAY),
-            ),
+            now,
             stops: Stops::of(stops),
             running: crate::publish::Replacing::Idle,
         })
@@ -465,7 +464,8 @@ struct GuidePublish {
     input: Option<(iptv_import::EpgImport, iptv_store_sqlite::EpgStage)>,
     results: Vec<(iptv_epg::FeedId, Option<ImportErrorKind>)>,
     first_error: Option<ImportErrorKind>,
-    prune_before: UnixTime,
+    /// Finished programs are pruned from it ([`prune_before`]).
+    now: UnixTime,
     stops: Stops,
     running: crate::publish::Replacing<iptv_store_sqlite::EpgReplacement<'static, Store>>,
 }
@@ -512,7 +512,7 @@ impl crate::publish::Publish for GuidePublish {
             .done()
             .ok_or(StoreError::Unavailable("the guide publish did not finish"))?;
         live.record_epg_feed_results(source, &self.results)?;
-        let pruned = live.prune_epg(self.prune_before)?;
+        let pruned = live.prune_epg(prune_before(live, self.now)?)?;
         if let Some(kind) = self.first_error {
             live.record_epg_failure(source, kind)?;
         }
@@ -907,7 +907,7 @@ mod tests {
 
     /// The download configs under the default settings.
     fn configs(sources: &[GuideSource]) -> Vec<EpgSourceConfig> {
-        super::configs(&Settings::new(), sources)
+        super::configs(sources)
     }
 
     /// The refresh decision under the default settings.
@@ -1142,20 +1142,20 @@ mod tests {
             decide(&s, Trigger::PlaylistChanged, &fresh),
             Decision::Refresh(RefreshReason::PlaylistChanged)
         );
-        // Not at start: the next timer does it.
+        // The retired switches no longer hold a refresh back (#282).
         s.set("epg.update_on_start", Value::Bool(false)).unwrap();
+        s.set("epg.update_on_playlist_change", Value::Bool(false))
+            .unwrap();
         assert!(matches!(
             decide(&s, Trigger::Startup, &old),
-            Decision::Keep {
-                next_check: Some(_)
-            }
+            Decision::Refresh(RefreshReason::Stale { .. })
         ));
-        assert!(matches!(
-            decide(&s, Trigger::Timer, &old),
-            Decision::Refresh(_)
-        ));
-        // Interval 0: only on request.
-        s.set("epg.update_interval", Value::Duration(0)).unwrap();
+        assert_eq!(
+            decide(&s, Trigger::PlaylistChanged, &fresh),
+            Decision::Refresh(RefreshReason::PlaylistChanged)
+        );
+        // Only on request.
+        s.set("epg.update", Value::choice("on_request")).unwrap();
         assert_eq!(
             decide(&s, Trigger::Timer, &old),
             Decision::Keep { next_check: None }
@@ -1164,33 +1164,38 @@ mod tests {
             decide(&s, Trigger::Manual, &old),
             Decision::Refresh(RefreshReason::Requested)
         );
-        // A changed playlist no longer refreshes a fresh guide.
-        s.set("epg.update_on_playlist_change", Value::Bool(false))
-            .unwrap();
+        // A changed playlist still refreshes the guide.
         assert_eq!(
             decide(&s, Trigger::PlaylistChanged, &fresh),
-            Decision::Keep { next_check: None }
+            Decision::Refresh(RefreshReason::PlaylistChanged)
         );
     }
 
     #[test]
-    fn storage_settings_travel_with_the_guides() {
+    fn storage_options_no_longer_follow_settings() {
         let mut s = Settings::new();
-        assert_eq!(keep_past_days(&s), 7, "a week by default");
         s.set("epg.keep_past", Value::Duration(3 * DAY * 1000))
             .unwrap();
         s.set("epg.store_descriptions", Value::Bool(false)).unwrap();
-        assert_eq!(keep_past_days(&s), 3);
-        let guides = with_storage(configs(&sources(false)), &s);
+        let guides = with_storage(configs(&sources(false)));
         assert_eq!(
             guides[0].store,
             StoreOptions {
-                store_descriptions: false,
-                past_days_to_keep: Some(3)
+                store_descriptions: true,
+                past_days_to_keep: Some(iptv_import::KEEP_PAST_MAX_DAYS)
             }
         );
-        // A guide fetched with other storage settings is downloaded again.
-        let fetched = stored(&configs(&sources(false)));
+        assert_eq!(stored_past_days(), iptv_import::KEEP_PAST_MAX_DAYS);
+        // A guide fetched with the earlier storage settings (a week, no
+        // descriptions) is downloaded again once.
+        let mut earlier = configs(&sources(false));
+        for config in &mut earlier {
+            config.store = StoreOptions {
+                store_descriptions: false,
+                past_days_to_keep: Some(7),
+            };
+        }
+        let fetched = stored(&earlier);
         let o = none();
         assert_eq!(
             plan_with(
@@ -1203,6 +1208,14 @@ mod tests {
             ),
             Decision::Refresh(RefreshReason::FeedsChanged)
         );
+    }
+
+    /// Finished programs are kept for the longest catch-up archive of the
+    /// stored channels, at least the old default's week (#282).
+    #[test]
+    fn finished_programs_are_pruned_after_the_longest_archive() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(prune_before(&store, NOW).unwrap(), NOW - 7 * DAY);
     }
 
     #[test]

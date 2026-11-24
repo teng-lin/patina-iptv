@@ -151,7 +151,7 @@ struct Scenario {
 
 impl Scenario {
     /// `automatic`: whether the guide is updated on a timer
-    /// (`epg.update_interval`); `linked`: the playlist comes from a server
+    /// (`epg.update`); `linked`: the playlist comes from a server
     /// instead of a picked file.
     fn start(home: &crate::isolated::Home, automatic: bool, linked: bool) -> Self {
         let _ = env_logger::builder()
@@ -159,15 +159,9 @@ impl Scenario {
             .filter_level(log::LevelFilter::Info)
             .try_init();
         let mut settings = iptv_settings::Settings::new();
-        settings
-            .set(
-                "epg.update_on_playlist_change",
-                iptv_settings::Value::Bool(true),
-            )
-            .unwrap();
         if !automatic {
             settings
-                .set("epg.update_interval", iptv_settings::Value::ms(0))
+                .set("epg.update", iptv_settings::Value::choice("on_request"))
                 .unwrap();
         }
         let data = home.data_dir();
@@ -669,10 +663,18 @@ fn a_refresh_reporting_after_the_guide_was_deleted_does_not_show_it_again() {
 fn deleting_guide_data_stops_a_guide_check_that_is_downloading() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, true, false);
-    // Changed storage settings: the next check downloads the guide again.
-    s.guide_settings();
-    step(s.app.press("text:Keep program descriptions"));
-    to_guide(&mut s.app);
+    // The guide source changed behind the app's back (storage settings
+    // did this before #282 retired them): the next check finds other feeds
+    // than the stored guide's and downloads it again.
+    {
+        let mut store = store(&s.data);
+        let feed = store.guide_sources(s.source).unwrap()[0].feed;
+        assert!(
+            store
+                .edit_guide_sources(s.source, &iptv_library::guides::Edit::Shift(feed, 30))
+                .unwrap()
+        );
+    }
     s.server.hold();
     let asked = s.server.requests();
     step(s.app.fast_forward(LONGEST));

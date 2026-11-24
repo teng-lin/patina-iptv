@@ -90,7 +90,7 @@ pub fn build(
         )));
         return;
     }
-    let keep = crate::data::stored::keep_past_days(&crate::settings::get());
+    let keep = crate::data::stored::stored_past_days();
     let padding = i64::from(iptv_core::organization::GROUP_EPG_OFFSET_MAX) * 60;
     let from: UnixTime = crate::time::wall_unix()
         .saturating_sub(i64::from(keep).saturating_mul(DAY))

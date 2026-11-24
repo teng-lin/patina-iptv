@@ -209,8 +209,26 @@ pub fn act(act: Act, kind: Option<SourceKind>, shown: bool, running: bool) -> &'
         Act::Rename => tr("Rename"),
         Act::Details => kind.map_or(tr("Provider details"), details_title),
         Act::UserAgent => tr("User-Agent"),
+        Act::Streams => tr("Streams at once"),
         Act::Guides => tr("Guide sources"),
         Act::Delete => tr("Delete"),
+    }
+}
+
+/// The streams-at-once action: the playlist's own ceiling (`None`:
+/// Automatic), and beside it the allowance its provider reported, when
+/// an import of this session read one.
+pub fn streams(own: Option<u32>, reported: Option<u32>) -> String {
+    let value = own.map_or_else(|| tr("Automatic").to_owned(), |n| n.to_string());
+    match reported {
+        Some(count) => trf(
+            "Streams at once: {value} · provider allows {count}",
+            &[
+                ("value", (&value).into()),
+                ("count", (&count.to_string()).into()),
+            ],
+        ),
+        None => trf("Streams at once: {value}", &[("value", (&value).into())]),
     }
 }
 
@@ -471,6 +489,16 @@ mod tests {
             "Portal and MAC address"
         );
         assert_eq!(act(Act::UserAgent, None, false, false), "User-Agent");
+        assert_eq!(act(Act::Streams, None, false, false), "Streams at once");
+        assert_eq!(streams(None, None), "Streams at once: Automatic");
+        assert_eq!(
+            streams(None, Some(2)),
+            "Streams at once: Automatic · provider allows 2"
+        );
+        assert_eq!(
+            streams(Some(4), Some(2)),
+            "Streams at once: 4 · provider allows 2"
+        );
         assert_eq!(act(Act::Guides, None, false, false), "Guide sources");
         assert_eq!(act(Act::Delete, None, false, false), "Delete");
         assert_eq!(act(Act::Rename, None, false, false), "Rename");

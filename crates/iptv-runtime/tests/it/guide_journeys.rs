@@ -4,7 +4,7 @@ use crate::common;
 use iptv_epg::{ChannelKey, DAY, EpgRef, FeedId, MatchKind, ProgramData};
 use iptv_import::{EpgImport, EpgSourceConfig, GuideSink, ListedChannel};
 use iptv_runtime::{Ports, Runtime, RuntimeEvent, data};
-use iptv_settings::{Settings, Target, Value};
+use iptv_settings::{Settings, Value};
 use iptv_store_sqlite::{
     DatabaseKey, EpgFeedMeta, EpgStage, GuideSource, SourceId, SourcePolicy, Store,
 };
@@ -43,14 +43,7 @@ async fn event(
 fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
     let mut settings = Settings::new();
     settings
-        .set("epg.update_on_start", Value::Bool(false))
-        .unwrap();
-    settings
-        .set("epg.update_on_playlist_change", Value::Bool(false))
-        .unwrap();
-    settings.set("epg.update_interval", Value::secs(0)).unwrap();
-    settings
-        .set("epg.keep_past", Value::secs(7 * 86400))
+        .set("epg.update", Value::choice("on_request"))
         .unwrap();
     std::fs::create_dir_all(root).unwrap();
     std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
@@ -81,7 +74,7 @@ fn seed(root: &std::path::Path, now: i64) -> (SourceId, String, Settings) {
     store
         .set_guide_sources(source, std::slice::from_ref(&config))
         .unwrap();
-    let options = iptv_import::store_options(&settings, &Target::Global);
+    let options = iptv_import::store_options();
     let mut stage = EpgStage::create_in_store(&store, root).unwrap();
     stage.begin_feed(FEED, 1000, options, now).unwrap();
     for (index, channel) in catalog.channels.iter().enumerate() {

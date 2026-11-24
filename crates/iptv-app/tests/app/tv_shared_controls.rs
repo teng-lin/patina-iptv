@@ -121,9 +121,6 @@ fn tv_can_scroll_long_program_details_and_reopen_at_the_top() {
         .set("guide.stay_on_guide", Value::Bool(true))
         .unwrap();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
-    settings
-        .set("epg.update_on_start", Value::Bool(true))
-        .unwrap();
     let mut fixture = personalization::launch_prepared(
         home,
         settings,

@@ -192,7 +192,7 @@ Play a channel first").
 | Program and channel menu | Move | Performs the item | – | Closes; focus returns to the program or channel |
 | Program details | – | Records the program | – | Closes |
 | Channel list over the video | Move | Plays the focused channel | Left: the groups; Right: back to the channels | Back: from the groups to the channels, then closes; Menu: the channel's or group's menu (also Hold OK) |
-| PIN prompt | Move between digits and actions | Presses the focused action | – | Back closes; the content it guarded is not played |
+| PIN prompt | Move between digits and actions | On a digit after digits typed on number keys, submits; otherwise presses the focused key, so a PIN of any length can be entered on the keypad and Continue submits it. Number keys type digits | Move between digits and actions | Back closes; the content it guarded is not played |
 | Settings and other screens | Move | Activates | Move between columns | Back returns to where Settings opened, on the same channel |
 
 Ch+ / Ch− in the channel list zap without closing it.

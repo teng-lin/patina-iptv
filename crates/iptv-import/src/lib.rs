@@ -59,8 +59,9 @@ pub use link::{stalker_link, stalker_session};
 pub use m3u::import_m3u_text;
 pub use progress::{NoProgress, Phase, Progress, ProgressSink};
 pub use refresh::{
-    Decision, GuideState, RefreshPolicy, RefreshReason, StartupPlan, Trigger, decide,
-    matching_fingerprint, plan_startup, store_options,
+    Decision, GuideState, KEEP_PAST_MAX_DAYS, KEEP_PAST_MIN_DAYS, RefreshPolicy, RefreshReason,
+    StartupPlan, Trigger, decide, keep_past_days, matching_fingerprint, plan_startup,
+    store_options, update_interval,
 };
 pub use sink::{GuideSink, MemoryGuide, SinkError};
 

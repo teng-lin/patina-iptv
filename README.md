@@ -410,10 +410,11 @@ the player uses its normal pause, rewind, fast-forward and seek bar controls.
 Interrupted recordings retain captured media and recover the remaining time
 when possible; gaps are reported. Reminders and network recording
 destinations remain outside this feature. Provider accounts need enough
-connections for watching plus recording. **Settings → Other → Streams at once**
-uses the reported provider allowance automatically, or one connection when the
-allowance is unknown. An explicit local ceiling and known provider limits still
-apply. Watching and recording currently use separate upstream connections. Accounts identified
+connections for watching plus recording. Each playlist's **Streams at once**
+(among its actions under **Settings → Playlists → Manage playlists**) uses the
+reported provider allowance automatically, shown beside it, or one connection
+when the allowance is unknown. An explicit ceiling set there and known provider
+limits still apply. Watching and recording currently use separate upstream connections. Accounts identified
 as the same Xtream/portal account share their budget. M3U account associations
 are unknown and are counted conservatively against other streams.
 

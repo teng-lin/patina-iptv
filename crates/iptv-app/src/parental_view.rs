@@ -403,7 +403,7 @@ pub fn remote(ui: Ui, key: RemoteKey) {
     match key {
         RemoteKey::Digit(d) => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.digit(d);
+                o.dialog.key_digit(d);
             }
         }),
         RemoteKey::Up => self::key(ui, Action::MoveUp),
@@ -420,9 +420,14 @@ pub fn remote(ui: Ui, key: RemoteKey) {
                     .parental
                     .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
                 activate(ui, at);
-            } else if crate::settings::choice(iptv_settings::keys::PARENTAL_PIN_INPUT)
-                == "number_keys"
-            {
+            } else if ui.parental.with_untracked(|o| {
+                // One rule for every remote (#282): after digits typed on
+                // number keys, OK on a digit key submits; otherwise it
+                // presses the focused key (a digit, Delete, Continue,
+                // Forgot PIN?), so the keypad enters any PIN length.
+                o.as_ref()
+                    .is_some_and(|o| matches!(o.dialog.focus, 0..=8 | 10) && o.dialog.ok_submits())
+            }) {
                 submit(ui);
             } else {
                 let at = ui
@@ -499,7 +504,7 @@ fn activate(ui: Ui, index: usize) {
         }),
         9 => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.input.erase();
+                o.dialog.erase();
             }
         }),
         10 => ui.parental.update(|o| {

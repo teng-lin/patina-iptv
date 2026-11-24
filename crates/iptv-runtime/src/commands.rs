@@ -1186,7 +1186,7 @@ pub fn stored_guide(
     source: SourceId,
     now: iptv_epg::UnixTime,
 ) -> impl Future<Output = Result<iptv_epg::GuideStore, super::Error>> + use<> {
-    let window = super::paging::window(now, super::stored::keep_past_days(&owner.settings()));
+    let window = super::paging::window(now, super::stored::stored_past_days());
     let read = owner
         .services()
         .call(move |store| store.load_epg(source, &super::paging::store_window(window)));

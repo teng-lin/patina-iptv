@@ -69,11 +69,6 @@ fn fixture_in(
     settings
         .set("playlists.max_connections", Value::Int(3))
         .unwrap();
-    if guide_fixture.is_some() {
-        settings
-            .set("epg.update_on_start", Value::Bool(true))
-            .unwrap();
-    }
     let root = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();

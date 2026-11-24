@@ -122,7 +122,7 @@ pub(super) fn prepare(home: &crate::isolated::Home) {
     std::fs::create_dir_all(&directory).unwrap();
     let mut settings = iptv_settings::Settings::new();
     settings
-        .set("epg.update_interval", iptv_settings::Value::Duration(0))
+        .set("epg.update", iptv_settings::Value::choice("on_request"))
         .unwrap();
     std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
 }

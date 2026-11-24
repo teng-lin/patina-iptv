@@ -167,7 +167,7 @@ pub(crate) fn save(
     choice: Choice,
 ) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, crate::Error>> + use<> {
     let services = owner.services();
-    let keep = stored::keep_past_days(&services.settings());
+    let keep = stored::stored_past_days();
     let saved = services.call(move |store| save_and_rebind(store, source, &key, &choice, keep));
     async move { saved.await.map_err(crate::Error::from) }
 }

@@ -12,7 +12,7 @@ static PAGES: &[Page] = &[
     },
     Page {
         key: "playlists",
-        parts: &[Part::Keys(&["playlists.update_all"])],
+        parts: &[Part::Keys(&["playlists.update_all", "general.user_agent"])],
     },
     Page {
         key: "epg",
@@ -142,12 +142,14 @@ fn rows_leave_out_what_is_not_offered() {
         !general.contains(&"general.confirm_exit_window"),
         "advanced"
     );
+    // The default User-Agent is filed with the playlists (#282).
+    assert!(!general.contains(&"general.user_agent"));
     let other = keys_of(&rows(page("other"), &ctx(&s)));
     assert!(!other.contains(&"search.prefer_voice"));
     // Named rows are shown in their order.
     assert_eq!(
         keys_of(&rows(page("playlists"), &ctx(&s))),
-        ["playlists.update_all"]
+        ["playlists.update_all", "general.user_agent"]
     );
 }
 
@@ -349,83 +351,6 @@ fn a_stepper_moves_in_steps_within_range_and_keeps_on_ok() {
 }
 
 #[test]
-fn accepting_automatic_connections_preserves_absence_but_explicit_limits_are_saved() {
-    static CONNECTIONS: &[Page] = &[Page {
-        key: "connections",
-        parts: &[Part::Keys(&["playlists.max_connections"])],
-    }];
-    let mut settings = Settings::new();
-    fn context(settings: &Settings) -> Ctx<'_> {
-        Ctx {
-            settings,
-            offer: &everything,
-        }
-    }
-    let mut screen = Screen::new(CONNECTIONS, "connections");
-    screen.tap_row("playlists.max_connections", &context(&settings));
-    assert_eq!(screen.commit(), Effect::None);
-    assert!(screen.editor().is_none());
-    assert!(
-        settings
-            .stored("playlists.max_connections", &iptv_settings::Target::Global)
-            .is_none()
-    );
-    // Either choosing the lower boundary or returning to it after stepping up
-    // deliberately selects one; it must not silently retain Automatic.
-    for steps in [&[-1][..], &[1, -1][..]] {
-        screen.tap_row("playlists.max_connections", &context(&settings));
-        for &by in steps {
-            screen.step(by);
-        }
-        let selected = screen.commit();
-        assert_eq!(
-            selected,
-            Effect::Set {
-                key: "playlists.max_connections",
-                value: Value::Int(1)
-            }
-        );
-        let mut explicit = settings.clone();
-        apply(&mut explicit, selected);
-        assert_eq!(
-            explicit.stored("playlists.max_connections", &iptv_settings::Target::Global),
-            Some(&Value::Int(1))
-        );
-    }
-    screen.tap_row("playlists.max_connections", &context(&settings));
-    screen.step(1);
-    let changed = screen.commit();
-    assert_eq!(
-        changed,
-        Effect::Set {
-            key: "playlists.max_connections",
-            value: Value::Int(2)
-        }
-    );
-    apply(&mut settings, changed);
-    screen.tap_row("playlists.max_connections", &context(&settings));
-    assert_eq!(
-        screen.commit(),
-        Effect::Set {
-            key: "playlists.max_connections",
-            value: Value::Int(2)
-        }
-    );
-    // A previously explicit one must also remain explicit when accepted unchanged.
-    settings
-        .set("playlists.max_connections", Value::Int(1))
-        .unwrap();
-    screen.tap_row("playlists.max_connections", &context(&settings));
-    assert_eq!(
-        screen.commit(),
-        Effect::Set {
-            key: "playlists.max_connections",
-            value: Value::Int(1)
-        }
-    );
-}
-
-#[test]
 fn integers_step_as_integers() {
     let s = Settings::new();
     let mut screen = Screen::new(PAGES, "appearance");
@@ -516,7 +441,7 @@ fn text_is_kept_only_when_valid() {
         settings: &s,
         offer: &everything,
     };
-    let mut screen = Screen::new(PAGES, "general");
+    let mut screen = Screen::new(PAGES, "playlists");
     assert_eq!(screen.tap_row("general.user_agent", &c), Effect::None);
     screen.set_text("SyntheticPlayer/1.0");
     assert_eq!(
@@ -596,11 +521,12 @@ fn editors_name_what_they_edit() {
         let mut screen = Screen::new(PAGES, page);
         assert_eq!(opened(&mut screen, key), (key, Some(key)));
     }
-    let mut screen = Screen::new(PAGES, "general");
+    let mut screen = Screen::new(PAGES, "playlists");
     assert_eq!(
         opened(&mut screen, "general.user_agent"),
         ("general.user_agent", Some("general.user_agent"))
     );
+    let mut screen = Screen::new(PAGES, "general");
     assert_eq!(
         opened(&mut screen, "general.restore"),
         ("general.restore", None),
