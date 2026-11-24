@@ -322,7 +322,8 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
     let cols = Columns {
         entries: entry_count(&**view.catalog()),
         rail: &rail,
-        back_to_now: crate::settings::flag(iptv_settings::keys::BACK_RETURNS_TO_NOW),
+        // Always: `guide.back_returns_to_now` is retired (#281).
+        back_to_now: true,
     };
     let mut outcome = Outcome::None;
     ui.focus.update(|focus| outcome = f(focus, &cols, &view));

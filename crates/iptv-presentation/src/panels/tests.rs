@@ -345,3 +345,30 @@ fn input_during_a_hold_does_not_pull_its_deadline_in() {
     p.show_controls(3_100);
     assert_eq!(p.hide_at_ms(), Some(4_100));
 }
+
+#[test]
+fn panels_stay_while_a_screen_reader_or_switch_access_runs() {
+    let mut p = Panels::default();
+    p.assistive(true, 0);
+    assert!(p.waits_for_assistive());
+    // Every panel, the control strip included, stays however long the
+    // viewer takes.
+    let shows: [fn(&mut Panels, u64); 4] = [
+        Panels::show_controls,
+        Panels::show_card,
+        Panels::show_info,
+        Panels::show_banner,
+    ];
+    for show in shows {
+        show(&mut p, 10);
+        assert_eq!(p.hide_at_ms(), None);
+        assert!(!p.tick(1_000_000), "{:?} stays", p.shown);
+        p.hide();
+        assert_eq!(p.shown, Shown::Hidden, "the viewer still hides them");
+    }
+    // Once it stops, the strip's delay starts again from then.
+    p.show_controls(30);
+    p.assistive(false, 100);
+    assert_eq!(p.hide_at_ms(), Some(100 + p.timeouts.controls_ms));
+    assert!(p.tick(100 + p.timeouts.controls_ms));
+}

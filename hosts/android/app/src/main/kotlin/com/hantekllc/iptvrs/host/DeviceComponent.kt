@@ -1,13 +1,19 @@
 package com.hantekllc.iptvrs.host
 
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.database.ContentObserver
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.View
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityManager
 import com.longbridge.nsh.NshComponent
 import com.longbridge.nsh.NshComponentContext
 
@@ -17,6 +23,14 @@ import com.longbridge.nsh.NshComponentContext
  * it attaches, and again on each configuration change that alters them
  * (the activity handles `keyboard`, `keyboardHidden`, `navigation`,
  * `screenSize` and `smallestScreenSize` itself, so its views receive them).
+ *
+ * Also the accessibility settings that panels hiding by themselves follow,
+ * as an `accessibility` event, `{"controls_ms", "text_ms",
+ * "switch_access"}`: the timeouts `AccessibilityManager` recommends (the
+ * "time to take action" setting) and whether Switch Access runs. They are
+ * reported when it attaches, whenever accessibility is switched on or off
+ * or its services or timeouts change, and when the window regains the
+ * focus (back from the system's settings).
  */
 internal class DeviceComponent(
     private val context: NshComponentContext,
@@ -26,11 +40,38 @@ internal class DeviceComponent(
     }
 
     private var reported: Map<String, Any>? = null
+    private var reportedAccessibility: Map<String, Any>? = null
+    private val accessibility = context.context.getSystemService(AccessibilityManager::class.java)
+    private val accessibilityChanged = AccessibilityManager.AccessibilityStateChangeListener { reportAccessibility() }
+    private val accessibilitySettings =
+        object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = reportAccessibility()
+        }
     private val observer =
         object : View(context.context) {
             override fun onAttachedToWindow() {
                 super.onAttachedToWindow()
                 report(resources.configuration)
+                accessibility?.addAccessibilityStateChangeListener(accessibilityChanged)
+                for (name in AccessibilitySignals.SETTINGS) {
+                    context.contentResolver.registerContentObserver(
+                        Settings.Secure.getUriFor(name),
+                        false,
+                        accessibilitySettings,
+                    )
+                }
+                reportAccessibility()
+            }
+
+            override fun onDetachedFromWindow() {
+                accessibility?.removeAccessibilityStateChangeListener(accessibilityChanged)
+                context.contentResolver.unregisterContentObserver(accessibilitySettings)
+                super.onDetachedFromWindow()
+            }
+
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                super.onWindowFocusChanged(hasWindowFocus)
+                if (hasWindowFocus) reportAccessibility()
             }
 
             override fun onConfigurationChanged(config: Configuration) {
@@ -57,6 +98,28 @@ internal class DeviceComponent(
         if (next != reported) {
             reported = next
             context.emit("device", next)
+        }
+    }
+
+    private fun reportAccessibility() {
+        val manager = accessibility ?: return
+        val recommended = { flags: Int ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) manager.getRecommendedTimeoutMillis(0, flags) else 0
+        }
+        val services =
+            manager
+                .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                .mapNotNull { it.id }
+        val next =
+            mapOf(
+                "controls_ms" to recommended(AccessibilitySignals.CONTROLS),
+                "text_ms" to recommended(AccessibilitySignals.TEXT),
+                "switch_access" to AccessibilitySignals.switchAccess(services),
+            )
+        if (next != reportedAccessibility) {
+            Log.i("nsh", "iptv accessibility: $next")
+            reportedAccessibility = next
+            context.emit("accessibility", next)
         }
     }
 
@@ -134,4 +197,39 @@ internal object DeviceSignals {
             }
         return (minOf(width, height) / density).toInt()
     }
+}
+
+/**
+ * What Android's accessibility settings ask of panels that hide by
+ * themselves (`device.rs`'s `Recommended` and `assistive`).
+ */
+internal object AccessibilitySignals {
+    /** Panels with controls: the control strip, the card's actions, the play bar. */
+    const val CONTROLS = AccessibilityManager.FLAG_CONTENT_CONTROLS or AccessibilityManager.FLAG_CONTENT_TEXT
+
+    /** Panels to read: the banner after a channel change, the info card. */
+    const val TEXT = AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_ICONS
+
+    /**
+     * The secure settings whose change can change a report: the enabled
+     * services, and the interactive and non-interactive timeouts behind
+     * `getRecommendedTimeoutMillis` (named as `Settings.Secure` keeps them).
+     */
+    val SETTINGS =
+        listOf(
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            "accessibility_interactive_ui_timeout_ms",
+            "accessibility_non_interactive_ui_timeout_ms",
+        )
+
+    /**
+     * Whether a switch service runs, by the ids (`package/class`) of the
+     * enabled accessibility services: Google's Switch Access and Samsung's
+     * Universal Switch. No service property sets them apart.
+     */
+    fun switchAccess(serviceIds: List<String>): Boolean =
+        serviceIds.any { id ->
+            val name = id.lowercase()
+            "switchaccess" in name || "universalswitch" in name
+        }
 }

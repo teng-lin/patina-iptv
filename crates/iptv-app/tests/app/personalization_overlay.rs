@@ -8,6 +8,7 @@ fn overlay(stay: Option<bool>) -> Settings {
     let mut s = Settings::new();
     s.set("guide.browse_mode", Value::choice("overlay"))
         .unwrap();
+    // The retired switch: stored on, it reads as "Keep it open" (#281).
     if let Some(stay) = stay {
         s.set("guide.stay_on_guide", Value::Bool(stay)).unwrap();
     }

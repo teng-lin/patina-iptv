@@ -144,6 +144,7 @@ pub const ALL: &[(&str, &str)] = &[
     (VOD_SORT.0, "enum"),
     (VOD_AUTOPLAY_NEXT_EPISODE.0, "bool"),
     (GUIDE_SHOW_LOGOS.0, "bool"),
+    (GUIDE_AFTER_CHOOSING.0, "enum"),
     (GUIDE_STAY_ON_GUIDE.0, "bool"),
     (GUIDE_STAY_ON_LIST.0, "bool"),
 ];
@@ -311,6 +312,8 @@ impl BindingsKey {
         self.0
     }
 }
+
+pub const GUIDE_AFTER_CHOOSING: EnumKey = EnumKey("guide.after_choosing");
 
 pub const GUIDE_STAY_ON_GUIDE: BoolKey = BoolKey("guide.stay_on_guide");
 

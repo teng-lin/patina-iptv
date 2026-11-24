@@ -114,6 +114,8 @@ pub fn subsection(section: Section, subsection: &str) -> &'static str {
         (_, "unlock") => tr("Unlocking"),
         (_, "timing") => tr("Timing"),
         (_, "mapping") => tr("Keys"),
+        (_, "accessibility") => tr("Accessibility"),
+        (_, "advanced") => tr("Advanced"),
 
         _ => "",
     }
@@ -210,6 +212,7 @@ pub fn label(key: &str) -> &'static str {
         "guide.autoplay" => tr("Play the focused channel by itself"),
         "guide.switch_delay" => tr("Wait before tuning"),
         "guide.fullscreen_timeout" => tr("Go full screen after"),
+        "guide.after_choosing" => tr("After choosing a channel"),
         "guide.stay_on_list" => tr("Keep the channel list after choosing"),
         "guide.stay_on_guide" => tr("Keep the guide overlay after choosing"),
         "guide.back_returns_to_now" => tr("Back returns to the programs on air"),
@@ -350,6 +353,8 @@ pub fn choice(family: &str, variant: &str) -> String {
         ("selection_style", "neutral_fill") => tr("Neutral"),
         ("browse_mode", "preview") => tr("Video beside the list"),
         ("browse_mode", "overlay") => tr("List over the video"),
+        ("after_choosing", "full_screen") => tr("Go full screen"),
+        ("after_choosing", "stay") => tr("Keep it open"),
         ("now_highlight", "plain") => tr("Plain"),
         ("now_highlight", "color") => tr("Tinted"),
         ("now_highlight", "progress_only") => tr("Progress bar only"),

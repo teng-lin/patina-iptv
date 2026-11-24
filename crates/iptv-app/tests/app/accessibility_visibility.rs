@@ -507,8 +507,10 @@ fn inactive_player_ui_stays_out_of_accessibility_and_returns_without_recreating_
     exposure.shown(app, "player-panels", true);
     exposure.shown(app, "player-top-bar", false);
     exposure.shown(app, "player-controls", false);
+    // With the reader on, the banner stays past its delay (#281) until
+    // the viewer replaces or hides it.
     step(app.run_for(Duration::from_secs(4)));
-    exposure.shown(app, "player-panels", false);
+    exposure.shown(app, "player-panels", true);
     step(app.press_key("i"));
     step(app.wait_for("id:player-card"));
     exposure.shown(app, "player-card", true);

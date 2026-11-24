@@ -179,6 +179,9 @@ pub struct Panels {
     /// panels shown when it went down: apart from the idle deadline, so
     /// input meanwhile (a zap's banner) does not pull it in.
     hold: Option<(Shown, u64)>,
+    /// A screen reader or switch access runs: the panels stay until the
+    /// viewer hides them ([`Self::assistive`]).
+    assistive: bool,
 }
 
 impl Default for Panels {
@@ -192,6 +195,7 @@ impl Default for Panels {
             by_pointer: false,
             hide_at_ms: None,
             hold: None,
+            assistive: false,
         }
     }
 }
@@ -435,6 +439,20 @@ impl Panels {
         self.hold.is_some()
     }
 
+    /// A screen reader or switch access started (`true`) or stopped. Its
+    /// user moves from control to control at their own pace, slower than
+    /// any delay: while one runs, the panels shown stay until the viewer
+    /// hides them; once it stops, their delay starts again.
+    pub fn assistive(&mut self, on: bool, now_ms: u64) {
+        self.assistive = on;
+        self.touch(now_ms);
+    }
+
+    /// Whether the panels wait for a screen reader or switch access.
+    pub fn waits_for_assistive(&self) -> bool {
+        self.assistive
+    }
+
     /// Any input while shown: restart the auto-hide timer.
     pub fn touch(&mut self, now_ms: u64) {
         let t = self.timeouts;
@@ -449,8 +467,12 @@ impl Panels {
 
     /// When the panels hide unless something happens (for scheduling):
     /// their idle deadline, or a held key's if later and still over the
-    /// panels it was held on.
+    /// panels it was held on; never while a screen reader or switch access
+    /// runs.
     pub fn hide_at_ms(&self) -> Option<u64> {
+        if self.assistive {
+            return None;
+        }
         let hold = self
             .hold
             .filter(|(shown, _)| *shown == self.shown)

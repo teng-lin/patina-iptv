@@ -217,6 +217,17 @@ impl PlayBar {
         self.hold_until_ms.is_some()
     }
 
+    /// Changes the idle delay (a system's recommended accessibility
+    /// timeout, for one): from the next input on.
+    pub fn set_idle_ms(&mut self, idle_ms: u64) {
+        self.idle_ms = idle_ms;
+    }
+
+    /// The idle delay.
+    pub fn idle_ms(&self) -> u64 {
+        self.idle_ms
+    }
+
     fn restart(&mut self, now_ms: u64) {
         self.hide_at_ms = Some(now_ms.saturating_add(self.idle_ms));
     }

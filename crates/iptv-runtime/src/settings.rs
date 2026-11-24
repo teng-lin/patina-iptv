@@ -35,11 +35,36 @@ pub(crate) fn load(owner: &super::Runtime) {
     let services = owner.services();
     let (settings, read_only) = read_file(services.files(), &path(services.directory()));
     owner.settings_read_only.set(read_only);
-    let settings = Arc::new(settings);
+    let settings = Arc::new(adopt_retired(settings));
     owner
         .settings_saved
         .with(|saved| *saved.borrow_mut() = Some((owner.settings_changed.get(), settings.clone())));
     replace(services.shared_settings(), settings);
+}
+
+/// Carries retired settings into the ones that replaced them, as the
+/// settings load: at startup, which is also when a restored backup's
+/// settings are first read. Nothing is rewritten until the next save, and
+/// the retired entries stay, so an older build that reads the file keeps
+/// its own meaning of them.
+///
+/// - `guide.stay_on_guide` and `guide.stay_on_list` (#281): one
+///   `guide.after_choosing` replaces them. While it is not stored, either
+///   one on stands for `stay`: the viewer chose to keep a list open, and
+///   one choice now covers both.
+fn adopt_retired(mut settings: Settings) -> Settings {
+    let at = Target::Global;
+    let stayed = settings.bool(keys::GUIDE_STAY_ON_GUIDE, &at)
+        || settings.bool(keys::GUIDE_STAY_ON_LIST, &at);
+    if stayed
+        && settings
+            .stored(keys::GUIDE_AFTER_CHOOSING.as_str(), &at)
+            .is_none()
+        && let Err(error) = settings.set(keys::GUIDE_AFTER_CHOOSING.as_str(), Value::choice("stay"))
+    {
+        log::warn!("iptv settings: could not carry the stay choice over: {error}");
+    }
+    settings
 }
 
 /// The settings saved at `path` (or queued for it); defaults when there
@@ -623,6 +648,43 @@ mod host_tests {
         assert_eq!(
             owner.settings().text(keys::USER_AGENT, &Target::Global),
             "SyntheticAgent/3"
+        );
+    }
+}
+
+#[cfg(test)]
+mod adopt_tests {
+    use super::*;
+
+    fn after_choosing(settings: &Settings) -> Option<&Value> {
+        settings.stored(keys::GUIDE_AFTER_CHOOSING.as_str(), &Target::Global)
+    }
+
+    #[test]
+    fn a_stay_choice_carries_into_the_one_after_choosing() {
+        // Nothing chosen: nothing is stored, the default (full screen) holds.
+        assert_eq!(after_choosing(&adopt_retired(Settings::new())), None);
+        // Either old switch on stands for staying; the old entry stays.
+        for key in ["guide.stay_on_guide", "guide.stay_on_list"] {
+            let mut old = Settings::new();
+            old.set(key, Value::Bool(true)).unwrap();
+            let adopted = adopt_retired(old);
+            assert_eq!(after_choosing(&adopted), Some(&Value::choice("stay")));
+            assert_eq!(adopted.get(key), Ok(Value::Bool(true)), "{key} is kept");
+        }
+        // Both off, as a viewer who turned one off again stored it.
+        let mut off = Settings::new();
+        off.set("guide.stay_on_guide", Value::Bool(false)).unwrap();
+        assert_eq!(after_choosing(&adopt_retired(off)), None);
+        // A choice made since wins over the old switches.
+        let mut chosen = Settings::new();
+        chosen.set("guide.stay_on_list", Value::Bool(true)).unwrap();
+        chosen
+            .set("guide.after_choosing", Value::choice("full_screen"))
+            .unwrap();
+        assert_eq!(
+            after_choosing(&adopt_retired(chosen)),
+            Some(&Value::choice("full_screen"))
         );
     }
 }

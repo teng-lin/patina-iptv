@@ -8,8 +8,8 @@ pub fn two_step_preview(home: &std::path::Path) {
 
 pub fn two_step_preview_with(home: &std::path::Path, adjust: impl FnOnce(&mut Settings)) {
     let mut s = Settings::new();
-    s.set("guide.stay_on_guide", Value::Bool(true)).unwrap();
-    s.set("guide.stay_on_list", Value::Bool(true)).unwrap();
+    s.set("guide.after_choosing", Value::choice("stay"))
+        .unwrap();
     s.set("guide.switch_delay", Value::ms(0)).unwrap();
     adjust(&mut s);
     let dir = crate::isolated::data_dir(home);

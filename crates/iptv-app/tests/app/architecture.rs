@@ -22,20 +22,21 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.
     ("desktop.rs", "TRAVELED"),                     // Last pointer place, for Keys to Pointer.
     ("device.rs", "REPORTED"),                      // Reactive handle of the host's device report.
-    ("fonts.rs", "FITTED"),                         // Font measurement cache.
-    ("fonts.rs", "FONTS_IN"),                       // Font registration flag.
-    ("guide_assign_view.rs", "REQUEST"),            // Discard stale dialog replies.
-    ("header.rs", "ON"),                            // Debug overlay environment flag cache.
-    ("i18n.rs", "SYSTEM"),                          // System locale cache.
-    ("i18n.rs", "WORDING_SETTINGS"),                // cfg(test)-only scoped wording preferences.
-    ("i18n/pseudo.rs", "ENABLED"), // test-support-only pseudolocale environment flag.
-    ("i18n/pseudo.rs", "FIXED"),   // test-support-only immutable expanded catalog.
-    ("input.rs", "REMOTE_PHASES"), // test-support-only remote key phase switch.
-    ("input.rs", "REPEATS"),       // test-support-only keyboard repeat mirror.
-    ("lib.rs", "RUNTIME"),         // The shell's single application handle.
-    ("lib.rs", "ROOT_STARTED"),    // Guard: the handle is asked for on the application thread only.
-    ("lib.rs", "TUI_MODE"),        // Host flag: TUI backend bypasses StickyCells trackball wrapper.
-    ("lists.rs", "HINT_SHOWN"),    // Visible navigation hint revision.
+    ("device.rs", "ACCESSIBILITY"), // Reactive handle of the host's accessibility report.
+    ("fonts.rs", "FITTED"),         // Font measurement cache.
+    ("fonts.rs", "FONTS_IN"),       // Font registration flag.
+    ("guide_assign_view.rs", "REQUEST"), // Discard stale dialog replies.
+    ("header.rs", "ON"),            // Debug overlay environment flag cache.
+    ("i18n.rs", "SYSTEM"),          // System locale cache.
+    ("i18n.rs", "WORDING_SETTINGS"), // cfg(test)-only scoped wording preferences.
+    ("i18n/pseudo.rs", "ENABLED"),  // test-support-only pseudolocale environment flag.
+    ("i18n/pseudo.rs", "FIXED"),    // test-support-only immutable expanded catalog.
+    ("input.rs", "REMOTE_PHASES"),  // test-support-only remote key phase switch.
+    ("input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
+    ("lib.rs", "RUNTIME"),          // The shell's single application handle.
+    ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
+    ("lib.rs", "TUI_MODE"),     // Host flag: TUI backend bypasses StickyCells trackball wrapper.
+    ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
     ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.

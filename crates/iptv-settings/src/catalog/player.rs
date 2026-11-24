@@ -39,14 +39,14 @@ const IF_AFR: &[Dependency] = &[enabled_if(&[when("playback.afr", Test::IsTrue)]
 pub static PLAYER: &[Setting] = &[
     // default: ours (iptv-core panels::Timeouts)
     player(
-        "panels",
+        "accessibility",
         "player.info_panel_timeout",
         secs(1, 30, 1, 4),
         key("The info panel hides itself after this long without input."),
     ),
     // default: ours (iptv-core panels::Timeouts)
     player(
-        "panels",
+        "accessibility",
         "player.controls_panel_timeout",
         secs(1, 60, 1, 7),
         key("The control panel hides itself after this long without input."),
@@ -305,14 +305,14 @@ pub static CATCHUP: &[Setting] = &[
     ),
     // default: ours
     catchup(
-        "steps",
+        "advanced",
         "catchup.forward_step",
         secs(5, 600, 5, 30),
         key("Jump made by one fast-forward press."),
     ),
     // default: ours
     catchup(
-        "steps",
+        "advanced",
         "catchup.rewind_step",
         secs(5, 600, 5, 10),
         key("Jump made by one rewind press."),

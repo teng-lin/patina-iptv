@@ -83,14 +83,17 @@ rules are more than a few lines, that is the point to take a library.
 
 Weekday and month names, their order, and the 12-hour day's two halves come
 from `crates/iptv-presentation/src/i18n/calendar.rs` (`Tue 10 Nov`, `Di., 10. Nov.`,
-`11月10日(火)`). **Settings → General → Clock** chooses the clock:
+`11月10日(火)`). A phone or a tablet (Android, iPad) follows the system's
+12/24-hour setting, which NSH receives, and has no Clock row (#281). On a
+desktop or a TV, **Settings → General → Clock** chooses the clock:
 
 - **As the language writes it** (the default): 12-hour for English outside
   the United Kingdom, Ireland and South Africa, for Korean and for
   Traditional Chinese; 24-hour for the rest. With **System language**, the
   device's locale decides (`en-GB` is 24-hour); with a chosen language, that
   language does. A device language the app has no translation for keeps the
-  24-hour clock. The app does not read Android's own 12/24-hour switch.
+  24-hour clock. On an Android TV the app does not read Android's own
+  12/24-hour switch.
 - **12-hour** or **24-hour**, whatever the language.
 
 Durations (`1:05:30`), time shifts (`+1:30 h`) and stream figures are numbers,

@@ -35,8 +35,26 @@ configuration change; before that report an Android build counts as a tablet
 with neither input. The settings offer check (`settings::offer`), the control
 strip and multiview's decoder count read the signals as they are now, so a
 change takes effect without a restart. A control that leaves the strip while
-focused passes the focus to its nearest neighbor. No gate changes what it offers
-by these signals yet; the host profiles above still follow the platform alone.
+focused passes the focus to its nearest neighbor. The host profiles above still
+follow the platform alone.
+
+Settings the signals decide (#281, `settings::offer`):
+
+| Setting | Phone, tablet | Desktop | TV | Compact window |
+| --- | --- | --- | --- | --- |
+| `general.clock` | Hidden: the system's 24-hour setting decides | Shown | Shown | As the device |
+| `appearance.ui_transparency`, `guide.browse_mode`, `guide.list_browse_mode` | Shown | Shown | Shown | Hidden: the guide shows its preview, and the channel list has no room for the video beside it |
+| `guide.fullscreen_timeout` | Hidden, never | Hidden, never | Under Advanced | As the device |
+| `guide.after_choosing` | Hidden, always full screen | Shown | Shown | As the device |
+| `player.info_on_switch` | Hidden unless a keyboard or a D-pad is connected | Shown | Shown | As the device |
+
+Android's activity also reports its accessibility settings: the timeouts
+`AccessibilityManager.getRecommendedTimeoutMillis` gives for controls and for
+text, and whether Switch Access (or Samsung's Universal Switch) runs. The
+player's panels and the play bar never hide sooner than the recommended
+timeout, and stay until the viewer hides them while a screen reader (as NSH
+reports it, on every host) or Switch Access runs. iPadOS's Switch Control is
+not detected: NSH reports VoiceOver only.
 
 These are configured limits and facilities, not certification of a device's
 decoder performance. The profile tests exercise each row without needing that

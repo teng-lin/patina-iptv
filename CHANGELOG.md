@@ -23,6 +23,18 @@ is below 1.0, a minor release may change behavior.
   future recording, and the recorder login startup and precise wakeup settings
   are hidden. Recordings scheduled earlier stay listed, can be canceled and
   still run. Record now is unchanged.
+- Let the device decide several guide, player and display settings. Phones and
+  tablets follow the system's 12/24-hour clock and always go full screen after
+  choosing a channel. One "After choosing a channel" choice replaces the two
+  "Keep … after choosing" switches on desktops and TVs. "Go full screen after"
+  is a TV's only, under Advanced. A compact window shows the guide beside its
+  preview and hides the layout and transparency rows. "Show info on a channel
+  change" is hidden on a phone or tablet without a keyboard or D-pad. Back in
+  the guide always returns to the programs on air first.
+- Move the panel timeouts under Playback → Accessibility, and the rewind and
+  fast-forward jumps under Advanced. The player's panels and play bar now wait
+  at least Android's recommended accessibility timeout, and stay until hidden
+  while a screen reader or Switch Access runs.
 
 ## [0.1.8] - 2026-11-23
 

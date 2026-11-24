@@ -185,6 +185,12 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
             GL,
             "",
         ),
+        (
+            "guide.after_choosing",
+            choice(&c::AFTER_CHOOSING, "full_screen"),
+            GL,
+            "",
+        ),
         ("guide.fullscreen_timeout", secs(0, 60, 1, 0), GL, ""),
         ("guide.stay_on_list", boolean(false), GL, ""),
         ("guide.stay_on_guide", boolean(false), GL, ""),
