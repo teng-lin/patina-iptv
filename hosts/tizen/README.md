@@ -33,8 +33,9 @@ features (reference types, bulk memory) that this engine rejects, so
 
 Requirements: Tizen Studio with the TV extension and Samsung Certificate
 Extension, a Samsung certificate profile that lists your TV's DUID, the TV in
-Developer Mode with this computer's address, and the pinned nightly toolchain
-with `rust-src`:
+Developer Mode with this computer's address, Python 3 (it writes the
+interface languages' package files), and the pinned nightly toolchain with
+`rust-src`:
 
 ```sh
 rustup toolchain install nightly-2026-10-24 --component rust-src
@@ -51,9 +52,10 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   playlist is saved. Holding OK or Back acts once. The red button opens it
   again later.
 - Back on the guide's rail, or on the first launch's playlist setup,
-  asks "Close Patina?" with No focused: Left, Right, Up and Down move
-  between No and Yes, OK chooses, Back closes the question. Only Yes
-  leaves. The remote's Exit key is the system's: it leaves from any
+  asks "Close Patina?" with No focused: Left moves to No and Right to
+  Yes, Up and Down to the other answer, OK chooses, Back closes the
+  question. Only Yes leaves. The focused answer has the page's focus, so
+  Voice Guide reads it. The remote's Exit key is the system's: it leaves from any
   screen without asking (Samsung's termination rules; the page does not
   register it). The question is in the TV's language.
 - The guide screen: the preview of the playing channel at the top left

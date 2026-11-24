@@ -368,6 +368,7 @@ body.guide #notice { top: auto; bottom: 32px; }
     font-size: 28px;
     border-radius: 6px;
 }
+#leave-buttons span:focus { outline: none; }
 #leave-buttons span.focus { background: #9CCBEB; color: #101418; }
 
 /* The core stopped: the last layer, above every other one. */

@@ -804,31 +804,45 @@ function exit() {
  * never registered, so it leaves from any screen without asking. */
 var leave = { open: false, yes: false };
 function openLeave(m) {
-    if (stopped) return;
+    /* A second answer (two quick Returns) keeps the choice already made. */
+    if (stopped || leave.open) return;
+    /* A field the setup started editing while the core answered: the
+     * question takes the keys. */
+    if (setup.editing) {
+        setup.editing.blur();
+        setup.editing = null;
+        drawSetup();
+    }
+    $('leave').lang = m.lang || '';
     $('leave-title').textContent = m.title;
     $('leave-no').textContent = m.no;
     $('leave-yes').textContent = m.yes;
     leave.open = true;
     leave.yes = false;
     keysLost();
-    $('search-input').blur();
     $('leave').classList.remove('hidden');
     drawLeave();
 }
+/* The answer in focus has the page's focus too, so the TV's Voice Guide
+ * reads it. */
 function drawLeave() {
     $('leave-no').classList.toggle('focus', !leave.yes);
     $('leave-yes').classList.toggle('focus', leave.yes);
+    $(leave.yes ? 'leave-yes' : 'leave-no').focus();
 }
 function closeLeave() {
     leave.open = false;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     $('leave').classList.add('hidden');
 }
-/* Every key is the prompt's while it is open: Left, Right, Up and Down
- * move between No and Yes, OK chooses, Back closes it (as No). OK and
- * Back act once per press. */
+/* Every key is the prompt's while it is open: Left moves to No and Right
+ * to Yes (as they are laid out), Up and Down move to the other one, OK
+ * chooses, Back closes it (as No). OK and Back act once per press. */
 function leaveKey(code, repeat) {
-    if (code === 37 || code === 38 || code === 39 || code === 40) {
-        leave.yes = !leave.yes;
+    var yes = code === 37 ? false : code === 39 ? true
+        : (code === 38 || code === 40) && !repeat ? !leave.yes : leave.yes;
+    if (yes !== leave.yes) {
+        leave.yes = yes;
         drawLeave();
     } else if (code === 13 && !repeat) {
         if (leave.yes) exit();
@@ -838,8 +852,12 @@ function leaveKey(code, repeat) {
     }
 }
 
+/* The remote's Exit key (10182) is the system's: never registered, and
+ * left alone should the page see it. */
+var EXIT = 10182;
 document.addEventListener('keydown', function (e) {
     var code = e.keyCode;
+    if (code === EXIT) return;
     if (stopped) { e.preventDefault(); return; }
     if (leave.open) { e.preventDefault(); leaveKey(code, e.repeat); return; }
     if (setup.open) { if (setupKey(code, e.repeat)) e.preventDefault(); return; }

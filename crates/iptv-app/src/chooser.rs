@@ -373,8 +373,23 @@ fn start_sleep(ui: Ui, minutes: u32) {
     });
 }
 
-pub fn layer(ui: Ui) -> impl IntoElement {
-    let open = move || ui.chooser.with(Option::is_some);
+/// Whether a chooser is open in the layer of the question before leaving
+/// (`leave`, over every screen) or in the one of the others (over the
+/// video, under the play bar).
+pub(crate) fn is_open(ui: Ui, leave: bool) -> bool {
+    ui.chooser
+        .with(|c| c.as_ref().is_some_and(|c| (c.kind == Kind::Leave) == leave))
+}
+
+/// The choosers' layer: `leave` for the question before leaving, over
+/// every screen; else the others, over the video. Each shows only its own.
+pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
+    let open = move || is_open(ui, leave);
+    let overlay = if leave {
+        crate::overlays::Overlay::Leave
+    } else {
+        crate::overlays::Overlay::Chooser
+    };
     let width = signal(None);
     effect(move || {
         let stale = ui.chooser.with(|chooser| {
@@ -389,14 +404,24 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         });
         // Keep row identities stable for an in-flight press. A change in
         // availability or fit dismisses the old list before it can be used.
-        if stale {
+        if stale && !leave {
             close(ui);
         }
     });
-    let count = move || ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len));
+    let count = move || {
+        if open() {
+            ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len))
+        } else {
+            0
+        }
+    };
     let size = Scale::new();
     let list = element_ref();
-    let focus = computed(move || ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)));
+    let focus = computed(move || {
+        open()
+            .then(|| ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)))
+            .flatten()
+    });
     effect(move || {
         if let Some(i) = focus.get() {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
@@ -471,7 +496,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .text_color(move || mark().text()),
             )
     };
-    let kind = move || ui.chooser.with(|c| c.as_ref().map(|c| c.kind));
+    let kind = move || {
+        open()
+            .then(|| ui.chooser.with(|c| c.as_ref().map(|c| c.kind)))
+            .flatten()
+    };
     // Mounted while closed: nothing in it says `PointerEvents::Auto`
     // (`channels_view::layer`).
     view()
@@ -498,10 +527,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 40.0
             })
         })
-        .test_id("chooser-layer")
-        .accessibility_elements_hidden(move || {
-            crate::overlays::Overlay::Chooser.accessibility_hidden(ui)
+        .test_id(if leave {
+            "leave-layer"
+        } else {
+            "chooser-layer"
         })
+        .accessibility_elements_hidden(move || overlay.accessibility_hidden(ui))
         .opacity(move || if open() { 1.0_f32 } else { 0.0 })
         .pointer_events(move || {
             if open() {
@@ -524,7 +555,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         )
         .child(
             view()
-                .test_id("chooser-panel")
+                .test_id(if leave {
+                    "leave-panel"
+                } else {
+                    "chooser-panel"
+                })
                 // Never wider than the window (an iPad's narrowest windows).
                 .max_w(percentage(1.0))
                 // Nor taller than the room between the safe area and the
@@ -551,7 +586,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     virtual_list(count, row)
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
-                        .test_id("chooser-items")
+                        .test_id(if leave {
+                            "leave-items"
+                        } else {
+                            "chooser-items"
+                        })
                         .flex_shrink(1.0)
                         .min_h(px(0.0))
                         .h(move || {

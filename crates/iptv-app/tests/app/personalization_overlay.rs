@@ -121,7 +121,7 @@ fn a_host_that_asks_before_leaving_confirms_back_at_the_top_level() {
     step(app.press_key("left"));
     let ask = |app: &mut crate::headless::Headless| {
         step(app.back());
-        step(app.wait_for("id:chooser-panel >> text:Close Patina?"));
+        step(app.wait_for("id:leave-panel >> text:Close Patina?"));
         assert!(app.shows("No") && app.shows("Yes"));
     };
     let gone = |app: &mut crate::headless::Headless| {
@@ -142,5 +142,37 @@ fn a_host_that_asks_before_leaving_confirms_back_at_the_top_level() {
     step(app.press_key("down"));
     step(app.press_key("enter"));
     gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 1);
+}
+
+/// The first run's welcome screen is the app's first screen too: where
+/// the host asks before leaving, Back there asks over it (#277), and No
+/// or Back returns to it.
+#[test]
+fn a_host_that_asks_before_leaving_confirms_back_on_the_welcome_screen() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LEFT: AtomicUsize = AtomicUsize::new(0);
+    let Some(_home) = isolated!() else { return };
+    iptv_app::confirm_leaving(|| {
+        LEFT.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut config = nsh_engine::EngineConfig {
+        viewport: nsh_core::Size::new(nsh_core::prelude::px(1920.0), nsh_core::prelude::px(1080.0)),
+        ..nsh_engine::EngineConfig::new(nsh_core::element::Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = nsh_core::platform::Idiom::Tv;
+    let mut app = crate::headless::Headless::start(config).unwrap();
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.back());
+    step(app.wait_for("id:leave-panel >> text:Close Patina?"));
+    step(app.back());
+    step(app.wait_for_gone("text:Close Patina?", Duration::from_secs(2)));
+    step(app.wait_for("id:wizard-welcome"));
+    assert_eq!(LEFT.load(Ordering::SeqCst), 0);
+    step(app.back());
+    step(app.wait_for("id:leave-panel >> text:Close Patina?"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Close Patina?", Duration::from_secs(2)));
     assert_eq!(LEFT.load(Ordering::SeqCst), 1);
 }

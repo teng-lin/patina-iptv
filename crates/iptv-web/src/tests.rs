@@ -398,14 +398,14 @@ fn imports_a_playlist_and_its_guide_then_plays_and_zaps() {
     assert_eq!(asked(&fake), 1);
     assert_eq!(
         last_of(&fake, "leave"),
-        serde_json::json!({ "type": "leave", "title": "Close Patina?", "no": "No", "yes": "Yes" })
+        serde_json::json!({ "type": "leave", "lang": "en", "title": "Close Patina?", "no": "No", "yes": "Yes" })
     );
     send(serde_json::json!({ "cmd": "locale", "locale": "de-DE" }));
     key("back");
     assert_eq!(asked(&fake), 2);
     assert_eq!(
         last_of(&fake, "leave"),
-        serde_json::json!({ "type": "leave", "title": "Patina schließen?", "no": "Nein", "yes": "Ja" })
+        serde_json::json!({ "type": "leave", "lang": "de", "title": "Patina schließen?", "no": "Nein", "yes": "Ja" })
     );
     // The page's `leave` (Back at the first launch's setup) asks the same.
     send(serde_json::json!({ "cmd": "leave" }));

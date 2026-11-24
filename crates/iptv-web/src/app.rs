@@ -181,6 +181,7 @@ fn ask_to_leave() {
     host().emit(
         &json!({
             "type": "leave",
+            "lang": language.tag,
             "title": tr("Close Patina?"),
             "no": tr("No"),
             "yes": tr("Yes"),

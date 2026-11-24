@@ -1082,7 +1082,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(multiview_picker::layer(ui))
         .child(search_view::layer(ui))
         .child(menu_view::layer(ui))
-        .child(chooser::layer(ui))
+        .child(chooser::layer(ui, false))
         // Over the popups it opens (choosers, program details), so its
         // buttons stay usable and toggle them.
         .child(play_bar::layer(ui))
@@ -1104,6 +1104,13 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(backup::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup::store_failure_layer(ui))
+        // The question before leaving, over every screen it can be asked
+        // from (the first run's welcome screen too); mounted only while it
+        // is asked.
+        .child(nsh_core::prelude::when(
+            move || chooser::is_open(ui, true),
+            move || chooser::layer(ui, true),
+        ))
         .child(settings_view::notice_layer())
 }
 
@@ -1196,6 +1203,12 @@ fn asks_before_leaving() -> bool {
     LEAVE.get().is_some()
 }
 
+/// Where Back would leave the app: the prompt instead, where the host asks
+/// first ([`confirm_leaving`]); `false` (leave) elsewhere.
+pub(crate) fn ask_before_leaving(ui: Ui) -> bool {
+    asks_before_leaving() && chooser::ask_to_leave(ui)
+}
+
 /// Yes in the prompt [`confirm_leaving`] asked for: the host leaves.
 pub(crate) fn leave() {
     if let Some(leave) = LEAVE.get() {
@@ -1248,7 +1261,9 @@ fn bind_back(ui: Ui) {
 
 /// One step back (the platform's Back, or a key standing in for it);
 /// `false` where Back leaves the app. Where the host asks before leaving
-/// ([`confirm_leaving`]), that last step opens the prompt instead.
+/// ([`confirm_leaving`]), every such last step (the guide's rail, the
+/// first run's welcome screen, the store failure screen) opens the prompt
+/// instead, over every other layer.
 pub(crate) fn go_back(ui: Ui) -> bool {
     external_player::cancel_pending(ui);
     if ui.channel_number.with(|entry| entry.active()) {
@@ -1269,6 +1284,10 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
+            _ if top == Some(Overlay::Leave) => {
+                chooser::close(ui);
+                true
+            }
             _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
@@ -1333,21 +1352,18 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                     .update(iptv_presentation::play_bar::PlayBar::hide);
                 true
             }
-            // Hint, past program → now, guide → groups → rail → leave
-            // (or ask first, where the host does).
+            // Hint, past program → now, guide → groups → rail → leave.
             (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
                 ui.mode.set(ViewMode::Fullscreen);
                 true
             }
-            (ViewMode::Guide | ViewMode::Overlay, _, _) => {
-                lists::back(ui) || (asks_before_leaving() && chooser::ask_to_leave(ui))
-            }
+            (ViewMode::Guide | ViewMode::Overlay, _, _) => lists::back(ui),
             _ => {
                 ui.mode.set(crate::settings::browse_mode());
                 true
             }
         }
-    })
+    }) || ask_before_leaving(ui)
 }
 
 /// Whether a stored source has a guide timer or an in-flight guide read,

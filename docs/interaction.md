@@ -223,7 +223,9 @@ and focus on a live channel follows the clock to the program now on air.
   (#277). A host that asks before leaving (`iptv_app::confirm_leaving`:
   the Tizen NSH host, after Samsung's termination guide) keeps the handler
   there instead, and Back opens a chooser, "Close Patina?", with No
-  focused and Yes; Back or No closes it, Yes has the host leave.
+  focused and Yes; Back or No closes it, Yes has the host leave. It asks
+  wherever Back would otherwise leave (the first run's welcome screen
+  too) and shows over every other screen.
 
 ## Secondary actions
 

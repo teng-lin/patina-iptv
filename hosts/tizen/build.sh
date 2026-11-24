@@ -8,8 +8,11 @@
 #
 # Signing uses a local Tizen Studio certificate profile named by
 # TIZEN_SIGNING_PROFILE (Certificate Manager; keep it out of the repository).
-# Requires Tizen Studio's `tizen` CLI and a nightly toolchain with rust-src.
+# Requires Tizen Studio's `tizen` CLI, a nightly toolchain with rust-src,
+# and Python 3 (the interface languages' package files).
 set -euo pipefail
+
+command -v python3 >/dev/null || { echo "build.sh: python3 is needed to write the language files" >&2; exit 1; }
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$root/target/tizen"
