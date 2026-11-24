@@ -274,10 +274,21 @@ fn touch(
 /// then reports as a tap whatever the finger did (its press ends early
 /// only when the finger leaves the view): a swipe must not be one.
 fn lift_press(app: &mut Headless) {
+    // Android's host reports a finger's press with at least one click.
+    press_video(app, 1);
+}
+
+/// The video's press: `clicks` 0 is a keyboard's or a screen reader's.
+fn press_video(app: &mut Headless, clicks: u32) {
     let video = app.screen().id("id:video").unwrap();
-    app.engine()
-        .control()
-        .dispatch_event(video, EventKind::Press, EventPayload::None);
+    app.engine().control().dispatch_event(
+        video,
+        EventKind::Press,
+        EventPayload::Press(nsh_core::PressEvent {
+            clicks,
+            ..Default::default()
+        }),
+    );
 }
 
 /// A finger on the video goes down at `from`, moves through `through`, 10
@@ -414,6 +425,58 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     assert!(banner_names(&app, 3));
     tunes(&mut app, &tuned, 3, "swipe down: Ch−");
 
+    // A lift that is the swipe's first report past the threshold, no move
+    // between, swiped too: its press is no tap, which would drop the zap.
+    let (target, path) = video_path(&app);
+    touch(
+        &mut app,
+        TouchPhase::Start,
+        target,
+        &path,
+        (640.0, 600.0),
+        5_000.0,
+    );
+    touch(
+        &mut app,
+        TouchPhase::End,
+        target,
+        &path,
+        (640.0, 300.0),
+        5_050.0,
+    );
+    lift_press(&mut app);
+    app.settle();
+    assert!(!app.screen().matches("id:play-bar-layer").unwrap());
+    assert!(banner_names(&app, 2), "the lift alone swiped up");
+    tunes(&mut app, &tuned, 2, "a swipe reported only at its lift");
+    swipe(&mut app, 300.0);
+    tunes(&mut app, &tuned, 3, "swipe down again");
+
+    // A platform that reports no press after a swipe (iOS's ends with the
+    // finger's movement): a keyboard's or a screen reader's press after it
+    // is still a tap.
+    let from = (SCREEN.0 / 2.0, 600.0);
+    finger(&mut app, from, &[(from.0, 560.0)], true);
+    let (target, path) = video_path(&app);
+    touch(
+        &mut app,
+        TouchPhase::End,
+        target,
+        &path,
+        (from.0, 560.0),
+        2_000.0,
+    );
+    app.settle();
+    press_video(&mut app, 0);
+    app.settle();
+    assert!(
+        app.screen().matches("id:play-bar-layer").unwrap(),
+        "a screen reader's activation after a swipe shows the play bar"
+    );
+    press_video(&mut app, 0);
+    app.settle();
+    assert!(!app.screen().matches("id:play-bar-layer").unwrap());
+
     // A swipe brought back, one from the bottom edge, one from the top
     // edge and a horizontal drag change nothing.
     let opened = streams(&tuned).len();
@@ -522,6 +585,16 @@ fn with_swiping_off_the_buttons_and_accessibility_actions_still_zap() {
     tunes(&mut app, &tuned, 2, "next: Ch+");
     step(app.press("id:play-bar-previous-channel"));
     tunes(&mut app, &tuned, 3, "previous: Ch−");
+
+    // Over a chooser the bar stays usable: its next button closes the
+    // chooser (about the channel it leaves), and the zap tunes.
+    step(app.play_bar_option("Display"));
+    step(app.wait_for("id:chooser-panel >> text:Picture size"));
+    step(app.press("id:play-bar-next-channel"));
+    step(app.wait_for_gone("id:chooser-panel >> text:Picture size", WAIT));
+    tunes(&mut app, &tuned, 2, "next over a chooser");
+    step(app.press("id:play-bar-previous-channel"));
+    tunes(&mut app, &tuned, 3, "previous again");
 
     // A screen reader's actions on the video, with the bar hidden: the
     // banner shows although `player.info_on_switch` is off.

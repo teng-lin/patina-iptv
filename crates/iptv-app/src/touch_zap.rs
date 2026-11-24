@@ -75,6 +75,15 @@ pub(crate) fn zap(ui: Ui, direction: Direction) {
         return;
     };
     log::info!("iptv touch zap: {direction:?} to {to}");
+    // The play bar stays usable over its popups (a chooser, the program's
+    // details), which are about the channel it leaves: they go, so the
+    // player owns input again and the pending zap tunes.
+    if ui.chooser.with_untracked(Option::is_some) {
+        crate::chooser::close(ui);
+    }
+    if ui.description.with_untracked(Option::is_some) {
+        ui.description.set(None);
+    }
     crate::browse_playback::zap_by(ui, to, true);
     if untracked(|| crate::play_bar::shows(ui)) {
         crate::play_bar::used(ui);
@@ -93,9 +102,10 @@ fn touched(ui: Ui) {
 
 /// The touches on `video` (the full-screen tap catcher): the first
 /// finger's swipe. `swiped` holds from a swipe's first move past the
-/// threshold until the next finger goes down: the view's press, which a
-/// platform may still report when the finger lifts inside the view
-/// (Android's does, the view filling the screen), is then no tap.
+/// threshold until the next finger goes down or the view's next pointer
+/// press, which a platform may still report when the finger lifts inside
+/// the view (Android's does, the view filling the screen): that press is
+/// then no tap. A keyboard's or a screen reader's press always is.
 pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, swiped: Stored<bool>) -> E {
     let swipe = stored(Swipe::default());
     // Made again mid-swipe (live video turned into a replay): its banner
@@ -126,14 +136,20 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, swiped: Stored<bool>) -> E
                         }
                     })
                 }
-                nsh_core::TouchPhase::Move if !untracked(|| takes_swipes(ui)) => {
+                // Something opened over the video, or it stopped being live,
+                // mid-swipe: no change, even at the lift.
+                nsh_core::TouchPhase::Move | nsh_core::TouchPhase::End
+                    if !untracked(|| takes_swipes(ui)) =>
+                {
                     swipe.with(Swipe::reset)
                 }
                 nsh_core::TouchPhase::Move => swipe.with(|s| s.moved(id, at, t)),
                 nsh_core::TouchPhase::End => swipe.with(|s| s.up(id, at, t)),
                 nsh_core::TouchPhase::Cancel => swipe.with(|s| s.cancel(id)),
             };
-            if matches!(outcome, Outcome::Follow { .. }) {
+            // A lift can be the swipe's first report past the threshold
+            // (no move between): it swiped as much as a followed one.
+            if outcome != Outcome::None {
                 swiped.with(|w| *w = true);
             }
             apply(ui, outcome, at.1);
@@ -256,7 +272,9 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
 /// channel's number and name and its program on air. Faint until the
 /// swipe has gone far enough to change channel.
 pub(crate) fn layer(ui: Ui) -> impl IntoElement {
-    let preview = computed(move || ui.swipe.get());
+    // Only while the video takes swipes: one held as the video leaves full
+    // screen (or a dialog opens over it) shows nothing until it ends.
+    let preview = computed(move || ui.swipe.get().filter(|_| takes_swipes(ui)));
     when(
         move || preview.with(Option::is_some),
         move || {

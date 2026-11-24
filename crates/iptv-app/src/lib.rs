@@ -1122,8 +1122,10 @@ fn video_catcher(ui: Ui, live: bool) -> View {
         })
         .label(move || tr("Video"))
         .on_press(move |e: &PressEvent| {
-            // The finger swiped (`touch_zap.rs`): no tap.
-            if swiped.with(|s| *s) {
+            // The finger swiped (`touch_zap.rs`): its lift is no tap. Only
+            // a pointer's press is the swipe's (a keyboard's or a screen
+            // reader's has no clicks), and only the first one after it.
+            if e.clicks != 0 && swiped.with(std::mem::take) {
                 return;
             }
             ui.touched();
