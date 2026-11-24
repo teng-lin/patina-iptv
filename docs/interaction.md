@@ -15,11 +15,15 @@ implement; each section states where current behavior still falls short.
 
 ## Principles
 
-- **Choosing is watching.** Choosing a channel or a live program plays it full
-  screen, on every input and in both guide layouts, unless the viewer has chosen
-  to keep the guide open.
-- **Layout is appearance, not behavior.** The guide layout, window size and
-  orientation change how content is arranged, never what an action does.
+- **Choose to preview, choose again to watch.** In the TV Guide’s preview
+  layout, choosing a live channel plays it in the preview, on every input and
+  every device; choosing the playing channel again goes full screen on the
+  same stream. In the overlay layout and the channel list, which already draw
+  over full-screen video, choosing a channel watches it full screen unless the
+  viewer has chosen to keep the guide or list open.
+- **Layout is appearance, not behavior.** Window size and orientation change
+  how content is arranged, never what an action does. The guide layout decides
+  only where a chosen channel first plays.
 - **Every way in has a way back the viewer can see or find on the input in
   use**: the Back key on a remote, a visible Back button for touch and pointer.
   It returns to the same content.

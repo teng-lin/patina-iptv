@@ -13,6 +13,7 @@ link to them instead of duplicating release or validation instructions.
 | Disposable emulator operation and evidence | [Android validation](android-validation.md) |
 | iOS simulator build, entitlements and synthetic run | [iOS simulator validation](ios-validation.md) |
 | Platform capability/support limits | [Capabilities](capabilities.md) |
+| Platform feature, operation and settings review | [Platform feature audit](platform-feature-audit.md) |
 | Native framework revision and update policy | [NSH pin](nsh.md) |
 | Encryption, backups and trust boundaries | [Security model](security.md), [vulnerability reporting](../SECURITY.md) |
 | Choosing, watching and returning on every input | [Interaction contract](interaction.md) |
