@@ -214,6 +214,13 @@ pub fn press_control(ui: Ui, control: Control) {
     ui.update_panels(|p, now| p.touch(now));
     if !crate::player_panels::enabled(ui, control) {
         log::info!("iptv control {control:?} not available");
+        // Multiview drawn disabled says why (a TV at the account's limit).
+        if control == Control::Multiview
+            && let Some(reason) =
+                nsh_core::prelude::untracked(|| crate::capabilities::multiview(ui)).reason()
+        {
+            crate::settings_view::notify(crate::capabilities::reason(reason));
+        }
         return;
     }
     match control {

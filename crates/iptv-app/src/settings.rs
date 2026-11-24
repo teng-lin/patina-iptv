@@ -207,6 +207,13 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if NOT_OFFERED.contains(&key) {
         return Offer::Hidden;
     }
+    // Sound follows the selected tile: not on a phone, nor where multiview
+    // never exists (#279). The stored value is kept, unused.
+    if key == keys::SOUND_FOLLOWS_TILE.as_str()
+        && !iptv_presentation::capabilities::sound_follows_tile(host)
+    {
+        return Offer::Hidden;
+    }
     // Swiping over full-screen video: where a finger may touch it (a TV's
     // remote has Ch± instead). Outside a running app (the unit tests) no
     // device is known: it counts as offered.
@@ -432,8 +439,6 @@ mod tests {
 
     #[test]
     fn what_the_app_offers() {
-        // The signals reach the offer; none of them changes it yet (the
-        // features that follow them come with their own issues).
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
@@ -460,6 +465,19 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
+            // Sound follows the selected tile: never on a phone (#279);
+            // elsewhere where this build has multiview.
+            let follows = device.form_factor() != iptv_core::capabilities::FormFactor::Phone
+                && iptv_presentation::capabilities::multiview_exists(device.host);
+            assert_eq!(
+                offer("player.sound_follows_tile"),
+                if follows {
+                    Offer::Active
+                } else {
+                    Offer::Hidden
+                },
+                "{device:?}"
+            );
         }
     }
 

@@ -28,6 +28,22 @@ class DeviceSignalsTest {
     }
 
     @Test
+    fun theDecoderProbeCountsHardwareH264DecodersOnly() {
+        fun codec(
+            encoder: Boolean = false,
+            hardware: Boolean = true,
+            avc: Boolean = true,
+            max: Int,
+        ) = DeviceSignals.Decoder(encoder, hardware, avc, max)
+        assertEquals(null, DeviceSignals.decoders(emptyList()))
+        // Software decoders and encoders do not bound the tiles.
+        assertEquals(null, DeviceSignals.decoders(listOf(codec(hardware = false, max = 32), codec(encoder = true, max = 1))))
+        assertEquals(1, DeviceSignals.decoders(listOf(codec(max = 1), codec(hardware = false, max = 32))))
+        assertEquals(16, DeviceSignals.decoders(listOf(codec(max = 2), codec(max = 16), codec(avc = false, max = 64))))
+        assertEquals(null, DeviceSignals.decoders(listOf(codec(max = 0))))
+    }
+
+    @Test
     fun aKeyboardOrDPadCountsOnlyWhileAttachedAndShown() {
         assertTrue(DeviceSignals.keyboard(Configuration.KEYBOARD_QWERTY, Configuration.HARDKEYBOARDHIDDEN_NO))
         assertFalse(DeviceSignals.keyboard(Configuration.KEYBOARD_QWERTY, Configuration.HARDKEYBOARDHIDDEN_YES))
