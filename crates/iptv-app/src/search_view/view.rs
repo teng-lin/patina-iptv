@@ -4,6 +4,7 @@
 //! pill.
 
 use crate::i18n::tr;
+use nsh_core::Checked;
 
 use super::*;
 use crate::fonts::{CAPTION, CONDENSED, SANS};
@@ -252,6 +253,27 @@ fn tab_button(ui: Ui, tab: Tab, size: Scale) -> impl IntoElement {
     })
 }
 
+/// The filter row below the tabs: finished programs that cannot be
+/// replayed, listed or not (#282).
+fn filter_button(ui: Ui, size: Scale) -> impl IntoElement {
+    let on = move || state(ui, |s| s.state.past_without_replay()).unwrap_or(false);
+    let focused = move || state(ui, |s| *s.state.focus() == Focus::Filter) == Some(true);
+    ui_kit::tab(
+        ui,
+        size,
+        move || tr("Finished programs without replay").to_owned(),
+        on,
+        focused,
+        move || apply(ui, SearchAction::Pick(Focus::Filter)),
+    )
+    .role(AccessibilityRole::Switch)
+    .accessibility_state(move || AccessibilityState {
+        checked: Some(if on() { Checked::True } else { Checked::False }),
+        ..Default::default()
+    })
+    .test_id("search-filter-past")
+}
+
 fn status(ui: Ui) -> String {
     state(ui, |s| match s.state.phase() {
         Phase::Typing => tr("Searching…").to_owned(),
@@ -332,6 +354,10 @@ fn results(ui: Ui, size: Scale) -> impl IntoElement {
                     },
                 )),
         )
+        .child(when(
+            move || state(ui, |s| s.state.filter_shown()).unwrap_or(false),
+            move || view().flex_row().flex_wrap().child(filter_button(ui, size)),
+        ))
         .child(
             virtual_list(count, move |at| result_row(ui, at, focused_index, size))
                 .estimated_item_size(list_rows::pitch(size, ROW_TWO))

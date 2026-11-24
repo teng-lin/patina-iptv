@@ -9,7 +9,7 @@
 use super::*;
 
 /// Opens a fresh search screen picking for multiview. A screen waiting
-/// for playback to end (`search.stay_on_search`) gives way to it.
+/// for playback to end gives way to it.
 pub fn open_to_pick(ui: Ui) {
     if ui.search.with_untracked(Option::is_some) {
         close(ui);

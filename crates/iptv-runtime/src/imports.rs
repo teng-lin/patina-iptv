@@ -665,7 +665,7 @@ pub(crate) async fn pipeline(
         Some(_) => {
             match download_guide(
                 &net,
-                &stored::configs_for(&services.settings(), &planned, &job.source.config),
+                &stored::configs_for(&planned, &job.source.config),
                 matching,
                 now,
                 &mut progress,
@@ -738,7 +738,7 @@ pub(crate) async fn pipeline(
         services.before_report();
         let _ = tx.send(Msg::Playlist(Ok((counts, imported(guide)))));
     };
-    let guides = stored::configs_for(&services.settings(), &sources, &job.source.config);
+    let guides = stored::configs_for(&sources, &job.source.config);
     if let Some(import) = typed_guide {
         report(keep_guide(services, id, import, &guides, matching, now, &stops).await);
         return send_next_check(services, tx, id, &guides, matching);

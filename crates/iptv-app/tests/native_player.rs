@@ -407,10 +407,7 @@ fn native_selection_reaches_a_correlated_render_submission() {
     drop(store);
     let mut settings = iptv_settings::Settings::new();
     settings
-        .set("epg.update_on_start", iptv_settings::Value::Bool(false))
-        .unwrap();
-    settings
-        .set("epg.update_interval", iptv_settings::Value::Duration(0))
+        .set("epg.update", iptv_settings::Value::choice("on_request"))
         .unwrap();
     std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
     let mut cleanup = Cleanup::default();

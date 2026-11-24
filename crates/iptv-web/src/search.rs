@@ -245,6 +245,8 @@ pub(crate) fn json(
         Focus::Input => "input",
         Focus::History(_) => "history",
         Focus::Tabs => "tabs",
+        // Not offered here: the TV host searches no finished programs.
+        Focus::Filter => "filter",
         Focus::Result(_) => "result",
     };
     let phase = match state.phase() {

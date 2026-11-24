@@ -11,6 +11,32 @@ fn digits(app: &mut Headless, pin: &str) {
         step(app.press_key(&digit.to_string()));
     }
 }
+/// Enters `pin` on the on-screen keypad with arrows and OK alone, from
+/// the first key, then presses its Continue the same way. The keypad is
+/// 1 2 3 / 4 5 6 / 7 8 9 / Delete 0 Continue.
+fn keypad(app: &mut Headless, pin: &str) {
+    let mut at = 0_usize;
+    let mut go = |app: &mut Headless, to: usize| {
+        while at / 3 != to / 3 {
+            let down = at / 3 < to / 3;
+            step(app.press_key(if down { "down" } else { "up" }));
+            at = if down { at + 3 } else { at - 3 };
+        }
+        while at != to {
+            let right = at < to;
+            step(app.press_key(if right { "right" } else { "left" }));
+            at = if right { at + 1 } else { at - 1 };
+        }
+        step(app.press_key("enter"));
+    };
+    for digit in pin.bytes() {
+        let digit = usize::from(digit - b'0');
+        go(app, if digit == 0 { 10 } else { digit - 1 });
+    }
+    let masked = "\u{2022}".repeat(pin.len());
+    step(app.wait_for(&format!("id:parental-layer >> text:{masked}")));
+    go(app, 11);
+}
 fn continue_entry(app: &mut Headless) {
     step(app.press("id:parental-layer >> text:Continue"));
 }
@@ -181,6 +207,64 @@ fn setup_block_remote_unlock_change_and_recovery() {
     assert!(!saved.contains("8642"));
 }
 
+/// A PIN longer than four digits, entered on the keypad by D-pad (a remote
+/// without number keys) and on number keys, when setting it and at unlock
+/// (#282). OK on the keypad presses keys until Continue; after number keys
+/// it submits.
+#[test]
+fn six_digit_pins_by_dpad_and_number_keys() {
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    settings
+        .set(
+            "parental.require_pin_for",
+            Value::Enum("blocked_content_and_settings".into()),
+        )
+        .unwrap();
+    let fixture = personalization::start(home, settings, false);
+    let mut app = fixture.app;
+    personalization::menu(&mut app, "Protect channel with PIN");
+    wait(&mut app, "Choose a new PIN");
+    keypad(&mut app, "246813");
+    wait(&mut app, "Confirm new PIN");
+    keypad(&mut app, "246813");
+    wait(&mut app, "Save your recovery code");
+    step(app.press("text:I saved the code"));
+    step(app.wait_for("text:Content blocked"));
+    personalization::menu(&mut app, "Manage PIN-protected content…");
+    wait(&mut app, "Blocked content");
+    step(app.press("text:Lock now"));
+    settings_menu(&mut app);
+    wait(&mut app, "Enter parental PIN");
+    keypad(&mut app, "246813");
+    step(app.wait_for("text:Parental control"));
+    // Changing it on number keys: OK submits after the sixth digit.
+    step(app.press("text:Parental control"));
+    step(app.press("text:Set the PIN"));
+    wait(&mut app, "Enter current PIN");
+    digits(&mut app, "246813");
+    step(app.press_key("enter"));
+    wait(&mut app, "Choose a new PIN");
+    digits(&mut app, "135790");
+    step(app.press_key("enter"));
+    wait(&mut app, "Confirm new PIN");
+    digits(&mut app, "135790");
+    step(app.press_key("enter"));
+    wait(&mut app, "Save your recovery code");
+    step(app.press("text:I saved the code"));
+    step(app.back());
+    step(app.back());
+    settings_menu(&mut app);
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "135790");
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:Enter parental PIN", Duration::from_secs(20)));
+}
+
 #[test]
 fn number_key_entry_protects_settings_and_changes_an_existing_pin() {
     let Some(home) = isolated!() else { return };
@@ -189,9 +273,6 @@ fn number_key_entry_protects_settings_and_changes_an_existing_pin() {
         .set("general.resume_last_channel", Value::Bool(false))
         .unwrap();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
-    settings
-        .set("parental.pin_input", Value::Enum("number_keys".into()))
-        .unwrap();
     settings
         .set(
             "parental.require_pin_for",

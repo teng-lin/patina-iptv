@@ -173,10 +173,7 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
         .set("guide.stay_on_guide", iptv_settings::Value::Bool(true))
         .unwrap();
     settings
-        .set("epg.update_on_start", iptv_settings::Value::Bool(false))
-        .unwrap();
-    settings
-        .set("epg.update_interval", iptv_settings::Value::Duration(0))
+        .set("epg.update", iptv_settings::Value::choice("on_request"))
         .unwrap();
     std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
     let mut t = T::new(EngineConfig {

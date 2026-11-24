@@ -4,12 +4,14 @@
 //! searches (debounced), maps remote keys and taps to search actions and
 //! carries out what the state answers (play, show details, close).
 //!
-//! Choosing a result plays it full screen. With `search.stay_on_search`
-//! the screen waits suspended and leaving full screen brings it back with
-//! its query and focus (`SearchState::resume`); otherwise it closes.
-//! Ranking follows `search.favorites_first` and
-//! `search.include_past_without_catchup`; with `search.show_history` off
-//! the screen opens without the recent searches (they are still kept).
+//! Choosing a result plays it full screen; the screen waits suspended and
+//! leaving full screen (Back) brings it back with its query and focus
+//! (`SearchState::resume`). Favorite channels rank first. The results'
+//! filter row decides whether finished programs without replay are
+//! listed. These replaced `search.stay_on_search`, `search.favorites_first`
+//! and `search.include_past_without_catchup` (#282), whose stored values
+//! are ignored. With `search.show_history` off the screen opens without
+//! the recent searches (they are still kept).
 //! Programs are searched over every day the store keeps
 //! (`program_index.rs`), not only the guide days held in memory.
 //! Wording is iptv-rs's own.
@@ -76,20 +78,12 @@ pub struct Screen {
 /// The `search.*` settings the screen follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Options {
-    favorites_first: bool,
-    include_past_without_catchup: bool,
-    /// Come back to the results after watching one.
-    stay: bool,
     show_history: bool,
 }
 
 fn options(s: &Settings) -> Options {
-    let at = &Target::Global;
     Options {
-        favorites_first: s.bool(keys::SEARCH_FAVORITES_FIRST, at),
-        include_past_without_catchup: s.bool(keys::SEARCH_INCLUDE_PAST_WITHOUT_CATCHUP, at),
-        stay: s.bool(keys::SEARCH_STAY, at),
-        show_history: s.bool(keys::SEARCH_SHOW_HISTORY, at),
+        show_history: s.bool(keys::SEARCH_SHOW_HISTORY, &Target::Global),
     }
 }
 
@@ -357,21 +351,26 @@ fn run_search(ui: Ui, query: &str) {
     let schedule = crate::schedule();
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);
-    let options = options(&crate::settings::get());
+    let past_without_replay = ui
+        .search
+        .with_untracked(|s| s.as_ref().is_some_and(|s| s.state.past_without_replay()));
     let mut channels = crate::runtime().search_channels(
         query,
         &favorites,
         ChannelSearchOptions {
-            favorites_first: options.favorites_first,
+            favorites_first: true,
             limit: LIMIT,
         },
     );
     let opts = ProgramSearchOptions {
         visible: Some(&visible),
-        include_past_without_catchup: options.include_past_without_catchup,
+        include_past_without_catchup: past_without_replay,
         catchup_days: Some(&days),
+        // As far back as a guide keeps finished programs (a catch-up
+        // archive of up to 14 days, #282); pruning bounds what is there.
+        look_back: i64::from(iptv_runtime::stored::stored_past_days()) * 86_400,
         favorites: Some(&favorites),
-        favorites_first: options.favorites_first,
+        favorites_first: true,
         limit: LIMIT,
         ..Default::default()
     };
@@ -443,7 +442,8 @@ pub fn open(ui: Ui) {
                     load_history()
                 } else {
                     SearchHistory::default()
-                }),
+                })
+                .with_filter(),
                 suspended: false,
                 programs: ProgramSearch::Building,
                 pick: false,
@@ -547,8 +547,7 @@ fn choose(ui: Ui, id: ResultId) {
     }
 }
 
-/// Plays full screen; the screen waits until playback leaves full screen
-/// (`search.stay_on_search`), else closes.
+/// Plays full screen; the screen waits until playback leaves full screen.
 fn watch(ui: Ui, channel: usize, playback: Playback) {
     save_history(ui);
     let now = ui.focus.with(|f| f.now);
@@ -557,10 +556,6 @@ fn watch(ui: Ui, channel: usize, playback: Playback) {
     // Full screen first: the resume effect ignores a suspended screen in full screen.
     ui.mode.set(ViewMode::Fullscreen);
     ui.show_playing();
-    if !options(&crate::settings::get()).stay {
-        close(ui);
-        return;
-    }
     ui.search.update(|s| {
         if let Some(s) = s {
             s.suspended = true;
@@ -601,31 +596,26 @@ mod tests {
     #[test]
     fn options_follow_the_search_settings() {
         let mut s = Settings::new();
-        let defaults = Options {
-            favorites_first: true,
-            include_past_without_catchup: false,
-            stay: false,
-            show_history: true,
-        };
-        assert_eq!(options(&s), defaults);
-        s.set("search.favorites_first", iptv_settings::Value::Bool(false))
-            .unwrap();
-        s.set(
+        assert_eq!(options(&s), Options { show_history: true });
+        // The retired search settings change nothing (#282).
+        for key in [
+            "search.favorites_first",
             "search.include_past_without_catchup",
-            iptv_settings::Value::Bool(true),
-        )
-        .unwrap();
-        s.set("search.stay_on_search", iptv_settings::Value::Bool(true))
-            .unwrap();
+            "search.stay_on_search",
+        ] {
+            let stored = !s.bool(
+                iptv_settings::keys::BoolKey::try_new(key).unwrap(),
+                &Target::Global,
+            );
+            s.set(key, iptv_settings::Value::Bool(stored)).unwrap();
+        }
+        assert_eq!(options(&s), Options { show_history: true });
         s.set("search.show_history", iptv_settings::Value::Bool(false))
             .unwrap();
         assert_eq!(
             options(&s),
             Options {
-                favorites_first: false,
-                include_past_without_catchup: true,
-                stay: true,
-                show_history: false,
+                show_history: false
             }
         );
     }

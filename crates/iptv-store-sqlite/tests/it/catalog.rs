@@ -231,3 +231,29 @@ fn stalker_streams_round_trip() {
         .unwrap();
     assert_eq!(s.channel(src, &ch.id).unwrap().unwrap().channel, ch);
 }
+
+/// The guide keeps finished programs for the longest catch-up archive of
+/// the stored channels (#282).
+#[test]
+fn longest_catchup_archive_spans_every_source() {
+    let mut s = store();
+    assert_eq!(s.longest_catchup_days(7).unwrap(), 0, "nothing stored");
+    let src = s.add_source(&xtream_source("Xt")).unwrap();
+    // Every third channel has three days of catch-up, some without a window.
+    let mut cat = catalog(12, 2, XT_PASSWORD);
+    replace(&mut s, src, &cat);
+    assert_eq!(s.longest_catchup_days(7).unwrap(), 7, "the default window");
+    assert_eq!(s.longest_catchup_days(2).unwrap(), 3);
+    for channel in &mut cat.channels {
+        if let Some(catch_up) = &mut channel.catch_up {
+            catch_up.days = Some(2);
+        }
+    }
+    replace(&mut s, src, &cat);
+    assert_eq!(s.longest_catchup_days(7).unwrap(), 2);
+    let other = s.add_source(&xtream_source("Other")).unwrap();
+    let mut longer = catalog(12, 2, XT_PASSWORD);
+    longer.channels[0].catch_up.as_mut().unwrap().days = Some(5);
+    replace(&mut s, other, &longer);
+    assert_eq!(s.longest_catchup_days(2).unwrap(), 5);
+}

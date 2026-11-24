@@ -294,6 +294,29 @@ impl Store {
         Ok(n.max(0) as u64)
     }
 
+    /// The longest catch-up archive of any stored channel, in days (0
+    /// when none has catch-up). A declared archive without a window counts
+    /// as `default_days`; a catch-up type the app cannot replay does not
+    /// count. How long the guide keeps finished programs follows it.
+    pub fn longest_catchup_days(&self, default_days: u32) -> Result<u32> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT DISTINCT catch_up FROM channels WHERE catch_up IS NOT NULL")?;
+        let mut rows = stmt.query([])?;
+        let mut longest = 0;
+        while let Some(row) = rows.next()? {
+            let text: String = row.get(0)?;
+            let catch_up = catch_up_from_json(&text)?;
+            if !matches!(
+                catch_up.kind,
+                iptv_providers::model::CatchUpKind::Unsupported(_)
+            ) {
+                longest = longest.max(catch_up.window_days(default_days));
+            }
+        }
+        Ok(longest)
+    }
+
     /// One channel by stable id, whatever its flags.
     pub fn channel(&self, source: SourceId, id: &ContentId) -> Result<Option<ChannelRow>> {
         let sql = format!(

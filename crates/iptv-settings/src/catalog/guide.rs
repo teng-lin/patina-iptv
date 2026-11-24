@@ -40,29 +40,40 @@ const fn logos(key: &'static str, ty: ValueType, summary: &'static str) -> Setti
 }
 
 pub static EPG: &[Setting] = &[
-    // default: ours
+    // default: ours — daily, as `epg.update_interval` (24 h) with
+    // `epg.update_on_start` (on) were before settings version 6 merged them.
+    epg(
+        "updates",
+        "epg.update",
+        choice(&GUIDE_UPDATE, "daily"),
+        key(
+            "When the guide downloads again: only on request, or once it is older than this, also at startup.",
+        ),
+    ),
+    // Retired rows (#282): no longer offered or read. Settings version 6
+    // folds the first two into `epg.update`; the others keep their stored
+    // values, which nothing reads. A guide now always updates after its
+    // playlist changes, keeps descriptions wherever the host stores the
+    // guide on disk, and keeps finished programs for the longest catch-up
+    // archive of the stored channels (at least a week, at most 14 days).
     epg(
         "updates",
         "epg.update_interval",
         hours(0, 168, 1, 24),
         key("Download guide data again after this long; 0 updates only on request."),
     ),
-    // default: ours
     epg(
         "updates",
         "epg.update_on_start",
         boolean(true),
         key("Fetch guide data when the app starts if the interval has passed."),
     ),
-    // default: ours
     epg(
         "updates",
         "epg.update_on_playlist_change",
         boolean(true),
         key("Fetch guide data after a playlist is added, changed or refreshed."),
     ),
-    // default: ours — a week, so the guide reaches back as far as the
-    // usual catch-up archives (3 to 7 days) and replays can be chosen.
     epg(
         "storage",
         "epg.keep_past",
@@ -71,10 +82,6 @@ pub static EPG: &[Setting] = &[
             "How many days of finished programs stay in the guide (for catch-up and browsing back).",
         ),
     ),
-    // default: ours — on, except in browser builds (browser TVs): there the
-    // guide lives in memory and in an IndexedDB quota of about 92 MB, and
-    // descriptions take a real account's database from 23 to 57 MB (the
-    // browser TV architecture plan, decision 2).
     epg(
         "storage",
         "epg.store_descriptions",

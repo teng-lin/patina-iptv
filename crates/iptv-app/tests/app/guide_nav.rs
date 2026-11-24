@@ -165,8 +165,9 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     assert_eq!(iptv_app::player_opens(0), 0);
     step(app.back());
 
-    // Day steps reach the oldest retained page. Instead of trying to
-    // browse before it, Left opens the groups and then the rail.
+    // Day steps reach the oldest retained page: with a day of catch-up the
+    // guide still keeps the old default's week (#282). Instead of trying
+    // to browse before it, Left opens the groups and then the rail.
     for _ in 0..3 {
         step(app.press_key("mod+left"));
     }

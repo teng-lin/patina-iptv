@@ -51,7 +51,7 @@ pub async fn paged(
     source: SourceId,
     now: UnixTime,
 ) -> EpgSchedule {
-    let keep = super::stored::keep_past_days(&owner.settings());
+    let keep = super::stored::stored_past_days();
     let window = window(now, keep);
     let starts = match crate::commands::guide_listing_starts(owner, source, window.oldest).await {
         Ok(starts) => starts,

@@ -183,7 +183,7 @@ async fn send_stored_after(
         }
     }
     let started = Instant::now();
-    let window = super::paging::window(now, stored::keep_past_days(&services.settings()));
+    let window = super::paging::window(now, stored::stored_past_days());
     let guide = services
         .read(move |store| store.load_epg(id, &super::paging::store_window(window)))
         .await
@@ -217,12 +217,8 @@ async fn send_stored_after(
                 ),
             );
         if !playlist_due {
-            let configs = stored::configs_from_sources(
-                &services.settings(),
-                &sources,
-                state.as_ref(),
-                Some(&job.source.config),
-            );
+            let configs =
+                stored::configs_from_sources(&sources, state.as_ref(), Some(&job.source.config));
             let overrides = overrides
                 .into_iter()
                 .map(|(id, epg)| (ChannelKey::new(id.as_str()), epg.to_override()))
