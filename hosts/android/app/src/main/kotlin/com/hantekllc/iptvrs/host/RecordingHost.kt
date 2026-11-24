@@ -1,5 +1,6 @@
 package com.hantekllc.iptvrs.host
 
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -101,7 +102,7 @@ object RecordingHost {
      * itself. While one is, the foreground service runs; otherwise it stops.
      * If Android kills the process mid-capture, the service is sticky, so
      * Android restarts it and it resumes the capture from its spool; before
-     * Android 12 a 120-second [WATCHDOG] alarm also restarts it (#275). */
+     * Android 12 a 120-second watchdog alarm ([arm]) also restarts it (#275). */
     @JvmStatic @Synchronized
     fun schedule(active: Boolean) {
         desiredActive = active
@@ -129,15 +130,14 @@ object RecordingHost {
         }
     }
 
-    /** Whether the watchdog alarm is armed at all. From Android 12 only an
-     * exact alarm, which needs a permission Patina no longer asks for, may
-     * start a foreground service from the background: an inexact one would
-     * fire up to an hour late and then be refused, retrying every minute.
-     * There the sticky [RecordingService] is the recovery instead. */
-    val WATCHDOG = Build.VERSION.SDK_INT < 31
-
-    /** Arms the watchdog alarm at `next` (UTC seconds) where [WATCHDOG]
-     * allows it, or disarms it for 0. */
+    /** Arms the watchdog alarm at `next` (UTC seconds), or disarms it for 0.
+     * It is armed only before Android 12. From 12 on only an exact alarm,
+     * which needs a permission Patina no longer asks for, may start a
+     * foreground service from the background: an inexact one would fire up
+     * to an hour late and then be refused, retrying every minute. There the
+     * sticky [RecordingService] is the recovery instead. Before 12 an exact
+     * alarm needs no permission, which lint does not see. */
+    @SuppressLint("MissingPermission")
     fun arm(
         context: Context,
         next: Long,
@@ -146,7 +146,7 @@ object RecordingHost {
             val alarms = context.getSystemService(AlarmManager::class.java)
             val pending = alarmIntent(context)
             alarms.cancel(pending)
-            if (next > 0 && WATCHDOG) {
+            if (next > 0 && Build.VERSION.SDK_INT < 31) {
                 val at = maxOf(Math.multiplyExact(next, 1000L), System.currentTimeMillis() + 1000)
                 alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pending)
             }
