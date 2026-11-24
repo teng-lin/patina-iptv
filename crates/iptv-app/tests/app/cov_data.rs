@@ -104,15 +104,19 @@ fn serve(body: Arc<Mutex<Option<String>>>) -> String {
     link
 }
 
-/// An M3U playlist of `channels` (tvg-id, name), its guide at `guide`.
-pub(super) fn playlist(guide: Option<&Path>, channels: &[(&str, &str)]) -> String {
+/// An M3U playlist of `channels` (tvg-id, name) served at `stream_base`.
+pub(super) fn playlist(
+    stream_base: &str,
+    guide: Option<&Path>,
+    channels: &[(&str, &str)],
+) -> String {
     let mut m3u = match guide {
         Some(g) => format!("#EXTM3U url-tvg=\"{}\"\n", g.display()),
         None => "#EXTM3U\n".to_owned(),
     };
     for (id, name) in channels {
         m3u.push_str(&format!(
-            "#EXTINF:-1 tvg-id=\"{id}\" group-title=\"Synthetic\",{name}\nhttp://stream.example.test/{id}.m3u8\n"
+            "#EXTINF:-1 tvg-id=\"{id}\" group-title=\"Synthetic\",{name}\n{stream_base}/{id}.m3u8\n"
         ));
     }
     m3u
@@ -277,11 +281,17 @@ fn stored_playlists_switch_refresh_and_go() {
     // The third playlist's guide, typed as a link: a local mock server.
     let guide_c: Arc<Mutex<Option<String>>> = Arc::default();
     let guide_c_link = serve(guide_c.clone());
-    let alpha = |channels: &[(&str, &str)]| playlist(Some(&guide_a), channels);
-    let beta = |channels: &[(&str, &str)]| playlist(Some(&guide_b), channels);
+    // End the live-input probe locally. The headless player observes source
+    // publication without reading media from the relay.
+    let streams = crate::support::Server::start(&[]);
+    let alpha = |channels: &[(&str, &str)]| playlist(&streams.base, Some(&guide_a), channels);
+    let beta = |channels: &[(&str, &str)]| playlist(&streams.base, Some(&guide_b), channels);
     let first = alpha(&[("a1", "Alpha One"), ("a2", "Alpha Two")]);
     let picks = Arc::new(Mutex::new(vec![
-        ("third list.m3u", playlist(None, &[("c1", "Gamma One")])),
+        (
+            "third list.m3u",
+            playlist(&streams.base, None, &[("c1", "Gamma One")]),
+        ),
         ("second.m3u", beta(&[("b1", "Beta One")])),
         ("first.m3u", first),
     ]));

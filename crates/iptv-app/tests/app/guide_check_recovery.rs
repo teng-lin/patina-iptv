@@ -368,7 +368,11 @@ impl Scenario {
 }
 
 fn channels() -> String {
-    playlist(None, &[("a1", "Alpha One"), ("a2", "Alpha Two")])
+    playlist(
+        "http://stream.example.test",
+        None,
+        &[("a1", "Alpha One"), ("a2", "Alpha Two")],
+    )
 }
 
 /// A refresh replaces one whose guide download is still running, then
