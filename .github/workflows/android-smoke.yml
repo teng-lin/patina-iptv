@@ -2,21 +2,16 @@ name: Android smoke
 on:
   workflow_dispatch:
 permissions:
+  actions: read
   contents: read
 jobs:
-  seed:
+  tv:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - form: tablet
-            target: google_apis
-            profile: pixel_tablet
-          - form: tv
-            target: android-tv
-            profile: tv_1080p
+        boot: [cold, warm]
     steps:
       - name: Enable KVM
         run: |
@@ -24,76 +19,45 @@ jobs:
             sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Boot emulator
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        with:
-          avd-name: patina-validation-ci
-          api-level: 36
-          target: ${{ matrix.target }}
-          arch: x86_64
-          profile: ${{ matrix.profile }}
-          disable-animations: true
-          emulator-boot-timeout: 180
-          ram-size: 4096M
-          disk-size: 4096M
-          force-avd-creation: true
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot-load
-          script: test -z "$(adb -s emulator-5554 shell pm list packages com.hantekllc.iptvrs.validation)"
-      - name: Pack pristine snapshot
-        timeout-minutes: 2
+      - name: Identify the emulator and system image
+        if: matrix.boot == 'warm'
         run: |
-          cd "$HOME/.android/avd"
-          while fuser -s patina-validation-ci.avd/multiinstance.lock; do sleep 1; done
-          test -s patina-validation-ci.avd/snapshots/default_boot/snapshot.pb
-          tar --sparse -cf - patina-validation-ci.ini patina-validation-ci.avd |
-            zstd -1 -T2 -o "$GITHUB_WORKSPACE/avd.tar.zst"
-          stat -c 'Compressed snapshot size %s bytes' "$GITHUB_WORKSPACE/avd.tar.zst"
-      - name: Upload pristine snapshot
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: avd-trial-${{ matrix.form }}
-          path: avd.tar.zst
-          compression-level: 0
-          retention-days: 1
-  warm:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: seed
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - form: tablet
-            target: google_apis
-            profile: pixel_tablet
-          - form: tv
-            target: android-tv
-            profile: tv_1080p
-    steps:
-      - name: Enable KVM
+          sdkmanager --install emulator 'system-images;android-36;android-tv;x86_64' < /dev/null > /dev/null
+          sha256sum "$ANDROID_HOME/emulator/source.properties" \
+            "$ANDROID_HOME/system-images/android-36/android-tv/x86_64/source.properties"
+      - name: Verify snapshot provenance
+        if: matrix.boot == 'warm'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
-            sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - name: Download pristine snapshot
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+          gh api 'repos/teng-lin/patina-iptv/actions/runs/45294865543/artifacts' |
+            jq -e '.artifacts | any(.id == 14875957920 and .name == "avd-trial-tv" and .expired == false)' > /dev/null
+      - name: Download the snapshot from a prior hosted run
+        if: matrix.boot == 'warm'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: avd-trial-${{ matrix.form }}
+          artifact-ids: 14875957920
+          run-id: 45294865543
+          github-token: ${{ github.token }}
       - name: Unpack snapshot
+        if: matrix.boot == 'warm'
+        shell: bash
         run: |
           mkdir -p "$HOME/.android/avd"
           zstd -d -c avd.tar.zst | tar -C "$HOME/.android/avd" -xf -
+          test -s "$HOME/.android/avd/patina-validation-ci.avd/snapshots/default_boot/snapshot.pb"
       - name: Boot emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           avd-name: patina-validation-ci
           api-level: 36
-          target: ${{ matrix.target }}
+          target: android-tv
           arch: x86_64
-          profile: ${{ matrix.profile }}
+          profile: tv_1080p
           disable-animations: true
-          emulator-boot-timeout: 180
-          force-avd-creation: false
-          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot-save
-          script: test -z "$(adb -s emulator-5554 shell pm list packages com.hantekllc.iptvrs.validation)"
+          emulator-boot-timeout: 150
+          ram-size: ${{ matrix.boot == 'cold' && '4096M' || '' }}
+          disk-size: ${{ matrix.boot == 'cold' && '4096M' || '' }}
+          force-avd-creation: ${{ matrix.boot == 'cold' }}
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader ${{ matrix.boot == 'cold' && '-no-snapshot' || '-no-snapshot-save' }}
+          script: adb -s emulator-5554 shell pm path android
