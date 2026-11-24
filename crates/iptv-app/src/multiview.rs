@@ -32,7 +32,7 @@
 //! the history), catch-up starts, or full screen is left; then only that
 //! channel plays on.
 //!
-//! Limits: the device's decoders ([`DECODERS`]) and the streams the
+//! Limits: the device's decoders ([`decoders`]) and the streams the
 //! account allows at once (an Xtream account's `max_connections`, from its
 //! last import). Nothing else of the app opens streams (no recordings), so
 //! the whole allowance is multiview's: adding the stream that goes past it
@@ -56,9 +56,13 @@ pub use pointer::{
 
 pub type State = Multiview<usize>;
 
-/// Streams this device decodes at once (setting-ready): cheap TV boxes
-/// manage two, desktops four.
-pub const DECODERS: usize = crate::capabilities::HOST.decoder_slots();
+/// Streams this device decodes at once now (setting-ready): cheap TV
+/// boxes manage two, desktops four. Reactive, as it follows the host's
+/// report (`crate::capabilities::host`): a session opened before a change
+/// keeps the limits it opened with.
+pub fn decoders() -> usize {
+    crate::capabilities::host().decoder_slots()
+}
 
 /// Space around each tile, px (twice this between two).
 const GAP: f32 = 3.0;
@@ -184,7 +188,7 @@ pub fn open(ui: Ui) {
     ui.panels.update(|p| p.hide());
     crate::channels_view::close(ui);
     let limits = Limits {
-        decoders: DECODERS,
+        decoders: decoders(),
         connections: crate::runtime().account_limit(),
     };
     log::info!(

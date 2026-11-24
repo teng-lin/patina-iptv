@@ -10,6 +10,7 @@ pub mod editor;
 pub mod favorites;
 pub mod input_mode;
 pub mod interruption;
+pub mod layout;
 pub mod library_recovery;
 pub mod membership;
 pub mod on_demand;

@@ -15,6 +15,7 @@ use crate::i18n::{tr, trf};
 use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
+use iptv_presentation::capabilities::Device;
 use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
 use iptv_presentation::player_info::date_time;
 use iptv_presentation::sound::delay_label;
@@ -129,6 +130,15 @@ fn is_favorite(ui: Ui) -> bool {
     ui.playing
         .get()
         .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
+}
+
+/// Whether the strip shows `control` at all on `device` as it is now:
+/// what can never act there is left out rather than drawn disabled, and
+/// the focus moves off a control that leaves (`Panels::offer`). Every
+/// control is offered on every device for now; the features that follow
+/// the device's form factor and input are left out here.
+pub(crate) fn offered(_ui: Ui, _device: Device, _control: Control) -> bool {
+    true
 }
 
 /// Whether a control can act now; the rest show disabled.
@@ -470,33 +480,55 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
         .pointer_events(PointerEvents::None)
 }
 
-/// The control strip: a horizontal list that keeps the focused control on
-/// screen.
+/// The control strip: a horizontal list of the controls offered here
+/// ([`offered`]) that keeps the focused control on screen.
 fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     let list = element_ref();
-    let focus = computed(move || ui.panels.with(|p| p.focus));
+    // Follows the device's signals (`device.rs`): a control that leaves
+    // while focused passes the focus to its nearest neighbor shown.
+    effect(move || {
+        let device = crate::device::current();
+        let shown: Vec<Control> = CONTROLS
+            .into_iter()
+            .filter(|&control| offered(ui, device, control))
+            .collect();
+        untracked(|| {
+            ui.panels
+                .update(|p| p.offer(|control| shown.contains(&control)))
+        });
+    });
+    let focus = computed(move || {
+        ui.panels
+            .with(|p| p.controls().position(|c| c == p.focused()).unwrap_or(0))
+    });
     effect(move || {
         let at = focus.get();
         if open() {
             list.scroll_to_index(at as u32, percentage(0.5), px(0.0), true);
         }
     });
-    virtual_list(CONTROLS.len(), move |at| {
+    let count = computed(move || ui.panels.with(|p| p.controls().count()));
+    virtual_list(count, move |at| {
         let index = at.index();
-        let control = CONTROLS[index];
+        let control = computed(move || {
+            ui.panels
+                .with(|p| p.controls().nth(index))
+                .unwrap_or(CONTROLS[0])
+        });
         let focused = move || {
             ui.keys_shown()
                 && ui
                     .panels
-                    .with(|p| p.shown == Shown::Controls && p.focus == index)
+                    .with(|p| p.shown == Shown::Controls && p.focused() == control.get())
         };
         pill(
             ui,
-            move || label(ui, control),
+            move || label(ui, control.get()),
             focused,
-            move || !enabled(ui, control),
+            move || !enabled(ui, control.get()),
             move || {
-                ui.panels.update(|p| p.focus = index);
+                let control = control.get_untracked();
+                ui.panels.update(|p| p.focus_control(control));
                 crate::player_keys::press_control(ui, control);
             },
         )

@@ -45,6 +45,7 @@ mod content_image;
 mod custom_groups;
 mod data;
 mod desktop;
+mod device;
 mod epg_sources_view;
 mod external_player;
 mod fav_editor;
@@ -973,6 +974,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         // The picture-in-picture window shows only the video (`pip.rs`).
         .child(backup::service_layer())
         .child(keyboard::bridge())
+        .child(device::bridge())
         .child(panels::backdrop(ui))
         .child(video::layer(ui, 0))
         .children((1..player::SURFACES).map(move |s| {

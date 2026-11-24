@@ -73,7 +73,7 @@ pub(crate) fn export_ui() {
 /// Whether this host offers the backup document action.
 pub(crate) fn available() -> bool {
     matches!(
-        crate::settings::offer("general.restore"),
+        crate::settings::offer_now("general.restore"),
         iptv_presentation::settings::screen::Offer::Active
     )
 }

@@ -192,6 +192,47 @@ fn reopening_starts_at_the_first_control_and_no_card() {
 }
 
 #[test]
+fn the_strip_keeps_a_valid_focus_as_controls_come_and_go() {
+    // A device signal changes while the strip is open: controls leave and
+    // come back, and the focus is always on one the strip shows.
+    let mut p = Panels::default();
+    p.show_controls(0);
+    p.move_focus(4, 1);
+    assert_eq!(p.focused(), Control::PictureInPicture);
+
+    // The focused control leaves: the focus goes to the one before it.
+    p.offer(|c| c != Control::PictureInPicture);
+    assert_eq!(p.focused(), Control::Multiview);
+    assert!(!p.controls().any(|c| c == Control::PictureInPicture));
+    p.move_focus(1, 2);
+    assert_eq!(p.focused(), Control::VideoTracks, "steps over the omitted");
+
+    // It comes back: the focus stays where the viewer put it.
+    p.offer(|_| true);
+    assert_eq!(p.focused(), Control::VideoTracks);
+    assert_eq!(p.controls().count(), CONTROLS.len());
+
+    // The first controls leave while it is focused: the nearest one after.
+    p.move_focus(-99, 3);
+    assert_eq!(p.focused(), Control::Search);
+    p.offer(|c| !matches!(c, Control::Search | Control::ChannelList));
+    assert_eq!(p.focused(), Control::Recordings);
+    p.move_focus(-1, 4);
+    assert_eq!(p.focused(), Control::Recordings, "nothing shown before it");
+
+    // A strip whose first control is left out opens on the first shown,
+    // and a pointer cannot focus a control that is not shown.
+    p.hide();
+    p.show_controls(5);
+    assert_eq!(p.focused(), Control::Recordings);
+    p.focus_control(Control::Search);
+    assert_eq!(p.focused(), Control::Recordings);
+    p.focus_control(Control::Record);
+    assert_eq!(p.focused(), Control::Record);
+    assert_eq!(p.select(6), Pick::Control(Control::Record));
+}
+
+#[test]
 fn a_held_key_keeps_the_card_until_its_press_is_decided() {
     let mut p = Panels::default();
     p.timeouts.controls_ms = 1_000;
