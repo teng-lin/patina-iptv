@@ -856,6 +856,29 @@ impl Runtime {
             let _ = release.await;
         }
     }
+    /// Whether to tell the viewer, this once, that the upgrade removed the
+    /// scheduled recordings and repeating rules an earlier version kept.
+    pub async fn announce_retired_recordings(&self) -> Result<bool, Error> {
+        Ok(self
+            .services()
+            .call(|store| store.announce_retired_recordings())
+            .await?)
+    }
+    /// The canceled schedules, read-only, until the viewer has seen them.
+    pub async fn retired_recording_schedules(
+        &self,
+    ) -> Result<Vec<iptv_core::recording::RetiredSchedule>, Error> {
+        Ok(self
+            .services()
+            .read(|store| store.retired_recording_schedules())
+            .await?)
+    }
+    pub async fn dismiss_retired_recording_schedules(&self) -> Result<(), Error> {
+        Ok(self
+            .services()
+            .call(|store| store.dismiss_retired_recording_schedules())
+            .await?)
+    }
     pub async fn open_recording(&self, id: JobId) -> Result<PlaySource, Error> {
         let _operation = self.recordings.media_ops.lock().await;
         let (file, target) = self.recording_file_with_target(id).await?;
@@ -1118,9 +1141,11 @@ async fn recover_media(services: &Services, job: &Job) -> completion::Transition
         })
         .await
         .unwrap_or(0);
-    if job.status == Status::Partial && bytes > 0 {
+    if job.status == Status::Partial && bytes > 0 && job.bytes == bytes {
         return completion::Transition::Applied;
     }
+    // A capture the retirement of scheduled recording marked partial records
+    // its size only now; a partial without media cannot be played.
     transition(
         services,
         job,

@@ -229,8 +229,10 @@ pub fn key(ui: Ui, action: Action) {
         Action::MoveRight => send(ui, WizardEvent::Right),
         Action::Select => send(ui, WizardEvent::Ok),
         Action::ShowMenu => send(ui, WizardEvent::Paste),
+        // On the first run's welcome screen, where Back leaves: the
+        // question first, where the host asks it (`crate::confirm_leaving`).
         Action::Back => {
-            back(ui);
+            let _ = back(ui) || crate::ask_before_leaving(ui);
         }
         _ => {}
     }

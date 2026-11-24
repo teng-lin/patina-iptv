@@ -381,6 +381,11 @@ pub(crate) fn language_changed(_tag: &str) {}
 pub mod exports {}
 
 pub(crate) const EXTERNAL_PLAYER: bool = false;
+pub(crate) fn external_player_available() -> bool {
+    false
+}
+#[cfg(feature = "test-support")]
+pub(crate) fn set_external_player_handler(_handler: Option<bool>) {}
 #[derive(Clone)]
 pub(crate) struct ExternalSession;
 impl ExternalSession {

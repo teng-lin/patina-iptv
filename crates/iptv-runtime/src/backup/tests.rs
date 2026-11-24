@@ -986,3 +986,96 @@ fn an_older_backup_with_unknown_or_invalid_settings_is_still_refused() {
     }
     assert!(!sibling(&root, "restore-pending").exists());
 }
+
+/// A backup made before scheduled recording was retired carries scheduled
+/// jobs, repeating rules and the recording settings removed with them. It
+/// restores without error and drops its schedules. Recording media lives
+/// beside the catalog under this device's job ids, so the restored library
+/// keeps this device's recording rows and can reopen that media.
+#[test]
+fn an_older_backup_with_schedules_restores_and_keeps_this_devices_recordings() {
+    use iptv_core::recording::{JobId, Status};
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("live");
+    seed(&root, "Generated");
+    rusqlite::Connection::open(root.join("iptv.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,message,source_incarnation)
+             VALUES(900,1,'generated-host','Generated host channel','Generated kept capture',
+                 1800000000,1800000060,'completed',376,'',
+                 (SELECT incarnation FROM guide_revisions WHERE source_id=1)),
+                (901,1,'generated-host','Generated host channel','Generated stopped capture',
+                 1800000100,1800000160,'partial',188,'Interrupted when the app closed',
+                 (SELECT incarnation FROM guide_revisions WHERE source_id=1));
+             INSERT INTO recording_playback_progress(recording_id,position_ms,duration_ms,
+                 completed,updated_at) VALUES(900,4000,60000,0,1800000200);",
+        )
+        .unwrap();
+    let old = dir.path().join("v24.sqlite");
+    v24_library(&old);
+    // The older device still had a pending job and two enabled rules.
+    rusqlite::Connection::open(&old)
+        .unwrap()
+        .execute(
+            "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,source_incarnation)
+             SELECT 46,source_id,channel_id,channel_name,'Generated pending',starts_at+86400,
+                 ends_at+86400,'scheduled',source_incarnation FROM recording_jobs WHERE id=41",
+            [],
+        )
+        .unwrap();
+    let settings = json!({
+        "format": iptv_settings::backup::FORMAT,
+        "version": 3,
+        "global": {
+            "recordings.lead_padding": 120_000,
+            "recordings.trail_padding": 600_000,
+            "recordings.reminder_wake": true
+        }
+    })
+    .to_string();
+    stage(
+        &root,
+        &mut packed(vec![
+            ("iptv.sqlite", fs::read(&old).unwrap()),
+            ("settings.json", settings.into_bytes()),
+        ])
+        .as_slice(),
+    )
+    .unwrap();
+    activate(&root).unwrap();
+
+    let store = Store::open(root.join("iptv.sqlite")).unwrap();
+    assert_eq!(
+        store
+            .recording_jobs()
+            .unwrap()
+            .iter()
+            .map(|job| (job.id, job.status, job.bytes))
+            .collect::<Vec<_>>(),
+        [
+            (JobId(901), Status::Partial, 188),
+            (JobId(900), Status::Completed, 376),
+        ],
+        "this device's captures, none of the backup's schedules"
+    );
+    assert_eq!(
+        store.recording_progress(JobId(900)).unwrap().position_ms,
+        4000
+    );
+    assert!(store.recording_rules().unwrap().is_empty());
+    assert!(store.retired_recording_schedules().unwrap().is_empty());
+    // The backup's catalog is the one in use.
+    assert_ne!(store.sources().unwrap()[0].name, "Generated");
+    // Removed recording keys stay readable; nothing acts on them.
+    let (restored, report) =
+        Settings::from_json(&fs::read_to_string(root.join("settings.json")).unwrap()).unwrap();
+    assert!(report.unknown.is_empty() && report.rejected.is_empty());
+    assert_eq!(
+        restored.get("recordings.trail_padding").unwrap(),
+        iptv_settings::Value::Duration(600_000)
+    );
+}

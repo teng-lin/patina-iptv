@@ -17,6 +17,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
     ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
+    ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
     ("custom_groups.rs", "GENERATION"),             // Discard stale dialog replies.
     ("data.rs", "APP_OWNER"),                       // UI root owner for detached local tasks.
@@ -39,6 +40,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lib.rs", "RUNTIME"),          // The shell's single application handle.
     ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
     ("lib.rs", "TUI_MODE"),     // Host flag: TUI backend bypasses StickyCells trackball wrapper.
+    ("lib.rs", "LEAVE"), // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
@@ -50,9 +52,10 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("seek.rs", "PRESSES"),                             // Key gesture state.
     ("seek.rs", "HOLD"),                                // Held-key gesture state.
     ("settings.rs", "REVISION"),                        // Reactive settings subscription handle.
-    ("settings_view.rs", "PAGES"),                      // Immutable screen definitions.
-    ("settings_view.rs", "LAST"),                       // Last selected settings tab.
-    ("settings_view.rs", "NOTICE"),                     // Toast signal handle.
+    ("settings.rs", "PIP"), // The host's picture-in-picture report, for the settings offer.
+    ("settings_view.rs", "PAGES"), // Immutable screen definitions.
+    ("settings_view.rs", "LAST"), // Last selected settings tab.
+    ("settings_view.rs", "NOTICE"), // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.

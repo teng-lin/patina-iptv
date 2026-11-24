@@ -214,9 +214,37 @@ var imports = {
         },
         monotonic_ms: function () { return performance.now(); },
         wall_ms: function () { return Date.now(); },
-        utc_offset_minutes: function (ms) { return -new Date(ms).getTimezoneOffset(); }
+        utc_offset_minutes: function (ms) { return -new Date(ms).getTimezoneOffset(); },
+        /* Package files (iptv-web's package.rs): an interface language's
+         * messages, read synchronously when it is first shown. */
+        package_file_size: function (ptr, len) {
+            packageFile = readPackageFile(text(ptr, len));
+            return packageFile ? packageFile.byteLength : -1;
+        },
+        package_file_read: function (ptr, len) {
+            var file = packageFile;
+            packageFile = null;
+            if (!file || file.byteLength !== len) return 0;
+            new Uint8Array(ex.memory.buffer, ptr, len).set(new Uint8Array(file));
+            return len;
+        }
     }
 };
+
+/* The package file the core last asked for, until it reads it. */
+var packageFile = null;
+function readPackageFile(path) {
+    try {
+        var x = new XMLHttpRequest();
+        x.open('GET', path, false);
+        x.responseType = 'arraybuffer';
+        x.send();
+        /* A local package file has status 0 on the TV, 200 when served. */
+        return (x.status === 200 || x.status === 0) && x.response ? x.response : null;
+    } catch (e) {
+        return null;
+    }
+}
 
 var queue = [];
 function command(cmd) {

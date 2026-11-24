@@ -137,15 +137,21 @@ mod tests {
     fn live_player_reports_replace_unknown_support_and_revoke_actions() {
         let mut state = Pip::default();
         assert_eq!(pip(&state, true).reason(), Some(Reason::WaitingForPlayer));
-        state.report(false, true, false);
+        state.report(false, false, false);
         assert_eq!(pip(&state, true).reason(), Some(Reason::UnsupportedPip));
-        state.report(true, true, false);
+        state.report(true, false, false);
         assert_eq!(pip(&state, false).reason(), Some(Reason::PlaybackRequired));
         assert!(pip(&state, true).available());
-        state.report(true, true, true);
+        state.report(true, false, true);
         assert_eq!(pip(&state, true).reason(), Some(Reason::PipAlreadyActive));
-        state.report(false, true, false);
+        state.report(false, false, false);
         assert!(!pip(&state, true).available());
+        state.report(true, true, false);
+        assert_eq!(
+            pip(&state, true).reason(),
+            Some(Reason::UnsupportedPip),
+            "a TV never has it"
+        );
     }
 
     #[test]

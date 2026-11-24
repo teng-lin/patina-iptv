@@ -1079,7 +1079,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(multiview_picker::layer(ui))
         .child(search_view::layer(ui))
         .child(menu_view::layer(ui))
-        .child(chooser::layer(ui))
+        .child(chooser::layer(ui, false))
         // Over the popups it opens (choosers, program details), so its
         // buttons stay usable and toggle them.
         .child(play_bar::layer(ui))
@@ -1101,6 +1101,13 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(backup::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup::store_failure_layer(ui))
+        // The question before leaving, over every screen it can be asked
+        // from (the first run's welcome screen too); mounted only while it
+        // is asked.
+        .child(nsh_core::prelude::when(
+            move || chooser::is_open(ui, true),
+            move || chooser::layer(ui, true),
+        ))
         .child(settings_view::notice_layer())
 }
 
@@ -1219,6 +1226,38 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     play_bar::pointer_moved(ui);
 }
 
+/// How the host leaves the app after the viewer confirmed it, where it
+/// asks first ([`confirm_leaving`]).
+static LEAVE: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
+
+/// Makes Back at the top level ask before the app leaves: a Yes/No prompt
+/// (No focused; Back closes it), and Yes calls `leave`. For a host whose
+/// platform asks for that (Samsung's Tizen TVs: an exit confirmation on
+/// Return at the app's first screen, `hosts/tizen-nsh`); elsewhere the
+/// platform's Back leaves at once. Only the first call counts; make it
+/// before the app starts.
+pub fn confirm_leaving(leave: fn()) {
+    let _ = LEAVE.set(leave);
+}
+
+/// Whether Back at the top level asks before leaving ([`confirm_leaving`]).
+fn asks_before_leaving() -> bool {
+    LEAVE.get().is_some()
+}
+
+/// Where Back would leave the app: the prompt instead, where the host asks
+/// first ([`confirm_leaving`]); `false` (leave) elsewhere.
+pub(crate) fn ask_before_leaving(ui: Ui) -> bool {
+    asks_before_leaving() && chooser::ask_to_leave(ui)
+}
+
+/// Yes in the prompt [`confirm_leaving`] asked for: the host leaves.
+pub(crate) fn leave() {
+    if let Some(leave) = LEAVE.get() {
+        leave();
+    }
+}
+
 /// Back: dialogs close; a full screen window becomes a window again (the
 /// desktop's Escape); player panels or the play bar → hidden; full screen/overlay → guide;
 /// then the guide screen's chain (`browse.rs`): hint card → guide → groups →
@@ -1226,9 +1265,11 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
 /// the platform's Back takes it at once: Android leaves without a second
 /// press and its predictive back gesture shows the way home; a desktop
 /// window stays open (Escape does nothing there, and the window closes
-/// the operating system's way). The release of a Long Back that acted
-/// takes no step (`input::swallow_back`), so a handler stays while one is
-/// pending, even where Back would leave.
+/// the operating system's way). A host that asks before leaving
+/// ([`confirm_leaving`]) keeps the handler there, and Back opens its
+/// prompt. The release of a Long Back that acted takes no step
+/// (`input::swallow_back`), so a handler stays while one is pending, even
+/// where Back would leave.
 fn bind_back(ui: Ui) {
     let back_target = computed(move || {
         let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
@@ -1254,14 +1295,17 @@ fn bind_back(ui: Ui) {
             && !ui.any_overlay_open()
             && !desktop::fullscreen()
             && !ui.back_guard.with(iptv_nav::BackGuard::armed);
-        if !leaves {
+        if !leaves || asks_before_leaving() {
             on_back_press(move || input::swallow_back(ui) || go_back(ui));
         }
     });
 }
 
 /// One step back (the platform's Back, or a key standing in for it);
-/// `false` where Back leaves the app.
+/// `false` where Back leaves the app. Where the host asks before leaving
+/// ([`confirm_leaving`]), every such last step (the guide's rail, the
+/// first run's welcome screen, the store failure screen) opens the prompt
+/// instead, over every other layer.
 pub(crate) fn go_back(ui: Ui) -> bool {
     external_player::cancel_pending(ui);
     if ui.channel_number.with(|entry| entry.active()) {
@@ -1282,6 +1326,10 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             || ui.chooser.with(Option::is_some)
             || ui.editor.with(Option::is_some);
         match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
+            _ if top == Some(Overlay::Leave) => {
+                chooser::close(ui);
+                true
+            }
             _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
@@ -1357,7 +1405,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
         }
-    })
+    }) || ask_before_leaving(ui)
 }
 
 /// Whether a stored source has a guide timer or an in-flight guide read,
@@ -1416,6 +1464,13 @@ pub fn hold_source_preparation() -> runtime::TestGate {
     host::host_handle()
         .and_then(|owner| owner.hold_source_preparation())
         .expect("source preparation gate needs a started app")
+}
+
+/// Pretends an external player is (`Some(true)`) or is not (`Some(false)`)
+/// installed, or probes the host again (`None`), for the headless tests.
+#[cfg(feature = "test-support")]
+pub fn set_external_player_handler(handler: Option<bool>) {
+    host::set_external_player_handler(handler);
 }
 
 /// Read-only synthetic-source observation keyed by the actually published URL.

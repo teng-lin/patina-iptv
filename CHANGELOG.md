@@ -35,6 +35,10 @@ is below 1.0, a minor release may change behavior.
   fast-forward jumps under Advanced. The player's panels and play bar now wait
   at least Android's recommended accessibility timeout, and stay until hidden
   while a screen reader or Switch Access runs.
+- Android TV no longer offers picture in picture: Home during playback returns
+  to the launcher and stops the stream, and the control and the
+  picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
+  it, entering on Home only from full-screen playback.
 
 ### Fixed
 

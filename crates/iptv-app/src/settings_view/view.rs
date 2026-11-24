@@ -69,6 +69,8 @@ pub(crate) fn notice_layer() -> impl IntoElement {
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = computed(move || {
         let settings = crate::settings::read(ui);
+        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        ui.pip.with(|p| p.supported);
         state(ui, |s| {
             s.rows(&Ctx {
                 settings: &settings,
@@ -275,22 +277,6 @@ fn row_view(
     };
     let note = move || {
         let settings = crate::settings::read(ui);
-        if row().is_some_and(|row| row.key() == Some(iptv_settings::keys::PIP_ON_LEAVE.as_str())) {
-            let unavailable = ui.pip.with(|pip| {
-                iptv_presentation::capabilities::pip(pip, true)
-                    .reason()
-                    .filter(|reason| {
-                        matches!(
-                            reason,
-                            iptv_presentation::capabilities::Reason::WaitingForPlayer
-                                | iptv_presentation::capabilities::Reason::UnsupportedPip
-                        )
-                    })
-            });
-            if let Some(reason) = unavailable {
-                return crate::capabilities::reason(reason).to_owned();
-            }
-        }
         row().map(|r| note(&settings, &r)).unwrap_or_default()
     };
     let current = move || {
@@ -440,6 +426,8 @@ fn row_view(
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
         let settings = crate::settings::read(ui);
+        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        ui.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
             offer: &crate::settings::offer_now,
