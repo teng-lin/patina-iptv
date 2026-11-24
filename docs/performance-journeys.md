@@ -29,7 +29,7 @@ UI reload are paused, and periodic EPG checks are disabled; the cached cold prof
 and guide refresh. This excludes unrelated minute-boundary/background work from
 the exact action counters. The native recording executor still starts and playback
 uses its normal authorization and connection reservations. The recordings UI normally
-reloads jobs, progress and repeating rules every second (three reader jobs); including
+reloads jobs, progress and the retired schedules every second (three reader jobs); including
 that poll made an otherwise identical selection count differ by three when a tick
 crossed the interval. The performance profile excludes that unrelated view poll,
 while ordinary app tests continue to exercise it.

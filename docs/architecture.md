@@ -16,10 +16,10 @@ lists each difference and where the piece goes.
 
 | Term | Meaning |
 | --- | --- |
-| Domain | Facts and rules about the content and the viewer's data. They hold for every entry point: a remote, a touch, the bridge, a background refresh, a scheduled recording. |
-| Operation | Work that achieves a goal: import a playlist, schedule a recording, resolve a stream. It is the same whoever asks, and it checks its own request. |
+| Domain | Facts and rules about the content and the viewer's data. They hold for every entry point: a remote, a touch, the bridge, a background refresh, a recording. |
+| Operation | Work that achieves a goal: import a playlist, start a recording, resolve a stream. It is the same whoever asks, and it checks its own request. |
 | Operation identity | The value that ties a reply to its request. The Application issues it, and it stays unique while the runtime lives. |
-| Host capability | A fact a host reports about itself, as a value: its platform, its decoder slots, whether it can wake to record. The Domain's rules read it. |
+| Host capability | A fact a host reports about itself, as a value: its platform, its decoder slots, whether it can record. The Domain's rules read it. |
 | Message id | A message named by its English source text, as data, marked with `key`. Only the presentation translates or formats one. |
 | Feature | One thing a person operates: the guide, the player's panels, the add-playlist wizard, recordings. |
 | Presentation state | What exists only while a person operates a feature, with no toolkit in it. Both front ends share it. |
@@ -475,12 +475,12 @@ service failure/restart scenarios and distinguishes headless, decoder and device
 
 ## The video layer
 
-Recording jobs and rules live in `iptv_core::recording`. The remote and
+Recording jobs live in `iptv_core::recording`, with the repeating rules of
+earlier versions, kept only so they can be read, listed and retired. The remote and
 touch screen model lives in `iptv_presentation::recording`. The app's
 `recordings_view` renders it and calls the `iptv-runtime` recording service. SQLite stores durable,
 source-scoped intent without resolved stream URLs. A scheduler conditionally
-claims the saved time window, so cancellation or editing invalidates an old
-read. Jobs are host-local and are removed from portable snapshots/restores.
+claims the saved time window, so cancellation invalidates an old read. Jobs are host-local and are removed from portable snapshots/restores.
 Snapshots also drop downloaded guide programs and mark each stored guide as
 never downloaded, so the restored app fetches the guide at its first start.
 
@@ -500,11 +500,10 @@ as partial recordings; publication never overwrites an existing media file.
 Native recording ownership is independent of the UI service epoch. A host
 shares recording state and account budgets across engine recreation while a
 process-wide storage lock excludes competing processes. Android supplies a
-foreground service, wake lock and alarm/boot receivers. Desktop window close
-can retain the host; login startup is opt-in, with experimental Windows task
-wake integration. Linux/macOS sleep wake and iPad background capture are not
-implemented. Recurring local-time and guide-title rules materialize durable,
-conditionally claimed jobs; accepted jobs do not depend on viewing unlocks.
+sticky foreground service and a wake lock while a capture runs; a desktop
+holds the computer from idle sleep. Nothing registers a login item, a wake
+timer or a boot receiver, and iPad background capture is not implemented.
+Accepted jobs do not depend on viewing unlocks.
 Independent UI and recording services share per-directory filesystem gates
 for private playlist publication and recovery, so opening one service cannot
 remove another service's active encrypted temporary file.

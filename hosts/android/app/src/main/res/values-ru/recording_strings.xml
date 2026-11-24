@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="recording_channel">Запланированные записи</string>
+    <string name="recording_channel">Текущие записи</string>
     <string name="recording_title">Patina ведёт запись</string>
-    <string name="recording_background">Запланированная запись продолжается в фоне</string>
+    <string name="recording_background">Запись продолжается в фоне</string>
     <string name="recording_stopped_channel">Записи, остановленные досрочно</string>
     <string name="recording_stopped_title">Запись остановлена</string>
     <string name="recording_stopped_tv_off">Телевизор был выключен. Записанное до этого момента находится в разделе «Записи».</string>

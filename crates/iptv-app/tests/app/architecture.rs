@@ -51,11 +51,10 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.
     ("host/web.rs", "FILES"), // Restored browser files are shared across app owners.
     ("host/web.rs", "HOST_STOP"), // The root owner's weak handle, as natively.
-    ("host/native/recording_host/android.rs", "HOST"), // JNI VM/class handle for OS wake publication.
-    ("host/native/recording_host/windows.rs", "TASKS"), // Serialize OS task registration and removal.
-    ("seek.rs", "PRESSES"),                             // Key gesture state.
-    ("seek.rs", "HOLD"),                                // Held-key gesture state.
-    ("settings.rs", "REVISION"),                        // Reactive settings subscription handle.
+    ("host/native/recording_host/android.rs", "HOST"), // JNI VM/class handle for the recording host.
+    ("seek.rs", "PRESSES"),                            // Key gesture state.
+    ("seek.rs", "HOLD"),                               // Held-key gesture state.
+    ("settings.rs", "REVISION"),                       // Reactive settings subscription handle.
     ("settings.rs", "PIP"), // The host's picture-in-picture report, for the settings offer.
     ("settings_view.rs", "PAGES"), // Immutable screen definitions.
     ("settings_view.rs", "LAST"), // Last selected settings tab.

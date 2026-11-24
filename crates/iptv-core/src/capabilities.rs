@@ -1,5 +1,4 @@
 //! Host facts and current feature availability. These values grant no content access.
-use crate::recording::WakeCapability;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Platform {
@@ -165,31 +164,8 @@ impl Host {
             Platform::Android | Platform::Linux | Platform::Macos | Platform::Windows
         )
     }
-    pub const fn startup_registration(self) -> bool {
-        matches!(
-            self.platform,
-            Platform::Linux | Platform::Macos | Platform::Windows
-        )
-    }
-    pub const fn alarm_permission(self) -> bool {
-        matches!(self.platform, Platform::Android)
-    }
     pub const fn automatic_pip(self) -> bool {
         matches!(self.platform, Platform::Android)
-    }
-}
-
-/// Current native scheduling report, independent of whether a particular job is allowed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Recording {
-    pub background: bool,
-    /// None until the host has acknowledged registration, including a denied report.
-    pub wake: Option<WakeCapability>,
-}
-impl Recording {
-    /// Exact starts are a host report, never inferred from the operating system name.
-    pub fn exact_start(self) -> bool {
-        self.wake == Some(WakeCapability::Exact)
     }
 }
 
@@ -198,21 +174,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn host_profiles_do_not_imply_permissions_or_exact_wakes() {
-        for (platform, slots, background, startup, alarms) in [
-            (Platform::Android, 2, true, false, true),
-            (Platform::Linux, 4, true, true, false),
-            (Platform::Macos, 4, true, true, false),
-            (Platform::Windows, 4, true, true, false),
-            (Platform::Ipad, 4, false, false, false),
-            (Platform::Unknown, 1, false, false, false),
+    fn host_profiles_match_the_documented_table() {
+        for (platform, slots, background, pip) in [
+            (Platform::Android, 2, true, true),
+            (Platform::Linux, 4, true, false),
+            (Platform::Macos, 4, true, false),
+            (Platform::Windows, 4, true, false),
+            (Platform::Ipad, 4, false, false),
+            (Platform::Unknown, 1, false, false),
         ] {
             let host = Host::of(platform);
             assert_eq!(host.decoder_slots(), slots);
             assert_eq!(host.background_recordings(), background);
-            assert_eq!(host.startup_registration(), startup);
-            assert_eq!(host.alarm_permission(), alarms);
-            assert_eq!(host.automatic_pip(), alarms);
+            assert_eq!(host.automatic_pip(), pip);
             let name = match platform {
                 Platform::Android => "Android TV/tablet",
                 Platform::Linux => "Linux",
@@ -222,22 +196,10 @@ mod tests {
                 Platform::Unknown => "Unknown",
             };
             let yn = |value| if value { "Yes" } else { "No" };
-            let row = format!(
-                "| {name} | {slots} | {} | {} | {} |",
-                yn(background),
-                yn(startup),
-                yn(alarms)
-            );
+            let row = format!("| {name} | {slots} | {} |", yn(background));
             assert!(
                 include_str!("../../../docs/capabilities.md").contains(&row),
                 "documented profile drifted: {row}"
-            );
-            assert!(
-                !Recording {
-                    background,
-                    wake: None
-                }
-                .exact_start()
             );
         }
     }
@@ -316,8 +278,6 @@ mod tests {
                     };
                     assert_eq!(host.decoder_slots(), built.decoder_slots());
                     assert_eq!(host.background_recordings(), built.background_recordings());
-                    assert_eq!(host.startup_registration(), built.startup_registration());
-                    assert_eq!(host.alarm_permission(), built.alarm_permission());
                     assert_eq!(host.automatic_pip(), built.automatic_pip());
                 }
             }
@@ -345,21 +305,5 @@ mod tests {
             ..Host::of(Platform::Linux)
         };
         assert_eq!(desktop.decoder_slots(), 3);
-    }
-
-    #[test]
-    fn only_an_exact_report_implies_an_exact_start() {
-        for wake in [
-            WakeCapability::Exact,
-            WakeCapability::Inexact,
-            WakeCapability::Denied,
-            WakeCapability::AwakeOnly,
-        ] {
-            let state = Recording {
-                background: true,
-                wake: Some(wake),
-            };
-            assert_eq!(state.exact_start(), wake == WakeCapability::Exact);
-        }
     }
 }

@@ -116,9 +116,8 @@ fn a_queued_registration_cannot_outlive_its_application_owner() {
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
         panic!("a wake report must not open the catalog")
     });
-    ports.recording_schedule = |_, _| {
+    ports.recording_schedule = |_| {
         CALLS.fetch_add(1, Ordering::SeqCst);
-        iptv_core::recording::WakeCapability::Exact
     };
     let owner = Runtime::new(ports);
     owner.start_services();
@@ -139,11 +138,10 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
     type Gate = (SyncSender<()>, Receiver<()>);
     static GATE: std::sync::Mutex<Option<Gate>> = std::sync::Mutex::new(None);
-    fn register(_: i64, _: bool) -> iptv_core::recording::WakeCapability {
+    fn register(_: bool) {
         let (entered, release) = GATE.lock().unwrap().take().unwrap();
         entered.send(()).unwrap();
         release.recv_timeout(Duration::from_secs(10)).unwrap();
-        iptv_core::recording::WakeCapability::Exact
     }
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
@@ -164,26 +162,25 @@ fn a_registration_spanning_native_restart_cannot_publish_the_old_report() {
     owner.recordings.execution().generation += 1;
     release.send(()).unwrap();
     assert!(!worker.join().unwrap());
-    assert_eq!(owner.recording_capabilities().wake, None);
+    assert_eq!(owner.recordings.lock().published_schedule, None);
     assert!(owner.drain_services());
 }
 
 #[tokio::test]
-async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_intents() {
-    static REGISTRATIONS: std::sync::Mutex<Vec<(i64, bool)>> = std::sync::Mutex::new(Vec::new());
-    fn register(next: i64, active: bool) -> iptv_core::recording::WakeCapability {
-        REGISTRATIONS.lock().unwrap().push((next, active));
-        iptv_core::recording::WakeCapability::Exact
+async fn the_host_is_told_whether_a_capture_is_due_and_a_late_poll_cannot_replace_it() {
+    static PUBLISHED: std::sync::Mutex<Vec<bool>> = std::sync::Mutex::new(Vec::new());
+    fn publish(active: bool) {
+        PUBLISHED.lock().unwrap().push(active);
     }
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().to_owned(), |_| {
-        panic!("wake refresh must not open the catalog")
+        panic!("a publication must not open the catalog")
     });
-    ports.recording_schedule = register;
+    ports.recording_schedule = publish;
     let owner = Runtime::new(ports);
     owner.start_services();
     let at = now();
-    let guide_deadline = at + 25 * 60;
+    // A job an earlier version left for later is not a capture to run for.
     let mut job = Job {
         id: JobId(1),
         source_current: true,
@@ -203,8 +200,6 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
     {
         let mut data = owner.recordings.lock();
         data.ready = true;
-        data.recurring = true;
-        data.guide_check_at = guide_deadline;
         data.jobs = vec![job.clone()];
     }
     assert!(
@@ -212,39 +207,32 @@ async fn foreground_refresh_preserves_the_native_series_deadline_and_newer_inten
             .recordings
             .publish_schedule(&owner.services(), 0, false)
     );
-    owner.refresh_recording_wake().await.unwrap();
-    assert_eq!(
-        *REGISTRATIONS.lock().unwrap(),
-        vec![(guide_deadline, false); 2],
-        "foreground permission refresh must retain the native series wake"
+    assert_eq!(*PUBLISHED.lock().unwrap(), [false]);
+    // An unchanged poll does not call the host again.
+    assert!(
+        owner
+            .recordings
+            .publish_schedule(&owner.services(), 0, false)
     );
-    owner.recordings.lock().jobs.clear();
-    owner.refresh_recording_wake().await.unwrap();
-    assert_eq!(
-        REGISTRATIONS.lock().unwrap().last(),
-        Some(&(guide_deadline, false))
-    );
-    job.request.start = at + 60;
-    job.request.end = at + 120;
+    assert_eq!(PUBLISHED.lock().unwrap().len(), 1);
+    job.request.start = at - 1;
+    job.request.end = at + 60;
     {
         let mut data = owner.recordings.lock();
         data.intent_revision += 1;
         data.jobs = vec![job];
     }
-    owner.refresh_recording_wake().await.unwrap();
-    assert_eq!(
-        REGISTRATIONS.lock().unwrap().last(),
-        Some(&(at + 60, false))
-    );
+    owner.publish_recording_schedule().await.unwrap();
+    assert_eq!(PUBLISHED.lock().unwrap().last(), Some(&true));
     assert!(
         !owner
             .recordings
             .publish_schedule(&owner.services(), 0, false)
     );
     assert_eq!(
-        REGISTRATIONS.lock().unwrap().len(),
-        4,
-        "a late native poll cannot replace the edit"
+        PUBLISHED.lock().unwrap().len(),
+        2,
+        "a late native poll cannot replace the newer capture"
     );
     assert!(owner.drain_services());
 }
@@ -426,280 +414,6 @@ async fn a_reused_playlist_id_does_not_inherit_an_old_connection_allowance() {
     assert!(owner.drain_services());
 }
 
-fn seed_series_guide(owner: &Runtime, request: &Request, start: i64, end: i64) {
-    let raw = rusqlite::Connection::open(owner.data_dir().join("iptv.sqlite")).unwrap();
-    raw.pragma_update(None, "key", format!("x'{}'", "11".repeat(32)))
-        .unwrap();
-    raw.pragma_update(None, "foreign_keys", true).unwrap();
-    raw.execute(
-        "INSERT INTO epg_guides(source_id) VALUES(?1)",
-        [request.source],
-    )
-    .unwrap();
-    raw.execute("INSERT INTO epg_feeds(source_id,feed_id,url,priority,fetched_at) VALUES(?1,1,'https://example.test/generated.xmltv',0,?2)", rusqlite::params![request.source, now()]).unwrap();
-    raw.execute(
-        "INSERT INTO epg_channels(id,source_id,feed_id,epg_channel) VALUES(1,?1,1,'generated')",
-        [request.source],
-    )
-    .unwrap();
-    raw.execute("INSERT INTO epg_bindings(source_id,channel_key,epg_channel_id,match_kind) VALUES(?1,?2,1,'tvg-id')", rusqlite::params![request.source, request.channel]).unwrap();
-    for offset in [0, 86400] {
-        raw.execute(
-            "INSERT INTO epg_programs(channel_id,start,stop,title) VALUES(1,?1,?2,?3)",
-            rusqlite::params![start + offset, end + offset, request.title],
-        )
-        .unwrap();
-    }
-}
-
-#[tokio::test]
-async fn series_padding_is_applied_once_and_raw_occurrence_cancellation_survives_refresh() {
-    use iptv_core::recording::{RecurrenceTiming, Repeat};
-    let directory = tempfile::tempdir().unwrap();
-    let owner = owner(&directory.path().join("generated-app"));
-    let mut request = seed(&owner, "https://example.test/generated.ts").await;
-    let (start, end) = (request.start, request.end);
-    seed_series_guide(&owner, &request, start, end);
-    request.start -= 300;
-    request.end += 600;
-    let first = owner
-        .schedule_repeating_recording_with_timing(
-            request.clone(),
-            Repeat::Series,
-            Some(RecurrenceTiming {
-                program_start: start,
-                program_end: end,
-                guide_offset_seconds: None,
-                lead_seconds: 300,
-                trail_seconds: 600,
-            }),
-        )
-        .await
-        .unwrap();
-    let jobs = owner.recording_jobs().await.unwrap();
-    assert_eq!(
-        jobs.len(),
-        2,
-        "the initial padded episode must not be materialized twice"
-    );
-    assert!(
-        jobs.iter()
-            .any(|job| job.request.start == start - 300 && job.request.end == end + 600)
-    );
-    assert!(jobs.iter().any(
-        |job| job.request.start == start + 86400 - 300 && job.request.end == end + 86400 + 600
-    ));
-    let rule = owner.recording_rules().await.unwrap().pop().unwrap();
-    assert_eq!((rule.lead_seconds, rule.trail_seconds), (300, 600));
-    owner.stop_recording(first).await.unwrap();
-    owner.delete_recording(first).await.unwrap();
-    rules::materialize(&owner.services()).await.unwrap();
-    assert_eq!(
-        owner.recording_jobs().await.unwrap().len(),
-        1,
-        "deleting the initial episode does not rearm its raw guide identity"
-    );
-    assert!(owner.drain_services());
-}
-
-#[tokio::test]
-async fn a_currently_airing_series_first_capture_does_not_duplicate_the_guide_occurrence() {
-    use iptv_core::recording::Repeat;
-    let directory = tempfile::tempdir().unwrap();
-    let owner = owner(&directory.path().join("generated-app"));
-    let mut request = seed(&owner, "https://example.test/generated.ts").await;
-    let start = now() - 120;
-    let end = now() + 600;
-    seed_series_guide(&owner, &request, start, end);
-    request.start = now();
-    request.end = end;
-    owner
-        .schedule_repeating_recording(request, Repeat::Series)
-        .await
-        .unwrap();
-    assert_eq!(
-        owner.recording_jobs().await.unwrap().len(),
-        2,
-        "record-now and the raw currently-airing occurrence are the same episode"
-    );
-    assert!(owner.drain_services());
-}
-
-#[tokio::test]
-async fn current_daily_and_weekly_captures_keep_the_nominal_clock_and_duration() {
-    use iptv_core::recording::{RecurrenceTiming, Repeat};
-    for (repeat, interval) in [(Repeat::Daily, 86400), (Repeat::Weekly, 7 * 86400)] {
-        let directory = tempfile::tempdir().unwrap();
-        let owner = owner(&directory.path().join("generated-app"));
-        let mut request = seed(&owner, "https://example.test/generated.ts").await;
-        let start = now() - 600;
-        let end = now() + 600;
-        request.start = now();
-        request.end = end + 600;
-        let first_start = request.start;
-        let id = owner
-            .schedule_repeating_recording_with_timing(
-                request,
-                repeat,
-                Some(RecurrenceTiming {
-                    program_start: start,
-                    program_end: end,
-                    guide_offset_seconds: None,
-                    lead_seconds: 300,
-                    trail_seconds: 600,
-                }),
-            )
-            .await
-            .unwrap();
-        let jobs = owner.recording_jobs().await.unwrap();
-        assert_eq!(
-            jobs.iter().find(|job| job.id == id).unwrap().request.start,
-            first_start
-        );
-        let nominal = owner.recording_rules().await.unwrap().pop().unwrap();
-        assert_eq!(
-            nominal.local_start,
-            rules::local_timestamp(start - 300).unwrap()
-        );
-        assert_eq!(
-            nominal.request.end - nominal.request.start,
-            end + 600 - (start - 300)
-        );
-        let local_next = nominal.local_start + interval;
-        if let (Some(next_start), Some(next_end)) = (
-            rules::utc_timestamp(local_next),
-            rules::utc_timestamp(local_next + nominal.request.end - nominal.request.start),
-        ) {
-            assert!(
-                jobs.iter()
-                    .any(|job| job.request.start == next_start && job.request.end == next_end),
-                "the next capture keeps its local clock and full padded duration across DST"
-            );
-        }
-        assert_eq!(
-            jobs.iter().filter(|job| job.request.start < end).count(),
-            1,
-            "the clamped initial capture is the only current occurrence"
-        );
-        assert!(owner.drain_services());
-    }
-}
-
-#[tokio::test]
-async fn overlapping_daily_and_weekly_windows_do_not_abort_later_rule_materialization() {
-    use iptv_core::recording::{Repeat, Rule, RuleId};
-    let directory = tempfile::tempdir().unwrap();
-    let owner = owner(&directory.path().join("generated-app"));
-    let request = seed(&owner, "https://example.test/generated.ts").await;
-    let (daily, weekly, third, shared, shared_start, third_start) = owner
-        .services()
-        .call(move |store| {
-            let daily = Rule {
-                id: RuleId(100),
-                local_start: rules::local_timestamp(request.start).unwrap(),
-                request: request.clone(),
-                repeat: Repeat::Daily,
-                enabled: true,
-                lead_seconds: 0,
-                trail_seconds: 0,
-            };
-            store.schedule_recording_rule_and_first(&daily, JobId(1001), now())?;
-            let mut third = daily.clone();
-            third.id = RuleId(300);
-            third.request.start += 1800;
-            third.request.end += 1800;
-            third.local_start = rules::local_timestamp(third.request.start).unwrap();
-            store.schedule_recording_rule_and_first(&third, JobId(3001), now())?;
-            let (shared_start, shared_end, third_start) = (1..=7)
-                .find_map(|day| {
-                    Some((
-                        rules::utc_timestamp(daily.local_start + day * 86400)?,
-                        rules::utc_timestamp(
-                            daily.local_start + day * 86400 + request.end - request.start,
-                        )?,
-                        rules::utc_timestamp(third.local_start + day * 86400)?,
-                    ))
-                })
-                .unwrap();
-            let mut weekly = daily.clone();
-            weekly.id = RuleId(200);
-            weekly.repeat = Repeat::Weekly;
-            weekly.request.start = shared_start;
-            weekly.request.end = shared_end;
-            weekly.local_start = rules::local_timestamp(shared_start).unwrap();
-            let shared = store.schedule_recording_rule_and_first(&weekly, JobId(2001), now())?;
-            Ok((
-                daily.id,
-                weekly.id,
-                third.id,
-                shared,
-                shared_start,
-                third_start,
-            ))
-        })
-        .await
-        .unwrap();
-    rules::materialize(&owner.services()).await.unwrap();
-    let jobs = owner.recording_jobs().await.unwrap();
-    assert_eq!(
-        jobs.iter()
-            .filter(|job| job.request.start == shared_start)
-            .count(),
-        1,
-        "one capture satisfies both rules"
-    );
-    assert!(
-        jobs.iter().any(|job| job.request.start == third_start),
-        "a shared earlier window does not starve the third rule"
-    );
-    owner
-        .set_recording_rule_enabled(weekly, false)
-        .await
-        .unwrap();
-    assert_eq!(
-        owner
-            .recording_jobs()
-            .await
-            .unwrap()
-            .iter()
-            .find(|job| job.id == shared)
-            .unwrap()
-            .status,
-        Status::Scheduled,
-        "daily still requires the shared job"
-    );
-    owner
-        .set_recording_rule_enabled(weekly, true)
-        .await
-        .unwrap();
-    owner
-        .set_recording_rule_enabled(daily, false)
-        .await
-        .unwrap();
-    assert_eq!(
-        owner
-            .recording_jobs()
-            .await
-            .unwrap()
-            .iter()
-            .find(|job| job.id == shared)
-            .unwrap()
-            .status,
-        Status::Scheduled,
-        "re-enabled weekly intent keeps the shared capture when daily is paused"
-    );
-    owner.stop_repeating_recording(shared).await.unwrap();
-    let remaining = owner.recording_rules().await.unwrap();
-    assert!(
-        !remaining
-            .iter()
-            .any(|rule| rule.id == daily || rule.id == weekly),
-        "job-level cancellation removes all linked recurring intents"
-    );
-    assert!(remaining.iter().any(|rule| rule.id == third));
-    assert!(owner.drain_services());
-}
-
 #[tokio::test]
 async fn an_isolated_recording_owner_can_restart_without_a_native_background_service() {
     let directory = tempfile::tempdir().unwrap();
@@ -830,14 +544,12 @@ pub(super) async fn until(owner: &Runtime, id: JobId, accept: impl Fn(&Job) -> b
 }
 
 #[tokio::test]
-async fn intent_is_idempotent_editable_and_canceled_before_it_starts() {
+async fn intent_is_idempotent_and_canceled_before_it_starts() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(&directory.path().join("catalog"));
-    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    let request = seed(&owner, "https://example.test/generated.ts").await;
     let id = owner.schedule_recording(request.clone()).await.unwrap();
-    assert_eq!(owner.schedule_recording(request.clone()).await.unwrap(), id);
-    request.end += 60;
-    owner.update_recording(id, request).await.unwrap();
+    assert_eq!(owner.schedule_recording(request).await.unwrap(), id);
     owner.stop_recording(id).await.unwrap();
     until(&owner, id, |j| j.status == Status::Canceled).await;
     assert!(owner.recording_file(id).await.is_err());
@@ -1280,18 +992,12 @@ async fn a_surviving_ui_and_a_restarted_host_keep_one_recording_budget() {
 }
 
 #[tokio::test]
-async fn enabling_a_rule_publishes_background_intent_before_it_returns() {
+async fn accepting_a_recording_needs_the_background_host_before_it_returns() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(&directory.path().join("generated-app"));
     let request = seed(&owner, "https://example.test/generated.ts").await;
-    let id = owner
-        .schedule_repeating_recording(request, iptv_core::recording::Repeat::Daily)
-        .await
-        .unwrap();
-    let rule = owner.recording_rules().await.unwrap()[0].id;
-    owner.set_recording_rule_enabled(rule, false).await.unwrap();
     assert!(!owner.recording_background_needed());
-    owner.set_recording_rule_enabled(rule, true).await.unwrap();
+    let id = owner.schedule_recording(request).await.unwrap();
     assert!(owner.recording_background_needed());
     assert!(
         owner
@@ -1299,6 +1005,7 @@ async fn enabling_a_rule_publishes_background_intent_before_it_returns() {
             .iter()
             .any(|job| job.id == id && job.status == Status::Scheduled)
     );
+    owner.stop_recording(id).await.unwrap();
     assert!(owner.drain_services());
 }
 
@@ -1309,24 +1016,19 @@ struct PublicationGate {
     changed: Condvar,
 }
 static PUBLICATION_GATE: Mutex<Option<Arc<PublicationGate>>> = Mutex::new(None);
-fn blocking_wake_registration(next: i64, _active: bool) -> iptv_core::recording::WakeCapability {
-    use iptv_core::recording::WakeCapability;
-    if next <= 0 {
-        return WakeCapability::Exact;
+fn blocking_publication(active: bool) {
+    if !active {
+        return;
     }
     let gate = PUBLICATION_GATE.lock().unwrap().clone();
     if let Some(gate) = gate {
         gate.entered.store(true, Ordering::SeqCst);
         let released = gate.released.lock().unwrap();
-        let (released, _) = gate
+        let _ = gate
             .changed
             .wait_timeout_while(released, Duration::from_secs(10), |released| !*released)
             .unwrap();
-        if !*released {
-            return WakeCapability::Denied;
-        }
     }
-    WakeCapability::Exact
 }
 struct ReleasePublication(Arc<PublicationGate>);
 impl Drop for ReleasePublication {
@@ -1337,7 +1039,7 @@ impl Drop for ReleasePublication {
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn accepted_schedule_waits_for_os_registration_without_blocking_the_ui_executor() {
+async fn an_accepted_capture_waits_for_the_host_without_blocking_the_ui_executor() {
     let directory = tempfile::tempdir().unwrap();
     let gate = Arc::new(PublicationGate::default());
     *PUBLICATION_GATE.lock().unwrap() = Some(gate.clone());
@@ -1345,15 +1047,17 @@ async fn accepted_schedule_waits_for_os_registration_without_blocking_the_ui_exe
     let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
         Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
     });
-    ports.recording_schedule = blocking_wake_registration;
+    ports.recording_schedule = blocking_publication;
     let owner = Runtime::new(ports);
     owner.start_services();
-    let request = seed(&owner, "https://example.test/generated.ts").await;
+    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    // Record now: the host is told a capture is due.
+    request.start = now();
     let mut accepted = Box::pin(owner.schedule_recording(request));
     tokio::select! {
-        result=&mut accepted=>panic!("schedule acknowledged before platform registration completed: {result:?}"),
+        result=&mut accepted=>panic!("capture acknowledged before the host applied it: {result:?}"),
         _=async {while !gate.entered.load(Ordering::SeqCst) {tokio::time::sleep(Duration::from_millis(10)).await;}}=>{},
-        _=tokio::time::sleep(Duration::from_secs(3))=>panic!("platform registration did not begin"),
+        _=tokio::time::sleep(Duration::from_secs(3))=>panic!("the host was not told"),
     }
     assert_eq!(
         owner
@@ -1363,7 +1067,7 @@ async fn accepted_schedule_waits_for_os_registration_without_blocking_the_ui_exe
             .unwrap()
             .len(),
         1,
-        "intent is durable while platform registration is still blocked"
+        "intent is durable while the host call is still blocked"
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(50), accepted.as_mut())
@@ -1374,32 +1078,6 @@ async fn accepted_schedule_waits_for_os_registration_without_blocking_the_ui_exe
     drop(release);
     let id = accepted.await.unwrap();
     assert_eq!(owner.recording_snapshot()[0].id, id);
-    assert_eq!(owner.recording_wake_notice(), None);
-    assert!(owner.drain_services());
-}
-#[tokio::test]
-async fn a_denied_wake_is_explicit_and_does_not_discard_the_accepted_job() {
-    let directory = tempfile::tempdir().unwrap();
-    let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
-        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
-    });
-    ports.recording_schedule = |_, _| iptv_core::recording::WakeCapability::Denied;
-    let owner = Runtime::new(ports);
-    owner.start_services();
-    let request = seed(&owner, "https://example.test/generated.ts").await;
-    let id = owner.schedule_recording(request).await.unwrap();
-    assert!(owner.recording_wake_notice().is_some());
-    assert_eq!(
-        owner
-            .recording_jobs()
-            .await
-            .unwrap()
-            .iter()
-            .find(|job| job.id == id)
-            .unwrap()
-            .status,
-        Status::Scheduled
-    );
     assert!(owner.drain_services());
 }
 
@@ -1430,32 +1108,16 @@ async fn protect_recording(owner: &Runtime, request: &Request) -> iptv_core::par
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn queued_recording_mutations_recheck_the_grant_in_the_accepting_writer() {
-    use iptv_core::recording::{Repeat, Rule, RuleId};
+async fn a_queued_recording_rechecks_the_grant_in_the_accepting_writer() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(directory.path());
     let request = seed(&owner, "https://example.test/generated.ts").await;
     let initial = request.clone();
-    let rule = Rule {
-        id: RuleId(952),
-        request: Request {
-            start: request.start + 86400,
-            end: request.end + 86400,
-            ..request.clone()
-        },
-        local_start: request.start + 86400,
-        repeat: Repeat::Daily,
-        enabled: true,
-        lead_seconds: 0,
-        trail_seconds: 0,
-    };
-    let existing = rule.clone();
     let services = owner.services();
     services
         .call(move |store| {
             store.schedule_recording(JobId(951), &initial, now())?;
-            store.schedule_recording_rule_and_first(&existing, JobId(953), now())?;
-            store.set_recording_rule_enabled(existing.id, false, now())
+            Ok(())
         })
         .await
         .unwrap();
@@ -1476,56 +1138,13 @@ async fn queued_recording_mutations_recheck_the_grant_in_the_accepting_writer() 
             accepted.authorize(store)
         })
     });
-    let accepted = admission.clone();
-    let edited = Request {
-        end: request.end + 60,
-        ..request.clone()
-    };
-    let updating = services.call(move |store| {
-        store.update_recording_checked(JobId(951), &edited, now(), |store| {
-            accepted.authorize(store)
-        })
-    });
-    let accepted = admission.clone();
-    let repeated = Rule {
-        id: RuleId(955),
-        request: Request {
-            start: request.start + 172800,
-            end: request.end + 172800,
-            ..request.clone()
-        },
-        ..rule.clone()
-    };
-    let repeating = services.call(move |store| {
-        store.schedule_recording_rule_with_first_checked(
-            &repeated,
-            JobId(956),
-            &repeated.request,
-            repeated.request.start,
-            now(),
-            |store| accepted.authorize(store),
-        )
-    });
-    let enabling = services.call(move |store| {
-        store.set_recording_rule_enabled_checked(RuleId(952), true, now(), |store| {
-            admission.authorize(store)
-        })
-    });
     owner.parental_lock();
     release.send(()).unwrap();
     writer.await.unwrap();
     assert!(scheduling.await.is_err());
-    assert!(updating.await.is_err());
-    assert!(repeating.await.is_err());
-    assert!(enabling.await.is_err());
-    let end = request.end;
     services
         .read(move |store| {
-            assert_eq!(store.recording_jobs()?.len(), 2);
-            assert_eq!(store.recording_job(JobId(951))?.unwrap().request.end, end);
-            let rules = store.recording_rules()?;
-            assert_eq!(rules.len(), 1);
-            assert!(!rules[0].enabled);
+            assert_eq!(store.recording_jobs()?.len(), 1);
             Ok(())
         })
         .await
@@ -1681,56 +1300,5 @@ async fn an_unlocked_legacy_blocked_recording_captures_after_the_viewer_relocks(
         "new requests still need a current unlock"
     );
     capture_accepted_media(&owner, id).await;
-    assert!(owner.drain_services());
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn an_accepted_series_captures_a_new_occurrence_materialized_after_block_and_relock() {
-    use iptv_core::{
-        parental::{Pin, Target},
-        recording::Repeat,
-    };
-    let directory = tempfile::tempdir().unwrap();
-    let owner = owner(directory.path());
-    let request = seed(&owner, &server()).await;
-    let mut settings = (*owner.settings()).clone();
-    settings
-        .set("parental.live_enabled", iptv_settings::Value::Bool(true))
-        .unwrap();
-    *owner.services().shared_settings().write().unwrap() = Some(Arc::new(settings));
-    owner
-        .parental_change_pin(None, Pin::parse("2468").unwrap())
-        .await
-        .unwrap();
-    // Accept the series while available, before its currently airing episode
-    // exists in the guide. Later viewing protection does not cancel this rule.
-    let first = owner
-        .schedule_repeating_recording(request.clone(), Repeat::Series)
-        .await
-        .unwrap();
-    let source = SourceId(request.source);
-    let channel = ContentId::from_stored(request.channel.clone());
-    owner
-        .services()
-        .call(move |store| store.set_blocked(source, &channel, true))
-        .await
-        .unwrap();
-    owner.parental_lock();
-    let target = Target::live(request.source, request.channel.as_str());
-    assert!(owner.parental_check(&target).await.is_err());
-    let start = now();
-    seed_series_guide(&owner, &request, start, start + 60);
-    rules::materialize(&owner.services()).await.unwrap();
-    let occurrence = owner
-        .recording_jobs()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|job| job.id != first && job.request.start == start)
-        .expect("accepted rule materializes newly discovered blocked occurrence");
-    capture_accepted_media(&owner, occurrence.id).await;
-    // Stopping the accepted rule remains available while viewing stays locked.
-    owner.stop_repeating_recording(first).await.unwrap();
-    assert!(owner.recording_rules().await.unwrap().is_empty());
     assert!(owner.drain_services());
 }

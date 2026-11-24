@@ -171,10 +171,6 @@ const CARRIED_MESSAGES: &[(&str, &str)] = &[
     // Core parental entry and native errors are checked MESSAGE_FILES.
     ("iptv-app/src/parental_view.rs", "message"),
     ("iptv-app/src/parental_view.rs", "title"),
-    ("iptv-runtime/src/recordings.rs", "notice"),
-    // The capability notice returns key-marked messages in presentation
-    // capabilities.rs, or the existing checked recording wake messages.
-    ("iptv-app/src/host/native/recording_host.rs", "message"),
     // Record now's start notices: key-marked in presentation capabilities.rs.
     ("iptv-app/src/capture_limits.rs", "notice"),
     // Recording keys originate in the checked recording MESSAGE_FILES. Transport

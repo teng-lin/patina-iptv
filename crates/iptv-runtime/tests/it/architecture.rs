@@ -117,7 +117,7 @@ const STATICS: &[(&str, &str)] = &[
     // This module is declared only under cfg(test), never in a shipped runtime.
     ("recordings/tests.rs", "CALLS"),
     ("recordings/tests.rs", "GATE"),
-    ("recordings/tests.rs", "REGISTRATIONS"),
+    ("recordings/tests.rs", "PUBLISHED"),
 ];
 
 fn sources(directory: &Path, files: &mut Vec<PathBuf>) {

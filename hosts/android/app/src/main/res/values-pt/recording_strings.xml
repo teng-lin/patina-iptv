@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="recording_channel">Gravações agendadas</string>
+    <string name="recording_channel">Gravações em curso</string>
     <string name="recording_title">Patina está a gravar</string>
-    <string name="recording_background">A gravação agendada continua em segundo plano</string>
+    <string name="recording_background">A gravação continua em segundo plano</string>
     <string name="recording_stopped_channel">Gravações paradas antes do fim</string>
     <string name="recording_stopped_title">Gravação parada</string>
     <string name="recording_stopped_tv_off">A TV foi desligada. O que foi gravado até então está em Gravações.</string>

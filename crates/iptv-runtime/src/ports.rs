@@ -42,10 +42,11 @@ pub struct Ports {
     pub directory: PathBuf,
     /// Native host keeps recording independently of UI engine ownership.
     pub background_recordings: bool,
-    /// Register the next wake (UTC seconds, zero when none) and capture activity.
-    /// Runs on a native worker; return only after OS registration completes and
-    /// report the capability actually granted.
-    pub recording_schedule: fn(i64, bool) -> iptv_core::recording::WakeCapability,
+    /// Whether a capture is running or due, so the host keeps running for
+    /// it (Android's foreground service and its watchdog alarm, a desktop's
+    /// idle-sleep hold) or lets go. Runs on a native worker; returns once
+    /// the host has applied it.
+    pub recording_schedule: fn(bool),
     pub database_key: Arc<KeyBroker>,
     pub exclude_from_backup: fn(&Path) -> io::Result<()>,
     pub startup_mark: fn(&'static str, String),
@@ -98,7 +99,7 @@ impl Ports {
         Self {
             directory,
             background_recordings: false,
-            recording_schedule: |_, _| iptv_core::recording::WakeCapability::AwakeOnly,
+            recording_schedule: |_| {},
             database_key: Arc::new(database_key),
             exclude_from_backup: |_| Ok(()),
             startup_mark: |_, _| {},

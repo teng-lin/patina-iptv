@@ -21,11 +21,9 @@ pub enum MenuItem {
     StartFromBeginning,
     WatchInNewWindow,
     Record,
-    ScheduleRecording,
     RecordNow,
     CancelRecording,
     StopRecording,
-    CustomRecording,
     Description,
     // Channel.
     ToggleFavorite,
@@ -187,8 +185,8 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
         Airing::Live => vec![Record],
         Airing::Ended if in_archive => vec![StartFromBeginning],
         Airing::Ended => vec![],
-        // Recording a future program is retired (#273): no Schedule recording
-        // or Schedule a recording… here. `Record` starts recording now.
+        // Only a program on now can be recorded: `Record` starts recording
+        // it now. A future program has no recording action.
         Airing::Upcoming => vec![],
     };
     items.push(Description);
@@ -413,17 +411,6 @@ mod tests {
         );
         assert_eq!(program_actions(ENDED, 0, 0), [Description]);
         assert_eq!(program_actions(FUTURE, 3, 0), [Description]);
-    }
-
-    #[test]
-    fn no_program_action_schedules_a_future_recording() {
-        for program in [LIVE, ENDED, FUTURE] {
-            for days in [0, 3] {
-                let items = program_actions(program, days, 0);
-                assert!(!items.contains(&ScheduleRecording), "{program:?}");
-                assert!(!items.contains(&CustomRecording), "{program:?}");
-            }
-        }
     }
 
     #[test]

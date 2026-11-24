@@ -3,7 +3,6 @@
 use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
 use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
-use iptv_presentation::capabilities::recording_notice;
 use iptv_presentation::menu::{MenuItem, Origin};
 use iptv_presentation::recording::status_label;
 use nsh_core::prelude::*;
@@ -63,19 +62,15 @@ fn reload(ui: Ui) {
     crate::data::spawn_in_app(async move {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
-        let repeating = owner.repeating_recording_jobs().await.unwrap_or_default();
         let retired = owner
             .retired_recording_schedules()
             .await
             .unwrap_or_default();
-        let background_notice = recording_notice(owner.recording_capabilities()).map(str::to_owned);
         ui.recordings.update(|s| {
             if s.read_generation != generation {
                 return;
             }
-            s.repeating = repeating;
             s.retired = retired;
-            s.background_notice = background_notice;
             match result {
                 Ok(jobs) => {
                     s.progress = points;
@@ -168,6 +163,8 @@ pub fn reserve_viewing(_ui: Ui, surface: usize, channel: usize, live: bool) -> b
     }
     true
 }
+/// The guide's mark on a program being recorded: "● " while a capture of
+/// it is writing, otherwise nothing.
 pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static str {
     if ui.recordings.with(|s| s.jobs.is_empty()) {
         return "";
@@ -183,25 +180,18 @@ pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static
         crate::guide::unix_of(&*schedule, program.start),
         crate::guide::unix_of(&*schedule, program.end),
     );
-    ui.recordings.with(|s| {
-        s.jobs
-            .iter()
-            .find(|j| {
-                j.status.active()
-                    && j.source_current
-                    && j.request.source == source.0
-                    && j.request.channel == key
-                    && j.request.start < end
-                    && j.request.end > start
-            })
-            .map_or("", |j| {
-                if j.status == Status::Recording && j.bytes > 0 {
-                    "● "
-                } else {
-                    "◷ "
-                }
-            })
-    })
+    let recording = ui.recordings.with(|s| {
+        s.jobs.iter().any(|j| {
+            j.status == Status::Recording
+                && j.bytes > 0
+                && j.source_current
+                && j.request.source == source.0
+                && j.request.channel == key
+                && j.request.start < end
+                && j.request.end > start
+        })
+    });
+    if recording { "● " } else { "" }
 }
 pub fn current(ui: Ui) {
     // The Record key does nothing where Record now is not offered.
@@ -308,7 +298,7 @@ pub fn toggle_current(ui: Ui) {
 }
 
 /// The play bar records its playing channel, independently of guide focus.
-/// It never opens the custom schedule form or replaces the player surface.
+/// It never replaces the player surface.
 pub fn record_now(ui: Ui) {
     if ui.player_surface != 0 || ui.playback.get_untracked() != crate::Playback::Live {
         return;
@@ -367,7 +357,7 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
         request.end = now + 3600;
     }
     let target = iptv_core::parental::Target::live(request.source, request.channel.clone());
-    crate::parental_view::request(ui, target, move || start_request(ui, request));
+    crate::parental_view::request(ui, target, move || start(ui, request));
 }
 fn request(origin: Origin) -> Option<Request> {
     let schedule = crate::schedule();
@@ -385,65 +375,21 @@ fn request(origin: Origin) -> Option<Request> {
     })
 }
 /// The active job must belong to the selected occurrence, including its end
-/// when an immediate recording starts after the program began.
-fn occurrence_job(
-    request: &Request,
-    stored_start: i64,
-    jobs: Vec<Job>,
-    padded_matches: impl Fn(&Request) -> bool,
-) -> Option<Job> {
+/// when a recording started after the program began.
+fn occurrence_job(request: &Request, jobs: Vec<Job>) -> Option<Job> {
     jobs.into_iter()
         .filter(|job| {
             job.source_current
                 && job.status.active()
                 && job.request.source == request.source
                 && job.request.channel == request.channel
-                && if let Some(raw) = job.series_start {
-                    (stored_start..stored_start + 60).contains(&raw)
-                } else {
-                    (job.request.end == request.end
-                        && match job.status {
-                            Status::Scheduled => job.request.start == request.start,
-                            _ => (request.start..request.end).contains(&job.request.start),
-                        })
-                        || padded_matches(&job.request)
+                && job.request.end == request.end
+                && match job.status {
+                    Status::Scheduled => job.request.start == request.start,
+                    _ => (request.start..request.end).contains(&job.request.start),
                 }
         })
         .max_by_key(|job| job.status == Status::Recording)
-}
-
-fn padded_occurrence(
-    schedule: &dyn crate::guide::Schedule,
-    channel: usize,
-    program: crate::guide::Program,
-    airing: &Request,
-    recording: &Request,
-) -> bool {
-    const MAX_PADDING: i64 = 3600;
-    if recording.title != airing.title
-        || !(airing.start - MAX_PADDING..=airing.start).contains(&recording.start)
-        || !(airing.end..=airing.end + MAX_PADDING).contains(&recording.end)
-        || !matches!(
-            schedule.listing(channel, program),
-            Some(crate::guide::Listing::Title(_))
-        )
-    {
-        return false;
-    }
-    let epoch = schedule.epoch_unix();
-    let from = ((recording.start - epoch).div_euclid(60)) as i32;
-    let to = ((recording.end - epoch).div_euclid(60)) as i32;
-    // A padded request spanning two same-title airings is ambiguous.
-    let mut matches = schedule
-        .programs_between(channel, from, to - from)
-        .into_iter()
-        .filter(|candidate| {
-            candidate.start >= from
-                && candidate.end <= to
-                && crate::listing_labels::listing(schedule.listing(channel, *candidate))
-                    == airing.title
-        });
-    matches.next() == Some(program) && matches.next().is_none()
 }
 
 fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
@@ -454,14 +400,7 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
     let program = schedule.program_at(origin.channel, origin.program_start);
     let mut request = request(origin)?;
     request.start = crate::guide::unix_of(&*schedule, program.start);
-    let stored_start =
-        request.start - i64::from(crate::player::guide_offset(&*schedule, origin.channel)) * 60;
-    if let Some(job) = occurrence_job(
-        &request,
-        stored_start,
-        crate::runtime().recording_snapshot(),
-        |recording| padded_occurrence(&*schedule, origin.channel, program, &request, recording),
-    ) {
+    if let Some(job) = occurrence_job(&request, crate::runtime().recording_snapshot()) {
         let item = if job.status == Status::Recording {
             MenuItem::StopRecording
         } else {
@@ -469,9 +408,9 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
         };
         return Some((item, Some(job)));
     }
-    // A future program is not scheduled (#273); only one on now records,
-    // where the device offers Record now. A recording already running or
-    // carried over can still be stopped or canceled above.
+    // Only a program on now records, where the device offers Record now. A
+    // recording already running or carried over can still be stopped or
+    // canceled above.
     (program.airing(crate::time::now_minute()) == crate::guide::Airing::Live
         && crate::capabilities::record_now().offered())
     .then_some((MenuItem::RecordNow, None))
@@ -501,10 +440,10 @@ pub fn remember(ui: Ui, origin: Origin) {
     let context = request(origin).map(|request| (origin, request));
     ui.recordings.update(|s| s.context = context);
 }
-/// Records `request` now. Scheduling or editing a future recording is retired
-/// (#273), so this is the only way the app creates a job.
-fn start_request(ui: Ui, mut request: Request) {
-    // Count the capture from the end of any parental PIN prompt.
+/// Starts recording `request` now, once the parental check has passed.
+fn start(ui: Ui, mut request: Request) {
+    // A parental PIN may have been entered since the request was made: the
+    // capture starts now, or the runtime would count the wait as a gap.
     let now = crate::time::wall_unix();
     request.start = request.start.max(now);
     if let Err(message) = request.validate(now) {
@@ -521,6 +460,7 @@ fn start_request(ui: Ui, mut request: Request) {
     crate::data::spawn_in_app(async move {
         let result = owner.schedule_recording(request).await;
         match &result {
+            // What can stop it, said as it starts (#275).
             Ok(_) => crate::settings_view::notify(&crate::capture_limits::start_notice()),
             Err(error) => crate::settings_view::notify(translated_reason(
                 error
@@ -539,8 +479,8 @@ fn start_request(ui: Ui, mut request: Request) {
             if let Some(jobs) = jobs {
                 s.reload(jobs);
             }
-            // A play-bar action owns no library presentation: keep a row or
-            // confirmation the viewer opened meanwhile.
+            // A play-bar action owns no library presentation: a row or
+            // confirmation the viewer opened meanwhile stays.
             if let Err(error) = result {
                 s.error = Some(
                     error
@@ -642,8 +582,7 @@ fn confirm_delete(ui: Ui) {
     }
 }
 fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
-    let mut actions = match job.status {
-        // A scheduled job is not edited (#273); it can still be canceled.
+    match job.status {
         Status::Scheduled => vec!["Cancel recording"],
         Status::Recording => vec!["Stop recording"],
         Status::Completed | Status::Partial if job.bytes > 0 => {
@@ -670,11 +609,7 @@ fn actions(ui: Ui, job: &Job) -> Vec<&'static str> {
             ]
         }
         _ => vec!["Delete recording"],
-    };
-    if ui.recordings.with(|s| s.repeating.contains(&job.id)) {
-        actions.push("Cancel repeating schedule");
     }
-    actions
 }
 fn perform(ui: Ui, index: usize) {
     let (job, confirm) = ui
@@ -736,8 +671,6 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
                 }
                 Err(e) => Err(e),
             }
-        } else if action == "Cancel repeating schedule" {
-            owner.stop_repeating_recording(job.id).await
         } else if action == "Delete recording" {
             // Consent precedes stopping; deleting another file leaves playback alone.
             if ui
@@ -931,10 +864,8 @@ fn requirements() -> &'static str {
         tr("Keep Patina open and this device awake for recordings. \
              Recordings use local app storage and are excluded from backups.")
     } else {
-        tr(
-            "Recordings continue when you close the player. Check Recordings settings for startup and device wake requirements. \
-             Recordings use local storage and are excluded from backups.",
-        )
+        tr("Recordings continue when you close the player. \
+             Recordings use local storage and are excluded from backups.")
     }
 }
 
@@ -989,17 +920,6 @@ fn library_content(ui: Ui, size: Scale) -> View {
             },
         ))
         .child(recording_list(ui, size))
-        .child(
-            ui_kit::caption(size, move || {
-                ui.recordings.with(|s| {
-                    s.background_notice
-                        .as_ref()
-                        .map(|message| tr(message).to_owned())
-                        .unwrap_or_default()
-                })
-            })
-            .px(move || size.px(24.0)),
-        )
         .child(
             ui_kit::caption(size, requirements())
                 .px(move || size.px(24.0))
@@ -1152,44 +1072,34 @@ mod tests {
             start: 1_800_000_000,
             end: 1_800_003_600,
         };
-        let raw_start = request.start - 900;
-        let mut job = Job {
+        let job = Job {
             id: JobId(7),
             source_current: true,
-            series_start: Some(raw_start + 18),
+            series_start: None,
             request: request.clone(),
             status: Status::Scheduled,
             bytes: 0,
             message: String::new(),
         };
-        job.request.start -= 600;
-        job.request.end += 900;
-        let mut neighbor = job.clone();
-        neighbor.id = JobId(8);
-        neighbor.series_start = Some(raw_start + 3600);
+        let mut next = job.clone();
+        next.id = JobId(8);
+        next.request.start += 3600;
+        next.request.end += 3600;
         let mut other_playlist = job.clone();
         other_playlist.id = JobId(9);
         other_playlist.request.source = 2;
         assert_eq!(
-            occurrence_job(
-                &request,
-                raw_start,
-                vec![neighbor.clone(), other_playlist, job.clone()],
-                |_| false
-            )
-            .map(|job| job.id),
+            occurrence_job(&request, vec![next.clone(), other_playlist, job.clone()])
+                .map(|job| job.id),
             Some(JobId(7)),
         );
+        assert_eq!(occurrence_job(&request, vec![next]), None);
+        // Record now starts after the program began; it still matches.
+        let mut started = job;
+        started.status = Status::Recording;
+        started.request.start += 1200;
         assert_eq!(
-            occurrence_job(&request, raw_start, vec![neighbor], |_| false),
-            None
-        );
-        job.series_start = None;
-        job.status = Status::Recording;
-        job.request = request.clone();
-        job.request.start += 1200;
-        assert_eq!(
-            occurrence_job(&request, raw_start, vec![job], |_| false).map(|job| job.id),
+            occurrence_job(&request, vec![started]).map(|job| job.id),
             Some(JobId(7))
         );
     }

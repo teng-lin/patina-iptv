@@ -6,7 +6,6 @@ mod common;
 mod support;
 
 mod architecture;
-mod capability_reports;
 mod command_journeys;
 mod command_values;
 mod data_startup;
@@ -25,8 +24,6 @@ mod parental_access;
 mod parental_recovery;
 mod persistence_safety;
 mod read_lane_contention;
-mod recording_capability_restart;
-mod recording_capability_startup;
 mod relative_organization_moves;
 mod shell_boundary;
 mod vod_import_pipeline;

@@ -829,8 +829,8 @@ fn closing_the_main_window_during_recordings_ends_every_viewing_window() {
     app.settle();
     assert!(app.window_state("pip").unwrap().is_some());
 
-    // Scheduled recordings keep the app running in the background: the
-    // main window hides, and every viewing window closes with it.
+    // Closing keeps the app running in the background, so a recording can
+    // go on: the main window hides, and every viewing window closes with it.
     step(app.press_window_close("main"));
     app.idle(Duration::from_millis(300)).unwrap();
     assert!(!app.window_state("main").unwrap().unwrap().visible);

@@ -1,20 +1,20 @@
 # Feature availability
 
 The portable [capability model](../crates/iptv-core/src/capabilities.rs) separates
-host facilities, live player reports and recording wake registration. The
+host facilities from live player reports. The
 [presentation capability rules](../crates/iptv-presentation/src/capabilities.rs)
 decide when to offer PiP and multiview. The
 [shell adapter](../crates/iptv-app/src/capabilities.rs) chooses the host profile;
 native services report what the operating system actually accepted.
 
-| Host profile | Player surfaces | Recorder can outlive UI | Login registration | Alarm permission control |
-| --- | --- | --- | --- | --- |
-| Android TV/tablet | 2 | Yes | No | Yes |
-| Linux | 4 | Yes | Yes | No |
-| macOS | 4 | Yes | Yes | No |
-| Windows preview | 4 | Yes | Yes | No |
-| iPad | 4 | No | No | No |
-| Unknown | 1 | No | No | No |
+| Host profile | Player surfaces | Recorder can outlive UI |
+| --- | --- | --- |
+| Android TV/tablet | 2 | Yes |
+| Linux | 4 | Yes |
+| macOS | 4 | Yes |
+| Windows preview | 4 | Yes |
+| iPad | 4 | No |
+| Unknown | 1 | No |
 
 ## Device signals
 
@@ -161,34 +161,21 @@ it ([`record_now_notices`](../crates/iptv-presentation/src/capabilities.rs),
 | Desktop | The idle-sleep inhibitor (IOKit assertion, logind or portal inhibitor, `SetThreadExecutionState`) could not be taken | Keep the computer awake | — |
 
 The iPad has no metered-network signal here; it does not record, so nothing is
-checked. While a capture runs on Android, the 120-second watchdog alarm restarts
-its foreground service if Android killed it; with no capture running no alarm
-is armed.
+checked. While a capture runs on Android, its foreground service is sticky: if
+Android kills the process, it restarts the service, which resumes the capture
+from what was written. Before Android 12 a 120-second exact watchdog alarm
+also restarts it. Patina does not ask for exact alarms, and from Android 12 an
+inexact alarm may neither come on time nor start a foreground service from
+the background, so none is armed there. Nothing restarts a capture after a
+reboot or a force stop.
 
-Recording capabilities report background-host ownership separately from the
-last acknowledged wake registration: unknown, awake-only, exact, inexact or
-denied. The runtime does not infer exact alarms from a platform name. Permission
-changes are reflected when the host next acknowledges registration. Unchanged
-scheduler inputs alone do not imply a fresh permission check. Opening the background
-status command uses the current report. The recording screen refreshes its
-notice through its existing reload loop.
-Returning to the foreground requests a fresh acknowledgement, including after
-leaving Android's alarm-permission settings. That refresh does not open a stream.
-It uses the recorder's current schedule, including the earlier recurring guide
-check deadline, so refreshing permission cannot postpone discovery of episodes.
-During native startup a refresh returns without replacing the saved alarm;
-the first loaded job/rule snapshot supplies the new schedule. Foreground checks update the
-persistent recording notice without repeating its warning toast on every return.
-
-Awake-only desktop capture can outlive the window while the host process and
-computer remain running. iPad capture requires the app to remain open. Android
-uses a foreground service and is subject to force-stop and OS execution limits.
-Windows wake tasks remain experimental; a successful registration is not
-physical-machine wake validation. An unknown report does not promise an
-unattended start. See [architecture](architecture.md) and
+The recorder tells the host whether a capture is running or due
+(`Ports::recording_schedule`). A desktop capture can continue after the
+window closes while the host process and computer stay running. Patina
+registers no wakes, login items or alarms for scheduled recordings. See
+[architecture](architecture.md) and
 [platform installation details](../README.md) for the supported distributions.
 
-Validation combines portable profile/decision tests, I/O-free initial capability
-inspection, native startup/restart tests and permission changes without reopening
-credentials, headless control scenarios and native host smoke checks. Real-device
+Validation combines portable profile/decision tests, native startup/restart
+tests, headless control scenarios and native host smoke checks. Real-device
 and emulator evidence must remain distinguishable.

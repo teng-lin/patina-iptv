@@ -36,36 +36,22 @@ pub(crate) fn set_language(tag: &str) {
     }
 }
 
-pub(crate) fn schedule(next: i64, active: bool) -> iptv_core::recording::WakeCapability {
-    use iptv_core::recording::WakeCapability;
+/// Whether a capture is running or due. While one is, `RecordingHost`
+/// keeps the sticky foreground service running, which Android restarts if
+/// it killed the process, and before Android 12 also arms a 120-second
+/// watchdog alarm; otherwise it disarms the alarm and lets the service stop
+/// (#275).
+pub(crate) fn schedule(active: bool) {
     let Some((vm, class)) = HOST.get() else {
-        return WakeCapability::Denied;
+        return;
     };
     let Ok(mut env) = vm.attach_current_thread() else {
-        return WakeCapability::Denied;
+        return;
     };
     let class: &JClass = class.as_obj().into();
-    // Scheduled recording is retired: the alarm is only the 120-second
-    // watchdog that restarts an active capture's service if Android killed
-    // it (`RecordingHost.schedule`). With no capture running, nothing is
-    // armed, whatever a carried-over job asks for (#275).
-    let next = if active { next } else { 0 };
-    let result = env
-        .call_static_method(
-            class,
-            "schedule",
-            "(JZ)I",
-            &[JValue::Long(next), JValue::Bool(active as u8)],
-        )
-        .and_then(|value| value.i());
+    let _ = env.call_static_method(class, "schedule", "(Z)V", &[JValue::Bool(active as u8)]);
     if env.exception_check().unwrap_or(false) {
         let _ = env.exception_clear();
-        return WakeCapability::Denied;
-    }
-    match result {
-        Ok(1) => WakeCapability::Exact,
-        Ok(2) => WakeCapability::Inexact,
-        _ => WakeCapability::Denied,
     }
 }
 #[unsafe(no_mangle)]
@@ -130,19 +116,6 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stopCaptures
         stop_captures(std::path::Path::new(&String::from(path)), why) as jni::sys::jint
     }))
     .unwrap_or(0)
-}
-
-pub(super) fn request_alarm_access() {
-    let Some((vm, class)) = HOST.get() else {
-        return;
-    };
-    if let Ok(mut env) = vm.attach_current_thread() {
-        let class: &JClass = class.as_obj().into();
-        let _ = env.call_static_method(class, "requestAlarmAccess", "()V", &[]);
-        if env.exception_check().unwrap_or(false) {
-            let _ = env.exception_clear();
-        }
-    }
 }
 
 #[unsafe(no_mangle)]

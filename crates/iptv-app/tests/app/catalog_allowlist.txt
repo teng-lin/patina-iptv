@@ -269,13 +269,10 @@ iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded
 
 iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
 
-# Native login integration: task/launch-agent identities and serialization.
+# Retiring earlier versions' login and wake registrations: their identities.
 iptv-app/src/host/native/recording_host/startup.rs	\n$ErrorActionPreference = 'Stop'\ntry {\n    $scheduler = New-Object -ComObject 'Schedule.Service'\n    $scheduler.Connect()\n    $folder = $scheduler.GetFolder('\\')\n    try {\n        $folder.DeleteTask($env:PATINA_RECORDING_TASK, 0)\n    } catch {\n        $failure = $_.Exception\n        while ($null -ne $failure.InnerException) { $failure = $failure.InnerException }\n        if ($failure.HResult -ne -2147024894) { throw }\n    }\n    exit 0\n} catch { exit 1 }\n
-iptv-app/src/host/native/recording_host/startup.rs	<?xml version="1.0"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>Label</key><string>com.hantekllc.patina.recorder</string><key>ProgramArguments</key><array><string>{}</string><string>--background-recordings</string></array><key>RunAtLoad</key><true/></dict></plist>
 iptv-app/src/host/native/recording_host/startup.rs	Library/LaunchAgents/com.hantekllc.patina.recorder.plist
 iptv-app/src/host/native/recording_host/startup.rs	Patina Recorder
-iptv-app/src/host/native/recording_host/startup.rs	[Desktop Entry]\nType=Application\nName=Patina Recorder\nExec={} --background-recordings\nTerminal=false\nNoDisplay=true\n
-iptv-app/src/host/native/recording_host/windows.rs	Patina Recorder
 iptv-app/src/host/native/recording_host/windows.rs	Patina
 # Sleep inhibitors while recording: D-Bus methods and the reasons the OS shows.
 iptv-app/src/host/native/keep_awake.rs	Close
