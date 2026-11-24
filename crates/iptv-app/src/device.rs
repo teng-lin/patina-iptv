@@ -172,8 +172,7 @@ pub(crate) fn bridge() -> impl IntoElement {
                             let limit = event.data["limit"]
                                 .as_u64()
                                 .map(|n| u32::try_from(n).unwrap_or(u32::MAX));
-                            crate::runtime()
-                                .emit(crate::runtime::RuntimeEvent::AccountStreams(limit));
+                            crate::runtime_events::account_streams_reported(limit);
                             return;
                         }
                         if event.name.as_ref() != "device" {

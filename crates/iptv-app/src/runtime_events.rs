@@ -133,3 +133,10 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
 pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
     crate::lists::focused_channel(ui)
 }
+
+/// The headless scenarios' stand-in for an import reporting the shown
+/// account's connection limit (`device.rs`'s test seam).
+#[cfg(feature = "test-support")]
+pub(crate) fn account_streams_reported(limit: Option<u32>) {
+    crate::runtime().emit(RuntimeEvent::AccountStreams(limit));
+}
