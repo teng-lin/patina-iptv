@@ -373,18 +373,21 @@ programs in the guide.
 
 Daily and weekly schedules created earlier keep their local clock time across
 daylight-saving changes; series rules match the program title on the selected
-channel as guide data arrives. Cancel repeating schedule stops future occurrences without deleting finished recordings. If multiple
-repeating schedules share the selected recording, this cancels all of them.
+channel as guide data arrives. Cancel repeating schedule stops future
+occurrences without deleting finished recordings. If multiple repeating
+schedules share the selected recording, this cancels all of them.
 
 On Android, capture runs in a foreground service with a notification. Boot and
-package updates restore the wakeups of recordings scheduled earlier. Android force stop prevents execution until
-Patina is opened again, and Android 15 can limit background capture to six
-hours in a 24-hour period. Device, network and storage availability still apply.
+package updates restore the wakeups of recordings scheduled earlier. Android
+force stop prevents execution until Patina is opened again, and Android 15 can
+limit background capture to six hours in a 24-hour period. Device, network and
+storage availability still apply.
 
 On desktop, closing the window keeps the process running when recordings or
-repeating rules need it; **Quit Patina** stops the recorder. Linux and macOS require an awake
-computer. Windows includes an experimental scheduled-task wake hook, subject
-to the system's wake-timer settings; it does not power on a shut-down computer.
+repeating rules need it; **Quit Patina** stops the recorder. Linux and macOS
+require an awake computer. Windows includes an experimental scheduled-task wake
+hook, subject to the system's wake-timer settings; it does not power on a
+shut-down computer.
 iPad background recording is not supported.
 
 Finished and partial recordings offer resume and playback from the beginning;
