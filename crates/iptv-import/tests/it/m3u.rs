@@ -448,9 +448,9 @@ impl iptv_import::CatalogSink for Stage {
 fn all_unusable_stream_entries_report_no_usable_entries() {
     // The final malformed entry has no newline, so it completes at EOF.
     let text = concat!(
-        "#EXTM3U\n#EXTINF:-1,Unsupported generated stream\n",
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Discarded\",Unsupported generated stream\n",
         "rtmp://media.example.test/live\n",
-        "#EXTINF:-1,Generated placeholder\nnot-a-stream-address",
+        "#EXTINF:-1,Generated placeholder\n#EXTGRP:Discarded at EOF\nnot-a-stream-address",
     );
     let matches_failure = |error: ImportError| {
         assert!(matches!(
@@ -488,6 +488,11 @@ fn embedded_local_and_private_destinations_fail_without_a_partial_catalog() {
         "file:///etc/hosts",
         "file://[invalid]/generated.ts",
         "FiLe://localhost:80/generated.ts",
+        "\u{1}file:///synthetic/generated.ts",
+        "fi\tle:///synthetic/generated.ts",
+        "\u{1}/synthetic/generated.ts",
+        "\u{1}C:/Synthetic/generated.ts",
+        "\u{1}../generated.ts",
         "/etc/hosts",
         "./generated.ts",
         "../generated.ts",
@@ -495,6 +500,9 @@ fn embedded_local_and_private_destinations_fail_without_a_partial_catalog() {
         "..\\generated.ts",
         "C:\\Synthetic\\generated.ts",
         "C:/Synthetic/generated.ts",
+        "C:generated.ts",
+        "~/generated.ts",
+        "~\\generated.ts",
         "http://127.0.0.1/private",
         "http://10.0.0.1/private",
         "http://[::1]/private",

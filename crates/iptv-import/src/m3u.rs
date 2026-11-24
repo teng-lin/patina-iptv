@@ -7,7 +7,7 @@
 //! playlist without entries is [`ImportError::Empty`].
 
 use iptv_core::import_limits::{DecodeBuffer, ImportLimits, LimitExceeded, LimitKind};
-use std::{collections::HashSet, io::Write};
+use std::{borrow::Cow, collections::HashSet, io::Write};
 
 use flate2::write::MultiGzDecoder;
 use iptv_providers::m3u::{M3uParser, M3uPlaylist};
@@ -149,21 +149,29 @@ fn retain_usable_streams(
         let StreamLocator::Url { url, .. } = &channel.stream else {
             return true;
         };
-        let value = url.trim();
+        // Match URL parsing's C0/space trimming and embedded tab/line-break
+        // removal when recognizing local destinations, without changing the URL.
+        let trimmed = url.trim_matches(|ch| ch <= ' ');
+        let normalized = if trimmed.contains(['\t', '\r', '\n']) {
+            Cow::Owned(trimmed.replace(['\t', '\r', '\n'], ""))
+        } else {
+            Cow::Borrowed(trimmed)
+        };
+        let value = normalized.as_ref();
         let bytes = value.as_bytes();
-        let drive_path = bytes.first().is_some_and(u8::is_ascii_alphabetic)
-            && bytes.get(1) == Some(&b':')
-            && bytes.get(2).is_some_and(|b| matches!(b, b'/' | b'\\'));
+        let drive_path =
+            bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':');
         let file_url = value
             .get(..5)
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"));
-        let relative_path = ["./", "../", ".\\", "..\\"]
+        let relative_path = ["./", "../", ".\\", "..\\", "~/", "~\\"]
             .iter()
             .any(|prefix| value.starts_with(prefix));
         if value.starts_with(['/', '\\']) || drive_path || file_url || relative_path {
             return true;
         }
-        url::Url::parse(value).is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https"))
+        url::Url::parse(value)
+            .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https" | "file"))
     });
     for group in channels.iter().flat_map(|channel| &channel.groups) {
         if !usable_groups.contains(group) {
