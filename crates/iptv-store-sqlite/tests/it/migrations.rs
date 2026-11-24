@@ -262,6 +262,138 @@ fn custom_group_preferences_share_the_canonical_guide_id() {
     );
 }
 
+/// Schema 28 retires scheduled recording. A file from 0.1.8 (schema 27),
+/// and one from a release before it (schema 26, skipping 0.1.8), opens with
+/// nothing left to run: pending jobs are canceled and listed once, repeating
+/// rules are disabled and listed, interrupted captures become partial
+/// recordings instead of resuming, and retained media keeps its rows.
+#[test]
+fn upgrading_retires_scheduled_recordings_and_keeps_captures() {
+    use iptv_core::recording::{JobId, Repeat, Status};
+
+    for version in [26, 27] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("generated-v{version}.db"));
+        build_old_file(
+            &path,
+            HISTORY.iter().find(|v| v.version == version).unwrap(),
+        );
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        // 41 completed with progress, 42 recording with a completion receipt
+        // and 44 canceled come from the fixtures; rules 71 and 72 are enabled.
+        conn.execute_batch(
+            "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,source_incarnation)
+             SELECT 46,source_id,channel_id,channel_name,'Generated once',starts_at+86400,
+                 ends_at+86400,'scheduled',0,source_incarnation FROM recording_jobs WHERE id=41;
+             INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,message,source_incarnation)
+             SELECT 47,source_id,channel_id,channel_name,'Generated resuming',starts_at+300,
+                 ends_at+300,'scheduled',376,'Resuming interrupted recording',source_incarnation
+             FROM recording_jobs WHERE id=41;
+             INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,message,source_incarnation)
+             SELECT 48,source_id,channel_id,channel_name,'Generated capturing',starts_at+600,
+                 ends_at+600,'recording',0,'Starting recording',source_incarnation
+             FROM recording_jobs WHERE id=41;
+             INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,source_incarnation)
+             SELECT 49,source_id,channel_id,channel_name,title,starts_at+172800,ends_at+172800,
+                 'scheduled',0,source_incarnation FROM recording_jobs WHERE id=41;
+             INSERT INTO recording_rule_jobs(job_id,rule_id,starts_at) VALUES(49,71,1800172800);
+             INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,bytes,message,source_incarnation)
+             SELECT 51,source_id,channel_id,channel_name,'Generated rule canceled mid-capture',
+                 starts_at+900,ends_at+900,'canceled',188,'Recurring schedule disabled',
+                 source_incarnation FROM recording_jobs WHERE id=41;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let mut store = Store::open(&path).unwrap();
+        assert_eq!(store.schema_version().unwrap(), SCHEMA_VERSION);
+        let job = |store: &Store, id| store.recording_job(JobId(id)).unwrap().unwrap();
+        for id in [46, 49] {
+            let canceled = job(&store, id);
+            assert_eq!(canceled.status, Status::Canceled, "v{version} job {id}");
+            assert_eq!(canceled.message, "Scheduled recording was removed");
+        }
+        let resuming = job(&store, 47);
+        assert_eq!((resuming.status, resuming.bytes), (Status::Partial, 376));
+        assert_eq!(resuming.message, "Interrupted when the app closed");
+        assert_eq!(job(&store, 48).status, Status::Partial);
+        // An earlier build canceled a resuming capture with its rule and kept
+        // its bytes: it becomes a partial recording too.
+        let stranded = job(&store, 51);
+        assert_eq!((stranded.status, stranded.bytes), (Status::Partial, 188));
+        // A synced capture keeps its receipt, so recovery publishes it.
+        assert_eq!(job(&store, 42).status, Status::Recording);
+        assert!(store.recording_completion(JobId(42)).unwrap().is_some());
+        let kept = job(&store, 41);
+        assert_eq!((kept.status, kept.bytes), (Status::Completed, 18800));
+        assert_eq!(
+            store.recording_progress(JobId(41)).unwrap().position_ms,
+            12000
+        );
+        assert_eq!(job(&store, 44).status, Status::Canceled);
+        assert!(
+            store
+                .recording_jobs()
+                .unwrap()
+                .iter()
+                .all(|job| job.status != Status::Scheduled)
+        );
+        assert!(store.recording_rules().unwrap().iter().all(|r| !r.enabled));
+
+        let retired = store.retired_recording_schedules().unwrap();
+        assert_eq!(
+            retired
+                .iter()
+                .map(|s| (s.title.as_str(), s.repeat))
+                .collect::<Vec<_>>(),
+            [
+                ("Generated programme", Repeat::Daily),
+                ("Generated programme", Repeat::Weekly),
+                ("Generated once", Repeat::Once),
+            ],
+            "v{version}: rules, then jobs no rule owns"
+        );
+        assert!(store.announce_retired_recordings().unwrap());
+        assert!(!store.announce_retired_recordings().unwrap());
+        drop(store);
+
+        // The retirement ran once: a new Record now job survives reopening.
+        let mut store = Store::open(&path).unwrap();
+        assert_eq!(store.retired_recording_schedules().unwrap().len(), 3);
+        assert!(!store.announce_retired_recordings().unwrap());
+        store.dismiss_retired_recording_schedules().unwrap();
+        assert!(store.retired_recording_schedules().unwrap().is_empty());
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO recording_jobs(id,source_id,channel_id,channel_name,title,starts_at,
+                 ends_at,status,source_incarnation)
+             SELECT 50,source_id,channel_id,channel_name,title,starts_at,ends_at,'scheduled',
+                 source_incarnation FROM recording_jobs WHERE id=41",
+            [],
+        )
+        .unwrap();
+        drop((store, conn));
+        let store = Store::open(&path).unwrap();
+        assert_eq!(job(&store, 50).status, Status::Scheduled);
+    }
+}
+
+/// A file with nothing scheduled shows no notice.
+#[test]
+fn upgrading_without_schedules_shows_no_retirement_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("generated-v10.db");
+    build_old_file(&path, HISTORY.iter().find(|v| v.version == 10).unwrap());
+    let mut store = Store::open(&path).unwrap();
+    assert!(store.retired_recording_schedules().unwrap().is_empty());
+    assert!(!store.announce_retired_recordings().unwrap());
+}
+
 /// A historical version: its schema snapshot and the data files to load
 /// into it, in order.
 struct Version {
@@ -735,6 +867,38 @@ const HISTORY: &[Version] = &[
             "data_v24.sql",
             "data_v25.sql",
             "data_v26.sql",
+        ],
+    },
+    Version {
+        version: 27,
+        data: &[
+            "data_v1.sql",
+            "data_v2.sql",
+            "data_v3.sql",
+            "data_v4.sql",
+            "data_v5.sql",
+            "data_v6.sql",
+            "data_v7.sql",
+            "data_v8.sql",
+            "data_v9.sql",
+            "data_v10.sql",
+            "data_v11.sql",
+            "data_v12.sql",
+            "data_v13.sql",
+            "data_v14.sql",
+            "data_v15.sql",
+            "data_v16.sql",
+            "data_v17.sql",
+            "data_v18.sql",
+            "data_v19.sql",
+            "data_v20.sql",
+            "data_v21.sql",
+            "data_v22.sql",
+            "data_v23.sql",
+            "data_v24.sql",
+            "data_v25.sql",
+            "data_v26.sql",
+            "data_v27.sql",
         ],
     },
 ];

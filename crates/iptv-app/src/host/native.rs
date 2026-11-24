@@ -103,6 +103,7 @@ pub mod exports {
     /// Explicit synthetic-key injection for the headless test binary only.
     #[cfg(feature = "test-support")]
     pub use super::credential_key::install_test_key;
+    pub use super::platform_data::exit_background_recorder_launch;
     /// Use a fresh explicit synthetic profile without changing the process home.
     #[cfg(feature = "test-support")]
     pub use super::platform_data::install_test_data_dir;

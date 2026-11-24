@@ -54,8 +54,36 @@ object RecordingHost {
     fun attach(context: Context) {
         if (context is Activity) activity = java.lang.ref.WeakReference(context)
         this.context = context.applicationContext
+        retireSchedules(this.context)
         initialize()
     }
+
+    /** Scheduled recording is retired. Once per install, before Rust can
+     * publish again: cancel the wake an earlier version armed for a scheduled
+     * job and forget its stored time. A Record now capture this version
+     * starts arms its own watchdog through [schedule], which also ends the
+     * retirement. Returns whether this call retired them; a failure is
+     * retried on the next launch or broadcast until [schedule] has run. */
+    @JvmStatic @Synchronized
+    fun retireSchedules(context: Context): Boolean {
+        val preferences = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE)
+        if (preferences.getBoolean(RETIRED, false)) return false
+        return try {
+            context.getSystemService(AlarmManager::class.java).cancel(alarmIntent(context))
+            preferences
+                .edit()
+                .remove("next")
+                .putBoolean(RETIRED, true)
+                .commit()
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
+
+    fun schedulesRetired(context: Context): Boolean =
+        context.getSharedPreferences("recording-host", Context.MODE_PRIVATE).getBoolean(RETIRED, false)
+
+    private const val RETIRED = "schedules-retired"
 
     private fun alarmIntent(context: Context) =
         PendingIntent.getBroadcast(
@@ -100,7 +128,17 @@ object RecordingHost {
                 } else {
                     next
                 }
-            if (!preferences.edit().putLong("next", wake).commit()) return 3
+            // This version now owns the alarm: arming replaces any wake an
+            // earlier version left, and a retirement retried later must not
+            // cancel this one.
+            if (!preferences
+                    .edit()
+                    .putLong("next", wake)
+                    .putBoolean(RETIRED, true)
+                    .commit()
+            ) {
+                return 3
+            }
             val capability = arm(context, wake)
             if (active) {
                 if (!startService(context)) return 3
@@ -138,9 +176,12 @@ object RecordingHost {
             3
         }
 
+    /** Rearms the stored wake after a reboot or update. Nothing is scheduled
+     * any more: a stored time is the watchdog of a Record now capture, and
+     * without one there is nothing to start. */
     fun restore(context: Context) {
         val next = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE).getLong("next", 0)
-        arm(context, if (next > 0) next else System.currentTimeMillis() / 1000 + 5)
+        if (next > 0) arm(context, next)
     }
 
     fun startService(context: Context): Boolean =
@@ -161,6 +202,13 @@ class RecordingAlarm : BroadcastReceiver() {
         context: Context,
         intent: Intent,
     ) {
+        // Until the wake an earlier version armed for a scheduled job is
+        // retired, a broadcast retires it instead of acting on it; a failed
+        // retirement is retried by the next launch or broadcast.
+        if (!RecordingHost.schedulesRetired(context)) {
+            RecordingHost.retireSchedules(context)
+            return
+        }
         if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
             intent.action == Intent.ACTION_MY_PACKAGE_REPLACED ||
             intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED

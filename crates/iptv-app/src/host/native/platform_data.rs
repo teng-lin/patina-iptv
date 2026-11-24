@@ -177,6 +177,7 @@ fn host_stop_flush(limit: std::time::Duration) -> bool {
 /// Called before opening settings, the database, restore state, or any worker.
 /// The restrictive process mask also covers SQLite WAL/SHM and temporary files.
 pub(crate) fn initialize() -> io::Result<PathBuf> {
+    exit_background_recorder_launch();
     #[cfg(windows)]
     if crate::host::native::recording_host::activate_existing() {
         std::process::exit(0);
@@ -189,7 +190,28 @@ pub(crate) fn initialize() -> io::Result<PathBuf> {
         libc::umask(0o077);
     }
     protect_directory(&directory)?;
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    crate::host::native::recording_host::retire_registrations(&directory, false);
     Ok(directory)
+}
+
+/// An earlier version's login item or wake task launches Patina with
+/// `--background-recordings` to run scheduled recordings, which are retired:
+/// remove those registrations and exit, before any window, storage or
+/// recorder. The desktop runners call this first; `initialize` calls it again
+/// for runners that do not.
+pub fn exit_background_recorder_launch() {
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    if crate::desktop::recorder_only_startup() {
+        match resolve_data_dir() {
+            Ok(directory) => {
+                crate::host::native::recording_host::retire_registrations(&directory, true);
+            }
+            Err(error) => log::warn!("iptv recordings: no data directory ({:?})", error.kind()),
+        }
+        log::info!("iptv recordings: scheduled recording was removed; exiting a recorder launch");
+        std::process::exit(0);
+    }
 }
 
 #[cfg(not(target_os = "android"))]
