@@ -4,8 +4,8 @@
 //! keys and taps, and every kind of settings row and editor (a switch, a
 //! choice with swatches, a stepper, a text with a rejected value, a
 //! confirmation, the remote's key list, commands that open other screens
-//! or update the guide), what they store, and the second Back that
-//! leaves.
+//! or update the guide), what they store, and Back at the top level,
+//! which is the platform's.
 //!
 //! Synthetic data only: a playlist "picked" from a file, with a local
 //! XMLTV guide.
@@ -584,43 +584,49 @@ fn other_pages(app: &mut Headless) {
     step(app.wait_for(PAGES_HINT));
 }
 
-/// With "Press Back twice to leave" (on by default), the first Back at
-/// the top asks for a second.
+/// Back at the top level is the platform's (#277): the app registers no
+/// Back handler there, so Android leaves at once and its predictive back
+/// shows; no second press is asked for, and the settings offer no
+/// "Press Back twice to leave". A Backspace standing in for Back changes
+/// nothing there.
 fn leaving(app: &mut Headless) {
     step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
+    let handed = app
+        .back()
+        .expect_err("Back at the top level is the platform's");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     step(app.press_key("backspace"));
-    step(app.wait_for("text:Press Back again to leave"));
-    assert!(app.screen().matches("role:alert").unwrap());
-    step(app.press_key("backspace"));
-    step(app.wait_for_gone("text:Press Back again to leave", Duration::from_secs(6)));
+    step(app.wait(Duration::from_millis(300)));
+    assert!(!app.screen().matches("role:alert").unwrap());
+    assert!(!app.shows("Press Back again to leave"));
 
-    // Switched off, the first Back leaves (nothing asks).
     step(app.press_key("right"));
     step(app.press_key("right"));
     open_menu(app);
     step(app.press(MENU_SETTINGS));
     step(app.wait_for("text:General >> nth=0"));
     step(app.press("text:General >> nth=0"));
-    step(app.wait_for("text:Press Back twice to leave"));
-    let switch = app
-        .screen()
-        .accessibility_state("role:switch[/Press Back twice to leave/]")
-        .unwrap();
-    assert_eq!(switch.checked, Some(Checked::True));
-    assert!(!switch.selected);
-    step(app.press("text:Press Back twice to leave"));
-    row_value(app, "Press Back twice to leave", "Off");
-    let switch = app
-        .screen()
-        .accessibility_state("role:switch[/Press Back twice to leave/]")
-        .unwrap();
-    assert_eq!(switch.checked, Some(Checked::False));
-    assert!(!switch.selected);
+    step(app.wait_for("text:Play the last channel on start"));
+    assert!(!app.shows("Press Back twice to leave"));
+    assert!(!app.shows("Time for the second Back"));
+    // A switch tells its state (`settings` above turned this one off).
+    let label = "Play the last channel on start";
+    let switch = |app: &mut Headless| {
+        app.screen()
+            .accessibility_state(&format!("role:switch[/{label}/]"))
+            .unwrap()
+    };
+    assert_eq!(switch(app).checked, Some(Checked::False));
+    step(app.press(&format!("text:{label}")));
+    row_value(app, label, "On");
+    let on = switch(app);
+    assert_eq!(on.checked, Some(Checked::True));
+    assert!(!on.selected);
     // A key the screen has no use for changes nothing.
     step(app.press_key("space"));
-    row_value(app, "Press Back twice to leave", "Off");
+    row_value(app, label, "On");
     // A tap on the dimmed guide beside the panel closes the screen.
     let beside = app
         .screen()
@@ -635,13 +641,7 @@ fn leaving(app: &mut Headless) {
         })
         .expect("the dimmed guide beside the settings");
     step(app.press(&format!("view:{}", beside.id)));
-    step(app.wait_for_gone("text:Press Back twice to leave", GONE));
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.press_key("backspace"));
-    step(app.wait(Duration::from_millis(300)));
-    assert!(!app.shows("Press Back again to leave"));
+    step(app.wait_for_gone(&format!("text:{label}"), GONE));
 }
 
 #[test]
