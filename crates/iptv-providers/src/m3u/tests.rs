@@ -289,7 +289,15 @@ fn parses_vod_type_and_catchup_correction() {
 #[test]
 fn untitled_entries_have_neutral_labels_and_keep_legacy_ids() {
     let playlist = parse_m3u(
-        "#EXTM3U\nhttp://streams.example.com/12345.ts\n#EXTINF:-1,\nhttp://streams.example.com/12345.ts\n#EXTINF:-1,12345\nhttp://streams.example.com/12345.ts\n#EXTINF:-1 tvg-name=\"Provided label\",\nhttp://streams.example.com/another.ts\n",
+        "#EXTM3U\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1,\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1,12345\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1 tvg-name=\"Provided label\",\n\
+http://streams.example.com/another.ts\n\
+",
     );
     let channels = &playlist.channels.items;
     let legacy = ContentId::from_m3u("http://streams.example.com/12345.ts", "12345");

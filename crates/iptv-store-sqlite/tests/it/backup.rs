@@ -481,7 +481,16 @@ fn older_untitled_imports_keep_personalization_on_upgrade_restore_and_refresh() 
     let directory = tempfile::tempdir().unwrap();
     let live = directory.path().join("generated-live.sqlite");
     let backup = directory.path().join("generated-older-backup.sqlite");
-    let text = "#EXTM3U\nhttp://streams.example.com/12345.ts\nhttp://streams.example.com/12345.ts\n#EXTINF:-1,Explicit title\nhttp://streams.example.com/named.ts\n#EXTINF:-1,http://label.example.com/title\nhttp://streams.example.com/url-label.ts\n#EXTINF:-1 tvg-name=\"56789\",\nhttp://streams.example.com/56789.ts\n";
+    let text = "#EXTM3U\n\
+http://streams.example.com/12345.ts\n\
+http://streams.example.com/12345.ts\n\
+#EXTINF:-1,Explicit title\n\
+http://streams.example.com/named.ts\n\
+#EXTINF:-1,http://label.example.com/title\n\
+http://streams.example.com/url-label.ts\n\
+#EXTINF:-1 tvg-name=\"56789\",\n\
+http://streams.example.com/56789.ts\n\
+";
     let channels = parse_m3u(text).channels.items;
     let mut store = Store::open(&live).unwrap();
     let source = store.add_source(&m3u_source("Generated labels")).unwrap();
