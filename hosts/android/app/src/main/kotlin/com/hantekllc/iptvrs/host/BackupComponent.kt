@@ -194,8 +194,7 @@ internal object DocumentPickers {
     ): Intent = intent.apply { picker(manager, this)?.let { setPackage(it) } }
 
     /** (create, open): which pickers resolve on this device now. */
-    fun probe(manager: PackageManager): Pair<Boolean, Boolean> =
-        (picker(manager, create()) != null) to (picker(manager, open()) != null)
+    fun probe(manager: PackageManager): Pair<Boolean, Boolean> = (picker(manager, create()) != null) to (picker(manager, open()) != null)
 }
 
 /** Owns the one document chooser/copy operation for an activity. */
