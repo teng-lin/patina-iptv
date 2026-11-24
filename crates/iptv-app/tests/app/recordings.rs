@@ -172,7 +172,7 @@ fn fixture_in(
     (app, path, source, expected)
 }
 
-/// A one-off job and a daily rule (with its first job), stored the way the
+/// A one-off job and a series rule (with its first job), stored the way the
 /// runtime stores them, as viewers scheduled them before scheduling was
 /// retired (#273).
 fn seed_scheduled(path: &std::path::Path, source: iptv_library::SourceId) {
@@ -202,12 +202,14 @@ fn seed_scheduled(path: &std::path::Path, source: iptv_library::SourceId) {
             now,
         )
         .unwrap();
-    let daily = request("Generated daily recording", now + 7200);
+    // No guide program carries the series title, so the recorder adds no
+    // occurrences while the test runs (a daily rule would).
+    let series = request("Generated series recording", now + 7200);
     let rule = Rule {
         id: RuleId(1),
-        local_start: daily.start,
-        request: daily,
-        repeat: Repeat::Daily,
+        local_start: series.start,
+        request: series,
+        repeat: Repeat::Series,
         enabled: true,
         lead_seconds: 0,
         trail_seconds: 0,
@@ -254,7 +256,7 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     seed_scheduled(&path, source);
     crate::browse_fixture::open_rail_item(&mut app, "Recordings");
     step(app.wait_for("id:recordings-screen"));
-    // Newest start first: the daily rule's job, then the one-off job.
+    // Newest start first: the series rule's job, then the one-off job.
     step(app.wait_for_within("id:recording-job >> nth=1", Duration::from_secs(15)));
     assert_eq!(app.screen().count("text:/Scheduled ·/").unwrap(), 2);
     assert!(!app.shows("label:/^Edit recording ·/"));
@@ -266,12 +268,12 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
         step(app.press_key("down"));
         step(app.press_key("enter"));
     } else {
-        step(app.press("role:button[/^More options for Generated daily recording/]"));
+        step(app.press("role:button[/^More options for Generated series recording/]"));
         step(app.wait_for("text:Cancel repeating schedule"));
         assert!(!app.shows("text:Edit recording"));
         step(app.press("text:Cancel repeating schedule"));
     }
-    wait_for_jobs(&mut app, &path, "the daily rule is canceled", |jobs| {
+    wait_for_jobs(&mut app, &path, "the series rule is canceled", |jobs| {
         jobs.iter()
             .any(|j| j.id.0 == 2 && j.status == Status::Canceled)
     });

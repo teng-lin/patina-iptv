@@ -197,9 +197,11 @@ pub fn can_record_now(origin: Origin, now: i32) -> bool {
 }
 
 /// The program details' Record button (and Select or Record over the
-/// details): records a program on now from its menu context.
+/// details): records a program on now from its menu context. It checks the
+/// clock itself, not the guide's cached minute: a program that has just ended
+/// must not fall back to recording the next hour under its title.
 pub fn record_details(ui: Ui, origin: Origin) {
-    if ui.player_surface != 0 || !can_record_now(origin, ui.focus.with_untracked(|f| f.now)) {
+    if ui.player_surface != 0 || !can_record_now(origin, crate::time::now_minute()) {
         return;
     }
     ui.description.set(None);
