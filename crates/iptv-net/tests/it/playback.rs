@@ -821,6 +821,177 @@ async fn failed_full_probe_does_not_prepend_stale_slice_bytes() {
     assert_eq!(response.text().await.unwrap(), "refused");
 }
 
+fn partial_playlist() -> Resp {
+    let fragment = "#EXTM3U\n#EXTINF:2,\nstale.ts\n";
+    Resp {
+        status: 206,
+        ..Resp::ok(fragment)
+    }
+    .header(
+        "Content-Range",
+        &format!("bytes 0-{}/100", fragment.len() - 1),
+    )
+}
+
+fn assert_whole_playlist_retry(origin: &TestServer) {
+    let requests = origin.requests();
+    assert_eq!(requests.len(), 2, "one ranged request and one retry");
+    assert_eq!(requests[0].path, "/live.m3u8");
+    assert_eq!(requests[0].header("range"), Some("bytes=0-"));
+    assert_eq!(requests[0].header("if-range"), Some("\"synthetic-etag\""));
+    assert_eq!(requests[1].path, "/live.m3u8");
+    assert_eq!(requests[1].header("range"), None);
+    assert_eq!(requests[1].header("if-range"), None);
+}
+
+#[tokio::test]
+async fn a_disconnected_whole_playlist_retry_leaves_the_relay_ready_to_recover() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use std::time::Duration;
+
+    let recovered = Arc::new(AtomicBool::new(false));
+    let origin = TestServer::http({
+        let recovered = recovered.clone();
+        move |request| match request.path.as_str() {
+            "/live.m3u8" if request.header("range").is_some() => partial_playlist(),
+            "/live.m3u8" if recovered.load(Ordering::Relaxed) => {
+                Resp::ok("#EXTM3U\n#EXTINF:2,\nfresh.ts\n")
+            }
+            "/live.m3u8" => Resp::disconnect(),
+            "/fresh.ts" => Resp::ok(vec![0x47, 0, 1, 2]),
+            _ => Resp::status(404),
+        }
+    })
+    .await;
+    let relay = fixture_relay(&origin.url("/live.m3u8"), &[]);
+    let player = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    let response = player
+        .get(relay.url())
+        .header("Range", "bytes=0-")
+        .header("If-Range", "\"synthetic-etag\"")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 502);
+    assert!(response.headers().get("content-range").is_none());
+    assert_eq!(response.text().await.unwrap(), "Playback request failed");
+    assert_whole_playlist_retry(&origin);
+
+    recovered.store(true, Ordering::Relaxed);
+    let response = player.get(relay.url()).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(relay.take_error_code(), None);
+    let manifest = response.text().await.unwrap();
+    assert!(!manifest.contains("stale.ts"));
+    let segments = relay_urls(&relay, &manifest);
+    let [segment] = segments.as_slice() else {
+        panic!("expected exactly one rewritten segment");
+    };
+    let response = player.get(segment).send().await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), &[0x47, 0, 1, 2]);
+    let requests = origin.requests();
+    assert_eq!(requests.len(), 4, "one recovery manifest and one segment");
+    assert_eq!(requests[2].path, "/live.m3u8");
+    assert_eq!(requests[2].header("range"), None);
+    assert_eq!(requests[2].header("if-range"), None);
+    assert_eq!(requests[3].path, "/fresh.ts");
+
+    let address = relay_address(&relay);
+    tokio::time::timeout(Duration::from_secs(5), relay.shutdown())
+        .await
+        .expect("the relay shuts down after recovery");
+    let closed = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::net::TcpStream::connect(address),
+    )
+    .await
+    .expect("the retired listener responds to a connection attempt")
+    .expect_err("the retired listener has closed");
+    assert_eq!(closed.kind(), std::io::ErrorKind::ConnectionRefused);
+}
+
+#[tokio::test]
+async fn a_second_partial_playlist_is_refused_without_forwarding_its_bytes() {
+    let origin = TestServer::http(|_| partial_playlist()).await;
+    let relay = fixture_relay(&origin.url("/live.m3u8"), &[]);
+
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap()
+        .get(relay.url())
+        .header("Range", "bytes=0-")
+        .header("If-Range", "\"synthetic-etag\"")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 502);
+    assert!(response.headers().get("content-range").is_none());
+    assert_eq!(response.text().await.unwrap(), "Partial manifest refused");
+    assert_whole_playlist_retry(&origin);
+}
+
+#[tokio::test]
+async fn an_external_player_gets_a_generic_failure_for_a_refused_whole_playlist() {
+    use std::time::Duration;
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let origin = TestServer::http(|request| {
+        if request.header("range").is_some() {
+            partial_playlist()
+        } else {
+            Resp {
+                status: 503,
+                ..Resp::ok("generated upstream session details")
+            }
+            .header("Retry-After", "60")
+        }
+    })
+    .await;
+    let (relay, mut admission) = PlaybackRelay::start_external(
+        &origin.url("/live.m3u8"),
+        &[],
+        PlaybackPolicy {
+            allow_private_fixture: true,
+            ..PlaybackPolicy::default()
+        },
+    )
+    .unwrap();
+    let player_url = relay.url().to_owned();
+    let player = tokio::spawn(async move {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap()
+            .get(player_url)
+            .header("Range", "bytes=0-")
+            .header("If-Range", "\"synthetic-etag\"")
+            .send()
+            .await
+            .unwrap()
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), admission.connected())
+            .await
+            .unwrap()
+    );
+    assert!(admission.allow());
+    let response = player.await.unwrap();
+    assert_eq!(response.status(), 502);
+    assert!(response.headers().get("content-range").is_none());
+    assert!(response.headers().get("retry-after").is_none());
+    assert_eq!(response.text().await.unwrap(), "Playback request failed");
+    assert_whole_playlist_retry(&origin);
+}
+
 /// A playlist may set `Origin` to any text (`url|Origin=…`): here a whole
 /// address with a token, `null`, and text that names no origin. The
 /// stream's own origin gets it as written. Another origin, reached by a
