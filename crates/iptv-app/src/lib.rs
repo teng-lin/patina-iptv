@@ -1376,6 +1376,13 @@ pub fn hold_source_preparation() -> runtime::TestGate {
         .expect("source preparation gate needs a started app")
 }
 
+/// Pretends an external player is (`Some(true)`) or is not (`Some(false)`)
+/// installed, or probes the host again (`None`), for the headless tests.
+#[cfg(feature = "test-support")]
+pub fn set_external_player_handler(handler: Option<bool>) {
+    host::set_external_player_handler(handler);
+}
+
 /// Read-only synthetic-source observation keyed by the actually published URL.
 #[cfg(feature = "test-support")]
 pub fn original_player_source(url: &str) -> Option<iptv_core::playback::PlaySource> {

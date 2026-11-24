@@ -14,6 +14,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
     ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
+    ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
     ("custom_groups.rs", "GENERATION"),             // Discard stale dialog replies.
     ("data.rs", "APP_OWNER"),                       // UI root owner for detached local tasks.
