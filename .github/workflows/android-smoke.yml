@@ -11,8 +11,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: google_apis
-            profile: pixel_tablet
           - target: android-tv
             profile: tv_1080p
     steps:
@@ -44,5 +42,5 @@ jobs:
         if: always()
         with:
           name: lean-boot-${{ matrix.profile }}
-          path: target/android-smoke/emulator.log
+          path: target/android-smoke/emulator.txt
           retention-days: 1

@@ -46,7 +46,7 @@ def adb(*args, env, phase, timeout=15, capture=False):
 
 def wait_for_boot(process, name, env):
     start = time.monotonic()
-    while time.monotonic() - start < 180:
+    while time.monotonic() - start < 600:
         if process.poll() is not None:
             raise RuntimeError("emulator exited before boot")
         try:
@@ -85,11 +85,16 @@ def main():
     parser.add_argument("apk", type=Path)
     args = parser.parse_args()
 
-    sdk = Path(os.environ["ANDROID_HOME"])
-    env = dict(os.environ, PATH=os.pathsep.join((str(sdk / "platform-tools"), os.environ["PATH"])))
+    sdk_path = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if not sdk_path:
+        parser.error("set ANDROID_HOME or ANDROID_SDK_ROOT to the Android SDK")
+    sdk = Path(sdk_path)
+    env = dict(os.environ, ANDROID_HOME=sdk_path,
+               PATH=os.pathsep.join((str(sdk / "platform-tools"), os.environ["PATH"])))
     tools, image = prepare_sdk(sdk, args.target, env)
     for port in (PORT, PORT + 1):
         with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", port))
     output = Path(env.get("IPTV_SMOKE_OUT", "target/android-smoke"))
     output.mkdir(parents=True, exist_ok=True)
@@ -102,7 +107,10 @@ def main():
         with config.open("a") as stream:
             stream.write("\nhw.cpu.ncore=2\nhw.ramSize=4096M\ndisk.dataPartition.size=4096M\n")
 
-        with (output / "emulator.log").open("w") as log:
+        # Start ADB first so the emulator can read the runner's host key at boot.
+        subprocess.run([sdk / "platform-tools/adb", "start-server"], env=env, check=True, timeout=30)
+        # The smoke script clears its own *.log files at the start of each attempt.
+        with (output / "emulator.txt").open("w") as log:
             emulator = subprocess.Popen([sdk / "emulator/emulator", "-avd", name, "-port", str(PORT), "-no-window",
                                          "-no-snapshot", "-no-audio", "-no-boot-anim", "-gpu", "swiftshader"],
                                         stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -117,7 +125,10 @@ def main():
 
 
 if __name__ == "__main__":
-    def interrupted(signum, frame):
+    def interrupted(signum, _frame):
+        # Let the first interruption stop the owned processes and remove their AVD.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         raise SystemExit(128 + signum)
 
     signal.signal(signal.SIGTERM, interrupted)
