@@ -212,7 +212,8 @@ and focus on a live channel follows the clock to the program now on air.
 - **Now:** with nothing left to close at the top level, Back is the
   platform's (`bind_back` in `crates/iptv-app/src/lib.rs` registers no
   handler there). Android TV and Android phones and tablets leave in one
-  press, with the predictive back gesture on Android 14 and later. A
+  press, with the predictive back animation on Android 15 and later (on
+  Android 14 behind the developer option "Predictive back animations"). A
   desktop window stays open: Escape at the top level does nothing, and the
   window closes the operating system's way. Nothing asks for a second Back
   (#277).

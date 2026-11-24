@@ -1201,7 +1201,14 @@ fn bind_back(ui: Ui) {
         (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu)
     });
     effect(move || {
-        let leaves = matches!(back_target.get(), (ViewMode::Guide, Pane::Rail, false))
+        // The guide's rail, or the overlay layout's with nothing playing
+        // (there Back would otherwise go back to the video); a channel
+        // number being typed is cancelled first.
+        let leaves = match back_target.get() {
+            (ViewMode::Guide, Pane::Rail, false) => true,
+            (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
+            _ => false,
+        } && !ui.channel_number.with(|entry| entry.active())
             && !ui.any_overlay_open()
             && !desktop::fullscreen()
             && !ui.back_guard.with(iptv_nav::BackGuard::armed);
