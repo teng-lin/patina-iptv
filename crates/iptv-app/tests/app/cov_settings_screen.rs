@@ -353,16 +353,32 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.press_key("up"));
     step(app.wait_for(PAGES_HINT));
     step(app.wait_for("text:/^\\d+ of \\d+ settings here can be changed now$/"));
-    // Into the rows: backup is now the first available command. Its
-    // description and Restore's are reachable before the startup switches.
+    // Into the rows: the startup switches come first. Backup and Restore,
+    // under Data and privacy, say what a backup holds and what a restore
+    // replaces; globally unavailable rows do not interrupt navigation.
+    const FIRST: &str = "text:Start playing the channel that was on when the app was last closed.";
+    const BACKUP: &str = "text:Write playlists with their logins, settings and history to an unencrypted backup file.";
     step(app.press_key("right"));
     step(app.wait_for(ROWS_HINT));
-    step(app.wait_for("text:Write settings and customizations to a backup file."));
+    step(app.wait_for(FIRST));
+    for _ in 0..10 {
+        if app.screen().matches(BACKUP).unwrap() {
+            break;
+        }
+        step(app.press_key("down"));
+    }
+    step(app.wait_for(BACKUP));
     step(app.press_key("down"));
-    step(app.wait_for("text:Replace everything with a backup's contents."));
-    // Globally unavailable command rows no longer interrupt navigation.
-    step(app.press_key("down"));
-    step(app.wait_for("text:Start playing the channel that was on when the app was last closed."));
+    step(app.wait_for(
+        "text:Replace all current data, including playlists, settings and watch history, with a backup's contents.",
+    ));
+    for _ in 0..10 {
+        if app.screen().matches(FIRST).unwrap() {
+            break;
+        }
+        step(app.press_key("up"));
+    }
+    step(app.wait_for(FIRST));
     // A failed write is visible and leaves the live setting unchanged.
     let data = crate::isolated::data_dir(home);
     let blocked = data.join("settings.json.tmp");

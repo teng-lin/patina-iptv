@@ -227,10 +227,14 @@ pub fn text_factor() -> f32 {
 pub fn offer(device: Device, key: &str) -> Offer {
     let host = device.host;
     // Recording and backups run on blocking workers; a host without them
-    // offers neither. Imports and guide downloads run where the host can
-    // import (`host::IMPORTS`).
-    if !crate::host::HAS_WORKERS
-        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+    // offers neither. A backup action also needs its document picker
+    // (`backup::offered`; none on the iPad yet). Imports and guide
+    // downloads run where the host can import (`host::IMPORTS`).
+    if !crate::host::HAS_WORKERS && key.starts_with("recordings.") {
+        return Offer::Hidden;
+    }
+    if matches!(key, "general.backup" | "general.restore")
+        && !(crate::host::HAS_WORKERS && crate::backup::offered(key))
     {
         return Offer::Hidden;
     }
@@ -247,14 +251,21 @@ pub fn offer(device: Device, key: &str) -> Offer {
     }
     // Leaving the app into a picture-in-picture window: Android only.
     let android = host.automatic_pip();
-    if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
-        return Offer::NotYet;
-    }
     if NOT_OFFERED.contains(&key) || RETIRED.contains(&key) {
         return Offer::Hidden;
     }
     if let Some(offer) = by_device(device, key) {
         return offer;
+    }
+    // Swiping over full-screen video: where a finger may touch it (a TV's
+    // remote has Ch± instead). Outside a running app (the unit tests) no
+    // device is known: it counts as offered.
+    if key == keys::SWIPE_TO_ZAP.as_str() {
+        return if try_os().is_none() || crate::play_bar::pointer_available() {
+            Offer::Active
+        } else {
+            Offer::Hidden
+        };
     }
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)

@@ -36,6 +36,12 @@ is below 1.0, a minor release may change behavior.
   at least Android's recommended accessibility timeout, and stay until hidden
   while a screen reader or Switch Access runs.
 
+### Fixed
+
+- Import usable channels from M3U playlists containing malformed or unsupported
+  stream addresses, and report the skipped entries instead of rejecting the
+  whole playlist.
+
 ## [0.1.8] - 2026-11-23
 
 ### Changed

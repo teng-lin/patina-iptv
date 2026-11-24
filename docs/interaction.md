@@ -167,6 +167,38 @@ In the guide:
 - **Now:** a day of listings that a pan pages in keeps the channels where
   the finger scrolled them.
 
+### Changing channel by touch (#285)
+
+- **Now:** on full-screen live video, a vertical swipe changes channel:
+  up as Ch+, down as Ch−, along the list on screen and wrapping as Ch±
+  does. Past the same 10-point threshold the banner of the channel it
+  would change to (number, name, program on air) follows the finger;
+  released past a quarter of the screen's height, or flung, it changes
+  channel with a light haptic, and brought back it does nothing. It
+  starts only 40 points or more from the screen's edges, which the
+  systems keep for their own gestures. A second finger cancels it, and a
+  horizontal drag is left alone (`iptv_presentation::touch_zap`). A
+  swipe is never also a tap on the video: Android reports the video's
+  press when the finger lifts anywhere inside it, and the app drops that
+  one press after a swipe. A keyboard's or a screen reader's press stays
+  a tap.
+- **Now:** a replay, an on-demand title, multiview, the guide's preview
+  and anything open over the video take no swipe.
+- **Now:** a touch's zap goes the way Ch± does
+  (`browse_playback::zap_by`): the banner names the new channel at once
+  and the stream tunes after `guide.switch_delay`, so a burst of swipes
+  opens only the last channel's stream. Its banner shows whatever
+  `player.info_on_switch` says; while the play bar shows, the bar's own
+  line names the channel instead.
+- **Now:** the play bar's top line has previous and next channel buttons
+  beside the channel's name, and the full-screen video has "Next channel"
+  and "Previous channel" accessibility actions for TalkBack and VoiceOver,
+  which take swipes for themselves. On an iPad the video is adjustable
+  too, so VoiceOver's swipe up and down changes channel.
+- **Now:** Swipe to change channel (`playback.swipe_to_zap`, on by
+  default, offered where there is a touch screen or a pointer) turns the
+  swipe off; the buttons and actions stay.
+
 "Full screen" means the video fills Patina's screen or window. On desktop it
 never resizes the operating-system window; that is a separate action (double-click
 on the video, or the window's own control).
