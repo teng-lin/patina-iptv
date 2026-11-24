@@ -110,7 +110,13 @@ full lint, library/app test, dependency, tooling and portable-build suite.
 and app test-support features, ordinary app targets, exact isolated repair,
 inspection-display, guide-latency and busy-reader scenarios, portable wasm builds
 and normal app build.
-Ordinary tests share one Cargo invocation and feature graph. Examples are checked
+Ordinary tests share one Cargo invocation and feature graph. Linux CI runs the
+same plan as two parallel jobs, `tools/check.sh <tier> app` and
+`tools/check.sh <tier> core`: the app part runs iptv-app's `app` and
+`native_player` harnesses and the timing checks that reuse them, the core part
+everything else. Both use the same packages and features, so they build one
+dependency graph. Run `tools/check.sh` without a part to run the whole plan locally.
+Examples are checked
 by Clippy's `--all-targets` pass, without linking them in the test or coverage pass;
 doctests run explicitly in the host checks.
 Host workflows upload `rust-timings-*` artifacts with Cargo's compilation/linking

@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Every host-side check: formatting, core tests, wasm builds of the portable
 # crates, and the app build. Run before committing.
+# CI may run it as two parallel parts: `app` (iptv-app's integration harnesses
+# and the checks that reuse them) and `core` (everything else). With no part,
+# it runs both, one after the other.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 tier=${1:-full}
-case "$tier" in pr|full) ;; *) echo "usage: tools/check.sh [pr|full]" >&2; exit 2 ;; esac
+part=${2:-}
+case "$tier" in pr|full) ;; *) echo "usage: tools/check.sh [pr|full] [app|core]" >&2; exit 2 ;; esac
+case "$part" in ''|app|core) ;; *) echo "usage: tools/check.sh [pr|full] [app|core]" >&2; exit 2 ;; esac
 case "$(uname -s)" in
   Linux) host=linux ;;
   Darwin) host=macos ;;
@@ -18,6 +23,12 @@ fi
 # NSH is a path dependency, so Cargo.lock cannot pin it: nsh.rev does. Fail
 # before compiling against another commit (IPTV_ALLOW_NSH_DRIFT=1 allows it).
 python3 tools/ci/pins.py check-nsh
+if [ "$part" = app ]; then
+  # Linters, dependency policy and helper tests belong to the core part.
+  python3 tools/ci/check-plan.py run --tier "$tier" --host "$host" --part app
+  echo "app checks passed"
+  exit 0
+fi
 if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then
   PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools -p test_version.py
 fi
@@ -26,7 +37,7 @@ python3 tools/ci/check-plan.py format
 bash tools/ci/check-line-length.sh
 bash tools/ci/lint.sh
 cargo deny --locked check
-python3 tools/ci/check-plan.py run --tier "$tier" --host "$host"
+python3 tools/ci/check-plan.py run --tier "$tier" --host "$host" ${part:+--part "$part"}
 if [ "${IPTV_HELPERS_CHECKED:-false}" != true ]; then
 IPTV_REAL_CARGO="$(command -v cargo)" python3 tools/ci/test-locked-cargo.py
 python3 tools/ci/test-mpvkit-notices.py

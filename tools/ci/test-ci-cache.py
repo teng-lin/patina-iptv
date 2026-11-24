@@ -212,11 +212,15 @@ class ToolCache(unittest.TestCase):
             self.assertTrue(validation.select([path])["packages"], path)
 
     def test_validation_retains_successful_dependency_work_after_test_failure_only_on_master(self):
-        for action in ("setup", "setup-windows"):
+        for action, save in (("setup", "save-if: ${{ github.ref == 'refs/heads/master' && inputs.cargo-cache-save == 'true' }}"),
+                             ("setup-windows", "save-if: ${{ github.ref == 'refs/heads/master' }}")):
             text = (ROOT / f".github/actions/{action}/action.yml").read_text()
             self.assertIn("cache-on-failure: ${{ inputs.cache-on-failure }}", text)
-            self.assertIn("save-if: ${{ github.ref == 'refs/heads/master' }}", text)
+            self.assertIn(save, text)
             self.assertIn("if: inputs.cache == 'true'", text)
+        # The Linux app part builds a subset of the core part's dependencies.
+        host = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("cargo-cache-save: ${{ matrix.part != 'app' }}", host)
         for workflow in ("ci", "windows", "coverage"):
             text = (ROOT / f".github/workflows/{workflow}.yml").read_text()
             self.assertIn("cache-on-failure: 'true'", text)

@@ -27,6 +27,13 @@ GTK_LIFECYCLE = "native_gtk_player_shares_pip_frames_and_recreates_only_after_co
 COVERAGE_FEATURES = "iptv-runtime/test-support,iptv-app/test-support"
 WASM_CLIPPY = ("cargo", "clippy", "--locked", "--target", "wasm32-unknown-unknown", "--", "-D", "warnings")
 PERFORMANCE_HARNESSES = {"app", "native_player"}
+# CI can run the plan as two parallel parts. The app part owns iptv-app's two
+# integration harnesses and everything that reuses them; the core part runs
+# every other check. Together they run exactly the full plan.
+PARTS = ("app", "core")
+APP_HARNESSES = ("app", "native_player")
+APP_PART_STEPS = ("app-tests", "busy-guide-navigation", "busy-store-reader", "native-gtk-lifecycle")
+HARNESS_STEPS = ("workspace-tests", "app-tests")
 
 
 def workspace_crates(root=ROOT):
@@ -48,13 +55,89 @@ def package_args(crates):
     return [argument for crate in crates for argument in ("-p", crate)]
 
 
+def _members(root):
+    manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
+    return [path for pattern in manifest["workspace"]["members"]
+            for path in sorted(root.glob(pattern)) if (path / "Cargo.toml").is_file()]
+
+
+def _enabled_features(package):
+    """The package's own features the plan enables: default, plus test support, transitively."""
+    plan_features = {}
+    for feature in COVERAGE_FEATURES.split(","):
+        crate, name = feature.split("/")
+        plan_features.setdefault(crate, set()).add(name)
+    features = package.get("features", {})
+    pending = ["default", *plan_features.get(package["package"]["name"], ())]
+    enabled = set()
+    while pending:
+        feature = pending.pop()
+        if feature not in enabled:
+            enabled.add(feature)
+            # Only the package's own features; `dep:` and `crate/feature` entries enable other crates.
+            pending.extend(item for item in features.get(feature, ()) if ":" not in item and "/" not in item)
+    return enabled
+
+
+def _tested_targets(root, kind):
+    """Names of the `kind` ("test" or "bin") targets `cargo test --tests` builds for the plan.
+
+    Follows Cargo's discovery: explicit targets, then auto-discovered files not
+    already claimed by one (by path or name). An explicit target with
+    `test = false`, or whose required features the plan leaves off, is skipped,
+    as --tests skips it rather than failing.
+    """
+    names = set()
+    for member in _members(root):
+        package = tomllib.loads((member / "Cargo.toml").read_text(encoding="utf-8"))
+        enabled = _enabled_features(package)
+        claimed_paths, claimed_names = set(), set()
+        for target in package.get(kind, []):
+            claimed_names.add(target["name"])
+            if target.get("path"):
+                claimed_paths.add((member / target["path"]).resolve())
+            if target.get("test", True) and set(target.get("required-features", ())) <= enabled:
+                names.add(target["name"])
+        if kind == "test" and package["package"].get("autotests", True):
+            found = [(path.stem, path) for path in (member / "tests").glob("*.rs")]
+            found += [(path.parent.name, path) for path in (member / "tests").glob("*/main.rs")]
+        elif kind == "bin" and package["package"].get("autobins", True):
+            main = member / "src/main.rs"
+            found = [(package["package"]["name"], main)] if main.is_file() else []
+            found += [(path.stem, path) for path in (member / "src/bin").glob("*.rs")]
+            found += [(path.parent.name, path) for path in (member / "src/bin").glob("*/main.rs")]
+        else:
+            found = []
+        names.update(name for name, path in found
+                     if name not in claimed_names and path.resolve() not in claimed_paths)
+    return sorted(names)
+
+
+def integration_tests(root=ROOT):
+    """Names of the integration test targets `cargo test --tests` builds for the plan."""
+    names = _tested_targets(root, "test")
+    if not set(APP_HARNESSES) <= set(names):
+        raise ValueError("the app part's integration harnesses are missing")
+    return names
+
+
+def tested_binaries(root=ROOT):
+    """Names of the binary targets whose unit tests `cargo test --tests` runs.
+
+    Named one by one: `--bins` would also build binaries marked `test = false`.
+    """
+    return _tested_targets(root, "bin")
+
+
 def step(name, *argv):
     return {"name": name, "argv": list(argv)}
 
 
-def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None, skip_app_build=False):
+def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None, skip_app_build=False, part=None):
     if tier not in ("pr", "full", "native") or host not in ("linux", "macos", "windows"):
         raise ValueError("unsupported validation tier or host")
+    if part is not None and (part not in PARTS or tier == "native"):
+        raise ValueError("plan parts split the pr and full tiers only")
     workspace = package_args(workspace_crates(root))
     test_args = ["--locked", "--features", COVERAGE_FEATURES, *workspace]
     app_build = step("app-build", "cargo", "build", "--locked", "-p", "iptv-app", "--timings",
@@ -73,11 +156,26 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None,
     workspace_test_options = ["--format=pretty", *memory]
     if test_threads is not None:
         workspace_test_options.extend(("--test-threads", str(test_threads)))
+    if part is None:
+        # One feature-unified graph, without linking the examples Clippy checks.
+        tests = [step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings",
+                      "--", *workspace_test_options)]
+    else:
+        # The same packages and features as --tests, so both parts build one
+        # dependency graph; only the selected test targets differ.
+        others = [argument for name in integration_tests(root) if name not in APP_HARNESSES
+                  for argument in ("--test", name)]
+        harnesses = [argument for name in APP_HARNESSES for argument in ("--test", name)]
+        binaries = [argument for name in tested_binaries(root) for argument in ("--bin", name)]
+        tests = [
+            step("app-tests", "cargo", "test", *test_args, *harnesses, "--timings", "--", *workspace_test_options),
+            step("core-tests", "cargo", "test", *test_args, "--lib", *binaries, *others, "--timings",
+                 "--", *workspace_test_options),
+        ]
     steps = [
         step("workspace-clippy", "cargo", "clippy", "--locked", "--workspace", "--all-targets",
              "--features", COVERAGE_FEATURES, "--", "-D", "warnings"),
-        # One feature-unified graph, without linking the examples Clippy checks.
-        step("workspace-tests", "cargo", "test", *test_args, "--tests", "--timings", "--", *workspace_test_options),
+        *tests,
         step("repair-display-independence", "cargo", "test", *test_args,
              "--lib", REPAIR, "--", "--ignored", "--exact", "--format=pretty"),
         step("inspection-display-budget", "cargo", "test", *test_args,
@@ -132,6 +230,10 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None,
                           "--", "--ignored", "--exact", "--format=pretty"))
     # Test-support builds must never replace the final production configuration.
     steps.extend(app_build_steps)
+    if part == "app":
+        return [check for check in steps if check["name"] in APP_PART_STEPS]
+    if part == "core":
+        return [check for check in steps if check["name"] not in APP_PART_STEPS]
     return steps
 
 
@@ -190,7 +292,7 @@ def run(steps, root=ROOT, runner=subprocess.run, harness_output=None):
         if sys.platform == "darwin" and (directory := os.environ.get("IPTV_RS_MPV_LIB_DIR")):
             options["env"] = dict(options.get("env", os.environ), DYLD_LIBRARY_PATH=directory)
         try:
-            if harness_output and check["name"] == "workspace-tests":
+            if harness_output and check["name"] in HARNESS_STEPS:
                 status = record_harnesses(check["argv"], options, harness_output, root)
             else:
                 status = runner(check["argv"], **options).returncode
@@ -219,6 +321,8 @@ def main(argv=None):
                             help="override the Rust test threads for the workspace test step")
         action.add_argument("--tier", choices=("pr", "full", "native"), default="full")
         action.add_argument("--host", choices=("linux", "macos", "windows"), default="linux")
+        action.add_argument("--part", choices=PARTS,
+                            help="run one of the two parallel CI parts instead of the whole plan")
     actions.add_parser("format", help="check formatting of workspace packages only")
     inventory = actions.add_parser("inventory", help="print the shared crate inventory")
     inventory.add_argument("--kind", choices=("workspace", "libraries", "portable"), default="workspace")
@@ -237,14 +341,18 @@ def main(argv=None):
     elif options.action == "format":
         return run(format_plan())
     elif options.action == "run":
-        if options.harness_output and options.tier == "native":
-            parser.error("the native tier does not build the performance harnesses")
+        if options.harness_output and (options.tier == "native" or options.part == "core"):
+            parser.error("this plan does not build the performance harnesses")
+        if options.part and options.tier == "native":
+            parser.error("plan parts split the pr and full tiers only")
         return run(plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads,
-                        skip_app_build=options.skip_app_build),
+                        skip_app_build=options.skip_app_build, part=options.part),
                    harness_output=options.harness_output)
     else:
+        if options.part and options.tier == "native":
+            parser.error("plan parts split the pr and full tiers only")
         checks = plan(release=options.release, tier=options.tier, host=options.host, test_threads=options.test_threads,
-                      skip_app_build=options.skip_app_build)
+                      skip_app_build=options.skip_app_build, part=options.part)
         if options.json:
             print(json.dumps(checks, indent=2))
         else:
