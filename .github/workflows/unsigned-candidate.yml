@@ -235,7 +235,7 @@ jobs:
           stage-release: 'true'
           prepared: ${{ inputs.prepared-linux-tools && matrix.platform == 'linux' }}
       - uses: ./.github/actions/desktop-cargo-cache
-        if: (matrix.platform == 'linux' || matrix.platform == 'macos') && github.ref == 'refs/heads/master'
+        if: matrix.platform == 'macos' && github.ref == 'refs/heads/master'
         with:
           platform: ${{ matrix.platform }}
           lookup-only: 'true'

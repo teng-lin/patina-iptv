@@ -57,13 +57,17 @@ and full corpus cache. Five-minute runs build the instrumented targets before
 running up to three targets concurrently. New/shared parser inputs select all
 targets, and unknown fuzz target names fail before execution.
 Only master refreshes shared Cargo caches. Host, coverage and stress lanes retain
-compiled dependencies when a later assertion or coverage floor fails. Desktop
+compiled dependencies when a later assertion or coverage floor fails. macOS desktop
 previews use a dependency cache for the generated NSH runner workspace. The
 scheduled Validation run warms this cache on master. Windows native tests and
 installers use separate caches keyed by the MSVC toolset, Windows SDK, Rust
 and dependency inputs. The unsigned Windows installer and macOS package jobs
 on master can seed the preview caches from their fresh builds. Those jobs look
 up cache keys without downloading compiled application dependencies.
+Linux desktop packaging does not retain a Cargo cache: packaging runs only for
+relevant PR changes or scheduled/full validation, and its large cache competes
+with the frequently used host and tool caches. Master candidates do not seed
+it, and successful master pruning retires unused entries from its old namespace.
 
 The macOS package setup uses the runner's pkg-config and the pinned libmpv
 verified by the package script. Host player tests still have FFmpeg for media

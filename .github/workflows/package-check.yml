@@ -71,6 +71,7 @@ jobs:
         with:
           prepared: ${{ inputs.prepared-linux-tools && matrix.platform == 'linux' }}
       - uses: ./.github/actions/desktop-cargo-cache
+        if: matrix.platform == 'macos'
         with:
           platform: ${{ matrix.platform }}
       - name: Linux package installation and smoke tests
