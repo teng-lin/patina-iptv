@@ -534,6 +534,21 @@ fn older_untitled_imports_keep_personalization_on_upgrade_restore_and_refresh() 
                 assert_eq!(row.channel.name, channel.name);
             }
             assert_eq!(rows[1].name, "My generated label");
+            let neutral = store.search_channels(Some(source), "Unnamed", 10).unwrap();
+            assert_eq!(neutral.len(), 2);
+            assert!(
+                store
+                    .search_channels(Some(source), "12345", 10)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                store
+                    .search_channels(Some(source), "Explicit", 10)
+                    .unwrap()
+                    .len(),
+                1
+            );
             for channel in channels.iter().take(2) {
                 assert!(store.is_favorite(source, &channel.id).unwrap());
             }

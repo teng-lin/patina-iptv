@@ -271,6 +271,7 @@ fn neutral_m3u_labels(conn: &Connection) -> rusqlite::Result<()> {
     )?;
     let mut rows = query.query([])?;
     let mut update = conn.prepare("UPDATE channels SET name=?1 WHERE rowid=?2")?;
+    let mut changed = false;
     while let Some(row) = rows.next()? {
         let name: String = row.get(1)?;
         let stream: String = row.get(2)?;
@@ -284,7 +285,14 @@ fn neutral_m3u_labels(conn: &Connection) -> rusqlite::Result<()> {
                 iptv_providers::m3u::UNTITLED_CHANNEL_NAME,
                 row.get::<_, i64>(0)?,
             ])?;
+            changed = true;
         }
+    }
+    if changed {
+        // Name writes ordinarily maintain the derived FTS rows explicitly.
+        // Opening rebuilds them after this migration commits, including the
+        // provider names behind custom user labels.
+        conn.execute("DELETE FROM store_meta WHERE key='channel_fts_version'", [])?;
     }
     Ok(())
 }
