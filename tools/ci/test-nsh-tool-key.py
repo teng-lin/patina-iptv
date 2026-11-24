@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import tarfile
 from pathlib import Path
 import tempfile
 import unittest
@@ -53,6 +54,12 @@ class ToolIdentityTests(unittest.TestCase):
         )
         self.command_mock = self.commands.start()
         self.addCleanup(self.commands.stop)
+
+    def test_plan_can_find_the_cli_by_the_same_key_without_checking_out_nsh(self):
+        self.versions["git"] = "a" * 40
+        self.assertEqual(module.identity("cli"), module.identity("cli", self.versions["git"]))
+        with self.assertRaisesRegex(ValueError, "Invalid revision"):
+            module.identity("android", self.versions["git"])
 
     def test_application_changes_do_not_invalidate_tools(self):
         before = [module.identity(kind) for kind in ("cli", "android")]
@@ -142,6 +149,23 @@ class ToolIdentityTests(unittest.TestCase):
 
 
 class IdentityStepTests(unittest.TestCase):
+    def test_prepared_tools_can_fall_back_on_a_runner_image_mismatch(self):
+        root = Path(__file__).resolve().parents[2]
+        text = (root / ".github/actions/nsh-cli/action.yml").read_text()
+        identity, restore = text.split("    - uses: actions/download-artifact", 1)
+        self.assertIn("inputs.prepared == 'true' || inputs.share == 'true'", identity)
+        download = restore.split("    - name: ", 1)[0]
+        self.assertIn("github.workflow != 'Release'", download)
+        self.assertIn("continue-on-error: true", download)
+        self.assertIn("digest-mismatch: error", download)
+        install = restore.split("    - name: ", 2)[1]
+        self.assertIn("id: prepared\n", install)
+        self.assertIn("steps.prepared-download.outcome == 'success'", install)
+        self.assertIn("continue-on-error: true", install)
+        self.assertIn("steps.prepared.outcome != 'success'", restore)
+        smoke = (root / ".github/workflows/android-smoke.yml").read_text()
+        self.assertIn("inputs.prepared-linux-tools && !inputs.cold", smoke)
+
     def test_identity_step_errors_and_canonical_cache_paths(self):
         root = Path(__file__).resolve().parents[2]
         for action in ("nsh-cli", "android"):
@@ -154,7 +178,7 @@ class IdentityStepTests(unittest.TestCase):
                 end += 1
             script = "\n".join(line[8:] for line in lines[start:end])
             self.assertEqual(
-                [line.strip() for line in lines if line.strip().startswith("path:")],
+                [line.strip() for line in lines if line.strip().startswith("path: ${{ steps.identity")],
                 ["path: ${{ steps.identity.outputs.path }}"] * (3 if action == "nsh-cli" else 2),
             )
             for fake_python in ("exit 1", "echo invalid-key", "exit 0", "echo " + "0" * 64):
@@ -270,6 +294,51 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual([call.args[:2] for call in command.call_args_list], [("release", "upload"), ("release", "edit")])
         self.assertEqual(command.call_args_list[0].args[3:], (str(self.manifest), str(self.license)))
 
+    def test_retry_replaces_incomplete_or_stale_assets_in_a_draft(self):
+        draft = {**self.release, "isDraft": True, "isImmutable": False}
+        stale = {**draft, "assets": [
+            {**draft["assets"][0], "digest": "sha256:" + "b" * 64},
+            {**draft["assets"][1], "state": "starter", "size": 0, "digest": None},
+            draft["assets"][2],
+        ]}
+        with (patch.object(releases, "lookup", side_effect=[stale, draft, self.release]),
+              patch.object(releases, "gh", return_value=subprocess.CompletedProcess([], 0)) as command):
+            releases.publish(self.tag, self.root, "b" * 40)
+        self.assertEqual(command.call_args_list[0].args,
+                         ("release", "upload", self.tag, "--clobber", str(self.source), str(self.manifest)))
+
+    def test_windows_cargo_about_artifact_uses_its_own_source_license(self):
+        artifact = self.root / f"patina-cargo-about-release-Windows-X64-{self.key}"
+        artifact.mkdir()
+        executable = artifact / "cargo-about.exe"
+        executable.write_bytes(b"synthetic windows executable")
+        tag = releases.tag_for("Windows-X64", self.key, "cargo-about")
+        with (patch.object(releases, "trusted_commit", return_value="b" * 40),
+              patch.object(releases, "lookup", return_value=None),
+              patch.object(releases, "read_license", return_value=b"license") as read_license):
+            self.assertTrue(releases.prepare(self.root))
+        read_license.assert_called_once_with(releases.CARGO_ABOUT_LICENSE)
+        self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()),
+                         {"tag": tag, "digest": releases.digest_file(executable)})
+
+    def test_publisher_requires_archive_checksums_before_attestation(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / ".github/workflows/nsh-cli-releases.yml").read_text()
+        self.assertEqual(workflow.count("uses: actions/download-artifact@"), 2)
+        self.assertEqual(workflow.count("digest-mismatch: error"), 2)
+
+    def test_one_failed_release_does_not_block_other_staged_tools(self):
+        artifacts = [("failed", self.root / "failed"), ("next", self.root / "next")]
+        for _, directory in artifacts:
+            directory.mkdir()
+            (directory / releases.MANIFEST).touch()
+        with (patch.object(releases, "trusted_commit", return_value="b" * 40),
+              patch.object(releases, "staged", return_value=artifacts),
+              patch.object(releases, "publish", side_effect=[ValueError(), None]) as publish):
+            with self.assertRaisesRegex(RuntimeError, "Tool releases still pending: failed"):
+                releases.publish_staged(self.root)
+        self.assertEqual(publish.call_count, 2)
+
     def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
         artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
         artifact.mkdir()
@@ -280,6 +349,7 @@ class ReleaseTests(unittest.TestCase):
         with (patch.dict(os.environ, GITHUB_REPOSITORY=releases.REPOSITORY, GITHUB_REF="refs/heads/master",
                          GITHUB_EVENT_NAME="workflow_run", GITHUB_EVENT_PATH=str(event)),
               patch.object(releases, "publish") as publish,
+              patch.object(releases, "lookup", return_value=None),
               patch.object(releases, "upstream_license", return_value=self.license.read_bytes()) as license_fetch):
             for incorrect in ({"event": "pull_request"}, {"conclusion": "failure"}, {"conclusion": "cancelled"},
                               {"head_repository": {"full_name": "fork/patina-iptv"}}):
@@ -293,6 +363,39 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()), json.loads(self.manifest.read_text()))
             releases.publish_staged(self.root)
             publish.assert_called_once_with(self.tag, artifact, run["head_sha"])
+
+
+class AndroidBundleTests(unittest.TestCase):
+    def test_bundle_only_installs_the_requested_abi_and_rejects_other_entries(self):
+        bundle_spec = importlib.util.spec_from_file_location(
+            'bundle', Path(__file__).with_name('nsh-android-bundle.py'))
+        bundle = importlib.util.module_from_spec(bundle_spec)
+        bundle_spec.loader.exec_module(bundle)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source'
+            for name in bundle.entries('x86_64'):
+                path = source / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(f'synthetic {name}'.encode())
+            archive = root / 'runtime.tar.gz'
+            bundle.pack(source, 'x86_64', archive)
+            first = archive.read_bytes()
+            for name in bundle.entries('x86_64'):
+                os.utime(source / name, (1234567890, 1234567890))
+            bundle.pack(source, 'x86_64', archive)
+            self.assertEqual(first, archive.read_bytes())
+            output = root / 'restored'
+            with self.assertRaisesRegex(ValueError, 'requested ABI'):
+                bundle.unpack(output, 'arm64-v8a', archive)
+            bundle.unpack(output, 'x86_64', archive)
+            for name in bundle.entries('x86_64'):
+                self.assertEqual((source / name).read_bytes(), (output / name).read_bytes())
+            with tarfile.open(archive, 'w:gz') as staged:
+                staged.add(source / 'classes.jar', arcname='../outside')
+            with self.assertRaisesRegex(ValueError, 'requested ABI'):
+                bundle.unpack(output, 'x86_64', archive)
+            self.assertFalse((root / 'outside').exists())
 
 
 if __name__ == "__main__":

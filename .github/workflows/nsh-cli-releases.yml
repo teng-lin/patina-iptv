@@ -1,4 +1,4 @@
-name: Publish NSH CLI releases
+name: Publish pinned CI tools
 on:
   workflow_run:
     workflows: [Validation]
@@ -31,16 +31,25 @@ jobs:
           digest-mismatch: error
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
-          pattern: patina-nsh-cli-release-*
+          pattern: patina-nsh-*-release-*
+          path: target/nsh-cli-releases
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          digest-mismatch: error
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: patina-cargo-about-release-*
           path: target/nsh-cli-releases
       - name: Generate checksum manifests
         id: manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 tools/ci/nsh-cli-release.py prepare target/nsh-cli-releases
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         if: steps.manifests.outputs.available == 'true'
         with:
           subject-path: target/nsh-cli-releases/*/nsh-cli.json
-      - name: Publish completed NSH CLI builds
+      - name: Publish completed tool builds
         if: steps.manifests.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ github.token }}

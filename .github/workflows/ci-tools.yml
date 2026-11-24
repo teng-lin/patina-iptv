@@ -1,0 +1,30 @@
+name: Prepare the shared Linux NSH CLI
+on:
+  workflow_call:
+    outputs:
+      cli-ready:
+        value: ${{ jobs.linux.outputs.cli-ready }}
+permissions:
+  contents: read
+  actions: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    # The consuming jobs have their own restore and build path.
+    continue-on-error: true
+    outputs:
+      cli-ready: ${{ steps.cli.outputs.artifact-ready }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        timeout-minutes: 8
+        with:
+          prerequisites: metadata
+          cache: 'false'
+      - uses: ./.github/actions/nsh-cli
+        id: cli
+        with:
+          share: 'true'
