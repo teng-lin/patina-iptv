@@ -46,7 +46,7 @@ internal class DeviceComponent(
         val host = observer.context
         val leanback = host.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         val tv = DeviceSignals.tv(config.uiMode, leanback)
-        val display = DeviceSignals.displaySmallestDp(host)
+        val display = DeviceSignals.displaySmallestDp(host, config)
         val next =
             mapOf(
                 "form" to DeviceSignals.form(tv, display),
@@ -110,11 +110,17 @@ internal object DeviceSignals {
     /**
      * The smallest width of the physical display in dp: the largest window
      * the system would give the app, whatever its window is now (split
-     * screen, a freeform window). 0 when it cannot be read.
+     * screen, a freeform window), at `config`'s density. 0 when it cannot
+     * be read.
      */
-    fun displaySmallestDp(context: Context): Int {
+    fun displaySmallestDp(
+        context: Context,
+        config: Configuration,
+    ): Int {
         val windows = context.getSystemService(WindowManager::class.java) ?: return 0
-        val density = context.resources.displayMetrics.density
+        // The incoming configuration's density: the resources' can still
+        // hold the previous one during `onConfigurationChanged`.
+        val density = config.densityDpi / DisplayMetrics.DENSITY_DEFAULT.toFloat()
         if (density <= 0f) return 0
         val (width, height) =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

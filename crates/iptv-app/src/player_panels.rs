@@ -492,6 +492,14 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
             .into_iter()
             .filter(|&control| offered(ui, device, control))
             .collect();
+        // A resize or a report that leaves the strip as it is does not
+        // touch the panels, whose readers would otherwise all run again.
+        if ui
+            .panels
+            .with_untracked(|p| p.controls().eq(shown.iter().copied()))
+        {
+            return;
+        }
         untracked(|| {
             ui.panels
                 .update(|p| p.offer(|control| shown.contains(&control)))
@@ -509,8 +517,10 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     });
     let count = computed(move || ui.panels.with(|p| p.controls().count()));
     virtual_list(count, move |at| {
-        let index = at.index();
+        // NSH recycles a cell for another row by moving its position, so
+        // the index is read inside the memo, not once.
         let control = computed(move || {
+            let index = at.index();
             ui.panels
                 .with(|p| p.controls().nth(index))
                 .unwrap_or(CONTROLS[0])

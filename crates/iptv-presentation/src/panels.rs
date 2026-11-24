@@ -78,6 +78,9 @@ pub enum Control {
     Record,
 }
 
+// [`Panels`] keeps the controls it leaves out as a `u16` mask.
+const _: () = assert!(CONTROLS.len() <= 16 && QUICK_ACTIONS.len() <= 16);
+
 pub const CONTROLS: [Control; 15] = [
     Control::Search,
     Control::ChannelList,
@@ -99,6 +102,9 @@ pub const CONTROLS: [Control; 15] = [
 /// The first index of [`CONTROLS`] in `step`'s direction from `from`
 /// (exclusive) whose control is offered.
 fn next_offered(omitted: u16, from: usize, step: isize) -> Option<usize> {
+    if step == 0 {
+        return None;
+    }
     let mut at = from as isize;
     loop {
         at += step.signum();

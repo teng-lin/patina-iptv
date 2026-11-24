@@ -76,8 +76,10 @@ pub fn host() -> Host {
     host
 }
 
-/// The current window's size class (reactive: the window's size, the
-/// guide's scale and the viewer's text size). Before the root mounts, and
+/// The main window's size class (reactive: the window's size, the
+/// guide's scale and the viewer's text size). A desktop's auxiliary
+/// player windows have their own bounds; a gate that lays them out must
+/// read their window, not this. Before the root mounts, and
 /// off the UI thread, there is no window: expanded, the class that
 /// leaves nothing out.
 pub fn window_class() -> Class {
