@@ -62,7 +62,16 @@ fn label(ui: Ui, control: Control) -> String {
         }
         .to_owned(),
         Multiview if crate::multiview::detour(ui) => tr("Back to multiview").to_owned(),
-        Multiview => tr("Multiview").to_owned(),
+        // Disabled with its reason (a TV at the account's limit, #279).
+        Multiview => with(
+            tr("Multiview"),
+            match crate::capabilities::multiview_offer(ui) {
+                iptv_presentation::capabilities::MultiviewOffer::Disabled(reason) => {
+                    Some(crate::capabilities::reason(reason).to_owned())
+                }
+                _ => None,
+            },
+        ),
         PictureInPicture => with(
             tr("Picture in picture"),
             ui.pip
@@ -141,7 +150,9 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
     match control {
         Control::Record | Control::Recordings => crate::host::HAS_WORKERS && main,
         Control::Search => main,
-        Control::Multiview => main && device.host.decoder_slots() > 1,
+        // As the device and its window offer it (#279): a phone upright, a
+        // tablet in split screen, an iPad and a browser TV leave it out.
+        Control::Multiview => main && crate::capabilities::multiview_offer_on(ui, device).shown(),
         // Shown until the host reports, then only where it can: never a TV
         // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
         Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
@@ -468,12 +479,19 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
             words::quick_label(action, is_favorite(ui), detour).to_owned()
         },
         focused,
-        move || action == QuickAction::Multiview && ui.playing.get().is_none(),
+        move || action == QuickAction::Multiview && !crate::capabilities::multiview(ui).available(),
         move || {
             ui.panels.update(|p| p.quick = Some(i));
             crate::player_keys::press_quick(ui, action);
         },
     )
+    // Why a dimmed Multiview cannot open, said on focus (#279).
+    .optional_accessibility_description(move || {
+        (action == QuickAction::Multiview)
+            .then(|| crate::capabilities::multiview_disabled(ui))
+            .flatten()
+            .map(SharedString::from)
+    })
 }
 
 /// What the keys do now, under the panels (keys only).

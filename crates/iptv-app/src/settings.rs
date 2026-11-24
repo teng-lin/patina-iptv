@@ -11,9 +11,12 @@
 //!   reads. Only the UI thread writes.
 //!
 //! Values are global, except a playlist's own movie and series import
-//! (`playlists.include_vod`), which its actions on the playlists screen
-//! set (`Runtime::set_playlist_setting`). Other playlist-scoped settings
-//! read their global value; a deleted playlist's own values go with it.
+//! (`playlists.include_vod`) and streams-at-once ceiling
+//! (`playlists.max_connections`), which its actions on the playlists
+//! screen set (`Runtime::set_playlist_setting`,
+//! `Runtime::set_connection_limit`). Other playlist-scoped settings read
+//! their global value; a deleted playlist's own values go with it. The
+//! catalog's Sort keeps `vod.sort` itself.
 //!
 //! [`offer`] says what the app does with each setting and command: the
 //! ones it acts on ([`WIRED`], [`COMMANDS`]), those it keeps with the
@@ -46,11 +49,8 @@ pub const WIRED: &[&str] = &[
     "parental.live_enabled",
     "parental.vod_enabled",
     "parental.require_pin_for",
-    "parental.pin_input",
     "parental.unlock_window",
     "playlists.include_vod",
-    "playlists.max_connections",
-    "vod.sort",
     "vod.autoplay_next_episode",
     "general.language",
     "general.clock",
@@ -66,11 +66,7 @@ pub const WIRED: &[&str] = &[
     "guide.visible_minutes",
     "general.resume_last_channel",
     "general.user_agent",
-    "epg.update_interval",
-    "epg.update_on_start",
-    "epg.update_on_playlist_change",
-    "epg.keep_past",
-    "epg.store_descriptions",
+    "epg.update",
     "appearance.accent",
     "appearance.background",
     "appearance.ui_transparency",
@@ -83,9 +79,6 @@ pub const WIRED: &[&str] = &[
     "catchup.forward_step",
     "catchup.rewind_step",
     "catchup.timebar_step",
-    "search.favorites_first",
-    "search.include_past_without_catchup",
-    "search.stay_on_search",
     "search.show_history",
 ];
 
@@ -175,6 +168,28 @@ const NOT_OFFERED: &[&str] = &[
     "recordings.enable_startup",
     "recordings.disable_startup",
     "recordings.alarm_access",
+    // Retired by #282. Their stored values stay (a backup keeps them) and
+    // are ignored, except as noted: the guide's interval and start switch
+    // became `epg.update` (settings version 6); a guide always updates
+    // after its playlist changes, keeps descriptions wherever the host
+    // stores it on disk, and keeps finished programs for the longest
+    // catch-up archive (at least a week); search always ranks favorites first, offers
+    // finished programs without replay as a filter in its results and
+    // returns to them after watching; OK in the PIN prompt follows one
+    // rule. `vod.sort` is the catalog's own Sort, which keeps it, and a
+    // playlist's streams at once are among its actions on the playlists
+    // screen (a global value moves to each playlist at startup).
+    "epg.update_interval",
+    "epg.update_on_start",
+    "epg.update_on_playlist_change",
+    "epg.keep_past",
+    "epg.store_descriptions",
+    "search.favorites_first",
+    "search.include_past_without_catchup",
+    "search.stay_on_search",
+    "parental.pin_input",
+    "vod.sort",
+    "playlists.max_connections",
 ];
 
 /// Retired (#281): fixed behavior replaced them. They stay in the catalog,
@@ -326,6 +341,18 @@ pub fn offer(device: Device, key: &str) -> Offer {
     }
     if let Some(offer) = by_device(device, key) {
         return offer;
+    }
+    // No enabled playlist can supply movies or series: their settings go
+    // as the rail's Movies and Shows do (`lists::live_only`).
+    if key.starts_with("vod.") && crate::lists::live_only() {
+        return Offer::Hidden;
+    }
+    // Sound follows the selected tile: not on a phone, nor where multiview
+    // never exists (#279). The stored value is kept, unused.
+    if key == keys::SOUND_FOLLOWS_TILE.as_str()
+        && !iptv_presentation::capabilities::sound_follows_tile(host)
+    {
+        return Offer::Hidden;
     }
     // The keyboard or remote settings: only while there are keys (#280).
     if on_keys_page(key) && keys(device).is_none() {
@@ -636,12 +663,28 @@ mod tests {
         };
         for device in devices() {
             let offer = |key| offer(device, key);
-            assert_eq!(offer("epg.keep_past"), Offer::Active);
+            assert_eq!(offer("epg.update"), Offer::Active);
+            // Retired by #282.
+            for key in [
+                "epg.update_interval",
+                "epg.update_on_start",
+                "epg.update_on_playlist_change",
+                "epg.keep_past",
+                "epg.store_descriptions",
+                "search.favorites_first",
+                "search.include_past_without_catchup",
+                "search.stay_on_search",
+                "parental.pin_input",
+                "vod.sort",
+                "playlists.max_connections",
+            ] {
+                assert_eq!(offer(key), Offer::Hidden, "{key}");
+            }
+            assert_eq!(offer("general.user_agent"), Offer::Active);
             assert_eq!(offer("epg.update_now"), Offer::Active);
             assert_eq!(offer("epg.manage_sources"), Offer::Active);
             assert_eq!(offer("epg.add_source"), Offer::Active);
             assert_eq!(offer("playback.afr"), Offer::Hidden);
-            assert_eq!(offer("vod.sort"), Offer::Active);
             assert_eq!(offer("parental.live_enabled"), Offer::Active);
             assert_eq!(offer("parental.change_pin"), Offer::Active);
             assert_eq!(offer("history.keep_days"), Offer::Hidden);
@@ -683,6 +726,19 @@ mod tests {
             for key in ["catchup.forward_step", "catchup.rewind_step"] {
                 assert_eq!(offer(key), steps, "{key}");
             }
+            // Sound follows the selected tile: never on a phone (#279);
+            // elsewhere where this build has multiview.
+            let follows = device.form_factor() != iptv_core::capabilities::FormFactor::Phone
+                && iptv_presentation::capabilities::multiview_exists(device.host);
+            assert_eq!(
+                offer("player.sound_follows_tile"),
+                if follows {
+                    Offer::Active
+                } else {
+                    Offer::Hidden
+                },
+                "{device:?}"
+            );
         }
         offer_pip(false);
         assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);

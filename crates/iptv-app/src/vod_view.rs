@@ -27,17 +27,49 @@ pub fn is_open(ui: Ui) -> bool {
 pub fn open(ui: Ui, kind: Kind) {
     ui.vod.update(|s| {
         s.begin(kind);
-        s.query.sort = match crate::settings::get().choice(
+        s.query.sort = sort_of(crate::settings::get().choice(
             iptv_settings::keys::VOD_SORT,
             &iptv_settings::Target::Global,
-        ) {
-            "year" => Sort::Year,
-            "rating" => Sort::Rating,
-            "date_added" | "last_modified" => Sort::Newest,
-            _ => Sort::Name,
-        };
+        ));
     });
     reload(ui, false);
+}
+
+/// The catalog's Sort as `vod.sort` keeps it (#282): the order chosen
+/// last opens again.
+fn sort_of(choice: &str) -> Sort {
+    match choice {
+        "year" => Sort::Year,
+        "rating" => Sort::Rating,
+        "date_added" => Sort::Newest,
+        _ => Sort::Name,
+    }
+}
+
+fn choice_of(sort: Sort) -> &'static str {
+    match sort {
+        Sort::Name => "name",
+        Sort::Newest => "date_added",
+        Sort::Year => "year",
+        Sort::Rating => "rating",
+    }
+}
+
+/// The catalog's Sort moved on: shown at once and kept for the next time
+/// the catalog opens (on this device; a backup carries it).
+fn cycle_sort(ui: Ui) {
+    let sort = edit(ui, |s| {
+        s.cycle_sort();
+        s.query.sort
+    });
+    reload(ui, false);
+    if let Err(error) = crate::settings::set(
+        ui,
+        iptv_settings::keys::VOD_SORT.as_str(),
+        iptv_settings::Value::choice(choice_of(sort)),
+    ) {
+        log::warn!("iptv vod: the catalog order was not kept: {error}");
+    }
 }
 
 /// Opens a cross-source shelf from the rail: movies and series of every
@@ -665,10 +697,7 @@ fn activate(ui: Ui) {
             ui.vod.update(|s| s.enter_catalog());
         }
         Control::Category => cycle_category(ui),
-        Control::Sort => {
-            ui.vod.update(|s| s.cycle_sort());
-            reload(ui, false);
-        }
+        Control::Sort => cycle_sort(ui),
         Control::Continue => {
             ui.vod
                 .update(|s| s.query.continue_watching = !s.query.continue_watching);

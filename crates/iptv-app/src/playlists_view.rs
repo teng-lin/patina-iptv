@@ -4,7 +4,9 @@
 //! playlist opens its actions: show it, refresh it now, rename it, change
 //! its provider details (link, server and login, portal and MAC address:
 //! checked by importing them, kept only if that works), its User-Agent,
-//! its guide sources (`epg_sources_view`), delete it after a confirmation
+//! its streams at once (Automatic, the allowance its provider reports and
+//! shown beside it, or a number), its guide sources (`epg_sources_view`),
+//! delete it after a confirmation
 //! that states what goes. `state.rs` and `details.rs` own
 //! focus and flow; `data::library` does the work.
 //!
@@ -155,6 +157,7 @@ fn perform(ui: Ui, effect: Effect) {
             | Effect::TryDetails(..)
             | Effect::SetUserAgent(..)
             | Effect::ToggleOnDemand(_)
+            | Effect::CycleStreams(_)
     ) && crate::runtime().parental_has_pin()
         && !crate::runtime().parental_settings_allowed()
     {
@@ -192,6 +195,13 @@ fn perform(ui: Ui, effect: Effect) {
                     iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str(),
                     iptv_settings::Value::Bool(!on),
                 ) {
+                    crate::settings_view::notify_setting_error(e);
+                }
+                Ok(())
+            }
+            Effect::CycleStreams(id) => {
+                let next = state::next_streams(own_streams(id));
+                if let Err(e) = crate::runtime().set_connection_limit(id, next) {
                     crate::settings_view::notify_setting_error(e);
                 }
                 Ok(())
@@ -260,6 +270,7 @@ fn effect_name(effect: &Effect) -> String {
         Effect::Refresh(id) => format!("refresh {}", id.0),
         Effect::Policy(id, _) => format!("playlist policy {}", id.0),
         Effect::ToggleOnDemand(id) => format!("movie and series import of {}", id.0),
+        Effect::CycleStreams(id) => format!("streams at once of {}", id.0),
         Effect::CustomGroups(id) => format!("custom groups {}", id.0),
         Effect::Organize(id, _) => format!("organize {}", id.0),
         Effect::Rename(id, _) => format!("rename {}", id.0),
@@ -282,6 +293,18 @@ fn on_demand(id: SourceId) -> bool {
         iptv_settings::keys::PLAYLISTS_INCLUDE_VOD,
         &iptv_settings::Target::playlist(id.0.to_string()),
     )
+}
+
+/// Playlist `id`'s own streams-at-once ceiling; `None` is Automatic (the
+/// allowance its provider reports).
+fn own_streams(id: SourceId) -> Option<u32> {
+    let at = iptv_settings::Target::playlist(id.0.to_string());
+    match crate::settings::get()
+        .stored(iptv_settings::keys::PLAYLISTS_MAX_CONNECTIONS.as_str(), &at)
+    {
+        Some(iptv_settings::Value::Int(n)) => u32::try_from(*n).ok(),
+        _ => None,
+    }
 }
 
 // --- View ----------------------------------------------------------------------
@@ -607,6 +630,11 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                         "Movies and series: {answer}",
                         &[("answer", yes_no(on_demand(id)).into())],
                     )
+                }
+                (Act::Streams, Some(_)) => {
+                    ui.app.settings.get();
+                    ui.app.library.version.get();
+                    words::streams(own_streams(id), crate::runtime().reported_streams(id))
                 }
                 _ => words::act(act, kind, shown, running()).to_owned(),
             }

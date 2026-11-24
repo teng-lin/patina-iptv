@@ -70,14 +70,25 @@ pub static CHANNEL_SORT: Choices = Choices {
     variants: &["playlist_order", "name", "watch_time", "manual"],
 };
 
+/// The catalog's own Sort, in the order it cycles (#282). Settings
+/// version 6 rewrote the earlier `playlist_order` (shown by name) and
+/// `last_modified` (shown newest first) choices.
 pub static VOD_SORT: Choices = Choices {
     family: "sort",
+    variants: &["name", "date_added", "year", "rating"],
+};
+
+/// When the guide downloads again: only on request, or once it is older
+/// than the period (also checked at startup).
+pub static GUIDE_UPDATE: Choices = Choices {
+    family: "guide_update",
     variants: &[
-        "playlist_order",
-        "date_added",
-        "name",
-        "rating",
-        "last_modified",
+        "on_request",
+        "every_6_hours",
+        "every_12_hours",
+        "daily",
+        "every_2_days",
+        "weekly",
     ],
 };
 
@@ -226,6 +237,7 @@ pub static ALL: &[&Choices] = &[
     &GROUP_SORT,
     &CHANNEL_SORT,
     &VOD_SORT,
+    &GUIDE_UPDATE,
     &SIZE,
     &CLOCK_SIZE,
     &LEVEL,

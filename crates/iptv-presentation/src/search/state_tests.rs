@@ -180,6 +180,50 @@ fn switches_to_the_tab_with_results_and_handles_no_results() {
     assert_eq!(s.focus(), &Focus::Input);
 }
 
+/// #282: finished programs without replay are a filter in the results,
+/// not a setting.
+#[test]
+fn the_filter_row_switches_finished_programs_without_replay() {
+    let mut s = SearchState::new(SearchHistory::default()).with_filter();
+    s.apply(Type("owl".into()));
+    assert!(!s.past_without_replay());
+    s.set_results("owl", vec![ch(1)], vec![pr(2, 100)]);
+    s.apply(Ok);
+    s.apply(Up);
+    assert_eq!(
+        s.focus(),
+        &Focus::Filter,
+        "the filter row is below the tabs"
+    );
+    s.apply(Up);
+    assert_eq!(s.focus(), &Focus::Tabs);
+    s.apply(Down);
+    assert_eq!(s.focus(), &Focus::Filter);
+    assert_eq!(s.apply(Ok), SearchEffect::Search("owl".into()));
+    assert!(s.past_without_replay());
+    assert_eq!(s.phase(), Phase::Typing);
+    s.set_results("owl", vec![ch(1)], vec![pr(2, 100), pr(3, 50)]);
+    assert_eq!(s.focus(), &Focus::Filter, "the filter keeps the focus");
+    // A tap switches it back.
+    assert_eq!(
+        s.apply(Pick(Focus::Filter)),
+        SearchEffect::Search("owl".into())
+    );
+    assert!(!s.past_without_replay());
+    // No results: the filter stays in reach, as it may bring some.
+    s.set_results("owl", vec![], vec![]);
+    assert_eq!(s.focus(), &Focus::Filter);
+    s.apply(Up);
+    assert_eq!(s.focus(), &Focus::Input);
+    s.apply(Down);
+    assert_eq!(s.focus(), &Focus::Filter);
+    // Without a query there is no filter row; nor where it is not offered.
+    s.apply(Clear);
+    assert!(!s.filter_shown());
+    assert_eq!(s.apply(Pick(Focus::Filter)), SearchEffect::None);
+    assert!(!typed("owl").filter_shown());
+}
+
 #[test]
 fn back_hides_keyboard_then_returns_to_input_then_closes() {
     let mut s = typed("owl");

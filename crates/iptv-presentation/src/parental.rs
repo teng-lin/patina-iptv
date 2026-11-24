@@ -28,6 +28,9 @@ pub struct Dialog {
     held_notice: zeroize::Zeroizing<String>,
     changing: bool,
     setup: bool,
+    /// The last digit came from a number key (or typing), not the
+    /// on-screen keypad.
+    keyed: bool,
 }
 pub enum Submission {
     None,
@@ -61,11 +64,27 @@ impl Dialog {
             held_notice: zeroize::Zeroizing::new(String::new()),
             changing: phase == Phase::Old,
             setup: phase == Phase::New,
+            keyed: false,
         }
     }
+    /// A digit pressed on the on-screen keypad (by OK or touch).
     pub fn digit(&mut self, digit: u8) {
         if !self.busy {
             self.input.push(digit);
+            self.keyed = false;
+        }
+    }
+    /// Delete on the on-screen keypad: removes the last digit, and the
+    /// viewer is on the keypad now, so OK goes on pressing its keys.
+    pub fn erase(&mut self) {
+        self.input.erase();
+        self.keyed = false;
+    }
+    /// A digit typed with a number key or a keyboard.
+    pub fn key_digit(&mut self, digit: u8) {
+        if !self.busy {
+            self.input.push(digit);
+            self.keyed = true;
         }
     }
     pub fn move_focus(&mut self, step: isize, count: usize) {
@@ -138,6 +157,19 @@ impl Dialog {
         self.notice(code);
         true
     }
+    /// Whether OK on a digit key submits rather than pressing that key
+    /// (#282: one rule for every remote, in place of the
+    /// `parental.pin_input` setting). It does when the digits entered so
+    /// far end with one typed on number keys: that viewer is not using the
+    /// keypad, so OK means done. A viewer entering digits with arrows and
+    /// OK keeps pressing keys, whatever the PIN's length, and submits with
+    /// the keypad's Continue.
+    pub fn ok_submits(&self) -> bool {
+        self.keyed
+            && !self.input.is_empty()
+            && !matches!(self.phase, Phase::Recovery | Phase::RecoveryNotice)
+    }
+
     pub fn submit(&mut self) -> Submission {
         if self.busy {
             return Submission::None;
@@ -216,6 +248,58 @@ mod dialog_tests {
         for digit in text.bytes() {
             dialog.digit(digit - b'0');
         }
+    }
+    fn key(dialog: &mut Dialog, text: &str) {
+        for digit in text.bytes() {
+            dialog.key_digit(digit - b'0');
+        }
+    }
+    #[test]
+    fn ok_submits_only_after_number_keys() {
+        // A six-digit PIN on the keypad: OK never submits on its own, so
+        // the fifth and sixth digits can be pressed.
+        let mut d = Dialog::new(Phase::Unlock);
+        enter(&mut d, "123456");
+        assert_eq!(d.input.len(), 6);
+        assert!(!d.ok_submits(), "OK still presses the focused key");
+        // The same PIN on number keys: OK submits after the last digit.
+        let mut d = Dialog::new(Phase::Unlock);
+        key(&mut d, "1234");
+        assert!(d.ok_submits());
+        key(&mut d, "56");
+        assert!(d.ok_submits());
+        assert!(matches!(d.submit(), Submission::Verify(pin) if pin.bytes() == b"123456"));
+        // The latest digit decides: a keypad press after number keys
+        // returns OK to the keypad.
+        let mut d = Dialog::new(Phase::Unlock);
+        key(&mut d, "1234");
+        enter(&mut d, "5");
+        assert!(!d.ok_submits());
+        // A digit typed by mistake on number keys and removed with the
+        // keypad's Delete: OK presses keys again.
+        let mut d = Dialog::new(Phase::Unlock);
+        enter(&mut d, "1234");
+        key(&mut d, "9");
+        assert!(d.ok_submits());
+        d.erase();
+        assert_eq!(d.input.len(), 4);
+        assert!(!d.ok_submits());
+        // Setting a new six-digit PIN, by keypad then by number keys.
+        let mut setup = Dialog::new(Phase::New);
+        enter(&mut setup, "246813");
+        assert!(!setup.ok_submits());
+        setup.submit();
+        assert_eq!(setup.phase, Phase::Confirm);
+        assert!(!setup.ok_submits(), "nothing entered yet");
+        key(&mut setup, "246813");
+        assert!(setup.ok_submits());
+        assert!(
+            matches!(setup.submit(), Submission::Change { new, .. } if new.bytes() == b"246813")
+        );
+        let mut recovery = Dialog::new(Phase::Unlock);
+        key(&mut recovery, "1");
+        recovery.recover();
+        assert!(!recovery.ok_submits());
     }
     #[test]
     fn setup_requires_confirmation_and_clears_mismatch() {

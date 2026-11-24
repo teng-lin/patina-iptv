@@ -69,11 +69,6 @@ fn fixture_in(
     settings
         .set("playlists.max_connections", Value::Int(3))
         .unwrap();
-    if guide_fixture.is_some() {
-        settings
-            .set("epg.update_on_start", Value::Bool(true))
-            .unwrap();
-    }
     let root = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("settings.json"), settings.to_json_string()).unwrap();
@@ -826,4 +821,139 @@ fn one_recording_list_keeps_scheduled_and_finished_jobs_visible() {
     step(app.press_key("right"));
     step(app.press_key("left"));
     assert_eq!(app.screen().count("id:recording-job").unwrap(), 3);
+}
+
+/// Opens the channel menu of `cell` until it offers `item`. The menu reads
+/// the recorder's job snapshot, which follows the store within seconds.
+#[track_caller]
+fn channel_menu_offering(app: &mut Headless, cell: &str, item: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let open = "id:menu-panel >> text:Add to favorites";
+    loop {
+        step(app.long_press(cell));
+        step(app.wait_for(open));
+        if app.screen().matches(item).unwrap() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the channel menu never offered {item}"
+        );
+        step(app.back());
+        step(app.wait_for_gone(open, Duration::from_secs(2)));
+        app.idle(Duration::from_millis(250)).unwrap();
+    }
+}
+
+/// Record now from the guide: the Record key and the channel menu start a
+/// program on now, a repeated Record does not start it twice, and the
+/// channel menu stops it.
+#[test]
+fn record_key_and_channel_menu_start_and_stop_a_program_on_now() {
+    let Some(home) = isolated!() else { return };
+    let (url, server) = local_capture();
+    let (mut app, path, _, _) = fixture(
+        &home,
+        Idiom::Pad,
+        &url,
+        Some(GuideFixture::Listing("Generated future program")),
+    );
+    // A badge prefixes the title while a job covers it.
+    let live = "role:cell[/Generated live program$/]";
+    let stop = "id:menu-panel >> label:/^Stop recording · Generated live program/";
+    step(app.wait_for(live));
+    step(app.press_remote(nsh_tv::RemoteKey::Record));
+    wait_for_jobs(&mut app, &path, "the Record key starts a job", |jobs| {
+        jobs.len() == 1 && jobs[0].status.active()
+    });
+    assert_eq!(jobs(&path)[0].request.title, "Generated live program");
+    assert!(!app.screen().matches("id:recordings-screen").unwrap());
+
+    // Once the recorder lists the job, Record again only confirms it.
+    channel_menu_offering(&mut app, live, stop);
+    step(app.back());
+    step(app.wait_for_gone(stop, Duration::from_secs(2)));
+    step(app.press_remote(nsh_tv::RemoteKey::Record));
+    step(app.wait_for_within(
+        "id:app-notice >> text:Recording started",
+        Duration::from_secs(5),
+    ));
+    app.idle(Duration::from_millis(500)).unwrap();
+    assert_eq!(
+        jobs(&path).len(),
+        1,
+        "a repeated Record starts no second job"
+    );
+
+    channel_menu_offering(&mut app, live, stop);
+    step(app.press(stop));
+    wait_for_jobs(&mut app, &path, "the channel menu stops it", |jobs| {
+        jobs.len() == 1 && !jobs[0].status.active()
+    });
+
+    let record_now = "id:menu-panel >> label:/^Record now · Generated live program/";
+    channel_menu_offering(&mut app, live, record_now);
+    step(app.press(record_now));
+    wait_for_jobs(&mut app, &path, "Record now starts a new job", |jobs| {
+        jobs.len() == 2 && jobs.iter().any(|j| j.status.active())
+    });
+    channel_menu_offering(&mut app, live, stop);
+    step(app.press(stop));
+    wait_for_jobs(&mut app, &path, "the second job stops", |jobs| {
+        jobs.iter().all(|j| !j.status.active())
+    });
+    server.join().unwrap();
+}
+
+/// A job scheduled before scheduling was retired (#273) is offered for
+/// cancellation from its program's channel menu.
+#[test]
+fn channel_menu_cancels_a_job_scheduled_before_scheduling_was_retired() {
+    use iptv_core::recording::{JobId, Request, Status};
+    let Some(home) = isolated!() else { return };
+    let (mut app, path, source, expected) = fixture(
+        &home,
+        Idiom::Pad,
+        "https://example.test/generated.ts",
+        Some(GuideFixture::Listing("Generated future program")),
+    );
+    let (start, end) = expected.unwrap();
+    let future = "role:cell[Generated future program]";
+    step(app.wait_for(future));
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let channel = store.load_channels(source, &Default::default()).unwrap()[0]
+        .channel
+        .id
+        .as_str()
+        .to_owned();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    store
+        .schedule_recording(
+            JobId(1),
+            &Request {
+                source: source.0,
+                channel,
+                channel_name: "Generated channel".into(),
+                title: "Generated future program".into(),
+                start,
+                end,
+            },
+            now,
+        )
+        .unwrap();
+    drop(store);
+    let cancel = "id:menu-panel >> label:/^Cancel recording · Generated future program/";
+    channel_menu_offering(&mut app, future, cancel);
+    assert!(
+        !app.screen()
+            .matches("id:menu-panel >> label:/^Record now/")
+            .unwrap()
+    );
+    step(app.press(cancel));
+    wait_for_jobs(&mut app, &path, "the scheduled job is canceled", |jobs| {
+        jobs.len() == 1 && jobs[0].status == Status::Canceled
+    });
 }

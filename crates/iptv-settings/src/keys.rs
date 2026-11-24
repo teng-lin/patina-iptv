@@ -52,12 +52,8 @@ pub const GROUP_SORT: EnumKey = EnumKey("channels.group_sort");
 pub const RECENT_COUNT: IntKey = IntKey("history.recent_count");
 pub const USER_AGENT: TextKey = TextKey("general.user_agent");
 
-// EPG refresh and storage (iptv-import refresh policy).
-pub const EPG_UPDATE_INTERVAL: DurationKey = DurationKey("epg.update_interval");
-pub const EPG_UPDATE_ON_START: BoolKey = BoolKey("epg.update_on_start");
-pub const EPG_UPDATE_ON_PLAYLIST_CHANGE: BoolKey = BoolKey("epg.update_on_playlist_change");
-pub const EPG_KEEP_PAST: DurationKey = DurationKey("epg.keep_past");
-pub const EPG_STORE_DESCRIPTIONS: BoolKey = BoolKey("epg.store_descriptions");
+// EPG refresh (iptv-import refresh policy).
+pub const EPG_UPDATE: EnumKey = EnumKey("epg.update");
 
 // Startup and leaving.
 pub const RESUME_LAST_CHANNEL: BoolKey = BoolKey("general.resume_last_channel");
@@ -85,10 +81,6 @@ pub const REWIND_STEP: DurationKey = DurationKey("catchup.rewind_step");
 pub const TIMEBAR_STEP: DurationKey = DurationKey("catchup.timebar_step");
 
 // Search.
-pub const SEARCH_FAVORITES_FIRST: BoolKey = BoolKey("search.favorites_first");
-pub const SEARCH_INCLUDE_PAST_WITHOUT_CATCHUP: BoolKey =
-    BoolKey("search.include_past_without_catchup");
-pub const SEARCH_STAY: BoolKey = BoolKey("search.stay_on_search");
 pub const SEARCH_SHOW_HISTORY: BoolKey = BoolKey("search.show_history");
 
 /// Every typed key with its expected type name, for the schema test.
@@ -112,11 +104,7 @@ pub const ALL: &[(&str, &str)] = &[
     (GROUP_SORT.0, "enum"),
     (RECENT_COUNT.0, "integer"),
     (USER_AGENT.0, "text"),
-    (EPG_UPDATE_INTERVAL.0, "duration"),
-    (EPG_UPDATE_ON_START.0, "bool"),
-    (EPG_UPDATE_ON_PLAYLIST_CHANGE.0, "bool"),
-    (EPG_KEEP_PAST.0, "duration"),
-    (EPG_STORE_DESCRIPTIONS.0, "bool"),
+    (EPG_UPDATE.0, "enum"),
     (RESUME_LAST_CHANNEL.0, "bool"),
     (SHOW_FAVORITES.0, "bool"),
     (CONFIRM_EXIT.0, "bool"),
@@ -131,9 +119,6 @@ pub const ALL: &[(&str, &str)] = &[
     (FORWARD_STEP.0, "duration"),
     (REWIND_STEP.0, "duration"),
     (TIMEBAR_STEP.0, "duration"),
-    (SEARCH_FAVORITES_FIRST.0, "bool"),
-    (SEARCH_INCLUDE_PAST_WITHOUT_CATCHUP.0, "bool"),
-    (SEARCH_STAY.0, "bool"),
     (SEARCH_SHOW_HISTORY.0, "bool"),
     (PLAYLISTS_INCLUDE_VOD.0, "bool"),
     (PARENTAL_UNLOCK_WINDOW.0, "enum"),
@@ -142,9 +127,9 @@ pub const ALL: &[(&str, &str)] = &[
     (PARENTAL_REQUIRE_PIN_FOR.0, "enum"),
     (GUIDE_LIST_BROWSE_MODE.0, "enum"),
     (GUIDE_SHOW_CHANNEL_NUMBERS.0, "bool"),
-    (PARENTAL_PIN_INPUT.0, "enum"),
     (GUIDE_VISIBLE_MINUTES.0, "integer"),
     (VOD_SORT.0, "enum"),
+    (PLAYLISTS_MAX_CONNECTIONS.0, "integer"),
     (VOD_AUTOPLAY_NEXT_EPISODE.0, "bool"),
     (GUIDE_SHOW_LOGOS.0, "bool"),
     (GUIDE_AFTER_CHOOSING.0, "enum"),
@@ -166,11 +151,13 @@ pub const GUIDE_LIST_BROWSE_MODE: EnumKey = EnumKey("guide.list_browse_mode");
 
 pub const GUIDE_SHOW_CHANNEL_NUMBERS: BoolKey = BoolKey("guide.show_channel_numbers");
 
-pub const PARENTAL_PIN_INPUT: EnumKey = EnumKey("parental.pin_input");
-
 pub const GUIDE_VISIBLE_MINUTES: IntKey = IntKey("guide.visible_minutes");
 
+/// The catalog's Sort, which the catalog itself stores (#282).
 pub const VOD_SORT: EnumKey = EnumKey("vod.sort");
+
+/// A playlist's own streams-at-once ceiling (#282).
+pub const PLAYLISTS_MAX_CONNECTIONS: IntKey = IntKey("playlists.max_connections");
 
 pub const VOD_AUTOPLAY_NEXT_EPISODE: BoolKey = BoolKey("vod.autoplay_next_episode");
 

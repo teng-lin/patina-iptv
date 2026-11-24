@@ -399,7 +399,11 @@ fn settings(app: &mut Headless, home: &Path) {
     assert!(!app.screen().matches("text:Not available yet").unwrap());
 
     // Text: the entry sheet; too long a value is refused, a good one kept.
-    step(app.press("text:User-Agent"));
+    // The default User-Agent is with the playlists (#282).
+    assert!(!app.screen().matches("text:Default User-Agent").unwrap());
+    step(app.press("text:Playlists >> nth=0"));
+    step(app.wait_for("text:Manage playlists"));
+    step(app.press("text:Default User-Agent"));
     let field = input(app);
     step(app.type_text(&field, &"x".repeat(513)));
     sheet_button(app, "Done");
@@ -408,7 +412,7 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.wait_for_gone("text:That is not a valid value here", GONE));
     step(app.type_text(&field, "SyntheticPlayer/1.0\n"));
     sheet_closed(app);
-    row_value(app, "User-Agent", "SyntheticPlayer/1.0");
+    row_value(app, "Default User-Agent", "SyntheticPlayer/1.0");
     saved(
         app,
         home,
@@ -416,17 +420,17 @@ fn settings(app: &mut Headless, home: &Path) {
         Value::text("SyntheticPlayer/1.0"),
     );
     // Cancel and Back leave it as it was.
-    step(app.press("text:User-Agent"));
+    step(app.press("text:Default User-Agent"));
     let field = input(app);
     step(app.type_text(&field, " extra"));
     sheet_button(app, "Cancel");
     sheet_closed(app);
-    step(app.press("text:User-Agent"));
+    step(app.press("text:Default User-Agent"));
     let field = input(app);
     step(app.type_text(&field, " extra"));
     step(app.back());
     sheet_closed(app);
-    row_value(app, "User-Agent", "SyntheticPlayer/1.0");
+    row_value(app, "Default User-Agent", "SyntheticPlayer/1.0");
 
     appearance(app, home);
     guide_data(app, home);
@@ -512,6 +516,20 @@ fn appearance(app: &mut Headless, home: &Path) {
 fn guide_data(app: &mut Headless, home: &Path) {
     step(app.press("text:TV guide data >> nth=0"));
     step(app.wait_for("text:Update the guide now"));
+    // One choice for when the guide updates; the retired rows are gone (#282).
+    row_value(app, "Update guide", "Every day");
+    for retired in [
+        "Download the guide every",
+        "Update when the app starts",
+        "Update after a playlist changes",
+        "Keep finished programs for",
+        "Keep program descriptions",
+    ] {
+        assert!(
+            !app.screen().matches(&format!("text:{retired}")).unwrap(),
+            "{retired}"
+        );
+    }
     row_value(app, "Guide sources", "1 source");
     // Update now: the guide is downloaded again (with the User-Agent set).
     step(app.press("text:Update the guide now"));

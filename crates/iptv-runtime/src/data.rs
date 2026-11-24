@@ -112,6 +112,10 @@ fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
                 if let Err(error) = crate::settings::forget_import_switches(&owner, None, &stored) {
                     log::warn!("iptv data: deleted playlists' settings stay: {error}");
                 }
+                if let Err(error) = crate::settings::adopt_global_connection_limit(&owner, &stored)
+                {
+                    log::warn!("iptv data: the shared streams-at-once value stays: {error}");
+                }
                 (source, combined, any)
             });
             if startup.is_ok() {

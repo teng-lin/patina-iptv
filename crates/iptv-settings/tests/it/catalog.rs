@@ -37,7 +37,6 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("general.language", text(Locale, 35, "system"), GL, ""),
         ("general.clock", choice(&c::CLOCK, "auto"), GL, ""),
         ("general.keyboard", choice(&c::KEYBOARD, "system"), GL, ""),
-        ("general.user_agent", text(Plain, 512, ""), PL, ""),
         ("general.udp_proxy", text(HostPort, 261, ""), GL, "a"),
         ("general.usage_statistics", boolean(false), GL, ""),
         ("general.auto_update", boolean(false), GL, ""),
@@ -57,6 +56,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
             GL,
             "",
         ),
+        ("general.user_agent", text(Plain, 512, ""), PL, ""),
         ("playlists.update_interval", hours(0, 168, 1, 24), PL, ""),
         ("playlists.update_on_start", boolean(false), PL, ""),
         // Channels.
@@ -97,6 +97,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("channels.strip_prefixes", text(CommaList, 512, ""), PL, ""),
         ("channels.strip_suffixes", text(CommaList, 512, ""), PL, ""),
         // EPG.
+        ("epg.update", choice(&c::GUIDE_UPDATE, "daily"), GL, ""),
         ("epg.update_interval", hours(0, 168, 1, 24), GL, ""),
         ("epg.update_on_start", boolean(true), GL, ""),
         ("epg.update_on_playlist_change", boolean(true), GL, ""),
@@ -376,7 +377,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("vod.movies_by_category", boolean(true), GL, ""),
         ("vod.shows_by_category", boolean(true), GL, ""),
         ("vod.card_style", choice(&c::CARD_STYLE, "poster"), GL, ""),
-        ("vod.sort", choice(&c::VOD_SORT, "playlist_order"), PL, ""),
+        ("vod.sort", choice(&c::VOD_SORT, "name"), PL, ""),
         ("vod.autoplay_next_episode", boolean(true), GL, ""),
     ]
 }

@@ -16,6 +16,10 @@
 //!   activity reports `Configuration.keyboard` and `navigation`, again on
 //!   each configuration change. iPadOS's `GCKeyboard` is not read yet
 //!   ([`ipad_input_unreported`]).
+//! - The video decoders the device runs at once, where its host measures
+//!   them: Android's activity reports its hardware H.264 decoder's
+//!   instance limit (`MediaCodecInfo.CodecCapabilities`), which can only
+//!   lower the platform's budget (`Host::decoder_slots`).
 //!
 //! Every value is reactive: a closure that reads one runs again when it
 //! changes, so gates follow a foldable opening, a resized window or a
@@ -49,6 +53,7 @@ fn ipad_input_unreported() -> Input {
 struct Report {
     form_factor: Option<FormFactor>,
     input: Option<Input>,
+    decoders: Option<usize>,
 }
 
 /// How long the system asks panels that hide by themselves to stay, at
@@ -123,6 +128,9 @@ pub fn host() -> Host {
     if let Some(input) = report.input {
         host.input = input;
     }
+    if report.decoders.is_some() {
+        host.decoders = report.decoders;
+    }
     host
 }
 
@@ -171,8 +179,8 @@ fn observed() -> bool {
 }
 
 /// The host's report of `data`: `{"form": "phone" | "tablet" | "tv" |
-/// "desktop", "keyboard": bool, "dpad": bool}`; a field missing or not
-/// understood keeps what was reported before.
+/// "desktop", "keyboard": bool, "dpad": bool, "decoders": number}`; a
+/// field missing or not understood keeps what was reported before.
 fn parse(data: &nsh_core::JsonValue, before: Report) -> Report {
     let form_factor = data["form"]
         .as_str()
@@ -182,7 +190,15 @@ fn parse(data: &nsh_core::JsonValue, before: Report) -> Report {
         (Some(keyboard), Some(dpad)) => Some(Input { keyboard, dpad }),
         _ => before.input,
     };
-    Report { form_factor, input }
+    let decoders = data["decoders"]
+        .as_u64()
+        .map(|n| usize::try_from(n).unwrap_or(usize::MAX))
+        .or(before.decoders);
+    Report {
+        form_factor,
+        input,
+        decoders,
+    }
 }
 
 /// The host's accessibility report `data`: `{"controls_ms": number,
@@ -244,16 +260,28 @@ pub(crate) fn bridge() -> impl IntoElement {
                             }
                             return;
                         }
+                        // The headless scenarios' stand-in for an account's
+                        // import reporting its connection limit
+                        // (`tests/app/multiview_by_device.rs`).
+                        #[cfg(feature = "test-support")]
+                        if probe && event.name.as_ref() == "accountStreams" {
+                            let limit = event.data["limit"]
+                                .as_u64()
+                                .map(|n| u32::try_from(n).unwrap_or(u32::MAX));
+                            crate::runtime_events::account_streams_reported(limit);
+                            return;
+                        }
                         if event.name.as_ref() != "device" {
                             return;
                         }
                         let next = parse(&event.data, reported.get_untracked());
                         if next != reported.get_untracked() {
                             log::info!(
-                                "iptv device: {} keyboard={} dpad={}",
+                                "iptv device: {} keyboard={} dpad={} decoders={:?}",
                                 next.form_factor.map_or("unreported", FormFactor::name),
                                 next.input.is_some_and(|i| i.keyboard),
                                 next.input.is_some_and(|i| i.dpad),
+                                next.decoders,
                             );
                             reported.set(next);
                         }
@@ -367,6 +395,12 @@ mod tests {
         );
         // Half an input report is not one.
         assert_eq!(parse(&json(r#"{"keyboard":false}"#), second), second);
+        // A decoder count is kept until the next one.
+        let third = parse(&json(r#"{"decoders":3}"#), second);
+        assert_eq!(third.decoders, Some(3));
+        assert_eq!(third.form_factor, second.form_factor);
+        assert_eq!(parse(&json(r#"{"form":"tv"}"#), third).decoders, Some(3));
+        assert_eq!(parse(&json(r#"{"decoders":-1}"#), third).decoders, Some(3));
     }
 
     #[test]
@@ -401,6 +435,7 @@ mod tests {
                     keyboard: true,
                     dpad: true,
                 },
+                decoders: None,
             },
             window: Class::Expanded,
         };
