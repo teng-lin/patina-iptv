@@ -21,7 +21,7 @@ use tokio::sync::mpsc::UnboundedSender as Sender;
 /// How many days of finished programs reads of the stored guide reach:
 /// as far as any guide keeps them ([`iptv_import::KEEP_PAST_MAX_DAYS`]).
 /// What is stored is pruned to the longest catch-up archive
-/// ([`prune_before`]), so a read finds no more than that.
+/// (`prune_before`), so a read finds no more than that.
 pub fn stored_past_days() -> u32 {
     iptv_import::KEEP_PAST_MAX_DAYS
 }
