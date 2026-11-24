@@ -1,6 +1,7 @@
 package com.hantekllc.iptvrs.host
 
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -201,8 +202,11 @@ internal object DeviceSignals {
 
 /**
  * What Android's accessibility settings ask of panels that hide by
- * themselves (`device.rs`'s `Recommended` and `assistive`).
+ * themselves (`device.rs`'s `Recommended` and `assistive`). The content
+ * flags are API 29's constants, inlined at compile time and passed only to
+ * the API 29 call that reads them.
  */
+@SuppressLint("InlinedApi")
 internal object AccessibilitySignals {
     /** Panels with controls: the control strip, the card's actions, the play bar. */
     const val CONTROLS = AccessibilityManager.FLAG_CONTENT_CONTROLS or AccessibilityManager.FLAG_CONTENT_TEXT
