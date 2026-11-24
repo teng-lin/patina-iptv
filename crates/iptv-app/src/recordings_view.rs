@@ -114,7 +114,10 @@ fn announce_retired(ui: Ui) {
             }
             ui.recordings.update(|s| s.retired.clear());
             crate::data::spawn_in_app(async move {
-                let _ = crate::runtime().dismiss_retired_recording_schedules().await;
+                // On failure the list stays stored and shows again next time.
+                if let Err(error) = crate::runtime().dismiss_retired_recording_schedules().await {
+                    log::warn!("iptv recordings: keeping the retired schedule list: {error:?}");
+                }
             });
         });
     });
@@ -1105,14 +1108,22 @@ fn retired_schedules(ui: Ui, size: Scale) -> View {
         ))
         .child(ui_kit::caption(size, move || {
             ui.recordings.with(|s| {
-                s.retired
+                // A bounded list keeps the recordings below it in view.
+                let mut lines = s
+                    .retired
                     .iter()
+                    .take(RETIRED_LINES)
                     .map(retired_line)
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                    .collect::<Vec<_>>();
+                if s.retired.len() > RETIRED_LINES {
+                    lines.push(format!("+{}", s.retired.len() - RETIRED_LINES));
+                }
+                lines.join("\n")
             })
         }))
 }
+
+const RETIRED_LINES: usize = 8;
 
 fn retired_line(schedule: &iptv_core::recording::RetiredSchedule) -> String {
     use iptv_core::recording::Repeat;

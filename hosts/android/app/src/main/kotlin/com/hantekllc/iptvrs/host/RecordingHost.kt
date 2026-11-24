@@ -80,6 +80,9 @@ object RecordingHost {
         }
     }
 
+    fun schedulesRetired(context: Context): Boolean =
+        context.getSharedPreferences("recording-host", Context.MODE_PRIVATE).getBoolean(RETIRED, false)
+
     private const val RETIRED = "schedules-retired"
 
     private fun alarmIntent(context: Context) =
@@ -199,9 +202,13 @@ class RecordingAlarm : BroadcastReceiver() {
         context: Context,
         intent: Intent,
     ) {
-        // The first broadcast after updating from a version that scheduled
-        // recordings retires its wake instead of acting on it.
-        if (RecordingHost.retireSchedules(context)) return
+        // Until the wake an earlier version armed for a scheduled job is
+        // retired, a broadcast retires it instead of acting on it; a failed
+        // retirement is retried by the next launch or broadcast.
+        if (!RecordingHost.schedulesRetired(context)) {
+            RecordingHost.retireSchedules(context)
+            return
+        }
         if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
             intent.action == Intent.ACTION_MY_PACKAGE_REPLACED ||
             intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
