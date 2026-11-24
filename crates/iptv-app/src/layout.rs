@@ -1,6 +1,6 @@
 //! Shared layout geometry at the current window width and text scale. The
 //! window size class itself is portable (`iptv_presentation::layout`);
-//! [`crate::device::window_class`] reads the current window's.
+//! `crate::device::window_class` reads the current window's.
 
 pub use iptv_presentation::layout::Class;
 
