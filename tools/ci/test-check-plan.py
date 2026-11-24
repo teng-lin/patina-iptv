@@ -23,9 +23,9 @@ def packages(argv):
     return [argv[index + 1] for index, value in enumerate(argv[:-1]) if value == "-p"]
 
 
-def selected_tests(argv):
+def selected_tests(argv, flag="--test"):
     cargo = argv[:argv.index("--")]
-    return [cargo[index + 1] for index, value in enumerate(cargo[:-1]) if value == "--test"]
+    return [cargo[index + 1] for index, value in enumerate(cargo[:-1]) if value == flag]
 
 
 class Parts(unittest.TestCase):
@@ -63,6 +63,10 @@ class Parts(unittest.TestCase):
         self.assertNotIn("--lib", parts["app-tests"])
         self.assertEqual(sorted(selected_tests(parts["core-tests"]) + selected_tests(parts["app-tests"])),
                          checks.integration_tests())
+        # Tested binaries are named; --bins would also build test = false ones.
+        self.assertEqual(selected_tests(parts["core-tests"], "--bin"), checks.tested_binaries())
+        self.assertEqual(selected_tests(parts["app-tests"], "--bin"), [])
+        self.assertNotIn("--bins", parts["core-tests"])
 
     def test_integration_tests_follow_cargo_discovery(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -98,6 +102,24 @@ class Parts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "harnesses are missing"):
                 checks.integration_tests(root)
 
+    def test_tested_binaries_follow_cargo_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Cargo.toml").write_text('[workspace]\nmembers = ["auto", "declared", "off"]\n')
+            for member in ("auto", "declared", "off"):
+                (root / member / "src/bin").mkdir(parents=True)
+                (root / member / "src/main.rs").write_text("")
+            (root / "auto/Cargo.toml").write_text('[package]\nname = "auto"\n')
+            (root / "auto/src/bin/helper.rs").write_text("")
+            # An explicit target claims src/main.rs under another name, keeping tests on.
+            (root / "declared/Cargo.toml").write_text(
+                '[package]\nname = "declared"\n[[bin]]\nname = "tool"\npath = "src/main.rs"\n')
+            # test = false and autobins = false keep a package's binaries out.
+            (root / "off/Cargo.toml").write_text(
+                '[package]\nname = "off"\nautobins = false\n[[bin]]\nname = "off"\npath = "src/main.rs"\ntest = false\n')
+            (root / "off/src/bin/extra.rs").write_text("")
+            self.assertEqual(checks.tested_binaries(root), ["auto", "helper", "tool"])
+
     @unittest.skipUnless(shutil.which(os.environ.get("IPTV_REAL_CARGO") or "cargo")
                          and (checks.ROOT.parent / "nsh-patina").is_dir(), "needs Cargo and the NSH checkout")
     def test_parts_select_exactly_the_targets_cargo_tests(self):
@@ -108,11 +130,12 @@ class Parts(unittest.TestCase):
                   for package in metadata["packages"] for target in package["targets"]
                   if target.get("test") and target["kind"] != ["custom-build"]}
         libraries = {name for kind, name in tested if kind == "lib"}
-        # --tests selects libraries and integration tests; the parts select
-        # --lib plus every integration test by name, so no other kind may opt in.
-        self.assertEqual({kind for kind, _ in tested}, {"lib", "test"})
+        # --tests selects libraries, tested binaries and integration tests; the parts
+        # select --lib plus each binary and integration test by name, so no other kind may opt in.
+        self.assertLessEqual({kind for kind, _ in tested}, {"lib", "bin", "test"})
         self.assertTrue(libraries)
         self.assertEqual(sorted({name for kind, name in tested if kind == "test"}), checks.integration_tests())
+        self.assertEqual(sorted({name for kind, name in tested if kind == "bin"}), checks.tested_binaries())
 
     def test_parts_reject_the_native_tier_and_unknown_parts(self):
         for options in ({"tier": "native", "part": "app"}, {"part": "everything"}):

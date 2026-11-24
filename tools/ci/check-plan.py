@@ -55,45 +55,78 @@ def package_args(crates):
     return [argument for crate in crates for argument in ("-p", crate)]
 
 
-def integration_tests(root=ROOT):
-    """Names of the integration test targets `cargo test --tests` builds for the plan.
-
-    Follows Cargo's discovery: explicit [[test]] targets, then auto-discovered
-    files not already claimed by one. A target whose required features the
-    plan does not enable is skipped, as --tests skips it rather than failing.
-    """
+def _members(root):
     manifest = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))
-    members = [path for pattern in manifest["workspace"]["members"]
-               for path in sorted(root.glob(pattern)) if (path / "Cargo.toml").is_file()]
+    return [path for pattern in manifest["workspace"]["members"]
+            for path in sorted(root.glob(pattern)) if (path / "Cargo.toml").is_file()]
+
+
+def _enabled_features(package):
+    """The package's own features the plan enables: default, plus test support, transitively."""
     plan_features = {}
     for feature in COVERAGE_FEATURES.split(","):
         crate, name = feature.split("/")
         plan_features.setdefault(crate, set()).add(name)
+    features = package.get("features", {})
+    pending = ["default", *plan_features.get(package["package"]["name"], ())]
+    enabled = set()
+    while pending:
+        feature = pending.pop()
+        if feature not in enabled:
+            enabled.add(feature)
+            # Only the package's own features; `dep:` and `crate/feature` entries enable other crates.
+            pending.extend(item for item in features.get(feature, ()) if ":" not in item and "/" not in item)
+    return enabled
+
+
+def _tested_targets(root, kind):
+    """Names of the `kind` ("test" or "bin") targets `cargo test --tests` builds for the plan.
+
+    Follows Cargo's discovery: explicit targets, then auto-discovered files not
+    already claimed by one (by path or name). An explicit target with
+    `test = false`, or whose required features the plan leaves off, is skipped,
+    as --tests skips it rather than failing.
+    """
     names = set()
-    for member in members:
+    for member in _members(root):
         package = tomllib.loads((member / "Cargo.toml").read_text(encoding="utf-8"))
-        features = package.get("features", {})
-        pending = ["default", *plan_features.get(package["package"]["name"], ())]
-        enabled = set()
-        while pending:
-            feature = pending.pop()
-            if feature not in enabled:
-                enabled.add(feature)
-                # Only the package's own features; `dep:` and `crate/feature` entries enable other crates.
-                pending.extend(item for item in features.get(feature, ()) if ":" not in item and "/" not in item)
-        claimed = set()
-        for target in package.get("test", []):
+        enabled = _enabled_features(package)
+        claimed_paths, claimed_names = set(), set()
+        for target in package.get(kind, []):
+            claimed_names.add(target["name"])
             if target.get("path"):
-                claimed.add((member / target["path"]).resolve())
-            if set(target.get("required-features", ())) <= enabled:
+                claimed_paths.add((member / target["path"]).resolve())
+            if target.get("test", True) and set(target.get("required-features", ())) <= enabled:
                 names.add(target["name"])
-        if package["package"].get("autotests", True):
-            tests = member / "tests"
-            names.update(path.stem for path in tests.glob("*.rs") if path.resolve() not in claimed)
-            names.update(path.parent.name for path in tests.glob("*/main.rs") if path.resolve() not in claimed)
-    if not set(APP_HARNESSES) <= names:
-        raise ValueError("the app part's integration harnesses are missing")
+        if kind == "test" and package["package"].get("autotests", True):
+            found = [(path.stem, path) for path in (member / "tests").glob("*.rs")]
+            found += [(path.parent.name, path) for path in (member / "tests").glob("*/main.rs")]
+        elif kind == "bin" and package["package"].get("autobins", True):
+            main = member / "src/main.rs"
+            found = [(package["package"]["name"], main)] if main.is_file() else []
+            found += [(path.stem, path) for path in (member / "src/bin").glob("*.rs")]
+            found += [(path.parent.name, path) for path in (member / "src/bin").glob("*/main.rs")]
+        else:
+            found = []
+        names.update(name for name, path in found
+                     if name not in claimed_names and path.resolve() not in claimed_paths)
     return sorted(names)
+
+
+def integration_tests(root=ROOT):
+    """Names of the integration test targets `cargo test --tests` builds for the plan."""
+    names = _tested_targets(root, "test")
+    if not set(APP_HARNESSES) <= set(names):
+        raise ValueError("the app part's integration harnesses are missing")
+    return names
+
+
+def tested_binaries(root=ROOT):
+    """Names of the binary targets whose unit tests `cargo test --tests` runs.
+
+    Named one by one: `--bins` would also build binaries marked `test = false`.
+    """
+    return _tested_targets(root, "bin")
 
 
 def step(name, *argv):
@@ -133,9 +166,10 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None,
         others = [argument for name in integration_tests(root) if name not in APP_HARNESSES
                   for argument in ("--test", name)]
         harnesses = [argument for name in APP_HARNESSES for argument in ("--test", name)]
+        binaries = [argument for name in tested_binaries(root) for argument in ("--bin", name)]
         tests = [
             step("app-tests", "cargo", "test", *test_args, *harnesses, "--timings", "--", *workspace_test_options),
-            step("core-tests", "cargo", "test", *test_args, "--lib", *others, "--timings",
+            step("core-tests", "cargo", "test", *test_args, "--lib", *binaries, *others, "--timings",
                  "--", *workspace_test_options),
         ]
     steps = [
