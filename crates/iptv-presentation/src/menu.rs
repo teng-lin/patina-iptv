@@ -52,6 +52,9 @@ pub enum MenuItem {
     ResetGroupName,
     ShowFavoritesOnly,
     GroupExternalPlayer,
+    /// Turns the group's external player off, offered when a handoff found
+    /// no player to take it.
+    StopExternalPlayer,
     GroupEpgOffset,
     DecreaseEpgOffset,
     IncreaseEpgOffset,

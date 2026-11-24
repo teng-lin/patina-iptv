@@ -260,6 +260,16 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
     if !schedule.group_channels(group_index).contains(&channel) {
         return false;
     }
+    // The player chosen for this group may have been removed since: the
+    // caller plays the channel here instead, and the viewer may turn the
+    // group's preference off.
+    if !host::external_player_available() {
+        crate::menu_view::offer_external_player_reset(ui, list);
+        crate::settings_view::notify(tr(
+            "No external player is installed, so this channel plays here.",
+        ));
+        return false;
+    }
     let owner = crate::runtime();
     let Some(target) = crate::parental_view::live_target(ui, channel) else {
         return false;

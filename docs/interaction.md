@@ -287,7 +287,11 @@ visible entry point for touch and pointer users.
   the times in a provider group in 15-minute steps. Existing recordings keep
   their accepted capture windows. **Use external player** applies to explicit
   channel choices on Android and Linux. Android offers installed video apps.
-  Linux tries VLC, then mpv.
+  Linux tries VLC, then mpv. The option appears only while such a player is
+  installed, or while it is on, so it can be turned off. A choice made after
+  the player was removed plays in Patina and offers **Turn off external
+  player**. During an Android handoff a media playback foreground service
+  keeps Patina's relay running while the other app plays.
 - **Now:** long press, right-click and the remote's Menu key open guide
   channel and group options. The guide has no overflow buttons in its header
   or groups column. The ruler shows the date and time and offers **Now** after
