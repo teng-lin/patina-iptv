@@ -118,8 +118,8 @@ and normal app build.
 Ordinary tests share one Cargo invocation and feature graph. Linux CI runs the
 same plan as two parallel jobs, `tools/check.sh <tier> app` and
 `tools/check.sh <tier> core`: the app part runs iptv-app's `app` and
-`native_player` harnesses and the timing checks that reuse them, the core part
-everything else. Both use the same packages and features, so they build one
+`native_player` harnesses, the timing checks that reuse them and the browser
+application-stack lints (to even out the two jobs), the core part everything else. Both use the same packages and features, so they build one
 dependency graph. Run `tools/check.sh` without a part to run the whole plan locally.
 Examples are checked
 by Clippy's `--all-targets` pass, without linking them in the test or coverage pass;
