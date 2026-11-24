@@ -22,6 +22,13 @@ is below 1.0, a minor release may change behavior.
   program details, Record key and Recordings no longer schedule or edit a
   future recording, and the recorder login startup and precise wakeup settings
   are hidden. Record now is unchanged.
+- Settings show Keyboard or Remote control only while there are keys to set
+  up: always on a TV and a desktop, and on a phone or a tablet while a
+  hardware keyboard or a D-pad is connected. The page holds the replay seek
+  keys; the keyboard's leaves out keys only a remote has, and a hold is offered
+  only where keys report their release. Guide autoplay and its delay move to
+  a new Advanced page on desktop and TV, and on a phone or a tablet show only
+  with a keyboard or D-pad, autoplay staying off without one.
 - Android TV no longer offers picture in picture: Home during playback returns
   to the launcher and stops the stream, and the control and the
   picture-in-picture-on-leaving setting are gone there. Phones and tablets keep

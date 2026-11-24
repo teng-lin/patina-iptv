@@ -75,6 +75,17 @@ pub(crate) fn long_press() -> bool {
     REMOTE_KEYS
 }
 
+/// Whether `key` tells a tap from a hold: where keys report their
+/// phases ([`long_press`]), but not a keyboard shortcut with a modifier
+/// (`shift+left`), which reports its press only.
+pub(crate) fn holds(key: RemoteKey) -> bool {
+    long_press()
+        && (KEYS.iter().all(|&(_, k)| k != key)
+            || KEYS
+                .iter()
+                .any(|&(name, k)| k == key && !name.contains('+')))
+}
+
 /// Whose keys: a TV remote's on Android, a keyboard's on the desktops
 /// (`iptv_nav::Profile`: one map; the hints name their keys).
 pub(crate) const PROFILE: Profile = if REMOTE_KEYS {

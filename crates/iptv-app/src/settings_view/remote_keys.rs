@@ -4,6 +4,7 @@
 use crate::i18n::{tr, trf};
 
 use iptv_nav::{Action, Context, RemoteKey};
+use iptv_presentation::capabilities::Keys;
 
 pub(crate) const KEYS: [RemoteKey; 27] = [
     RemoteKey::Up,
@@ -46,6 +47,33 @@ pub(crate) const KEYBOARD_KEYS: [RemoteKey; 7] = [
     RemoteKey::CtrlRight,
 ];
 
+/// Keys only a remote has: no keyboard key stands in for them
+/// (`input::keys::KEYS`), so the keyboard settings leave them out. A
+/// keyboard's `=` and `-` are its channel keys, `[` and `]` its rewind
+/// and fast-forward, Space play/pause: those single-key shortcuts stay
+/// remappable (WCAG 2.1.4).
+pub(crate) const REMOTE_ONLY: [RemoteKey; 8] = [
+    RemoteKey::Play,
+    RemoteKey::Pause,
+    RemoteKey::Stop,
+    RemoteKey::Record,
+    RemoteKey::Red,
+    RemoteKey::Green,
+    RemoteKey::Yellow,
+    RemoteKey::Blue,
+];
+
+/// The keys the bindings editor offers for `keys`, digits last: a
+/// remote's every key, a keyboard's without [`REMOTE_ONLY`].
+pub(crate) fn editable(keys: Keys) -> Vec<RemoteKey> {
+    KEYS.iter()
+        .chain(KEYBOARD_KEYS.iter())
+        .copied()
+        .filter(|key| keys == Keys::Remote || !REMOTE_ONLY.contains(key))
+        .chain((0..=9).map(RemoteKey::Digit))
+        .collect()
+}
+
 pub(crate) fn key_name(key: RemoteKey) -> String {
     let name = match key {
         RemoteKey::Up => tr("Up"),
@@ -86,7 +114,8 @@ pub(crate) fn key_name(key: RemoteKey) -> String {
         RemoteKey::CtrlLeft => tr("Ctrl+Left"),
         RemoteKey::CtrlRight => tr("Ctrl+Right"),
     };
-    // The keyboard stands in for a remote on the desktop (`input.rs`).
+    // The keyboard stands in for a remote (`input.rs`): its key is named
+    // where the keys set up are a keyboard's.
     let keyboard = match key {
         RemoteKey::Ok => tr("Enter"),
         RemoteKey::Back => tr("Esc"),
@@ -102,7 +131,7 @@ pub(crate) fn key_name(key: RemoteKey) -> String {
         RemoteKey::Search => tr("/ or Ctrl+F"),
         _ => "",
     };
-    if crate::host::ANDROID || keyboard.is_empty() {
+    if crate::settings::keys_now() != Some(Keys::Keyboard) || keyboard.is_empty() {
         name.to_owned()
     } else {
         trf(
@@ -269,8 +298,8 @@ mod tests {
         });
     }
 
-    /// A remote's keys are named in the interface language. A desktop adds
-    /// the keyboard key that stands in for one; Android has the remote.
+    /// A remote's keys are named in the interface language. A keyboard
+    /// adds the key that stands in for one.
     #[test]
     fn keys_are_named_in_the_interface_language() {
         let remote_only = |name: &str| name.split(" (").next().unwrap().to_owned();
@@ -289,5 +318,28 @@ mod tests {
                 assert_eq!(names.len(), KEYS.len(), "{}", language.tag);
             });
         }
+    }
+
+    /// A keyboard is offered every key it has, a remote every key.
+    #[test]
+    fn a_keyboard_is_offered_its_own_keys() {
+        let keyboard = editable(Keys::Keyboard);
+        let remote = editable(Keys::Remote);
+        for key in REMOTE_ONLY {
+            assert!(!keyboard.contains(&key), "{key:?}");
+            assert!(remote.contains(&key), "{key:?}");
+        }
+        for key in [
+            RemoteKey::Menu,
+            RemoteKey::ChannelUp,
+            RemoteKey::PlayPause,
+            RemoteKey::Search,
+            RemoteKey::Tab,
+            RemoteKey::Digit(0),
+        ] {
+            assert!(keyboard.contains(&key), "{key:?}");
+        }
+        assert_eq!(remote.len(), KEYS.len() + KEYBOARD_KEYS.len() + 10);
+        assert_eq!(keyboard.len(), remote.len() - REMOTE_ONLY.len());
     }
 }
