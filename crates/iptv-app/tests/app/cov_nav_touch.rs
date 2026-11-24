@@ -36,6 +36,7 @@ const PICKER: &str = "id:multiview-picker";
 const PAUSED: &str = "id:multiview-paused";
 const GROUPS: &str = "id:channel-list-groups";
 const WAIT: Duration = Duration::from_secs(3);
+const SURFACES: usize = iptv_core::multiview::MAX_SURFACES;
 /// "Gala Evening"'s channel and times: its result's second line, and the
 /// details popover's (mounted, empty, while closed).
 // A time on another local day carries its weekday and date ("Thu 12 · 00:22"):
@@ -590,8 +591,17 @@ fn multiview_by_pointer(app: &mut Headless) {
     let error = json!({ "code": "ERROR_CODE_PARSING_MANIFEST_MALFORMED" });
     player_event(app, "Test Channel Four", "error", error.clone());
     step(app.wait_for(&missing));
+    // Try again resolves the stream again off the UI thread and only then
+    // hands the player a new source (`player::publish_source`); until it
+    // does, the app drops the player's events as the last session's
+    // (`Stream::accepts_native`). A real player cannot fail a source it was
+    // not given, so wait for the reopen before reporting the next failure.
+    let opens: Vec<u64> = (0..SURFACES).map(iptv_app::player_opens).collect();
     step(app.press(&format!("{TILE} >> text:Try again")));
     gone(app, &missing);
+    step(app.wait_until("Try again reopens four", WAIT, |_| {
+        (0..SURFACES).any(|s| iptv_app::player_opens(s) > opens[s])
+    }));
     // Failed again: the tile's menu offers Try again first.
     player_event(app, "Test Channel Four", "error", error);
     step(app.wait_for(&missing));
