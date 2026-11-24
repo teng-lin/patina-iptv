@@ -35,9 +35,12 @@ configuration change; before that report an Android build counts as a tablet
 with neither input. The settings offer check (`settings::offer`), the control
 strip and multiview's offer read the signals as they are now, so a
 change takes effect without a restart. A control that leaves the strip while
-focused passes the focus to its nearest neighbor. Multiview is the first
-feature these signals gate (below); the other host profiles above still follow
-the platform alone.
+focused passes the focus to its nearest neighbor. The Keyboard or Remote
+settings, and guide autoplay with its delay, follow the form factor and the
+connected input ([TV controls](tv-controls.md)); a settings page without rows
+leaves the list while the screen stays open, and the page shown, or the one in
+its place, keeps the focus. Multiview follows the form factor and the window
+(below). The host profiles above still follow the platform alone.
 
 Android also reports its video decoder capacity: the instances the hardware
 H.264 decoder the player picks supports at once
