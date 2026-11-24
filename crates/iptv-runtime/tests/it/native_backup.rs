@@ -73,6 +73,30 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
     let directory = tempfile::tempdir().unwrap();
     let original = runtime(&directory.path().join("generated-original"));
     let (source, document) = seed(&original, "Generated original");
+    let guide_text =
+        b"<tv><channel id=\"generated\"><display-name>Generated</display-name></channel></tv>";
+    let guide = block_on(original.keep_picked_file("generated.xml", guide_text)).unwrap();
+    let orphan = block_on(original.keep_picked_file("generated-unused.m3u", b"#EXTM3U\n")).unwrap();
+    {
+        let mut store = Store::open_encrypted(
+            original.data_dir().join("iptv.sqlite"),
+            &DatabaseKey::from_bytes(KEY),
+        )
+        .unwrap();
+        store
+            .set_guide_sources(
+                source,
+                &[iptv_store_sqlite::GuideSource {
+                    feed: iptv_epg::FeedId(1),
+                    provider_index: None,
+                    url: SecretUrl::new(&guide),
+                    name: None,
+                    enabled: true,
+                    shift_minutes: 0,
+                }],
+            )
+            .unwrap();
+    }
     original
         .set_setting(
             "general.user_agent",
@@ -112,6 +136,29 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
     }))
     .unwrap();
     drop(busy);
+    let exported = fs::read(&destination).unwrap();
+    let header_length = u64::from_le_bytes(exported[9..17].try_into().unwrap()) as usize;
+    let manifest = iptv_import::backup_manifest::parse(&exported[17..17 + header_length]).unwrap();
+    let relative = |path: &str| {
+        Path::new(path)
+            .strip_prefix(original.data_dir())
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace(std::path::MAIN_SEPARATOR, "/")
+    };
+    assert!(
+        manifest
+            .files
+            .iter()
+            .any(|entry| entry.name == relative(&guide))
+    );
+    assert!(
+        !manifest
+            .files
+            .iter()
+            .any(|entry| entry.name == relative(&orphan))
+    );
     assert_eq!(
         &*events.borrow(),
         &[
@@ -187,6 +234,18 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
         .unwrap();
     assert_eq!(restored_bytes, TEXT);
     assert!(!fs::read(restored).unwrap().starts_with(TEXT));
+    let guides = store.guide_sources(source).unwrap();
+    let restored_guide = Path::new(guides[0].url.expose());
+    assert!(restored_guide.starts_with(&target_root));
+    let mut restored_guide_bytes = Vec::new();
+    store
+        .read_private_file(restored_guide)
+        .unwrap()
+        .read_to_end(&mut restored_guide_bytes)
+        .unwrap();
+    assert_eq!(restored_guide_bytes, guide_text);
+    assert!(!fs::read(restored_guide).unwrap().starts_with(guide_text));
+    assert!(!target_root.join(relative(&orphan)).exists());
     assert!(original.drain_services());
     assert!(restarted.drain_services());
 }

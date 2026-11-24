@@ -494,17 +494,189 @@ fn startup_removes_abandoned_plaintext_backup_work_only_for_this_root() {
 }
 
 #[test]
-fn backup_collection_skips_interrupted_atomic_document_writes() {
+fn export_selects_shared_playlists_and_local_guides_from_the_snapshot() {
+    use iptv_epg::FeedId;
+    use iptv_import::{EpgImport, EpgSourceConfig, GuideSink};
+    use iptv_store_sqlite::{EpgFeedMeta, EpgStage, GuideSource};
+
     let directory = tempfile::tempdir().unwrap();
-    let documents = directory.path().join("playlists");
-    fs::create_dir(&documents).unwrap();
-    for name in [".iptv-sealing-new", ".iptv-sealing-new-journal"] {
-        fs::write(documents.join(name), b"interrupted encrypted write").unwrap();
+    let root = directory.path().join("original");
+    seed(&root, "Generated first");
+    let mut store = Store::open(root.join("iptv.sqlite")).unwrap();
+    let first = store.sources().unwrap()[0].id;
+    let mut shared = store.source(first).unwrap().unwrap().source;
+    shared.name = "Generated shared playlist".into();
+    let second = store.add_source(&shared).unwrap();
+    let mut separate = shared;
+    separate.name = "Generated separate playlist".into();
+    let SourceConfig::M3u(config) = &mut separate.config else {
+        unreachable!()
+    };
+    let separate_path = root.join("playlists/generated/separate.m3u");
+    let separate_text = b"#EXTM3U\n#EXTINF:-1,Generated separate\nhttps://example.test/separate\n";
+    fs::write(&separate_path, separate_text).unwrap();
+    config.location = SecretUrl::new(separate_path.to_str().unwrap());
+    store.add_source(&separate).unwrap();
+    let guide_text =
+        b"<tv><channel id=\"generated\"><display-name>Generated</display-name></channel></tv>";
+    for name in ["shared.xml", "retained.xml", "unused.xml"] {
+        fs::write(root.join("playlists/generated").join(name), guide_text).unwrap();
     }
-    fs::write(documents.join("valid.m3u"), b"#EXTM3U\n").unwrap();
-    let mut names = Vec::new();
-    collect(directory.path(), &documents, &mut names).unwrap();
-    assert_eq!(names, ["playlists/valid.m3u"]);
+    let guide_path = root.join("playlists/generated/shared.xml");
+    let guide = GuideSource {
+        feed: FeedId(1),
+        provider_index: None,
+        url: SecretUrl::new(guide_path.to_str().unwrap()),
+        name: None,
+        enabled: true,
+        shift_minutes: 0,
+    };
+    for id in [first, second] {
+        store
+            .set_guide_sources(id, std::slice::from_ref(&guide))
+            .unwrap();
+    }
+    // A previous download can retain a different local feed after editing the
+    // configured sources. Both kinds of reference must survive the backup.
+    let retained_path = root.join("playlists/generated/retained.xml");
+    let mut staged = EpgStage::create_in(directory.path()).unwrap();
+    staged
+        .begin_feed(FeedId(2), 0, Default::default(), 0)
+        .unwrap();
+    staged.finish_feed().unwrap();
+    store
+        .replace_epg(
+            first,
+            &mut staged,
+            &EpgImport::default(),
+            &[EpgFeedMeta {
+                config: EpgSourceConfig::new(
+                    FeedId(2),
+                    SecretUrl::new(retained_path.to_str().unwrap()),
+                ),
+                fetched_at: 1,
+                etag: None,
+                last_modified: None,
+                bytes: guide_text.len() as u64,
+            }],
+            0,
+        )
+        .unwrap();
+    drop(store);
+    for name in [
+        "unused.m3u",
+        ".iptv-sealing-new",
+        ".iptv-sealing-new-journal",
+    ] {
+        fs::write(
+            root.join("playlists/generated").join(name),
+            b"generated unreferenced document",
+        )
+        .unwrap();
+    }
+    let archive = directory.path().join("generated.patinabackup");
+    export(&root, &archive, &Settings::new().to_json_string()).unwrap();
+    let bytes = fs::read(&archive).unwrap();
+    let length = u64::from_le_bytes(bytes[9..17].try_into().unwrap()) as usize;
+    let manifest = backup_manifest::parse(&bytes[17..17 + length]).unwrap();
+    let documents: Vec<_> = manifest
+        .files
+        .iter()
+        .filter(|entry| entry.name.starts_with("playlists/"))
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(
+        documents,
+        [
+            "playlists/generated/list.m3u",
+            "playlists/generated/retained.xml",
+            "playlists/generated/separate.m3u",
+            "playlists/generated/shared.xml",
+        ]
+    );
+    let target = directory.path().join("restored");
+    fs::create_dir(&target).unwrap();
+    stage(&target, &mut bytes.as_slice()).unwrap();
+    activate(&target).unwrap();
+    let store = Store::open(target.join("iptv.sqlite")).unwrap();
+    for id in [first, second] {
+        let SourceConfig::M3u(config) = store.source(id).unwrap().unwrap().source.config else {
+            unreachable!()
+        };
+        assert_eq!(
+            config.location.expose(),
+            target
+                .join("playlists/generated/list.m3u")
+                .to_str()
+                .unwrap()
+        );
+        assert_eq!(
+            store.guide_sources(id).unwrap()[0].url.expose(),
+            target
+                .join("playlists/generated/shared.xml")
+                .to_str()
+                .unwrap()
+        );
+    }
+    assert_eq!(
+        store.epg_guide(first).unwrap().unwrap().feeds[0]
+            .meta
+            .config
+            .url
+            .expose(),
+        target
+            .join("playlists/generated/retained.xml")
+            .to_str()
+            .unwrap()
+    );
+    for name in documents {
+        assert_eq!(
+            fs::read(target.join(name)).unwrap(),
+            fs::read(root.join(name)).unwrap()
+        );
+    }
+    assert!(!target.join("playlists/generated/unused.m3u").exists());
+    assert!(!target.join("playlists/generated/unused.xml").exists());
+}
+
+#[test]
+fn export_refuses_missing_outside_and_invalid_referenced_documents() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("original");
+    seed(&root, "Generated");
+    let archive = directory.path().join("generated.patinabackup");
+    let mut store = Store::open(root.join("iptv.sqlite")).unwrap();
+    let id = store.sources().unwrap()[0].id;
+    let mut source = store.source(id).unwrap().unwrap().source;
+    for path in [
+        root.join("playlists/missing.m3u"),
+        directory.path().join("outside.m3u"),
+        root.join("playlists/generated/../generated/list.m3u"),
+    ] {
+        let SourceConfig::M3u(config) = &mut source.config else {
+            unreachable!()
+        };
+        config.location = SecretUrl::new(path.to_str().unwrap());
+        let added = store.add_source(&source).unwrap();
+        assert!(export(&root, &archive, &Settings::new().to_json_string()).is_err());
+        store.delete_source(added).unwrap();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let path = root.join("playlists/generated/list.m3u");
+        let outside = directory.path().join("outside.m3u");
+        fs::rename(&path, &outside).unwrap();
+        symlink(&outside, &path).unwrap();
+        assert!(export(&root, &archive, &Settings::new().to_json_string()).is_err());
+        fs::remove_file(&path).unwrap();
+        fs::rename(&outside, &path).unwrap();
+        let managed = root.join("playlists");
+        let outside_directory = directory.path().join("outside-directory");
+        fs::rename(&managed, &outside_directory).unwrap();
+        symlink(&outside_directory, &managed).unwrap();
+        assert!(export(&root, &archive, &Settings::new().to_json_string()).is_err());
+    }
 }
 
 #[test]
