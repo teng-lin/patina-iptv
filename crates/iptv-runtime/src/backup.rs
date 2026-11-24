@@ -207,7 +207,27 @@ fn sync_dir(_: &Path) -> Result<()> {
 
 // Select from the standalone snapshot, not the live database: its references
 // and its document list must describe the same committed library state.
-fn referenced_documents(root: &Path, files: &Path, snapshot: &Store) -> Result<BTreeSet<String>> {
+enum DocumentCheck {
+    Export,
+    Restore,
+}
+
+fn referenced_documents(
+    root: &Path,
+    files: &Path,
+    snapshot: &Store,
+    operation: DocumentCheck,
+) -> Result<BTreeSet<String>> {
+    let (outside_storage, missing_file) = match operation {
+        DocumentCheck::Export => (
+            "A local playlist is outside application storage; add it with the file picker before backing up",
+            "A local playlist file is missing; add it again before backing up",
+        ),
+        DocumentCheck::Restore => (
+            "Backup references a local playlist outside application storage",
+            "Backup is missing a local playlist file",
+        ),
+    };
     let mut names = BTreeSet::new();
     let mut include = |location: &str| -> Result<()> {
         let Some(local) = iptv_providers::content_url::local_path(location)
@@ -215,9 +235,7 @@ fn referenced_documents(root: &Path, files: &Path, snapshot: &Store) -> Result<B
         else {
             return Ok(());
         };
-        let relative = local.strip_prefix(root).context(
-            "A local playlist is outside application storage; add it with the file picker before backing up",
-        )?;
+        let relative = local.strip_prefix(root).context(outside_storage)?;
         let name = relative
             .to_str()
             .ok_or("Invalid local playlist path")?
@@ -236,7 +254,7 @@ fn referenced_documents(root: &Path, files: &Path, snapshot: &Store) -> Result<B
         for part in relative.components() {
             path.push(part);
             let kind = fs::symlink_metadata(&path)
-                .context("A local playlist file is missing; add it again before backing up")?
+                .context(missing_file)?
                 .file_type();
             if kind.is_symlink() {
                 return Err("Linked local playlist files cannot be backed up".into());
@@ -424,7 +442,12 @@ fn export(services: &Services, destination: &Path, settings: &str) -> Result<()>
     snapshot_library(services, &snapshot)?;
     let mut names = vec!["iptv.sqlite".to_owned(), "settings.json".to_owned()];
     let snapshot_store = Store::open(&snapshot).context("Could not check backup sources")?;
-    names.extend(referenced_documents(root, root, &snapshot_store)?);
+    names.extend(referenced_documents(
+        root,
+        root,
+        &snapshot_store,
+        DocumentCheck::Export,
+    )?);
     drop(snapshot_store);
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries {
@@ -645,7 +668,7 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     // Check rewritten local references point to files included in this archive.
     let store =
         Store::open(work.0.join("iptv.sqlite")).context("Could not check backup library")?;
-    referenced_documents(root, &work.0, &store)?;
+    referenced_documents(root, &work.0, &store, DocumentCheck::Restore)?;
     drop(store);
     // All archive validation and reference rewriting succeeded. Encrypt the
     // persistent pending tree before its rename can make it survive restart.
