@@ -1211,14 +1211,11 @@ mod tests {
     }
 
     /// Finished programs are kept for the longest catch-up archive of the
-    /// stored channels, at least a day (#282).
+    /// stored channels, at least the old default's week (#282).
     #[test]
     fn finished_programs_are_pruned_after_the_longest_archive() {
         let store = Store::open_in_memory().unwrap();
-        assert_eq!(
-            prune_before(&store, NOW).unwrap(),
-            NOW - i64::from(iptv_import::KEEP_PAST_MIN_DAYS) * DAY
-        );
+        assert_eq!(prune_before(&store, NOW).unwrap(), NOW - 7 * DAY);
     }
 
     #[test]

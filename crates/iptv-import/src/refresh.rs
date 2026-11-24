@@ -93,9 +93,10 @@ pub fn update_interval(choice: &str) -> Option<i64> {
 /// The most days of finished programs a guide keeps: the old
 /// `epg.keep_past` setting's ceiling.
 pub const KEEP_PAST_MAX_DAYS: u32 = 14;
-/// The fewest: a day of finished programs stays for search's past
-/// listings and the guide's look back, also without any catch-up.
-pub const KEEP_PAST_MIN_DAYS: u32 = 1;
+/// The fewest: the old `epg.keep_past` default, so a guide without
+/// catch-up still keeps a week of finished programs for search's past
+/// listings and the guide's look back.
+pub const KEEP_PAST_MIN_DAYS: u32 = 7;
 
 /// Days of finished programs to keep when the longest catch-up archive of
 /// the stored channels is `longest_archive_days` (0 without catch-up):

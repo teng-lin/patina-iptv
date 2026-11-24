@@ -139,7 +139,7 @@ const NOT_OFFERED: &[&str] = &[
     // became `epg.update` (settings version 6); a guide always updates
     // after its playlist changes, keeps descriptions wherever the host
     // stores it on disk, and keeps finished programs for the longest
-    // catch-up archive; search always ranks favorites first, offers
+    // catch-up archive (at least a week); search always ranks favorites first, offers
     // finished programs without replay as a filter in its results and
     // returns to them after watching; OK in the PIN prompt follows one
     // rule. `vod.sort` is the catalog's own Sort, which keeps it, and a

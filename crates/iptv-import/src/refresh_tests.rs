@@ -315,8 +315,9 @@ fn policy_and_storage_from_settings() {
 
 #[test]
 fn finished_programs_follow_the_longest_archive_within_bounds() {
-    assert_eq!(keep_past_days(0), KEEP_PAST_MIN_DAYS, "search keeps a day");
-    assert_eq!(keep_past_days(3), 3);
-    assert_eq!(keep_past_days(7), 7);
-    assert_eq!(keep_past_days(30), KEEP_PAST_MAX_DAYS);
+    assert_eq!(keep_past_days(0), 7, "without catch-up: the old default");
+    assert_eq!(keep_past_days(3), 7);
+    assert_eq!(keep_past_days(10), 10);
+    assert_eq!(keep_past_days(14), 14);
+    assert_eq!(keep_past_days(30), 14, "capped");
 }
