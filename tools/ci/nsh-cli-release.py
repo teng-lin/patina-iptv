@@ -151,7 +151,7 @@ def publish(tag, directory, commit):
     print(f"Published immutable CI tool release {tag}")
 
 
-def trusted_commit():
+def trusted_run():
     if (os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
             or os.environ.get("GITHUB_REF") != "refs/heads/master" or os.environ.get("GITHUB_EVENT_NAME") != "workflow_run"):
         raise ValueError("CI tool publication requires a trusted master Validation run")
@@ -160,11 +160,41 @@ def trusted_commit():
             or run["conclusion"] != "success" or run["head_repository"]["full_name"] != REPOSITORY
             or not re.fullmatch(r"[a-f0-9]{40}", run["head_sha"])):
         raise ValueError("CI tool publication requires a trusted master Validation run")
-    return run["head_sha"]
+    return run
+
+
+def trusted_commit():
+    return trusted_run()["head_sha"]
+
+
+def select(root):
+    """Choose the staged artifacts and a destination that always names each one.
+
+    download-artifact extracts a lone matched artifact straight into its path,
+    which would drop the artifact name that carries the tool kind and build key.
+    """
+    run_id = trusted_run()["id"]
+    if type(run_id) is not int:
+        raise ValueError("Invalid Validation run id")
+    listing = subprocess.run(
+        ["gh", "api", "--paginate", f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100",
+         "--jq", ".artifacts[] | select(.expired | not) | [.id, .name] | @json"],
+        capture_output=True, text=True, timeout=90)
+    listing.check_returncode()
+    latest = {}
+    for line in listing.stdout.splitlines():
+        artifact_id, name = json.loads(line)
+        if type(artifact_id) is int and ARTIFACT.fullmatch(name):
+            latest[name] = max(artifact_id, latest.get(name, 0))
+    if len(latest) == 1:
+        root = root / next(iter(latest))
+    return ",".join(str(artifact_id) for _, artifact_id in sorted(latest.items())), root
 
 
 def staged(root):
-    for artifact in sorted((*root.glob("patina-nsh-*-release-*"), *root.glob("patina-cargo-about-release-*"))):
+    if not root.exists():
+        return
+    for artifact in sorted(root.iterdir()):
         match = ARTIFACT.fullmatch(artifact.name)
         if not match or not artifact.is_dir():
             raise ValueError(f"Invalid staged CI tool artifact: {artifact.name}")
@@ -238,9 +268,15 @@ def main():
     download.add_argument("key")
     download.add_argument("path", type=Path)
     download.add_argument("--kind", choices=KINDS, default='nsh-cli')
-    for command in ("prepare", "publish"):
+    for command in ("select", "prepare", "publish"):
         commands.add_parser(command).add_argument("root", type=Path)
     options = parser.parse_args()
+    if options.command == "select":
+        ids, path = select(options.root)
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            print(f"ids={ids}", file=output)
+            print(f"path={path}", file=output)
+        return
     if options.command == "check":
         tag = tag_for(options.platform, options.key)
         release = lookup(tag)

@@ -310,15 +310,16 @@ class ReleaseTests(unittest.TestCase):
                          ("release", "upload", self.tag, "--clobber", str(self.source), str(self.manifest)))
 
     def test_windows_cargo_about_artifact_uses_its_own_source_license(self):
-        artifact = self.root / f"patina-cargo-about-release-Windows-X64-{self.key}"
-        artifact.mkdir()
+        staging = self.root / "staging"
+        artifact = staging / f"patina-cargo-about-release-Windows-X64-{self.key}"
+        artifact.mkdir(parents=True)
         executable = artifact / "cargo-about.exe"
         executable.write_bytes(b"synthetic windows executable")
         tag = releases.tag_for("Windows-X64", self.key, "cargo-about")
         with (patch.object(releases, "trusted_commit", return_value="b" * 40),
               patch.object(releases, "lookup", return_value=None),
               patch.object(releases, "read_license", return_value=b"license") as read_license):
-            self.assertTrue(releases.prepare(self.root))
+            self.assertTrue(releases.prepare(staging))
         read_license.assert_called_once_with(releases.CARGO_ABOUT_LICENSE)
         self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()),
                          {"tag": tag, "digest": releases.digest_file(executable)})
@@ -326,8 +327,55 @@ class ReleaseTests(unittest.TestCase):
     def test_publisher_requires_archive_checksums_before_attestation(self):
         root = Path(__file__).resolve().parents[2]
         workflow = (root / ".github/workflows/nsh-cli-releases.yml").read_text()
-        self.assertEqual(workflow.count("uses: actions/download-artifact@"), 2)
-        self.assertEqual(workflow.count("digest-mismatch: error"), 2)
+        self.assertEqual(workflow.count("uses: actions/download-artifact@"), 1)
+        self.assertEqual(workflow.count("digest-mismatch: error"), 1)
+        download = workflow.split("uses: actions/download-artifact@", 1)[1].split("\n      - ", 1)[0]
+        # Exact IDs from the listing, never a pattern whose lone match loses its name.
+        self.assertNotIn("pattern:", download)
+        self.assertIn("artifact-ids: ${{ steps.staged.outputs.ids }}", download)
+        self.assertIn("path: ${{ steps.staged.outputs.path }}", download)
+        self.assertIn("run-id: ${{ github.event.workflow_run.id }}", download)
+        self.assertLess(workflow.index("nsh-cli-release.py select"), workflow.index("uses: actions/download-artifact@"))
+        self.assertLess(workflow.index("uses: actions/download-artifact@"), workflow.index("nsh-cli-release.py prepare"))
+
+    def select(self, listing, run=None):
+        event = self.root / "event.json"
+        run = run or {"id": 42, "event": "push", "conclusion": "success", "head_branch": "master",
+                      "path": ".github/workflows/validation.yml",
+                      "head_repository": {"full_name": releases.REPOSITORY}, "head_sha": "b" * 40}
+        event.write_text(json.dumps({"workflow_run": run}))
+        stdout = "".join(json.dumps(item) + "\n" for item in listing)
+        with (patch.dict(os.environ, GITHUB_REPOSITORY=releases.REPOSITORY, GITHUB_REF="refs/heads/master",
+                         GITHUB_EVENT_NAME="workflow_run", GITHUB_EVENT_PATH=str(event)),
+              patch.object(releases.subprocess, "run",
+                           return_value=subprocess.CompletedProcess([], 0, stdout=stdout)) as command):
+            return releases.select(self.root / "staging"), command
+
+    def test_a_lone_staged_artifact_is_downloaded_into_its_named_directory(self):
+        name = f"patina-cargo-about-release-Windows-X64-{self.key}"
+        (ids, path), command = self.select([[7, "release-candidate"], [8, name]])
+        self.assertEqual((ids, path), ("8", self.root / "staging" / name))
+        self.assertIn(f"repos/{releases.REPOSITORY}/actions/runs/42/artifacts?per_page=100", command.call_args.args[0])
+
+    def test_several_staged_artifacts_use_their_own_directories_and_latest_copies(self):
+        about = f"patina-cargo-about-release-Windows-X64-{self.key}"
+        cli = f"patina-nsh-cli-release-{self.platform}-{self.key}"
+        (ids, path), _ = self.select([[9, about], [3, cli], [5, about], [4, f"patina-cargo-about-{self.key}"]])
+        self.assertEqual((ids, path), ("9,3", self.root / "staging"))
+        self.assertEqual(self.select([])[0], ("", self.root / "staging"))
+
+    def test_selection_requires_a_trusted_master_validation(self):
+        with self.assertRaises(ValueError):
+            self.select([], {"id": 42, "event": "pull_request"})
+
+    def test_a_flattened_artifact_fails_instead_of_publishing_nothing(self):
+        staging = self.root / "staging"
+        staging.mkdir()
+        (staging / "cargo-about.exe").write_bytes(b"synthetic windows executable")
+        with patch.object(releases, "trusted_commit", return_value="b" * 40):
+            with self.assertRaisesRegex(ValueError, "Invalid staged CI tool artifact: cargo-about.exe"):
+                releases.prepare(staging)
+        self.assertEqual(list(releases.staged(self.root / "missing")), [])
 
     def test_one_failed_release_does_not_block_other_staged_tools(self):
         artifacts = [("failed", self.root / "failed"), ("next", self.root / "next")]
@@ -381,8 +429,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(result.read_text(), "restored=false\n")
 
     def test_publish_uses_only_artifacts_from_a_trusted_master_validation(self):
-        artifact = self.root / f"patina-nsh-cli-release-{self.platform}-{self.key}"
-        artifact.mkdir()
+        staging = self.root / "staging"
+        artifact = staging / f"patina-nsh-cli-release-{self.platform}-{self.key}"
+        artifact.mkdir(parents=True)
         self.download(artifact)
         event = self.root / "event.json"
         run = {"event": "push", "conclusion": "success", "head_branch": "master", "path": ".github/workflows/validation.yml",
@@ -396,13 +445,13 @@ class ReleaseTests(unittest.TestCase):
                               {"head_repository": {"full_name": "fork/patina-iptv"}}):
                 event.write_text(json.dumps({"workflow_run": run | incorrect}))
                 with self.assertRaises(ValueError):
-                    releases.publish_staged(self.root)
+                    releases.publish_staged(staging)
             publish.assert_not_called()
             event.write_text(json.dumps({"workflow_run": run}))
-            self.assertTrue(releases.prepare(self.root))
+            self.assertTrue(releases.prepare(staging))
             license_fetch.assert_called_once_with(run["head_sha"])
             self.assertEqual(json.loads((artifact / releases.MANIFEST).read_text()), json.loads(self.manifest.read_text()))
-            releases.publish_staged(self.root)
+            releases.publish_staged(staging)
             publish.assert_called_once_with(self.tag, artifact, run["head_sha"])
 
 
