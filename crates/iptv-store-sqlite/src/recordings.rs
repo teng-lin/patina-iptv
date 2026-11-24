@@ -318,10 +318,155 @@ impl Store {
     }
     /// Restored schedules must never rearm on a different host; media is not in catalog backups.
     pub fn discard_recording_jobs(&mut self) -> Result<()> {
-        self.conn.execute("DELETE FROM recording_rules", [])?;
-        self.conn.execute("DELETE FROM recording_jobs", [])?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM recording_rules", [])?;
+        tx.execute("DELETE FROM recording_jobs", [])?;
+        tx.execute("DELETE FROM retired_recording_schedules", [])?;
+        tx.execute(
+            "DELETE FROM store_meta WHERE key='retired_recording_notice'",
+            [],
+        )?;
+        tx.commit()?;
         Ok(())
     }
+
+    /// Replaces this library's recording rows with those of `from`, the
+    /// host's own library: its media lives beside the catalog directory
+    /// under these job ids, so a restored catalog keeps reopening it.
+    /// Repeating rules are not carried; scheduling is retired.
+    pub fn adopt_host_recordings(&mut self, from: &std::path::Path) -> Result<()> {
+        self.adopt_recordings(from, None)
+    }
+    /// [`Self::adopt_host_recordings`] for a host library encrypted with `key`.
+    pub fn adopt_host_recordings_encrypted(
+        &mut self,
+        from: &std::path::Path,
+        key: &crate::DatabaseKey,
+    ) -> Result<()> {
+        self.adopt_recordings(from, Some(key))
+    }
+    fn adopt_recordings(
+        &mut self,
+        from: &std::path::Path,
+        key: Option<&crate::DatabaseKey>,
+    ) -> Result<()> {
+        // Opening migrates the host library first, so both files have this
+        // build's tables and nothing scheduled survives into the copy.
+        let host = match key {
+            Some(key) => Store::open_encrypted(from, key)?,
+            None => Store::open(from)?,
+        };
+        // A scheduled row with media is an interrupted capture resuming.
+        const KEPT: &str = "status<>'scheduled' OR bytes>0";
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for table in [
+            "recording_rules",
+            "recording_jobs",
+            "retired_recording_schedules",
+        ] {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+        tx.execute(
+            "DELETE FROM store_meta WHERE key='retired_recording_notice'",
+            [],
+        )?;
+        let kept_job = format!("job_id IN (SELECT id FROM recording_jobs WHERE {KEPT})");
+        for (table, filter) in [
+            ("recording_jobs", KEPT.to_owned()),
+            (
+                "recording_playback_progress",
+                kept_job.replace("job_id", "recording_id"),
+            ),
+            ("recording_completions", kept_job),
+            ("retired_recording_schedules", "1".to_owned()),
+            ("store_meta", "key='retired_recording_notice'".to_owned()),
+        ] {
+            copy_rows(&host.conn, &tx, table, &filter)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The schedules the upgrade that retired scheduled recording canceled,
+    /// until the viewer has seen them.
+    pub fn retired_recording_schedules(
+        &self,
+    ) -> Result<Vec<iptv_core::recording::RetiredSchedule>> {
+        use iptv_core::recording::{Repeat, RetiredSchedule};
+        Ok(self
+            .conn
+            .prepare(
+                "SELECT channel_name,title,starts_at,ends_at,repeat
+                 FROM retired_recording_schedules ORDER BY id",
+            )?
+            .query_map([], |r| {
+                Ok(RetiredSchedule {
+                    channel_name: r.get(0)?,
+                    title: r.get(1)?,
+                    start: r.get(2)?,
+                    end: r.get(3)?,
+                    repeat: match r.get::<_, String>(4)?.as_str() {
+                        "daily" => Repeat::Daily,
+                        "weekly" => Repeat::Weekly,
+                        "series" => Repeat::Series,
+                        _ => Repeat::Once,
+                    },
+                })
+            })?
+            .collect::<rusqlite::Result<_>>()?)
+    }
+    /// Whether the viewer has yet to be told that scheduled recordings were
+    /// removed. Marks it told, so the notice appears once.
+    pub fn announce_retired_recordings(&mut self) -> Result<bool> {
+        Ok(self.conn.execute(
+            "UPDATE store_meta SET value='announced'
+             WHERE key='retired_recording_notice' AND value='pending'",
+            [],
+        )? == 1)
+    }
+    /// The viewer has seen the list of canceled schedules: forget it. The
+    /// canceled jobs themselves remain in the library with their media.
+    pub fn dismiss_retired_recording_schedules(&mut self) -> Result<()> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute("DELETE FROM retired_recording_schedules", [])?;
+        tx.execute(
+            "DELETE FROM store_meta WHERE key='retired_recording_notice'",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+/// Copies `table`'s rows matching `filter` between two libraries of this
+/// build's schema, column for column.
+fn copy_rows(
+    from: &rusqlite::Connection,
+    to: &rusqlite::Transaction<'_>,
+    table: &str,
+    filter: &str,
+) -> Result<()> {
+    let mut query = from.prepare(&format!("SELECT * FROM {table} WHERE {filter}"))?;
+    let columns = query.column_count();
+    let values = (1..=columns)
+        .map(|at| format!("?{at}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut insert = to.prepare(&format!("INSERT INTO {table} VALUES({values})"))?;
+    let mut rows = query.query([])?;
+    while let Some(row) = rows.next()? {
+        let values = (0..columns)
+            .map(|at| row.get::<_, rusqlite::types::Value>(at))
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        insert.execute(rusqlite::params_from_iter(values))?;
+    }
+    Ok(())
 }
 
 impl Store {

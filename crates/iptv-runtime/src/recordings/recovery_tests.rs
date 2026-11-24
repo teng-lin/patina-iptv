@@ -136,6 +136,48 @@ async fn running_host_retains_parked_media_when_viewing_uses_the_only_connection
     assert!(owner.drain_services());
 }
 
+/// The upgrade that retired scheduled recording turns a capture interrupted
+/// mid-window into a partial row whose size was never stored. Recovery
+/// finalizes its spool and records the size, so it plays, and never resumes
+/// the capture.
+#[tokio::test]
+async fn startup_finalizes_a_capture_the_upgrade_marked_partial() {
+    let directory = tempfile::tempdir().unwrap();
+    let (owner, mut request) = fixture(&directory.path().join("profile")).await;
+    request.start = now() - 60;
+    request.end = now() + 3600;
+    let id = JobId(752);
+    std::fs::create_dir_all(media_directory(owner.data_dir())).unwrap();
+    std::fs::write(path(&owner.services(), id, true), [0x47; 188]).unwrap();
+    owner
+        .services()
+        .call(move |store| {
+            store.schedule_recording(id, &request, request.start)?;
+            assert!(store.transition_recording(
+                id,
+                Status::Scheduled,
+                Status::Partial,
+                0,
+                "Interrupted when the app closed",
+            )?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    recover(&owner.services()).await.unwrap();
+    let job = owner
+        .services()
+        .read(move |store| store.recording_job(id))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!((job.status, job.bytes), (Status::Partial, 188));
+    let file = owner.recording_file(id).await.unwrap();
+    assert_eq!(std::fs::read(file).unwrap(), [0x47; 188]);
+    assert!(!path(&owner.services(), id, true).exists());
+    assert!(owner.drain_services());
+}
+
 #[test]
 fn quota_reserves_remaining_bytes_and_accepts_four_growing_captures() {
     let directory = tempfile::tempdir().unwrap();

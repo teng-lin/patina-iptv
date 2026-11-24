@@ -524,11 +524,15 @@ http://streams.example.com/56789.ts\n\
     store.snapshot_to(&backup).unwrap();
     drop(store);
     // This data-only migration leaves schema 26 unchanged, so removing its
-    // ledger entry exactly reconstructs a pre-correction store and snapshot.
+    // ledger entry, and the table schema 28 adds, exactly reconstructs a
+    // pre-correction store and snapshot.
     for path in [&live, &backup] {
         let db = Connection::open(path).unwrap();
-        db.execute("DELETE FROM schema_migrations WHERE version=27", [])
-            .unwrap();
+        db.execute_batch(
+            "DELETE FROM schema_migrations WHERE version>=27;
+             DROP TABLE retired_recording_schedules;",
+        )
+        .unwrap();
         db.pragma_update(None, "user_version", 26).unwrap();
     }
     Store::validate_snapshot(&backup).unwrap();

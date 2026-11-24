@@ -1,5 +1,10 @@
 //! User-scoped, opt-in login integration; never install from a background tick.
-use std::{io, path::Path};
+//! Scheduled recording is retired, so launches now remove what earlier
+//! versions registered ([`retire`]).
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 #[cfg(any(windows, target_os = "macos", test))]
 fn xml(value: &str) -> String {
     value
@@ -70,6 +75,107 @@ try {
     }
 }
 
+/// Written in the data directory once every registration below is gone.
+pub(super) const RETIRED: &str = "recording-registrations.retired";
+/// Earlier versions' marker that start at login was enabled. Windows
+/// re-registers its wake task on each schedule publication while it exists.
+const ENABLED: &str = "recording-login.enabled";
+#[cfg_attr(not(windows), allow(dead_code))]
+const WINDOWS_TASK: &str = "Patina Recorder";
+
+/// Where earlier versions registered Patina to start at login or wake.
+#[derive(Debug, Default)]
+pub(super) struct Registrations {
+    /// The Linux autostart entry.
+    autostart: Option<PathBuf>,
+    /// The macOS LaunchAgent.
+    launch_agent: Option<PathBuf>,
+    /// The Windows task, with its logon and time triggers and wake flag.
+    windows_task: bool,
+}
+
+impl Registrations {
+    /// The registrations of the signed-in user.
+    #[cfg(not(any(test, feature = "test-support")))]
+    pub(super) fn current() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_absolute());
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|config| config.is_absolute())
+            .or_else(|| home.as_ref().map(|home| home.join(".config")));
+        Self {
+            autostart: config
+                .filter(|_| cfg!(target_os = "linux"))
+                .map(|config| config.join("autostart/patina-recorder.desktop")),
+            launch_agent: home
+                .filter(|_| cfg!(target_os = "macos"))
+                .map(|home| home.join("Library/LaunchAgents/com.hantekllc.patina.recorder.plist")),
+            windows_task: cfg!(windows),
+        }
+    }
+    /// Test builds never touch the real user's login items or tasks: only
+    /// the entries under `IPTV_RS_TEST_REGISTRATIONS`, a scenario's
+    /// temporary directory, and no Windows task.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(super) fn current() -> Self {
+        std::env::var_os("IPTV_RS_TEST_REGISTRATIONS")
+            .map(PathBuf::from)
+            .filter(|root| root.is_absolute())
+            .map_or_else(Self::default, |root| Self::under(&root))
+    }
+    /// Both desktop file locations under `root`, whatever this system is.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(super) fn under(root: &Path) -> Self {
+        Self {
+            autostart: Some(root.join("autostart/patina-recorder.desktop")),
+            launch_agent: Some(root.join("LaunchAgents/com.hantekllc.patina.recorder.plist")),
+            windows_task: false,
+        }
+    }
+}
+
+fn remove_if_present(path: &Path) -> io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// Scheduled recording is retired: removes every login and wake
+/// registration an earlier version made, then the start-at-login marker,
+/// and records that in `directory`. Removing what is absent succeeds. On an
+/// error the record is not written, so the next launch tries again.
+pub(super) fn retire(directory: &Path, registrations: &Registrations) -> io::Result<()> {
+    #[cfg(windows)]
+    let _tasks = super::windows::TASKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut result = Ok(());
+    for path in [&registrations.autostart, &registrations.launch_agent]
+        .into_iter()
+        .flatten()
+    {
+        result = result.and(remove_if_present(path));
+    }
+    if registrations.windows_task {
+        #[cfg(windows)]
+        {
+            result = result.and(remove_windows_task(WINDOWS_TASK));
+        }
+    }
+    // Leftovers of an interrupted registration.
+    for name in ["recording-task.xml", "recording-wake-task.xml"] {
+        let _ = remove_if_present(&directory.join(name));
+    }
+    // Without the marker no later publication registers the task again,
+    // even while removing it failed.
+    result = result.and(remove_if_present(&directory.join(ENABLED)));
+    result?;
+    std::fs::write(directory.join(RETIRED), b"1")
+}
+
 pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
     #[cfg(windows)]
     let _tasks = super::windows::TASKS
@@ -133,7 +239,7 @@ pub(super) fn install(directory: &Path, enabled: bool) -> io::Result<()> {
     }
     #[cfg(windows)]
     {
-        let task = "Patina Recorder";
+        let task = WINDOWS_TASK;
         if enabled {
             let file = directory.join("recording-task.xml");
             std::fs::write(&file, task_xml(&executable.to_string_lossy(), None))?;
@@ -227,6 +333,61 @@ mod tests {
             "\"/home/generated/\\$literal\\`name\\\".AppImage\""
         );
     }
+    /// Every location lives in a temporary directory: tests never touch the
+    /// real user's login items.
+    #[test]
+    fn retiring_removes_each_registration_and_the_marker_once_and_idempotently() {
+        let registrations = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let entries = Registrations::under(registrations.path());
+        for path in [&entries.autostart, &entries.launch_agent]
+            .into_iter()
+            .flatten()
+        {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "generated registration").unwrap();
+        }
+        std::fs::write(data.path().join(ENABLED), b"1").unwrap();
+        std::fs::write(data.path().join("recording-wake-task.xml"), "generated").unwrap();
+        retire(data.path(), &entries).unwrap();
+        assert!(!entries.autostart.as_ref().unwrap().exists());
+        assert!(!entries.launch_agent.as_ref().unwrap().exists());
+        assert!(!data.path().join(ENABLED).exists());
+        assert!(!data.path().join("recording-wake-task.xml").exists());
+        assert!(data.path().join(RETIRED).exists());
+        // Nothing left to remove is still success.
+        retire(data.path(), &entries).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_removal_is_not_recorded_so_the_next_launch_retries() {
+        use std::os::unix::fs::PermissionsExt;
+        let registrations = tempfile::tempdir().unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let entries = Registrations::under(registrations.path());
+        let autostart = entries.autostart.clone().unwrap();
+        let folder = autostart.parent().unwrap();
+        std::fs::create_dir_all(folder).unwrap();
+        std::fs::write(&autostart, "generated registration").unwrap();
+        std::fs::write(data.path().join(ENABLED), b"1").unwrap();
+        std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let denied = std::fs::write(folder.join("probe"), b"").is_err();
+        let failed = retire(data.path(), &entries);
+        std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+        if !denied {
+            // Running as a user that ignores permissions: nothing to observe.
+            return;
+        }
+        assert!(failed.is_err());
+        assert!(!data.path().join(RETIRED).exists());
+        // The wake marker goes regardless, so nothing registers again.
+        assert!(!data.path().join(ENABLED).exists());
+        retire(data.path(), &entries).unwrap();
+        assert!(!autostart.exists());
+        assert!(data.path().join(RETIRED).exists());
+    }
+
     #[test]
     fn startup_task_has_a_bounded_identity_and_escaped_executable() {
         let task = task_xml(
