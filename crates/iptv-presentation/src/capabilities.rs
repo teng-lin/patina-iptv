@@ -27,6 +27,41 @@ impl Device {
     }
 }
 
+/// What the keys connected now are set up as in Settings (#280): a
+/// keyboard's shortcuts, or a remote's keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Keys {
+    /// A keyboard: its single-key shortcuts can be remapped or turned off
+    /// (WCAG 2.1.4); keys only a remote has (colour keys, Play, Stop,
+    /// Record) are left out.
+    Keyboard,
+    /// A TV remote's or a game controller's D-pad, with every remote key.
+    Remote,
+}
+
+/// Which keys `host` has to set up, if any. A TV has its remote and a
+/// desktop its keyboard, whatever is reported. A phone or a tablet has
+/// them only while one is connected (not when one was used last, so a
+/// keyboard-cover user who reaches Settings by touch still finds them):
+/// a D-pad makes them a remote's, a keyboard alone a keyboard's, and a
+/// touch screen alone has none.
+pub fn keys(host: Host) -> Option<Keys> {
+    match host.form_factor {
+        FormFactor::Tv => Some(Keys::Remote),
+        FormFactor::Desktop => Some(Keys::Keyboard),
+        FormFactor::Phone | FormFactor::Tablet => {
+            let Input { keyboard, dpad } = host.input;
+            if dpad {
+                Some(Keys::Remote)
+            } else if keyboard {
+                Some(Keys::Keyboard)
+            } else {
+                None
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
     WaitingForPlayer,
@@ -398,6 +433,31 @@ mod tests {
             Some(Reason::UnsupportedPip),
             "a TV never has it"
         );
+    }
+
+    #[test]
+    fn keys_follow_the_form_factor_and_the_connected_input() {
+        let host = |form_factor, keyboard, dpad| Host {
+            platform: Platform::Android,
+            form_factor,
+            input: Input { keyboard, dpad },
+        };
+        for form in [FormFactor::Phone, FormFactor::Tablet] {
+            assert_eq!(keys(host(form, false, false)), None, "{form:?}");
+            assert_eq!(keys(host(form, true, false)), Some(Keys::Keyboard));
+            assert_eq!(keys(host(form, false, true)), Some(Keys::Remote));
+            assert_eq!(keys(host(form, true, true)), Some(Keys::Remote));
+        }
+        for (keyboard, dpad) in [(false, false), (true, false), (false, true)] {
+            let tv = host(FormFactor::Tv, keyboard, dpad);
+            assert_eq!(keys(tv), Some(Keys::Remote));
+            let desktop = host(FormFactor::Desktop, keyboard, dpad);
+            assert_eq!(keys(desktop), Some(Keys::Keyboard));
+        }
+        // Builds before any report.
+        assert_eq!(keys(Host::of(Platform::Linux)), Some(Keys::Keyboard));
+        assert_eq!(keys(Host::of(Platform::Unknown)), Some(Keys::Remote));
+        assert_eq!(keys(Host::of(Platform::Android)), None);
     }
 
     #[test]

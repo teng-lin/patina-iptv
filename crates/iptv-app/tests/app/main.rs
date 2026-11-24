@@ -53,6 +53,7 @@ mod guide_scroll_cost;
 mod interface_languages;
 mod ipad_windows;
 mod keyboard_dismissal;
+mod keyboard_remote_settings;
 mod library_cached_epg;
 mod library_management;
 mod library_refresh;
