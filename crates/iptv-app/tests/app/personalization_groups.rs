@@ -493,3 +493,72 @@ fn standalone_group_preferences_apply_to_the_selected_group() {
         },
     ));
 }
+
+/// The group option appears only with a player to hand streams to; a
+/// player removed after it was chosen plays the channel here and offers to
+/// turn the option off. Linux is the headless host that has the handoff.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_external_player_option_needs_a_player_and_falls_back_without_one() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    let news = "id:guide-groups >> text:News";
+    let option = "id:menu-panel >> text:Use external player";
+    let external = |path: &std::path::Path, source, wanted: bool| {
+        let store = crate::isolated::open_database(path).unwrap();
+        let groups = store.groups(source, None).unwrap();
+        groups.into_iter().any(|group| {
+            group.name == "News"
+                && store
+                    .guide_group_preferences(source, group.id.as_str())
+                    .is_ok_and(|prefs| prefs.external_player == wanted)
+        })
+    };
+
+    iptv_app::set_external_player_handler(Some(false));
+    step(app.open_guide_groups());
+    step(app.long_press(news));
+    step(app.wait_for("id:menu-panel >> text:Show favorites only"));
+    assert!(!app.shows(option), "{:?}", app.screen().texts());
+    step(app.back());
+
+    iptv_app::set_external_player_handler(Some(true));
+    step(app.long_press(news));
+    step(app.press(option));
+    step(crate::isolated::wait_outside(
+        app,
+        "external player on",
+        Duration::from_secs(5),
+        || external(&fixture.path, fixture.source, true),
+    ));
+
+    // The player is uninstalled. The option stays while it is on, so it
+    // can still be turned off from group options.
+    iptv_app::set_external_player_handler(Some(false));
+    step(app.long_press(news));
+    step(app.wait_for(option));
+    step(app.back());
+
+    step(app.press(news));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for("text:No external player is installed, so this channel plays here."));
+    step(
+        app.wait_until("the channel playing here", Duration::from_secs(5), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    step(app.press("id:menu-panel >> text:Turn off external player"));
+    step(crate::isolated::wait_outside(
+        app,
+        "external player off",
+        Duration::from_secs(5),
+        || external(&fixture.path, fixture.source, false),
+    ));
+    step(app.wait_for_gone("text:Turn off external player", Duration::from_secs(5)));
+    step(app.open_guide_groups());
+    step(app.long_press(news));
+    step(app.wait_for("id:menu-panel >> text:Show favorites only"));
+    assert!(!app.shows(option), "{:?}", app.screen().texts());
+}

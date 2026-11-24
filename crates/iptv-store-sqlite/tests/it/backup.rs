@@ -32,9 +32,27 @@ fn wal_snapshot_preserves_credentials_organization_history_and_cached_catalog() 
     let combined_key = format!("source:{}:{}", id.0, last.as_str());
     store.set_all_playlists(true).unwrap();
     store.set_combined_last_channel(&combined_key).unwrap();
+    // This device's list of retired schedules is not part of a backup.
+    Connection::open(&live)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO retired_recording_schedules(channel_name,title,starts_at,ends_at,repeat)
+             VALUES('Generated channel','Generated retired program',1800000000,1800000060,'once');
+             INSERT INTO store_meta(key,value) VALUES('retired_recording_notice','pending');",
+        )
+        .unwrap();
     assert_eq!(store.journal_mode().unwrap(), "wal");
     assert!(live.with_extension("sqlite-wal").exists());
     store.snapshot_to(&archive).unwrap();
+    assert_eq!(store.retired_recording_schedules().unwrap().len(), 1);
+    {
+        let archived = Connection::open(&archive).unwrap();
+        assert_eq!(rows(&archived, "retired_recording_schedules"), 0);
+        assert_eq!(
+            rows(&archived, "store_meta WHERE key='retired_recording_notice'"),
+            0
+        );
+    }
     // Subsequent writes never leak into the completed snapshot.
     store.rename_source(id, "Changed after backup").unwrap();
     store.set_all_playlists(false).unwrap();
@@ -524,11 +542,15 @@ http://streams.example.com/56789.ts\n\
     store.snapshot_to(&backup).unwrap();
     drop(store);
     // This data-only migration leaves schema 26 unchanged, so removing its
-    // ledger entry exactly reconstructs a pre-correction store and snapshot.
+    // ledger entry, and the table schema 28 adds, exactly reconstructs a
+    // pre-correction store and snapshot.
     for path in [&live, &backup] {
         let db = Connection::open(path).unwrap();
-        db.execute("DELETE FROM schema_migrations WHERE version=27", [])
-            .unwrap();
+        db.execute_batch(
+            "DELETE FROM schema_migrations WHERE version>=27;
+             DROP TABLE retired_recording_schedules;",
+        )
+        .unwrap();
         db.pragma_update(None, "user_version", 26).unwrap();
     }
     Store::validate_snapshot(&backup).unwrap();
