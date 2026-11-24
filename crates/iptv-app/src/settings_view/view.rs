@@ -426,6 +426,8 @@ fn row_view(
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
         let settings = crate::settings::read(ui);
+        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        ui.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
             offer: &crate::settings::offer,

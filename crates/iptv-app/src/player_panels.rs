@@ -483,7 +483,13 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
     });
     // Picture in picture is in the strip only where the host offers it
     // (`pip.rs`): a cell reads its control by position.
-    let count = move || ui.panels.with(|p| p.controls().count());
+    // Memos: focus moves and timer updates leave the list as it is.
+    let shown = computed(move || {
+        ui.panels
+            .with(|p| p.controls().map(|c| c as u8).collect::<Vec<_>>())
+    });
+    let rows = computed(move || shown.with(Vec::len));
+    let count = move || rows.get();
     virtual_list(count, move |at| {
         let control = move || {
             ui.panels
@@ -509,10 +515,7 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
         )
         .mr(px(10.0))
     })
-    .keys(move || {
-        ui.panels
-            .with(|p| p.controls().map(|c| c as u8).collect::<Vec<_>>())
-    })
+    .keys(move || shown.get())
     .horizontal()
     .estimated_item_size(px(170.0))
     .element_ref(&list)
