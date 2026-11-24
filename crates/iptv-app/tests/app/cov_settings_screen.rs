@@ -370,7 +370,7 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.wait_for(BACKUP));
     step(app.press_key("down"));
     step(app.wait_for(
-        "text:Replace current playlists, settings and watch history with a backup's contents.",
+        "text:Replace all current data, including playlists, settings and watch history, with a backup's contents.",
     ));
     for _ in 0..10 {
         if app.screen().matches(FIRST).unwrap() {

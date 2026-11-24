@@ -110,7 +110,7 @@ pub static COMMANDS: &[Command] = &[
         S::General,
         "privacy",
         "general.restore",
-        key("Replace current playlists, settings and watch history with a backup's contents."),
+        key("Replace all current data, including playlists, settings and watch history, with a backup's contents."),
     )
     .confirm()
     .restart(),

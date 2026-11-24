@@ -159,25 +159,43 @@ internal object DocumentPickers {
             type = "*/*"
         }
 
-    /** Whether any of the packages whose activities resolve is a real picker. */
-    fun usable(packages: Collection<String?>): Boolean = packages.any { it != null && it !in STUBS }
+    /**
+     * The first real picker among the packages whose activities resolve, in
+     * the resolver's order (best first), or null when there is none.
+     */
+    fun choose(packages: Collection<String?>): String? = packages.firstOrNull { it != null && it !in STUBS }
 
-    private fun resolves(
+    /** Whether any of the packages whose activities resolve is a real picker. */
+    fun usable(packages: Collection<String?>): Boolean = choose(packages) != null
+
+    /** The package of the best real picker for [intent], or null. */
+    fun picker(
         manager: PackageManager,
         intent: Intent,
-    ): Boolean =
+    ): String? =
         try {
-            usable(
+            choose(
                 manager
                     .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
                     .map { it.activityInfo?.packageName },
             )
         } catch (_: Exception) {
-            false
+            null
         }
 
+    /**
+     * [intent] aimed at its real picker. The TV stub declares a high intent
+     * priority, so an unaimed intent can open it even where a real picker
+     * resolves too.
+     */
+    fun aimed(
+        manager: PackageManager,
+        intent: Intent,
+    ): Intent = intent.apply { picker(manager, this)?.let { setPackage(it) } }
+
     /** (create, open): which pickers resolve on this device now. */
-    fun probe(manager: PackageManager): Pair<Boolean, Boolean> = resolves(manager, create()) to resolves(manager, open())
+    fun probe(manager: PackageManager): Pair<Boolean, Boolean> =
+        (picker(manager, create()) != null) to (picker(manager, open()) != null)
 }
 
 /** Owns the one document chooser/copy operation for an activity. */
@@ -273,7 +291,10 @@ class BackupHost(
         active = request
         try {
             activity.startActivityForResult(
-                if (importing) DocumentPickers.open() else DocumentPickers.create(),
+                DocumentPickers.aimed(
+                    activity.packageManager,
+                    if (importing) DocumentPickers.open() else DocumentPickers.create(),
+                ),
                 TRANSFER_BACKUP,
             )
         } catch (_: Exception) {

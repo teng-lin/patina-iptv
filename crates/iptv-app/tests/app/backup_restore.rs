@@ -456,6 +456,43 @@ fn ipad_settings_show_no_backup_rows() {
     }
 }
 
+/// Each action follows its own picker: a device that creates files but
+/// cannot open them offers Back up alone, and one that opens files but
+/// cannot create them offers Restore alone, both under Data and privacy.
+#[test]
+fn each_backup_action_follows_its_own_picker() {
+    let Some(home) = isolated!() else { return };
+    iptv_app::set_pickers_for_test(iptv_app::Pickers {
+        create: true,
+        open: false,
+    });
+    let mut fixture = crate::personalization::start(home, Settings::default(), false);
+    {
+        let app = &mut fixture.app;
+        open_settings(app);
+        step(app.wait_for(&message("Data and privacy")));
+        step(app.wait_for(&message("Back up")));
+        absent(app, "Restore a backup");
+    }
+    let crate::personalization::Fixture { app, home, .. } = fixture;
+    drop(app);
+
+    iptv_app::set_pickers_for_test(iptv_app::Pickers {
+        create: false,
+        open: true,
+    });
+    let mut app = start_app();
+    step(app.wait_for_within("text:★ Local A", Duration::from_secs(20)));
+    step(app.open_guide_groups());
+    step(app.press_key("right"));
+    open_settings(&mut app);
+    step(app.wait_for(&message("Data and privacy")));
+    step(app.wait_for(&message("Restore a backup")));
+    absent(&app, "Back up");
+    drop(app);
+    drop(home);
+}
+
 /// A device without document pickers (an Android TV box without a usable
 /// one) offers neither action, yet a restore scheduled earlier stays
 /// reachable: it can be reviewed, kept and canceled, never replaced.

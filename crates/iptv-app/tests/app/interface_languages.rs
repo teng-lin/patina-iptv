@@ -604,7 +604,7 @@ fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
         }
         // Restore, under Data and privacy: a title plus a second-line note.
         let restore = expanded(
-            "Replace current playlists, settings and watch history with a backup's contents.",
+            "Replace all current data, including playlists, settings and watch history, with a backup's contents.",
         );
         for _ in 0..20 {
             if app.shows(restore) {
