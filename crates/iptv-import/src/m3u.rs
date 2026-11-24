@@ -7,12 +7,12 @@
 //! playlist without entries is [`ImportError::Empty`].
 
 use iptv_core::import_limits::{DecodeBuffer, ImportLimits, LimitExceeded, LimitKind};
-use std::io::Write;
+use std::{borrow::Cow, collections::HashSet, io::Write};
 
 use flate2::write::MultiGzDecoder;
-use iptv_providers::HttpRequest;
 use iptv_providers::m3u::{M3uParser, M3uPlaylist};
 use iptv_providers::model::{Channel, ContentKind, M3uSourceConfig, StreamLocator};
+use iptv_providers::{GroupId, HttpRequest};
 
 use crate::cancel::{CancelToken, check};
 use crate::catalog::{Catalog, SourceMeta};
@@ -36,6 +36,8 @@ pub(crate) struct M3uFeeder {
     limits: ImportLimits,
     bytes: u64,
     parsed: u64,
+    unusable_streams: usize,
+    usable_groups: HashSet<GroupId>,
 }
 
 impl M3uFeeder {
@@ -45,6 +47,8 @@ impl M3uFeeder {
             limits,
             bytes: 0,
             parsed: 0,
+            unusable_streams: 0,
+            usable_groups: HashSet::new(),
             head: Vec::new(),
             gzip: None,
             decided: false,
@@ -69,6 +73,7 @@ impl M3uFeeder {
             }
         }
         let mut completed = self.parser.take_channels();
+        self.unusable_streams += retain_usable_streams(&mut completed, &mut self.usable_groups);
         self.parsed += completed.len() as u64;
         self.taken.append(&mut completed);
         Ok(self.parsed)
@@ -102,7 +107,7 @@ impl M3uFeeder {
         Ok(())
     }
 
-    pub fn finish(mut self) -> Result<(M3uPlaylist, Vec<u8>), ImportError> {
+    pub fn finish(mut self) -> Result<(M3uPlaylist, Vec<u8>, usize), ImportError> {
         if !self.decided {
             self.decide();
             let head = std::mem::take(&mut self.head);
@@ -121,10 +126,59 @@ impl M3uFeeder {
         if let Some(error) = playlist.error {
             return Err(limit_error(error));
         }
+        self.unusable_streams +=
+            retain_usable_streams(&mut playlist.channels.items, &mut self.usable_groups);
+        playlist
+            .groups
+            .retain(|group| self.usable_groups.contains(&group.id));
         self.taken.append(&mut playlist.channels.items);
         playlist.channels.items = self.taken;
-        Ok((playlist, self.sniff))
+        Ok((playlist, self.sniff, self.unusable_streams))
     }
+}
+
+/// Discard unsupported protocols and malformed remote addresses before they
+/// reach a private stage. Explicit local destinations still reach the existing
+/// fatal destination-policy checks, as do private HTTP(S) hosts.
+fn retain_usable_streams(
+    channels: &mut Vec<Channel>,
+    usable_groups: &mut HashSet<GroupId>,
+) -> usize {
+    let before = channels.len();
+    channels.retain(|channel| {
+        let StreamLocator::Url { url, .. } = &channel.stream else {
+            return true;
+        };
+        // Match URL parsing's C0/space trimming and embedded tab/line-break
+        // removal when recognizing local destinations, without changing the URL.
+        let trimmed = url.trim_matches(|ch| ch <= ' ');
+        let normalized = if trimmed.contains(['\t', '\r', '\n']) {
+            Cow::Owned(trimmed.replace(['\t', '\r', '\n'], ""))
+        } else {
+            Cow::Borrowed(trimmed)
+        };
+        let value = normalized.as_ref();
+        let bytes = value.as_bytes();
+        let drive_path =
+            bytes.first().is_some_and(u8::is_ascii_alphabetic) && bytes.get(1) == Some(&b':');
+        let file_url = value
+            .get(..5)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"));
+        let relative_path = ["./", "../", ".\\", "..\\", "~/", "~\\"]
+            .iter()
+            .any(|prefix| value.starts_with(prefix));
+        if value.starts_with(['/', '\\']) || drive_path || file_url || relative_path {
+            return true;
+        }
+        url::Url::parse(value)
+            .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https" | "file"))
+    });
+    for group in channels.iter().flat_map(|channel| &channel.groups) {
+        if !usable_groups.contains(group) {
+            usable_groups.insert(group.clone());
+        }
+    }
+    before - channels.len()
 }
 
 /// Decoded playlist text: keep the first bytes for sniffing, then parse.
@@ -157,6 +211,7 @@ fn into_catalog(
     stats: crate::catalog::ImportStats,
     allow_private_fixture: bool,
     emitted: u64,
+    unusable_streams: usize,
 ) -> Result<Catalog, ImportError> {
     let fail = |p| Err(ImportError::parse(Step::Playlist, p));
     let head = String::from_utf8_lossy(sniff);
@@ -184,10 +239,9 @@ fn into_catalog(
     }
     let channels = &playlist.channels;
     if channels.items.is_empty() && emitted == 0 {
-        return if channels.skipped > 0 {
-            fail(ParseProblem::NoUsableEntries {
-                skipped: channels.skipped,
-            })
+        let skipped = channels.skipped + unusable_streams;
+        return if skipped > 0 {
+            fail(ParseProblem::NoUsableEntries { skipped })
         } else {
             Err(ImportError::Empty {
                 step: Step::Playlist,
@@ -217,6 +271,13 @@ fn into_catalog(
     });
     catalog.warn_guide_limit(dropped_guides);
     catalog.stats = stats;
+    if unusable_streams > 0 {
+        catalog.stats.skipped += unusable_streams;
+        catalog.warn(
+            Step::Playlist,
+            format!("skipped {unusable_streams} malformed or unsupported stream URLs"),
+        );
+    }
     catalog.stats.content_items = emitted + playlist.channels.items.len() as u64;
     catalog.groups = playlist.groups;
     catalog.channels = catalog.absorb(Step::Playlist, None, playlist.channels);
@@ -280,13 +341,14 @@ pub(crate) async fn import_m3u<F: Fetch, P: ProgressSink>(
         Ok(count)
     })
     .await?;
-    let (playlist, sniff) = feeder.finish()?;
+    let (playlist, sniff, unusable_streams) = feeder.finish()?;
     let mut catalog = into_catalog(
         playlist,
         &sniff,
         ctx.stats.clone(),
         allow_private_fixture,
         emitted,
+        unusable_streams,
     )?;
     if let Some(s) = &mut sink {
         for group in std::mem::take(&mut catalog.groups) {
@@ -328,12 +390,12 @@ pub fn import_m3u_text(
         p.bytes += chunk.len() as u64;
         progress.report(&p);
     }
-    let (playlist, sniff) = feeder.finish()?;
+    let (playlist, sniff, unusable_streams) = feeder.finish()?;
     let stats = crate::catalog::ImportStats {
         bytes: bytes.len() as u64,
         ..Default::default()
     };
-    let catalog = into_catalog(playlist, &sniff, stats, false, 0)?;
+    let catalog = into_catalog(playlist, &sniff, stats, false, 0, unusable_streams)?;
     report_done(progress, catalog.channels.len());
     Ok(catalog)
 }
