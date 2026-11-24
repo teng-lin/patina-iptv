@@ -22,6 +22,7 @@
 
 use crate::guide::{Focus, Move, Pane};
 use iptv_core::guide::Schedule;
+use iptv_providers::model::SourceKind;
 
 /// An item of the navigation rail.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,18 +60,39 @@ pub struct VodAvailability {
     /// Any enabled playlist has movies or shows: the cross-source Continue
     /// watching and Recently added shelves, whichever playlist is on screen.
     pub any: bool,
+    /// No catalog can ever fill: Movies and Shows are not offered
+    /// ([`live_only`]).
+    pub live_only: bool,
+}
+
+/// Whether the stored playlists are live only: at least one is stored and
+/// every enabled one is M3U, whose imports never carry movies or shows.
+/// `playlists`: each stored playlist's kind and whether it is enabled.
+///
+/// Movies and Shows stay offered before the first playlist (to be
+/// discovered) and with an enabled Xtream or Stalker playlist, also one
+/// whose movie and series import is off: their empty state links to its
+/// settings.
+pub fn live_only(playlists: impl IntoIterator<Item = (SourceKind, bool)>) -> bool {
+    let mut stored = false;
+    for (kind, enabled) in playlists {
+        stored = true;
+        if enabled && kind != SourceKind::M3u {
+            return false;
+        }
+    }
+    stored
 }
 
 /// Movies and Shows stay discoverable directly below Live TV, including
-/// when no on-demand content has been imported. Discovery shelves follow
-/// when an enabled playlist has VOD. TV remains the rail's home.
+/// when no on-demand content has been imported, unless the playlists are
+/// live only ([`live_only`]). Discovery shelves follow when an enabled
+/// playlist has VOD. TV remains the rail's home.
 pub fn rail_items(vod: VodAvailability) -> Vec<RailItem> {
-    let mut items = vec![
-        RailItem::Search,
-        RailItem::Tv,
-        RailItem::Movies,
-        RailItem::Shows,
-    ];
+    let mut items = vec![RailItem::Search, RailItem::Tv];
+    if !vod.live_only {
+        items.extend([RailItem::Movies, RailItem::Shows]);
+    }
     // The shown playlist is one of the enabled ones.
     if vod.any || vod.shown {
         items.extend([RailItem::Continue, RailItem::Recent]);

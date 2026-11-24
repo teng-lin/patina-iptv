@@ -1,13 +1,16 @@
 //! The empty Movies and Shows catalog in a compact window (#130): its
 //! message and action are the one pane (`iptv_presentation::vod::Screen::one_pane`).
-//! At 400×600 with an M3U-only library the categories give way, the
-//! message keeps a readable width, Add playlist and Close stay inside the
-//! window for a pointer or a finger, and the keyboard still moves between
-//! the rail and the action — at Medium and at Extra large text, and with
-//! the test pseudolocale's longer strings. The rail stays narrow with the
-//! remote on it, and stays on screen with it when the window widens.
+//! At 400×600, with movie and series imports off, the categories give
+//! way, the message keeps a readable width, Playlist settings and Close
+//! stay inside the window for a pointer or a finger, and the keyboard
+//! still moves between the rail and the action — at Medium and at Extra
+//! large text, and with the test pseudolocale's longer strings. The rail
+//! stays narrow with the remote on it, and stays on screen with it when
+//! the window widens.
 //!
-//! Synthetic data only: the personalization playlist (M3U).
+//! Synthetic data only: the personalization playlist, stored as an Xtream
+//! Codes playlist that is never refreshed (an M3U playlist alone offers no
+//! Movies or Shows).
 
 use std::time::Duration;
 
@@ -17,7 +20,8 @@ use nsh_core::{Size, prelude::*};
 
 const WINDOW: (f32, f32) = (400.0, 600.0);
 const WIDE: (f32, f32) = (1280.0, 720.0);
-const M3U_ONLY: &str = "Movies and shows come from Xtream Codes and Stalker playlists. M3U playlists have live channels only.";
+const IMPORTS_OFF: &str = "Movie and series imports are off for this playlist.";
+const ACTION: &str = "Playlist settings";
 
 fn bounds(app: &crate::Headless, matches: impl Fn(&nsh_testing::LayoutNode) -> bool) -> [f32; 4] {
     let node = app
@@ -66,12 +70,9 @@ fn resize(app: &mut crate::Headless, (w, h): (f32, f32)) {
 /// of the window, its action and Close inside it.
 #[track_caller]
 fn one_pane(app: &mut crate::Headless, pseudo: bool) {
-    let text = t(pseudo, M3U_ONLY);
+    let text = t(pseudo, IMPORTS_OFF);
     step(app.wait_for(&format!("text:{text}")));
-    step(app.wait_for(&format!(
-        "id:vod-empty >> label:{}",
-        t(pseudo, "Add playlist")
-    )));
+    step(app.wait_for(&format!("id:vod-empty >> label:{}", t(pseudo, ACTION))));
     for id in ["id:vod-category", "id:vod-continue"] {
         assert_eq!(app.screen().count(id).unwrap(), 0, "no categories");
     }
@@ -90,7 +91,7 @@ fn one_pane(app: &mut crate::Headless, pseudo: bool) {
         "the message {message:?} has a readable width"
     );
     let action = bounds(app, by_id("vod-empty-action"));
-    inside_the_window("Add playlist", action);
+    inside_the_window(ACTION, action);
     assert!(
         action[1] >= message[1] + message[3],
         "the action follows the message"
@@ -98,6 +99,20 @@ fn one_pane(app: &mut crate::Headless, pseudo: bool) {
     let close = app.screen().id(&close_selector(pseudo)).unwrap();
     let close = bounds(app, |n| n.id == close);
     inside_the_window("Close", close);
+}
+
+/// The action opened the playlists screen: Back closes it.
+fn leave_playlists(app: &mut crate::Headless) {
+    const SCREEN: &str = "id:playlists-screen";
+    step(app.wait_for(SCREEN));
+    for _ in 0..3 {
+        if !app.screen().matches(SCREEN).unwrap() {
+            break;
+        }
+        step(app.back());
+        app.settle();
+    }
+    step(app.wait_for_gone(SCREEN, Duration::from_secs(2)));
 }
 
 fn close_selector(pseudo: bool) -> String {
@@ -113,13 +128,24 @@ fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseu
     settings
         .set("appearance.font_size", Value::choice(font))
         .unwrap();
-    let mut fixture = crate::personalization::start(home, settings, true);
+    settings
+        .set("playlists.include_vod", Value::Bool(false))
+        .unwrap();
+    let mut fixture = crate::personalization::launch_prepared(
+        home,
+        settings,
+        true,
+        crate::personalization::as_catalog_playlist,
+        |_| {},
+        |_| {},
+    );
     let app = &mut fixture.app;
-    let wizard = format!("id:wizard-form >> text:{}", t(pseudo, "Source type"));
+    step(app.open_guide_groups());
+    step(app.press_key("right"));
     resize(app, WINDOW);
     // Movies by pointer. Left puts the remote on the rail, which stays
     // narrow; a wider window keeps the rail, now beside the categories;
-    // compact again, a click still reaches Add playlist.
+    // compact again, a click still reaches Playlist settings.
     crate::browse_fixture::open_rail_item(app, t(pseudo, "Movies"));
     one_pane(app, pseudo);
     step(app.press_key("left"));
@@ -133,16 +159,14 @@ fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseu
     one_pane(app, pseudo);
     step(app.press("id:vod-empty-action"));
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
-    step(app.wait_for(&wizard));
-    step(app.back());
-    step(app.wait_for_gone(&wizard, Duration::from_secs(2)));
+    leave_playlists(app);
     // Shows by pointer, closed with the rail's Close.
     crate::browse_fixture::open_rail_item(app, t(pseudo, "Shows"));
     one_pane(app, pseudo);
     step(app.press(&close_selector(pseudo)));
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
     // Then the keyboard: Left reaches the rail, Right the action again
-    // (the categories never return), Enter adds a playlist.
+    // (the categories never return), Enter opens the playlist's settings.
     crate::browse_fixture::open_rail_item(app, t(pseudo, "Shows"));
     one_pane(app, pseudo);
     step(app.press_key("left"));
@@ -150,7 +174,7 @@ fn empty_catalog_in_a_small_window(home: crate::isolated::Home, font: &str, pseu
     one_pane(app, pseudo);
     step(app.press_key("enter"));
     step(app.wait_for_gone("id:vod-screen", Duration::from_secs(2)));
-    step(app.wait_for(&wizard));
+    step(app.wait_for("id:playlists-screen"));
 }
 
 #[test]
