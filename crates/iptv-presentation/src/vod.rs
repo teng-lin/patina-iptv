@@ -108,6 +108,15 @@ pub enum Retried {
     /// added again, or edited): nothing is shown or played from it.
     PlaylistChanged,
 }
+/// Rail destinations that can never show anything here.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Omitted {
+    /// Movies and Shows: every enabled playlist is M3U
+    /// ([`crate::browse::live_only`]).
+    catalogs: bool,
+    /// Recordings: the host never records.
+    recordings: bool,
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Destination {
     Live,
@@ -179,6 +188,9 @@ pub struct Screen {
     /// (the compact window class); set by the shell through
     /// [`Screen::set_compact`] and kept across [`Screen::begin`].
     compact: bool,
+    /// What the rail never offers here, set by the shell through
+    /// [`Screen::set_navigation`] and kept across [`Screen::begin`].
+    omitted: Omitted,
     /// The remote was sent off the empty screen's action because it moved
     /// to another playlist while a read was pending, or went away: the next
     /// settling of the panes must not put it back on the new action
@@ -218,9 +230,34 @@ impl Screen {
             library: self.library,
             offered: self.library.action().map(EmptyAction::target),
             compact: self.compact,
+            omitted: self.omitted,
             ..Default::default()
         };
         self.reload()
+    }
+    /// Sets which destinations the rail offers: Movies and Shows unless
+    /// every enabled playlist is M3U (`catalogs`), Recordings where the
+    /// host records (`recordings`). A remote on one that goes moves to
+    /// Live TV.
+    pub fn set_navigation(&mut self, catalogs: bool, recordings: bool) {
+        self.omitted = Omitted {
+            catalogs: !catalogs,
+            recordings: !recordings,
+        };
+        if self.control == Control::Navigation && !self.destinations().contains(&self.destination) {
+            self.destination = Destination::Live;
+        }
+    }
+    /// The rail's destinations, in order.
+    pub fn destinations(&self) -> Vec<Destination> {
+        let mut destinations = vec![Destination::Live];
+        if !self.omitted.catalogs {
+            destinations.extend([Destination::Movies, Destination::Shows]);
+        }
+        if !self.omitted.recordings {
+            destinations.push(Destination::Recordings);
+        }
+        destinations
     }
     /// Sets whether the window is compact. A compact window shows one pane
     /// at a time ([`Screen::one_pane`]).
@@ -267,7 +304,15 @@ impl Screen {
     /// window, smaller text).
     fn focus_rail(&mut self) {
         self.categories_open = true;
+        self.enter_navigation();
+    }
+    /// The remote to the rail, on this screen's destination where the rail
+    /// offers it, else on Live TV.
+    fn enter_navigation(&mut self) {
         self.control = Control::Navigation;
+        if !self.destinations().contains(&self.destination) {
+            self.destination = Destination::Live;
+        }
     }
     /// Keeps the remote on something shown and never on an action it did
     /// not see appear. Once the empty catalog is the one pane, a remote
@@ -441,6 +486,7 @@ impl Screen {
             shelf: Some(shelf),
             generation: self.generation.wrapping_add(1),
             compact: self.compact,
+            omitted: self.omitted,
             ..Default::default()
         };
         self.reload()
@@ -769,7 +815,7 @@ impl Screen {
                 self.categories_open = false;
                 self.control = Control::Catalog;
             } else {
-                self.control = Control::Navigation;
+                self.enter_navigation();
             }
             return;
         }
@@ -822,16 +868,11 @@ impl Screen {
     fn move_vertical(&mut self, step: isize) -> bool {
         match self.control {
             Control::Navigation => {
-                let destinations = [
-                    Destination::Live,
-                    Destination::Movies,
-                    Destination::Shows,
-                    Destination::Recordings,
-                ];
+                let destinations = self.destinations();
                 let at = destinations
                     .iter()
                     .position(|d| *d == self.destination)
-                    .unwrap_or(1);
+                    .unwrap_or(0);
                 self.destination =
                     destinations[at.saturating_add_signed(step).min(destinations.len() - 1)];
             }
@@ -1118,7 +1159,7 @@ impl Screen {
                 if self.one_pane() {
                     self.focus_rail();
                 } else {
-                    self.control = Control::Navigation;
+                    self.enter_navigation();
                 }
                 return;
             }
@@ -2850,5 +2891,39 @@ mod tests {
         s.hand_to_player();
         s.begin(Kind::Series);
         assert!(!s.returns_to(&card("b").key));
+    }
+
+    #[test]
+    fn the_rail_leaves_out_destinations_that_can_never_show_anything() {
+        let mut s = Screen::default();
+        assert_eq!(
+            s.destinations(),
+            [
+                Destination::Live,
+                Destination::Movies,
+                Destination::Shows,
+                Destination::Recordings
+            ]
+        );
+        // Every enabled playlist is M3U, and the host never records.
+        s.set_navigation(false, false);
+        s.begin(Kind::Movie);
+        assert_eq!(s.destinations(), [Destination::Live], "kept across begin");
+        s.browse_horizontal(-1);
+        assert_eq!(s.control, Control::Navigation);
+        assert_eq!(s.destination, Destination::Live, "not the hidden Movies");
+        s.browse_vertical(1);
+        assert_eq!(s.destination, Destination::Live);
+        // An Xtream playlist arrives: Movies and Shows come back.
+        s.set_navigation(true, false);
+        s.browse_vertical(1);
+        assert_eq!(s.destination, Destination::Movies);
+        s.browse_vertical(5);
+        assert_eq!(s.destination, Destination::Shows, "no Recordings");
+        // And go again with the remote on them.
+        s.set_navigation(false, true);
+        assert_eq!(s.destination, Destination::Live);
+        s.browse_vertical(1);
+        assert_eq!(s.destination, Destination::Recordings);
     }
 }

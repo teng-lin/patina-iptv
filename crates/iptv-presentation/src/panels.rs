@@ -73,12 +73,13 @@ pub enum Control {
     Scaling,
     SleepTimer,
     Favorite,
-    ChannelOptions,
-    Settings,
     Record,
 }
 
-pub const CONTROLS: [Control; 15] = [
+// [`Panels`] keeps the controls it leaves out as a `u16` mask.
+const _: () = assert!(CONTROLS.len() <= 16 && QUICK_ACTIONS.len() <= 16);
+
+pub const CONTROLS: [Control; 13] = [
     Control::Search,
     Control::ChannelList,
     Control::Recordings,
@@ -91,10 +92,26 @@ pub const CONTROLS: [Control; 15] = [
     Control::Scaling,
     Control::SleepTimer,
     Control::Favorite,
-    Control::ChannelOptions,
-    Control::Settings,
     Control::Record,
 ];
+
+/// The first index below `len` in `step`'s direction from `from`
+/// (exclusive) that `omitted` (a mask by index) does not leave out.
+fn next_offered(omitted: u16, len: usize, from: usize, step: isize) -> Option<usize> {
+    if step == 0 {
+        return None;
+    }
+    let mut at = from as isize;
+    loop {
+        at += step.signum();
+        if at < 0 || at as usize >= len {
+            return None;
+        }
+        if omitted & (1 << at) == 0 {
+            return Some(at as usize);
+        }
+    }
+}
 
 /// The one time line a panel shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,13 +165,13 @@ pub struct Panels {
     /// Index into [`QUICK_ACTIONS`] of the focused action card; none until
     /// Left or Right reaches the row.
     pub quick: Option<usize>,
-    /// Index into [`Panels::controls`] of the focused control.
+    /// Index into [`CONTROLS`] of the focused control: always one the
+    /// strip offers ([`Self::offer`]).
     pub focus: usize,
+    /// Controls the host can never offer, by their [`CONTROLS`] index: the
+    /// strip leaves them out rather than drawing them disabled.
+    omitted: u16,
     pub timeouts: Timeouts,
-    /// The strip offers [`Control::PictureInPicture`]: the host can open
-    /// the window ([`Panels::offer_pip`]). Elsewhere (a TV, the iPad, a
-    /// browser TV) the strip has no such control at all.
-    pip: bool,
     /// The mouse showed (or last kept) them.
     by_pointer: bool,
     hide_at_ms: Option<u64>,
@@ -170,8 +187,8 @@ impl Default for Panels {
             shown: Shown::Hidden,
             quick: None,
             focus: 0,
+            omitted: 0,
             timeouts: Timeouts::default(),
-            pip: false,
             by_pointer: false,
             hide_at_ms: None,
             hold: None,
@@ -195,7 +212,7 @@ impl Panels {
     /// control unless it was already open.
     pub fn show_controls(&mut self, now_ms: u64) {
         if self.shown != Shown::Controls {
-            self.focus = 0;
+            self.focus = self.first_offered();
         }
         self.shown = Shown::Controls;
         self.by_pointer = false;
@@ -241,7 +258,7 @@ impl Panels {
     pub fn hide(&mut self) {
         self.shown = Shown::Hidden;
         self.quick = None;
-        self.focus = 0;
+        self.focus = self.first_offered();
         self.by_pointer = false;
         self.hide_at_ms = None;
         self.hold = None;
@@ -267,29 +284,82 @@ impl Panels {
         }
     }
 
-    /// The strip's controls, in order: [`CONTROLS`] less picture in
-    /// picture where the host has none.
+    pub fn focused(&self) -> Control {
+        CONTROLS[self.focus]
+    }
+
+    /// Says which controls the strip shows: the rest are left out, as
+    /// controls the host can never offer. A focused control that is left
+    /// out passes the focus to the nearest one shown.
+    pub fn offer(&mut self, offered: impl Fn(Control) -> bool) {
+        self.omitted = CONTROLS
+            .iter()
+            .enumerate()
+            .filter(|&(_, &control)| !offered(control))
+            .fold(0, |mask, (at, _)| mask | (1 << at));
+        if self.omitted & (1 << self.focus) != 0 {
+            self.focus = next_offered(self.omitted, CONTROLS.len(), self.focus, -1)
+                .or_else(|| next_offered(self.omitted, CONTROLS.len(), self.focus, 1))
+                .unwrap_or(0);
+        }
+        let quick = self.quick_omitted();
+        if let Some(at) = self.quick
+            && quick & (1 << at) != 0
+        {
+            self.quick = next_offered(quick, QUICK_ACTIONS.len(), at, -1)
+                .or_else(|| next_offered(quick, QUICK_ACTIONS.len(), at, 1));
+        }
+    }
+
+    /// Whether the action cards show `action`: Multiview only where the
+    /// strip offers it ([`Self::offer`]).
+    pub fn offers_quick(&self, action: QuickAction) -> bool {
+        match action {
+            QuickAction::Multiview => self.offers(Control::Multiview),
+            _ => true,
+        }
+    }
+
+    fn offers(&self, control: Control) -> bool {
+        CONTROLS
+            .iter()
+            .position(|&c| c == control)
+            .is_some_and(|at| self.omitted & (1 << at) == 0)
+    }
+
+    /// The action cards left out, by their [`QUICK_ACTIONS`] index.
+    fn quick_omitted(&self) -> u16 {
+        QUICK_ACTIONS
+            .iter()
+            .enumerate()
+            .filter(|&(_, &action)| !self.offers_quick(action))
+            .fold(0, |mask, (at, _)| mask | (1 << at))
+    }
+
+    /// The controls the strip shows, in order.
     pub fn controls(&self) -> impl Iterator<Item = Control> + '_ {
         CONTROLS
-            .into_iter()
-            .filter(|c| self.pip || *c != Control::PictureInPicture)
+            .iter()
+            .enumerate()
+            .filter(|&(at, _)| self.omitted & (1 << at) == 0)
+            .map(|(_, &control)| control)
     }
 
-    /// Whether the strip offers picture in picture (the host reports it
-    /// can open the window). The focused control stays focused.
-    pub fn offer_pip(&mut self, offered: bool) {
-        if self.pip == offered {
-            return;
+    /// A pointer or touch focused `control` (if the strip shows it).
+    pub fn focus_control(&mut self, control: Control) {
+        if let Some(at) = CONTROLS.iter().position(|&c| c == control)
+            && self.omitted & (1 << at) == 0
+        {
+            self.focus = at;
         }
-        let focused = self.focused();
-        self.pip = offered;
-        let count = self.controls().count();
-        let at = self.controls().position(|c| c == focused);
-        self.focus = at.unwrap_or(self.focus.min(count - 1));
     }
 
-    pub fn focused(&self) -> Control {
-        self.controls().nth(self.focus).unwrap_or(Control::Search)
+    fn first_offered(&self) -> usize {
+        if self.omitted & 1 == 0 {
+            0
+        } else {
+            next_offered(self.omitted, CONTROLS.len(), 0, 1).unwrap_or(0)
+        }
     }
 
     pub fn quick_focused(&self) -> Option<QuickAction> {
@@ -299,13 +369,29 @@ impl Panels {
     /// Moves focus within the row that has it (clamped, no wrap); the
     /// first press over the card focuses its first action.
     pub fn move_focus(&mut self, step: isize, now_ms: u64) {
-        let clamp =
-            |at: usize, len: usize| (at as isize + step).clamp(0, len as isize - 1) as usize;
         match self.shown {
-            Shown::Card => {
-                self.quick = Some(self.quick.map_or(0, |at| clamp(at, QUICK_ACTIONS.len())));
+            // Guide, the first card, is always offered.
+            Shown::Card => match self.quick {
+                None => self.quick = Some(0),
+                Some(mut at) => {
+                    let quick = self.quick_omitted();
+                    for _ in 0..step.unsigned_abs() {
+                        match next_offered(quick, QUICK_ACTIONS.len(), at, step) {
+                            Some(next) => at = next,
+                            None => break,
+                        }
+                    }
+                    self.quick = Some(at);
+                }
+            },
+            Shown::Controls => {
+                for _ in 0..step.unsigned_abs() {
+                    match next_offered(self.omitted, CONTROLS.len(), self.focus, step) {
+                        Some(at) => self.focus = at,
+                        None => break,
+                    }
+                }
             }
-            Shown::Controls => self.focus = clamp(self.focus, self.controls().count()),
             Shown::Hidden | Shown::Banner | Shown::Info => {}
         }
         self.by_pointer = false;

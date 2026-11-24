@@ -19,16 +19,13 @@ pub enum MenuItem {
     Settings,
     // Program.
     StartFromBeginning,
-    ExternalPlayer,
     WatchInNewWindow,
-    Reminder,
     Record,
     ScheduleRecording,
     RecordNow,
     CancelRecording,
     StopRecording,
     CustomRecording,
-    SaveToList,
     Description,
     // Channel.
     ToggleFavorite,
@@ -183,16 +180,16 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
     use MenuItem::*;
     let in_archive = program.can_replay(now, catchup_days);
     let mut items = match program.airing(now) {
-        Airing::Live if in_archive => vec![StartFromBeginning, ExternalPlayer, Record],
-        Airing::Live => vec![ExternalPlayer, Record],
-        Airing::Ended if in_archive => vec![StartFromBeginning, ExternalPlayer],
+        Airing::Live if in_archive => vec![StartFromBeginning, Record],
+        Airing::Live => vec![Record],
+        Airing::Ended if in_archive => vec![StartFromBeginning],
         Airing::Ended => vec![],
-        Airing::Upcoming => vec![Reminder, ScheduleRecording],
+        Airing::Upcoming => vec![ScheduleRecording],
     };
     if program.airing(now) != Airing::Upcoming {
         items.push(CustomRecording);
     }
-    items.extend([SaveToList, Description]);
+    items.push(Description);
     items
 }
 
@@ -405,54 +402,32 @@ mod tests {
     fn program_actions_follow_the_observed_matrix() {
         assert_eq!(
             program_actions(LIVE, 3, 0),
-            [
-                StartFromBeginning,
-                ExternalPlayer,
-                Record,
-                CustomRecording,
-                SaveToList,
-                Description
-            ]
+            [StartFromBeginning, Record, CustomRecording, Description]
         );
         assert_eq!(
             program_actions(LIVE, 0, 0),
-            [
-                ExternalPlayer,
-                Record,
-                CustomRecording,
-                SaveToList,
-                Description
-            ]
+            [Record, CustomRecording, Description]
         );
         assert_eq!(
             program_actions(ENDED, 3, 0),
-            [
-                StartFromBeginning,
-                ExternalPlayer,
-                CustomRecording,
-                SaveToList,
-                Description
-            ]
+            [StartFromBeginning, CustomRecording, Description]
         );
-        assert_eq!(
-            program_actions(ENDED, 0, 0),
-            [CustomRecording, SaveToList, Description]
-        );
+        assert_eq!(program_actions(ENDED, 0, 0), [CustomRecording, Description]);
         assert_eq!(
             program_actions(FUTURE, 3, 0),
-            [Reminder, ScheduleRecording, SaveToList, Description]
+            [ScheduleRecording, Description]
         );
     }
 
     #[test]
     fn actions_follow_the_guide_now() {
         let p = Program { start: 30, end: 60 };
-        assert_eq!(program_actions(p, 3, 0)[0], Reminder);
+        assert_eq!(program_actions(p, 3, 0)[0], ScheduleRecording);
         assert_eq!(program_actions(p, 3, 45)[0], StartFromBeginning);
         assert!(program_actions(p, 0, 45).contains(&Record));
         assert_eq!(
             program_actions(p, 0, 90),
-            [CustomRecording, SaveToList, Description],
+            [CustomRecording, Description],
             "ended, no archive"
         );
     }

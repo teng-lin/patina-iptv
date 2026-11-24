@@ -151,7 +151,9 @@ fn native_pip_reports_remove_and_restore_the_control_without_reopening_playback(
         if supported && !tv {
             step(app.wait_for(PIP));
         } else {
-            step(app.wait_for_gone("text:/^Picture in picture/", Duration::from_secs(3)));
+            // A host that cannot offer it, or a TV, gets no permanently
+            // disabled control: the strip leaves it out.
+            step(app.wait_for_gone(PIP, Duration::from_secs(3)));
             assert!(
                 !app.screen()
                     .shows("Picture in picture is unavailable on this device"),

@@ -192,6 +192,78 @@ fn reopening_starts_at_the_first_control_and_no_card() {
 }
 
 #[test]
+fn controls_the_host_never_offers_are_left_out_of_the_strip_and_its_focus() {
+    let never = |c| {
+        !matches!(
+            c,
+            Control::Recordings | Control::Multiview | Control::Record
+        )
+    };
+    let mut p = Panels::default();
+    p.offer(never);
+    assert_eq!(
+        p.controls().collect::<Vec<_>>(),
+        [
+            Control::Search,
+            Control::ChannelList,
+            Control::PictureInPicture,
+            Control::VideoTracks,
+            Control::AudioTracks,
+            Control::AudioOffset,
+            Control::Captions,
+            Control::Scaling,
+            Control::SleepTimer,
+            Control::Favorite,
+        ]
+    );
+    p.show_controls(0);
+    p.move_focus(2, 1);
+    assert_eq!(p.select(2), Pick::Control(Control::PictureInPicture));
+    p.move_focus(-1, 3);
+    assert_eq!(p.focused(), Control::ChannelList, "steps over the omitted");
+    p.move_focus(99, 4);
+    assert_eq!(p.focused(), Control::Favorite, "the last shown, not Record");
+    p.focus_control(Control::Record);
+    assert_eq!(
+        p.focused(),
+        Control::Favorite,
+        "an omitted control takes no focus"
+    );
+
+    // Losing the focused control passes the focus to its neighbor, and a
+    // strip without its first control opens on the first one shown.
+    p.focus_control(Control::Captions);
+    p.offer(|c| c != Control::Captions && c != Control::Search);
+    assert_eq!(p.focused(), Control::AudioOffset);
+    p.hide();
+    p.show_controls(5);
+    assert_eq!(p.focused(), Control::ChannelList);
+}
+
+#[test]
+fn the_multiview_card_follows_the_strip() {
+    let mut p = Panels::default();
+    p.show_card(0);
+    p.move_focus(1, 1);
+    p.move_focus(4, 2);
+    assert_eq!(p.quick_focused(), Some(QuickAction::Multiview));
+    // The host can never offer it: the card goes and takes no focus.
+    p.offer(|c| c != Control::Multiview);
+    assert!(!p.offers_quick(QuickAction::Multiview));
+    assert_eq!(p.quick_focused(), Some(QuickAction::Favorite));
+    p.move_focus(1, 3);
+    assert_eq!(
+        p.quick_focused(),
+        Some(QuickAction::Controls),
+        "steps over it"
+    );
+    p.move_focus(-1, 4);
+    assert_eq!(p.quick_focused(), Some(QuickAction::Favorite));
+    p.offer(|_| true);
+    assert!(p.offers_quick(QuickAction::Multiview));
+}
+
+#[test]
 fn a_held_key_keeps_the_card_until_its_press_is_decided() {
     let mut p = Panels::default();
     p.timeouts.controls_ms = 1_000;
@@ -231,26 +303,4 @@ fn input_during_a_hold_does_not_pull_its_deadline_in() {
     p.keep_until(9_000);
     p.show_controls(3_100);
     assert_eq!(p.hide_at_ms(), Some(4_100));
-}
-
-#[test]
-fn the_strip_has_picture_in_picture_only_where_the_host_offers_it() {
-    let mut p = Panels::default();
-    assert!(
-        !p.controls().any(|c| c == Control::PictureInPicture),
-        "nothing offered yet: no placeholder"
-    );
-    assert_eq!(p.controls().count(), CONTROLS.len() - 1);
-    p.show_controls(0);
-    p.move_focus(4, 1);
-    assert_eq!(p.focused(), Control::VideoTracks);
-    p.offer_pip(true);
-    assert_eq!(p.controls().count(), CONTROLS.len());
-    assert_eq!(p.focused(), Control::VideoTracks, "the focus stays put");
-    p.move_focus(-1, 2);
-    assert_eq!(p.select(3), Pick::Control(Control::PictureInPicture));
-    p.offer_pip(false);
-    assert_eq!(p.focused(), Control::VideoTracks, "the gone control's next");
-    p.move_focus(99, 4);
-    assert_eq!(p.focused(), Control::Record);
 }

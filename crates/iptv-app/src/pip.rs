@@ -75,7 +75,8 @@ pub fn ui_shown(ui: Ui) -> bool {
 }
 
 /// Whether this device has the window at all (reading subscribes): the
-/// play bar and the control strip show its button only then.
+/// play bar shows its button only then, and the control strip once the
+/// host reported (`player_panels::offered`).
 pub fn supported(ui: Ui) -> bool {
     ui.pip.with(|p| p.supported)
 }
@@ -89,11 +90,6 @@ pub fn can_enter(ui: Ui) -> bool {
 /// The desktops: their window can (Android's host reports its own), and
 /// closes when nothing plays any more or multiview opens.
 pub fn bind(ui: Ui) {
-    // The strip has the control only where the host can open the window.
-    effect(move || {
-        let offered = supported(ui);
-        untracked(|| ui.panels.update(|p| p.offer_pip(offered)));
-    });
     if !crate::desktop::DESKTOP {
         // Android reports through its persistent player. Other hosts have no
         // native PiP implementation to acknowledge availability later.
