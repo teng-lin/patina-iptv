@@ -1,118 +1,12 @@
 name: Android smoke
 on:
-  workflow_call:
-    inputs:
-      lto:
-        description: LTO setting for the x86_64 smoke APK
-        type: string
-        default: 'off'
   workflow_dispatch:
-    inputs:
-      cold:
-        description: Build without restoring apt, NSH, Gradle or Rust caches
-        type: boolean
-        default: false
-      lto:
-        description: LTO setting for the x86_64 smoke APK
-        type: choice
-        options: ['off', thin]
-        default: 'off'
-
-concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('android-smoke-pr-{0}', github.event.pull_request.number) || format('android-smoke-run-{0}', github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
-# Launches the app on a tablet and a TV emulator and drives it with remote keys
-# (tools/ci/android-smoke.sh): first run, the synthetic playlist, a channel in
-# the guide, full screen, multiview, background and resume. Path-filtered and
-# selected by the required Validation aggregate.
 jobs:
-  build:
+  seed:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    env:
-      PATINA_SMOKE_LTO: ${{ inputs.lto || 'off' }}
-      PATINA_SMOKE_CODEGEN_UNITS: '16'
-      PATINA_SMOKE_DEBUG_ASSERTIONS: 'true'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        timeout-minutes: 25
-        with:
-          prerequisites: android-smoke
-          cache: ${{ inputs.cold && 'false' || 'true' }}
-          cargo-cache: 'false'
-      - uses: ./.github/actions/android
-        with:
-          abi: x86_64
-          cache: ${{ !inputs.cold && 'gradle' || '' }}
-      - name: Identify the Android compiler and host libraries
-        id: compiler
-        shell: bash
-        run: |
-          case "$PATINA_SMOKE_LTO" in off|thin) ;; *) echo 'Expected off or thin LTO' >&2; exit 2 ;; esac
-          compiler=$(rustc -vV)
-          host_compiler=$(cc --version)
-          ndk=$(cat "$ANDROID_NDK_HOME/source.properties")
-          libraries=$(dpkg-query -W libc6-dev libgtk-4-dev libssl-dev libdbus-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libmpv2)
-          identity=$({
-            printf '%s\n' "$compiler" "$host_compiler" "$ndk" "$libraries" "$PATINA_SMOKE_LTO" "${ImageOS:-}"
-            printf '%s\n' "$PATINA_SMOKE_CODEGEN_UNITS" "$PATINA_SMOKE_DEBUG_ASSERTIONS"
-          } | sha256sum | cut -c1-16)
-          echo "key=$identity" >> "$GITHUB_OUTPUT"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: inputs.cold != true
-        with:
-          key: android-smoke-x86_64-v5-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', 'tools/sync-host.sh', 'tools/ci/locked-cargo.py', 'tools/ci/android-ndk-env.sh', '.cargo/config.toml') }}
-          # The checked-in runner lock supplies the identity before NSH generates
-          # the workspace. At save time its graph retains Android-only crates.
-          add-rust-environment-hash-key: 'false'
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-          cache-bin: 'false'
-          workspaces: crates/iptv-app/.nsh/rust -> ../../../../target
-      # A debug APK for x86_64 emulators whose wizard starts with the mock
-      # server's playlist; debug assertions let it reach that private address.
-      - name: Build the development APK
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target
-          ABIS: x86_64
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ env.PATINA_SMOKE_CODEGEN_UNITS }}
-          CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: ${{ env.PATINA_SMOKE_DEBUG_ASSERTIONS }}
-          CARGO_PROFILE_RELEASE_LTO: ${{ env.PATINA_SMOKE_LTO }}
-          IPTV_VALIDATION_APP_ID: com.hantekllc.iptvrs.validation
-          IPTV_RS_DEV_PLAYLIST: http://10.0.2.2:8089/iptv/playlist.m3u
-          IPTV_CARGO_TIMINGS: '1'
-          NSH_VERBOSE: '1'
-        run: |
-          bash tools/sync-host.sh
-          (cd hosts/android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug)
-      - name: Rust compilation and linking timings
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: rust-timings-android-smoke
-          path: target/cargo-timings/*.html
-          if-no-files-found: warn
-          retention-days: 7
-      - name: Generate the synthetic fixtures
-        run: |
-          bash tools/make-hls-fixtures.sh --android-smoke
-          python3 -I tools/make-iptv-fixtures.py --channels 300
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: android-smoke-input
-          path: |
-            hosts/android/app/build/outputs/apk/debug/app-debug.apk
-            fixtures/hls
-          if-no-files-found: error
-          retention-days: 3
-  smoke:
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -124,61 +18,82 @@ jobs:
             target: android-tv
             profile: tv_1080p
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: android-smoke-input
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
             sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Serve the fixtures
-        run: |
-          python3 -I tools/ci/test-adb-timeout.py
-          mkdir -p target
-          nohup python3 tools/mock-server.py 8089 fixtures/hls > target/mock-server.log 2>&1 &
-          for _ in $(seq 1 20); do
-            curl -sf -o /dev/null http://127.0.0.1:8089/iptv/playlist.m3u && exit 0
-            sleep 0.5
-          done
-          exit 1
-      - name: Smoke test on the ${{ matrix.form }} emulator
-        timeout-minutes: 20
+      - name: Boot emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
-        env:
-          IPTV_SMOKE_OUT: target/android-smoke
-          IPTV_SMOKE_SETTLE: 45
-          IPTV_SMOKE_DISPOSABLE_AVD: patina-validation-ci
         with:
           avd-name: patina-validation-ci
           api-level: 36
           target: ${{ matrix.target }}
           arch: x86_64
           profile: ${{ matrix.profile }}
+          disable-animations: true
+          emulator-boot-timeout: 180
           ram-size: 4096M
           disk-size: 4096M
           force-avd-creation: true
-          disable-animations: true
-          emulator-options: -no-window -no-snapshot -no-audio -no-boot-anim -gpu swiftshader
-          # If the emulator's own system dies (not the app: the script fails
-          # at once on an app crash), reboot it and run once more.
-          script: >-
-            bash tools/ci/android-smoke.sh emulator-5554 hosts/android/app/build/outputs/apk/debug/app-debug.apk || {
-            grep -q DeadSystemException target/android-smoke/crash.log &&
-            echo "emulator system died; rebooting for one more run" &&
-            python3 tools/ci/android/adb.py --phase "system recovery" --category reboot --timeout 30 -- adb -s emulator-5554 reboot &&
-            python3 tools/ci/android/adb.py --phase "system recovery" --category wait-for-device --timeout 120 -- adb -s emulator-5554 wait-for-device &&
-            bash tools/ci/android-smoke.sh emulator-5554 hosts/android/app/build/outputs/apk/debug/app-debug.apk;
-            }
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot-load
+          script: test -z "$(adb -s emulator-5554 shell pm list packages com.hantekllc.iptvrs.validation)"
+      - name: Pack pristine snapshot
+        timeout-minutes: 2
+        run: |
+          cd "$HOME/.android/avd"
+          while fuser -s patina-validation-ci.avd/multiinstance.lock; do sleep 1; done
+          test -s patina-validation-ci.avd/snapshots/default_boot/snapshot.pb
+          tar --sparse -cf - patina-validation-ci.ini patina-validation-ci.avd |
+            zstd -1 -T2 -o "$GITHUB_WORKSPACE/avd.tar.zst"
+          stat -c 'Compressed snapshot size %s bytes' "$GITHUB_WORKSPACE/avd.tar.zst"
+      - name: Upload pristine snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: android-smoke-${{ matrix.form }}
-          path: |
-            target/android-smoke
-            target/mock-server.log
-          if-no-files-found: ignore
+          name: avd-trial-${{ matrix.form }}
+          path: avd.tar.zst
+          compression-level: 0
+          retention-days: 1
+  warm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: seed
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - form: tablet
+            target: google_apis
+            profile: pixel_tablet
+          - form: tv
+            target: android-tv
+            profile: tv_1080p
+    steps:
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+            sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Download pristine snapshot
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: avd-trial-${{ matrix.form }}
+      - name: Unpack snapshot
+        run: |
+          mkdir -p "$HOME/.android/avd"
+          zstd -d -c avd.tar.zst | tar -C "$HOME/.android/avd" -xf -
+      - name: Boot emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          avd-name: patina-validation-ci
+          api-level: 36
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: ${{ matrix.profile }}
+          disable-animations: true
+          emulator-boot-timeout: 180
+          force-avd-creation: false
+          emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot-save
+          script: test -z "$(adb -s emulator-5554 shell pm list packages com.hantekllc.iptvrs.validation)"
