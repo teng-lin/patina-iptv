@@ -184,11 +184,10 @@ pub fn program_actions(program: Program, catchup_days: u8, now: i32) -> Vec<Menu
         Airing::Live => vec![Record],
         Airing::Ended if in_archive => vec![StartFromBeginning],
         Airing::Ended => vec![],
-        Airing::Upcoming => vec![ScheduleRecording],
+        // Recording a future program is retired (#273): no Schedule recording
+        // or Schedule a recording… here. `Record` starts recording now.
+        Airing::Upcoming => vec![],
     };
-    if program.airing(now) != Airing::Upcoming {
-        items.push(CustomRecording);
-    }
     items.push(Description);
     items
 }
@@ -402,32 +401,37 @@ mod tests {
     fn program_actions_follow_the_observed_matrix() {
         assert_eq!(
             program_actions(LIVE, 3, 0),
-            [StartFromBeginning, Record, CustomRecording, Description]
+            [StartFromBeginning, Record, Description]
         );
-        assert_eq!(
-            program_actions(LIVE, 0, 0),
-            [Record, CustomRecording, Description]
-        );
+        assert_eq!(program_actions(LIVE, 0, 0), [Record, Description]);
         assert_eq!(
             program_actions(ENDED, 3, 0),
-            [StartFromBeginning, CustomRecording, Description]
+            [StartFromBeginning, Description]
         );
-        assert_eq!(program_actions(ENDED, 0, 0), [CustomRecording, Description]);
-        assert_eq!(
-            program_actions(FUTURE, 3, 0),
-            [ScheduleRecording, Description]
-        );
+        assert_eq!(program_actions(ENDED, 0, 0), [Description]);
+        assert_eq!(program_actions(FUTURE, 3, 0), [Description]);
+    }
+
+    #[test]
+    fn no_program_action_schedules_a_future_recording() {
+        for program in [LIVE, ENDED, FUTURE] {
+            for days in [0, 3] {
+                let items = program_actions(program, days, 0);
+                assert!(!items.contains(&ScheduleRecording), "{program:?}");
+                assert!(!items.contains(&CustomRecording), "{program:?}");
+            }
+        }
     }
 
     #[test]
     fn actions_follow_the_guide_now() {
         let p = Program { start: 30, end: 60 };
-        assert_eq!(program_actions(p, 3, 0)[0], ScheduleRecording);
+        assert_eq!(program_actions(p, 3, 0), [Description], "upcoming");
         assert_eq!(program_actions(p, 3, 45)[0], StartFromBeginning);
         assert!(program_actions(p, 0, 45).contains(&Record));
         assert_eq!(
             program_actions(p, 0, 90),
-            [CustomRecording, Description],
+            [Description],
             "ended, no archive"
         );
     }

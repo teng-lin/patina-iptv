@@ -15,7 +15,6 @@ fn control(
         .role(AccessibilityRole::Button)
         .label(move || {
             let label = match action {
-                "Edit recording" => tr("Edit recording"),
                 "Cancel recording" => tr("Cancel recording"),
                 "Stop recording" => tr("Stop recording"),
                 _ => tr("Delete recording"),
@@ -170,12 +169,7 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                 )
                 .child(when(
                     move || job().is_some_and(|j| j.status == Status::Scheduled),
-                    move || {
-                        view()
-                            .flex_row()
-                            .child(control(ui, size, job, Icon::Edit, "Edit recording"))
-                            .child(control(ui, size, job, Icon::Close, "Cancel recording"))
-                    },
+                    move || control(ui, size, job, Icon::Close, "Cancel recording"),
                 ))
                 .child(when(
                     move || job().is_some_and(|j| j.status == Status::Recording),
