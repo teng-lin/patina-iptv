@@ -1,6 +1,9 @@
 package com.hantekllc.iptvrs.host
 
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
@@ -38,21 +41,26 @@ class ExternalPlayerProbeTest {
      * other player from the probe, and the option would never appear. */
     @Test fun theManifestMakesThePlayersOfTheHandoffVisible() {
         val android = "http://schemas.android.com/apk/res/android"
-        val manifest = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
-            .newDocumentBuilder().parse(File("src/main/AndroidManifest.xml"))
+        val manifest =
+            DocumentBuilderFactory
+                .newInstance()
+                .apply { isNamespaceAware = true }
+                .newDocumentBuilder()
+                .parse(File("src/main/AndroidManifest.xml"))
         val queries = manifest.getElementsByTagName("queries").item(0) as org.w3c.dom.Element
         val intents = queries.getElementsByTagName("intent")
-        val visible = (0 until intents.length).any { index ->
-            val intent = intents.item(index) as org.w3c.dom.Element
-            val action = intent.getElementsByTagName("action").item(0) as org.w3c.dom.Element?
-            val data = intent.getElementsByTagName("data")
-            action?.getAttributeNS(android, "name") == "android.intent.action.VIEW" &&
-                (0 until data.length).any {
-                    val element = data.item(it) as org.w3c.dom.Element
-                    element.getAttributeNS(android, "scheme") == ExternalPlayerHost.SCHEME &&
-                        element.getAttributeNS(android, "mimeType") == ExternalPlayerHost.MIME_TYPE
-                }
-        }
+        val visible =
+            (0 until intents.length).any { index ->
+                val intent = intents.item(index) as org.w3c.dom.Element
+                val action = intent.getElementsByTagName("action").item(0) as org.w3c.dom.Element?
+                val data = intent.getElementsByTagName("data")
+                action?.getAttributeNS(android, "name") == "android.intent.action.VIEW" &&
+                    (0 until data.length).any {
+                        val element = data.item(it) as org.w3c.dom.Element
+                        element.getAttributeNS(android, "scheme") == ExternalPlayerHost.SCHEME &&
+                            element.getAttributeNS(android, "mimeType") == ExternalPlayerHost.MIME_TYPE
+                    }
+            }
         assertTrue(visible)
     }
 }

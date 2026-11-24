@@ -48,21 +48,24 @@ internal object ExternalPlayerHost {
         return try {
             val video = video(uri)
             val players = players(context, video)
-            val default = context.packageManager
-                .resolveActivity(video, PackageManager.MATCH_DEFAULT_ONLY)
-                ?.activityInfo
-                ?.let { ComponentName(it.packageName, it.name) }
-            val launch = when (val target = target(players, default)) {
-                // Android TV images resolve the chooser and the resolver to
-                // framework stubs that only say no app can do this, so one
-                // player, or the viewer's default, is started directly.
-                null -> {
-                    if (players.isEmpty()) return false
-                    Intent.createChooser(video, null)
-                        .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, stubs(context, video).toTypedArray())
+            val default =
+                context.packageManager
+                    .resolveActivity(video, PackageManager.MATCH_DEFAULT_ONLY)
+                    ?.activityInfo
+                    ?.let { ComponentName(it.packageName, it.name) }
+            val launch =
+                when (val target = target(players, default)) {
+                    // Android TV images resolve the chooser and the resolver to
+                    // framework stubs that only say no app can do this, so one
+                    // player, or the viewer's default, is started directly.
+                    null -> {
+                        if (players.isEmpty()) return false
+                        Intent
+                            .createChooser(video, null)
+                            .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, stubs(context, video).toTypedArray())
+                    }
+                    else -> video.setComponent(target)
                 }
-                else -> video.setComponent(target)
-            }
             // Started while Patina is still in the foreground, as Android
             // requires; a failed start leaves nothing to release.
             ExternalPlaybackService.hold(context)
@@ -87,16 +90,23 @@ internal object ExternalPlayerHost {
 
     private fun video(uri: Uri) = Intent(Intent.ACTION_VIEW).setDataAndType(uri, MIME_TYPE)
 
-    private fun handlers(context: Context, video: Intent): List<ComponentName> =
+    private fun handlers(
+        context: Context,
+        video: Intent,
+    ): List<ComponentName> =
         context.packageManager
             .queryIntentActivities(video, PackageManager.MATCH_DEFAULT_ONLY)
             .mapNotNull { it.activityInfo?.let { info -> ComponentName(info.packageName, info.name) } }
 
-    private fun players(context: Context, video: Intent): List<ComponentName> =
-        handlers(context, video).filter { player(it.packageName, context.packageName) }
+    private fun players(
+        context: Context,
+        video: Intent,
+    ): List<ComponentName> = handlers(context, video).filter { player(it.packageName, context.packageName) }
 
-    private fun stubs(context: Context, video: Intent): List<ComponentName> =
-        handlers(context, video).filter { stub(it.packageName) }
+    private fun stubs(
+        context: Context,
+        video: Intent,
+    ): List<ComponentName> = handlers(context, video).filter { stub(it.packageName) }
 
     /** The framework package stubs (AOSP's `FrameworkPackageStubs`, on
      * Android TV and some other images) answer every view intent with a
@@ -108,11 +118,17 @@ internal object ExternalPlayerHost {
 
     /** Only another app that plays video counts: a handoff never comes back
      * to Patina, and a framework stub plays nothing. */
-    fun player(handler: String, own: String): Boolean = handler != own && !stub(handler)
+    fun player(
+        handler: String,
+        own: String,
+    ): Boolean = handler != own && !stub(handler)
 
     /** The player to start directly: the viewer's default when it is one of
      * [players], else the only one; null leaves the choice to the chooser. */
-    fun <T> target(players: List<T>, default: T?): T? =
+    fun <T> target(
+        players: List<T>,
+        default: T?,
+    ): T? =
         when {
             default != null && default in players -> default
             players.size == 1 -> players[0]
