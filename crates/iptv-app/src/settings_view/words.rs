@@ -232,6 +232,7 @@ pub fn label(key: &str) -> &'static str {
         "player.guide_button" => tr("Guide button"),
         "player.pip_on_leave" => tr("Picture in picture when leaving"),
         "player.sound_follows_tile" => tr("Sound follows the selected tile"),
+        "playback.swipe_to_zap" => tr("Swipe to change channel"),
         "playback.video_decoder" => tr("Video decoding"),
         "playback.audio_decoder" => tr("Audio decoding"),
         "playback.tunneling" => tr("Tunneled video"),

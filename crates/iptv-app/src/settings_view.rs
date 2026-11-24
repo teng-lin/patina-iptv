@@ -590,8 +590,9 @@ mod tests {
         let playback = PAGES.iter().find(|p| p.key == "playback").unwrap();
         let (active, _) = counts(playback);
         // Panel timeouts, channel-change info, multiview's sound following
-        // the selected tile, seek keys and three steps.
-        assert_eq!(active, 8);
+        // the selected tile, seek keys, three steps and swiping to change
+        // channel.
+        assert_eq!(active, 9);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
         // Only the two enable switches and PIN command are visible by default;
         // dependent preferences appear after live or VOD protection is enabled.

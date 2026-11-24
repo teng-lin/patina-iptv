@@ -225,6 +225,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ),
         ("player.sound_follows_tile", boolean(false), GL, ""),
         // Playback.
+        ("playback.swipe_to_zap", boolean(true), GL, ""),
         (
             "playback.video_decoder",
             choice(&c::DECODER, "hardware"),

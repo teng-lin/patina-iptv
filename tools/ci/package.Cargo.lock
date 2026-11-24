@@ -2954,6 +2954,7 @@ dependencies = [
  "iptv-providers",
  "iptv-settings",
  "serde_json",
+ "url",
 ]
 
 [[package]]
