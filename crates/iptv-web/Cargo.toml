@@ -12,7 +12,9 @@ default = ["bridge"]
 # The Live TV bridge (the frozen JavaScript host's application: `app`,
 # `store` and the `command` export). An application on the real runtime
 # takes only the adapters and their delivery exports, without it.
-bridge = ["dep:iptv-nav", "dep:iptv-presentation"]
+# Its messages are package files (`i18n/<tag>.tsv`, hosts/tizen/build.sh),
+# read through `package` when a language is first shown.
+bridge = ["dep:iptv-nav", "dep:iptv-presentation", "iptv-presentation/external-catalog"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
