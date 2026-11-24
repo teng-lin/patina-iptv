@@ -77,6 +77,17 @@ class FavoritesAccessibility(unittest.TestCase):
         tree[1].set("selected", "false")
         self.assertTrue(UI.selected(tree, "Manage favorites…"))
 
+    def test_selection_and_editor_observations_fail_closed_until_ready(self):
+        for tree in (self.tree(), self.tree({"selected": "true", "content-desc": "Generated one"},
+                                          {"selected": "true", "content-desc": "Generated two"})):
+            with self.assertRaises(ValueError):
+                UI.selected_label(tree)
+        self.assertEqual(UI.selected_label(self.tree({"selected": "true", "content-desc": "Search"})), "Search")
+        self.assertFalse(UI.editor_closed(self.tree()))
+        self.assertFalse(UI.editor_closed(self.tree({"text": "Favorites · Generated · 0 of 3"})))
+        self.assertFalse(UI.editor_closed(self.tree({"text": UI.CONFIRMATION})))
+        self.assertTrue(UI.editor_closed(self.tree({"text": "Generated guide channel"})))
+
     def test_touch_uses_enabled_button_bounds_not_its_child_text(self):
         tree = self.tree({"content-desc": "Cancel", "clickable": "true", "enabled": "true", "bounds": "[40,80][240,180]"},
                          {"text": "Cancel", "clickable": "false", "enabled": "true", "bounds": "[80,100][160,160]"})
@@ -105,6 +116,52 @@ class FavoritesAccessibility(unittest.TestCase):
     def test_confirmation_is_distinct_from_toolbar_remove_all(self):
         self.assertFalse(UI.confirmation_open(self.tree({"content-desc": "Remove all"})))
         self.assertTrue(UI.confirmation_open(self.tree({"text": UI.CONFIRMATION})))
+
+
+class FavoritesObservationWait(unittest.TestCase):
+    def run_menu_wait(self, observations):
+        with tempfile.TemporaryDirectory(prefix="patina-ui-wait-") as temporary:
+            root = Path(temporary)
+            for index, label in enumerate(observations, 1):
+                tree = ET.Element("hierarchy")
+                ET.SubElement(tree, "node", {"selected": "true", "content-desc": label})
+                ET.ElementTree(tree).write(root / f"{index}.xml")
+            wait = re.search(r"(?ms)^ui_wait\(\) \{\n.*?^\}", SOURCE)[0]
+            selected = re.search(r"(?ms)^ui_selected_changed\(\) \{\n.*?^\}", SOURCE)[0]
+            script = r'''
+ui_probe=$UI_PROBE
+ui_xml=$UI_CASE/current.xml
+samples=0
+actions=0
+python3() { "$UI_PYTHON" "$@"; }
+ui_dump() {
+  samples=$((samples + 1))
+  observed=$samples
+  [ "$observed" -le "$UI_OBSERVATIONS" ] || observed=$UI_OBSERVATIONS
+  cp "$UI_CASE/$observed.xml" "$ui_xml"
+}
+keys() { actions=$((actions + 1)); }
+pause() { :; }
+fail() { echo "$* samples=$samples actions=$actions" >&2; exit 1; }
+''' + wait + "\n" + selected + r'''
+keys KEYCODE_DPAD_DOWN
+ui_wait "selection transition" ui_selected_changed Search
+printf '%s %s %s' "$samples" "$actions" "$menu_selection"
+'''
+            return subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                                  env=dict(os.environ, UI_CASE=str(root), UI_PYTHON=sys.executable,
+                                           UI_PROBE=str(ROOT / "tools/ci/android/ui-snapshot.py"),
+                                           UI_OBSERVATIONS=str(len(observations))), timeout=15)
+
+    def test_stale_selection_is_observed_again_without_replaying_down(self):
+        result = self.run_menu_wait(["Search", "Search", "Manage favorites…"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "3 1 Manage favorites…")
+
+    def test_unchanged_selection_stops_after_bounded_observations(self):
+        result = self.run_menu_wait(["Search"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("samples=6 actions=1", result.stderr)
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "Android smoke uses a Unix host")

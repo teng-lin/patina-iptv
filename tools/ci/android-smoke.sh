@@ -319,19 +319,47 @@ ui_tap() {
   read -r tap_x tap_y <<< "$coordinates"
   adb shell input tap "$tap_x" "$tap_y"
 }
-assert_favorites() {
+# A queued native input is not an acknowledgement of the Rust state change.
+# Retry observations only: replaying a key/tap could toggle or move twice.
+ui_wait() {
+  local description=$1 attempt deadline=$((SECONDS + 30))
+  shift
+  for attempt in $(seq 1 6); do
+    ui_dump
+    if "$@"; then return 0; fi
+    [ "$SECONDS" -lt "$deadline" ] || break
+    pause 0.2
+  done
+  fail "native UI did not settle: $description"
+}
+ui_count_matches() {
   local counts
-  ui_dump
-  counts=$(ui_count) || fail "cannot observe native favorites count"
-  [ "$counts" = "$1 $favorites_total" ] || fail "native favorites count differs after $2"
-  ! ui_confirmation || fail "confirmation remained open after $2"
+  ! ui_confirmation || return 1
+  counts=$(ui_count 2>/dev/null) || return 1
+  [ "$counts" = "$1 $favorites_total" ]
+}
+ui_initial_editor() {
+  local counts
+  ! ui_confirmation || return 1
+  counts=$(ui_count 2>/dev/null) || return 1
+  [ "${counts%% *}" = 0 ] && [ "${counts#* }" -gt 0 ] || return 1
+  favorites_total=${counts#* }
+}
+ui_selected_changed() {
+  local observed
+  observed=$(python3 "$ui_probe" "$ui_xml" selected-label 2>/dev/null) || return 1
+  [ "$observed" != "$1" ] || return 1
+  menu_selection=$observed
+}
+ui_editor_closed() { python3 "$ui_probe" "$ui_xml" editor-closed; }
+assert_favorites() {
+  ui_wait "favorites count after $2" ui_count_matches "$1"
   cp "$ui_xml" "$out/favorites-${2// /-}.xml"
   echo "  ok: native favorites $1/$favorites_total after $2"
 }
 request_favorites_clear() {
   keys KEYCODE_DPAD_CENTER
-  ui_dump
-  ui_confirmation || fail "Remove all did not ask for native confirmation"
+  ui_wait 'remote Remove all confirmation' ui_confirmation
 }
 
 step "confirm bulk favorites removal with remote and touch"
@@ -340,21 +368,21 @@ keys KEYCODE_MENU
 # Menu composition depends on the current program. Follow its actual selected
 # accessibility label rather than assuming an action index. Every wait is
 # bounded, including adb's UI-automation idle wait.
+ui_wait 'initial context menu selection' python3 "$ui_probe" "$ui_xml" selected Search
+menu_selection=Search
 menu_found=false
 for _ in $(seq 1 30); do
-  ui_dump
   if python3 "$ui_probe" "$ui_xml" selected 'Manage favorites…'; then
     menu_found=true
     break
   fi
+  previous_selection=$menu_selection
   keys KEYCODE_DPAD_DOWN
+  ui_wait 'context menu selection after Down' ui_selected_changed "$previous_selection"
 done
 [ "$menu_found" = true ] || fail "cannot reach Manage favorites in native menu"
 keys KEYCODE_DPAD_CENTER
-ui_dump
-counts=$(ui_count) || fail "native favorites editor did not open"
-favorites_total=${counts#* }
-[ "${counts%% *}" = 0 ] && [ "$favorites_total" -gt 0 ] || fail "expected a nonempty list with no favorites"
+ui_wait 'empty native favorites editor' ui_initial_editor
 keys KEYCODE_DPAD_RIGHT
 assert_favorites "$favorites_total" 'remote Add all'
 keys KEYCODE_DPAD_LEFT
@@ -378,31 +406,28 @@ assert_favorites 0 'remote confirmation'
 # refuse a point that would instead activate either real dialog action.
 cp "$ui_xml" "$out/favorites-before-covered-touch.xml"
 ui_tap 'Remove all'
-ui_dump
-ui_confirmation || fail "covered-touch test did not open confirmation"
+ui_wait 'covered-touch confirmation opening' ui_confirmation
 covered_coordinates=$(python3 "$ui_probe" "$ui_xml" covered-tap 'Add all' \
   --before "$out/favorites-before-covered-touch.xml") || fail "cannot measure a covered toolbar touch"
 read -r covered_x covered_y <<< "$covered_coordinates"
 adb shell input tap "$covered_x" "$covered_y"
-ui_dump
-ui_confirmation || fail "covered toolbar touch dismissed confirmation"
+ui_wait 'confirmation retained after covered toolbar touch' ui_confirmation
 ui_tap Cancel
 assert_favorites 0 'blocked underlying Add all touch'
 ui_tap 'Add all'
 assert_favorites "$favorites_total" 'touch Add all'
 ui_tap 'Remove all'
-ui_dump
-ui_confirmation || fail "touch Remove all did not ask for confirmation"
+ui_wait 'touch Remove all confirmation opening' ui_confirmation
 ui_tap Cancel
 assert_favorites "$favorites_total" 'touch Cancel'
 ui_tap 'Remove all'
-ui_dump
-ui_confirmation || fail "touch Remove all did not reopen confirmation"
+ui_wait 'touch Remove all confirmation reopening' ui_confirmation
 # The toolbar is hidden from accessibility while the modal is open: this is
 # the dialog's explicit destructive action, not the button behind the scrim.
 ui_tap 'Remove all'
 assert_favorites 0 'touch confirmation'
 keys KEYCODE_BACK                                  # Leave the editor on the original guide row.
+ui_wait 'favorites editor closing' ui_editor_closed
 adb shell rm -f "$device_ui"
 shot 03b-favorites-cleared
 

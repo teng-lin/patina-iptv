@@ -18,6 +18,16 @@ def selected(root, label):
                for node in root.iter("node"))
 
 
+def selected_label(root):
+    names = {node.get("content-desc") or node.get("text")
+             for node in root.iter("node") if node.get("selected") == "true"}
+    names.discard(None)
+    names.discard("")
+    if len(names) != 1:
+        raise ValueError("expected one selected accessibility label")
+    return names.pop()
+
+
 def favorites_count(root):
     counts = {tuple(map(int, match.groups()))
               for node in root.iter("node") for label in labels(node)
@@ -32,6 +42,12 @@ def favorites_count(root):
 
 def confirmation_open(root):
     return any(CONFIRMATION in labels(node) for node in root.iter("node"))
+
+
+def editor_closed(root):
+    return (next(root.iter("node"), None) is not None and not confirmation_open(root)
+            and not any(label.startswith("Favorites · ")
+                        for node in root.iter("node") for label in labels(node)))
 
 
 def button_center(root, label):
@@ -74,7 +90,7 @@ def covered_button_center(before, modal, label):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("snapshot", type=Path)
-    parser.add_argument("action", choices=("selected", "count", "confirmation", "tap", "covered-tap"))
+    parser.add_argument("action", choices=("selected", "selected-label", "count", "confirmation", "editor-closed", "tap", "covered-tap"))
     parser.add_argument("label", nargs="?")
     parser.add_argument("--before", type=Path, help="snapshot before opening the confirmation")
     args = parser.parse_args()
@@ -84,10 +100,14 @@ def main():
             if not args.label:
                 parser.error("selected requires a label")
             return 0 if selected(root, args.label) else 1
-        if args.action == "count":
+        if args.action == "selected-label":
+            print(selected_label(root))
+        elif args.action == "count":
             print(*favorites_count(root))
         elif args.action == "confirmation":
             return 0 if confirmation_open(root) else 1
+        elif args.action == "editor-closed":
+            return 0 if editor_closed(root) else 1
         else:
             if not args.label:
                 parser.error("tap requires a label")
