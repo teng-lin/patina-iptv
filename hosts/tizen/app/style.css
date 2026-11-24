@@ -337,6 +337,40 @@ body.guide #notice { top: auto; bottom: 32px; }
 #setup .button { text-align: center; background: #285575; }
 #setup .hint { margin-top: 28px; font-size: 22px; }
 
+/* Leave? No or Yes: over every screen and notice, under #fatal. */
+#leave {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+    z-index: 8;
+    background: rgba(16, 20, 24, 0.6);
+}
+#leave-box {
+    position: absolute;
+    left: 660px;
+    top: 400px;
+    width: 600px;
+    padding: 36px 32px 32px;
+    box-sizing: border-box;
+    background: #1C2429;
+    border-radius: 8px;
+    text-align: center;
+}
+#leave-title { font-size: 36px; margin-bottom: 32px; }
+#leave-buttons span {
+    display: inline-block;
+    min-width: 160px;
+    margin: 0 12px;
+    padding: 12px 32px;
+    background: #262E33;
+    font-size: 28px;
+    border-radius: 6px;
+}
+#leave-buttons span:focus { outline: none; }
+#leave-buttons span.focus { background: #9CCBEB; color: #101418; }
+
 /* The core stopped: the last layer, above every other one. */
 #fatal {
     position: absolute;

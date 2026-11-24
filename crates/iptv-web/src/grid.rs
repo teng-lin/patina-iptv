@@ -50,6 +50,9 @@ pub(crate) enum GridOutcome {
     Search,
     /// OK or Right on an empty list.
     Empty,
+    /// Back on the rail: the page asks before the app leaves (Samsung's
+    /// exit confirmation on Return at the app's first screen).
+    Leave,
 }
 
 pub(crate) struct Grid {
@@ -269,7 +272,7 @@ impl Grid {
             {
                 GridOutcome::Empty
             }
-            // Back on the rail: the app stays (the remote's Exit key leaves).
+            browse::Outcome::Leave => GridOutcome::Leave,
             _ => GridOutcome::Stay,
         }
     }
@@ -527,7 +530,7 @@ mod tests {
         assert_ne!(later["start"], after["start"]);
         assert_ne!(sig(&later, 0), sig(&after, 0));
         // Back returns to now, then shows the groups, then the rail; on the
-        // rail it stays.
+        // rail it asks to leave, and stays there.
         assert_eq!(g.key(Action::Back, 0, ENTRIES, false), GridOutcome::Stay);
         assert_eq!(g.focus.cursor, 0);
         g.key(Action::Back, 0, ENTRIES, false);
@@ -535,7 +538,7 @@ mod tests {
         assert_eq!(json(&g)["columns"], true);
         g.key(Action::Back, 0, ENTRIES, false);
         assert_eq!(g.pane(), Pane::Rail);
-        assert_eq!(g.key(Action::Back, 0, ENTRIES, false), GridOutcome::Stay);
+        assert_eq!(g.key(Action::Back, 0, ENTRIES, false), GridOutcome::Leave);
         assert_eq!(g.pane(), Pane::Rail);
     }
 

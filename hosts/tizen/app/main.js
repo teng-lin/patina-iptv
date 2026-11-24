@@ -592,10 +592,11 @@ worker.onmessage = function (e) {
         if (view && view.mode === 'full') showBanner(m.channel);
         break;
     case 'notice': notice(m.text, m.kind === 'info'); break;
+    case 'leave': openLeave(m); break;
     case 'sourceRejected': loading(false); openSetup(); notice(m.text); break;
     case 'fatal':
         /* The core stopped: nothing it showed works any more, and only
-         * the Exit key still does something. */
+         * the remote's Exit key (the system's) still does something. */
         stopped = true;
         resetKeys();
         player.stop();
@@ -701,7 +702,10 @@ function setupKey(code, repeat) {
             return true;
         }
     } else if (code === 10009) {
-        if (savedSource()) {
+        /* The first launch's setup is the app's first screen: Back asks
+         * to leave (the core sends the texts). */
+        if (!savedSource()) send({ cmd: 'leave' });
+        else {
             closeSetup();
             /* Nothing was loaded: what the setup held back shows at once
              * (the search field's focus and the TV's keyboard, when the
@@ -722,7 +726,6 @@ var KEYS = { 37: 'left', 38: 'up', 39: 'right', 40: 'down', 13: 'ok', 10009: 'ba
     405: 'yellow', 406: 'blue', 458: 'guide', 10225: 'search' };
 /* The TV keyboard's Done and Cancel. */
 var IME_DONE = 65376, IME_CANCEL = 65385;
-var EXIT = 10182;
 
 /* Only one input command waits on the worker. Physical phases and the
  * timer use the same page clock even when commands queue behind a reply. */
@@ -794,11 +797,69 @@ function exit() {
     try { tizen.application.getCurrentApplication().exit(); } catch (e) { window.close(); }
 }
 
+/* ---------- leaving ---------- */
+/* Samsung's exit confirmation: Back (Return) at the app's first screen
+ * (the guide's rail, or the first launch's setup) asks, with No focused;
+ * the app leaves only on Yes. The remote's Exit key is the system's: it is
+ * never registered, so it leaves from any screen without asking. */
+var leave = { open: false, yes: false };
+function openLeave(m) {
+    /* A second answer (two quick Returns) keeps the choice already made. */
+    if (stopped || leave.open) return;
+    /* A field the setup started editing while the core answered: the
+     * question takes the keys. */
+    if (setup.editing) {
+        setup.editing.blur();
+        setup.editing = null;
+        drawSetup();
+    }
+    $('leave').lang = m.lang || '';
+    $('leave-title').textContent = m.title;
+    $('leave-no').textContent = m.no;
+    $('leave-yes').textContent = m.yes;
+    leave.open = true;
+    leave.yes = false;
+    keysLost();
+    $('leave').classList.remove('hidden');
+    drawLeave();
+}
+/* The answer in focus has the page's focus too, so the TV's Voice Guide
+ * reads it. */
+function drawLeave() {
+    $('leave-no').classList.toggle('focus', !leave.yes);
+    $('leave-yes').classList.toggle('focus', leave.yes);
+    $(leave.yes ? 'leave-yes' : 'leave-no').focus();
+}
+function closeLeave() {
+    leave.open = false;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    $('leave').classList.add('hidden');
+}
+/* Every key is the prompt's while it is open: Left moves to No and Right
+ * to Yes (as they are laid out), Up and Down move to the other one, OK
+ * chooses, Back closes it (as No). OK and Back act once per press. */
+function leaveKey(code, repeat) {
+    var yes = code === 37 ? false : code === 39 ? true
+        : (code === 38 || code === 40) && !repeat ? !leave.yes : leave.yes;
+    if (yes !== leave.yes) {
+        leave.yes = yes;
+        drawLeave();
+    } else if (code === 13 && !repeat) {
+        if (leave.yes) exit();
+        else closeLeave();
+    } else if (code === 10009 && !repeat) {
+        closeLeave();
+    }
+}
+
+/* The remote's Exit key (10182) is the system's: never registered, and
+ * left alone should the page see it. */
+var EXIT = 10182;
 document.addEventListener('keydown', function (e) {
     var code = e.keyCode;
-    /* The remote's Exit key leaves the app, from any screen. */
-    if (code === EXIT) { e.preventDefault(); if (!e.repeat) exit(); return; }
+    if (code === EXIT) return;
     if (stopped) { e.preventDefault(); return; }
+    if (leave.open) { e.preventDefault(); leaveKey(code, e.repeat); return; }
     if (setup.open) { if (setupKey(code, e.repeat)) e.preventDefault(); return; }
     if (code === 403) { if (!e.repeat) openSetup(); return; }
     if (code === 404) {
@@ -858,13 +919,16 @@ document.addEventListener('visibilitychange', function () {
 (function start() {
     mark('scriptStart');
     if (hasTizen()) {
-        ['ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'Guide', 'Search', 'Exit'].forEach(function (k) {
+        /* Not Exit: the system handles it (Samsung's termination rules). */
+        ['ChannelUp', 'ChannelDown', 'ColorF0Red', 'ColorF1Green', 'ColorF2Yellow', 'ColorF3Blue', 'Guide', 'Search'].forEach(function (k) {
             try { tizen.tvinputdevice.registerKey(k); } catch (e) { /* the remote may lack it */ }
         });
     }
     makeRows($('group-rows'), ENTRIES, false);
     makeRows($('search-rows'), SEARCH_ROWS, true);
     makeGuideRows();
+    /* The interface language for what the core words (the exit prompt). */
+    send({ cmd: 'locale', locale: navigator.language || 'en' });
     $('search-input').addEventListener('input', function () { askSearch(this.value); });
     var source = savedSource();
     if (source) { loading(true, 'Connecting to your provider…'); load(source); } else openSetup();

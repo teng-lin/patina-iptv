@@ -13,6 +13,10 @@ fn ui_sets() -> Vec<nsh_core::element::Registry> {
 
 #[cfg(target_arch = "wasm32")]
 fn root() -> nsh_core::element::Root {
+    // Samsung asks for an exit confirmation on Return at the app's first
+    // screen: Back at the top level asks, and Yes has the page leave
+    // (patina-host.js, `onHost`).
+    iptv_app::confirm_leaving(|| nsh_platform_tizen::host(r#"{"leave":true}"#));
     nsh_core::element::Root::of::<iptv_app::App>()
         .app_id("com.hantekllc.iptvrs")
         .appearance(nsh_core::element::Appearance::Dark)
