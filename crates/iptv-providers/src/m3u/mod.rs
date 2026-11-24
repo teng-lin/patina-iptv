@@ -351,6 +351,7 @@ impl M3uParser {
             .title
             .clone()
             .or_else(|| attr("tvg-name").map(str::to_owned));
+        let generated_name = supplied_name.is_none();
         // Persisted identities predate the neutral display label. Keep the
         // original fallback as the identity input so refresh keeps overlays.
         let identity_name = supplied_name
@@ -416,7 +417,9 @@ impl M3uParser {
             logo: attr("tvg-logo").or(attr("logo")).map(str::to_owned),
             groups,
             epg_id: attr("tvg-id").map(str::to_owned),
-            epg_name: attr("tvg-name").map(str::to_owned),
+            epg_name: attr("tvg-name")
+                .map(str::to_owned)
+                .or_else(|| generated_name.then(|| identity_name.clone())),
             epg_shift_minutes: shift
                 .filter(|h| h.abs() <= 24.0)
                 .map(|h| (h * 60.0).round() as i32),

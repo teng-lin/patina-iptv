@@ -666,3 +666,39 @@ fn header_guide_planning_checks_identity_exhaustion_before_building_configs() {
         [2, 1]
     );
 }
+
+#[test]
+fn untitled_channels_keep_their_legacy_guide_name_match() {
+    let text = "#EXTM3U\nhttp://streams.example.com/GeneratedLegacy.ts\n#EXTINF:-1,Unnamed channel\nhttp://streams.example.com/ExplicitNeutral.ts\n";
+    let channels = import_m3u_text(text.as_bytes(), &mut NoProgress, &CancelToken::new())
+        .unwrap()
+        .channels;
+    assert_eq!(channels[0].name, "Unnamed channel");
+    assert_eq!(channels[0].epg_name.as_deref(), Some("GeneratedLegacy"));
+    assert_eq!(
+        channels[1].epg_name, None,
+        "explicit neutral titles keep their supplied matching name"
+    );
+    let xml = synth::xmltv(
+        &[
+            ("generated-legacy".into(), "GeneratedLegacy".into()),
+            ("generated-explicit".into(), "ExplicitNeutral".into()),
+        ],
+        NOW - HOUR,
+        NOW + HOUR,
+        HOUR,
+    );
+    let (epg, guide) = run(
+        &FakeFetch::body(xml.into_bytes()),
+        &[source(1, "/generated.xml")],
+        &channels,
+    )
+    .unwrap();
+    assert_eq!(epg.matches.by_name, 1);
+    assert_eq!(
+        epg.binding(&key(&channels[0])).unwrap().epg_id,
+        "generated-legacy"
+    );
+    assert!(guide.program_at(&key(&channels[0]), NOW).is_some());
+    assert!(epg.binding(&key(&channels[1])).is_none());
+}

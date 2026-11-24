@@ -492,6 +492,7 @@ fn older_untitled_imports_keep_personalization_on_upgrade_restore_and_refresh() 
             panic!()
         };
         channel.name = iptv_providers::m3u::legacy_fallback_name(url);
+        channel.epg_name = None;
     }
     store
         .replace_catalog(source, &[], &old_channels, &[], &[])
@@ -532,6 +533,7 @@ fn older_untitled_imports_keep_personalization_on_upgrade_restore_and_refresh() 
             for (row, channel) in rows.iter().zip(&channels) {
                 assert_eq!(row.channel.id, channel.id);
                 assert_eq!(row.channel.name, channel.name);
+                assert_eq!(row.channel.epg_name, channel.epg_name);
             }
             assert_eq!(rows[1].name, "My generated label");
             let neutral = store.search_channels(Some(source), "Unnamed", 10).unwrap();

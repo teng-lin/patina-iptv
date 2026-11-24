@@ -294,10 +294,12 @@ fn untitled_entries_have_neutral_labels_and_keep_legacy_ids() {
     let channels = &playlist.channels.items;
     let legacy = ContentId::from_m3u("http://streams.example.com/12345.ts", "12345");
     assert_eq!(channels[0].name, "Unnamed channel");
+    assert_eq!(channels[0].epg_name.as_deref(), Some("12345"));
     assert_eq!(channels[0].id, legacy);
     assert_eq!(channels[1].name, "Unnamed channel");
     assert_eq!(channels[1].id.as_str(), format!("{legacy}~2"));
     assert_eq!(channels[2].name, "12345");
+    assert_eq!(channels[2].epg_name, None);
     assert_eq!(channels[2].id.as_str(), format!("{legacy}~3"));
     assert_eq!(channels[3].name, "Provided label");
 }
