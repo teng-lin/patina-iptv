@@ -45,10 +45,11 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("seek.rs", "PRESSES"),                             // Key gesture state.
     ("seek.rs", "HOLD"),                                // Held-key gesture state.
     ("settings.rs", "REVISION"),                        // Reactive settings subscription handle.
-    ("settings_view.rs", "PAGES"),                      // Immutable screen definitions.
-    ("settings_view.rs", "LAST"),                       // Last selected settings tab.
-    ("settings_view.rs", "NOTICE"),                     // Toast signal handle.
-    ("settings_view.rs", "LEAVE_ASKED"),                // Exit confirmation clock.
+    ("settings.rs", "PIP"), // The host's picture-in-picture report, for the settings offer.
+    ("settings_view.rs", "PAGES"), // Immutable screen definitions.
+    ("settings_view.rs", "LAST"), // Last selected settings tab.
+    ("settings_view.rs", "NOTICE"), // Toast signal handle.
+    ("settings_view.rs", "LEAVE_ASKED"), // Exit confirmation clock.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.

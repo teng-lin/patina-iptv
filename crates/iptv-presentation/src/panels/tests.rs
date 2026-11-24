@@ -232,3 +232,25 @@ fn input_during_a_hold_does_not_pull_its_deadline_in() {
     p.show_controls(3_100);
     assert_eq!(p.hide_at_ms(), Some(4_100));
 }
+
+#[test]
+fn the_strip_has_picture_in_picture_only_where_the_host_offers_it() {
+    let mut p = Panels::default();
+    assert!(
+        !p.controls().any(|c| c == Control::PictureInPicture),
+        "nothing offered yet: no placeholder"
+    );
+    assert_eq!(p.controls().count(), CONTROLS.len() - 1);
+    p.show_controls(0);
+    p.move_focus(4, 1);
+    assert_eq!(p.focused(), Control::VideoTracks);
+    p.offer_pip(true);
+    assert_eq!(p.controls().count(), CONTROLS.len());
+    assert_eq!(p.focused(), Control::VideoTracks, "the focus stays put");
+    p.move_focus(-1, 2);
+    assert_eq!(p.select(3), Pick::Control(Control::PictureInPicture));
+    p.offer_pip(false);
+    assert_eq!(p.focused(), Control::VideoTracks, "the gone control's next");
+    p.move_focus(99, 4);
+    assert_eq!(p.focused(), Control::Record);
+}

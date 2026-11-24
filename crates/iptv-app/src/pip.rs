@@ -1,10 +1,10 @@
 //! Picture in picture: the playing channel in a small window over other
 //! apps, video only. The state is `iptv_presentation::pip`.
 //!
-//! **Android**: a system window. It opens from the control strip's
-//! button, or by itself when the viewer leaves the app (Home) while a
-//! channel plays full screen and `player.pip_on_leave` allows it (on
-//! phones and tablets by default, not on a TV). The window's buttons
+//! **Android phones and tablets**: a system window. It opens from the
+//! control strip's button, or by itself when the viewer leaves the app
+//! (Home) while a channel plays full screen (not the guide's preview) and
+//! `player.pip_on_leave` allows it. The window's buttons
 //! play/pause and change channel; a tap on it brings the app back full
 //! screen; closing it stops playback (the host stops its players when the
 //! activity stops, as for Home without it). The host's side is surface
@@ -17,6 +17,12 @@
 //!
 //! In Android's window only the video shows (`lib.rs` hides every other
 //! layer, [`ui_shown`]).
+//!
+//! **Android TV** has none, on every build: no control, no setting, no
+//! entry on Home (its host reports it unsupported and refuses to enter,
+//! `PipHost.kt`). Nor do the iPad and the browser TVs, which have no
+//! window yet: where the host has none the control strip and the play bar
+//! leave the control out rather than show it disabled.
 //!
 //! **The desktops** (Linux, macOS) open a window of the app's own, as
 //! browsers do (`desktop/pip_window.rs`, `iptv_presentation::pip_window`), from
@@ -69,7 +75,7 @@ pub fn ui_shown(ui: Ui) -> bool {
 }
 
 /// Whether this device has the window at all (reading subscribes): the
-/// play bar shows its button only then.
+/// play bar and the control strip show its button only then.
 pub fn supported(ui: Ui) -> bool {
     ui.pip.with(|p| p.supported)
 }
@@ -83,6 +89,11 @@ pub fn can_enter(ui: Ui) -> bool {
 /// The desktops: their window can (Android's host reports its own), and
 /// closes when nothing plays any more or multiview opens.
 pub fn bind(ui: Ui) {
+    // The strip has the control only where the host can open the window.
+    effect(move || {
+        let offered = supported(ui);
+        untracked(|| ui.panels.update(|p| p.offer_pip(offered)));
+    });
     if !crate::desktop::DESKTOP {
         // Android reports through its persistent player. Other hosts have no
         // native PiP implementation to acknowledge availability later.
@@ -192,6 +203,9 @@ pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
     if next == ui.pip.get_untracked() {
         return;
     }
+    // Before the signal changes: settings rows that read it then see the
+    // setting `player.pip_on_leave` come or go with the window.
+    crate::settings::offer_pip(next.supported);
     ui.pip.set(next);
     match change {
         Change::Entered => entered(ui),

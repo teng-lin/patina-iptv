@@ -19,10 +19,14 @@ native services report what the operating system actually accepted.
 These are configured limits and facilities, not certification of a device's
 decoder performance. The profile tests exercise each row without needing that
 OS. Android TV and tablet share the same surface budget; the native PiP report
-also distinguishes a TV for the existing automatic-entry preference.
+also distinguishes a TV, which never has picture in picture on any build: its
+host reports it unsupported and refuses to enter, by request or on Home.
 
 PiP starts unknown until the player reports support; hosts without a native
-implementation acknowledge it as unavailable during setup. Its button and action
+implementation (the iPad, browser TVs) acknowledge it as unavailable during
+setup. Where it is unavailable the control strip and the play bar leave the
+control out, rather than show it disabled, and the setting
+`player.pip_on_leave` is hidden. Its button and action
 handler use the same current decision. A denied or changed report takes effect
 without restarting the application. Desktop PiP presents the original player;
 it never reserves another provider stream.

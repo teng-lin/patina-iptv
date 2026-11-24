@@ -148,9 +148,13 @@ pub struct Panels {
     /// Index into [`QUICK_ACTIONS`] of the focused action card; none until
     /// Left or Right reaches the row.
     pub quick: Option<usize>,
-    /// Index into [`CONTROLS`] of the focused control.
+    /// Index into [`Panels::controls`] of the focused control.
     pub focus: usize,
     pub timeouts: Timeouts,
+    /// The strip offers [`Control::PictureInPicture`]: the host can open
+    /// the window ([`Panels::offer_pip`]). Elsewhere (a TV, the iPad, a
+    /// browser TV) the strip has no such control at all.
+    pip: bool,
     /// The mouse showed (or last kept) them.
     by_pointer: bool,
     hide_at_ms: Option<u64>,
@@ -167,6 +171,7 @@ impl Default for Panels {
             quick: None,
             focus: 0,
             timeouts: Timeouts::default(),
+            pip: false,
             by_pointer: false,
             hide_at_ms: None,
             hold: None,
@@ -262,8 +267,29 @@ impl Panels {
         }
     }
 
+    /// The strip's controls, in order: [`CONTROLS`] less picture in
+    /// picture where the host has none.
+    pub fn controls(&self) -> impl Iterator<Item = Control> + '_ {
+        CONTROLS
+            .into_iter()
+            .filter(|c| self.pip || *c != Control::PictureInPicture)
+    }
+
+    /// Whether the strip offers picture in picture (the host reports it
+    /// can open the window). The focused control stays focused.
+    pub fn offer_pip(&mut self, offered: bool) {
+        if self.pip == offered {
+            return;
+        }
+        let focused = self.focused();
+        self.pip = offered;
+        let count = self.controls().count();
+        let at = self.controls().position(|c| c == focused);
+        self.focus = at.unwrap_or(self.focus.min(count - 1));
+    }
+
     pub fn focused(&self) -> Control {
-        CONTROLS[self.focus]
+        self.controls().nth(self.focus).unwrap_or(Control::Search)
     }
 
     pub fn quick_focused(&self) -> Option<QuickAction> {
@@ -279,7 +305,7 @@ impl Panels {
             Shown::Card => {
                 self.quick = Some(self.quick.map_or(0, |at| clamp(at, QUICK_ACTIONS.len())));
             }
-            Shown::Controls => self.focus = clamp(self.focus, CONTROLS.len()),
+            Shown::Controls => self.focus = clamp(self.focus, self.controls().count()),
             Shown::Hidden | Shown::Banner | Shown::Info => {}
         }
         self.by_pointer = false;

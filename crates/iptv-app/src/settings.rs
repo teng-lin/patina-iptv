@@ -138,6 +138,19 @@ const NOT_OFFERED: &[&str] = &[
 
 thread_local! { static REVISION: std::cell::Cell<Option<Signal<u64>>> = const { std::cell::Cell::new(None) }; }
 
+thread_local! {
+    /// The host can open a picture-in-picture window (`pip.rs`): what
+    /// [`offer`] reads for `player.pip_on_leave`.
+    static PIP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the host can open a picture-in-picture window, as it last
+/// reported (`pip.rs`). Settings screens that list rows read `ui.pip` too,
+/// so they follow a later report.
+pub(crate) fn offer_pip(offered: bool) {
+    PIP.set(offered);
+}
+
 pub fn observe() {
     REVISION.with(|v| {
         if let Some(s) = v.get() {
@@ -166,7 +179,8 @@ pub fn text_factor() -> f32 {
 
 /// What the app does with the setting or command `key`. The long-press
 /// time matters only where keys report their release (Android), and
-/// picture in picture on leaving only on Android.
+/// picture in picture on leaving only on an Android phone or tablet whose
+/// host reported the window ([`offer_pip`]): never on a TV.
 pub fn offer(key: &str) -> Offer {
     // Recording and backups run on blocking workers; a host without them
     // offers neither. Imports and guide downloads run where the host can
@@ -197,8 +211,9 @@ pub fn offer(key: &str) -> Offer {
     {
         return Offer::Hidden;
     }
-    // Leaving the app into a picture-in-picture window: Android only.
-    let android = crate::capabilities::HOST.automatic_pip();
+    // Leaving the app into a picture-in-picture window: Android phones and
+    // tablets only, once the host says it has the window.
+    let pip = crate::capabilities::HOST.automatic_pip() && PIP.get();
     if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
         return Offer::NotYet;
     }
@@ -208,7 +223,7 @@ pub fn offer(key: &str) -> Offer {
     if WIRED.contains(&key)
         || COMMANDS.contains(&key)
         || (key == keys::LONG_PRESS.as_str() && crate::input::long_press())
-        || (key == keys::PIP_ON_LEAVE.as_str() && android)
+        || (key == keys::PIP_ON_LEAVE.as_str() && pip)
     {
         Offer::Active
     } else if key == keys::PIP_ON_LEAVE.as_str() {
@@ -396,12 +411,18 @@ mod tests {
         assert_eq!(offer("parental.change_pin"), Offer::Active);
         assert_eq!(offer("history.keep_days"), Offer::Hidden);
         assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
+        // Not before the host says it has the window, never off Android
+        // (nor on a TV, whose host reports none).
+        assert_eq!(offer("player.pip_on_leave"), Offer::Hidden);
+        offer_pip(true);
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
             Offer::Hidden
         };
         assert_eq!(offer("player.pip_on_leave"), pip);
+        offer_pip(false);
+        assert_eq!(offer("player.pip_on_leave"), Offer::Hidden);
     }
 
     #[test]

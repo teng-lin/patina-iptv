@@ -15,7 +15,7 @@ use crate::i18n::{tr, trf};
 use std::time::Duration;
 
 use iptv_core::tracks::Kind as Track;
-use iptv_presentation::panels::{CONTROLS, Control, QUICK_ACTIONS, Shown};
+use iptv_presentation::panels::{Control, QUICK_ACTIONS, Shown};
 use iptv_presentation::player_info::date_time;
 use iptv_presentation::sound::delay_label;
 use iptv_presentation::tracks::{audio_layout_in, summary_in};
@@ -481,26 +481,37 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
             list.scroll_to_index(at as u32, percentage(0.5), px(0.0), true);
         }
     });
-    virtual_list(CONTROLS.len(), move |at| {
-        let index = at.index();
-        let control = CONTROLS[index];
+    // Picture in picture is in the strip only where the host offers it
+    // (`pip.rs`): a cell reads its control by position.
+    let count = move || ui.panels.with(|p| p.controls().count());
+    virtual_list(count, move |at| {
+        let control = move || {
+            ui.panels
+                .with(|p| p.controls().nth(at.index()))
+                .unwrap_or(Control::Search)
+        };
         let focused = move || {
             ui.keys_shown()
                 && ui
                     .panels
-                    .with(|p| p.shown == Shown::Controls && p.focus == index)
+                    .with(|p| p.shown == Shown::Controls && p.focus == at.index())
         };
         pill(
             ui,
-            move || label(ui, control),
+            move || label(ui, control()),
             focused,
-            move || !enabled(ui, control),
+            move || !enabled(ui, control()),
             move || {
-                ui.panels.update(|p| p.focus = index);
+                let control = control();
+                ui.panels.update(|p| p.focus = at.index());
                 crate::player_keys::press_control(ui, control);
             },
         )
         .mr(px(10.0))
+    })
+    .keys(move || {
+        ui.panels
+            .with(|p| p.controls().map(|c| c as u8).collect::<Vec<_>>())
     })
     .horizontal()
     .estimated_item_size(px(170.0))
