@@ -138,7 +138,8 @@ pub(crate) fn offered(ui: Ui, control: Control) -> bool {
         Control::Record | Control::Recordings => crate::host::HAS_WORKERS && main,
         Control::Search => main,
         Control::Multiview => main && crate::capabilities::HOST.decoder_slots() > 1,
-        // Shown until the host reports, then only where it can.
+        // Shown until the host reports, then only where it can: never a TV
+        // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
         Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
         _ => true,
     }

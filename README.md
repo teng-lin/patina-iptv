@@ -56,7 +56,8 @@ custom groups and history.
   per-channel guide choice, catch-up playback where the provider offers it.
 - **Watching:** guide over live video, channel list beside the video,
   multiview (up to four tiles on desktop, two on Android),
-  picture-in-picture on the desktops, track and picture-size choice.
+  picture-in-picture on the desktops and Android phones and tablets, track
+  and picture-size choice.
 - **Library:** favorites, custom groups, reordering, hiding, history and
   channel/program search.
 - **Movies and series:** browse provider catalogs by playlist and category,

@@ -482,7 +482,7 @@ pauses and resumes: it never opens, retunes or restarts a stream.
 | A notification's sound | Plays on, quieter (the system ducks it) |
 | Home or another app, picture in picture off | Stops and closes the stream; on return it reopens what played, after fresh admission |
 | Another app beside Patina takes the focus (iPad Split View, Slide Over, Stage Manager; the window stays visible) | Plays on; nothing pauses or reopens |
-| Home with picture in picture on | Plays on in the window, on the same player and stream |
+| Home with picture in picture on (phones and tablets, from full-screen playback only; never a TV) | Plays on in the window, on the same player and stream |
 | The picture-in-picture window closed | Stops as above |
 
 In multiview the policy pauses and resumes the heard tile (the one the

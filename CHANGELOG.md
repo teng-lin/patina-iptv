@@ -23,6 +23,10 @@ is below 1.0, a minor release may change behavior.
   future recording, and the recorder login startup and precise wakeup settings
   are hidden. Recordings scheduled earlier stay listed, can be canceled and
   still run. Record now is unchanged.
+- Android TV no longer offers picture in picture: Home during playback returns
+  to the launcher and stops the stream, and the control and the
+  picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
+  it, entering on Home only from full-screen playback.
 
 ### Fixed
 
