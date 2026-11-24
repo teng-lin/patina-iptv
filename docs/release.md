@@ -529,7 +529,9 @@ To update after changing dependencies or the NSH revision:
    --format-version 1` to resolve its platform runners.
 4. Review the dependency delta, then copy the resulting lock to
    `tools/ci/package.Cargo.lock` and commit both locks together.
-5. Run package CI for all platforms. Run the stale-lock regression with
+5. Nightly validation runs the desktop package previews and master validates
+   the unsigned shipping packages. Dispatch full Validation to run the
+   previews before merging a dependency-only PR. Run the stale-lock regression with
    `IPTV_REAL_CARGO="$(command -v cargo)" python3 tools/ci/test-locked-cargo.py`.
 
 `cargo fmt` has no `--locked` option and does not resolve dependencies;

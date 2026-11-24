@@ -37,8 +37,8 @@ LANE_WORKFLOWS = {
 }
 NOTICES = ("about.toml", "LICENSE", "tools/ci/notices.hbs", "tools/ci/component-inventory.py",
            "tools/ci/crypto-native-notices.py", "tools/ci/check-notices.py", "tools/ci/notices.sh",
-           "tools/ci/package.Cargo.lock", "tools/ci/check-package-lock.py", "tools/ci/audit-runners.sh")
-ANDROID_PACKAGE = (*NOTICES, *BUILD, "hosts/android/**", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
+           "tools/ci/check-package-lock.py", "tools/ci/audit-runners.sh")
+ANDROID_PACKAGE = (*NOTICES, *BUILD, "tools/ci/package.Cargo.lock", "hosts/android/**", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
                    "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**", "about.toml", "LICENSE",
                    "tools/sync-host.sh", "tools/ci/android-ndk-env.sh", "tools/ci/check-android*",
                    "tools/ci/sign-android.sh", "tools/ci/prepare-android.sh", "tools/ci/package-android.sh",
@@ -47,19 +47,19 @@ ANDROID_PACKAGE = (*NOTICES, *BUILD, "hosts/android/**", "crates/iptv-app/build.
 LINUX_PACKAGE = ("tools/ci/*linux*.sh", "tools/ci/*linux*.py", "tools/ci/Dockerfile.*-smoke", "hosts/linux/**",
                  "tools/ci/enable-deb-src.sh")
 MACOS_PACKAGE = ("tools/package-macos.sh", "tools/bundle-macos.py", "tools/ci/*macos*.sh", "tools/ci/*macos*.py", "hosts/macos/**")
-PACKAGES = (*NOTICES, *LINUX_PACKAGE, *MACOS_PACKAGE, *BUILD, "about.toml", "LICENSE", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
-            "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**", "tools/package-*.sh",
-            "tools/bundle-macos.py", "tools/ci/package-*.sh", "tools/ci/*packages.sh",
+# General Rust build inputs already select native compilation on PRs.
+# Run desktop installers for inputs specific to their packaging or shipped resources.
+PACKAGES = (*NOTICES, *LINUX_PACKAGE, *MACOS_PACKAGE, "nsh.rev", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
+            "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**",
             "tools/ci/native-sources.py", "tools/ci/smoke-desktop.py", "tools/ci/nsh-tool-key.py",
             "tools/ci/native_candidates.py", "tools/ci/setup-linux-packaging.sh",
             "tools/ci/unpack-signing-input.py", "tools/ci/version.py", "tools/mpv-runtime/**", "tools/mpv-runtime-unix/**")
 WINDOWS_RESOURCES = ("crates/iptv-app/windows.rc", "crates/iptv-app/icon.ico")
-WINDOWS_PACKAGE = (*NOTICES, *BUILD, *WINDOWS_RESOURCES, "crates/iptv-app/build.rs", "hosts/windows/**", "tools/package-windows.ps1", "tools/build-windows.ps1",
+WINDOWS_PACKAGE = (*NOTICES, *WINDOWS_RESOURCES, "crates/iptv-app/build.rs", "hosts/windows/**", "tools/package-windows.ps1", "tools/build-windows.ps1",
                     "tools/fetch-mpv-windows.ps1", "tools/ci/*windows*.ps1", "tools/ci/*windows*.py",
                     "tools/ci/windows-notices.py", "tools/ci/windows-installer.iss", "tools/ci/setup-inno.ps1",
-                    "tools/ci/version.py", "tools/mpv-runtime/**",
-                    "about.toml", "LICENSE", "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**")
-SMOKE = (*BUILD, "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
+                    "tools/ci/version.py", "tools/mpv-runtime/**", "crates/iptv-app/icon.png", "crates/iptv-app/fonts/**")
+SMOKE = (*BUILD, "tools/ci/package.Cargo.lock", "hosts/android/**", "crates/iptv-app/**", "crates/iptv-runtime/**",
          "crates/iptv-player-mpv/**", "crates/iptv-net/**", "crates/iptv-nav/**", "tools/sync-host.sh",
          "tools/ci/android/**", "tools/ci/android-smoke.sh", "tools/ci/disposable-avd.py", "tools/ci/*hls-fixtures.py",
          "tools/ci/android-ndk-env.sh", "tools/make-*fixtures*", "tools/mock-server.py", "tools/mpv-runtime/**")
