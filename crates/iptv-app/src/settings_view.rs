@@ -210,7 +210,7 @@ fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
     let settings = crate::settings::get();
     f(&Ctx {
         settings: &settings,
-        offer: &crate::settings::offer,
+        offer: &crate::settings::offer_now,
     })
 }
 
@@ -364,7 +364,7 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 fn status(settings: &Settings, row: &Row) -> Status {
     Ctx {
         settings,
-        offer: &crate::settings::offer,
+        offer: &crate::settings::offer_now,
     }
     .status(row)
 }
@@ -520,7 +520,7 @@ mod tests {
             page,
             &Ctx {
                 settings,
-                offer: &crate::settings::offer,
+                offer: &crate::settings::offer_now,
             },
         )
         .into_iter()

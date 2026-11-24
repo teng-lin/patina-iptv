@@ -73,6 +73,7 @@ class TvActivity : Activity() {
             BackupComponent(this, context, backups)
         }
         nsh.registerComponent(ImeVisibilityComponent.NAME, ::ImeVisibilityComponent)
+        nsh.registerComponent(DeviceComponent.NAME, ::DeviceComponent)
         val gone = { p: PlayerComponent ->
             players.remove(p)
             pip.destroyed(p)

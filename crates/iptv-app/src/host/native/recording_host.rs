@@ -46,7 +46,7 @@ pub(crate) fn command(key: &str) {
             return;
         }
         crate::settings_view::notify(crate::i18n::tr(
-            if crate::capabilities::HOST.alarm_permission() {
+            if crate::capabilities::host().alarm_permission() {
                 "Android keeps capture in a foreground service. Exact alarms need Special app access. Force stop prevents recordings; Android may limit background recording to six hours."
             } else if !capability.background {
                 "Keep Patina open and this device awake for recordings. Recordings use local app storage and are excluded from backups."

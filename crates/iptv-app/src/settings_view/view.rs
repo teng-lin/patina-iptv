@@ -74,7 +74,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         state(ui, |s| {
             s.rows(&Ctx {
                 settings: &settings,
-                offer: &crate::settings::offer,
+                offer: &crate::settings::offer_now,
             })
         })
         .unwrap_or_default()
@@ -430,7 +430,7 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
         ui.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings::offer,
+            offer: &crate::settings::offer_now,
         };
         state(ui, |s| match s.focused_row(&ctx) {
             Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),

@@ -25,6 +25,7 @@
 
 use std::sync::Arc;
 
+use iptv_presentation::capabilities::Device;
 use iptv_presentation::panels::Timeouts;
 use iptv_presentation::settings::screen::Offer;
 use iptv_settings::keys;
@@ -184,11 +185,14 @@ pub fn text_factor() -> f32 {
     font_factor() * nsh_core::prelude::font_scale()
 }
 
-/// What the app does with the setting or command `key`. The long-press
-/// time matters only where keys report their release (Android), and
-/// picture in picture on leaving only on an Android phone or tablet whose
-/// host reported the window ([`offer_pip`]): never on a TV.
-pub fn offer(key: &str) -> Offer {
+/// What the app does with the setting or command `key` on `device` (as it
+/// is now: [`crate::device::current`], so a row can come and go when the
+/// form factor, the window or the connected input changes). The
+/// long-press time matters only where keys report their release
+/// (Android), and picture in picture on leaving only on an Android phone
+/// or tablet whose host reported the window ([`offer_pip`]): never on a TV.
+pub fn offer(device: Device, key: &str) -> Offer {
+    let host = device.host;
     // Recording and backups run on blocking workers; a host without them
     // offers neither. A backup action also needs its document picker
     // (`backup::offered`; none on the iPad yet). Imports and guide
@@ -209,12 +213,12 @@ pub fn offer(key: &str) -> Offer {
     {
         return Offer::Hidden;
     }
-    if key == "recordings.quit_host" && !crate::capabilities::HOST.startup_registration() {
+    if key == "recordings.quit_host" && !host.startup_registration() {
         return Offer::Hidden;
     }
     // Leaving the app into a picture-in-picture window: Android phones and
     // tablets only, once the host says it has the window.
-    let pip = crate::capabilities::HOST.automatic_pip() && PIP.get();
+    let pip = host.automatic_pip() && PIP.get();
     if NOT_OFFERED.contains(&key) {
         return Offer::Hidden;
     }
@@ -241,6 +245,12 @@ pub fn offer(key: &str) -> Offer {
     } else {
         Offer::Hidden
     }
+}
+
+/// [`offer`] on the device as it is now (reactive: a closure that asks
+/// runs again when a signal changes).
+pub fn offer_now(key: &str) -> Offer {
+    offer(crate::device::current(), key)
 }
 
 /// The effective settings of the shell's application owner.
@@ -407,38 +417,74 @@ mod tests {
         assert_eq!(own.len(), 1, "the channel's own agent wins");
     }
 
+    /// Every combination of the three signals on this build.
+    fn devices() -> Vec<Device> {
+        use iptv_core::capabilities::{FormFactor, Host, Input};
+        use iptv_presentation::layout::Class;
+        let mut all = Vec::new();
+        for form_factor in [
+            FormFactor::Phone,
+            FormFactor::Tablet,
+            FormFactor::Tv,
+            FormFactor::Desktop,
+        ] {
+            for window in [Class::Compact, Class::Medium, Class::Expanded] {
+                for (keyboard, dpad) in [(false, false), (true, false), (false, true), (true, true)]
+                {
+                    all.push(Device {
+                        host: Host {
+                            form_factor,
+                            input: Input { keyboard, dpad },
+                            ..crate::capabilities::BUILT
+                        },
+                        window,
+                    });
+                }
+            }
+        }
+        all
+    }
+
     #[test]
     fn what_the_app_offers() {
-        assert_eq!(offer("epg.keep_past"), Offer::Active);
-        assert_eq!(offer("epg.update_now"), Offer::Active);
-        assert_eq!(offer("epg.manage_sources"), Offer::Active);
-        assert_eq!(offer("epg.add_source"), Offer::Active);
-        assert_eq!(offer("playback.afr"), Offer::Hidden);
-        assert_eq!(offer("vod.sort"), Offer::Active);
-        assert_eq!(offer("parental.live_enabled"), Offer::Active);
-        assert_eq!(offer("parental.change_pin"), Offer::Active);
-        assert_eq!(offer("history.keep_days"), Offer::Hidden);
-        assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
-        // Scheduled recording is retired (#273).
-        for key in [
-            "recordings.enable_startup",
-            "recordings.disable_startup",
-            "recordings.alarm_access",
-        ] {
-            assert_eq!(offer(key), Offer::Hidden, "{key}");
+        // The signals reach the offer; none of them changes it yet (the
+        // features that follow them come with their own issues).
+        // Picture in picture on leaving: not before the host says it has
+        // the window, never off Android (nor on a TV, whose host reports
+        // none).
+        for device in devices() {
+            assert_eq!(offer(device, "player.pip_on_leave"), Offer::Hidden);
         }
-        // Not before the host says it has the window, never off Android
-        // (nor on a TV, whose host reports none).
-        assert_eq!(offer("player.pip_on_leave"), Offer::Hidden);
         offer_pip(true);
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
             Offer::Hidden
         };
-        assert_eq!(offer("player.pip_on_leave"), pip);
+        for device in devices() {
+            let offer = |key| offer(device, key);
+            assert_eq!(offer("epg.keep_past"), Offer::Active);
+            assert_eq!(offer("epg.update_now"), Offer::Active);
+            assert_eq!(offer("epg.manage_sources"), Offer::Active);
+            assert_eq!(offer("epg.add_source"), Offer::Active);
+            assert_eq!(offer("playback.afr"), Offer::Hidden);
+            assert_eq!(offer("vod.sort"), Offer::Active);
+            assert_eq!(offer("parental.live_enabled"), Offer::Active);
+            assert_eq!(offer("parental.change_pin"), Offer::Active);
+            assert_eq!(offer("history.keep_days"), Offer::Hidden);
+            assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
+            assert_eq!(offer("player.pip_on_leave"), pip);
+            // Scheduled recording is retired (#273).
+            for key in [
+                "recordings.enable_startup",
+                "recordings.disable_startup",
+                "recordings.alarm_access",
+            ] {
+                assert_eq!(offer(key), Offer::Hidden, "{key}");
+            }
+        }
         offer_pip(false);
-        assert_eq!(offer("player.pip_on_leave"), Offer::Hidden);
+        assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);
     }
 
     #[test]
