@@ -121,6 +121,11 @@ pub struct Host {
     pub platform: Platform,
     pub form_factor: FormFactor,
     pub input: Input,
+    /// The video decoders the host measured it can run at once (Android:
+    /// its hardware H.264 decoder's instance limit), when it reports them.
+    /// It can only lower the platform's surface budget
+    /// ([`Host::decoder_slots`]).
+    pub decoders: Option<usize>,
 }
 
 impl Default for Host {
@@ -136,14 +141,22 @@ impl Host {
             platform,
             form_factor: platform.form_factor(),
             input: platform.input(),
+            decoders: None,
         }
     }
 
+    /// The player surfaces the platform budgets for, lowered to the
+    /// decoders the host measured (never below one).
     pub const fn decoder_slots(self) -> usize {
-        match self.platform {
+        let budget = match self.platform {
             Platform::Android => 2,
             Platform::Linux | Platform::Macos | Platform::Windows | Platform::Ipad => 4,
             Platform::Unknown => 1,
+        };
+        match self.decoders {
+            Some(0) => 1,
+            Some(measured) if measured < budget => measured,
+            _ => budget,
         }
     }
     pub const fn background_recordings(self) -> bool {
@@ -299,6 +312,7 @@ mod tests {
                         platform,
                         form_factor,
                         input: Input { keyboard, dpad },
+                        decoders: None,
                     };
                     assert_eq!(host.decoder_slots(), built.decoder_slots());
                     assert_eq!(host.background_recordings(), built.background_recordings());
@@ -308,6 +322,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_measured_decoder_count_only_lowers_the_budget() {
+        let android = Host::of(Platform::Android);
+        for (measured, slots) in [
+            (None, 2),
+            (Some(0), 1),
+            (Some(1), 1),
+            (Some(2), 2),
+            (Some(32), 2),
+        ] {
+            let host = Host {
+                decoders: measured,
+                ..android
+            };
+            assert_eq!(host.decoder_slots(), slots, "{measured:?}");
+        }
+        let desktop = Host {
+            decoders: Some(3),
+            ..Host::of(Platform::Linux)
+        };
+        assert_eq!(desktop.decoder_slots(), 3);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Multiview's session against the rest of the app: the data changing
-//! under its tiles, full screen being left, a detour going elsewhere, and
-//! the key hint's time.
+//! under its tiles, full screen being left, a detour going elsewhere, the
+//! window no longer holding the tiles ([`collapse`]), and the key hint's
+//! time.
 
 use std::time::Duration;
 
@@ -90,6 +91,15 @@ pub fn bind(ui: Ui) {
             }
         });
     });
+    // A tablet's window going to split screen, a phone turned upright: the
+    // device no longer offers multiview here (#279), so the session
+    // collapses to the tile being heard.
+    let omitted = computed(move || !crate::capabilities::multiview_offer(ui).shown());
+    effect(move || {
+        if omitted.get() {
+            untracked(|| collapse(ui));
+        }
+    });
     let hint = computed(move || {
         ui.keys_shown()
             && ui.multiview.with(|m| {
@@ -111,4 +121,44 @@ pub fn bind(ui: Ui) {
             });
         }
     });
+}
+
+/// Multiview is no longer offered while a session is open: the session
+/// ends, and the tile being heard plays on full screen. On a detour that
+/// is the tile already full screen (surface 0), which plays on untouched.
+/// From the grid, the heard tile's stream is kept when it plays on surface
+/// 0, the full-screen player (the channel multiview opened with, unless
+/// Listen to this moved the sound); a tile heard on another surface plays
+/// on in surface 0 instead, as Exit multiview does, since only surface 0
+/// is shown full screen and no player view moves. The other surfaces stop,
+/// and a list picking a tile closes.
+pub fn collapse(ui: Ui) {
+    let heard = ui.multiview.with_untracked(|m| {
+        m.as_ref().map(|m| {
+            let tile = &m.tiles()[m.heard_index()];
+            (m.detour().is_some(), tile.channel, tile.surface)
+        })
+    });
+    if heard.is_none() {
+        return;
+    }
+    // A list picking a tile (Search and add, the channel picker) goes
+    // with the session: a pick would find none.
+    if untracked(|| crate::search_view::picking(ui)) {
+        crate::search_view::close(ui);
+    }
+    if untracked(|| crate::multiview_picker::is_open(ui)) {
+        crate::multiview_picker::close(ui);
+    }
+    match heard {
+        None => {}
+        Some((true, _, _)) => {
+            log::info!("iptv multiview: no longer offered here; the detour plays on");
+            end(ui);
+        }
+        Some((false, channel, surface)) => {
+            log::info!("iptv multiview: no longer offered here; surface {surface} heard plays on");
+            leave(ui, channel, surface);
+        }
+    }
 }

@@ -255,6 +255,13 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) {
         return Offer::Hidden;
     }
+    // Sound follows the selected tile: not on a phone, nor where multiview
+    // never exists (#279). The stored value is kept, unused.
+    if key == keys::SOUND_FOLLOWS_TILE.as_str()
+        && !iptv_presentation::capabilities::sound_follows_tile(host)
+    {
+        return Offer::Hidden;
+    }
     // The keyboard or remote settings: only while there are keys (#280).
     if on_keys_page(key) && keys(device).is_none() {
         return Offer::Hidden;
@@ -525,6 +532,19 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
+            // Sound follows the selected tile: never on a phone (#279);
+            // elsewhere where this build has multiview.
+            let follows = device.form_factor() != iptv_core::capabilities::FormFactor::Phone
+                && iptv_presentation::capabilities::multiview_exists(device.host);
+            assert_eq!(
+                offer("player.sound_follows_tile"),
+                if follows {
+                    Offer::Active
+                } else {
+                    Offer::Hidden
+                },
+                "{device:?}"
+            );
         }
         offer_pip(false);
         assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);

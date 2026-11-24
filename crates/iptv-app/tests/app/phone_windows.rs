@@ -8,7 +8,9 @@
 //! upright window, a strip beside it for a tap, and in the preview layout
 //! the video stays full screen under it until the window has room for it
 //! beside the list. The guide keeps its focus and the channel playing, and
-//! the one `tv.player` is never hidden, detached or re-parented.
+//! the one `tv.player` is never hidden, detached or re-parented. The play
+//! bar keeps Multiview under More on a phone (#279), as the device
+//! observer reports one (`device.rs`).
 //!
 //! Synthetic data only: the personalization playlist (M3U).
 
@@ -196,14 +198,30 @@ fn phone_channel_list_stays_inside_an_upright_window() {
     persistent(app, &lifetime, surface);
 }
 
+/// The bar's controls a phone shows directly: all but Multiview, which
+/// it keeps under More (#279).
+fn phone_bar_controls() -> Vec<&'static str> {
+    BAR_CONTROLS
+        .into_iter()
+        .filter(|id| *id != "play-bar-multiview")
+        .collect()
+}
+
 #[test]
 fn phone_play_bar_keeps_transport_centered_on_its_side() {
-    let Some(home) = isolated!() else { return };
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
     let (mut fixture, lifetime) = preview_fixture_with(home, |settings| {
         settings.set("guide.autoplay", Value::Bool(false)).unwrap();
     });
     let app = &mut fixture.app;
     step(app.set_environment("phone", phone));
+    crate::device_signals::report(app, "phone", false, false);
     present(app, SIDEWAYS[1], 1.0);
     let surface = player(app);
     step(app.press_key("down"));
@@ -226,14 +244,16 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             }
             step(app.wait_for("id:play-bar-back"));
             let what = format!("{size:?} at text {text}");
-            let rows: Vec<[f32; 4]> = BAR_CONTROLS
-                .iter()
-                .filter_map(|id| bounds(app, id))
-                .collect();
-            assert_eq!(rows.len(), BAR_CONTROLS.len(), "the bar's controls: {what}");
+            let direct = phone_bar_controls();
+            let rows: Vec<[f32; 4]> = direct.iter().filter_map(|id| bounds(app, id)).collect();
+            assert_eq!(rows.len(), direct.len(), "the bar's controls: {what}");
             assert!(
-                bounds(app, "play-bar-more").is_none(),
-                "all actions fit: {what}"
+                bounds(app, "play-bar-multiview").is_none(),
+                "Multiview under More: {what}"
+            );
+            assert!(
+                bounds(app, "play-bar-more").is_some(),
+                "More holds Multiview: {what}"
             );
             let pause = bounds(app, "play-bar-play-pause").expect("play/pause");
             assert!(
@@ -275,16 +295,20 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             persistent(app, &lifetime, surface);
         }
     }
-    // All ten controls fit at this width only by using spare space on the left.
+    // All ten buttons (nine controls and More, which holds Multiview) fit
+    // at this width only by using spare space on the left.
     present(app, (532.0, 280.0), 1.0);
-    let direct: Vec<_> = BAR_CONTROLS
-        .iter()
+    let direct: Vec<_> = phone_bar_controls()
+        .into_iter()
+        .chain(["play-bar-more"])
         .map(|id| bounds(app, id).expect(id))
         .collect();
-    assert!(bounds(app, "play-bar-more").is_none());
+    assert!(bounds(app, "play-bar-multiview").is_none());
     assert!(direct.iter().all(|b| b[0] >= 0.0 && b[0] + b[2] <= 532.5));
+    let mut ordered = direct.clone();
+    ordered.sort_by(|a, b| a[0].total_cmp(&b[0]));
     assert!(
-        direct
+        ordered
             .windows(2)
             .all(|pair| pair[0][0] + pair[0][2] <= pair[1][0] + 0.5),
         "adjacent targets do not intersect: {direct:?}"
@@ -306,7 +330,8 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
     step(app.wait_for("id:play-bar-pip"));
 
     // The overflow remains open across a resize that keeps the same actions.
-    // Once the actions fit on the bar, dismiss the old list as a unit.
+    // Once the other actions fit on the bar, dismiss the old list as a
+    // unit; More stays for Multiview.
     step(app.press("id:play-bar-more"));
     present(app, (371.0, 260.0), 1.0);
     step(app.wait_for("id:chooser-items >> text:Display"));
@@ -317,7 +342,24 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
             .matches("id:chooser-items >> text:Display")
             .unwrap()
     );
-    assert!(bounds(app, "play-bar-more").is_none());
+    assert!(bounds(app, "play-bar-more").is_some());
+
+    // Upright, a phone offers no Multiview: More no longer lists it.
+    present(app, UPRIGHT[1], 1.0);
+    if bounds(app, "play-bar-back").is_none() {
+        step(app.press("id:video"));
+    }
+    step(app.wait_for("id:play-bar-more"));
+    step(app.press("id:play-bar-more"));
+    step(app.wait_for("id:chooser-items >> text:Display"));
+    assert!(
+        !app.screen()
+            .matches("id:chooser-items >> text:Multiview")
+            .unwrap(),
+        "no Multiview upright"
+    );
+    step(app.press("id:play-bar-more"));
+    present(app, (532.0, 280.0), 1.0);
 
     // A control that moves into More after a press must still extend the
     // bar's idle deadline, and that deadline must survive the resize.

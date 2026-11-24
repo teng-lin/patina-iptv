@@ -8,7 +8,8 @@
 //! Above the controls: the channel, program information and stream quality.
 //! Sound and guide navigation sit left of transport. Favorite, picture in
 //! picture, multiview and display sit to its right. More holds only the
-//! available actions that do not fit. The timeline sits below the row.
+//! available actions that do not fit, and on a phone multiview always
+//! (#279). The timeline sits below the row.
 //! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -376,7 +377,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
     let eligible = |c: &Control| match c {
         Pip => crate::pip::supported(ui) && enabled(ui, Pip),
         More => false,
-        _ => enabled(ui, *c),
+        _ => shown(ui, *c),
     };
     let candidates: Vec<_> = LEFT
         .iter()
@@ -385,7 +386,14 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
         .copied()
         .filter(eligible)
         .collect();
-    let mut row = candidates.clone();
+    // A phone keeps multiview under More, whatever room the bar has.
+    let more_only = |c: &Control| *c == Multiview && phone_form();
+    let mut row: Vec<_> = candidates
+        .iter()
+        .copied()
+        .filter(|c| !more_only(c))
+        .collect();
+    let pinned = row.len() < candidates.len();
     let mut more = Vec::new();
     let needed = |row: &[Control]| {
         group_width(LEFT, row, size)
@@ -393,7 +401,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
             + group_width(RIGHT, row, size)
             + 2.0 * group_gap()
     };
-    if needed(&row) > available {
+    if pinned || needed(&row) > available {
         row.clear();
         row.push(More);
         // Keep transport direct where it fits, including at widths below
@@ -402,7 +410,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
             PlayPause, Rewind, Forward, Favorite, Guide, Pip, Mute, Multiview, Listen, Record,
             Channels, Tracks, Volume, Details, Picture, Fullscreen,
         ] {
-            if candidates.contains(&control) {
+            if candidates.contains(&control) && !more_only(&control) {
                 row.push(control);
                 if needed(&row) > available {
                     row.pop();
@@ -499,7 +507,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
-        .disabled(move || !enabled(ui, control))
+        .disabled(move || !shown(ui, control))
         .accessibility_state(move || AccessibilityState {
             selected: focused(ui, control),
             has_popup: control == Control::More,
@@ -532,6 +540,13 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .items_center()
         .justify_center()
         .label(move || label(ui, control))
+        // Why a control drawn disabled cannot act, said on focus (#279).
+        .optional_accessibility_description(move || {
+            (control == Control::Multiview)
+                .then(|| crate::capabilities::multiview_disabled(ui))
+                .flatten()
+                .map(SharedString::from)
+        })
         .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 2)))
         .on_press(move || {
             ui.touched();
@@ -611,6 +626,28 @@ fn tracks(ui: Ui) -> Option<Track> {
         .into_iter()
         .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
 }
+/// The device is a phone (its form factor, not its window's size).
+fn phone_form() -> bool {
+    crate::capabilities::host().form_factor == iptv_core::capabilities::FormFactor::Phone
+}
+
+/// A control drawn disabled that still takes the focus and a press, to
+/// say why it cannot act: multiview on a TV at the account's limit
+/// (#279). Every other control the bar cannot use is left out.
+fn explains(ui: Ui, control: Control) -> bool {
+    control == Control::Multiview
+        && !enabled(ui, control)
+        && matches!(
+            crate::capabilities::multiview_offer(ui),
+            iptv_presentation::capabilities::MultiviewOffer::Disabled(_)
+        )
+}
+
+/// Whether the bar shows `control` (enabled, or explaining why not).
+fn shown(ui: Ui, control: Control) -> bool {
+    enabled(ui, control) || explains(ui, control)
+}
+
 fn enabled(ui: Ui, control: Control) -> bool {
     match control {
         Control::Rewind | Control::Forward | Control::Timeline => {
@@ -635,6 +672,11 @@ pub(super) fn activate(
 ) {
     used(ui);
     if !enabled(ui, control) {
+        if explains(ui, control)
+            && let Some(reason) = untracked(|| crate::capabilities::multiview(ui)).reason()
+        {
+            crate::settings_view::notify(crate::capabilities::reason(reason));
+        }
         return;
     }
     log::info!("iptv play bar: {}", control_label(control));
@@ -679,7 +721,7 @@ pub(super) fn activate(
             layout(ui)
                 .more
                 .into_iter()
-                .filter(|c| enabled(ui, *c))
+                .filter(|c| shown(ui, *c))
                 .collect(),
             target_window,
         ),
@@ -791,7 +833,7 @@ pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
                 let enabled = layout(ui)
                     .row
                     .into_iter()
-                    .filter(|c| enabled(ui, *c))
+                    .filter(|c| shown(ui, *c))
                     .collect::<Vec<_>>();
                 update(ui, |b, now| {
                     b.move_focus(if forward { 1 } else { -1 }, &enabled, now)
