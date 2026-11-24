@@ -39,7 +39,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lib.rs", "RUNTIME"),         // The shell's single application handle.
     ("lib.rs", "ROOT_STARTED"),    // Guard: the handle is asked for on the application thread only.
     ("lib.rs", "TUI_MODE"),        // Host flag: TUI backend bypasses StickyCells trackball wrapper.
-    ("lists.rs", "HINT_SHOWN"),    // Visible navigation hint revision.
+    ("lib.rs", "LEAVE"), // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
+    ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
     ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.

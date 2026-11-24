@@ -866,7 +866,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         crate::fav_editor::key(ui, action);
         return;
     }
-    if top == Some(Overlay::Chooser) {
+    if matches!(top, Some(Overlay::Chooser | Overlay::Leave)) {
         match action {
             Action::MoveUp => crate::chooser::move_focus(ui, -1),
             Action::MoveDown => crate::chooser::move_focus(ui, 1),

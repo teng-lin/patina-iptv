@@ -222,7 +222,12 @@ registers no Back handler, so Back follows the platform's convention
 phones and tablets show the predictive back animation (on Android 15 and
 later; on Android 14 only with the developer option "Predictive back
 animations"). No second press is asked for. On a desktop, Escape there
-does nothing; the window closes the operating system's way. The former `general.confirm_exit` and
+does nothing; the window closes the operating system's way. Samsung's
+Tizen TVs are the exception: Samsung's termination guide asks for an exit
+confirmation on Return at the app's first screen, so both Tizen hosts
+keep Back there and ask "Close Patina?" with No (focused) and Yes; Back
+closes the question, and only Yes leaves. The remote's Exit key is left
+to the system there and leaves without asking. The former `general.confirm_exit` and
 `general.confirm_exit_window` settings are no longer offered, and stored
 values are ignored.
 

@@ -77,6 +77,10 @@ function PatinaPlayer(ctx) {
     };
 }
 
+function leave() {
+    try { tizen.application.getCurrentApplication().exit(); } catch (e) { /* not a TV */ }
+}
+
 NshTizen.registerComponent('tv.player', PatinaPlayer);
 NshTizen.start({
     container: document.getElementById('app'),
@@ -98,9 +102,13 @@ NshTizen.start({
         { family: 'Roboto', url: 'fonts/Roboto-Medium.woff2', weight: 500 },
         { family: 'Roboto Condensed', url: 'fonts/RobotoCondensed-Regular.woff2', weight: 400 }
     ],
-    onExit: function () {
-        try { tizen.application.getCurrentApplication().exit(); } catch (e) { /* not a TV */ }
+    /* Back at the top level asks first (iptv-app's `confirm_leaving`,
+     * Samsung's exit confirmation), and Yes sends {leave: true}. The
+     * remote's Exit key is never registered: the system handles it. */
+    onHost: function (message) {
+        if (message && message.leave) leave();
     },
+    onExit: leave,
     onError: function (text) {
         if (window.console) console.error('Patina: ' + text);
     }
