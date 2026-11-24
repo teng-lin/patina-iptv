@@ -28,6 +28,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("desktop.rs", "POINTER"),                      // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.
     ("desktop.rs", "TRAVELED"),                     // Last pointer place, for Keys to Pointer.
+    ("desktop.rs", "QUITTING"),                     // Stop and quit in progress (no second ask).
     ("device.rs", "REPORTED"),                      // Reactive handle of the host's device report.
     ("fonts.rs", "FITTED"),                         // Font measurement cache.
     ("fonts.rs", "FONTS_IN"),                       // Font registration flag.
@@ -42,7 +43,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("lib.rs", "RUNTIME"),         // The shell's single application handle.
     ("lib.rs", "ROOT_STARTED"),    // Guard: the handle is asked for on the application thread only.
     ("lib.rs", "TUI_MODE"),        // Host flag: TUI backend bypasses StickyCells trackball wrapper.
-    ("lists.rs", "HINT_SHOWN"),    // Visible navigation hint revision.
+    ("lib.rs", "LEAVE"), // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
+    ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.
     ("host/native/platform_data.rs", "HOST_STOP"), // The root owner's weak handle for off-thread host callbacks.

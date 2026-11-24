@@ -152,6 +152,26 @@ object RecordingHost {
         }
     }
 
+    /** The watchdog fired while this process still records: Rust publishes
+     * only when its schedule changes, so the next watchdog is armed here,
+     * or a kill later in a long capture would have none (#275). A new
+     * process starts idle and arms its own once its capture resumes. */
+    @JvmStatic @Synchronized
+    fun renewWatchdog(context: Context) {
+        if (!desiredActive) return
+        try {
+            val wake = System.currentTimeMillis() / 1000 + 120
+            context
+                .getSharedPreferences("recording-host", Context.MODE_PRIVATE)
+                .edit()
+                .putLong("next", wake)
+                .apply()
+            arm(context, wake)
+        } catch (_: RuntimeException) {
+            // The service start below still runs; Rust's next publication rearms.
+        }
+    }
+
     fun startService(context: Context): Boolean =
         try {
             val intent = Intent(context, RecordingService::class.java)
@@ -177,7 +197,9 @@ class RecordingAlarm : BroadcastReceiver() {
             RecordingHost.retireSchedules(context)
             return
         }
-        // The Record now watchdog: restart the capture's service.
+        // The Record now watchdog: rearm the next one while this process
+        // still records, then restart the capture's service.
+        RecordingHost.renewWatchdog(context)
         RecordingHost.startService(context)
     }
 }

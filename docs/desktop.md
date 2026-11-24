@@ -146,13 +146,14 @@ an IOKit `PreventUserIdleSystemSleep` assertion on macOS, a logind
 `sleep:idle` inhibitor (or the desktop portal's Inhibit request) on Linux,
 `SetThreadExecutionState` on Windows. It is released when no capture runs
 (`host/native/keep_awake.rs`). If it cannot be taken, Record says to keep the
-computer awake. It does not prevent a sleep the viewer asks for, such as
-closing a laptop's lid.
+computer awake. Closing a laptop's lid still sleeps (logind ignores
+inhibitors for the lid by default); on Linux, a suspend chosen from the
+system menu may first say that Patina is recording.
 
 - **Now:** all rows (`crates/iptv-app/src/desktop.rs`,
   `desktop/quit_confirm.rs`, `desktop/player_windows.rs`,
-  `desktop/pip_window.rs`). The headless scenarios run on Linux keep the macOS
-  close behavior unless `IPTV_TEST_CLOSE_ASKS` is set
+  `desktop/pip_window.rs`). The headless scenarios keep the macOS close
+  behavior unless `IPTV_TEST_CLOSE_ASKS` is set
   (`desktop_workflows.rs`).
 
 ## Displays and hosts

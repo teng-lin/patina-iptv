@@ -5,14 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import android.content.res.Configuration
-import android.os.Build
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.View
@@ -71,6 +71,8 @@ internal class DeviceComponent(
 
             override fun onDetachedFromWindow() {
                 watchLimits(false)
+                // A network change posted before detaching reports nothing.
+                main.removeCallbacksAndMessages(null)
                 super.onDetachedFromWindow()
             }
 

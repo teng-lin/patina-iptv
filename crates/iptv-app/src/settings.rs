@@ -182,8 +182,7 @@ pub fn text_factor() -> f32 {
 /// form factor, the window or the connected input changes). The
 /// long-press time matters only where keys report their release
 /// (Android), and picture in picture on leaving only on an Android phone
-/// or tablet whose host reported the window ([`offer_pip`]): never on a
-/// TV.
+/// or tablet whose host reported the window ([`offer_pip`]): never on a TV.
 pub fn offer(device: Device, key: &str) -> Offer {
     let host = device.host;
     // Recording and backups run on blocking workers; a host without them
@@ -439,6 +438,13 @@ mod tests {
     fn what_the_app_offers() {
         // The signals reach the offer; none of them changes it yet (the
         // features that follow them come with their own issues).
+        // Picture in picture on leaving: not before the host says it has
+        // the window, never off Android (nor on a TV, whose host reports
+        // none).
+        for device in devices() {
+            assert_eq!(offer(device, "player.pip_on_leave"), Offer::Hidden);
+        }
+        offer_pip(true);
         let pip = if crate::host::ANDROID {
             Offer::Active
         } else {
@@ -465,13 +471,10 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
-            // Not before the host says it has the window, never off
-            // Android (nor on a TV, whose host reports none).
-            assert_eq!(offer("player.pip_on_leave"), Offer::Hidden);
-            offer_pip(true);
             assert_eq!(offer("player.pip_on_leave"), pip);
-            offer_pip(false);
         }
+        offer_pip(false);
+        assert_eq!(offer_now("player.pip_on_leave"), Offer::Hidden);
     }
 
     #[test]

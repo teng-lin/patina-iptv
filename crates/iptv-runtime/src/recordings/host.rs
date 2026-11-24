@@ -249,7 +249,9 @@ impl State {
             .map(|(id, (_, stop))| (*id, stop.clone()))
             .collect();
         for (id, stop) in &running {
-            data.stop_reasons.insert(*id, why.reason());
+            // The first reason stands: a time limit reached after the TV
+            // turned off does not replace why it stopped.
+            data.stop_reasons.entry(*id).or_insert(why.reason());
             stop.cancel();
         }
         running.len()

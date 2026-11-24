@@ -392,8 +392,8 @@ force stop prevents execution until Patina is opened again, and Android 15 can
 limit background capture to six hours in a 24-hour period. Device, network and
 storage availability still apply.
 
-On desktop, Patina keeps running while a recording runs and holds the computer
-from idle sleep; quitting stops the recording and keeps what was recorded.
+On desktop, quitting while a recording runs asks first (see above for closing
+the window), then stops the recording and keeps what was recorded.
 iPad background recording is not supported.
 
 Earlier versions could schedule recordings. Upgrading from one of them cancels

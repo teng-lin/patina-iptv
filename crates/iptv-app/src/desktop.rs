@@ -35,15 +35,19 @@ thread_local! {
     static WINDOW: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
     /// Where the mouse last was (window points).
     static POINTER: Cell<Option<(f32, f32)>> = const { Cell::new(None) };
+    /// Stop and quit is closing the recordings (`stop_recordings_and_quit`):
+    /// a close or Quit meanwhile neither asks again nor starts it twice.
+    static QUITTING: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Whether closing the main window during a capture keeps recording with
 /// the window hidden (macOS, with its Dock icon) rather than asking
 /// whether to stop recording and quit (Windows, Linux). The headless
-/// scenarios run on Linux keep the macOS behavior unless
-/// `IPTV_TEST_CLOSE_ASKS` is set (`desktop_workflows.rs`).
+/// scenarios keep the macOS behavior on every desktop unless
+/// `IPTV_TEST_CLOSE_ASKS` is set, which asks on every desktop
+/// (`desktop_workflows.rs`).
 fn close_keeps_recording() -> bool {
-    if cfg!(feature = "test-support") && !crate::host::MACOS {
+    if cfg!(feature = "test-support") {
         return std::env::var_os("IPTV_TEST_CLOSE_ASKS").is_none();
     }
     crate::host::MACOS
@@ -61,6 +65,9 @@ pub fn bind(ui: Ui) {
     window.set(attributes);
     let close_window = window.clone();
     window.on_close_press(move |reason| {
+        if QUITTING.with(Cell::get) {
+            return;
+        }
         let recording = reason != nsh_core::desktop::CloseReason::System
             && crate::runtime().recording_background_needed();
         // Windows and Linux ask first, so no recorder runs without a
@@ -88,6 +95,9 @@ pub fn bind(ui: Ui) {
     keep_reachable(window.clone());
     // Quit (the menu's, the platform's key) asks first during a capture.
     nsh_core::element::desktop::on_quit_request(move || {
+        if QUITTING.with(Cell::get) {
+            return;
+        }
         if crate::runtime().recording_background_needed() {
             quit_confirm::open(ui);
         } else {
@@ -111,8 +121,13 @@ pub(crate) fn show_main() {
 /// viewer's Stop does, keeping what was recorded, waits briefly for them
 /// to close their files, then quits.
 pub(crate) fn stop_recordings_and_quit(ui: Ui) {
+    if QUITTING.with(|quitting| quitting.replace(true)) {
+        return;
+    }
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
+        // Every job still to record: with scheduling retired (#273), each
+        // is a Record now, running or waiting for a connection.
         let running: Vec<_> = owner
             .recording_snapshot()
             .into_iter()
@@ -133,6 +148,8 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
             timer(std::time::Duration::from_millis(200)).await;
         }
         quit(ui);
+        // Still here (the recorder had not closed): the viewer may try again.
+        QUITTING.with(|quitting| quitting.set(false));
     });
 }
 
