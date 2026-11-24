@@ -298,8 +298,13 @@ fn offered_rows(device: Device) -> String {
         "catchup.forward_step",
         "catchup.rewind_step",
     ];
+    use iptv_presentation::settings::screen::Offer;
+    // A row on the Advanced page counts as offered.
     let offered = ROWS.iter().copied().filter(|key| {
-        crate::settings::offer(device, key) == iptv_presentation::settings::screen::Offer::Active
+        matches!(
+            crate::settings::offer(device, key),
+            Offer::Active | Offer::Advanced
+        )
     });
     std::iter::once("rows:")
         .chain(offered)

@@ -317,7 +317,7 @@ pub static GUIDE: &[Setting] = &[
     ),
     // default: ours
     guide(
-        "advanced",
+        "switching",
         "guide.fullscreen_timeout",
         secs(0, 60, 1, 0),
         key("Go full screen after a preview has played this long without input; 0 never does."),

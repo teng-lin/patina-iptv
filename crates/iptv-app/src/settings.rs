@@ -16,9 +16,10 @@
 //! read their global value; a deleted playlist's own values go with it.
 //!
 //! [`offer`] says what the app does with each setting and command: the
-//! ones it acts on ([`WIRED`], [`COMMANDS`]), what it shows read-only,
-//! what comes later, and what it does not offer at all (device-level
-//! features of TV boxes). Some settings apply here ([`bind`]: colors,
+//! ones it acts on ([`WIRED`], [`COMMANDS`]), those it keeps with the
+//! advanced settings on this device, what comes later, and what it does
+//! not offer at all (device-level features of TV boxes, and the keys'
+//! settings while no keys are connected: [`keys`]). Some settings apply here ([`bind`]: colors,
 //! panel timeouts, [`network_config`]); the others are read where they act
 //! (guide data, catch-up keys and steps, search, startup channel, Back,
 //! channel-change info).
@@ -26,7 +27,7 @@
 use std::sync::Arc;
 
 use iptv_core::capabilities::{FormFactor, Platform};
-use iptv_presentation::capabilities::Device;
+use iptv_presentation::capabilities::{Device, Keys};
 use iptv_presentation::layout::Class;
 use iptv_presentation::panels::Timeouts;
 use iptv_presentation::settings::screen::Offer;
@@ -106,8 +107,39 @@ pub const COMMANDS: &[&str] = &[
     "playlists.manage",
 ];
 
-/// Shown with their value only: the key list has no editor yet.
-const READ_ONLY: &[&str] = &["remote.key_overrides"];
+/// Not shown: the changed keys (`remote.key_overrides`), which the
+/// bindings editor's row sums up (`settings_view::command_value`); the
+/// value stays stored and in backups.
+const SUMMED_UP: &[&str] = &["remote.key_overrides"];
+
+/// Guide preview and zapping timing (`browse_playback`): moving the focus
+/// with keys tunes after the delay. On a phone or a tablet they apply
+/// only while keys are connected ([`keys`]); a desktop and a TV keep them
+/// with the advanced settings.
+const ZAPPING: &[&str] = &["guide.autoplay", "guide.switch_delay"];
+
+/// What the keys connected to `device` are set up as, if anything
+/// (`iptv_presentation::capabilities::keys`). An iPad does not report its
+/// keyboard yet (`device::ipad_input_unreported`), and keyboard shortcuts
+/// work there: it keeps the keyboard settings, so a keyboard user can
+/// always remap or turn off a single-key shortcut (WCAG 2.1.4).
+pub fn keys(device: Device) -> Option<Keys> {
+    if crate::host::IPAD && device.form_factor() != FormFactor::Tv {
+        return Some(Keys::Keyboard);
+    }
+    iptv_presentation::capabilities::keys(device.host)
+}
+
+/// [`keys`] now (reactive).
+pub fn keys_now() -> Option<Keys> {
+    keys(crate::device::current())
+}
+
+/// Whether `key` is set up with the keyboard or remote settings: the
+/// remote section, which also holds the keys that seek in replays.
+fn on_keys_page(key: &str) -> bool {
+    key.starts_with("remote.") || key == keys::SEEK_KEYS.as_str()
+}
 
 /// Not offered: device-level features of TV boxes (start with the device,
 /// frame-rate switching, decoders, audio passthrough, multicast relay,
@@ -163,7 +195,8 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 }
 
 /// The rows the device decides (#281): `Some(Offer::Hidden)` where it
-/// hides them; `None` leaves them to the other rules.
+/// hides them, `Some(Offer::Advanced)` where they go to the Advanced page;
+/// `None` leaves them to the other rules.
 ///
 /// - `general.clock`: a phone or a tablet follows the system's 24-hour
 ///   setting ([`crate::i18n::clock_style`]).
@@ -171,8 +204,11 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 ///   `guide.list_browse_mode`: in a compact window the layout decides (the
 ///   guide shows its preview, [`browse_mode`]; the channel list has no
 ///   room for the video beside it), so the guide never draws over video.
-/// - `guide.fullscreen_timeout`: a TV's only. A phone, a tablet or a
-///   desktop never goes full screen by itself ([`fullscreen_timeout_ms`]).
+/// - `guide.fullscreen_timeout`: a TV's only, on the Advanced page. A
+///   phone, a tablet or a desktop never goes full screen by itself
+///   ([`fullscreen_timeout_ms`]).
+/// - `catchup.forward_step`, `catchup.rewind_step`: on the Advanced page
+///   on every device.
 /// - `guide.after_choosing`: a phone or a tablet always goes full screen
 ///   ([`stays_after_choosing`]).
 /// - `player.info_on_switch`: it applies to zapping with keys, which a
@@ -182,6 +218,14 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 ///   bring the row back.
 fn by_device(device: Device, key: &str) -> Option<Offer> {
     let input = device.input();
+    // Advanced settings: on the Advanced page (#281).
+    match key {
+        "catchup.forward_step" | "catchup.rewind_step" => return Some(Offer::Advanced),
+        "guide.fullscreen_timeout" if device.form_factor() == FormFactor::Tv => {
+            return Some(Offer::Advanced);
+        }
+        _ => {}
+    }
     let hidden = match key {
         "general.clock" | "guide.after_choosing" => handheld(device.form_factor()),
         "appearance.ui_transparency" | "guide.browse_mode" | "guide.list_browse_mode" => {
@@ -274,11 +318,22 @@ pub fn offer(device: Device, key: &str) -> Offer {
     // Leaving the app into a picture-in-picture window: Android phones and
     // tablets only, once the host says it has the window.
     let pip = host.automatic_pip() && PIP.get();
-    if NOT_OFFERED.contains(&key) || RETIRED.contains(&key) {
+    if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) || RETIRED.contains(&key) {
         return Offer::Hidden;
     }
     if let Some(offer) = by_device(device, key) {
         return offer;
+    }
+    // The keyboard or remote settings: only while there are keys (#280).
+    if on_keys_page(key) && keys(device).is_none() {
+        return Offer::Hidden;
+    }
+    if ZAPPING.contains(&key) {
+        return match device.form_factor() {
+            FormFactor::Desktop | FormFactor::Tv => Offer::Advanced,
+            FormFactor::Phone | FormFactor::Tablet if keys(device).is_some() => Offer::Active,
+            FormFactor::Phone | FormFactor::Tablet => Offer::Hidden,
+        };
     }
     // Swiping over full-screen video: where a finger may touch it (a TV's
     // remote has Ch± instead). Outside a running app (the unit tests) no
@@ -296,10 +351,6 @@ pub fn offer(device: Device, key: &str) -> Offer {
         || (key == keys::PIP_ON_LEAVE.as_str() && pip)
     {
         Offer::Active
-    } else if key == keys::PIP_ON_LEAVE.as_str() {
-        Offer::Hidden
-    } else if READ_ONLY.contains(&key) {
-        Offer::ReadOnly
     } else {
         Offer::Hidden
     }
@@ -504,7 +555,7 @@ mod tests {
 
     #[test]
     fn listed_keys_exist() {
-        for key in WIRED.iter().chain(READ_ONLY) {
+        for key in WIRED.iter().chain(SUMMED_UP) {
             assert!(catalog::setting(key).is_some(), "{key}");
         }
         for key in COMMANDS {
@@ -532,6 +583,8 @@ mod tests {
         add_user_agent(&mut own, Some("SyntheticPlayer/1.0".into()));
         assert_eq!(own.len(), 1, "the channel's own agent wins");
     }
+
+    use iptv_core::capabilities::FormFactor;
 
     /// Every combination of the three signals on this build.
     fn devices() -> Vec<Device> {
@@ -563,7 +616,9 @@ mod tests {
 
     #[test]
     fn what_the_app_offers() {
-        // What no signal changes.
+        // What no signal changes. The rows that follow the connected
+        // input are checked below (`keys_and_zapping_follow_the_connected_input`,
+        // `the_device_decides_guide_player_and_display_rows`).
         // Picture in picture on leaving: not before the host says it has
         // the window, never off Android (nor on a TV, whose host reports
         // none).
@@ -587,7 +642,8 @@ mod tests {
             assert_eq!(offer("parental.live_enabled"), Offer::Active);
             assert_eq!(offer("parental.change_pin"), Offer::Active);
             assert_eq!(offer("history.keep_days"), Offer::Hidden);
-            assert_eq!(offer("remote.key_overrides"), Offer::ReadOnly);
+            // The bindings editor's row sums the changed keys up.
+            assert_eq!(offer("remote.key_overrides"), Offer::Hidden);
             assert_eq!(offer("player.pip_on_leave"), pip);
             // Scheduled recording is retired (#273).
             for key in [
@@ -605,17 +661,19 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
-            // Kept on every device, under Accessibility and advanced
-            // Playback (#281).
+            // Kept on every device, the timeouts under Accessibility
+            // (#281).
             for key in [
                 "player.info_panel_timeout",
                 "player.controls_panel_timeout",
-                "catchup.forward_step",
-                "catchup.rewind_step",
                 "catchup.timebar_step",
                 "guide.visible_minutes",
             ] {
                 assert_eq!(offer(key), Offer::Active, "{key}");
+            }
+            // On the Advanced page on every device (#281).
+            for key in ["catchup.forward_step", "catchup.rewind_step"] {
+                assert_eq!(offer(key), Offer::Advanced, "{key}");
             }
         }
         offer_pip(false);
@@ -642,8 +700,12 @@ mod tests {
                 assert_eq!(shown(key), !compact, "{key}: {what}");
             }
             assert_eq!(
-                shown("guide.fullscreen_timeout"),
-                form == FormFactor::Tv,
+                offer(device, "guide.fullscreen_timeout"),
+                if form == FormFactor::Tv {
+                    Offer::Advanced
+                } else {
+                    Offer::Hidden
+                },
                 "{what}"
             );
             assert_eq!(shown("guide.after_choosing"), !held, "{what}");
@@ -686,6 +748,51 @@ mod tests {
         assert_eq!(guide_layout("overlay", Class::Compact), Guide);
         for window in [Class::Compact, Class::Medium, Class::Expanded] {
             assert_eq!(guide_layout("preview", window), Guide);
+        }
+    }
+
+    /// #280: the keyboard or remote settings exist while there are keys;
+    /// guide autoplay and its delay too on a phone or a tablet, and with
+    /// the advanced settings on a desktop or a TV.
+    #[test]
+    fn keys_and_zapping_follow_the_connected_input() {
+        let rows = [
+            "remote.digit_timeout",
+            "remote.player_up_down",
+            "remote.customize",
+            "catchup.seek_keys",
+        ];
+        for device in devices() {
+            let offer = |key| offer(device, key);
+            let input = device.input();
+            let has_keys = crate::host::IPAD
+                || match device.form_factor() {
+                    FormFactor::Tv | FormFactor::Desktop => true,
+                    FormFactor::Phone | FormFactor::Tablet => input.keyboard || input.dpad,
+                };
+            let page = if has_keys {
+                Offer::Active
+            } else {
+                Offer::Hidden
+            };
+            for key in rows {
+                assert_eq!(offer(key), page, "{key} on {device:?}");
+            }
+            // A hold only where keys report their release.
+            let hold = if has_keys && crate::input::long_press() {
+                Offer::Active
+            } else {
+                Offer::Hidden
+            };
+            assert_eq!(offer("remote.long_press"), hold, "{device:?}");
+            let zapping = match device.form_factor() {
+                FormFactor::Tv | FormFactor::Desktop => Offer::Advanced,
+                _ => page,
+            };
+            for key in ["guide.autoplay", "guide.switch_delay"] {
+                assert_eq!(offer(key), zapping, "{key} on {device:?}");
+            }
+            assert_eq!(keys(device).is_some(), has_keys, "{device:?}");
         }
     }
 

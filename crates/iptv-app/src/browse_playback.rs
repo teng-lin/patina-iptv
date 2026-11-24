@@ -73,9 +73,13 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     // The form factor only: a resized window changes nothing here.
     let form_factor = crate::device::host().form_factor;
     Policy {
+        // Off while its row is not offered (a phone or a tablet with no
+        // keyboard or D-pad, #280), whatever is stored.
         autoplay: !crate::desktop::recorder_only_startup()
             && surface != Some(Surface::Player)
-            && s.bool(keys::AUTOPLAY, at),
+            && s.bool(keys::AUTOPLAY, at)
+            && crate::settings::offer_now(keys::AUTOPLAY.as_str())
+                != iptv_presentation::settings::screen::Offer::Hidden,
         delay_ms: s.duration_ms(keys::SWITCH_DELAY, at).max(0) as u64,
         fullscreen_ms: if surface == Some(Surface::Player) {
             0

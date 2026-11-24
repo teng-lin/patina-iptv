@@ -96,7 +96,7 @@ impl Section {
             Section::Channels => &["sorting", "categories", "names"],
             Section::Epg => &["updates", "storage", "matching"],
             Section::Appearance => &["colors", "text", "motion"],
-            Section::Guide => &["browsing", "content", "emphasis", "switching", "advanced"],
+            Section::Guide => &["browsing", "content", "emphasis", "switching"],
             Section::Logos => &[],
             Section::Player => &[
                 "panels",
@@ -115,7 +115,7 @@ impl Section {
                 "frame_rate",
                 "external",
             ],
-            Section::Catchup => &["source", "seeking", "steps", "advanced"],
+            Section::Catchup => &["source", "seeking", "steps"],
             Section::History => &["history", "recent"],
             Section::Search => &[],
             Section::Recordings => &["recording", "reminders"],

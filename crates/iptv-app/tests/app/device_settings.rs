@@ -81,7 +81,7 @@ fn fixture(here: &str, settings: Settings) -> Option<personalization::Fixture> {
 }
 
 /// Rows every device keeps: the panel timeouts under Accessibility, the
-/// jumps under advanced Playback, the guide's minute span (every layout
+/// jumps on the Advanced page, the guide's minute span (every layout
 /// of the guide has a time grid).
 const EVERYWHERE: [&str; 5] = [
     "guide.visible_minutes",

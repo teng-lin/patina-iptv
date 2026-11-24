@@ -27,14 +27,21 @@ is below 1.0, a minor release may change behavior.
   tablets follow the system's 12/24-hour clock and always go full screen after
   choosing a channel. One "After choosing a channel" choice replaces the two
   "Keep … after choosing" switches on desktops and TVs. "Go full screen after"
-  is a TV's only, under Advanced. A compact window shows the guide beside its
+  is a TV's only, on the Advanced page. A compact window shows the guide beside its
   preview and hides the layout and transparency rows. "Show info on a channel
   change" is hidden on an Android phone or tablet without a keyboard or D-pad.
   Back in the guide always returns to the programs on air first.
 - Move the panel timeouts under Playback → Accessibility, and the rewind and
-  fast-forward jumps under Advanced. The player's panels and play bar now wait
+  fast-forward jumps to the Advanced page. The player's panels and play bar now wait
   at least Android's recommended accessibility timeout, and stay until hidden
   while a screen reader or Switch Access runs.
+- Settings show Keyboard or Remote control only while there are keys to set
+  up: always on a TV and a desktop, and on a phone or a tablet while a
+  hardware keyboard or a D-pad is connected. The page holds the replay seek
+  keys; the keyboard's leaves out keys only a remote has, and a hold is offered
+  only where keys report their release. Guide autoplay and its delay move to
+  a new Advanced page on desktop and TV, and on a phone or a tablet show only
+  with a keyboard or D-pad, autoplay staying off without one.
 - Android TV no longer offers picture in picture: Home during playback returns
   to the launcher and stops the stream, and the control and the
   picture-in-picture-on-leaving setting are gone there. Phones and tablets keep

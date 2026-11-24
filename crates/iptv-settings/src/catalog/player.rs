@@ -305,21 +305,14 @@ pub static CATCHUP: &[Setting] = &[
     ),
     // default: ours
     catchup(
-        "seeking",
-        "catchup.seek_keys",
-        choice(&SEEK_KEYS, "left_right"),
-        key("Which keys seek while replaying: Left/Right, Down/Up, or the transport keys."),
-    ),
-    // default: ours
-    catchup(
-        "advanced",
+        "steps",
         "catchup.forward_step",
         secs(5, 600, 5, 30),
         key("Jump made by one fast-forward press."),
     ),
     // default: ours
     catchup(
-        "advanced",
+        "steps",
         "catchup.rewind_step",
         secs(5, 600, 5, 10),
         key("Jump made by one rewind press."),
