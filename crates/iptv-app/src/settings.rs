@@ -176,10 +176,14 @@ pub fn text_factor() -> f32 {
 /// picture in picture on leaving only on Android.
 pub fn offer(key: &str) -> Offer {
     // Recording and backups run on blocking workers; a host without them
-    // offers neither. Imports and guide downloads run where the host can
-    // import (`host::IMPORTS`).
-    if !crate::host::HAS_WORKERS
-        && (key.starts_with("recordings.") || matches!(key, "general.backup" | "general.restore"))
+    // offers neither. A backup action also needs its document picker
+    // (`backup::offered`; none on the iPad yet). Imports and guide
+    // downloads run where the host can import (`host::IMPORTS`).
+    if !crate::host::HAS_WORKERS && key.starts_with("recordings.") {
+        return Offer::Hidden;
+    }
+    if matches!(key, "general.backup" | "general.restore")
+        && !(crate::host::HAS_WORKERS && crate::backup::offered(key))
     {
         return Offer::Hidden;
     }
@@ -196,9 +200,6 @@ pub fn offer(key: &str) -> Offer {
     }
     // Leaving the app into a picture-in-picture window: Android only.
     let android = crate::capabilities::HOST.automatic_pip();
-    if matches!(key, "general.backup" | "general.restore") && crate::host::IPAD {
-        return Offer::NotYet;
-    }
     if NOT_OFFERED.contains(&key) {
         return Offer::Hidden;
     }

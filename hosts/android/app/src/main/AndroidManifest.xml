@@ -19,6 +19,17 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="http" android:mimeType="video/*" />
         </intent>
+        <!-- The backup's document pickers (DocumentPickers): which resolve. -->
+        <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="application/octet-stream" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="*/*" />
+        </intent>
     </queries>
 
     <application
