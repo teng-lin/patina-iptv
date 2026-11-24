@@ -71,6 +71,8 @@ internal class DeviceComponent(
 
             override fun onDetachedFromWindow() {
                 watchLimits(false)
+                // A network change posted before detaching reports nothing.
+                main.removeCallbacksAndMessages(null)
                 super.onDetachedFromWindow()
             }
 
