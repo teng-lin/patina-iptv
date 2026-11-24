@@ -3,8 +3,10 @@
 //! phone, a tablet, a TV and a desktop, a window resized across the size
 //! classes and a hardware keyboard attached and detached all reach what
 //! the gates read, while the app runs. The settings rows and the control
-//! strip follow them without a rebuild; none of the signals changes what
-//! they offer yet, so the strip keeps its focus and the same controls.
+//! strip follow them without a rebuild; the input changes nothing they
+//! offer, so the strip keeps its focus and the same controls (what the
+//! form factor and the window change for multiview is
+//! `multiview_by_device.rs`).
 //!
 //! Synthetic data only: the personalization playlist (M3U).
 
