@@ -206,9 +206,10 @@ pub fn offer(key: &str) -> Offer {
         return Offer::Hidden;
     }
     // Swiping over full-screen video: where a finger may touch it (a TV's
-    // remote has Ch± instead).
+    // remote has Ch± instead). Outside a running app (the unit tests) no
+    // device is known: it counts as offered.
     if key == keys::SWIPE_TO_ZAP.as_str() {
-        return if crate::play_bar::pointer_available() {
+        return if try_os().is_none() || crate::play_bar::pointer_available() {
             Offer::Active
         } else {
             Offer::Hidden
