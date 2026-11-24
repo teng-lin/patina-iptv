@@ -363,7 +363,11 @@ impl Store {
         let tx = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // Children first, so this does not depend on foreign-key cascades.
         for table in [
+            "recording_playback_progress",
+            "recording_completions",
+            "recording_rule_jobs",
             "recording_rules",
             "recording_jobs",
             "retired_recording_schedules",
@@ -445,7 +449,7 @@ impl Store {
 }
 
 /// Copies `table`'s rows matching `filter` between two libraries of this
-/// build's schema, column for column.
+/// build's schema, by column name.
 fn copy_rows(
     from: &rusqlite::Connection,
     to: &rusqlite::Transaction<'_>,
@@ -454,11 +458,16 @@ fn copy_rows(
 ) -> Result<()> {
     let mut query = from.prepare(&format!("SELECT * FROM {table} WHERE {filter}"))?;
     let columns = query.column_count();
+    let names = query
+        .column_names()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>()
+        .join(",");
     let values = (1..=columns)
         .map(|at| format!("?{at}"))
         .collect::<Vec<_>>()
         .join(",");
-    let mut insert = to.prepare(&format!("INSERT INTO {table} VALUES({values})"))?;
+    let mut insert = to.prepare(&format!("INSERT INTO {table}({names}) VALUES({values})"))?;
     let mut rows = query.query([])?;
     while let Some(row) = rows.next()? {
         let values = (0..columns)

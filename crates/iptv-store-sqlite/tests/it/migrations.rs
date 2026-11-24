@@ -262,8 +262,6 @@ fn custom_group_preferences_share_the_canonical_guide_id() {
     );
 }
 
-/// A historical version: its schema snapshot and the data files to load
-/// into it, in order.
 /// Schema 28 retires scheduled recording. A file from 0.1.8 (schema 27),
 /// and one from a release before it (schema 26, skipping 0.1.8), opens with
 /// nothing left to run: pending jobs are canceled and listed once, repeating
@@ -387,6 +385,8 @@ fn upgrading_without_schedules_shows_no_retirement_notice() {
     assert!(!store.announce_retired_recordings().unwrap());
 }
 
+/// A historical version: its schema snapshot and the data files to load
+/// into it, in order.
 struct Version {
     version: u32,
     data: &'static [&'static str],

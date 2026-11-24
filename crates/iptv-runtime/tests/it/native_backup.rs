@@ -114,6 +114,42 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
     let target_root = directory.path().join("generated-target");
     let target = runtime(&target_root);
     let (target_id, _) = seed(&target, "Generated target");
+    // A recording this device made: its media stays beside the catalog
+    // under this job id, so the restored library keeps the row.
+    let kept = iptv_core::recording::JobId(931);
+    {
+        let mut store = Store::open_encrypted(
+            target_root.join("iptv.sqlite"),
+            &DatabaseKey::from_bytes(KEY),
+        )
+        .unwrap();
+        let request = iptv_core::recording::Request {
+            source: target_id.0,
+            channel: iptv_providers::m3u::parse_m3u(std::str::from_utf8(TEXT).unwrap())
+                .channels
+                .items[0]
+                .id
+                .to_string(),
+            channel_name: "Generated target channel".into(),
+            title: "Generated kept recording".into(),
+            start: 1_800_000_000,
+            end: 1_800_000_060,
+        };
+        store
+            .schedule_recording(kept, &request, 1_799_999_000)
+            .unwrap();
+        assert!(
+            store
+                .transition_recording(
+                    kept,
+                    iptv_core::recording::Status::Scheduled,
+                    iptv_core::recording::Status::Completed,
+                    376,
+                    "",
+                )
+                .unwrap()
+        );
+    }
     let wrong_events = Rc::new(RefCell::new(0));
     let wrong = wrong_events.clone();
     target.bind(move |event| {
@@ -220,6 +256,12 @@ fn native_backup_round_trip_reencrypts_documents_and_preserves_other_owner_event
     let channels = store.load_channels(source, &Default::default()).unwrap();
     assert_eq!(channels[0].name, "Generated backed up channel");
     assert!(store.is_favorite(source, &channels[0].channel.id).unwrap());
+    let recording = store.recording_job(kept).unwrap().unwrap();
+    assert_eq!(
+        (recording.status, recording.bytes),
+        (iptv_core::recording::Status::Completed, 376),
+        "this device's recording survives the restore"
+    );
     let SourceConfig::M3u(config) = store.source(source).unwrap().unwrap().source.config else {
         unreachable!()
     };
