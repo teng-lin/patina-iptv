@@ -73,6 +73,7 @@ class TvActivity : Activity() {
             BackupComponent(this, context, backups)
         }
         nsh.registerComponent(ImeVisibilityComponent.NAME, ::ImeVisibilityComponent)
+        nsh.registerComponent(DeviceComponent.NAME, ::DeviceComponent)
         val gone = { p: PlayerComponent ->
             players.remove(p)
             pip.destroyed(p)
@@ -109,6 +110,12 @@ class TvActivity : Activity() {
         started = true
         val allowed = RecordingHost.resumeViewing(filesDir.absolutePath)
         for (p in players.toList()) p.foreground(allowed)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The backup rows follow the document pickers that resolve now.
+        backups.resumed()
     }
 
     override fun onStop() {

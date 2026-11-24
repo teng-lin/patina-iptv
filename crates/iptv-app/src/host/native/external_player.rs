@@ -5,6 +5,42 @@ use tokio::sync::watch;
 
 pub(crate) const EXTERNAL_PLAYER: bool = cfg!(any(target_os = "android", target_os = "linux"));
 
+/// What the headless tests say about the handler, in place of the probe:
+/// 0 probes, 1 reports none, 2 reports one.
+#[cfg(feature = "test-support")]
+static TEST_HANDLER: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Pretends a handler is (`Some(true)`) or is not (`Some(false)`) installed,
+/// or probes again (`None`), for the headless tests.
+#[cfg(feature = "test-support")]
+pub(crate) fn set_external_player_handler(handler: Option<bool>) {
+    let value = match handler {
+        None => 0,
+        Some(false) => 1,
+        Some(true) => 2,
+    };
+    TEST_HANDLER.store(value, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether another player could take a handoff now: an app that resolves
+/// the handoff's intent on Android, VLC or mpv on Linux. The answer can
+/// change while Patina runs (a player installed or removed), so callers ask
+/// each time they offer or start a handoff rather than keeping it.
+pub(crate) fn external_player_available() -> bool {
+    #[cfg(feature = "test-support")]
+    match TEST_HANDLER.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => return false,
+        2 => return true,
+        _ => {}
+    }
+    #[cfg(target_os = "android")]
+    return android::handler_installed();
+    #[cfg(target_os = "linux")]
+    return linux::player_installed();
+    #[allow(unreachable_code)]
+    false
+}
+
 struct Connection {
     relay: PlaybackRelay,
     lease: Option<Box<dyn Send>>,
@@ -26,6 +62,9 @@ impl Drop for Retirement {
         if let Some(Connection { relay, lease }) = self.connection.take() {
             relay.shutdown_blocking();
             drop(lease);
+            // Lets Patina's process be cached again (`ExternalPlaybackService`).
+            #[cfg(target_os = "android")]
+            android::released();
         }
         self.session.retired.send_replace(true);
     }
@@ -169,6 +208,45 @@ mod linux {
         Mpv,
     }
 
+    impl Player {
+        const ALL: [Self; 2] = [Self::Vlc, Self::Mpv];
+
+        fn program(&self) -> &'static str {
+            match self {
+                Self::Vlc => "vlc",
+                Self::Mpv => "mpv",
+            }
+        }
+    }
+
+    /// Whether VLC or mpv is a file on `PATH` that Patina may execute, the
+    /// players a handoff launches.
+    pub(super) fn player_installed() -> bool {
+        std::env::var_os("PATH").is_some_and(|path| installed_in(&path))
+    }
+
+    fn installed_in(path: &std::ffi::OsStr) -> bool {
+        std::env::split_paths(path).any(|dir| {
+            Player::ALL
+                .iter()
+                .any(|player| executable(&dir.join(player.program())))
+        })
+    }
+
+    /// A regular file this process may execute: `access(2)` checks the
+    /// caller's own permission and a `noexec` mount, not just a mode bit.
+    fn executable(file: &std::path::Path) -> bool {
+        use std::os::unix::ffi::OsStrExt;
+        if !std::fs::metadata(file).is_ok_and(|metadata| metadata.is_file()) {
+            return false;
+        }
+        let Ok(file) = std::ffi::CString::new(file.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `file` is a NUL-terminated path that outlives the call.
+        unsafe { libc::access(file.as_ptr(), libc::X_OK) == 0 }
+    }
+
     struct LaunchedPlayer {
         handoff: ExternalHandoff,
         /// Send to let the player stay open. Dropping this stops an unclaimed player.
@@ -187,7 +265,7 @@ mod linux {
         before_launch: impl Fn() -> bool,
         mut launch: impl FnMut(ExternalPlayback, Player) -> Option<LaunchedPlayer>,
     ) -> Option<ExternalHandoff> {
-        for player in [Player::Vlc, Player::Mpv] {
+        for player in Player::ALL {
             let playback = super::prepare_external_player(source.clone()).await?;
             if !before_launch() {
                 return None;
@@ -218,22 +296,19 @@ mod linux {
         // The protected playlist keeps the stream capability out of argv.
         let mut playlist = tempfile::Builder::new().suffix(".m3u").tempfile().ok()?;
         writeln!(playlist, "#EXTM3U\n{}", relay.url()).ok()?;
-        let mut command = match player {
+        let mut command = Command::new(player.program());
+        match player {
             Player::Vlc => {
-                let mut command = Command::new("vlc");
                 command
                     .args(["--no-one-instance", "--"])
                     .arg(playlist.path());
-                command
             }
             Player::Mpv => {
-                let mut command = Command::new("mpv");
                 let mut path = std::ffi::OsString::from("--playlist=");
                 path.push(playlist.path());
                 command.arg(path);
-                command
             }
-        };
+        }
         command
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -300,6 +375,29 @@ mod linux {
             Exited,
             TimedOut,
             Connected,
+        }
+
+        #[test]
+        fn only_an_executable_vlc_or_mpv_on_the_path_counts_as_a_player() {
+            use std::os::unix::fs::PermissionsExt;
+            let empty = tempfile::tempdir().unwrap();
+            let other = tempfile::tempdir().unwrap();
+            let found = tempfile::tempdir().unwrap();
+            let program = |dir: &tempfile::TempDir, name: &str, mode: u32| {
+                let file = dir.path().join(name);
+                std::fs::write(&file, "#!/bin/sh\n").unwrap();
+                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+            };
+            program(&other, "generated-player", 0o755);
+            program(&other, "vlc", 0o644);
+            std::fs::create_dir(other.path().join("mpv")).unwrap();
+            let path = |dirs: &[&tempfile::TempDir]| {
+                std::env::join_paths(dirs.iter().map(|dir| dir.path())).unwrap()
+            };
+            assert!(!installed_in(&path(&[&empty, &other])));
+            program(&found, "mpv", 0o755);
+            assert!(installed_in(&path(&[&empty, &other, &found])));
+            assert!(!installed_in(std::ffi::OsStr::new("")));
         }
 
         #[test]
@@ -421,6 +519,30 @@ mod android {
         }
     }
 
+    /// Calls a static `ExternalPlayerHost` method that takes nothing and
+    /// returns a boolean (`()Z`) or nothing (`()V`).
+    fn call(name: &str, signature: &str) -> Option<bool> {
+        let (vm, class) = HOST.get()?;
+        let mut env = vm.attach_current_thread().ok()?;
+        let class: &JClass = class.as_obj().into();
+        let result = env.call_static_method(class, name, signature, &[]);
+        if env.exception_check().unwrap_or(false) {
+            let _ = env.exception_clear();
+        }
+        result.ok().map(|value| value.z().unwrap_or(false))
+    }
+
+    /// Asks `ExternalPlayerHost.available` whether another app resolves the
+    /// handoff's intent.
+    pub(super) fn handler_installed() -> bool {
+        call("available", "()Z") == Some(true)
+    }
+
+    /// Tells the host that a relay `open` started has shut down.
+    pub(super) fn released() {
+        let _ = call("released", "()V");
+    }
+
     pub(crate) async fn connect_external_player(
         source: PlaySource,
         before_launch: impl Fn() -> bool,
@@ -452,7 +574,11 @@ mod android {
             result.ok()?.z().ok()
         };
         if open() == Some(true) {
-            let mut current = PLAYBACK.lock().ok()?;
+            // The host now holds its service for this session: it must
+            // exist, so its retirement releases the service.
+            let mut current = PLAYBACK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let session = ExternalSession::new(relay);
             if let Some(previous) = current.replace(session.clone()) {
                 previous.close();

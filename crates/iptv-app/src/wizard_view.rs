@@ -229,8 +229,10 @@ pub fn key(ui: Ui, action: Action) {
         Action::MoveRight => send(ui, WizardEvent::Right),
         Action::Select => send(ui, WizardEvent::Ok),
         Action::ShowMenu => send(ui, WizardEvent::Paste),
+        // On the first run's welcome screen, where Back leaves: the
+        // question first, where the host asks it (`crate::confirm_leaving`).
         Action::Back => {
-            back(ui);
+            let _ = back(ui) || crate::ask_before_leaving(ui);
         }
         _ => {}
     }
@@ -399,7 +401,8 @@ fn choice(
 fn empty(ui: Ui) -> View {
     let size = Scale::new();
     let scrolling = ui_kit::FocusScroll::new();
-    let can_restore = read(ui, Wizard::can_restore).unwrap_or(false);
+    // Live: Android reports its document pickers after this is built.
+    let can_restore = move || read(ui, Wizard::can_restore).unwrap_or(false);
     let content = view()
         .gap(move || size.px(10.0))
         .child(
@@ -414,7 +417,7 @@ fn empty(ui: Ui) -> View {
             )
             .test_id("wizard-welcome-add"),
         )
-        .children(can_restore.then(|| {
+        .child(when(can_restore, move || {
             choice(
                 ui,
                 size,
@@ -437,7 +440,7 @@ fn empty(ui: Ui) -> View {
                 size,
                 || tr("Set up your library"),
                 move || {
-                    if can_restore {
+                    if can_restore() {
                         tr("Add a playlist from your TV provider, or bring your library over from another Patina installation.")
                     } else {
                         tr("Add a playlist from your TV provider.")

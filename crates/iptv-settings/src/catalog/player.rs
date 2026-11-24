@@ -152,6 +152,13 @@ pub static PLAYER: &[Setting] = &[
 ];
 
 pub static PLAYBACK: &[Setting] = &[
+    // default: ours (#285; the play bar's channel buttons stay either way)
+    playback(
+        "switching",
+        "playback.swipe_to_zap",
+        boolean(true),
+        key("Swipe up or down on full-screen live video to change channel."),
+    ),
     // default: observed (07) — Hardware
     playback(
         "decoding",
@@ -295,13 +302,6 @@ pub static CATCHUP: &[Setting] = &[
         "catchup.rewind_live_key",
         choice(&REWIND_LIVE_KEY, "rewind"),
         key("Which key starts rewinding a live channel that has replay."),
-    ),
-    // default: ours
-    catchup(
-        "seeking",
-        "catchup.seek_keys",
-        choice(&SEEK_KEYS, "left_right"),
-        key("Which keys seek while replaying: Left/Right, Down/Up, or the transport keys."),
     ),
     // default: ours
     catchup(

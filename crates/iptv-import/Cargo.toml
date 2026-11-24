@@ -10,6 +10,7 @@ license.workspace = true
 [dependencies]
 iptv-library.workspace = true
 serde_json.workspace = true
+url.workspace = true
 iptv-core.workspace = true
 iptv-providers.workspace = true
 iptv-epg.workspace = true

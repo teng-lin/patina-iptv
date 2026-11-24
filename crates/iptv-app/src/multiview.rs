@@ -32,11 +32,12 @@
 //! the history), catch-up starts, or full screen is left; then only that
 //! channel plays on.
 //!
-//! Limits: the device's decoders ([`DECODERS`]) and the streams the
-//! account allows at once (an Xtream account's `max_connections`, from its
-//! last import). Nothing else of the app opens streams (no recordings), so
-//! the whole allowance is multiview's: adding the stream that goes past it
-//! asks first.
+//! Limits: the tiles the device and its window hold ([`tiles`]) and the
+//! streams the account allows at once (an Xtream account's
+//! `max_connections`, from its last import). Nothing else of the app opens
+//! streams (no recordings), so the whole allowance is multiview's: adding
+//! the stream that goes past it asks first. A window or a device that no
+//! longer offers multiview collapses the session (`lifecycle::collapse`).
 
 mod lifecycle;
 mod pointer;
@@ -56,9 +57,18 @@ pub use pointer::{
 
 pub type State = Multiview<usize>;
 
-/// Streams this device decodes at once (setting-ready): cheap TV boxes
-/// manage two, desktops four.
-pub const DECODERS: usize = crate::capabilities::HOST.decoder_slots();
+/// The tiles multiview opens with now: a phone's, a tablet's and a TV's
+/// two, a desktop's four, never more than the device decodes at once
+/// (`crate::capabilities::multiview_offer`). Reactive, as it follows the
+/// device's signals: a session opened before a change keeps the limits it
+/// opened with, until the window no longer holds it
+/// (`lifecycle::collapse`).
+pub fn tiles(ui: Ui) -> usize {
+    match crate::capabilities::multiview_offer(ui) {
+        iptv_presentation::capabilities::MultiviewOffer::Tiles(tiles) => tiles,
+        _ => 1,
+    }
+}
 
 /// Space around each tile, px (twice this between two).
 const GAP: f32 = 3.0;
@@ -184,7 +194,7 @@ pub fn open(ui: Ui) {
     ui.panels.update(|p| p.hide());
     crate::channels_view::close(ui);
     let limits = Limits {
-        decoders: DECODERS,
+        decoders: untracked(|| tiles(ui)),
         connections: crate::runtime().account_limit(),
     };
     log::info!(
@@ -340,7 +350,11 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
     let failed = move |surface| crate::player::surface_failed(ui, surface);
     // Read at each step, so a change in the settings applies at the next
     // focus move, also in a session already open.
-    let follows = crate::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE);
+    // Not offered on a phone: there a stored value is kept, unused.
+    let follows = crate::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE)
+        && iptv_presentation::capabilities::sound_follows_tile(untracked(
+            crate::capabilities::host,
+        ));
     let mut step = None;
     ui.multiview.update(|m| {
         if let Some(m) = m.as_mut() {

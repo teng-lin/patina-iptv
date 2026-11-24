@@ -96,10 +96,6 @@ impl Portal {
     fn auth_attempts(&self) -> usize {
         self.gates.0.lock().unwrap().auth_attempts
     }
-
-    pub(super) fn link_requests(&self) -> usize {
-        self.links.load(Ordering::SeqCst)
-    }
 }
 
 impl Drop for Portal {

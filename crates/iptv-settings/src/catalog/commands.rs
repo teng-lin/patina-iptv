@@ -100,15 +100,17 @@ pub static COMMANDS: &[Command] = &[
     ),
     Command::new(
         S::General,
-        "",
+        "privacy",
         "general.backup",
-        key("Write settings and customizations to a backup file."),
+        key(
+            "Write playlists with their logins, settings and history to an unencrypted backup file.",
+        ),
     ),
     Command::new(
         S::General,
-        "",
+        "privacy",
         "general.restore",
-        key("Replace everything with a backup's contents."),
+        key("Replace all current data, including playlists, settings and watch history, with a backup's contents."),
     )
     .confirm()
     .restart(),
