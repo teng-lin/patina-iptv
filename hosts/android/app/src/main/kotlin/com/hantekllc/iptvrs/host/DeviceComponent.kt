@@ -43,10 +43,10 @@ internal class DeviceComponent(
     private var reported: Map<String, Any>? = null
     private var reportedAccessibility: Map<String, Any>? = null
     private val accessibility = context.context.getSystemService(AccessibilityManager::class.java)
-    private val accessibilityChanged = AccessibilityManager.AccessibilityStateChangeListener { reportAccessibility() }
+    private val accessibilityChanged = AccessibilityManager.AccessibilityStateChangeListener { reportAccessibilitySoon() }
     private val accessibilitySettings =
         object : ContentObserver(Handler(Looper.getMainLooper())) {
-            override fun onChange(selfChange: Boolean) = reportAccessibility()
+            override fun onChange(selfChange: Boolean) = reportAccessibilitySoon()
         }
     private val observer =
         object : View(context.context) {
@@ -101,6 +101,19 @@ internal class DeviceComponent(
             context.emit("device", next)
         }
     }
+
+    /**
+     * A settings change reaches this observer before `AccessibilityManager`
+     * has its new values (seen on the emulator: a timeout or a service
+     * switched on read as before), so read now and again once they settled.
+     */
+    private fun reportAccessibilitySoon() {
+        reportAccessibility()
+        observer.removeCallbacks(settledReport)
+        observer.postDelayed(settledReport, AccessibilitySignals.SETTLE_MS)
+    }
+
+    private val settledReport = Runnable { reportAccessibility() }
 
     private fun reportAccessibility() {
         val manager = accessibility ?: return
@@ -210,6 +223,9 @@ internal object DeviceSignals {
 internal object AccessibilitySignals {
     /** Panels with controls: the control strip, the card's actions, the play bar. */
     const val CONTROLS = AccessibilityManager.FLAG_CONTENT_CONTROLS or AccessibilityManager.FLAG_CONTENT_TEXT
+
+    /** How long after a change its new values are read again (ms). */
+    const val SETTLE_MS = 1_000L
 
     /** Panels to read: the banner after a channel change, the info card. */
     const val TEXT = AccessibilityManager.FLAG_CONTENT_TEXT or AccessibilityManager.FLAG_CONTENT_ICONS
