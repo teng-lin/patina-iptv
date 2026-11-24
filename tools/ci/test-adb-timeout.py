@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import shutil
 import signal
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "tools/ci/android/adb.py"
@@ -155,17 +157,6 @@ while True: signal.pause()
 
 
 class Integration(unittest.TestCase):
-    def action_script(self):
-        workflow = (ROOT / ".github/workflows/android-smoke.yml").read_text()
-        # This deliberately accepts only a flat >- block: more-indented or
-        # blank lines preserve YAML newlines that upstream executes separately.
-        block = workflow.split("          script: >-\n", 1)[1].split("      - uses:", 1)[0]
-        lines = block.splitlines()
-        self.assertTrue(lines)
-        self.assertTrue(all(line.startswith("            ") and line[12:] == line[12:].lstrip()
-                            and line[12:] for line in lines))
-        return " ".join(line[12:] for line in lines)
-
     def test_smoke_routes_all_adb_calls_through_the_guard_and_names_cleanup(self):
         script = (ROOT / "tools/ci/android-smoke.sh").read_text()
         self.assertNotRegex(script, r"\$adb(?:\s|$)")
@@ -179,30 +170,49 @@ class Integration(unittest.TestCase):
         self.assertLess(cleanup.index('adb shell am force-stop "$pkg"'),
                         cleanup.index('restore_setting global'))
 
-    def test_action_has_its_own_limit_and_recovery_commands_are_guarded(self):
+    def test_workflow_caps_the_emulator_launcher(self):
         workflow = (ROOT / ".github/workflows/android-smoke.yml").read_text()
         smoke = workflow.split("  smoke:\n", 1)[1]
         self.assertIn("timeout-minutes: 45", smoke)
         step = smoke.split("      - name: Smoke test on the", 1)[1]
         self.assertTrue(re.match(r"[^\n]+\n        timeout-minutes: 20\n", step))
-        for line in workflow.splitlines():
-            if re.search(r"\badb (?:reboot|wait-for-device)\b", line):
-                self.assertIn("python3 tools/ci/android/adb.py", line)
+        self.assertIn("python3 tools/ci/android/ci-emulator.py", step)
 
-    @unittest.skipUnless(os.name == "posix", "the action uses sh -c")
-    def test_every_upstream_split_script_is_valid_sh_and_system_recovery_is_guarded(self):
-        script = self.action_script()
-        # Match pinned script-parser.ts, then main.ts's independent sh -c.
-        commands = re.split(r"\r\n|\n|\r", script)
-        self.assertEqual(len(commands), 1)
-        for command in commands:
-            subprocess.run(["sh", "-n", "-c", command], check=True, timeout=2)
+    @unittest.skipUnless(os.name == "posix", "the CI emulator requires a Unix host")
+    def test_sdk_reuses_installed_tools_and_requests_only_the_missing_image(self):
+        with patch.object(sys, "path", [str(GUARD.parent), *sys.path]):
+            prepare = runpy.run_path(str(GUARD.with_name("ci-emulator.py")))["prepare_sdk"]
+        with tempfile.TemporaryDirectory() as directory, patch.object(subprocess, "run") as run:
+            sdk = Path(directory)
+            for relative in ("platform-tools/adb", "emulator/emulator", "build-tools/35.0.1/d8"):
+                tool = sdk / relative
+                tool.parent.mkdir(parents=True, exist_ok=True)
+                tool.touch(mode=0o755)
+            tools, image = prepare(sdk, "android-tv", {})
+            self.assertEqual(run.call_args.args[0], [tools / "sdkmanager", "--install", image])
+            self.assertEqual(image, "system-images;android-36;android-tv;x86_64")
+            properties = sdk / "system-images/android-36/android-tv/x86_64/source.properties"
+            properties.parent.mkdir(parents=True)
+            properties.touch()
+            run.reset_mock()
+            prepare(sdk, "android-tv", {})
+            run.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "the CI emulator requires a Unix host")
+    def test_emulator_system_recovery_is_guarded(self):
+        command = (
+            "import runpy; from pathlib import Path; import os, sys; "
+            "sys.path.insert(0, 'tools/ci/android'); "
+            "driver = runpy.run_path('tools/ci/android/ci-emulator.py'); "
+            "sys.exit(driver['run_smoke']('generated.apk', os.environ, Path('target/android-smoke')))"
+        )
         for system_crash in (False, True):
             with self.subTest(system_crash=system_crash), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 ci = root / "tools/ci"
                 (ci / "android").mkdir(parents=True)
                 shutil.copyfile(GUARD, ci / "android/adb.py")
+                shutil.copyfile(GUARD.with_name("ci-emulator.py"), ci / "android/ci-emulator.py")
                 smoke = ci / "android-smoke.sh"
                 smoke.write_text('''#!/usr/bin/env bash
 if [ ! -e first-run ]; then touch first-run; exit 1; fi
@@ -218,7 +228,7 @@ touch second-run
 with open("adb-calls.jsonl", "a") as stream: stream.write(json.dumps(sys.argv[1:]) + "\\n")
 ''')
                 adb.chmod(0o755)
-                result = subprocess.run(["sh", "-c", commands[0]], cwd=root, capture_output=True,
+                result = subprocess.run([sys.executable, "-c", command], cwd=root, capture_output=True,
                                         env={"PATH": str(binary) + os.pathsep + os.environ["PATH"]},
                                         timeout=5, check=False)
                 self.assertEqual(result.returncode, 0 if system_crash else 1, result.stderr)
