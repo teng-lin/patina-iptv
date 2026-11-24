@@ -235,6 +235,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
             },
         )
     });
+    let menu_label = computed(|| tr("More options").to_owned());
     let open_program_menu = move || {
         if program.with(Option::is_some) && !crate::organization_view::inline_order_open(ui) {
             ui.touched();
@@ -277,7 +278,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                 .flex_row()
                 .items_center()
                 .gap(move || size.px(TIMES_GAP))
-                .child(
+                .child(dynamic(move || {
+                    let menu_label = menu_label.get();
                     text(move || {
                         program.with(|p| {
                             p.map_or_else(String::new, |(_, _, _, ch, p)| {
@@ -289,11 +291,11 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .on_long_press(open_program_menu)
                     .on_context_menu(move |_: &nsh_core::ContextMenuEvent| open_program_menu())
                     .accessibility_actions(vec![nsh_core::AccessibilityActionDef {
-                        name: "program_menu".into(),
-                        label: Some(tr("More options").into()),
+                        name: "longpress".into(),
+                        label: Some(menu_label.into()),
                     }])
                     .on_accessibility_action(move |action: &str| {
-                        if action == "program_menu" {
+                        if action == "longpress" {
                             open_program_menu();
                         }
                     })
@@ -304,8 +306,8 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     .font_family(SANS)
                     .font_weight(MEDIUM)
                     .text_size(move || size.text_px(HEADER_TITLE))
-                    .text_color(rgb(WHITE)),
-                )
+                    .text_color(rgb(WHITE))
+                }))
                 .child(
                     text(move || labels.with(|labels| labels.1.clone()))
                         .test_id("guide-header-source")

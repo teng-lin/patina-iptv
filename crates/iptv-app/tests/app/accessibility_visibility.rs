@@ -61,6 +61,31 @@ impl Exposure {
         }
     }
 
+    pub(super) fn action_label(
+        &self,
+        app: &Headless,
+        test_id: &str,
+        action: &str,
+    ) -> Option<String> {
+        let nodes = app.screen().layout_nodes();
+        let id = nodes
+            .iter()
+            .find(|node| node.test_id.as_deref() == Some(test_id))?
+            .id;
+        self.0
+            .lock()
+            .unwrap()
+            .views
+            .get(&id)?
+            .accessibility
+            .actions
+            .iter()
+            .find(|item| item.name.as_ref() == action)?
+            .label
+            .as_deref()
+            .map(str::to_owned)
+    }
+
     #[track_caller]
     pub(super) fn shown(&self, app: &Headless, test_id: &str, expected: bool) {
         let nodes = app.screen().layout_nodes();
@@ -713,7 +738,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
             .accessibility
             .actions
             .iter()
-            .any(|action| action.name.as_ref() == "program_menu"
+            .any(|action| action.name.as_ref() == "longpress"
                 && action.label.as_deref() == Some("More options")),
         "the program title exposes a localized menu action to screen readers"
     );
@@ -722,7 +747,7 @@ fn a_screen_readers_activation_plays_from_the_guide_and_keeps_the_play_bar() {
         nsh_core::EventKind::AccessibilityAction,
         nsh_core::EventPayload::Map(vec![(
             "actionName",
-            nsh_core::PayloadValue::Str("program_menu".into()),
+            nsh_core::PayloadValue::Str("longpress".into()),
         )]),
     );
     step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
