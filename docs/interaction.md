@@ -556,16 +556,16 @@ Unavailable actions say why, using the host's reported capabilities
   remote's raw key phases, `tv_remote_journey`.
 - Tablet gestures, the touch journey, rotation, split screen, large text,
   text entry and interruptions: `tablet_gestures` and `tablet_journey`,
-  and the [issue #88 tablet validation](validation/issue-88-tablet-journey.md).
+  and the [issue #88 tablet validation](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-88-tablet-journey.md).
 - iPad portrait, resizable windows, Dynamic Type and another app beside:
   `ipad_windows`, and the
-  [issue #138 iPad validation](validation/issue-138-ipad-layouts.md).
+  [issue #138 iPad validation](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-138-ipad-layouts.md).
 - Pointer, keyboard and windows on desktops: `desktop_workflows`, and the
-  [issue #89 desktop journey](validation/issue-89-desktop-journey.md).
+  [issue #89 desktop journey](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-89-desktop-journey.md).
 - Native behavior on Android TV and tablets: the
   [disposable Android validation](android-validation.md) on `tv36` and `tab36`.
   Record emulator and physical-device evidence separately, with the build, OS,
   input and viewport, using synthetic data only.
 - The complete journey on TV, tablet and desktop, with the build, hosts,
-  screenshots and open bugs: [issue #86 journey validation](validation/issue-86-journey.md);
-  the TV remote journey: [issue #87](validation/issue-87-tv-journey.md).
+  screenshots and open bugs: [issue #86 journey validation](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-86-journey.md);
+  the TV remote journey: [issue #87](https://github.com/teng-lin/patina-iptv/blob/cb6b863b4635f40367ef5dce804d8fefe6ff0819/docs/validation/issue-87-tv-journey.md).
