@@ -39,7 +39,7 @@ pub struct ProbeRequest {
 }
 
 fn now() -> i64 {
-    crate::imports::now_unix()
+    crate::time::now_unix()
 }
 fn random<const N: usize>(entropy: crate::ports::Entropy) -> InspectionResult<[u8; N]> {
     let mut bytes = [0; N];
@@ -1476,6 +1476,7 @@ mod host_tests {
             |_| Ok(DatabaseKey::from_bytes([0x75; 32])),
             Arc::new(crate::native::network::NativeNetwork),
             Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+            crate::native::entropy,
         );
         let owner = Runtime::new(ports);
         owner.start_services();

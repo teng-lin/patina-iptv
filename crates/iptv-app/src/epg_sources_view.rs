@@ -49,7 +49,7 @@ pub fn open(ui: Ui, playlist: SourceId) {
     ui.guide_sources.set(Some(screen(playlist)));
     // Timer failures can occur without publishing a new visible guide.
     // Opening the controls always reads the latest persisted refresh result.
-    crate::runtime::data::stored::refresh_status(&crate::runtime_owner::runtime());
+    crate::runtime::data::refresh_guide_status(&crate::runtime_owner::runtime());
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide

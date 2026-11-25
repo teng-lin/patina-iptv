@@ -9,12 +9,12 @@ use iptv_settings::{Section, Setting, Value};
 
 /// A failed save before publication differs from an update whose durability
 /// could not be confirmed. OS details are already recorded by the runtime.
-pub fn save_failure(failure: crate::runtime::settings::SaveFailure) -> &'static str {
+pub fn save_failure(failure: crate::runtime::model::SaveFailure) -> &'static str {
     match failure {
-        crate::runtime::settings::SaveFailure::NotPublished => {
+        crate::runtime::model::SaveFailure::NotPublished => {
             tr("Settings could not be saved. Check storage permissions and try again.")
         }
-        crate::runtime::settings::SaveFailure::DurabilityUnconfirmed => tr(
+        crate::runtime::model::SaveFailure::DurabilityUnconfirmed => tr(
             "Settings updated, but we could not confirm they were saved safely. Check storage and try again.",
         ),
     }
@@ -627,7 +627,7 @@ mod tests {
 #[cfg(test)]
 mod save_failure_tests {
     use super::save_failure;
-    use crate::runtime::settings::SaveFailure;
+    use crate::runtime::model::SaveFailure;
 
     #[test]
     fn publication_distinctions_are_translated_in_every_interface_language() {

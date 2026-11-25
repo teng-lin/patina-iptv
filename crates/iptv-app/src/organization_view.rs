@@ -6,7 +6,7 @@ use crate::runtime::{Error, commands::OrganizationItems, model::SourceId};
 use crate::scale::Scale;
 use crate::wizard_view::entry::{self, TextSheet};
 use crate::{Ui, data, ui_kit};
-use iptv_core::organization::{Block, BlockKind, Blocks, Sort};
+use iptv_core::organization::{Block, BlockKind, Blocks, Item, Sort};
 use iptv_nav::Action;
 use iptv_presentation::guide::Pane;
 use iptv_presentation::lists::ListId;
@@ -46,6 +46,215 @@ pub struct Open {
     bulk_visibility: Option<(Edit, bool)>,
     dragging: bool,
 }
+enum OrderSave {
+    Unchanged,
+    Pending {
+        source: SourceId,
+        kind: Kind,
+        original: Vec<String>,
+        order: Vec<String>,
+        expected_sort: Sort,
+        from_custom: bool,
+    },
+}
+
+impl Open {
+    fn new(source: SourceId, kind: Kind, mode: Mode, placement: Placement) -> Self {
+        let mut editor = Editor::new(Vec::new(), None);
+        editor.mode = mode;
+        Self {
+            source,
+            kind,
+            editor,
+            saving: false,
+            blocks: Blocks::default(),
+            placement,
+            custom_from: None,
+            bulk_visibility: None,
+            dragging: false,
+        }
+    }
+
+    fn load(
+        &mut self,
+        loaded: OrganizationItems,
+        focus: Option<String>,
+        mode: Mode,
+        initial: Option<Edit>,
+        guide_keys: Option<&HashMap<String, usize>>,
+    ) {
+        let OrganizationItems { rows, sort, blocks } = loaded;
+        self.blocks = blocks;
+        self.editor = Editor::new(rows, focus.clone());
+        self.editor.sort = sort;
+        self.custom_from = (initial == Some(Edit::Sort(Sort::Manual))).then_some(sort);
+        self.editor.mode = mode;
+        self.configure_actions();
+        match initial {
+            Some(Edit::SortOptions) => self.editor.sort_focus = Some(sort),
+            Some(Edit::Rename) if self.editor.focus == focus => {
+                self.editor.text = self.editor.focused().map(|item| item.name.clone());
+            }
+            Some(Edit::Visibility) if self.editor.focus == focus => {
+                if let Some(id) = focus {
+                    self.editor.open_actions(id);
+                }
+            }
+            _ => {}
+        }
+        if mode == Mode::Reorder {
+            let include_hidden = self.placement == Placement::Screen;
+            self.editor.start_reorder(|item| match guide_keys {
+                Some(keys) => keys.contains_key(&item.id),
+                None => include_hidden || !item.hidden,
+            });
+        }
+    }
+
+    fn configure_actions(&mut self) {
+        if self.kind == Kind::Groups {
+            self.editor.set_sorts(GROUP_SORTS);
+        }
+        let mut actions = vec![Edit::Visibility, Edit::Blocking];
+        if self.kind == Kind::Groups {
+            actions.push(Edit::Channels);
+        }
+        if self.kind != Kind::Favorites {
+            actions.push(Edit::SortOptions);
+        }
+        if self.kind == Kind::Groups {
+            actions.extend([Edit::Reorder, Edit::SortChannels]);
+        }
+        actions.extend(ACTIONS.iter().copied().skip(1));
+        self.editor.set_actions(actions);
+    }
+
+    fn restore_items(&mut self, loaded: OrganizationItems) {
+        self.blocks = loaded.blocks;
+        self.editor.sort = loaded.sort;
+        self.editor.reload(loaded.rows);
+    }
+
+    fn refresh(&mut self, loaded: OrganizationItems) {
+        if !self.saving && self.editor.reorder.is_none() {
+            self.restore_items(loaded);
+        }
+    }
+
+    fn begin_save(&mut self) {
+        self.saving = true;
+    }
+
+    fn finish_save(&mut self) {
+        self.saving = false;
+    }
+
+    fn begin_block(&mut self) {
+        self.editor.action = None;
+        self.begin_save();
+    }
+
+    fn finish_block(&mut self, blocks: Blocks) {
+        self.blocks = blocks;
+        self.finish_save();
+    }
+
+    fn finish_edit(&mut self, expected: &Self, loaded: Option<OrganizationItems>) {
+        self.finish_save();
+        if let Some(loaded) = loaded {
+            self.restore_items(loaded);
+        }
+        if self.editor.action == expected.editor.action {
+            self.editor.action = None;
+        }
+        if self.editor.text == expected.editor.text {
+            self.editor.text = None;
+        }
+    }
+
+    fn request_bulk_visibility(&mut self, edit: Edit) {
+        if !self.saving {
+            self.bulk_visibility = Some((edit, false));
+        }
+    }
+
+    fn focus_bulk_visibility(&mut self, confirm: bool) {
+        if let Some((_, focus)) = &mut self.bulk_visibility {
+            *focus = confirm;
+        }
+    }
+
+    fn dismiss_bulk_visibility(&mut self) -> Option<Edit> {
+        self.bulk_visibility.take().map(|(edit, _)| edit)
+    }
+
+    fn activate_row(&mut self, id: String) -> Option<Edit> {
+        if self.saving {
+            return None;
+        }
+        let edit = match self.editor.mode {
+            Mode::Options => {
+                self.editor.open_actions(id);
+                return None;
+            }
+            Mode::Reorder => return None,
+            Mode::Visibility => Edit::Visibility,
+            Mode::Blocking => Edit::Blocking,
+        };
+        self.editor.focus_item(id);
+        Some(edit)
+    }
+
+    fn reorder_key(&mut self, key: Key, drag_editing: bool) -> Outcome<Item> {
+        if self.saving {
+            return Outcome::Ignored;
+        }
+        let Some(order) = &mut self.editor.reorder else {
+            return Outcome::Ignored;
+        };
+        let outcome = if key == Key::Back {
+            order.leave_with_changes(
+                !drag_editing && self.custom_from.is_some_and(|sort| sort != Sort::Manual),
+            )
+        } else {
+            order.key(key)
+        };
+        if matches!(outcome, Outcome::ConfirmLeave) {
+            self.editor.leave_choice = LeaveChoice::Save;
+        }
+        outcome
+    }
+
+    fn resolve_order(&mut self, choice: LeaveChoice) -> Outcome<Item> {
+        if self.saving {
+            return Outcome::Ignored;
+        }
+        self.editor
+            .reorder
+            .as_mut()
+            .map_or(Outcome::Ignored, |order| order.resolve_leave(choice))
+    }
+
+    fn begin_order_save(&mut self) -> Option<OrderSave> {
+        if self.saving || self.dragging {
+            return None;
+        }
+        let (original, order) = self.editor.order_ids()?;
+        if original == order && self.custom_from.is_none_or(|sort| sort == Sort::Manual) {
+            return Some(OrderSave::Unchanged);
+        }
+        self.begin_save();
+        Some(OrderSave::Pending {
+            source: self.source,
+            kind: self.kind.clone(),
+            original,
+            order,
+            expected_sort: self.editor.sort,
+            from_custom: self.custom_from.is_some(),
+        })
+    }
+}
+
 async fn items(
     source: SourceId,
     kind: &Kind,
@@ -202,21 +411,8 @@ fn open_with(
     placement: Placement,
 ) {
     let generation = next_open(ui);
-    ui.organization.set(Some(Open {
-        source,
-        kind: kind.clone(),
-        editor: {
-            let mut editor = Editor::new(Vec::new(), None);
-            editor.mode = mode;
-            editor
-        },
-        saving: false,
-        blocks: Blocks::default(),
-        placement,
-        custom_from: None,
-        bulk_visibility: None,
-        dragging: false,
-    }));
+    ui.organization
+        .set(Some(Open::new(source, kind.clone(), mode, placement)));
     crate::tasks::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
         let loaded = items(source, &kind, custom.then_some(Sort::Manual)).await;
@@ -224,45 +420,24 @@ fn open_with(
             return;
         }
         match loaded {
-            Ok(OrganizationItems { rows, sort, blocks }) => {
+            Ok(loaded) => {
                 if initial == Some(Edit::Rename)
-                    && !rows.iter().any(|item| Some(&item.id) == focus.as_ref())
+                    && !loaded
+                        .rows
+                        .iter()
+                        .any(|item| Some(&item.id) == focus.as_ref())
                 {
                     close(ui);
                     return;
                 }
                 update(ui, |state| {
-                    state.blocks = blocks;
-                    state.editor = Editor::new(rows, focus.clone());
-                    state.editor.sort = sort;
-                    state.custom_from = custom.then_some(sort);
-                    state.editor.mode = mode;
-                    configure_actions(state);
-                    match initial {
-                        Some(Edit::SortOptions) => state.editor.sort_focus = Some(sort),
-                        Some(Edit::Rename) if state.editor.focus == focus => {
-                            state.editor.text =
-                                state.editor.focused().map(|item| item.name.clone());
+                    let guide_keys = match &state.placement {
+                        Placement::Guide { list, .. } if mode == Mode::Reorder => {
+                            Some(guide_order_keys(ui, source, list))
                         }
-                        Some(Edit::Visibility) if state.editor.focus == focus => {
-                            if let Some(id) = focus {
-                                state.editor.open_actions(id);
-                            }
-                        }
-                        _ => {}
-                    }
-                    if mode == Mode::Reorder {
-                        let guide_keys = match &state.placement {
-                            Placement::Guide { list, .. } => {
-                                Some(guide_order_keys(ui, source, list))
-                            }
-                            _ => None,
-                        };
-                        state.editor.start_reorder(|item| match &guide_keys {
-                            Some(keys) => keys.contains_key(&item.id),
-                            None => state.placement == Placement::Screen || !item.hidden,
-                        });
-                    }
+                        _ => None,
+                    };
+                    state.load(loaded, focus, mode, initial, guide_keys.as_ref());
                 });
             }
             Err(error) => {
@@ -272,24 +447,6 @@ fn open_with(
         }
     });
 }
-fn configure_actions(state: &mut Open) {
-    if state.kind == Kind::Groups {
-        state.editor.set_sorts(GROUP_SORTS);
-    }
-    let mut actions = vec![Edit::Visibility, Edit::Blocking];
-    if state.kind == Kind::Groups {
-        actions.push(Edit::Channels);
-    }
-    if state.kind != Kind::Favorites {
-        actions.push(Edit::SortOptions);
-    }
-    if state.kind == Kind::Groups {
-        actions.extend([Edit::Reorder, Edit::SortChannels]);
-    }
-    actions.extend(ACTIONS.iter().copied().skip(1));
-    state.editor.set_actions(actions);
-}
-
 fn block_kind(kind: &Kind) -> BlockKind {
     if *kind == Kind::Groups {
         BlockKind::Group
@@ -316,7 +473,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
                 "The change could not be saved. Reopen the list and try again.",
             ));
             if still_open(ui, generation) {
-                update(ui, |state| state.saving = false);
+                update(ui, Open::finish_save);
             }
             return;
         }
@@ -325,7 +482,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
         } else {
             tr("Content unblocked")
         });
-        data::organization::changed(&owner, source);
+        data::organization_changed(&owner, source);
         if !still_open(ui, generation) || !is_open(ui) {
             return;
         }
@@ -334,10 +491,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
             return;
         }
         match blocks {
-            Ok(blocks) => update(ui, |state| {
-                state.blocks = blocks;
-                state.saving = false;
-            }),
+            Ok(blocks) => update(ui, |state| state.finish_block(blocks)),
             Err(_) => {
                 close(ui);
                 crate::settings_view::notify(tr(
@@ -366,7 +520,9 @@ pub fn back(ui: Ui) -> bool {
         return true;
     }
     if state(ui, |s| s.bulk_visibility.is_some()) == Some(true) {
-        update(ui, |s| s.bulk_visibility = None);
+        update(ui, |s| {
+            s.dismiss_bulk_visibility();
+        });
         return true;
     }
     if matches!(
@@ -411,11 +567,9 @@ pub fn key(ui: Ui, action: Action) {
     }
     if let Some((_, focus_confirm)) = state(ui, |s| s.bulk_visibility).flatten() {
         match action {
-            Action::MoveUp | Action::MoveDown => update(ui, |s| {
-                if let Some((_, focus)) = &mut s.bulk_visibility {
-                    *focus = action == Action::MoveDown;
-                }
-            }),
+            Action::MoveUp | Action::MoveDown => {
+                update(ui, |s| s.focus_bulk_visibility(action == Action::MoveDown));
+            }
             Action::Select => resolve_bulk_visibility(ui, focus_confirm),
             Action::Back => resolve_bulk_visibility(ui, false),
             _ => {}
@@ -507,20 +661,7 @@ fn reorder_key(ui: Ui, key: Key) {
     }
     let mut outcome = Outcome::Ignored;
     update(ui, |s| {
-        if !s.saving
-            && let Some(order) = s.editor.reorder.as_mut()
-        {
-            outcome = if key == Key::Back {
-                order.leave_with_changes(
-                    !ui.drag_editing() && s.custom_from.is_some_and(|sort| sort != Sort::Manual),
-                )
-            } else {
-                order.key(key)
-            };
-            if matches!(outcome, Outcome::ConfirmLeave) {
-                s.editor.leave_choice = LeaveChoice::Save;
-            }
-        }
+        outcome = s.reorder_key(key, key == Key::Back && ui.drag_editing())
     });
     if matches!(outcome, Outcome::Done(_)) {
         close(ui);
@@ -533,13 +674,7 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
         return;
     }
     let mut outcome = Outcome::Ignored;
-    update(ui, |s| {
-        if !s.saving
-            && let Some(order) = s.editor.reorder.as_mut()
-        {
-            outcome = order.resolve_leave(choice);
-        }
-    });
+    update(ui, |s| outcome = s.resolve_order(choice));
     if matches!(outcome, Outcome::Done(_)) {
         close(ui);
     }
@@ -547,32 +682,18 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 
 fn save_order(ui: Ui) {
     let mut draft = None;
-    let mut unchanged = false;
-    update(ui, |s| {
-        if s.saving || s.dragging {
-            return;
-        }
-        if let Some((original, order)) = s.editor.order_ids() {
-            if original == order && s.custom_from.is_none_or(|sort| sort == Sort::Manual) {
-                unchanged = true;
-            } else {
-                draft = Some((
-                    s.source,
-                    s.kind.clone(),
-                    original,
-                    order,
-                    s.editor.sort,
-                    s.custom_from.is_some(),
-                ));
-                s.saving = true;
-            }
-        }
-    });
-    if unchanged {
-        close(ui);
-    }
-    let Some((source, kind, original, order, expected_sort, from_custom)) = draft else {
-        return;
+    update(ui, |s| draft = s.begin_order_save());
+    let (source, kind, original, order, expected_sort, from_custom) = match draft {
+        Some(OrderSave::Pending {
+            source,
+            kind,
+            original,
+            order,
+            expected_sort,
+            from_custom,
+        }) => (source, kind, original, order, expected_sort, from_custom),
+        Some(OrderSave::Unchanged) => return close(ui),
+        None => return,
     };
     let generation = ui.organization_generation.get_untracked();
     let owner = crate::runtime_owner::runtime();
@@ -591,7 +712,7 @@ fn save_order(ui: Ui) {
             )
             .await;
             if result.is_ok() {
-                data::organization::changed(&owner, source);
+                data::organization_changed(&owner, source);
             }
             result
         };
@@ -602,7 +723,7 @@ fn save_order(ui: Ui) {
             Ok(()) => close(ui),
             Err(error) => {
                 log::warn!("iptv organization: {error}");
-                update(ui, |s| s.saving = false);
+                update(ui, Open::finish_save);
                 crate::settings_view::notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
                 ));
@@ -613,11 +734,7 @@ fn save_order(ui: Ui) {
 
 fn perform(ui: Ui, edit: Edit) {
     if matches!(edit, Edit::HideAll | Edit::ShowAll) {
-        update(ui, |s| {
-            if !s.saving {
-                s.bulk_visibility = Some((edit, false));
-            }
-        });
+        update(ui, |s| s.request_bulk_visibility(edit));
         return;
     }
     apply_edit(ui, edit);
@@ -659,10 +776,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
                 crate::settings_view::notify(tr("This channel is blocked by a group."));
                 return;
             }
-            update(ui, |s| {
-                s.editor.action = None;
-                s.saving = true;
-            });
+            update(ui, Open::begin_block);
             set_block(ui, s.source, kind, item.id, blocked == Block::None);
             return;
         }
@@ -760,7 +874,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             s.editor.sort,
             false,
         );
-        update(ui, |s| s.saving = true);
+        update(ui, Open::begin_save);
         crate::tasks::spawn_in_app(async move {
             finish(ui, &s, generation, result.await);
         });
@@ -773,7 +887,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     let Some(edit) = edit.edit() else {
         return;
     };
-    update(ui, |s| s.saving = true);
+    update(ui, Open::begin_save);
     let finished = s.clone();
     let result = crate::runtime::commands::edit_organization(
         &crate::runtime_owner::runtime(),
@@ -796,13 +910,13 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
         sort,
     );
     let expected = s.clone();
-    update(ui, |s| s.saving = true);
+    update(ui, Open::begin_save);
     crate::tasks::spawn_in_app(async move {
         let result = result.await;
         if still_open(ui, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
                 close(ui);
-                data::organization::changed(&crate::runtime_owner::runtime(), expected.source);
+                data::organization_changed(&crate::runtime_owner::runtime(), expected.source);
                 return;
             }
             update(ui, |s| s.editor.sort_focus = None);
@@ -814,7 +928,7 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
 fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
     if let Err(e) = result {
         if still_open(ui, generation) {
-            update(ui, |s| s.saving = false);
+            update(ui, Open::finish_save);
         }
         log::warn!("iptv organization: change refused: {e}");
         crate::settings_view::notify(tr(
@@ -826,29 +940,16 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         if still_open(ui, generation) {
             close(ui);
         }
-        data::organization::changed(&crate::runtime_owner::runtime(), s.source);
+        data::organization_changed(&crate::runtime_owner::runtime(), s.source);
         return;
     }
     let expected = s.clone();
     crate::tasks::spawn_in_app(async move {
         let loaded = items(expected.source, &expected.kind, None).await;
         if still_open(ui, generation) {
-            update(ui, |s| {
-                s.saving = false;
-                if let Ok(loaded) = loaded {
-                    s.blocks = loaded.blocks;
-                    s.editor.sort = loaded.sort;
-                    s.editor.reload(loaded.rows);
-                }
-                if s.editor.action == expected.editor.action {
-                    s.editor.action = None;
-                }
-                if s.editor.text == expected.editor.text {
-                    s.editor.text = None;
-                }
-            });
+            update(ui, |s| s.finish_edit(&expected, loaded.ok()));
         }
-        data::organization::changed(&crate::runtime_owner::runtime(), expected.source);
+        data::organization_changed(&crate::runtime_owner::runtime(), expected.source);
     });
 }
 
@@ -882,7 +983,7 @@ fn commit(ui: Ui) {
         text,
     );
     dismiss_keyboard();
-    update(ui, |s| s.saving = true);
+    update(ui, Open::begin_save);
     crate::tasks::spawn_in_app(async move {
         finish(ui, &s, generation, result.await);
     });
@@ -1075,23 +1176,7 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
             ui.touched();
             if let Some(i) = item() {
                 let mut edit = None;
-                update(ui, |s| {
-                    if s.saving {
-                        return;
-                    }
-                    match s.editor.mode {
-                        Mode::Options => s.editor.open_actions(i.id),
-                        Mode::Visibility | Mode::Blocking => {
-                            s.editor.focus_item(i.id);
-                            edit = Some(if s.editor.mode == Mode::Visibility {
-                                Edit::Visibility
-                            } else {
-                                Edit::Blocking
-                            });
-                        }
-                        Mode::Reorder => {}
-                    }
-                });
+                update(ui, |s| edit = s.activate_row(i.id));
                 if let Some(edit) = edit {
                     perform(ui, edit);
                 }
@@ -1294,9 +1379,9 @@ fn sort_sheet(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn resolve_bulk_visibility(ui: Ui, confirm: bool) {
-    let requested = state(ui, |s| s.bulk_visibility).flatten();
-    update(ui, |s| s.bulk_visibility = None);
-    if let Some((edit, _)) = requested.filter(|_| confirm) {
+    let mut requested = None;
+    update(ui, |s| requested = s.dismiss_bulk_visibility());
+    if let Some(edit) = requested.filter(|_| confirm) {
         apply_edit(ui, edit);
     }
 }
@@ -1749,13 +1834,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 if let Ok(loaded) = items(source, &kind, None).await
                     && still_open(ui, generation)
                 {
-                    update(ui, |s| {
-                        if !s.saving && s.editor.reorder.is_none() {
-                            s.blocks = loaded.blocks;
-                            s.editor.sort = loaded.sort;
-                            s.editor.reload(loaded.rows);
-                        }
-                    });
+                    update(ui, |s| s.refresh(loaded));
                 }
             });
         }
@@ -1918,4 +1997,80 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn loaded(ids: &[&str], sort: Sort) -> OrganizationItems {
+        OrganizationItems {
+            rows: ids
+                .iter()
+                .map(|id| Item {
+                    id: (*id).into(),
+                    name: format!("Generated {id}"),
+                    hidden: false,
+                })
+                .collect(),
+            sort,
+            blocks: Blocks::default(),
+        }
+    }
+
+    #[test]
+    fn preference_conversion_can_save_an_unchanged_custom_order() {
+        let mut screen = Open::new(SourceId(1), Kind::Groups, Mode::Reorder, Placement::Screen);
+        screen.load(
+            loaded(&["amber", "birch"], Sort::Name),
+            Some("birch".into()),
+            Mode::Reorder,
+            Some(Edit::Sort(Sort::Manual)),
+            None,
+        );
+        let Some(OrderSave::Pending {
+            source,
+            kind,
+            original,
+            order,
+            expected_sort,
+            from_custom,
+        }) = screen.begin_order_save()
+        else {
+            panic!("the custom order has not yet been saved");
+        };
+        assert_eq!(source, SourceId(1));
+        assert_eq!(kind, Kind::Groups);
+        assert!(from_custom);
+        assert_eq!(expected_sort, Sort::Name);
+        assert_eq!(original, order);
+        screen.refresh(loaded(&["oak"], Sort::Provider));
+        assert_eq!(screen.editor.focus.as_deref(), Some("birch"));
+    }
+
+    #[test]
+    fn edit_completion_preserves_new_input_and_restores_row_identity() {
+        let mut screen = Open::new(SourceId(1), Kind::Groups, Mode::Options, Placement::Screen);
+        screen.load(
+            loaded(&["amber", "birch"], Sort::Name),
+            Some("birch".into()),
+            Mode::Options,
+            Some(Edit::Rename),
+            None,
+        );
+        let expected = screen.clone();
+        screen.begin_save();
+        screen.editor.text = Some("New input".into());
+        screen.finish_edit(&expected, Some(loaded(&["birch", "amber"], Sort::Provider)));
+        assert!(!screen.saving);
+        assert_eq!(screen.editor.focus.as_deref(), Some("birch"));
+        assert_eq!(screen.editor.text.as_deref(), Some("New input"));
+        assert_eq!(screen.editor.sort, Sort::Provider);
+
+        screen.request_bulk_visibility(Edit::HideAll);
+        screen.focus_bulk_visibility(true);
+        assert_eq!(screen.bulk_visibility, Some((Edit::HideAll, true)));
+        assert_eq!(screen.dismiss_bulk_visibility(), Some(Edit::HideAll));
+        assert!(screen.bulk_visibility.is_none());
+    }
 }

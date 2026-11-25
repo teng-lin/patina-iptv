@@ -9,12 +9,12 @@ use crate::{
 };
 use iptv_core::vod::{Details, DiscoveryPage, DiscoveryQuery, Key, Kind, Progress, Shelf, Sort};
 use iptv_nav::Action;
-use iptv_presentation::vod::{Control, Operation, Retried};
+use iptv_presentation::vod::{BackOutcome, Control, Operation, Screen};
 use nsh_base::input;
 use nsh_core::prelude::*;
 mod browser;
 mod empty;
-fn edit<R>(ui: Ui, f: impl FnOnce(&mut iptv_presentation::vod::Screen) -> R) -> R {
+fn edit<R>(ui: Ui, f: impl FnOnce(&mut Screen) -> R) -> R {
     let mut result = None;
     ui.vod.update(|s| result = Some(f(s)));
     result.unwrap()
@@ -25,12 +25,12 @@ pub fn is_open(ui: Ui) -> bool {
 }
 
 pub fn open(ui: Ui, kind: Kind) {
+    let sort = sort_of(crate::settings::get().choice(
+        iptv_settings::keys::VOD_SORT,
+        &iptv_settings::Target::Global,
+    ));
     ui.vod.update(|s| {
-        s.begin(kind);
-        s.query.sort = sort_of(crate::settings::get().choice(
-            iptv_settings::keys::VOD_SORT,
-            &iptv_settings::Target::Global,
-        ));
+        s.begin_sorted(kind, sort);
     });
     reload(ui, false);
 }
@@ -86,11 +86,7 @@ pub fn close(ui: Ui) {
     }
     // A shelf page or focus lookup still being read is no longer wanted.
     crate::runtime_owner::runtime().vod_discovery_cancel();
-    ui.vod.update(|s| {
-        s.open = false;
-        s.handoff = iptv_presentation::vod::Handoff::None;
-        s.generation = s.generation.wrapping_add(1);
-    });
+    ui.vod.update(Screen::close);
 }
 
 /// Back from a movie or episode playing full screen: its details reopen
@@ -129,34 +125,12 @@ pub fn back(ui: Ui) -> bool {
     if ui.player.vod.with_untracked(Option::is_none) {
         crate::runtime_owner::runtime().parental_content_closed();
     }
-    let (closed, refresh, end) = edit(ui, |s| {
-        let pending = s.busy;
-        let had_details = s.details.is_some();
-        // Details reopened from the player over a list that watching
-        // changes (a shelf, or the Continue watching category): the list
-        // is read again for the progress and order just changed, its title
-        // kept by identity (a shelf reads the window around it). Another
-        // category's order does not change; its movie card already shows
-        // the progress (`Screen::return_from_player`), and reading it
-        // again from its first page could lose a deep title's focus.
-        let watched = had_details
-            && s.handoff == iptv_presentation::vod::Handoff::Returned
-            && (s.is_shelf() || s.query.continue_watching);
-        s.back();
-        if had_details {
-            s.control = Control::Catalog;
-        }
-        (
-            !s.open,
-            s.open && (watched || (pending && !had_details && !s.is_shelf())),
-            s.end,
-        )
-    });
+    let outcome = edit(ui, Screen::back);
     crate::parental_view::enforce(ui);
-    if closed {
-        crate::runtime_owner::runtime().vod_discovery_cancel();
-    } else if refresh {
-        load(ui, false, Some(end));
+    match outcome {
+        BackOutcome::Closed => crate::runtime_owner::runtime().vod_discovery_cancel(),
+        BackOutcome::Reload { through } => load(ui, false, Some(through)),
+        BackOutcome::Stay => {}
     }
     true
 }
@@ -204,10 +178,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
     crate::tasks::spawn_in_app(async move {
         // A queued host task may first run after Back or another shelf.
         // Do not start work (or supersede the newer read's token) then.
-        if !ui
-            .vod
-            .with_untracked(|s| s.open && s.generation == generation)
-        {
+        if !ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             return;
         }
         // A shelf reads one bounded page across every playlist; a
@@ -248,16 +219,14 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
                 ),
             };
         ui.vod.update(|s| {
-            if s.generation != generation || !s.open {
+            if !s.accepts_reply(generation) {
                 return;
             }
             match result {
                 Ok((page, filters)) => {
                     if let Some((sources, categories)) = filters {
-                        s.sources = sources;
-                        s.categories = categories;
-                    }
-                    if append {
+                        s.publish_catalog(generation, page, sources, categories, append);
+                    } else if append {
                         s.publish(generation, page.cards, page.more, true);
                     } else {
                         s.publish_window(generation, page);
@@ -292,21 +261,17 @@ fn load_previous(ui: Ui, step_up: bool) {
     crate::tasks::spawn_in_app(async move {
         if !ui
             .vod
-            .with_untracked(|s| s.open && s.generation == generation && s.start == start)
+            .with_untracked(|s| s.accepts_reply(generation) && s.start == start)
         {
             return;
         }
         let result = owner.vod_discovery(query).await;
         ui.vod.update(|s| {
-            if s.generation != generation || !s.open {
+            if !s.accepts_reply(generation) {
                 return;
             }
             match result {
-                Ok(page) => {
-                    if !s.publish_previous(generation, start, page, step_up) {
-                        s.busy = false;
-                    }
-                }
+                Ok(page) => s.finish_previous(generation, start, page, step_up),
                 Err(_) => s.fail(
                     crate::i18n::key("On-demand library could not be loaded"),
                     Operation::Previous { start, step_up },
@@ -346,10 +311,7 @@ fn retry(ui: Ui) {
 fn retry_details(ui: Ui, key: Key) {
     let generation = ui.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
-        if ui
-            .vod
-            .with_untracked(|s| s.open && s.generation == generation)
-        {
+        if ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             select_authorized(ui, key);
         }
     });
@@ -363,10 +325,7 @@ fn retry_details(ui: Ui, key: Key) {
 fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
     let generation = ui.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, iptv_runtime::vod::target(&item), move || {
-        if !ui
-            .vod
-            .with_untracked(|s| s.open && s.generation == generation)
-        {
+        if !ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             return;
         }
         let generation = edit(ui, |s| s.begin_operation());
@@ -387,46 +346,30 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
                 }
                 Ok(false) => {
                     ui.vod.update(|s| {
-                        if s.generation == generation && s.open {
-                            // The stale details close and nothing plays.
-                            s.playlist_changed();
-                            s.error = Some(
-                                crate::i18n::key(
-                                    "Playback unavailable; refresh the playlist and try again",
-                                )
-                                .into(),
-                            );
-                        }
+                        s.reject_replaced_playlist(
+                            generation,
+                            crate::i18n::key(
+                                "Playback unavailable; refresh the playlist and try again",
+                            ),
+                        );
                     });
                     return;
                 }
                 Err(error) => Err(error),
             };
             let ready = edit(ui, |s| {
-                if s.generation != generation || !s.open {
+                if !s.finish_operation(generation) {
                     return None;
                 }
-                s.busy = false;
                 match result {
-                    Ok(details) => {
-                        match s.show_details_keeping(details.clone(), &key, &incarnation) {
-                            Retried::Ready => Some(details),
-                            // A refresh removed the episode: the fresh details
-                            // are shown to choose another. The playlist changed:
-                            // the stale details closed, nothing is played, and
-                            // the title must be chosen again. Neither offers a
-                            // Retry that could not succeed.
-                            Retried::EpisodeGone | Retried::PlaylistChanged => {
-                                s.error = Some(
-                                    crate::i18n::key(
-                                        "Playback unavailable; refresh the playlist and try again",
-                                    )
-                                    .into(),
-                                );
-                                None
-                            }
-                        }
-                    }
+                    Ok(details) => s.accept_retried_details(
+                        details,
+                        &key,
+                        &incarnation,
+                        crate::i18n::key(
+                            "Playback unavailable; refresh the playlist and try again",
+                        ),
+                    ),
                     Err(_) => {
                         s.fail(
                             crate::i18n::key(
@@ -460,28 +403,21 @@ fn select(ui: Ui, key: Key) {
     }
     let generation = ui.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
-        if ui
-            .vod
-            .with_untracked(|s| s.open && s.generation == generation)
-        {
+        if ui.vod.with_untracked(|s| s.accepts_reply(generation)) {
             select_authorized(ui, key);
         }
     });
 }
 
 fn select_authorized(ui: Ui, key: Key) {
-    let generation = edit(ui, |s| {
-        s.focused = Some(key.clone());
-        s.begin_operation()
-    });
+    let generation = edit(ui, |s| s.begin_details(key.clone()));
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let result = owner.vod_details(key.clone()).await;
         ui.vod.update(|s| {
-            if s.generation != generation || !s.open {
+            if !s.finish_operation(generation) {
                 return;
             }
-            s.busy = false;
             match result {
                 Ok(details) => s.show_details(details),
                 Err(_) => s.fail(
@@ -512,10 +448,7 @@ fn play(ui: Ui, restart: bool) {
 fn play_key(ui: Ui, details: Details, key: Key, restart: bool) {
     // The viewer's choice supersedes a next episode about to autoplay
     // (`autoplay_next`), also while its PIN is still being checked.
-    let generation = edit(ui, |s| {
-        s.generation = s.generation.wrapping_add(1);
-        s.generation
-    });
+    let generation = edit(ui, Screen::supersede_operation);
     let parent = (key.kind == Kind::Episode).then(|| details.item.key.clone());
     let run = move || {
         crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
@@ -647,32 +580,12 @@ fn toggle_block(ui: Ui) {
 }
 
 fn cycle_source(ui: Ui) {
-    ui.vod.update(|s| {
-        let at = s
-            .query
-            .source
-            .and_then(|id| s.sources.iter().position(|v| v.id == id));
-        s.query.source = match at {
-            None => s.sources.first().map(|v| v.id),
-            Some(at) => s.sources.get(at + 1).map(|v| v.id),
-        };
-        s.query.category = None;
-    });
+    ui.vod.update(Screen::cycle_source);
     reload(ui, false);
 }
 
 fn cycle_category(ui: Ui) {
-    ui.vod.update(|s| {
-        let at = s.query.category.as_ref().and_then(|(source, id)| {
-            s.categories
-                .iter()
-                .position(|v| v.source == *source && v.id == *id)
-        });
-        s.query.category = match at {
-            None => s.categories.first().map(|v| (v.source, v.id.clone())),
-            Some(at) => s.categories.get(at + 1).map(|v| (v.source, v.id.clone())),
-        };
-    });
+    ui.vod.update(Screen::cycle_category);
     reload(ui, false);
 }
 
@@ -944,12 +857,9 @@ fn where_watched(ui: Ui, series: &Key) -> Watched {
 /// choose the next episode `key` of `season`; `ready` says it waits for
 /// Play.
 fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
-    ui.vod.update(|s| {
-        s.details = Some(details);
-        s.episode = Some(key.clone());
-        s.season = Some(season);
-        s.notice = ready.then(|| crate::i18n::key("Ready for the next episode").into());
-    });
+    let notice = ready.then(|| crate::i18n::key("Ready for the next episode"));
+    ui.vod
+        .update(|s| s.select_next_episode(details, key.clone(), season, notice));
 }
 
 /// The next episode `key` is not played: full screen, the series'
@@ -958,11 +868,12 @@ fn select_next(ui: Ui, details: Details, key: &Key, season: u32, ready: bool) {
 fn wait_for_next(ui: Ui, watched: Watched, details: Details, key: Key, season: u32) {
     match watched {
         Watched::FullScreen => ui.vod.update(|s| {
-            s.open = true;
-            s.show_details(details);
-            s.episode = Some(key);
-            s.season = Some(season);
-            s.notice = Some(crate::i18n::key("Ready for the next episode").into());
+            s.reopen_for_next_episode(
+                details,
+                key,
+                season,
+                crate::i18n::key("Ready for the next episode"),
+            );
         }),
         Watched::Details => {
             crate::player_keys::stopped(ui);
@@ -1235,10 +1146,7 @@ fn episode_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
         move || ep().is_some_and(|e| ui.vod.with(|s| s.episode.as_ref() == Some(&e.key))),
         move || {
             if let Some(ep) = ep() {
-                ui.vod.update(|s| {
-                    s.episode = Some(ep.key);
-                    s.control = Control::Episodes;
-                });
+                ui.vod.update(|s| s.select_episode(ep.key));
                 play(ui, false);
             }
         },

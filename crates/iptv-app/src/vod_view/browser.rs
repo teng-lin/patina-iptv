@@ -3,7 +3,7 @@
 use super::*;
 use iptv_core::vod::Card;
 use iptv_presentation::browse::RailItem;
-use iptv_presentation::vod::Destination;
+use iptv_presentation::vod::{CatalogGroup, Destination};
 
 fn all_label(ui: Ui) -> &'static str {
     if ui.vod.with(|s| s.query.kind == Kind::Series) {
@@ -153,13 +153,9 @@ fn navigation(ui: Ui, size: Scale) -> View {
         .child(view().flex_1())
 }
 
-fn choose_category(ui: Ui, category: Option<(i64, String)>, continuing: bool) {
+fn choose_category(ui: Ui, group: CatalogGroup) {
     ui.touched();
-    ui.vod.update(|s| {
-        s.control = Control::Category;
-        s.query.category = category;
-        s.query.continue_watching = continuing;
-    });
+    ui.vod.update(|s| s.choose_catalog_group(group));
     reload(ui, false);
 }
 
@@ -274,11 +270,16 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                                     selected() && ui.vod.with(|s| s.control == Control::Category)
                                 },
                                 move || {
-                                    choose_category(
-                                        ui,
-                                        category().map(|c| (c.source, c.id)),
-                                        at.index() == 0,
-                                    );
+                                    let group = match at.index() {
+                                        0 => CatalogGroup::ContinueWatching,
+                                        _ => category().map_or(CatalogGroup::All, |c| {
+                                            CatalogGroup::Category {
+                                                source: c.source,
+                                                id: c.id,
+                                            }
+                                        }),
+                                    };
+                                    choose_category(ui, group);
                                 },
                             )
                             .test_id({

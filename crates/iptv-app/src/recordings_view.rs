@@ -4,7 +4,7 @@ use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
 use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
 use iptv_presentation::menu::{MenuItem, Origin};
-use iptv_presentation::recording::status_label;
+use iptv_presentation::recording::{ActionOutcome, Screen, status_label};
 use nsh_core::prelude::*;
 use std::time::Duration;
 
@@ -20,45 +20,20 @@ pub fn open(ui: Ui) {
     if !crate::capabilities::recordings_library_untracked(ui) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.open = true;
-        s.error = None;
-        s.actions = false;
-        s.confirm_delete = false;
-    });
+    ui.recordings.update(Screen::open);
     reload(ui);
 }
 pub fn close(ui: Ui) {
-    ui.recordings.update(|s| {
-        if !s.busy {
-            s.open = false;
-            s.confirm_delete = false;
-        }
-    });
+    ui.recordings.update(Screen::close);
 }
 pub fn back(ui: Ui) -> bool {
-    ui.recordings.update(|s| {
-        if s.busy {
-            return;
-        }
-        s.error = None;
-        if s.confirm_delete {
-            s.confirm_delete = false;
-        } else if s.actions {
-            s.actions = false;
-        } else {
-            s.open = false;
-        }
-    });
+    ui.recordings.update(Screen::back);
     true
 }
 fn reload(ui: Ui) {
     let owner = crate::runtime_owner::runtime();
     let mut generation = 0;
-    ui.recordings.update(|s| {
-        s.read_generation += 1;
-        generation = s.read_generation;
-    });
+    ui.recordings.update(|s| generation = s.begin_reload());
     crate::tasks::spawn_in_app(async move {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
@@ -67,17 +42,12 @@ fn reload(ui: Ui) {
             .await
             .unwrap_or_default();
         ui.recordings.update(|s| {
-            if s.read_generation != generation {
-                return;
-            }
-            s.retired = retired;
-            match result {
-                Ok(jobs) => {
-                    s.progress = points;
-                    s.reload(jobs);
-                }
-                Err(_) => s.error = Some("Recordings could not be loaded".into()),
-            }
+            s.finish_reload(
+                generation,
+                result.map_err(|_| "Recordings could not be loaded"),
+                points,
+                retired,
+            );
         });
     });
 }
@@ -104,7 +74,7 @@ fn announce_retired(ui: Ui) {
             if ui.recordings.with(|s| s.retired.is_empty()) {
                 return;
             }
-            ui.recordings.update(|s| s.retired.clear());
+            ui.recordings.update(Screen::dismiss_retired);
             crate::tasks::spawn_in_app(async move {
                 // On failure the list stays stored and shows again next time.
                 if let Err(error) = crate::runtime_owner::runtime()
@@ -447,8 +417,9 @@ pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
 }
 
 pub fn remember(ui: Ui, origin: Origin) {
-    let context = request(origin).map(|request| (origin, request));
-    ui.recordings.update(|s| s.context = context);
+    let request = request(origin);
+    ui.recordings
+        .update(|s| s.remember_context(origin, request));
 }
 /// Starts recording `request` now, once the parental check has passed.
 fn start(ui: Ui, mut request: Request) {
@@ -458,14 +429,10 @@ fn start(ui: Ui, mut request: Request) {
     request.start = request.start.max(now);
     if let Err(message) = request.validate(now) {
         crate::settings_view::notify(tr(message));
-        ui.recordings.update(|s| s.error = Some(message.into()));
+        ui.recordings.update(|s| s.show_error(message));
         return;
     }
-    ui.recordings.update(|s| {
-        s.busy = true;
-        s.error = None;
-        s.starting = Some(request.clone());
-    });
+    ui.recordings.update(|s| s.begin_start(request.clone()));
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let result = owner.schedule_recording(request).await;
@@ -491,24 +458,13 @@ fn start(ui: Ui, mut request: Request) {
         } else {
             None
         };
-        ui.recordings.update(|s| {
-            s.busy = false;
-            s.starting = None;
-            if let Some(jobs) = jobs {
-                s.reload(jobs);
-            }
-            // A play-bar action owns no library presentation: a row or
-            // confirmation the viewer opened meanwhile stays.
-            if let Err(error) = result {
-                s.error = Some(
-                    error
-                        .unavailable_reason()
-                        .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-                        .unwrap_or("Recording action failed")
-                        .into(),
-                )
-            }
+        let error = result.as_ref().err().map(|error| {
+            error
+                .unavailable_reason()
+                .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
+                .unwrap_or("Recording action failed")
         });
+        ui.recordings.update(|s| s.finish_start(jobs, error));
         reload(ui);
     });
 }
@@ -516,13 +472,7 @@ fn select_job(ui: Ui, id: JobId) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.focus = Some(id);
-        s.actions = true;
-        s.confirm_delete = false;
-        s.action = 0;
-        s.error = None;
-    });
+    ui.recordings.update(|s| s.select_job(id));
 }
 pub(super) fn return_to_player(ui: Ui) {
     if ui.recordings.with_untracked(|s| s.busy) {
@@ -548,10 +498,7 @@ fn activate_job(ui: Ui, id: JobId) {
     {
         return_to_player(ui);
     } else if matches!(job.status, Status::Completed | Status::Partial) && job.bytes > 0 {
-        ui.recordings.update(|s| {
-            s.focus = Some(id);
-            s.confirm_delete = false;
-        });
+        ui.recordings.update(|s| s.focus_for_action(id));
         perform(ui, 0);
     } else {
         select_job(ui, id);
@@ -566,10 +513,7 @@ fn row_action(ui: Ui, id: JobId, action: &'static str) {
         .recordings
         .with_untracked(|s| s.jobs.iter().find(|j| j.id == id).cloned());
     if let Some(job) = job {
-        ui.recordings.update(|s| {
-            s.focus = Some(id);
-            s.confirm_delete = false;
-        });
+        ui.recordings.update(|s| s.focus_for_action(id));
         execute(ui, job, false, action);
     }
 }
@@ -578,13 +522,7 @@ fn request_delete(ui: Ui, id: JobId) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.focus = Some(id);
-        s.actions = false;
-        s.confirm_delete = true;
-        s.delete_selected = false;
-        s.error = None;
-    });
+    ui.recordings.update(|s| s.request_delete(id));
 }
 
 fn confirm_delete(ui: Ui) {
@@ -662,16 +600,14 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.busy = true;
-        s.error = None;
-    });
+    ui.recordings.update(Screen::begin_action);
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
-        let result = if matches!(
+        let plays = matches!(
             action,
             "Play recording" | "Resume recording" | "Play from beginning"
-        ) {
+        );
+        let result = if plays {
             crate::on_demand::flush(ui, false);
             let progress = owner.recording_progress(job.id).await.unwrap_or_default();
             match owner.open_recording(job.id).await {
@@ -707,41 +643,21 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
         } else {
             None
         };
-        let mut failure_notice = None;
-        ui.recordings.update(|s| {
-            s.busy = false;
-            if let Some(jobs) = jobs {
-                s.reload(jobs);
+        let outcome = match result {
+            Ok(()) if plays => ActionOutcome::Playing,
+            Ok(()) => ActionOutcome::Changed,
+            Err(_) if action == "Delete recording" => {
+                ActionOutcome::Failed("Recording could not be deleted")
             }
-            s.confirm_delete = false;
-            match result {
-                Ok(()) => {
-                    s.actions = false;
-                    if matches!(
-                        action,
-                        "Play recording" | "Resume recording" | "Play from beginning"
-                    ) {
-                        s.open = false;
-                    }
-                }
-                Err(_) => {
-                    if s.open {
-                        s.error = Some(
-                            if action == "Delete recording" {
-                                "Recording could not be deleted"
-                            } else {
-                                "Recording action failed; check whether its file is available"
-                            }
-                            .into(),
-                        );
-                    } else {
-                        failure_notice = Some(tr("Recording action failed"));
-                    }
-                }
-            }
-        });
-        if let Some(message) = failure_notice {
-            crate::settings_view::notify(message);
+            Err(_) => ActionOutcome::Failed(
+                "Recording action failed; check whether its file is available",
+            ),
+        };
+        let mut failure_notice = false;
+        ui.recordings
+            .update(|s| failure_notice = s.finish_action(jobs, outcome));
+        if failure_notice {
+            crate::settings_view::notify(tr("Recording action failed"));
         }
         reload(ui);
     });
@@ -757,8 +673,7 @@ pub fn key(ui: Ui, action: Action) {
     if ui.recordings.with_untracked(|s| s.confirm_delete) {
         match action {
             Action::MoveLeft | Action::MoveRight | Action::MoveUp | Action::MoveDown => {
-                ui.recordings
-                    .update(|s| s.delete_selected = !s.delete_selected);
+                ui.recordings.update(Screen::toggle_delete_choice);
             }
             Action::Select => {
                 if ui.recordings.with_untracked(|s| s.delete_selected) {
@@ -776,12 +691,8 @@ pub fn key(ui: Ui, action: Action) {
             .recordings
             .with_untracked(|s| s.focused().map(|j| actions(ui, j)).map_or(0, |a| a.len()));
         match action {
-            Action::MoveUp => ui
-                .recordings
-                .update(|s| s.action = s.action.saturating_sub(1)),
-            Action::MoveDown => ui
-                .recordings
-                .update(|s| s.action = (s.action + 1).min(length.saturating_sub(1))),
+            Action::MoveUp => ui.recordings.update(Screen::previous_action),
+            Action::MoveDown => ui.recordings.update(|s| s.next_action(length)),
             Action::Select => perform(ui, ui.recordings.with_untracked(|s| s.action)),
             _ => {}
         }

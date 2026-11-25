@@ -51,7 +51,7 @@ pub async fn paged(
     source: SourceId,
     now: UnixTime,
 ) -> EpgSchedule {
-    let keep = super::stored::stored_past_days();
+    let keep = crate::stored::stored_past_days();
     let window = window(now, keep);
     let starts = match crate::commands::guide_listing_starts(owner, source, window.oldest).await {
         Ok(starts) => starts,
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn nested_expansion_supersedes_a_rebuild_but_keeps_its_page_wakeup() {
-        use crate::data::{CommitOutcome, ScheduleUpdate, combined, commit_schedule};
+        use crate::data::{CommitOutcome, ScheduleUpdate, commit_schedule, toggle_playlist};
         use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
 
         let owner = Rc::new(crate::Runtime::default());
@@ -315,7 +315,7 @@ mod tests {
                     assert_eq!(owner.page_waiters.borrow().len(), 1);
                     if Rc::ptr_eq(&previous, &before) {
                         recorded.borrow_mut().push("rebuild");
-                        assert!(combined::toggle_playlist(&owner, 0));
+                        assert!(toggle_playlist(&owner, 0));
                     } else {
                         recorded.borrow_mut().push("toggle");
                     }
@@ -822,7 +822,7 @@ mod tests {
             .with_description_lookup(lookup);
         // The owner keeps the schedule on screen and its source's part.
         let schedule = Rc::new(schedule);
-        crate::data::combined::remember_single(&owner, source, schedule.clone());
+        crate::data::remember_single(&owner, source, schedule.clone());
         owner.set_schedule(schedule);
         drop(owner);
         assert!(weak.upgrade().is_none());

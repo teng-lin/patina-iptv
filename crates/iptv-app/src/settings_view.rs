@@ -261,7 +261,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
 }
 
 pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
-    use crate::runtime::settings::SaveFailure;
+    use crate::runtime::model::SaveFailure;
     match error {
         crate::settings::SaveError::ParentalLocked => {
             notify(tr("Unlock parental controls before changing settings"))
@@ -489,7 +489,7 @@ fn time_label(unix: i64) -> String {
 
 /// The runtime reports publication semantics; the shell chooses the wording
 /// in the current interface language, including changes made since the save.
-pub(crate) fn save_failed(failure: crate::runtime::settings::SaveFailure) {
+pub(crate) fn save_failed(failure: crate::runtime::model::SaveFailure) {
     notify(words::save_failure(failure));
 }
 

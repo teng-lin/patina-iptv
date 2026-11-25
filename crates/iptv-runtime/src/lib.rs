@@ -128,15 +128,10 @@ pub struct Runtime {
     backup_busy: Cell<bool>,
     /// The user was told that changes last for the session.
     session_only_noted: Cell<bool>,
-    backup_progress: Cell<backup::Progress>,
+    backup_progress: Cell<model::BackupProgress>,
     search: search::State,
     favorites: Slot<RefCell<favorites::State>>,
-    favorite_writer: Slot<RefCell<Option<std::sync::mpsc::Sender<favorites::Write>>>>,
-    favorite_unsaved: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    /// A favorites write queued on the store's writer lane failed since the
-    /// last barrier (hosts without workers, `favorites::send`).
-    favorite_failed: RefCell<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    activity: RefCell<BTreeMap<SourceId, library::Activity>>,
+    activity: RefCell<BTreeMap<SourceId, model::Activity>>,
     all: Cell<bool>,
     generation: Slot<Cell<u64>>,
     imports: Slot<RefCell<HashMap<SourceId, (u64, CancelToken)>>>,
@@ -204,12 +199,9 @@ impl Runtime {
             link_client: Default::default(),
             backup_busy: Cell::new(false),
             session_only_noted: Cell::new(false),
-            backup_progress: Cell::new(backup::Progress::Idle),
+            backup_progress: Cell::new(model::BackupProgress::Idle),
             search: search::State::default(),
             favorites: Slot(RefCell::new(favorites::State::with_catalog(&*schedule))),
-            favorite_writer: Slot::default(),
-            favorite_unsaved: Default::default(),
-            favorite_failed: Default::default(),
             activity: RefCell::default(),
             all: Cell::new(false),
             generation: Slot::default(),
@@ -765,12 +757,16 @@ pub mod settings;
 
 #[cfg(feature = "native")]
 mod native;
+#[cfg(feature = "native")]
+pub use native::network::adapter_config;
 pub mod network;
 mod ports;
 mod publish;
 pub mod store_host;
-pub use ports::{MaybeSend, MaybeSync, Ports, RecordingFailure};
+pub use ports::{Entropy, Ports, RecordingFailure};
 pub mod storage;
+mod threading;
+pub use threading::{MaybeSend, MaybeSync};
 pub mod time;
 
 #[cfg(all(test, feature = "native"))]

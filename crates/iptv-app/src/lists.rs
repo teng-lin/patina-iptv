@@ -499,7 +499,7 @@ pub fn columns_shown(ui: Ui) -> bool {
 fn toggle_playlist(entry: usize) -> bool {
     match Entry::at(entry) {
         Entry::Group(group) => {
-            crate::data::combined::toggle_playlist(&crate::runtime_owner::runtime(), group)
+            crate::data::toggle_playlist(&crate::runtime_owner::runtime(), group)
         }
         _ => false,
     }

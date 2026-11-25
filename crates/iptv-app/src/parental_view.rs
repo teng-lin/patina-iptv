@@ -325,18 +325,15 @@ pub fn enforce(ui: Ui) {
     if !denied.is_empty() {
         ui.vod.update(|s| s.redact_metadata(&denied));
     }
-    let details_allowed = ui.vod.with_untracked(|s| {
-        s.details.as_ref().is_none_or(|d| {
-            crate::runtime_owner::runtime()
-                .parental_allowed(&iptv_runtime::vod::target(&d.item.key))
+    let blocked_details = ui.vod.with_untracked(|s| {
+        s.details.as_ref().and_then(|d| {
+            let key = &d.item.key;
+            (!crate::runtime_owner::runtime().parental_allowed(&iptv_runtime::vod::target(key)))
+                .then(|| key.clone())
         })
     });
-    if !details_allowed {
-        ui.vod.update(|s| {
-            s.details = None;
-            s.episode = None;
-            s.control = iptv_presentation::vod::Control::Catalog;
-        });
+    if let Some(key) = blocked_details {
+        ui.vod.update(|s| s.close_blocked_details(&key));
     }
 
     if let Some((playing, _)) = ui.player.vod.get_untracked() {

@@ -307,15 +307,8 @@ pub(crate) fn invalidate_shifted_context(
     {
         ui.description.set(None);
     }
-    ui.recordings.update(|state| {
-        if state
-            .context
-            .as_ref()
-            .is_some_and(|(origin, _)| shifted(origin.channel))
-        {
-            state.context = None;
-        }
-    });
+    ui.recordings
+        .update(|state| state.invalidate_context(shifted));
 }
 
 /// Closes the menu or popover, keeping focus on its guide selection.
@@ -506,7 +499,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 );
                 crate::tasks::spawn_in_app(async move {
                     match saved.await {
-                        Ok(()) => crate::data::organization::changed(
+                        Ok(()) => crate::data::organization_changed(
                             &crate::runtime_owner::runtime(),
                             source,
                         ),
@@ -583,7 +576,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 );
                 crate::tasks::spawn_in_app(async move {
                     match save.await {
-                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Ok(()) => crate::data::organization_changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -612,7 +605,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 let save = crate::runtime::commands::hide_group(&owner, source, target.id);
                 crate::tasks::spawn_in_app(async move {
                     match save.await {
-                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Ok(()) => crate::data::organization_changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -859,7 +852,7 @@ fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPr
         crate::runtime::commands::set_group_preference(&owner, source, target.id, preference);
     crate::tasks::spawn_in_app(async move {
         match save.await {
-            Ok(()) => crate::data::organization::changed(&owner, source),
+            Ok(()) => crate::data::organization_changed(&owner, source),
             Err(_) => crate::settings_view::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             )),

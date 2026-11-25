@@ -54,6 +54,28 @@ class Workflows(unittest.TestCase):
         # Workflow lint precedes the expensive compiler/NSH helper setup.
         self.assertLess(helpers.index("Lint workflow definitions"), helpers.index("Read the compiler and NSH pins"))
 
+    def test_windows_installer_repetition_defaults_cover_both_entrypoints(self):
+        text = (ROOT / ".github/workflows/windows-package-check.yml").read_text()
+        triggers = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        # A reusable workflow keeps its caller's event name. Manual Validation
+        # must receive the same safe default as a direct package dispatch.
+        for event in ("workflow_call", "workflow_dispatch"):
+            block = triggers.split(f"  {event}:\n", 1)[1].split("\n  workflow_", 1)[0]
+            self.assertIn("      repetitions:", block)
+            self.assertIn("        type: number", block)
+            self.assertIn("        default: 1", block)
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        call = validation.split("uses: ./.github/workflows/windows-package-check.yml", 1)[1].split("\n  ", 1)[0]
+        self.assertNotIn("repetitions:", call)
+        run = text.split("      - name: Build and exercise the installer\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("SMOKE_REPETITIONS: ${{ inputs.repetitions }}", run)
+        self.assertIn("$env:SMOKE_REPETITIONS -notmatch '^[1-5]$'", run)
+        self.assertNotIn("GITHUB_EVENT_NAME", run)
+        self.assertNotIn("github.event_name", run)
+        self.assertNotIn("|| 1", run)
+        self.assertLess(run.index("-notmatch"), run.index("./tools/package-windows.ps1"))
+        self.assertIn("./tools/ci/check-windows-package.ps1", run)
+
     def test_standalone_lanes_do_not_emit_legacy_required_names(self):
         host = (ROOT / ".github/workflows/ci.yml").read_text()
         android = (ROOT / ".github/workflows/android.yml").read_text()
