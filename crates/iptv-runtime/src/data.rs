@@ -64,8 +64,9 @@ const MAX_WAIT: Duration = Duration::from_secs(6 * 3600);
 /// ...and at least this long.
 const MIN_WAIT: Duration = Duration::from_secs(60);
 
-use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, now_unix, pipeline};
+use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline};
 pub use crate::imports::{Job, Purpose, Update};
+use crate::time::now_unix;
 use crate::{GuideWork, Runtime, RuntimeEvent, ScheduleCause};
 
 enum ScheduleUpdate<'a> {

@@ -2,6 +2,7 @@
 use super::private_files::Client as NetClient;
 use super::store_service::Services;
 use super::{guides, opening, stored, wizard_map};
+use crate::time::now_unix;
 use iptv_core::add_playlist::{
     FailureKind, ImportCounts, ImportFailure, ImportInput, ImportProgress, ImportStage,
 };
@@ -235,10 +236,6 @@ pub enum GuideRead {
     Check,
     RestoreAndCheck,
     CacheOnly,
-}
-
-pub fn now_unix() -> i64 {
-    crate::time::since_epoch().as_secs() as i64
 }
 
 /// The import on the calling worker, to its end (tests drive it so).

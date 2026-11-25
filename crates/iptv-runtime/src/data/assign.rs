@@ -49,7 +49,7 @@ pub fn choose(
             };
             // A check the choice stopped comes due again shortly, unless the
             // download answers for it.
-            superseded.keep_check(&owner, source, generation, super::now_unix());
+            superseded.keep_check(&owner, source, generation, crate::time::now_unix());
             log::info!("iptv data: a channel's guide was chosen ({applied:?})");
             done(applied);
         }

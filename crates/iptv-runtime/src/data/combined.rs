@@ -105,7 +105,7 @@ pub(super) fn added(
             }
             reset_single(&owner);
             owner.emit(crate::RuntimeEvent::AccountStreams(None));
-            let now = super::now_unix();
+            let now = crate::time::now_unix();
             owner.epoch.with(|e| e.set(now - now.rem_euclid(3600)));
             rebuild(&owner);
             // The previous single source's timer belonged to its older generation.
@@ -240,7 +240,7 @@ async fn switch_all_ready(owner: &Rc<crate::Runtime>) {
     owner.parts.with(|p| p.borrow_mut().clear());
     owner.limits.with(|p| p.borrow_mut().clear());
     owner.emit(crate::RuntimeEvent::AccountStreams(None));
-    let now = super::now_unix();
+    let now = crate::time::now_unix();
     owner.epoch.with(|e| e.set(now - now.rem_euclid(3600)));
     rebuild(owner);
     if let Ok(playlists) = library::playlists(owner) {

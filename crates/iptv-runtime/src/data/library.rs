@@ -132,7 +132,7 @@ pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Pur
         };
         status.last_success_at.is_none()
             || playlist.policy.due(
-                super::now_unix(),
+                crate::time::now_unix(),
                 status.last_attempt_at,
                 matches!(purpose, Purpose::Startup | Purpose::Combined),
             )
@@ -140,7 +140,7 @@ pub(super) fn run(owner: &Rc<crate::Runtime>, stored: StoredSource, purpose: Pur
     if due {
         owner
             .attempts
-            .with(|a| a.borrow_mut().insert(id, super::now_unix()));
+            .with(|a| a.borrow_mut().insert(id, crate::time::now_unix()));
     }
     log::info!(
         "iptv data: {purpose:?} of source {} ({:?})",

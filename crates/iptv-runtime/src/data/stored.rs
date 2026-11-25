@@ -449,7 +449,7 @@ fn clear_sources(
             let outcome = saved.await;
             // A check stopped for it stays owed, as after a download that
             // was canceled: still due, later, not at once.
-            let later = super::now_unix() + RETRY_DUE;
+            let later = crate::time::now_unix() + RETRY_DUE;
             for (source, superseded) in superseded {
                 superseded.keep_check(&owner, source, generation, later);
             }

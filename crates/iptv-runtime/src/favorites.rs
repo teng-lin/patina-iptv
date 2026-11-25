@@ -569,7 +569,7 @@ pub fn played(owner: &super::Runtime, key: &str) {
             Write::Watched {
                 source,
                 key,
-                at: super::imports::now_unix(),
+                at: crate::time::now_unix(),
             },
         );
     }

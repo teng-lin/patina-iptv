@@ -407,7 +407,7 @@ pub fn start_scheduler(owner: &Rc<super::Runtime>) {
                             .get(&source.id)
                             .copied()
                             .or(source.import.last_attempt_at);
-                        if policy.due(super::imports::now_unix(), attempted, startup)
+                        if policy.due(crate::time::now_unix(), attempted, startup)
                             && !running(&runtime, source.id)
                         {
                             crate::data::refresh(&runtime, source.id);

@@ -39,7 +39,7 @@ pub struct ProbeRequest {
 }
 
 fn now() -> i64 {
-    crate::imports::now_unix()
+    crate::time::now_unix()
 }
 fn random<const N: usize>(entropy: crate::ports::Entropy) -> InspectionResult<[u8; N]> {
     let mut bytes = [0; N];

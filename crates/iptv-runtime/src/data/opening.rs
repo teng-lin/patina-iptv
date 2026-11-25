@@ -10,7 +10,7 @@ use std::rc::Rc;
 /// Cold start with stored source `stored` (the store open): the guide's
 /// empty shell, and the last channel when it can start at once.
 pub async fn begin(owner: &Rc<crate::Runtime>, stored: &StoredSource) {
-    let shell = EpgSchedule::new(Vec::new(), GuideStore::default(), super::now_unix());
+    let shell = EpgSchedule::new(Vec::new(), GuideStore::default(), crate::time::now_unix());
     commit_schedule(owner, ScheduleUpdate::Catalog(Rc::new(shell)), || {});
     let (done, wait) = futures_channel::oneshot::channel();
     owner.emit(crate::RuntimeEvent::EarlyResume {

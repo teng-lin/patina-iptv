@@ -117,7 +117,7 @@ fn receipt(owner: &Runtime, saved: Commit) -> Outcome {
 }
 
 fn now() -> i64 {
-    crate::imports::now_unix()
+    crate::time::now_unix()
 }
 fn random_id(entropy: crate::ports::Entropy) -> Result<String> {
     let mut bytes = [0; 16];
