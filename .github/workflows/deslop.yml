@@ -1,0 +1,46 @@
+name: Structure report
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: deslop-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  report:
+    if: github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        timeout-minutes: 20
+        with:
+          prerequisites: host
+          cargo-cache-save: 'false'
+          policy-tool: 'false'
+      - name: Install rust-analyzer for the pinned toolchain
+        run: rustup component add rust-analyzer --toolchain "$RUSTUP_TOOLCHAIN"
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: deslop-please
+          version: 0.1.5
+      - name: Check the index-health rules against the real analyzer
+        env:
+          DESLOP_LIVE: '1'
+        run: python3 tools/ci/test-deslop.py
+      - name: Measure master
+        run: python3 tools/ci/deslop.py --write "$RUNNER_TEMP/deslop/report.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: deslop-report
+          path: ${{ runner.temp }}/deslop/report.json
+          if-no-files-found: error
+          retention-days: 30

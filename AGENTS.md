@@ -12,6 +12,7 @@
 - **Domain and presentation stay portable.** `iptv-core`, `iptv-presentation` and the other portable crates must not
   depend on NSH or platform APIs, must not block, and must build for
   `wasm32-unknown-unknown`.
+- On Linux, run `tools/ci/deslop.py` before finishing a structural change, and quote its output in the pull request. Fix a new cycle by layer, or explain it there.
 - **State ownership.** The runtime owns content and operations. Feature
   holders in `iptv-presentation` track focus by content identity. Views
   render state and send actions.
