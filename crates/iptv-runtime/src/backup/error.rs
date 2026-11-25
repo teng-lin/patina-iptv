@@ -78,7 +78,9 @@ impl Error {
     pub(crate) fn invalid_reference(mut self) -> Self {
         if matches!(
             self.cause,
-            Cause::Rule | Cause::Step(_) | Cause::Io(io::ErrorKind::NotFound)
+            Cause::Rule
+                | Cause::Step(_)
+                | Cause::Io(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
         ) {
             self.rejection = Some(Rejection::Damaged);
         }

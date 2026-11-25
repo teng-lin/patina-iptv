@@ -9,6 +9,7 @@ use iptv_store_sqlite::{DatabaseKey, SourceId, Store};
 use std::{
     cell::RefCell,
     fs,
+    io::{self, Read},
     path::{Path, PathBuf},
     rc::Rc,
     time::Duration,
@@ -429,6 +430,28 @@ fn generated_tree(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
     files
 }
 
+/// Delivers a valid archive header, then an explicit reader error inside the
+/// first payload. Ordinary file truncation instead returns a short byte count.
+struct PayloadReadFailure {
+    input: io::Cursor<Vec<u8>>,
+    fail_at: u64,
+    kind: io::ErrorKind,
+}
+
+impl Read for PayloadReadFailure {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let remaining = self.fail_at.saturating_sub(self.input.position()) as usize;
+        if remaining == 0 {
+            return Err(self.kind.into());
+        }
+        let count = buffer.len().min(remaining);
+        self.input.read(&mut buffer[..count])
+    }
+}
+
 #[test]
 fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore() {
     use backup::error::Rejection;
@@ -695,6 +718,28 @@ fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore()
         Rejection::Damaged,
     ));
 
+    cases.push((
+        "referenced local playlist parent is a file",
+        rewrite_generated_archive(&accepted, |header, _| {
+            let entry = header["files"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|entry| entry["name"].as_str().unwrap().starts_with("playlists/"))
+                .unwrap();
+            let parent = entry["name"]
+                .as_str()
+                .unwrap()
+                .rsplit_once('/')
+                .unwrap()
+                .0
+                .to_owned();
+            assert!(parent.starts_with("playlists/"));
+            entry["name"] = json!(parent);
+        }),
+        Rejection::Damaged,
+    ));
+
     // These are valid versioned documents whose values this build cannot
     // restore faithfully. An older release may allow another enum, range or
     // override scope, so refusal must not call the archive damaged.
@@ -760,6 +805,34 @@ fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore()
         );
         assert_eq!(fs::read(&document).unwrap(), live_document, "{label}");
         assert!(current.restore_is_pending(), "{label}");
+    }
+
+    let header_length = u64::from_le_bytes(accepted[9..17].try_into().unwrap());
+    let fail_at = 17 + header_length + 1;
+    assert!(fail_at < accepted.len() as u64);
+    for (kind, rejection) in [
+        (io::ErrorKind::UnexpectedEof, Some(Rejection::Damaged)),
+        (io::ErrorKind::PermissionDenied, None),
+    ] {
+        let bytes = accepted.clone();
+        let error = block_on(busy.worker(move |archive| {
+            archive.stage(&mut PayloadReadFailure {
+                input: io::Cursor::new(bytes),
+                fail_at,
+                kind,
+            })
+        }))
+        .unwrap_err();
+        assert_eq!(error.rejection(), rejection, "{kind:?}: {error}");
+        assert_eq!(
+            error.to_string(),
+            format!("Could not read backup files (I/O: {kind:?})")
+        );
+        assert_eq!(generated_tree(&pending), queued, "{kind:?}");
+        assert_eq!(name(&current, live_source), "Generated current source");
+        assert_eq!(fs::read(root.join("settings.json")).unwrap(), live_settings);
+        assert_eq!(fs::read(&document).unwrap(), live_document);
+        assert!(current.restore_is_pending());
     }
     drop(busy);
     assert!(current.drain_services());

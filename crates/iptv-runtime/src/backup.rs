@@ -750,7 +750,9 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
             fs::create_dir_all(parent).context("Could not stage backup files")?;
         }
         let mut output = private_file(&path).context("Could not stage backup files")?;
-        if io::copy(&mut input.take(len), &mut output).context("Could not read backup files")?
+        if io::copy(&mut input.take(len), &mut output)
+            .context("Could not read backup files")
+            .map_err(Error::damaged)?
             != len
         {
             return Err(Error::from("Backup is incomplete").damaged());
