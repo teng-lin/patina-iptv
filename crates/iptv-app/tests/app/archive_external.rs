@@ -30,10 +30,19 @@ fn start(home: crate::isolated::Home, external_sport: bool) -> (Fixture, Streams
     let now = crate::support::now().div_euclid(60) * 60;
     let requests: Sources = Arc::default();
     let received = requests.clone();
+    // The relay sniffs bytes and rejects unknown printable text. Serve a
+    // generated HLS playlist and its transport packet, rather than prose.
+    let manifest = concat!(
+        "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:1\n",
+        "#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:1.0,\nsegment.ts\n#EXT-X-ENDLIST\n",
+    );
+    let mut packet = vec![0u8; 188];
+    packet[..4].copy_from_slice(&[0x47, 0x01, 0x01, 0x10]);
     let server = Server::start_with(
         &[
-            ("/one.ts", "Generated media one".into()),
-            ("/two.ts", "Generated media two".into()),
+            ("/one.ts", manifest.into()),
+            ("/two.ts", manifest.into()),
+            ("/segment.ts", String::from_utf8(packet).unwrap()),
         ],
         move |target| received.lock().unwrap().push(target.into()),
     );
@@ -337,7 +346,14 @@ try:
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
             response.read(1)
+    except urllib.error.HTTPError as error:
+        record('http-' + str(error.code))
+        record('rejected')
+    except (urllib.error.URLError, TimeoutError, OSError):
+        record('transport-error')
+        record('rejected')
     except Exception:
+        record('client-error')
         record('rejected')
     else:
         record('admitted')
@@ -376,11 +392,18 @@ finally:
         self.pids(event).len()
     }
     #[track_caller]
-    fn wait_until(&self, app: &mut Headless, label: &str, ready: impl Fn() -> bool) {
+    fn wait_until(
+        &self,
+        app: &mut Headless,
+        server: &Streams,
+        label: &str,
+        ready: impl Fn() -> bool,
+    ) {
         if let Err(error) = app.wait_until(label, WAIT, |_| ready()) {
             panic!(
-                "{error}; generated player events: {:?}",
-                std::fs::read_to_string(&self.log).unwrap_or_default()
+                "{error}; generated player events: {:?}; upstream requests: {}",
+                std::fs::read_to_string(&self.log).unwrap_or_default(),
+                server.requests().len()
             );
         }
     }
@@ -422,6 +445,7 @@ fn fullscreen_same_group_restart_transfers_the_captured_player_once() {
     step(app.press("id:menu-panel >> text:Play from the beginning"));
     player.wait_until(
         app,
+        &server,
         "same-group full-screen choice admitted externally",
         || player.count("admitted") == 1,
     );
@@ -457,9 +481,12 @@ fn both_archive_entries_handoff_once_and_a_superseded_group_never_reaches_upstre
         } else {
             step(app.press_key("enter"));
         }
-        player.wait_until(app, "one admitted synthetic external player", || {
-            player.count("admitted") == index + 1
-        });
+        player.wait_until(
+            app,
+            &server,
+            "one admitted synthetic external player",
+            || player.count("admitted") == index + 1,
+        );
         assert_eq!(player.count("launched"), index + 1);
         assert_eq!(
             iptv_app::player_opens(0),
