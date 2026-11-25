@@ -1,0 +1,11 @@
+### argv: --version
+rust-analyzer synthetic
+### exit: 0
+### argv: scip /synthetic/workspace --output /synthetic/index.scip
+Generating SCIP start...
+ERROR Config Error(s) error_sink=ConfigErrors([])
+rust-analyzer: Loading discovering sysroot
+rust-analyzer: Loading cargo metadata: finished
+Encountered duplicate scip symbols, indicating an internal rust-analyzer bug.
+Generating SCIP finished 1s
+### exit: 0

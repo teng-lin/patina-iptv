@@ -203,6 +203,8 @@ def measure(tree, nsh_checkout, *, target_dir=None):
             raise ValueError(problem)
         record["nsh_head"] = run(["git", "rev-parse", "HEAD"], nsh_checkout, environment)
         record["toolchain"] = pins.toolchain(tree)
+        # A caller may have sourced locked-build-env.sh for another tree.
+        environment["RUSTUP_TOOLCHAIN"] = record["toolchain"]
         before = time.monotonic()
         try:
             run(["cargo", "check", "--workspace", "--all-targets", "--locked",
@@ -393,13 +395,16 @@ def base_reference(tree, nsh_checkout, merge_base):
         try:
             base_pin, head_pin = pins.nsh_revision(worktree), pins.nsh_revision(tree)
             if base_pin != head_pin:
-                checkout = Path(directory) / "nsh-patina"
+                # Give persistent preparation commands, not the temporary path
+                # that the finally block is about to remove.
+                checkout = Path(tree).parent / "nsh-deslop-base"
                 print(f"NSH pins differ: base={base_pin}, HEAD={head_pin}; --base cannot continue.")
                 print("Prepare a separate adjacent checkout for the base pin with:")
                 print(f"git clone https://github.com/teng-lin/nsh.git {shlex.quote(str(checkout))}")
                 print(f"git -C {shlex.quote(str(checkout))} checkout --detach {base_pin}")
                 return None
             (Path(directory) / "nsh-patina").symlink_to(Path(nsh_checkout).resolve(), target_is_directory=True)
+            environment["RUSTUP_TOOLCHAIN"] = pins.toolchain(worktree)
             try:
                 run(["rustup", "which", "rust-analyzer"], worktree, environment)
             except (RuntimeError, OSError):

@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dirty": false,
+  "nsh_rev": "dddddddddddddddddddddddddddddddddddddddd",
+  "nsh_head": "dddddddddddddddddddddddddddddddddddddddd",
+  "toolchain": "0.0.0",
+  "rust_analyzer": "rust-analyzer synthetic",
+  "deslop": "deslop-please synthetic",
+  "target": "x86_64-unknown-linux-gnu",
+  "features": "default",
+  "cfg": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "valid": true,
+  "problems": [],
+  "seconds": {
+    "preflight": 1.0,
+    "index": 2.0,
+    "total": 3.0
+  },
+  "diagnostics": [
+    {
+      "lint": "module-cycle",
+      "key": "synthetic::a,synthetic::b,synthetic::c",
+      "message": "3 modules in `synthetic` use each other in a circle",
+      "notes": [],
+      "file": null,
+      "line": null
+    },
+    {
+      "lint": "field-leak",
+      "key": "synthetic::State::value",
+      "message": "read in 31 places in 7 modules",
+      "notes": [],
+      "file": null,
+      "line": null
+    },
+    {
+      "lint": "long-file",
+      "key": "crates/synthetic/src/old.rs",
+      "message": "has 1200 lines",
+      "notes": [],
+      "file": null,
+      "line": null
+    },
+    {
+      "lint": "wide-directory",
+      "key": "crates/",
+      "message": "holds 25 files and directories",
+      "notes": [],
+      "file": null,
+      "line": null
+    }
+  ]
+}
