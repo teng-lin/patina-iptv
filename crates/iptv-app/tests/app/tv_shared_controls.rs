@@ -508,6 +508,12 @@ fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_z
 #[test]
 fn live_play_bar_expires_and_back_dismisses_without_stopping() {
     let Some(home) = isolated!() else { return };
+    env_logger::Builder::new()
+        .filter_module("iptv_runtime::source_preparation", log::LevelFilter::Debug)
+        .filter_module("iptv_app::source_publication", log::LevelFilter::Debug)
+        .is_test(true)
+        .try_init()
+        .unwrap();
     let mut settings = Settings::new();
     settings
         .set("guide.stay_on_guide", Value::Bool(false))

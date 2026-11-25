@@ -1070,9 +1070,11 @@ fn load_authorized(
 fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
     let stream = ui.player.stream(surface);
     if stream.health.with_untracked(|h| h.session()) != session {
+        log::debug!(target: "iptv_app::source_publication", "prepared source superseded");
         return;
     }
     if !source_allowed(ui, surface) {
+        log::debug!(target: "iptv_app::source_publication", "prepared source denied");
         stop_surface(ui, surface);
         return;
     }
@@ -1112,6 +1114,7 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
         crate::media::reset(ui, surface);
         stream.source.set(Some(source));
     });
+    log::debug!(target: "iptv_app::source_publication", "published source to player");
     let now = ui.now_ms();
     stream.health.update(|h| h.resolved(now));
     watch_stall(ui, surface);

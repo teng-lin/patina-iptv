@@ -273,6 +273,8 @@ pub(crate) struct State {
     preparations: Mutex<HashMap<usize, SurfacePreparation>>,
     #[cfg(test)]
     preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,
+    #[cfg(all(test, feature = "test-support"))]
+    account_refresh: Mutex<Option<Arc<crate::testing::GateState>>>,
     media_ops: tokio::sync::Mutex<()>,
     #[cfg(test)]
     playback_completion: Mutex<Option<PlaybackCompletion>>,
@@ -986,8 +988,14 @@ async fn refresh_accounts(
     services: &Services,
     state: &State,
 ) -> Result<(), crate::model::StoreError> {
+    #[cfg(all(test, feature = "test-support"))]
+    let pause = state.account_refresh.lock().unwrap().take();
     let sources = services
-        .read(|store| {
+        .read(move |store| {
+            #[cfg(all(test, feature = "test-support"))]
+            if let Some(pause) = pause {
+                pause.pause();
+            }
             store
                 .sources()?
                 .into_iter()

@@ -239,6 +239,8 @@ pub(crate) struct Service {
     pub(crate) hooks: super::workers::Hooks,
     #[cfg(feature = "test-support")]
     pub(crate) reads: AtomicU64,
+    #[cfg(all(test, feature = "native"))]
+    before_cold_writer_close: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
@@ -274,11 +276,20 @@ impl Service {
             hooks: Default::default(),
             #[cfg(feature = "test-support")]
             reads: AtomicU64::new(0),
+            #[cfg(all(test, feature = "native"))]
+            before_cold_writer_close: Mutex::default(),
         }
     }
 
     pub(crate) fn directory(&self) -> &Path {
         &self.ports.directory
+    }
+
+    #[cfg(all(test, feature = "native"))]
+    pub(crate) fn has_open_connections(&self) -> bool {
+        [&self.writer, &self.reader, &self.analysis]
+            .into_iter()
+            .any(|lane| lane.connection.lock().unwrap().store.is_some())
     }
 
     /// The calling (UI) thread starts accepting store work for this owner.
@@ -373,22 +384,18 @@ impl Service {
         self.epochs.close_admission(epoch);
         #[cfg(feature = "test-support")]
         self.hooks.admission_closed();
-        // Natively a reader opens only through the writer; where lanes share
-        // the writer's connection, a read alone may have opened it.
-        if [&self.writer, &self.reader, &self.analysis]
-            .iter()
-            .all(|lane| lane.jobs.get().is_none())
-        {
-            self.epochs.close(epoch);
-            after_writer();
-            #[cfg(feature = "test-support")]
-            self.hooks.drained();
-            return true;
-        }
-        // A publish still in slices is abandoned, not finished: the owner is
-        // closing (natively a publish runs as one job and is never pending).
         if let Some(lane) = self.writer.jobs.get() {
+            // A cooperative publish still in slices is abandoned on shutdown.
             lane.cancel_sliced();
+        } else {
+            // An admitted reader can still be starting the writer to open its
+            // connection. Fence the epoch before looking up the barrier so a
+            // writer that races this branch either gets drained or cannot open.
+            #[cfg(all(test, feature = "native"))]
+            if let Some(before_close) = self.before_cold_writer_close.lock().unwrap().take() {
+                before_close();
+            }
+            self.epochs.close(epoch);
         }
         // The writer first: once it closed the epoch, a late read cannot open
         // the reader's connection again.
@@ -401,10 +408,6 @@ impl Service {
             // FIFO barrier still retires the connection held by preceding work.
             *connection = Connection::default();
         });
-        if self.writer.jobs.get().is_none() {
-            // Shared lanes that only read: no writer job closes the epoch.
-            self.epochs.close(epoch);
-        }
         // Queued writes have acknowledged before transient read/probe cancellation.
         after_writer();
         let reader = self.reader.barrier(limit, |connection| {
@@ -1354,6 +1357,33 @@ mod tests {
             !owner.accept().is_current(),
             "the closed owner accepts nothing"
         );
+    }
+
+    #[tokio::test]
+    async fn drain_closes_a_writer_started_by_an_already_admitted_cold_read() {
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let owner = service(directory.path(), 0x75);
+        owner.epochs.begin();
+        let services = owner.accept();
+        let release = hold_lane(&owner.reader);
+        let (read, observed) = std::sync::mpsc::channel();
+        let reply = services.read(move |store| {
+            let channel = store.combined_last_channel()?;
+            read.send(()).unwrap();
+            Ok(channel)
+        });
+        assert!(owner.writer.jobs.get().is_none());
+        *owner.before_cold_writer_close.lock().unwrap() = Some(Box::new(move || {
+            release.send(()).unwrap();
+            observed.recv_timeout(Duration::from_secs(5)).unwrap();
+        }));
+
+        assert!(owner.drain_on_shutdown());
+        assert!(reply.await.unwrap().is_none());
+        assert!(!owner.has_open_connections());
+        assert!(!owner.accept().is_current());
     }
 
     #[test]
