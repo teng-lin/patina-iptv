@@ -215,10 +215,16 @@ pub fn reset(owner: &super::Runtime) {
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
     *owner.favorite_failed.borrow_mut() = Default::default();
-    let catalog = owner.schedule();
-    owner
-        .favorites
-        .with(|state| *state.borrow_mut() = State::with_catalog(&*catalog));
+    owner.favorites.with(|state| {
+        let mut state = state.borrow_mut();
+        // A root reset keeps the installed catalog. Its index was built at
+        // initialization or at the last catalog commit.
+        let index = std::mem::take(&mut state.index);
+        *state = State {
+            index,
+            ..State::default()
+        };
+    });
 }
 
 /// The source whose catalog is about to be shown: its saved favorites
