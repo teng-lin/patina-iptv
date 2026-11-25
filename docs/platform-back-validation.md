@@ -76,6 +76,46 @@ events. It predates this audit and the follow-up idle-overlay-rail fix in that
 PR; it is not a new run or evidence from an Android phone. Keep any later runs
 separate, with their own commit, artifact hash and operation manifest.
 
+## Owned emulator follow-up on 2026-11-25 UTC
+
+These runs used application `cc494298c8ff3cc0fed9d68699f273ae1a848c61`,
+the pinned NSH revision above, and validation APK SHA-256
+`f693d48b640d740eb9ad3f96d03eca16fa1329fc934538d68a9977975eb0aa0d`.
+They predate the `9513c431` base integration. They do not certify a later APK.
+The CLI reported `nsh 0.6.0 (413cfb6)`; its SHA-256 and the rebuilt Android
+runtime hashes are retained in each operation manifest. A shared older CLI was
+excluded from accepted artifacts.
+
+Only fresh owned copies of `tv36`/`tab36` and the dedicated validation package
+were changed. The source profiles, other sessions and ordinary viewer profiles
+were untouched. Both copies were disposed after recording logs, XML and images.
+These were focused Back journeys; they did not run the standard playback smoke
+or establish either Tizen host's physical acceptance.
+
+| Emulator journey | Observed result |
+| --- | --- |
+| API 36 `tv36`, owned port 5590 | Guide rail, first-run welcome and recovery with details closed each returned to the TV launcher with one Back press. A form and open recovery details consumed Back before returning to their roots. No application crash or refused player load. |
+| API 36 `tab36`, owned port 5592 | Guest model `sdk_gphone64_arm64`, Android 16, ARM64, gesture navigation. Cancel retained Patina and commit returned to Nexus Launcher at all three roots. Forms and recovery details consumed Back. No application crash or refused player load. |
+| Tablet visual inspection | Rounded Patina-over-launcher previews were observed for committed guide Back and for committed and canceled welcome/recovery Back. The guide cancellation recording showed the system Back arrow, with Patina retained, but did not establish the rounded home preview. All-root predictive animation acceptance is therefore still incomplete. |
+
+TV evidence is under
+`/private/tmp/patina277-focused-tv/run-cua4xt11` on HanSolo; tablet evidence is
+under `/private/tmp/patina277-focused-tab-final/run-_b8wncn0`. Each has an
+`operation.json`, native action log, application/crash logs, XML and screenshots;
+the tablet run also retains six gesture MP4s, guest properties, navigation
+settings and frozen Python/Java helpers with hashes. The app was alive at each
+successful runner's final guard. The tablet's structural runner pass is separate
+from the qualified visual result above.
+
+Earlier tablet attempts remain failed setup/diagnostic records. Input controls
+on the same fresh profile showed that the injector and standard display-0 edge
+swipe could leave Android Settings. A normal Android full-screen education
+prompt (`Got it`) and immersive transient bars had to be handled before the
+observed Patina gesture. After dismissing that prompt and revealing the bars,
+the welcome preview and committed return home were recorded. Those diagnostics
+justify the input setup; they are not evidence of a new product defect, phone
+acceptance, or a policy change to Patina's window behavior.
+
 The follow-up in this change addresses two additional source-level defects:
 
 - First-run welcome and library recovery without open details still registered
@@ -97,7 +137,8 @@ Read-only inventory on 2026-11-25 UTC found:
 
 - SkyWalker: no connected Android device and no registered `tab36`/`tv36` AVDs.
 - HanSolo: `tab36` and `tv36` source profiles exist. An active Android emulator
-  belongs to another session; it was not used by this audit.
+  belongs to another session; it was not used by this audit. Later focused runs
+  used separate owned copies, as recorded above.
 - Gigabyte: a OnePlus **CPH2583**, Android **16/API 36**, gesture navigation
   (`navigation_mode=2`), and a Samsung **SM-X210** tablet. The phone was
   dozing with keyguard showing, and had no dedicated Patina validation package.
@@ -117,7 +158,7 @@ and emulators in separate evidence records.
 
 | Target | Required observations | Status |
 | --- | --- | --- |
-| `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. Repeat one-press exit from first-run welcome and recovery with details closed. A form or open recovery details consumes the first Back, then its root hands the next Back to the system. | Historical rail result in #288; welcome/recovery not newly run in this audit. |
+| `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. Repeat one-press exit from first-run welcome and recovery with details closed. A form or open recovery details consumes the first Back, then its root hands the next Back to the system. | Focused one-press rail/welcome/recovery results pass at `cc494298`; exact APK and limits above. A later integrated APK needs its own validation. |
 | Android phone, API 34+ | At each root (guide rail, first-run welcome, recovery with details closed), observe committed and canceled edge gestures: the predictive home preview shows, commit returns home, cancel keeps Patina on the same screen. Forms and recovery details still consume Back. A Back key event or launcher-at-end assertion alone is insufficient. | Pending unlocked phone session; no physical run. |
 | Tizen bridge | On the guide's rail and first-launch setup, Return shows the localized question with No focused. Left/Right select the corresponding answer; Up/Down change selection; OK on No and Back dismiss without exiting; Yes exits. | Pending connected test TV and policy choice. |
 | Tizen NSH host | On the guide's rail, first-run welcome and recovery with details closed, Return shows the question with No focused. Left/Right select No/Yes, Up/Down change selection, OK chooses, Back dismisses and Yes exits. Open recovery details consumes Return before the exit question. | Pending connected test TV and policy choice. |
