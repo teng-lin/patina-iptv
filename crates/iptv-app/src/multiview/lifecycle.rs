@@ -96,8 +96,28 @@ pub fn bind(ui: Ui) {
     // device no longer offers multiview here (#279), so the session
     // collapses to the tile being heard.
     let omitted = computed(move || !crate::capabilities::multiview_offer(ui).shown());
+    // A smaller decoder/form-factor budget can still offer multiview. An
+    // existing session must discard its old admission limit before adding
+    // another tile. Account limits do not revoke already admitted streams.
+    let capacity = computed(move || {
+        let device = crate::device::current();
+        let bounds = window();
+        match iptv_presentation::capabilities::multiview_offer(
+            device,
+            bounds.width.0 > bounds.height.0,
+            None,
+        ) {
+            iptv_presentation::capabilities::MultiviewOffer::Tiles(tiles) => tiles,
+            _ => 1,
+        }
+    });
     effect(move || {
-        if omitted.get() {
+        let omitted = omitted.get();
+        let capacity = capacity.get();
+        let reduced = ui
+            .multiview
+            .with_untracked(|m| m.as_ref().is_some_and(|m| m.limits().decoders > capacity));
+        if omitted || reduced {
             untracked(|| collapse(ui));
         }
     });

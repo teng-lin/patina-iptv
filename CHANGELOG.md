@@ -11,7 +11,8 @@ is below 1.0, a minor release may change behavior.
 
 - Follow iPad hardware keyboard attachment and Switch Control at runtime.
   Refresh these signals when returning to the app, keep panels open for
-  assistive navigation, and offer panel timeout settings only on TV under
+  assistive navigation, collapse multiview to the heard tile when its decoder
+  budget shrinks, and offer panel timeout settings only on TV under
   Advanced; handhelds and desktop use defaults with system accessibility timing.
 
 - Simplify the TV Guide header and groups column by removing overflow buttons,

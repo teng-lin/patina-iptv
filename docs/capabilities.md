@@ -48,6 +48,8 @@ H.264 decoder the player picks supports at once
 decoder, when Media3 decodes in software. The
 report can only lower the platform's surface budget, so a device that cannot
 run two hardware decoders at once loses multiview rather than gaining tiles.
+A lower decoder or form-factor budget collapses an open session to its heard
+tile, even when the smaller budget still offers a new multiview session.
 
 Settings the signals decide (#281, `settings::offer`). The rewind and
 fast-forward jumps (`catchup.forward_step`, `catchup.rewind_step`) are on the
