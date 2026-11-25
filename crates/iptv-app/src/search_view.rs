@@ -452,7 +452,7 @@ pub fn open(ui: Ui) {
         }
     }
     if ui.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.mode.set(crate::settings::browse_mode());
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
 }
 
@@ -554,7 +554,7 @@ fn watch(ui: Ui, channel: usize, playback: Playback) {
     crate::lists::tap(ui, channel, now);
     ui.play(channel, playback);
     // Full screen first: the resume effect ignores a suspended screen in full screen.
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
     ui.search.update(|s| {
         if let Some(s) = s {

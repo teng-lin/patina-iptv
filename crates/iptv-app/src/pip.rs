@@ -151,7 +151,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
         batch(|| {
             report(ui, false);
             if how == Exit::Close {
-                ui.mode.set(ViewMode::Guide);
+                ui.mode.apply(crate::mode::Action::ReturnToBrowse);
             }
         });
         return true;
@@ -159,7 +159,7 @@ pub fn exit(ui: Ui, how: Exit) -> bool {
     report(ui, false);
     match how {
         Exit::BackToApp => {
-            ui.mode.set(ViewMode::Fullscreen);
+            ui.mode.apply(crate::mode::Action::PipBackToApp);
             crate::desktop::focus_main();
         }
         Exit::Close => crate::player_keys::stop_playback(ui),

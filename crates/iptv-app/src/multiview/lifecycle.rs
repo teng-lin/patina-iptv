@@ -56,7 +56,7 @@ pub fn follow(ui: Ui) -> bool {
     }
     if !any {
         ui.multiview.set(None);
-        ui.mode.set(ViewMode::Guide);
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     true
 }

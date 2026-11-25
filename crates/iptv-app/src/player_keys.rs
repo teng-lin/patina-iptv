@@ -153,7 +153,7 @@ fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
     crate::multiview::close(ui);
     ui.playing.set(None);
     stop(ui);
-    ui.mode.set(crate::settings::browse_mode());
+    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
 }
 
 /// Channel up/down: switches playback and keeps the focus on it. Wraps
@@ -198,7 +198,7 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
             if let Some(ch) = ui.playing.get() {
                 crate::lists::show_channel(ui, ch);
             }
-            ui.mode.set(crate::settings::browse_mode());
+            ui.mode.apply(crate::mode::Action::ReturnToBrowse);
         }
         QuickAction::History => crate::chooser::open(ui, crate::chooser::Kind::History),
         QuickAction::Channels => crate::channels_view::open(ui, ListMode::Overlay),

@@ -95,7 +95,7 @@ fn preview(ui: Ui, size: Scale) -> impl IntoElement {
         .on_press(move || {
             ui.touched();
             if !idle() {
-                ui.mode.set(crate::ViewMode::Fullscreen);
+                ui.mode.apply(crate::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         })

@@ -91,7 +91,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
             if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_some() {
-                ui.mode.set(crate::ViewMode::Fullscreen);
+                ui.mode.apply(crate::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
         }

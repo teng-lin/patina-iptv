@@ -107,7 +107,7 @@ pub fn return_from_player(ui: Ui) -> bool {
     }
     ui.vod
         .update(|s| s.return_from_player(details, &played, saved));
-    ui.mode.set(crate::settings::browse_mode());
+    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     true
 }
 

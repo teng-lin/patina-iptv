@@ -92,7 +92,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         source: source.clone(),
     }));
     super::load_authorized(ui, 0, session, source, Some(authority));
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     true
 }
 
@@ -118,12 +118,12 @@ pub fn adopt(ui: Ui) -> bool {
         log::info!("iptv player: the early channel is not in the guide; stopping");
         ui.player.early.set(None);
         super::stop(ui);
-        ui.mode.set(crate::settings::browse_mode());
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
         return true;
     };
     if crate::schedule().channel_block(channel) != iptv_core::organization::Block::None {
         super::stop(ui);
-        ui.mode.set(crate::settings::browse_mode());
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
         return true;
     }
     // Preparing the early stream already owns this request, even before a

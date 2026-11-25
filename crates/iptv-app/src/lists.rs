@@ -452,7 +452,7 @@ fn follow(ui: Ui, outcome: Outcome) {
         Outcome::ReturnToPlayer
             if ui.playing.get_untracked().is_some() || crate::on_demand::active(ui) =>
         {
-            ui.mode.set(crate::ViewMode::Fullscreen);
+            ui.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         Outcome::Open(item) => open(ui, item),
