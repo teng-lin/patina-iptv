@@ -270,6 +270,7 @@ pub(crate) struct State {
     inputs_changed: tokio::sync::Notify,
     // Connection IDs belong to this directory-owned registry, including retries.
     next_input: AtomicU64,
+    next_preparation: AtomicU64,
     preparations: Mutex<HashMap<usize, SurfacePreparation>>,
     #[cfg(test)]
     preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,

@@ -20,6 +20,7 @@ const UNSHAREABLE_FOR: Duration = Duration::from_secs(30 * 60);
 /// one segment over the limit, or two that failed their checks (a single
 /// torn final packet may be a connection cut short).
 const STRIKES: u8 = 2;
+const PREPARATION_LOG: &str = concat!(module_path!(), "::source_preparation");
 
 /// Streams whose first HLS segment failed validation after a shared input
 /// had offered its first packets (`LiveInput::first_segment`). Such an input
@@ -503,13 +504,14 @@ impl Runtime {
         share: bool,
         expected: Option<iptv_guide::playback::ResolutionAuthority>,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
-        static NEXT_ATTEMPT: AtomicU64 = AtomicU64::new(0);
-        let attempt =
-            log::log_enabled!(target: "iptv_runtime::source_preparation", log::Level::Debug)
-                .then(|| NEXT_ATTEMPT.fetch_add(1, Ordering::Relaxed));
+        let attempt = log::log_enabled!(target: PREPARATION_LOG, log::Level::Debug).then(|| {
+            self.recordings
+                .next_preparation
+                .fetch_add(1, Ordering::Relaxed)
+        });
         let trace_preparation = move |phase: &'static str| {
             if let Some(attempt) = attempt {
-                log::debug!(target: "iptv_runtime::source_preparation",
+                log::debug!(target: PREPARATION_LOG,
                     "attempt {attempt}, surface {surface}: {phase}");
             }
         };
