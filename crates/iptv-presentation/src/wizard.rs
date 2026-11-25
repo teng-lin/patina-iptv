@@ -18,6 +18,7 @@
 //!   Back from the form returns to welcome or closes the settings wizard.
 //! - Submitting while an import runs does nothing. Canceling a draft with
 //!   a required guide waits for that import's result before another submit.
+//!   Progress and results are matched by import ID. Stale IDs are ignored.
 //!
 //! Secrets: usernames, passwords and MAC addresses print as `***` in
 //! `Debug`; URLs print only `scheme://host[:port]` because playlist URLs

@@ -445,6 +445,25 @@ fn stale() -> StoreError {
     StoreError::Unavailable("request belongs to a closed application")
 }
 
+#[cfg(any(not(feature = "native"), test))]
+async fn cooperative_import_turn<'a>(
+    lock: &'a tokio::sync::Mutex<()>,
+    cancel: Option<&CancelToken>,
+) -> Option<tokio::sync::MutexGuard<'a, ()>> {
+    let Some(cancel) = cancel else {
+        return Some(lock.lock().await);
+    };
+    let mut turn = std::pin::pin!(lock.lock());
+    let mut canceled = std::pin::pin!(cancel.canceled());
+    std::future::poll_fn(|cx| {
+        if canceled.as_mut().poll(cx).is_ready() {
+            return std::task::Poll::Ready(None);
+        }
+        turn.as_mut().poll(cx).map(Some)
+    })
+    .await
+}
+
 impl Services {
     pub(crate) fn service(&self) -> &Arc<Service> {
         &self.service
@@ -594,9 +613,12 @@ impl Services {
     /// Queues import or guide `work` ([`Self::can_import`]): natively on
     /// the bounded pool, driven there to its end (false when the pool is
     /// full); on a host without workers as a task, after the one running.
+    /// On the cooperative lane, canceling `cancel_while_queued` drops
+    /// `work` before the task starts, including any reply sender it holds.
     pub(crate) fn submit_import<F>(
         &self,
         visible: bool,
+        cancel_while_queued: Option<CancelToken>,
         work: impl FnOnce(Services) -> F + Send + 'static,
     ) -> bool
     where
@@ -614,14 +636,18 @@ impl Services {
             let accepted = self.clone();
             drop(self.spawn(async move {
                 let service = accepted.service.clone();
-                let _turn = service.cooperative_imports.lock().await;
-                if accepted.is_current() {
+                let turn = cooperative_import_turn(
+                    &service.cooperative_imports,
+                    cancel_while_queued.as_ref(),
+                )
+                .await;
+                if turn.is_some() && accepted.is_current() {
                     work(accepted).await;
                 }
             }));
             return true;
         }
-        let _ = (visible, work);
+        let _ = (visible, cancel_while_queued, work);
         false
     }
 
@@ -1195,6 +1221,33 @@ impl Services {
 mod tests {
     use super::{Connection, Service};
     use std::sync::Arc;
+
+    #[test]
+    fn cooperative_import_cancel_leaves_queue_before_its_turn() {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+
+        let lock = tokio::sync::Mutex::new(());
+        let busy = lock.try_lock().unwrap();
+        let cancel = iptv_import::CancelToken::new();
+        let mut requested = std::pin::pin!(super::cooperative_import_turn(&lock, Some(&cancel)));
+        let mut normal = std::pin::pin!(super::cooperative_import_turn(&lock, None));
+        let mut cx = Context::from_waker(Waker::noop());
+        assert!(requested.as_mut().poll(&mut cx).is_pending());
+        assert!(normal.as_mut().poll(&mut cx).is_pending());
+
+        cancel.cancel();
+        assert!(matches!(
+            requested.as_mut().poll(&mut cx),
+            Poll::Ready(None)
+        ));
+        assert!(normal.as_mut().poll(&mut cx).is_pending());
+        drop(busy);
+        assert!(matches!(
+            normal.as_mut().poll(&mut cx),
+            Poll::Ready(Some(_))
+        ));
+    }
 
     fn hold_lane(lane: &super::Lane) -> std::sync::mpsc::Sender<()> {
         let (entered, observed) = std::sync::mpsc::channel();

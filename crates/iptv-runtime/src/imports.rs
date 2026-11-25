@@ -762,17 +762,7 @@ pub(crate) async fn pipeline(
     let guides = stored::configs_for(&sources, &job.source.config);
     if job.epg_url.is_some() {
         let guide = match typed_guide {
-            Some(import) => {
-                // The native add's catalog has already committed. Once
-                // that happens, finish keeping the required guide, unless
-                // newer guide work superseded it.
-                let guide_stops = if job.stored.is_none() {
-                    std::slice::from_ref(&revoked)
-                } else {
-                    &stops[..]
-                };
-                keep_guide(services, id, import, &guides, matching, now, guide_stops).await
-            }
+            Some(import) => keep_guide(services, id, import, &guides, matching, now, &stops).await,
             None => stored::load_guide(services, id, now).unwrap_or_default(),
         };
         report(guide);

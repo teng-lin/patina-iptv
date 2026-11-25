@@ -464,6 +464,15 @@ fn cancellation_after_the_required_guide_swap_keeps_the_committed_add() {
     let guide = saved.epg_guide(imported.source).unwrap().unwrap();
     assert_eq!(guide.bound_channels, 1);
     assert!(guide.ends_at.is_some(), "the guide contains saved programs");
+    assert!(guide.match_fingerprint.is_some());
+    let feed_results = saved.epg_feed_results(imported.source).unwrap();
+    let [feed] = feed_results.as_slice() else {
+        panic!("expected the required guide feed's saved result");
+    };
+    assert_eq!(feed.error, None);
+    assert_eq!(feed.channel_count, 1);
+    assert_eq!(feed.listed_count, 1);
+    assert!(feed.program_count > 0);
     assert!(!has_stage(&directory));
 }
 

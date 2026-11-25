@@ -304,9 +304,10 @@ fn start_update(
                 Ok(guides) => {
                     let visible = super::source_is_visible(&owner, source);
                     let services = owner.services();
-                    let accepted = services.submit_import(visible, move |worker| async move {
-                        download_now(&worker, source, guides, &tx, &cancel).await;
-                    });
+                    let accepted =
+                        services.submit_import(visible, None, move |worker| async move {
+                            download_now(&worker, source, guides, &tx, &cancel).await;
+                        });
                     if !accepted {
                         owner.emit(crate::RuntimeEvent::Notify(
                             "Too many playlists are updating. Try again shortly.",
