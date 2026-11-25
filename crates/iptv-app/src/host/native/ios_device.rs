@@ -5,11 +5,8 @@ use std::{ptr::NonNull, rc::Rc};
 
 use block2::RcBlock;
 use nsh_platform_ios::{ComponentContext, Components, NativeComponent};
-use objc2::{
-    MainThreadMarker, msg_send,
-    rc::Retained,
-    runtime::{AnyClass, AnyObject, ProtocolObject},
-};
+use objc_runtime::{AnyClass, AnyObject, ProtocolObject};
+use objc2::{MainThreadMarker, msg_send, rc::Retained, runtime as objc_runtime};
 use objc2_foundation::{
     NSNotification, NSNotificationCenter, NSObjectProtocol, NSOperationQueue, NSString,
 };
