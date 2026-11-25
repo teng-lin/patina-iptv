@@ -9,7 +9,7 @@ use crate::{
 };
 use iptv_library::{Choice, SourceId, guide_repair as model, inspection::*};
 use iptv_nav::Action;
-use iptv_presentation::library::guide_repair_screen::{Row, Screen};
+use iptv_presentation::library::guide_repair_screen::{Reply, Row, Screen};
 use nsh_core::Checked;
 use nsh_core::prelude::*;
 use std::time::Duration;
@@ -62,19 +62,24 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
     accepted
 }
 fn accepts(screen: &Screen, generation: u64, cancel: &iptv_import::CancelToken) -> bool {
-    !cancel.is_canceled() && screen.open && screen.generation == generation
+    !cancel.is_canceled() && screen.accepts(generation)
 }
-fn finish(ui: Ui, generation: u64, cancel: &iptv_import::CancelToken, result: model::Result<()>) {
+fn finish(
+    ui: Ui,
+    generation: u64,
+    cancel: &iptv_import::CancelToken,
+    result: model::Result<Reply>,
+) {
     update(ui, |s| finish_screen(s, generation, cancel, result));
 }
 fn finish_screen(
     screen: &mut Screen,
     generation: u64,
     cancel: &iptv_import::CancelToken,
-    result: model::Result<()>,
+    result: model::Result<Reply>,
 ) {
-    if accepts(screen, generation, cancel) && screen.finish(generation) {
-        screen.error = result.err();
+    if !cancel.is_canceled() {
+        screen.finish(generation, result);
     }
 }
 fn release(preview: Option<model::Preview>) {
@@ -94,10 +99,7 @@ pub fn is_open(ui: Ui) -> bool {
 pub fn close(ui: Ui) {
     cancel(ui);
     let mut old = None;
-    update(ui, |s| {
-        s.open = false;
-        old = s.invalidate();
-    });
+    update(ui, |s| old = s.close());
     release(old);
     count(ui);
 }
@@ -115,10 +117,7 @@ fn dismiss_inspection_input(ui: Ui) {
 }
 pub fn reopen(ui: Ui) {
     dismiss_inspection_input(ui);
-    update(ui, |s| {
-        s.open = true;
-        s.restore_focus();
-    });
+    update(ui, Screen::reopen);
 }
 
 pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindow) {
@@ -174,30 +173,8 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
                 .set(Some(Screen::new(channel.source, window)));
         }
         invalidate(ui);
-        let mut target = target;
         update(ui, |s| {
-            if let model::Target::Staged {
-                evidence, addition, ..
-            } = &mut target
-                && evidence.feed.is_none()
-            {
-                let index = s
-                    .request
-                    .additions
-                    .iter()
-                    .position(|a| a.evidence == *evidence)
-                    .unwrap_or_else(|| {
-                        s.request.additions.push(model::FeedAddition {
-                            evidence: evidence.clone(),
-                            name: None,
-                        });
-                        s.request.additions.len() - 1
-                    });
-                *addition = Some(index);
-            }
-            if !s.add(info, target) {
-                s.error = Some(model::Error::InvalidRequest);
-            }
+            s.add(info, target);
         });
         count(ui);
     });
@@ -219,17 +196,8 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
     let cancel = control.cancel.clone();
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        match owner.recent_guide_repairs(source, 20, control).await {
-            Ok(history) => {
-                update(ui, |s| {
-                    if accepts(s, generation, &cancel) {
-                        s.history = history;
-                    }
-                });
-                finish(ui, generation, &cancel, Ok(()));
-            }
-            Err(error) => finish(ui, generation, &cancel, Err(error)),
-        }
+        let result = owner.recent_guide_repairs(source, 20, control).await;
+        finish(ui, generation, &cancel, result.map(Reply::History));
     });
 }
 fn preview(ui: Ui) {
@@ -245,13 +213,7 @@ fn preview(ui: Ui) {
         match owner.preview_guide_repair(screen.request, control).await {
             Ok(preview) => {
                 if state(ui, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
-                    update(ui, |s| {
-                        s.preview = Some(preview);
-                        s.mapping_offset = 0;
-                        s.indirect_offset = 0;
-                        s.focus = Row::Apply;
-                    });
-                    finish(ui, generation, &cancel, Ok(()));
+                    finish(ui, generation, &cancel, Ok(Reply::Preview(preview)));
                 } else {
                     let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
                 }
@@ -289,33 +251,14 @@ fn apply(ui: Ui) {
         let result = owner
             .apply_guide_repair(preview.id.clone(), preview.digest, control)
             .await;
-        match result {
-            Ok(outcome) => {
-                update(ui, |s| {
-                    if accepts(s, generation, &cancel) {
-                        s.outcome = Some(outcome);
-                        s.preview = None;
-                        s.focus = Row::Status;
-                    }
-                });
-                finish(ui, generation, &cancel, Ok(()));
-            }
+        let result = match result {
+            Ok(outcome) => Ok(Reply::Applied(outcome)),
             Err(model::Error::CompletionUnknown { operation }) => {
-                update(ui, |s| {
-                    if accepts(s, generation, &cancel) {
-                        s.uncertain = Some(operation.clone());
-                        s.focus = Row::Status;
-                    }
-                });
-                finish(
-                    ui,
-                    generation,
-                    &cancel,
-                    Err(model::Error::CompletionUnknown { operation }),
-                );
+                Ok(Reply::CompletionUnknown(operation))
             }
-            Err(error) => finish(ui, generation, &cancel, Err(error)),
-        }
+            Err(error) => Err(error),
+        };
+        finish(ui, generation, &cancel, result);
         count(ui);
     });
 }
@@ -330,30 +273,8 @@ fn status(ui: Ui, id: Option<String>) {
     };
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        match owner.guide_repair_operation(id).await {
-            Ok(operation) => {
-                update(ui, |s| {
-                    if accepts(s, generation, &cancel) {
-                        s.outcome = Some(model::Outcome {
-                            commit: operation.commit.clone(),
-                            configuration_committed: true,
-                            mapping_saved: true,
-                            effective: operation.effective,
-                            verification_pending: !operation
-                                .verification
-                                .as_ref()
-                                .is_some_and(|v| v.verified_coverage),
-                            operation: operation.id.clone(),
-                        });
-                        s.verification = operation.verification.clone();
-                        s.operation = Some(operation);
-                        s.uncertain = None;
-                    }
-                });
-                finish(ui, generation, &cancel, Ok(()));
-            }
-            Err(error) => finish(ui, generation, &cancel, Err(error)),
-        }
+        let result = owner.guide_repair_operation(id).await;
+        finish(ui, generation, &cancel, result.map(Reply::Status));
     });
 }
 fn verify(ui: Ui) {
@@ -367,20 +288,10 @@ fn verify(ui: Ui) {
     };
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        match owner
+        let result = owner
             .verify_guide_repair(id, screen.request.window, control)
-            .await
-        {
-            Ok(result) => {
-                update(ui, |s| {
-                    if accepts(s, generation, &cancel) {
-                        s.verification = Some(result);
-                    }
-                });
-                finish(ui, generation, &cancel, Ok(()));
-            }
-            Err(error) => finish(ui, generation, &cancel, Err(error)),
-        }
+            .await;
+        finish(ui, generation, &cancel, result.map(Reply::Verified));
     });
 }
 fn undo(ui: Ui) {
@@ -397,18 +308,8 @@ fn undo(ui: Ui) {
     };
     let owner = crate::runtime();
     crate::data::spawn_in_app(async move {
-        match owner.undo_guide_repair(id, control).await {
-            Ok(outcome) => {
-                update(ui, |s| {
-                    if accepts(s, generation, &cancel) {
-                        s.outcome = Some(outcome);
-                        s.verification = None;
-                    }
-                });
-                finish(ui, generation, &cancel, Ok(()));
-            }
-            Err(error) => finish(ui, generation, &cancel, Err(error)),
-        }
+        let result = owner.undo_guide_repair(id, control).await;
+        finish(ui, generation, &cancel, result.map(Reply::Undone));
     });
 }
 fn page(ui: Ui, indirect: bool) {
@@ -435,28 +336,19 @@ fn page(ui: Ui, indirect: bool) {
         effects,
         model::MAX_PREVIEW_PAGE,
     ) {
-        Ok(preview) => update(ui, |s| {
-            s.preview = Some(preview);
-            s.mapping_offset = mapping;
-            s.indirect_offset = effects;
-            s.restore_focus();
-        }),
-        Err(error) => update(ui, |s| s.error = Some(error)),
+        Ok(preview) => update(ui, |s| s.set_page(preview, mapping, effects)),
+        Err(error) => update(ui, |s| s.report_error(Some(error))),
     }
 }
 fn activate(ui: Ui, row: Row) {
     if state(ui, |s| s.busy).unwrap_or(true) && row != Row::Back {
         return;
     }
-    update(ui, |s| s.focus = row.clone());
+    update(ui, |s| s.focus_row(row.clone()));
     match row {
         Row::Mapping(key) => {
             invalidate(ui);
-            update(ui, |s| {
-                if let Some(row) = s.request.mappings.iter_mut().find(|r| r.channel == key) {
-                    row.replace_explicit = !row.replace_explicit;
-                }
-            });
+            update(ui, |s| s.toggle_replacement(&key));
         }
         Row::Remove(key) => {
             invalidate(ui);
@@ -477,17 +369,13 @@ fn activate(ui: Ui, row: Row) {
         Row::Clear => {
             cancel(ui);
             invalidate(ui);
-            update(ui, |s| {
-                let source = s.request.source;
-                let window = s.request.window;
-                *s = Screen::new(source, window);
-            });
+            update(ui, Screen::clear);
             count(ui);
         }
         Row::Cancel => {
             if let Some(id) = state(ui, Screen::commit_id).flatten() {
                 let result = crate::runtime().cancel_guide_repair_operation(&id);
-                update(ui, |s| s.error = result.err());
+                update(ui, |s| s.report_error(result.err()));
                 status(ui, Some(id));
             }
         }
@@ -966,7 +854,7 @@ mod callback_regressions {
         assert!(replacement.error.is_none());
         let new_control = iptv_import::CancelToken::new();
         assert!(accepts(&replacement, generation, &new_control));
-        replacement.open = false;
+        replacement.close();
         assert!(!accepts(&replacement, generation, &new_control));
     }
 }
