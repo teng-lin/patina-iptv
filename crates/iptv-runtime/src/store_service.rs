@@ -384,21 +384,11 @@ impl Service {
         self.epochs.close_admission(epoch);
         #[cfg(feature = "test-support")]
         self.hooks.admission_closed();
-        if [&self.writer, &self.reader, &self.analysis]
-            .into_iter()
-            .all(|lane| lane.jobs.get().is_none())
-        {
-            self.epochs.close(epoch);
-            after_writer();
-            #[cfg(feature = "test-support")]
-            self.hooks.drained();
-            return true;
-        }
         if !self.shared && self.writer.jobs.get().is_none() {
-            // An admitted reader may initialize the writer to open its
-            // connection. Initialize the same lane before queuing the FIFO
-            // barrier so no racing job ahead of it loses its epoch. Starting
-            // the lane itself does not open a store.
+            // A request admitted before shutdown may still be starting the
+            // writer directly or through a reader's first connection. Always
+            // queue the native FIFO barrier so jobs ahead of it keep their
+            // epoch. Starting the lane itself does not open a store.
             self.writer.initialize();
         }
         if let Some(lane) = self.writer.jobs.get() {
@@ -1408,6 +1398,32 @@ mod tests {
 
         assert!(owner.drain_on_shutdown());
         assert!(reply.await.unwrap().is_none());
+        assert!(!owner.has_open_connections());
+        assert!(!owner.accept().is_current());
+    }
+
+    #[test]
+    fn drain_serializes_an_already_admitted_first_native_write() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = service(directory.path(), 0x76);
+        let epoch = owner.epochs.begin();
+        // The request captured its epoch before admission closed and reaches
+        // the first writer lane just as shutdown schedules its barrier.
+        assert_eq!(owner.accept().affinity().unwrap(), epoch);
+        let admitted = Arc::downgrade(&owner);
+        let (finished, result) = std::sync::mpsc::channel();
+        *owner.writer.after_barrier_lookup.lock().unwrap() = Some(Box::new(move || {
+            let owner = admitted.upgrade().unwrap();
+            let writer = owner.clone();
+            let reply = owner
+                .writer
+                .wait(move |connection| writer.write(epoch, connection, |_| Ok(())))
+                .unwrap();
+            finished.send(reply).unwrap();
+        }));
+
+        assert!(owner.drain_on_shutdown());
+        assert!(result.try_recv().unwrap().is_ok());
         assert!(!owner.has_open_connections());
         assert!(!owner.accept().is_current());
     }
