@@ -134,6 +134,15 @@ pub(crate) fn start(
     home: crate::isolated::Home,
     settings: impl FnOnce(&mut iptv_settings::Settings),
 ) -> Fixture {
+    start_with_stream_limit(home, settings, 3)
+}
+
+/// The same synthetic fixture with an explicit account stream allowance.
+pub(crate) fn start_with_stream_limit(
+    home: crate::isolated::Home,
+    settings: impl FnOnce(&mut iptv_settings::Settings),
+    streams: i64,
+) -> Fixture {
     let server = Server::start(&[(
         "/player_api.php",
         r#"{"info": {"name": "Generated Voyage"}, "episodes": {}}"#.into(),
@@ -162,7 +171,7 @@ pub(crate) fn start(
         .set_in(
             "playlists.max_connections",
             &iptv_settings::Target::playlist(source.0.to_string()),
-            Setting::Int(3),
+            Setting::Int(streams),
         )
         .unwrap();
     std::fs::write(root.join("settings.json"), values.to_json_string()).unwrap();

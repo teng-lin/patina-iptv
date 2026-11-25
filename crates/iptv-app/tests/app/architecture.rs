@@ -144,7 +144,23 @@ fn statics(code: &str) -> Vec<&str> {
         let end = rest
             .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
             .unwrap_or(rest.len());
-        if end != 0 && rest[end..].trim_start().starts_with(':') {
+        // Foreign framework constants declare symbols owned by the OS;
+        // only definitions with an initializer own state in this shell.
+        let mut brackets = 0usize;
+        let terminal = rest
+            .char_indices()
+            .find_map(|(at, ch)| {
+                match ch {
+                    '[' => brackets += 1,
+                    ']' => brackets = brackets.saturating_sub(1),
+                    ';' if brackets == 0 => return Some(at),
+                    _ => {}
+                }
+                None
+            })
+            .unwrap_or(rest.len());
+        let declaration = &rest[..terminal];
+        if end != 0 && rest[end..].trim_start().starts_with(':') && declaration.contains('=') {
             result.push(&rest[..end]);
         }
     }
@@ -289,5 +305,10 @@ fn declarations_include_macro_and_local_statics_but_not_lifetimes() {
         vec!["local"]
     );
     assert_eq!(statics("pub static\n GLOBAL: usize = 0;"), vec!["GLOBAL"]);
+    assert_eq!(
+        statics("static KEY: OnceLock<[u8; 32]> = OnceLock::new();"),
+        vec!["KEY"]
+    );
+    assert!(statics("unsafe extern \"C\" { static HOST_NAME: &str; }").is_empty());
     assert!(statics("fn f() -> &'static str { x } struct A(&'static [u8]);").is_empty());
 }

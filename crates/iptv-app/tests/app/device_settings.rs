@@ -83,10 +83,8 @@ fn fixture(here: &str, settings: Settings) -> Option<personalization::Fixture> {
 /// Rows every device keeps: the panel timeouts under Accessibility, the
 /// jumps on the Advanced page, the guide's minute span (every layout
 /// of the guide has a time grid).
-const EVERYWHERE: [&str; 5] = [
+const EVERYWHERE: [&str; 3] = [
     "guide.visible_minutes",
-    "player.info_panel_timeout",
-    "player.controls_panel_timeout",
     "catchup.forward_step",
     "catchup.rewind_step",
 ];
@@ -310,6 +308,7 @@ fn strip(here: &str) -> Option<personalization::Fixture> {
     let app = &mut fixture.app;
     crate::browse_fixture::choose_fullscreen(app);
     step(app.wait_for("id:player-banner"));
+    report(app, "tv", false, true);
     open_strip(app);
     Some(fixture)
 }
@@ -370,19 +369,59 @@ fn the_control_strip_follows_switch_access_and_the_recommended_timeout() {
         serde_json::json!({ "controls_ms": 0, "text_ms": 0, "switch_access": true }),
     );
     stays(app, "Switch Access");
-    // Switch Access off, a "time to take action" of 4 s: the strip waits
-    // that long rather than its own 1 s.
+    // Switch Access off, a "time to take action" of 10 s: the strip waits
+    // that long rather than the tablet’s fixed 7 s.
     native(
         app,
         "accessibility",
-        serde_json::json!({ "controls_ms": 4_000, "text_ms": 0, "switch_access": false }),
+        serde_json::json!({ "controls_ms": 10_000, "text_ms": 0, "switch_access": false }),
     );
     open_strip(app);
     step(app.press_key("right"));
-    step(app.run_for(Duration::from_millis(2_500)));
+    step(app.run_for(Duration::from_millis(8_000)));
     assert!(
         app.screen().matches(STRIP).unwrap(),
-        "the strip waits the recommended 4 s"
+        "the strip waits the recommended 10 s"
     );
-    hides(app, Duration::from_millis(2_000));
+    hides(app, Duration::from_millis(2_500));
+}
+
+#[test]
+fn ipad_switch_control_holds_panels_and_releases_the_timer_when_disabled() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "ipad"),
+        ],
+    ) else {
+        return;
+    };
+    let mut fixture = personalization::start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    native(
+        app,
+        "accessibility",
+        serde_json::json!({"switch_access": true}),
+    );
+    crate::browse_fixture::choose_fullscreen(app);
+    step(app.wait_for("id:player-banner"));
+    step(app.run_for(Duration::from_secs(10)));
+    assert!(app.screen().matches("id:player-banner").unwrap());
+    open_strip(app);
+    stays(app, "iPad Switch Control");
+    // A keyboard attaching changes the gates while Switch Control stays active.
+    native(
+        app,
+        "device",
+        serde_json::json!({"keyboard": true, "dpad": false}),
+    );
+    stays(app, "iPad Switch Control with keyboard");
+    native(
+        app,
+        "accessibility",
+        serde_json::json!({"switch_access": false}),
+    );
+    hides(app, Duration::from_secs(10));
 }

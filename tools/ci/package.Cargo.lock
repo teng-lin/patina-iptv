@@ -2875,6 +2875,7 @@ name = "iptv-app"
 version = "0.1.8"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "chrono",
  "dbus",
  "dbus-secret-service",
@@ -2909,7 +2910,9 @@ dependencies = [
  "nsh-platform-macos",
  "nsh-platform-windows",
  "nsh-tv",
+ "objc2",
  "objc2-foundation",
+ "objc2-ui-kit",
  "serde_json",
  "sys-locale",
  "tempfile",

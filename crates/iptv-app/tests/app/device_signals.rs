@@ -147,3 +147,42 @@ fn a_keyboard_attach_and_detach_keeps_the_strip_focus() {
     step(app.press_key("enter"));
     step(app.wait_for_within("id:channel-list", WAIT));
 }
+
+#[test]
+fn ipad_keyboard_reports_attach_and_detach_without_changing_form_factor() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "ipad"),
+        ],
+    ) else {
+        return;
+    };
+    let mut fixture = personalization::start(home, iptv_settings::Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_viewport(Size::new(px(1280.0), px(720.0))));
+    for keyboard in [false, true, false] {
+        app.engine().control().dispatch_event(
+            node(app, "device-signals"),
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: "device".into(),
+                data: serde_json::json!({"keyboard": keyboard, "dpad": false}),
+            },
+        );
+        step(app.wait(Duration::ZERO));
+        expect(
+            app,
+            if keyboard {
+                "tablet expanded keyboard"
+            } else {
+                "tablet expanded"
+            },
+        );
+        let text = app.screen().texts().join(" ");
+        let rows = text.split("rows:").nth(1).expect("settings row probe");
+        assert_eq!(rows.contains("player.info_on_switch"), keyboard);
+    }
+}

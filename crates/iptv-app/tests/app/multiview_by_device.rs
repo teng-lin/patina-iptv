@@ -297,3 +297,87 @@ fn a_tv_at_the_accounts_limit_shows_multiview_disabled_with_its_reason() {
     step(app.press(BAR_MULTIVIEW));
     step(app.wait_for(PICKER));
 }
+
+#[test]
+fn a_decoder_budget_drop_collapses_four_tiles_even_while_multiview_stays_offered() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
+    let mut fixture = crate::desktop_workflows::start_with_stream_limit(home, |_| {}, 4);
+    let app = &mut fixture.app;
+    let seen = fixture.seen.clone();
+    report(app, "desktop", true, false);
+    resize(app, (1280.0, 720.0));
+    full_screen(app);
+    show_controls(app, "id:app-ui >> label:Multiview");
+    step(app.press("id:app-ui >> label:Multiview"));
+    for n in [5, 7, 9] {
+        let row = format!("{PICKER} >> text:/  {}$/", channel(n));
+        step(app.wait_for(&row));
+        step(app.press(&row));
+        step(app.wait_for_gone(PICKER, Duration::from_secs(2)));
+        let tile = format!("id:multiview-ui >> role:button[/^{}/]", channel(n));
+        step(app.wait_for(&tile));
+        assert_eq!(
+            app.screen().count(TILE).unwrap(),
+            (n - 1) / 2,
+            "after adding {}",
+            channel(n)
+        );
+        if n != 9 {
+            let tile = format!("id:multiview-ui >> role:button[/^{}/]", channel(n));
+            for _ in 0..2 {
+                if app.screen().matches("id:multiview-menu").unwrap() {
+                    break;
+                }
+                step(app.press(&tile));
+            }
+            step(app.press("id:multiview-menu >> text:Add screen"));
+        }
+    }
+    step(
+        app.wait_until("four tiles play", Duration::from_secs(5), |_| {
+            (0..4).all(iptv_app::player_has_source)
+        }),
+    );
+    assert_eq!(app.screen().count(TILE).unwrap(), 4);
+    step(app.wait_for("id:multiview-ui >> role:button[/^Desk 03/] >> id:multiview-heard"));
+    let main = seen.player(0).expect("persistent player");
+    let opened = iptv_app::player_opens(0);
+    let extra: Vec<_> = (1..4)
+        .map(|surface| seen.player(surface).unwrap())
+        .collect();
+
+    // Two decoders still offer multiview, but the open session admitted four.
+    app.engine().control().dispatch_event(
+        crate::device_signals::node(app, "device-signals"),
+        nsh_core::EventKind::NativeEvent,
+        nsh_core::EventPayload::Native {
+            name: "device".into(),
+            data: serde_json::json!({"decoders": 2}),
+        },
+    );
+    app.settle();
+    step(app.wait_for_gone(TILE, Duration::from_secs(2)));
+    assert!(iptv_app::player_has_source(0), "the heard stream remains");
+    assert_eq!(
+        iptv_app::player_opens(0),
+        opened,
+        "the heard stream is retained"
+    );
+    let nodes = app.screen().layout_nodes();
+    assert!(
+        nodes.iter().any(|n| n.id == main),
+        "surface zero never detaches"
+    );
+    assert!(
+        nodes.iter().all(|n| !extra.contains(&n.id)),
+        "extra tile players are removed"
+    );
+    bar(app);
+    step(app.wait_for(BAR_MULTIVIEW));
+}
