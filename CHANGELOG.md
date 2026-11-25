@@ -12,6 +12,9 @@ is below 1.0, a minor release may change behavior.
 - Group guide refresh, failed-source Retry, source editing and confirmed Clear
   under each playlist’s Guide data. Clear names the playlist and keeps other
   playlists, channels and guide links intact (#282).
+- Clarify portal identity transfers in the mobile privacy policy and record
+  first-release disclosure evidence and pending store checks (#221).
+
 - Cancel a channel swipe when a second finger lands on another player control.
 
 - Follow iPad hardware keyboard attachment and Switch Control at runtime.
