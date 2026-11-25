@@ -163,9 +163,21 @@ fn the_wizard_and_the_choosers() {
     // Back on welcome is handed to the host. OK opens the default form,
     // and backing out of it returns to welcome's add action.
     step(app.wait_for("id:wizard-welcome"));
+    let handed = app
+        .back()
+        .expect_err("first-run welcome leaves Back to the platform");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     step(app.press_key("backspace"));
     step(app.wait(Duration::from_millis(100)));
     assert!(app.screen().matches("id:wizard-welcome").unwrap());
+    step(app.press_key("enter"));
+    step(app.wait_for("id:wizard-form"));
+    step(app.back());
+    step(app.wait_for("id:wizard-welcome"));
+    let handed = app
+        .back()
+        .expect_err("Back is the platform's again after leaving the form");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     step(app.press_key("enter"));
     step(app.wait_for("id:wizard-form"));
     step(app.press_key("backspace"));
@@ -360,8 +372,19 @@ fn choosers(app: &mut Headless) {
     step(app.wait_for("text:/^Sleep timer/"));
     step(app.press("text:/^Sleep timer/"));
     step(app.wait_for("text:✓  Off"));
+    // The leave question's Right/Left override must not move other choosers.
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:✓  Off", GONE));
+    step(app.press("text:/^Sleep timer/"));
+    step(app.wait_for("text:✓  Off"));
     step(app.press("text:30 minutes"));
     step(app.wait_for_gone("text:✓  Off", GONE));
+    step(app.press("text:/^Sleep timer/"));
+    step(app.wait_for("text:✓  30 minutes"));
+    step(app.press_key("left"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:✓  30 minutes", GONE));
     step(app.press("text:/^Sleep timer/"));
     step(app.wait_for("text:✓  30 minutes"));
     step(app.press_key("up"));

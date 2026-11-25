@@ -1299,16 +1299,19 @@ fn bind_back(ui: Ui) {
         (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu)
     });
     effect(move || {
-        // The guide's rail, or the overlay layout's with nothing playing
-        // (there Back would otherwise go back to the video); a channel
-        // number being typed is cancelled first.
-        let leaves = match back_target.get() {
-            (ViewMode::Guide, Pane::Rail, false) => true,
-            (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
+        // Root screens leave through the platform: welcome, recovery without
+        // details, and the rail with no video to return to. A channel number
+        // being typed and a pending Long Back release are handled first.
+        let leaves = match ui.top_overlay() {
+            Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
+            Some(overlays::Overlay::StoreStartupFailure) => startup::store_failure_back_leaves(ui),
+            None if !desktop::fullscreen() => match back_target.get() {
+                (ViewMode::Guide, Pane::Rail, false) => true,
+                (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
+                _ => false,
+            },
             _ => false,
         } && !ui.channel_number.with(|entry| entry.active())
-            && !ui.any_overlay_open()
-            && !desktop::fullscreen()
             && !ui.back_guard.with(iptv_nav::BackGuard::armed);
         if !leaves || asks_before_leaving() {
             on_back_press(move || input::swallow_back(ui) || go_back(ui));

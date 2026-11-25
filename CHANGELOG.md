@@ -9,6 +9,9 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Keep Android's system Back gesture available on the first-run welcome and
+  library recovery root screens, and let all four D-pad directions select the
+  Tizen NSH exit confirmation's answers.
 - Group guide refresh, failed-source Retry, source editing and confirmed Clear
   under each playlist’s Guide data. Clear names the playlist and keeps other
   playlists, channels and guide links intact (#282).

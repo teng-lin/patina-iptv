@@ -21,12 +21,21 @@ responsiveness gates there (decision of 2026-11-21 and its numbers in
 | Package | `app/config.xml`, `build.sh` | Its own application id (`PatinaNsh1.Patina` by default), CSP mode, the `tizen` profile. |
 | Package files | `build.sh`, `catalog.py` | iptv-app's data, kept out of the module (its `browser-package` feature): `i18n/<tag>.tsv`, one language's messages each, read by the Worker when the language is first shown; `fonts/`, the page's fonts (`patina-host.js`); `assets/banner.png`, the splash. |
 
-Back at the top level (the guide's rail, or the first run's welcome
-screen) asks "Close Patina?" (No focused, then Yes), as
+Back at the top level (the guide's rail, the first run's welcome screen,
+or library recovery with its details closed) asks "Close Patina?" (No focused,
+then Yes), as
 Samsung's termination guide asks of a TV app: `src/lib.rs` calls
 `iptv_app::confirm_leaving`, and Yes sends `{"leave": true}` to the page
 (`nsh_platform_tizen::host`, the page's `onHost`), which exits. The
-platform never registers the remote's Exit key, so the system handles it.
+platform never registers the remote's Exit key. Patina's chooser is rendered
+inside the app; expected termination over it is an implementation inference,
+not a verified popup dismissal by firmware. The generic CO-US-04 popup rule
+needs owner/Samsung clarification; test the system IME separately.
+Up or Left selects No; Down or Right selects Yes, without wrapping.
+OK chooses and Back dismisses. The [acceptance ledger](../../docs/platform-back-validation.md)
+separates these source/headless guarantees from pending physical-TV checks,
+including the firmware's held-Return/Exit behavior and the unresolved Samsung
+certification policy.
 
 Decisions stay in Rust: the Worker script performs the requests and
 writes the chunks it is handed; the destination policy, the store and
