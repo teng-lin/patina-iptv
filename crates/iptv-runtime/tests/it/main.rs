@@ -26,5 +26,6 @@ mod persistence_safety;
 mod read_lane_contention;
 mod relative_organization_moves;
 mod shell_boundary;
+mod stalker_refresh;
 mod vod_import_pipeline;
 mod vod_library;

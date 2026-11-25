@@ -78,6 +78,9 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- A Stalker refresh whose live pages fail keeps the last complete channel
+  catalog and reports the failure for retry instead of publishing partial rows.
+
 - Import usable channels from M3U playlists containing malformed or unsupported
   stream addresses, and report the skipped entries instead of rejecting the
   whole playlist.

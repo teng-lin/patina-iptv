@@ -366,8 +366,9 @@ impl<T> Crawled<T> {
 }
 
 /// Crawls `get_ordered_list` pages. A failed page is retried
-/// `opts.page_retries` times; then the crawl stops with what it has (and a
-/// warning), or fails when it has nothing.
+/// `opts.page_retries` times. An exhausted live page fails the import so
+/// incomplete rows can never replace a complete saved catalog. Optional
+/// movie/series crawls retain earlier pages with a warning, as before.
 async fn crawl<F: Fetch, P: ProgressSink, T: Crawl>(
     ctx: &mut Ctx<'_, F, P>,
     session: &mut StalkerSession,
@@ -452,7 +453,7 @@ async fn crawl<F: Fetch, P: ProgressSink, T: Crawl>(
             }
             Err(e) if e.is_fatal() => return Err(e),
             Err(_) if failures < opts.page_retries => failures += 1,
-            Err(e) if rows == 0 => return Err(e),
+            Err(e) if kind == ContentKind::Live || rows == 0 => return Err(e),
             Err(e) => {
                 out.push_warning(CatalogWarning {
                     step,
@@ -556,14 +557,14 @@ mod warning_tests {
         let mut opts = ImportOptions::new(0);
         opts.page_retries = 0;
         let crawled = {
-            let future = crawl::<_, _, Channel>(
+            let future = crawl::<_, _, VodItem>(
                 &mut ctx,
                 &mut session,
-                ContentKind::Live,
+                ContentKind::Movie,
                 &opts,
-                opts.stalker_channel_cap,
-                |session, page| session.channels_page("*", page),
-                parse_channel_page,
+                opts.stalker_vod_cap,
+                |session, page| session.vod_page("*", page),
+                parse_vod_page,
             );
             let mut future = std::pin::pin!(future);
             // Every fake body and request is immediately ready; no runtime is needed.
