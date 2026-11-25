@@ -35,7 +35,7 @@ fn count(ui: Ui) {
     .unwrap_or(0);
     ui.guide_inspect.update(|s| {
         if let Some(s) = s {
-            s.pending_repairs = pending;
+            s.set_pending_repairs(pending);
         }
     });
 }
