@@ -455,9 +455,21 @@ capacity. An unavailable log is not the basis for classification: check-run
 annotations provide the positive evidence. The older setup and audit failures
 must not be turned green by infrastructure retry policy.
 
+An authorized maintainer-token API check on November 25 used fresh run and
+check data: the classifier accepted run 45620516253 attempt 1, and GitHub
+accepted one `rerun-failed-jobs` request. [Attempt 2](https://github.com/teng-lin/patina-iptv/actions/runs/45620516253/attempts/2)
+queued macOS package job 139258097505 while carrying the other successful
+selected lanes forward. At that observation, the dependent aggregate gate was
+still pending the package job; its success was not yet established. This checks
+the backend retry path with a maintainer token. The deployed observer's
+`GITHUB_TOKEN` permissions and delivery of the API retry's `workflow_run`
+completion still require live verification; the next scheduled completion also
+reconciles recent attempts. Do not request another retry for this run: attempt 2
+is the automatic retry cap.
+
 Measured creation delays in minutes were 516, 513, 514, 482, 500, 588, 636 and
 591 respectively (Nov 18–25): p50 515 minutes, range 482–636. Refs #337 retains
-follow-up measurement of delivery delay and the first live observer/retry.
+follow-up measurement of delivery delay and the first deployed observer/retry.
 Changing the schedule or moving its trigger remains a separate evidence-based
 decision. No live branch-protection, repository-variable or PR #330 hold change
 is part of the observer.
