@@ -148,7 +148,7 @@ fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
     if from_player {
         crate::channels_view::close(ui);
         ui.panels.update(|panels| panels.hide());
-        ui.mode.set(crate::ViewMode::Guide);
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     from_player
 }

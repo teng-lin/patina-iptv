@@ -23,7 +23,7 @@ use crate::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::RADIUS_LARGE;
 use crate::ui_kit;
-use crate::{Playback, Ui, ViewMode, tint};
+use crate::{Playback, Ui, tint};
 
 /// Rows shown at once; longer lists scroll (seven fit a TV's 540 dp).
 const MAX_ROWS: usize = 7;
@@ -360,7 +360,7 @@ fn play_recent(ui: Ui, key: &str) {
     if ui.playing.get_untracked() != Some(channel) || !live {
         ui.play(channel, Playback::Live);
     }
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.update_panels(|p, now| {
         p.hide();
         p.show_banner(now);

@@ -54,7 +54,7 @@ pub fn open(ui: Ui) {
     }
     ui.playlists.set(Some(screen));
     if ui.mode.get_untracked() == ViewMode::Fullscreen {
-        ui.mode.set(ViewMode::Guide);
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
 }
 

@@ -333,7 +333,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     // This presentation controls the already-mounted native surface. The
     // catalog and settings are shared; overlays and input state are fresh.
     local.playing = parent.player.stream(surface).channel;
-    local.mode.set(crate::ViewMode::Fullscreen);
+    local.mode.apply(crate::mode::Action::EnterFullscreen);
     local.input.set(crate::Input::Pointer);
     local.last_press.set(crate::Input::Pointer);
     local.paused.set(initial.paused);

@@ -219,7 +219,7 @@ impl PreviousPlayback {
         pending.return_to_internal(&target);
         ui.play(channel, playback);
         if ui.playing.get_untracked() == Some(channel) {
-            ui.mode.set(self.mode);
+            ui.mode.apply(crate::mode::Action::Restore(self.mode));
         } else {
             pending.owner.parental_end_transfer(&target);
         }

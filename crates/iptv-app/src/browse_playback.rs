@@ -244,7 +244,7 @@ fn full(ui: Ui) {
     if crate::channels_view::is_open(ui) {
         crate::channels_view::close(ui);
     }
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {

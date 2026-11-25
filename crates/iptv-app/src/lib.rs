@@ -85,6 +85,7 @@ mod listing_labels;
 mod lists;
 mod media;
 mod menu_view;
+mod mode;
 pub(crate) mod parental_view;
 #[cfg(feature = "test-support")]
 mod performance_probe;
@@ -269,7 +270,7 @@ pub struct Ui {
     pub input: Signal<Input>,
     /// What the last pointer press was made with ([`Ui::touched`] reads it).
     pub last_press: Signal<Input>,
-    pub mode: Signal<ViewMode>,
+    pub mode: mode::Mode,
     pub stats: Signal<Stats>,
     #[cfg(feature = "test-support")]
     pub(crate) performance: Signal<Option<performance_probe::Probe>>,
@@ -418,7 +419,7 @@ impl Ui {
                     Input::Keys
                 },
             ),
-            mode: signal(ViewMode::Guide),
+            mode: mode::Mode::new(app.settings),
             stats: signal(Stats::default()),
             #[cfg(feature = "test-support")]
             performance: signal(None),
@@ -502,7 +503,7 @@ impl Ui {
         match selection {
             ProgramSelection::AlreadyLive if external_player::maybe_open(*self, channel, None) => {}
             ProgramSelection::AlreadyLive => {
-                self.mode.set(ViewMode::Fullscreen);
+                self.mode.apply(crate::mode::Action::EnterFullscreen);
                 self.show_playing();
             }
             ProgramSelection::Live => browse_playback::select(*self),
@@ -519,7 +520,7 @@ impl Ui {
                         offset: 0,
                     },
                 );
-                self.mode.set(ViewMode::Fullscreen);
+                self.mode.apply(crate::mode::Action::EnterFullscreen);
                 self.show_playing();
             }
             ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
@@ -663,11 +664,6 @@ impl Ui {
     pub fn update_panels(&self, f: impl FnOnce(&mut Panels, u64)) {
         let now = self.now_ms();
         self.panels.update(|p| f(p, now));
-    }
-
-    pub(crate) fn toggle(&self, mode: ViewMode) {
-        self.mode
-            .update(|m| *m = if *m == mode { ViewMode::Guide } else { mode });
     }
 }
 
@@ -1384,12 +1380,12 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             }
             // Hint, past program → now, guide → groups → rail → leave.
             (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
-                ui.mode.set(ViewMode::Fullscreen);
+                ui.mode.apply(mode::Action::Back);
                 true
             }
             (ViewMode::Guide | ViewMode::Overlay, _, _) => lists::back(ui),
             _ => {
-                ui.mode.set(crate::settings::browse_mode());
+                ui.mode.apply(mode::Action::Back);
                 true
             }
         }

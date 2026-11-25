@@ -424,28 +424,6 @@ pub fn network_config() -> crate::runtime::network::NetworkConfig {
     crate::runtime::settings::network_config(&get())
 }
 
-/// The guide's layout outside full screen: `guide.browse_mode`, except in
-/// a compact window, where the layout decides and the guide shows its
-/// preview (reactive: the window's size class).
-pub fn browse_mode() -> crate::ViewMode {
-    guide_layout(choice(keys::BROWSE_MODE), crate::device::window_class())
-}
-
-/// The guide opened over full-screen video (the Guide key): its overlay
-/// layout, except in a compact window, where the guide shows its preview
-/// as [`browse_mode`] does, so it never draws over the video there.
-pub fn guide_over_video() -> crate::ViewMode {
-    guide_layout("overlay", crate::device::window_class())
-}
-
-fn guide_layout(mode: &str, window: Class) -> crate::ViewMode {
-    if mode == "overlay" && window != Class::Compact {
-        crate::ViewMode::Overlay
-    } else {
-        crate::ViewMode::Guide
-    }
-}
-
 /// Whether choosing a channel in the guide over the video or in the
 /// channel list keeps it open (`guide.after_choosing`) on a device of
 /// `form_factor`. A phone or a tablet always goes full screen. The guide's
@@ -530,33 +508,6 @@ pub fn bind(ui: Ui) {
     if crate::host::NOTIFICATIONS_FOLLOW_LANGUAGE {
         effect(move || crate::host::language_changed(crate::i18n::language().tag));
     }
-    // The guide's layout follows the setting and the window's class: it
-    // changes when either changes it, and never in full screen.
-    let layout = computed(move || {
-        let s = read(ui);
-        guide_layout(
-            s.choice(keys::BROWSE_MODE, &Target::Global),
-            crate::device::window_class(),
-        )
-    });
-    let last_layout = std::cell::Cell::new(None);
-    effect(move || {
-        let layout = layout.get();
-        if last_layout.replace(Some(layout)) != Some(layout)
-            && ui.mode.get_untracked() != crate::ViewMode::Fullscreen
-        {
-            untracked(|| ui.mode.set(layout));
-        }
-    });
-    // A window that turns compact under the guide's overlay (opened over
-    // full-screen video) shows it beside its preview too.
-    effect(move || {
-        if crate::device::window_class() == Class::Compact
-            && ui.mode.get_untracked() == crate::ViewMode::Overlay
-        {
-            untracked(|| ui.mode.set(crate::ViewMode::Guide));
-        }
-    });
     effect(move || {
         let s = read(ui);
         let theme = theme_of(&s);
@@ -807,17 +758,6 @@ mod tests {
         let s = Settings::new();
         assert!(!stays_after_choosing(&s, FormFactor::Tv));
         assert!(!stays_after_choosing(&s, FormFactor::Desktop));
-    }
-
-    #[test]
-    fn a_compact_window_shows_the_guide_beside_its_preview() {
-        use crate::ViewMode::{Guide, Overlay};
-        assert_eq!(guide_layout("overlay", Class::Expanded), Overlay);
-        assert_eq!(guide_layout("overlay", Class::Medium), Overlay);
-        assert_eq!(guide_layout("overlay", Class::Compact), Guide);
-        for window in [Class::Compact, Class::Medium, Class::Expanded] {
-            assert_eq!(guide_layout("preview", window), Guide);
-        }
     }
 
     /// #280: the keyboard or remote settings exist while there are keys;

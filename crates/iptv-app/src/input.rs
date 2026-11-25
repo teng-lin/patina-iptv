@@ -455,8 +455,12 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     }
     // Spike shortcuts for the view modes.
     if ui.player_surface == 0 {
-        on_key("o", move |_| ui.toggle(crate::settings::guide_over_video()));
-        on_key("f", move |_| ui.toggle(ViewMode::Fullscreen));
+        on_key("o", move |_| {
+            ui.mode.apply(crate::mode::Action::ToggleOverlay)
+        });
+        on_key("f", move |_| {
+            ui.mode.apply(crate::mode::Action::ToggleFullscreen)
+        });
     }
     input
 }
@@ -778,7 +782,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             // The guide is in the main window; dismissing this player lets
             // its owner stop the correct surface. Search has no local screen.
             Action::Stop | Action::ShowGuide => {
-                ui.mode.set(crate::settings::browse_mode());
+                ui.mode.apply(crate::mode::Action::ReturnToBrowse);
                 return;
             }
             Action::OpenSearch | Action::Record => return,
@@ -963,7 +967,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             Action::ShowMenu | Action::ShowControls
                 if ui.playing.get().is_some() || crate::on_demand::active(ui) =>
             {
-                ui.mode.set(ViewMode::Fullscreen);
+                ui.mode.apply(crate::mode::Action::EnterFullscreen);
                 crate::play_bar::remote(ui);
             }
             Action::Back => {
@@ -1007,10 +1011,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::MoveLeft => mv(Move::Left),
         Action::MoveRight => mv(Move::Right),
         Action::Select => crate::lists::ok(ui),
-        Action::ShowGuide => ui.mode.set(match ui.mode.get() {
-            ViewMode::Fullscreen => crate::settings::guide_over_video(),
-            _ => crate::settings::browse_mode(),
-        }),
+        Action::ShowGuide => ui.mode.apply(crate::mode::Action::ShowGuide),
         Action::ShowGroups => crate::lists::open_groups(ui),
         Action::OpenSearch => crate::search_view::open(ui),
         a @ (Action::JumpToNow
@@ -1019,7 +1020,9 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         | Action::DayBack
         | Action::DayForward
         | Action::ToggleGroups) => crate::grid::keys::apply(ui, a),
-        Action::ReturnToPlayer if ui.playing.get().is_some() => ui.mode.set(ViewMode::Fullscreen),
+        Action::ReturnToPlayer if ui.playing.get().is_some() => {
+            ui.mode.apply(crate::mode::Action::ReturnToPlayer);
+        }
         Action::ToggleFavorite => {
             if let Some(channel) = if ui.mode.get() == ViewMode::Fullscreen {
                 ui.playing.get()

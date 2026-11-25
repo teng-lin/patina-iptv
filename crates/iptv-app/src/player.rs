@@ -369,7 +369,7 @@ pub(crate) fn enforce_guide_blocks(ui: Ui, schedule: &dyn Schedule) {
         && early_guide_blocked(&early)
     {
         stop_surface(ui, 0);
-        ui.mode.set(crate::settings::browse_mode());
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     let mut stopped = false;
     for surface in 0..SURFACES {
@@ -502,7 +502,7 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
         .health
         .update(|h| session = h.start(false, ui.now_ms()));
     load(ui, 0, session, source);
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
 }
 
 /// Plays a movie or an episode on surface 0: full screen, or (`full_screen`
@@ -541,7 +541,7 @@ pub fn play_vod(
         ui.player.main().resume_ms.set(Some(resume));
     }
     if full_screen {
-        ui.mode.set(ViewMode::Fullscreen);
+        ui.mode.apply(crate::mode::Action::EnterFullscreen);
     }
 }
 
@@ -1252,9 +1252,7 @@ pub fn source_changed(ui: Ui) {
         log::info!("iptv player: another playlist is shown; stopping");
         ui.playing.set(None);
         stop(ui);
-        if ui.mode.get_untracked() != ViewMode::Guide {
-            ui.mode.set(ViewMode::Guide);
-        }
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     ui.player.main().key.set(None);
     ui.player.history.set(ChannelHistory::default());
@@ -1336,9 +1334,7 @@ fn gone(ui: Ui) {
     ui.playing.set(None);
     ui.player.main().key.set(None);
     stop(ui);
-    if ui.mode.get_untracked() != ViewMode::Guide {
-        ui.mode.set(ViewMode::Guide);
-    }
+    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
 }
 
 /// The replacement guide has fewer rows than the playing
@@ -1393,7 +1389,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
             return;
         }
         crate::lists::show_resumed(ui, channel);
-        ui.mode.set(ViewMode::Fullscreen);
+        ui.mode.apply(crate::mode::Action::EnterFullscreen);
         ui.show_playing();
     });
 }

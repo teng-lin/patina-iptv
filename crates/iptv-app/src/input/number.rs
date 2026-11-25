@@ -55,7 +55,7 @@ fn commit(ui: Ui, identity: Option<iptv_search::ChannelId>) {
     }
     crate::lists::show_channel(ui, channel);
     ui.play(channel, crate::Playback::Live);
-    ui.mode.set(crate::ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {

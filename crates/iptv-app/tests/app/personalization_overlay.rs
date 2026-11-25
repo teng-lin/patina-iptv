@@ -71,6 +71,71 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }
 
+#[test]
+fn fullscreen_and_overlay_shortcuts_reuse_the_player_with_overlay_preferred() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, overlay(None), true);
+    let app = &mut f.app;
+    let id = player(app).id;
+    let wait_for_width = |app: &mut crate::headless::Headless, full_width| {
+        step(app.wait_until(
+            "the requested video layout",
+            Duration::from_secs(2),
+            |screen| {
+                screen
+                    .layout_nodes()
+                    .iter()
+                    .any(|node| node.id == id && (node.bounds.size.width.0 == 1920.0) == full_width)
+            },
+        ));
+    };
+    step(app.press_key("f"));
+    step(app.press_key("f"));
+    wait_for_width(app, false);
+    step(app.press_key("o"));
+    wait_for_width(app, true);
+    step(app.press_key("o"));
+    wait_for_width(app, false);
+    assert_eq!(player(app).id, id);
+}
+
+#[test]
+fn returning_from_a_compact_window_does_not_restore_a_forced_overlay() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, Settings::new(), true);
+    let app = &mut f.app;
+    let id = player(app).id;
+    let assert_width = |app: &mut crate::headless::Headless, width, full_width| {
+        step(app.wait_until(
+            "the resized video layout",
+            Duration::from_secs(2),
+            |screen| {
+                screen
+                    .layout_nodes()
+                    .iter()
+                    .any(|node| node.id == id && (node.bounds.size.width.0 == width) == full_width)
+            },
+        ));
+    };
+    step(app.press_key("o"));
+    assert_width(app, 1920.0, true);
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(400.0),
+        nsh_core::prelude::px(700.0),
+    )));
+    app.settle();
+    assert_width(app, 400.0, false);
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(1920.0),
+        nsh_core::prelude::px(1080.0),
+    )));
+    app.settle();
+    assert_width(app, 1920.0, false);
+    step(app.press_key("o"));
+    assert_width(app, 1920.0, true);
+    assert_eq!(player(app).id, id);
+}
+
 /// Back at the top level is the platform's (#277) in the overlay layout
 /// too: with nothing playing, the rail registers no Back handler, so
 /// Android leaves at once and shows its predictive back. A channel number

@@ -651,7 +651,7 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
                     offset: 0,
                 },
             );
-            ui.mode.set(ViewMode::Fullscreen);
+            ui.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         _ => {}

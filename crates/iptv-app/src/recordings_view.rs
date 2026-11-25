@@ -514,7 +514,7 @@ pub(super) fn return_to_player(ui: Ui) {
         return;
     }
     close(ui);
-    ui.mode.set(crate::ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     crate::play_bar::tapped(ui);
 }
 
