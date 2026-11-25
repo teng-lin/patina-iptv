@@ -434,14 +434,85 @@ class Contract(unittest.TestCase):
         with patch.dict(os.environ, {"PILOT_INTENDED_MODE": "reuse", "PILOT_DECISION": "reuse"}):
             timeline = handoff.timeline(101, api)
         self.assertEqual([job["queue_seconds"] for job in timeline["jobs"]], [None, None])
-        self.assertEqual([job["execution_seconds"] for job in timeline["jobs"]], [50, 50])
+        self.assertEqual([job["execution_seconds"] for job in timeline["jobs"]], [50, None])
         self.assertTrue(timeline["jobs"][0]["inherited_from_previous_attempt"])
         summary = handoff.summarize([timeline])
         attempts = summary["runs"][0]["attempts"]
         self.assertEqual(attempts["unknown_queue_attempts"], 2)
         self.assertEqual(attempts["known_queue_seconds_sum"], 0)
-        self.assertEqual(attempts["total_execution_seconds"], 100)
+        self.assertIsNone(attempts["total_execution_seconds"])
+        self.assertEqual(attempts["known_execution_seconds_sum"], 50)
+        self.assertEqual(attempts["unknown_execution_attempts"], 1)
         self.assertEqual(summary["segments"]["Pilot consumer/queue_seconds"]["unavailable_n"], 1)
+
+    def copied_execution_fixture(self):
+        observed = {"head_sha": "a" * 40, "run_attempt": 2, "created_at": "2026-01-01T00:00:00Z"}
+        jobs = []
+        for identifier, name, runner, end in ((201, handoff.PRODUCER, 7, "00:01:00"), (202, "Pilot consumer", 8, "00:01:00"), (203, "Cold control", 9, "00:01:10")):
+            jobs.append({"id": identifier, "name": name, "head_sha": "a" * 40, "runner_id": runner, "runner_group_id": 1, "run_attempt": 1, "conclusion": "success", "created_at": "2026-01-01T00:00:00Z", "started_at": "2026-01-01T00:00:10Z", "completed_at": f"2026-01-01T{end}Z", "steps": [{"name": "Synthetic build or package", "status": "completed", "conclusion": "success", "started_at": "2026-01-01T00:00:10Z", "completed_at": f"2026-01-01T{end}Z"}]})
+        # GitHub gives retained successes new IDs/attempts/created_at and even a
+        # different runner group, while the execution itself remains identical.
+        jobs += [dict(copy.deepcopy(jobs[index]), id=identifier, run_attempt=2, runner_group_id=2, created_at="2026-01-01T00:03:00Z") for index, identifier in ((0, 204), (2, 205))]
+        jobs.append(dict(copy.deepcopy(jobs[1]), id=206, run_attempt=2, runner_id=10, created_at="2026-01-01T00:03:00Z", started_at="2026-01-01T00:03:10Z", completed_at="2026-01-01T00:04:00Z", steps=[{"name": "Synthetic actual retry", "conclusion": "success"}]))
+        return observed, jobs
+
+    def collect_synthetic_timeline(self, observed, jobs):
+        with patch.dict(os.environ, {"PILOT_INTENDED_MODE": "reuse", "PILOT_DECISION": "reuse"}):
+            return handoff.timeline(101, lambda endpoint: {"jobs": jobs} if "/jobs?" in endpoint else observed)
+
+    def test_copied_successes_keep_raw_records_without_duplicate_execution_cost(self):
+        observed, jobs = self.copied_execution_fixture()
+        timeline = self.collect_synthetic_timeline(observed, jobs)
+        self.assertEqual(len(timeline["jobs"]), 6)
+        self.assertEqual({row["id"]: row["alias_of"] for row in timeline["jobs"] if row["alias_of"]}, {204: 201, 205: 203})
+        self.assertEqual(timeline["jobs"][3]["attempt"], 2)
+        self.assertEqual(timeline["jobs"][3]["steps"], jobs[3]["steps"])
+        summary = handoff.summarize([timeline])
+        self.assertEqual(summary["runs"][0]["attempts"]["n"], 4)
+        self.assertEqual(summary["runs"][0]["attempts"]["copied_aliases"], 2)
+        self.assertEqual(summary["runs"][0]["attempts"]["total_execution_seconds"], 210)
+        self.assertEqual(summary["attempts_by_job"][handoff.PRODUCER]["n"], 1)
+        self.assertEqual(summary["segments"][handoff.PRODUCER + "/execution_seconds"]["n"], 1)
+        self.assertEqual(summary["segments"]["Pilot consumer/execution_seconds"]["n"], 2)
+        self.assertEqual(summary["paths"]["whole_pilot"]["p50_seconds"], 240)
+
+    def test_genuine_failed_and_canceled_retry_executions_are_retained(self):
+        for conclusion in ("failure", "cancelled"):
+            observed, jobs = self.copied_execution_fixture()
+            jobs[1]["conclusion"] = conclusion
+            timeline = self.collect_synthetic_timeline(observed, jobs)
+            self.assertIsNone(timeline["jobs"][1]["alias_of"])
+            summary = handoff.summarize([timeline])
+            attempts = summary["runs"][0]["attempts"]
+            with self.subTest(conclusion=conclusion):
+                self.assertEqual(attempts["n"], 4)
+                self.assertEqual(attempts["total_execution_seconds"], 210)
+                self.assertEqual(attempts["failed"], int(conclusion == "failure"))
+                self.assertEqual(attempts["canceled"], int(conclusion == "cancelled"))
+                self.assertEqual(summary["segments"]["Pilot consumer/execution_seconds"]["failures"], 1)
+
+    def test_unproven_execution_copies_are_unknown_not_assumed_aliases(self):
+        for field, value in (("head_sha", None), ("head_sha", "b" * 40), ("runner_id", 11), ("steps", []), ("steps", [{"name": "Different synthetic step"}])):
+            observed, jobs = self.copied_execution_fixture()
+            jobs[3][field] = value
+            timeline = self.collect_synthetic_timeline(observed, jobs)
+            with self.subTest(field=field, value=value):
+                self.assertIsNone(timeline["jobs"][3]["alias_of"])
+                self.assertTrue(timeline["jobs"][3]["execution_identity_unknown"])
+                self.assertIsNone(timeline["jobs"][3]["execution_seconds"])
+                summary = handoff.summarize([timeline])
+                self.assertEqual(summary["runs"][0]["attempts"]["n"], 5)
+                self.assertIsNone(summary["runs"][0]["attempts"]["total_execution_seconds"])
+        observed, jobs = self.copied_execution_fixture()
+        jobs.append(dict(copy.deepcopy(jobs[0]), id=207))
+        self.assertNotIn(204, handoff.execution_aliases(jobs))
+        # An invalid creation timestamp before completion is insufficient proof.
+        jobs = jobs[:-1]
+        jobs[3]["created_at"] = "2026-01-01T00:00:20Z"
+        self.assertNotIn(204, handoff.execution_aliases(jobs))
+        self.assertTrue(self.collect_synthetic_timeline(observed, jobs)["jobs"][3]["execution_identity_unknown"])
+        jobs[3]["created_at"] = jobs[3]["completed_at"]
+        self.assertNotIn(204, handoff.execution_aliases(jobs))
 
     def test_seal_binds_original_job_identity_and_rejects_ambiguity(self):
         executable = self.root / "target/release/iptv-app.exe"

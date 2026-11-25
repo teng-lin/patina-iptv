@@ -489,8 +489,10 @@ def summarize(timelines):
     if len(cohorts) > 1:
         raise ValueError("Measure clean and retried runs as separate cohorts")
 
-    def attempt_evidence(jobs):
+    def attempt_evidence(rows):
+        jobs = [job for job in rows if not job.get("alias_of")]
         return {
+            "copied_aliases": len(rows) - len(jobs),
             "n": len(jobs),
             "failed": sum(job["conclusion"] not in ("success", "cancelled", "skipped") for job in jobs),
             "canceled": sum(job["conclusion"] == "cancelled" for job in jobs),
@@ -507,6 +509,8 @@ def summarize(timelines):
         latest = {}
         for job in item["jobs"]:
             attempts_by_job.setdefault(job["name"], []).append(job)
+            if job.get("alias_of"):
+                continue
             for field in ("queue_seconds", "execution_seconds"):
                 segments.setdefault(f"{job['name']}/{field}", []).append({"conclusion": job["conclusion"], "seconds": job[field]})
             old = latest.get(job["name"])
@@ -531,6 +535,26 @@ def summarize(timelines):
     }
 
 
+
+def execution_aliases(jobs):
+    """Identify only proven GitHub copies of an earlier successful execution."""
+    aliases = {}
+    canonical = []
+    fields = ("name", "head_sha", "runner_id", "started_at", "completed_at", "steps")
+    for job in sorted(jobs, key=lambda row: (row["run_attempt"], row["id"])):
+        complete = all(job.get(field) for field in fields) and job.get("created_at")
+        if job.get("conclusion") != "success" or not complete:
+            continue
+        created, started, completed = (datetime.fromisoformat(job[field].replace("Z", "+00:00")) for field in ("created_at", "started_at", "completed_at"))
+        if created <= started <= completed:
+            canonical.append(job)
+        elif created > completed:
+            matches = [old for old in canonical if old["run_attempt"] < job["run_attempt"] and all(old.get(field) == job[field] for field in fields)]
+            if len(matches) == 1:
+                aliases[job["id"]] = matches[0]["id"]
+    return aliases
+
+
 def timeline(run_id, api=gh):
     observed = api(f"repos/{REPOSITORY}/actions/runs/{positive(run_id)}")
     jobs = pages(f"repos/{REPOSITORY}/actions/runs/{positive(run_id)}/jobs?filter=all", "jobs", api)
@@ -541,13 +565,22 @@ def timeline(run_id, api=gh):
         value = (datetime.fromisoformat(last.replace("Z", "+00:00")) - datetime.fromisoformat(first.replace("Z", "+00:00"))).total_seconds()
         return value if value >= 0 else None
 
+    aliases = execution_aliases(jobs)
     rows = []
     for job in jobs:
         if job.get("name") not in (PRODUCER, "Pilot consumer", "Cold control") or not job.get("completed_at"):
             continue
+        # A later-attempt record created after execution started has uncertain
+        # identity unless it meets the stricter, after-completion alias proof.
+        invalid_creation = seconds(job["started_at"] or job["completed_at"], job["created_at"]) not in (None, 0)
+        uncertain = job["run_attempt"] > 1 and invalid_creation and job["id"] not in aliases
         rows.append(
             {
                 "id": job["id"],
+                "head_sha": job.get("head_sha"),
+                "runner_id": job.get("runner_id"),
+                "alias_of": aliases.get(job["id"]),
+                "execution_identity_unknown": uncertain,
                 "name": job["name"],
                 "attempt": job["run_attempt"],
                 "conclusion": job["conclusion"],
@@ -557,8 +590,8 @@ def timeline(run_id, api=gh):
                 # GitHub may rewrite created_at on inherited successful jobs.
                 # Preserve raw timestamps but never sum these as measured queue.
                 "queue_seconds": seconds(job["created_at"], job["started_at"] or job["completed_at"]) if job["run_attempt"] == observed["run_attempt"] else None,
-                "inherited_from_previous_attempt": job["run_attempt"] < observed["run_attempt"],
-                "execution_seconds": seconds(job["started_at"], job["completed_at"]) if job["started_at"] else 0,
+                "inherited_from_previous_attempt": job["run_attempt"] < observed["run_attempt"] or job["id"] in aliases,
+                "execution_seconds": None if uncertain else seconds(job["started_at"], job["completed_at"]) if job["started_at"] else 0,
                 "trigger_to_completion_seconds": seconds(observed["created_at"], job["completed_at"]),
                 "steps": job.get("steps", []),
             }
