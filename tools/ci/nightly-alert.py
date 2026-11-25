@@ -67,7 +67,10 @@ def classify(jobs, annotations):
             continue
         expected = ('Require every selected lane to pass' if job['name'] == 'validation'
                     else 'Run test \"$RESULT\" = success')
-        failed_steps = [step['name'] for step in job.get('steps', [])
+        steps = job.get('steps')
+        if not isinstance(steps, list):
+            return False
+        failed_steps = [step['name'] for step in steps
                         if step.get('conclusion') not in ('success', 'skipped')]
         if job['conclusion'] != 'failure' or failed_steps != [expected]:
             return False
@@ -158,9 +161,11 @@ def observe(client=api, environment=None):
         jobs = [job for page in pages for job in page['jobs']]
         if not jobs:
             raise ValueError('Missing jobs; refusing to infer a nightly result')
+        candidate = (run['id'] == newest['id'] and run['run_attempt'] == 1
+                     and run['conclusion'] == 'failure')
         annotations = {}
         for job in jobs:
-            if job['conclusion'] == 'cancelled' and job['name'] not in PROXIES:
+            if candidate and job['conclusion'] == 'cancelled' and job['name'] not in PROXIES:
                 check_id = int(job['check_run_url'].rsplit('/', 1)[1])
                 annotation_pages = client(f'check-runs/{check_id}/annotations?per_page=100', paginate=True)
                 annotations[job['id']] = [a for page in annotation_pages for a in page]
@@ -175,8 +180,7 @@ def observe(client=api, environment=None):
                   'retry': 'not eligible', 'jobs': [
                       {k: job[k] for k in ('id', 'name', 'conclusion')}
                       for job in jobs if job['conclusion'] not in ('success', 'skipped')]}
-        eligible = (run['id'] == newest['id'] and run['run_attempt'] == 1
-                    and run['conclusion'] == 'failure' and classify(jobs, annotations))
+        eligible = candidate and classify(jobs, annotations)
         if eligible:
             record['retry'] = 'claimed once (API outcome may be unknown)'
             retry_run = run

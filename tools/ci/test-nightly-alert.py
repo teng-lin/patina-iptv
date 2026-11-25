@@ -145,7 +145,7 @@ class ObserverTests(unittest.TestCase):
 
 
     def test_missing_steps_or_independent_gate_failure_never_retry(self):
-        for job_index, change in ((1, {'steps': None}), (2, {'steps': []}),
+        for job_index, change in ((1, {'steps': None}), (2, {'steps': None}), (2, {'steps': []}),
                                   (2, {'conclusion': 'timed_out'}),
                                   (2, {'steps': [{'name': 'Checkout', 'conclusion': 'failure'}]})):
             with self.subTest(job_index=job_index, change=change):
@@ -197,6 +197,23 @@ class ObserverTests(unittest.TestCase):
         self.observe(event=run())
         self.assertFalse(self.client.retries())
         self.assertIn('Latest scheduled run: [100]', self.client.issue['body'])
+
+    def test_historical_cancelled_job_annotations_do_not_block_healthy_latest(self):
+        self.client.runs = [run(101, conclusion='success'), run()]
+        self.client.fail = 'check-runs/'
+        self.observe(event=run())
+        self.assertFalse(any(call[0].startswith('check-runs/') for call in self.client.calls))
+        self.assertFalse(self.client.retries())
+        self.assertIsNone(self.client.issue)
+
+    def test_second_attempt_records_failure_without_reading_ineligible_annotations(self):
+        self.client.runs = [run(101, attempt=2), run()]
+        self.client.fail = 'check-runs/'
+        self.observe(event=run())
+        self.assertFalse(any(call[0].startswith('check-runs/') for call in self.client.calls))
+        self.assertFalse(self.client.retries())
+        self.assertEqual(self.client.issue['state'], 'open')
+        self.assertIn('attempt 2): **failure**', self.client.issue['body'])
 
     def test_healthy_latest_run_never_creates_tracker_for_historical_failure(self):
         self.client.runs = [run(101, conclusion='success'), run()]
