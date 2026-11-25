@@ -204,6 +204,7 @@ pub fn act(act: Act, kind: Option<SourceKind>, shown: bool, running: bool) -> &'
         Act::Groups => tr("Organize groups"),
         Act::Show if shown => tr("On screen now: back to the guide"),
         Act::Show => tr("Show this playlist"),
+        Act::AllPlaylists => tr("Show all playlists"),
         Act::Refresh if running => tr("Refreshing…"),
         Act::Refresh => tr("Refresh now"),
         Act::Rename => tr("Rename"),

@@ -473,7 +473,6 @@ fn open(ui: Ui, item: RailItem) {
         RailItem::Movies => crate::vod_view::open(ui, iptv_core::vod::Kind::Movie),
         RailItem::Shows => crate::vod_view::open(ui, iptv_core::vod::Kind::Series),
         RailItem::Recordings => crate::recordings_view::open(ui),
-        RailItem::Playlists => crate::playlists_view::open(ui),
         RailItem::Settings => crate::settings_view::open(ui),
         other => log::info!("iptv rail: {other:?} not implemented yet"),
     }
@@ -504,20 +503,20 @@ fn toggle_playlist(entry: usize) -> bool {
     }
 }
 
+/// After a playlist heading's name: ▶ folded, ▼ open (the size of the
+/// playing channel's marker).
+pub fn playlist_arrow(collapsed: bool) -> &'static str {
+    if collapsed { "▶" } else { "▼" }
+}
+
 pub fn browser_entry_name(entry: usize) -> String {
     let schedule = crate::schedule();
     let name = entry_name(entry, &*schedule);
     if let Entry::Group(g) = Entry::at(entry) {
+        // A playlist heading: its name, then whether it is open, in the
+        // size of the playing channel's ▶.
         if schedule.group_is_playlist(g) {
-            return format!(
-                "{}  {}",
-                if schedule.group_is_collapsed(g) {
-                    "▸"
-                } else {
-                    "▾"
-                },
-                name
-            );
+            return format!("{name}  {}", playlist_arrow(schedule.group_is_collapsed(g)));
         }
         if schedule.group_depth(g) > 0 {
             return format!("    {name}");

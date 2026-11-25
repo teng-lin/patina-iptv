@@ -108,6 +108,26 @@ fn lock(t: &mut T, player: NodeId) {
     t.app.settle();
 }
 
+/// The rail's Settings under "protect settings": the PIN is asked first;
+/// entered (`unlock`), they open; cancelled, they stay closed.
+fn settings_unlocked(t: &mut T, unlock: bool) {
+    let settings = "id:navigation-rail >> label:Settings";
+    if !t.shows(settings) {
+        t.app.open_guide_groups().unwrap();
+        t.wait(settings, 5);
+    }
+    t.press(settings);
+    t.wait("id:parental-layer >> text:Enter parental PIN", 20);
+    if unlock {
+        pin(t, "2468");
+        t.wait("id:settings-screen", 5);
+    } else {
+        t.press("id:parental-cancel");
+        t.gone("id:parental-layer >> text:Enter parental PIN", 5);
+        assert!(!t.shows("id:settings-screen"), "cancelled: still closed");
+    }
+}
+
 fn repair_journey(home: crate::isolated::Home, protected: bool) {
     let directory = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&directory).unwrap();
@@ -263,12 +283,17 @@ fn repair_journey(home: crate::isolated::Home, protected: bool) {
         t.press("id:settings-screen >> text:Close");
         t.gone("id:settings-screen", 5);
     }
-    t.app.open_guide_groups().unwrap();
-    t.key("left");
-    t.key("left");
-    t.press("text:Playlists >> nth=0");
-    t.press("text:Synthetic viewer");
+    if protected {
+        // The playlists are in the protected settings: the PIN is asked
+        // as they open; cancelled, they stay closed.
+        settings_unlocked(&mut t, false);
+        settings_unlocked(&mut t, true);
+    }
+    let opened = t.app.open_playlist_actions("Synthetic viewer");
+    t.ok("Synthetic viewer's actions", opened);
     t.press("text:Show this playlist");
+    let closed = t.app.close_settings();
+    t.ok("settings closed", closed);
     t.wait("id:guide-row >> text:Synthetic Viewer", 10);
     t.press("id:guide-row >> text:Synthetic Viewer");
     crate::cov_data::until(
@@ -311,19 +336,18 @@ fn repair_journey(home: crate::isolated::Home, protected: bool) {
         state.commands.iter().filter(|id| **id == player).count()
     };
     assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
-    t.app.open_guide_groups().unwrap();
-    t.key("left");
-    t.key("left");
-    t.press("text:Playlists >> nth=0");
-    t.press("text:Synthetic inspection");
+    if protected {
+        // Every use asks: closed since, the settings ask again.
+        settings_unlocked(&mut t, true);
+    }
+    let opened = t.app.open_playlist_actions("Synthetic inspection");
+    t.ok("Synthetic inspection's actions", opened);
     t.press("text:Guide data");
     t.wait("text:Guide data · Synthetic inspection", 5);
+    // The settings' grant covers the update made there.
     t.press("text:Update the guide now");
-    if protected {
-        t.wait("id:parental-layer >> text:Enter parental PIN", 20);
-        pin(&mut t, "2468");
-    }
     t.wait("text:Guide updated", 15);
+    assert!(!t.shows("id:parental-layer >> text:Enter parental PIN"));
     t.press("text:Inspect guide coverage");
     t.wait("id:guide-inspection-screen", 5);
     t.wait("text:Synthetic Amber", 10);

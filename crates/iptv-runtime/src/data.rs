@@ -41,8 +41,8 @@ use iptv_import::CancelToken;
 use iptv_library::SourceId;
 
 pub use library::{
-    Activity, Playlist, delete, edit_guides, playlists, refresh, refresh_all, rename, set_policy,
-    set_user_agent, source_details, switch_to, try_details,
+    Activity, Playlist, delete, edit_guides, order_changed, playlists, refresh, refresh_all,
+    rename, reorder, set_policy, set_user_agent, source_details, switch_to, try_details,
 };
 pub use wizard_map::source_from_draft;
 

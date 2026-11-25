@@ -2182,14 +2182,8 @@ fn the_empty_state_covers_every_playlist_the_catalog_reads() {
     drop(store);
     let mut app = Headless::start(engine(nsh_core::platform::Idiom::Desktop)).unwrap();
     step(app.wait_for_within("text:/^Generated local live/", Duration::from_secs(20)));
-    // The M3U playlist alone on screen, from the playlists screen.
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.wait_for("text:Playlists >> nth=0"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Generated file playlist"));
-    step(app.press("text:Generated file playlist"));
+    // The M3U playlist alone on screen, from its Settings → Playlists row.
+    step(app.open_playlist_actions("Generated file playlist"));
     step(app.wait_for("text:Show this playlist"));
     step(app.press("text:Show this playlist"));
     step(app.wait_for_within("text:Generated local live", Duration::from_secs(20)));

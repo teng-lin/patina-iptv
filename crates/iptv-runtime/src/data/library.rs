@@ -364,6 +364,28 @@ pub async fn rename(
     Ok(())
 }
 
+/// Puts the playlists in `order` (their manual order); lists showing
+/// several follow it unless they sort by name.
+pub async fn reorder(owner: &Rc<crate::Runtime>, order: Vec<SourceId>) -> Result<(), StoreError> {
+    crate::library::reorder_sources(owner, order.clone()).await?;
+    refresh_after_commit(owner, |snapshot| {
+        let at = |id: SourceId| order.iter().position(|o| *o == id).unwrap_or(usize::MAX);
+        snapshot.playlists.sort_by_key(|p| at(p.id));
+    })
+    .await;
+    order_changed(owner);
+    Ok(())
+}
+
+/// The playlists' order changed (reordered, or `playlists.sort`
+/// switched): lists showing several follow.
+pub fn order_changed(owner: &Rc<crate::Runtime>) {
+    changed(owner);
+    if super::combined::active(owner) {
+        super::combined::rebuild(owner);
+    }
+}
+
 /// Changes the guide sources of playlist `id`; false when `edit` changes
 /// nothing. The guide on screen is checked again once the edits settle
 /// (changed feeds are downloaded); another playlist's when it is shown.

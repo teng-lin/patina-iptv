@@ -135,7 +135,8 @@ fn interface_language_changes_live_persists_and_can_be_recovered() {
     step(app.wait_for("text:TV en directo"));
     step(app.wait_for("id:navigation-rail >> text:Películas"));
     step(app.wait_for("id:navigation-rail >> text:Series"));
-    step(app.wait_for("id:navigation-rail >> text:Listas de reproducción"));
+    // The playlists are in the settings, not on the rail.
+    assert!(!app.shows("id:navigation-rail >> text:Listas de reproducción"));
     step(app.wait_for("text:Reproducir el último canal al iniciar"));
     let language_help =
         "Interface language: `system` follows the device, otherwise a language tag.";
@@ -207,15 +208,24 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
     let app = &mut fixture.app;
     // The ruler's date: German names and order, and its 24-hour clock.
     step(app.wait_for(r"text:/^(Mo|Di|Mi|Do|Fr|Sa|So)\., \d{1,2}\. \S+  \d\d:\d\d$/"));
+    // Settings → Playlists.
     rail(app);
-    step(app.press(&format!("text:{} >> nth=0", de.t("Playlists"))));
+    step(app.press(&format!("id:navigation-rail >> label:{}", de.t("Settings"))));
+    step(app.press(&format!(
+        "id:settings-content >> role:tab[{}]",
+        de.t("Playlists")
+    )));
     shown(app, "Synthetic personalization");
     // A count in the row: "3 Sender", not "3 channels".
     let three = de.f(CHANNELS, &[("count", 3u32.into())]);
-    shown(app, &format!("{} · {three}", de.t("M3U playlist")));
+    step(app.wait_for(&format!(
+        "text:/^{} · {}( · |$)/",
+        pattern(&de.t("M3U playlist")),
+        pattern(&three)
+    )));
     assert!(!app.shows("3 channels"));
-    // Its actions.
-    step(app.press("text:Synthetic personalization"));
+    // Its actions (a long press on its row).
+    step(app.long_press("role:checkbox[/^Synthetic personalization/]"));
     let yes = de.t("Yes");
     shown(
         app,
@@ -250,10 +260,9 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(3)));
     // A refresh that fails says so, and why, in German.
     std::fs::remove_file(&playlist).unwrap();
-    step(app.press("text:Synthetic personalization >> nth=0"));
     press(app, &de.t("Refresh now"));
     let failed = de.f("Refresh failed: {reason}", &[("reason", "".into())]);
-    step(app.wait_for_within(&format!("text:/^{}/", pattern(&failed)), IMPORT));
+    step(app.wait_for_within(&format!("text:/ · {}/", pattern(&failed)), IMPORT));
     assert!(!app.shows("Refresh failed"));
     // An import that fails: a file that is not a playlist.
     let picks = Arc::new(AtomicUsize::new(0));
@@ -263,8 +272,8 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
         crate::support::picked("not a playlist".to_owned())
     });
     step(app.press(&format!(
-        "id:playlists-screen >> text:{}",
-        pattern_free(&de.t("+ Add playlist"))
+        "id:settings-content >> text:{}",
+        pattern_free(&de.t("Add a playlist"))
     )));
     shown(app, &de.t("Source type"));
     step(app.press("id:wizard-source-type"));
@@ -283,7 +292,10 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
         crate::isolated::scaled_duration(IMPORT),
     ));
     assert_eq!(picks.load(Ordering::SeqCst), 1, "one file-picker request");
-    press(app, &de.t("Add playlist"));
+    // The wizard's own button (the settings row behind reads the same).
+    let add = format!("id:wizard-form >> text:{}", de.t("Add playlist"));
+    step(app.wait_for(&add));
+    step(app.press(&add));
     // The form comes back with the reason, whichever of these the reader
     // gives for such a file.
     let why = [

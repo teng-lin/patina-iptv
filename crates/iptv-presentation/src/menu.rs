@@ -34,6 +34,9 @@ pub enum MenuItem {
     ChannelOptions,
     ChannelActions,
     ProtectChannel,
+    // Playlist (a playlist's heading in the groups column).
+    RenamePlaylist,
+    ReorderPlaylists,
     // Group.
     ManageFavorites,
     ManageBlocked,
@@ -289,6 +292,8 @@ pub fn group_options(available: impl Fn(MenuItem) -> bool) -> Vec<Row> {
     use MenuItem::*;
     standalone(
         [
+            RenamePlaylist,
+            ReorderPlaylists,
             RenameGroup,
             ResetGroupName,
             SortChannels,
@@ -428,9 +433,31 @@ mod tests {
             }
         )));
 
-        let rows = group_options(|item| item != RenameGroup && item != ResetGroupName);
+        let rows = group_options(|item| {
+            !matches!(
+                item,
+                RenameGroup | ResetGroupName | RenamePlaylist | ReorderPlaylists
+            )
+        });
         let menu = Menu::new(rows, Target::Group, ListId::All);
         assert_eq!(menu.focused(), Some(SortChannels));
+    }
+
+    #[test]
+    fn a_playlist_heading_offers_its_rename_and_the_playlists_order_first() {
+        let rows =
+            group_options(|item| matches!(item, RenamePlaylist | ReorderPlaylists | SortChannels));
+        let menu = Menu::new(rows, Target::Group, ListId::All);
+        assert_eq!(menu.focused(), Some(RenamePlaylist));
+        let items: Vec<MenuItem> = menu
+            .rows
+            .iter()
+            .filter_map(|row| match row {
+                Row::Action { item, .. } => Some(*item),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(items, [RenamePlaylist, ReorderPlaylists, SortChannels]);
     }
 
     #[test]

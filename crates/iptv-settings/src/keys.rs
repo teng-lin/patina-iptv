@@ -49,6 +49,8 @@ pub const FONT_SIZE: EnumKey = EnumKey("appearance.font_size");
 // Organization.
 pub const CHANNEL_SORT: EnumKey = EnumKey("channels.channel_sort");
 pub const GROUP_SORT: EnumKey = EnumKey("channels.group_sort");
+/// Playlists in lists that show several: by hand or by name.
+pub const PLAYLIST_SORT: EnumKey = EnumKey("playlists.sort");
 pub const RECENT_COUNT: IntKey = IntKey("history.recent_count");
 pub const USER_AGENT: TextKey = TextKey("general.user_agent");
 
@@ -102,6 +104,7 @@ pub const ALL: &[(&str, &str)] = &[
     (FONT_SIZE.0, "enum"),
     (CHANNEL_SORT.0, "enum"),
     (GROUP_SORT.0, "enum"),
+    (PLAYLIST_SORT.0, "enum"),
     (RECENT_COUNT.0, "integer"),
     (USER_AGENT.0, "text"),
     (EPG_UPDATE.0, "enum"),

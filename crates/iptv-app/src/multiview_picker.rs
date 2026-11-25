@@ -374,12 +374,8 @@ fn group_name(ui: Ui, entry: usize) -> String {
     let name = entry_name(entry, &*catalog);
     match Entry::at(entry) {
         Entry::Group(g) if catalog.group_is_playlist(g) => {
-            let arrow = if catalog.group_is_collapsed(g) {
-                "▸"
-            } else {
-                "▾"
-            };
-            format!("{arrow}  {name}")
+            let arrow = crate::lists::playlist_arrow(catalog.group_is_collapsed(g));
+            format!("{name}  {arrow}")
         }
         Entry::Group(g) if catalog.group_depth(g) > 0 => format!("    {name}"),
         _ => name,

@@ -161,13 +161,36 @@ pub fn install(owner: &super::Runtime, snapshot: Snapshot) -> bool {
 
 /// The stored playlists in list order.
 fn playlists_native(owner: &super::Runtime) -> Result<Vec<Playlist>, StoreError> {
-    owner.library.with(|snapshot| {
+    let mut playlists = owner.library.with(|snapshot| {
         snapshot
             .borrow()
             .as_ref()
             .map(|snapshot| snapshot.playlists.clone())
             .ok_or(StoreError::Unavailable("library is loading"))
-    })
+    })?;
+    let by_name = owner.settings().choice(
+        iptv_settings::keys::PLAYLIST_SORT,
+        &iptv_settings::Target::Global,
+    ) == "name";
+    sort_playlists(&mut playlists, by_name);
+    Ok(playlists)
+}
+
+/// Playlists in the order lists show them: as stored (the manual order),
+/// or by name (stable: equal names keep the manual order).
+pub(crate) fn sort_playlists(playlists: &mut [Playlist], by_name: bool) {
+    if by_name {
+        playlists.sort_by_cached_key(|p| p.name.to_lowercase());
+    }
+}
+
+pub fn reorder_sources(
+    owner: &super::Runtime,
+    order: Vec<SourceId>,
+) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
+    owner
+        .services()
+        .call(move |store| store.set_source_order(&order))
 }
 pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
     store
@@ -443,6 +466,43 @@ pub fn policy(
     id: SourceId,
 ) -> Result<iptv_store_sqlite::SourcePolicy, crate::Error> {
     policy_native(owner, id).map_err(crate::Error::from)
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn named(id: i64, name: &str) -> Playlist {
+        Playlist {
+            id: SourceId(id),
+            name: name.into(),
+            kind: iptv_providers::model::SourceKind::M3u,
+            channels: 0,
+            has_movies: false,
+            has_series: false,
+            movies_failed: None,
+            series_failed: None,
+            updated_at: None,
+            failed: None,
+            guides: Vec::new(),
+            guide_failed: false,
+            user_agent: None,
+            from_file: false,
+            policy: Default::default(),
+        }
+    }
+
+    #[test]
+    fn playlists_sort_by_name_only_when_asked() {
+        let manual = vec![named(1, "Zeta"), named(2, "alpha"), named(3, "Beta")];
+        let mut kept = manual.clone();
+        sort_playlists(&mut kept, false);
+        assert_eq!(kept, manual);
+        let mut sorted = manual;
+        sort_playlists(&mut sorted, true);
+        let ids: Vec<i64> = sorted.iter().map(|p| p.id.0).collect();
+        assert_eq!(ids, [2, 3, 1]);
+    }
 }
 
 #[cfg(test)]

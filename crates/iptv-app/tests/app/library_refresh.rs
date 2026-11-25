@@ -93,15 +93,10 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
     })
     .unwrap();
     step(app.wait_for_within("text:A 0 · Synthetic A", Duration::from_secs(20)));
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.wait_for("text:Playlists >> nth=0"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Synthetic A"));
-    step(app.press("text:Synthetic A"));
+    step(app.open_playlist_actions("Synthetic A"));
     step(app.wait_for("text:Show this playlist"));
     step(app.press("text:Show this playlist"));
+    step(app.close_settings());
     step(app.wait_for_within("text:A 0", Duration::from_secs(20)));
     until(
         &mut app,
@@ -171,13 +166,7 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
     drop(store);
     // A failed manual update keeps the successful catalog on screen and on disk.
     std::fs::write(&file_a, "#EXTM3U\n").unwrap();
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.wait_for("text:Playlists >> nth=0"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Synthetic A"));
-    step(app.press("text:Synthetic A"));
+    step(app.open_playlist_actions("Synthetic A"));
     step(app.wait_for("text:Refresh now"));
     step(app.press("text:Refresh now"));
     until(
@@ -203,7 +192,7 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
         3
     );
     // Manual refresh of a disabled source remains possible without enabling/showing it.
-    step(app.press("text:Synthetic C"));
+    step(app.open_playlist_actions("Synthetic C"));
     step(app.wait_for("text:Refresh now"));
     step(app.press("text:Refresh now"));
     until(
@@ -234,9 +223,9 @@ fn startup_and_periodic_refresh_skip_disabled_sources_and_failures_keep_the_cach
             .unwrap(),
         Some(a)
     );
-    step(app.press("text:Synthetic A"));
-    step(app.wait_for("text:Playlist enabled: Yes"));
-    step(app.press("text:Playlist enabled: Yes"));
+    // Its check box on the Playlists page hides it.
+    step(app.wait_for_gone("id:playlists-task", Duration::from_secs(10)));
+    step(app.press("id:settings-content >> role:checkbox[/^Synthetic A · /]"));
     until(
         &mut app,
         "fallback to an enabled source",

@@ -27,6 +27,8 @@ use crate::runtime::model::SourceId;
 use iptv_nav::Action;
 use nsh_core::prelude::*;
 
+use iptv_presentation::reorder::LeaveChoice;
+pub use state::Only;
 pub use state::Screen as Open;
 use state::{Act, EditKind, Effect, Item, Key, Layer, Screen};
 pub(crate) use words::masked_link;
@@ -40,6 +42,40 @@ use crate::{Ui, ViewMode, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 const CARD_W: f32 = 640.0;
+
+/// What a playlist's row says under its name: its type and channels,
+/// then what its last refresh did (running, updated, failed, details
+/// refused) and whether it is on screen; and whether that is a failure.
+/// Reactive: the library's activity and the playlist on screen.
+pub(crate) fn summary(ui: Ui, playlist: &Playlist) -> (String, bool) {
+    let activity = ui
+        .app
+        .library
+        .activity
+        .with(|a| a.get(&playlist.id).cloned());
+    let (status, failed) = words::status(playlist, activity.as_ref(), crate::time::wall_unix());
+    let shown = !ui.app.library.all.get() && ui.app.library.shown.get() == Some(playlist.id);
+    let parts = [
+        words::summary(playlist),
+        status,
+        if shown {
+            tr("On screen").to_owned()
+        } else {
+            String::new()
+        },
+    ];
+    let line = parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (line, failed)
+}
+
+/// Whether the screen is open for one task over another screen.
+pub(crate) fn task_open(ui: Ui) -> bool {
+    state(ui, |s| s.opened_for().is_some()).unwrap_or(false)
+}
 
 // --- Actions -------------------------------------------------------------------
 
@@ -55,6 +91,18 @@ pub fn open(ui: Ui) {
     ui.playlists.set(Some(screen));
     if ui.mode.get_untracked() == ViewMode::Fullscreen {
         ui.mode.set(ViewMode::Guide);
+    }
+}
+
+/// Opens the screen for one task about playlist `id` ([`Only`]): its
+/// actions (the settings' playlist rows), its rename or the playlists'
+/// order (a playlist heading's menu). It closes when the task ends.
+pub fn open_only(ui: Ui, id: SourceId, only: Only) {
+    if is_open(ui) || crate::wizard_view::is_open(ui) {
+        return;
+    }
+    if let Some(screen) = Screen::only(load(), id, only) {
+        ui.playlists.set(Some(screen));
     }
 }
 
@@ -95,11 +143,17 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 /// Changes the state and carries out what it answers.
 fn update(ui: Ui, f: impl FnOnce(&mut Screen) -> Option<Effect>) {
     let mut effect = None;
+    let mut finished = false;
     ui.playlists.update(|s| {
         if let Some(s) = s {
             effect = f(s);
+            finished = s.finished();
         }
     });
+    // Opened for one task, which is over: back to where it came from.
+    if finished {
+        close(ui);
+    }
     if let Some(effect) = effect {
         perform(ui, effect);
     }
@@ -114,6 +168,8 @@ pub fn key(ui: Ui, action: Action) {
     let key = match action {
         Action::MoveUp => Key::Up,
         Action::MoveDown => Key::Down,
+        Action::MoveLeft => Key::Left,
+        Action::MoveRight => Key::Right,
         Action::Select => Key::Ok,
         Action::Back => Key::Back,
         Action::ShowMenu => Key::Menu,
@@ -224,6 +280,7 @@ fn perform(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::Rename(id, name) => data::rename(&crate::runtime(), id, &name).await,
+            Effect::Reorder(order) => data::reorder(&crate::runtime(), order).await,
             Effect::Guides(id) => {
                 crate::epg_sources_view::open(ui, id);
                 Ok(())
@@ -274,6 +331,7 @@ fn effect_name(effect: &Effect) -> String {
         Effect::CustomGroups(id) => format!("custom groups {}", id.0),
         Effect::Organize(id, _) => format!("organize {}", id.0),
         Effect::Rename(id, _) => format!("rename {}", id.0),
+        Effect::Reorder(order) => format!("reorder {} playlists", order.len()),
         Effect::Guides(id) => format!("guide sources of {}", id.0),
         Effect::Delete(id) => format!("delete {}", id.0),
         Effect::RefreshAll => "refresh all".to_owned(),
@@ -335,6 +393,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
         }
     });
+    // Opened for one task, which ended however it ended (a key, a check
+    // of new details, a playlist deleted elsewhere): back to where it
+    // came from, so no empty layer covers it.
+    effect(move || {
+        if state(ui, Screen::finished).unwrap_or(false) {
+            untracked(|| close(ui));
+        }
+    });
     // New details checked: saved closes the form, refused keeps it.
     effect(move || {
         let ended = ui.app.library.activity.with(|a| {
@@ -361,9 +427,25 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let entry =
         computed(move || state(ui, |s| s.editing().map(|e| (e.kind, e.prefilled))).flatten());
     let size = Scale::new();
-    when(
-        move || is_open(ui),
-        move || {
+    let only = computed(move || state(ui, |s| s.opened_for().is_some()));
+    dynamic(move || match only.get() {
+        None => view(),
+        // Opened for one task: its sheet over what opened it.
+        Some(true) => untracked(move || {
+            view()
+                .test_id("playlists-task")
+                .absolute()
+                .inset_0()
+                .child(sheet(ui, size))
+                .child(dynamic(move || {
+                    let shown = entry.get();
+                    untracked(move || match shown {
+                        Some((kind, prefilled)) => edit_sheet(ui, kind, prefilled),
+                        None => view(),
+                    })
+                }))
+        }),
+        Some(false) => untracked(move || {
             ui_kit::screen(ui, size)
                 .test_id("playlists-screen")
                 .accessibility_elements_hidden(move || {
@@ -386,20 +468,23 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         None => view(),
                     })
                 }))
-        },
-    )
+        }),
+    })
 }
 
 fn yes_no(yes: bool) -> &'static str {
     if yes { tr("Yes") } else { tr("No") }
 }
 
-fn hint(ui: Ui) -> &'static str {
+pub(crate) fn hint(ui: Ui) -> &'static str {
     let layer = state(ui, Screen::layer).unwrap_or(Layer::List);
     match (ui.keys_shown(), layer) {
         (true, Layer::List) => tr("▲▼ choose   OK actions   Back close"),
         (true, Layer::Actions { .. }) => tr("▲▼ choose   OK do it   Back close the sheet"),
         (true, Layer::Confirm { .. }) => tr("▲▼ choose   OK confirm   Back keep it"),
+        (true, Layer::Reorder { .. }) => {
+            tr("OK picks up or places · ↑/↓ move · ←/→ jump to either end")
+        }
         (true, Layer::Details { .. }) => {
             tr("▲▼ choose   OK change or check   Back leave unchanged")
         }
@@ -549,19 +634,27 @@ fn row(
 fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
     // Which sheet, not where its focus is.
     let open = computed(move || match state(ui, Screen::layer) {
-        Some(Layer::Actions { id, .. }) => Some((Sheet::Actions, id)),
-        Some(Layer::Confirm { id, .. }) => Some((Sheet::Confirm, id)),
-        Some(Layer::Details { id }) => Some((Sheet::Details, id)),
+        Some(Layer::Actions { id, .. }) => Some(Sheet::Actions(id)),
+        Some(Layer::Confirm { id, .. }) => Some(Sheet::Confirm(id)),
+        Some(Layer::Details { id }) => Some(Sheet::Details(id)),
+        Some(Layer::Reorder {
+            confirming: false, ..
+        }) => Some(Sheet::Reorder),
+        Some(Layer::Reorder {
+            confirming: true, ..
+        }) => Some(Sheet::ConfirmOrder),
         Some(Layer::List) | None => None,
     });
     dynamic(move || {
         let shown = open.get();
         untracked(move || match shown {
-            Some((Sheet::Actions, id)) => backdrop(ui, actions_card(ui, size, id).into_element()),
-            Some((Sheet::Confirm, id)) => backdrop(ui, confirm_card(ui, size, id).into_element()),
-            Some((Sheet::Details, id)) => {
+            Some(Sheet::Actions(id)) => backdrop(ui, actions_card(ui, size, id).into_element()),
+            Some(Sheet::Confirm(id)) => backdrop(ui, confirm_card(ui, size, id).into_element()),
+            Some(Sheet::Details(id)) => {
                 backdrop(ui, details_card::card(ui, size, id).into_element())
             }
+            Some(Sheet::Reorder) => backdrop(ui, reorder_card(ui, size).into_element()),
+            Some(Sheet::ConfirmOrder) => backdrop(ui, confirm_order_card(ui, size).into_element()),
             None => view(),
         })
     })
@@ -569,9 +662,114 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Sheet {
-    Actions,
-    Confirm,
-    Details,
+    Actions(SourceId),
+    Confirm(SourceId),
+    Details(SourceId),
+    Reorder,
+    ConfirmOrder,
+}
+
+/// The playlists in the order being arranged: OK (or a tap on the
+/// focused one) picks one up or puts it down, Up/Down move the focus or
+/// the playlist picked up.
+fn reorder_card(ui: Ui, size: Scale) -> impl IntoElement {
+    let count = move || state(ui, |s| s.reorder().map_or(0, |o| o.items().len())).unwrap_or(0);
+    let at = move |index: usize| {
+        state(ui, |s| {
+            let order = s.reorder()?;
+            let id = *order.items().get(index)?;
+            let name = s.row(id).map(|r| r.name.clone()).unwrap_or_default();
+            Some((
+                id,
+                name,
+                order.focused() == Some(&id),
+                order.selected() == Some(&id),
+            ))
+        })
+        .flatten()
+    };
+    let rows = element_ref();
+    effect(move || {
+        if let Some(i) = state(ui, |s| s.reorder().and_then(|o| o.focus_index())).flatten() {
+            rows.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
+        }
+    });
+    card(ui, size)
+        .test_id("playlists-reorder")
+        .child(ui_kit::title(size, move || tr("Reorder playlists")))
+        .child(ui_kit::caption(size, move || {
+            tr("OK picks up or places · ↑/↓ move · ←/→ jump to either end")
+        }))
+        .child(view().h(move || size.px(6.0)))
+        .child(
+            virtual_list(count, move |position| {
+                let index = position.index();
+                let label = move || match at(index) {
+                    Some((_, name, _, true)) => format!("↕  {name}"),
+                    Some((_, name, _, false)) => name,
+                    None => String::new(),
+                };
+                let focused = move || at(index).is_some_and(|(_, _, focused, _)| focused);
+                ui_kit::action(ui, size, label, focused, WHITE, move || {
+                    if let Some((id, ..)) = at(index) {
+                        update(ui, |s| s.tap_reorder(id));
+                    }
+                })
+            })
+            .test_id("playlists-reorder-list")
+            .estimated_item_size(list_rows::pitch(size, list_rows::ROW))
+            .element_ref(&rows)
+            .h(move || size.px(320.0)),
+        )
+        .child(ui_kit::action(
+            ui,
+            size,
+            tr("Save order"),
+            || false,
+            WHITE,
+            move || {
+                update(ui, |s| s.resolve_reorder(LeaveChoice::Save));
+            },
+        ))
+}
+
+/// Leaving the reorder with changes: keep them (focused first) or not.
+fn confirm_order_card(ui: Ui, size: Scale) -> impl IntoElement {
+    let focused = move |save: bool| {
+        move || {
+            state(ui, |s| {
+                s.layer()
+                    == Layer::Reorder {
+                        confirming: true,
+                        save,
+                    }
+            })
+            .unwrap_or(false)
+        }
+    };
+    card(ui, size)
+        .child(ui_kit::title(size, move || tr("Save the new order?")))
+        .child(view().h(move || size.px(8.0)))
+        .child(ui_kit::action(
+            ui,
+            size,
+            tr("Save order"),
+            focused(true),
+            WHITE,
+            move || {
+                update(ui, |s| s.resolve_reorder(LeaveChoice::Save));
+            },
+        ))
+        .child(ui_kit::action(
+            ui,
+            size,
+            tr("Discard changes"),
+            focused(false),
+            WHITE,
+            move || {
+                update(ui, |s| s.resolve_reorder(LeaveChoice::Discard));
+            },
+        ))
 }
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {

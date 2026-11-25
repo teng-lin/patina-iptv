@@ -61,7 +61,7 @@ fn report(app: &mut Headless, form: &str) {
 /// keep the focus afterwards.
 fn rail_offers(app: &mut Headless, name: &str) -> bool {
     step(app.open_guide_groups());
-    step(app.wait_for("id:navigation-rail >> label:Playlists"));
+    step(app.wait_for("id:navigation-rail >> label:Settings"));
     let offered = shown(app, &format!("id:navigation-rail >> label:{name}"));
     step(app.press_key("right"));
     offered
@@ -215,7 +215,7 @@ fn android_rail_follows_a_form_change_while_open() {
     step(app.wait_for(recordings));
     report(&mut app, "tablet");
     step(app.wait_for_gone(recordings, WAIT));
-    step(app.wait_for("id:navigation-rail >> label:Playlists"));
+    step(app.wait_for("id:navigation-rail >> label:Settings"));
     report(&mut app, "tv");
     step(app.wait_for(recordings));
     drop(app);

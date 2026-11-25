@@ -66,6 +66,7 @@ pub const WIRED: &[&str] = &[
     "guide.visible_minutes",
     "general.resume_last_channel",
     "general.user_agent",
+    "playlists.sort",
     "epg.update",
     "appearance.accent",
     "appearance.background",
@@ -96,6 +97,9 @@ pub const COMMANDS: &[&str] = &[
     "epg.clear",
     "remote.customize",
     "playlists.manage",
+    "playlists.add",
+    "playlists.update_all",
+    "playlists.reorder",
 ];
 
 /// Not shown: the changed keys (`remote.key_overrides`), which the
@@ -317,8 +321,21 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if !crate::host::IMPORTS
         && matches!(
             key,
-            "playlists.manage" | "epg.add_source" | "epg.update_now"
+            "playlists.manage"
+                | "playlists.add"
+                | "playlists.update_all"
+                | "epg.add_source"
+                | "epg.update_now"
         )
+    {
+        return Offer::Hidden;
+    }
+    // Arranging and ordering playlists needs two of them.
+    if matches!(key, "playlists.reorder" | "playlists.sort")
+        && crate::runtime()
+            .playlists()
+            .map_or(0, |playlists| playlists.len())
+            < 2
     {
         return Offer::Hidden;
     }
