@@ -223,7 +223,7 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
 
 /// The player list has no timeline cursor. Its channel actions use the live block.
 pub fn open_channel(ui: Ui, channel: usize) {
-    open_channel_at(ui, channel, crate::time::now_minute(), current_list(ui));
+    open_channel_at(ui, channel, crate::clock::now_minute(), current_list(ui));
 }
 
 fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {

@@ -62,7 +62,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("startup.rs", "MARKED"),                                  // Startup phase instrumentation.
     ("startup.rs", "FALLBACK"),                                // Startup clock instrumentation.
-    ("time.rs", "SHOWN"),                                      // Visible guide clock origin.
+    ("clock.rs", "SHOWN"),                                     // Visible guide clock origin.
     ("video.rs", "OPENS"),   // Native player open instrumentation.
     ("video.rs", "SOURCED"), // Native player source projection.
 ];

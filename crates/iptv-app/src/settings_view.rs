@@ -482,7 +482,7 @@ fn sources_value() -> String {
 
 /// A past time as the guide writes it (`14:05`, `Tue 10 · 14:05`).
 fn time_label(unix: i64) -> String {
-    crate::time::label(unix, crate::time::wall_unix())
+    crate::clock::label(unix, crate::clock::wall_unix())
 }
 
 /// The runtime reports publication semantics; the shell chooses the wording

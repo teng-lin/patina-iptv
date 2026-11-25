@@ -45,6 +45,7 @@ mod capabilities;
 mod capture_limits;
 mod channels_view;
 mod chooser;
+mod clock;
 mod content_image;
 mod custom_groups;
 mod data;
@@ -57,6 +58,7 @@ mod favorites;
 mod fonts;
 mod grid;
 mod guide_assign_view;
+mod guide_clock;
 mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
@@ -116,7 +118,11 @@ mod settings;
 mod settings_view;
 mod setup_view;
 pub mod startup;
-pub mod time;
+/// The app's guide clock and its UI tick.
+pub mod time {
+    pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
+    pub use crate::guide_clock::{start, tick};
+}
 mod touch_zap;
 mod ui_kit;
 mod video;
@@ -891,7 +897,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     #[cfg(feature = "test-support")]
     performance_probe::bind(ui);
     data::start(ui);
-    time::start(ui);
+    guide_clock::start(ui);
     player::bind(ui);
     player::watch_time::bind(ui);
     data::pages::bind(ui);

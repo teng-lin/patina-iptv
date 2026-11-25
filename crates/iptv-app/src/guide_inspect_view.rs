@@ -59,7 +59,7 @@ fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
 }
 
 pub fn open(ui: Ui, source: SourceId) {
-    let from = crate::time::wall_unix();
+    let from = crate::clock::wall_unix();
     let screen = Screen::new(
         source,
         TimeWindow {
@@ -548,8 +548,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     state(ui, |s| {
                         format!(
                             "{} — {}",
-                            crate::time::label(s.window.from, crate::time::wall_unix()),
-                            crate::time::label(s.window.to, crate::time::wall_unix())
+                            crate::clock::label(s.window.from, crate::clock::wall_unix()),
+                            crate::clock::label(s.window.to, crate::clock::wall_unix())
                         )
                     })
                     .unwrap_or_default()
@@ -660,13 +660,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                         s.samples.get(at.index()).map(|p| {
                                             format!(
                                                 "{} — {} · {}",
-                                                crate::time::label(
+                                                crate::clock::label(
                                                     p.start,
-                                                    crate::time::wall_unix()
+                                                    crate::clock::wall_unix()
                                                 ),
-                                                crate::time::label(
+                                                crate::clock::label(
                                                     p.stop,
-                                                    crate::time::wall_unix()
+                                                    crate::clock::wall_unix()
                                                 ),
                                                 p.title
                                             )

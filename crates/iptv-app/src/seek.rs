@@ -65,7 +65,7 @@ fn program(ui: Ui) -> Option<(i32, i32, i32)> {
     let schedule = crate::schedule();
     let p = schedule.program_at(channel, start);
     let length = (p.end - p.start) * 60;
-    let aired = crate::time::wall_unix() - crate::guide::unix_of(&*schedule, p.start);
+    let aired = crate::clock::wall_unix() - crate::guide::unix_of(&*schedule, p.start);
     let limit = length.min(i32::try_from(aired).unwrap_or(i32::MAX)) - END_MARGIN;
     Some((offset, length, limit.max(0)))
 }

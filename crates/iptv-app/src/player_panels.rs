@@ -408,7 +408,7 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
                 let unix = crate::guide::unix_of(&*s, ui.focus.with(|f| f.now));
                 date_time(
                     unix,
-                    crate::time::offset_minutes(unix),
+                    crate::clock::offset_minutes(unix),
                     crate::i18n::clock_style(),
                 )
             })

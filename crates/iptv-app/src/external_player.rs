@@ -292,7 +292,7 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
         return true;
     }
     let at = archive.map(|p| crate::guide::unix_of(&*schedule, p.start));
-    let clock = crate::runtime::playback::clock(crate::time::wall_unix(), at);
+    let clock = crate::runtime::playback::clock(crate::clock::wall_unix(), at);
     let epoch = schedule.epoch_unix();
     let epg_offset = epg.epg_offset_minutes(local);
     let expected = authority.clone();

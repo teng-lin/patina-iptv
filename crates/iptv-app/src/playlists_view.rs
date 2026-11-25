@@ -465,7 +465,7 @@ fn row(
     };
     let activity = move |id: SourceId| ui.app.library.activity.with(|a| a.get(&id).cloned());
     let status = move || match (playlist(), item()) {
-        (Some(p), _) => words::status(&p, activity(p.id).as_ref(), crate::time::wall_unix()),
+        (Some(p), _) => words::status(&p, activity(p.id).as_ref(), crate::clock::wall_unix()),
         (None, Some(Item::RefreshAll)) => (words::refreshing(refreshing()), false),
         _ => (String::new(), false),
     };

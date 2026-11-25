@@ -118,7 +118,7 @@ fn schedule_changed(
         crate::player::stop_archive_after_clock_edit(ui, &*previous, &*current);
         crate::menu_view::invalidate_shifted_context(ui, &*previous, &*current);
         if let ScheduleCause::Catalog { has_vod, any_vod } = cause {
-            crate::time::mark_shown();
+            crate::clock::mark_shown();
             if ui
                 .playing
                 .get_untracked()
