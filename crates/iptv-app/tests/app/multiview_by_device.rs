@@ -230,11 +230,12 @@ fn a_phone_metered_network_hides_multiview_and_collapses_the_session() {
         }),
     );
     let main = seen.player(0).expect("main player");
+    let second = seen.player(1).expect("second player");
     let opens = iptv_app::player_opens(0);
     metered(app, true);
     step(app.wait_for_gone(TILE, Duration::from_secs(2)));
     assert!(iptv_app::player_has_source(0));
-    assert!(!iptv_app::player_has_source(1));
+    assert!(app.screen().layout_nodes().iter().all(|n| n.id != second));
     assert_eq!(iptv_app::player_opens(0), opens);
     assert!(app.screen().layout_nodes().iter().any(|n| n.id == main));
     assert!(!more_lists_multiview(app));

@@ -188,11 +188,9 @@ pub fn multiview_offer(
     if !multiview_exists(host) {
         return Omitted(Reason::DecoderLimit);
     }
-    if host.form_factor == FormFactor::Phone && metered == Some(true) {
-        return Omitted(Reason::MeteredNetwork);
-    }
     let at_limit = account_streams.is_some_and(|allowed| allowed <= 1);
     match device.form_factor() {
+        FormFactor::Phone if metered == Some(true) => Omitted(Reason::MeteredNetwork),
         FormFactor::Phone if !landscape => Omitted(Reason::PhoneUpright),
         FormFactor::Phone if at_limit => Omitted(Reason::ConnectionLimit),
         FormFactor::Tablet if device.window < Class::Expanded => Omitted(Reason::WindowTooSmall),
@@ -646,7 +644,12 @@ mod tests {
 
     #[test]
     fn only_phones_omit_multiview_on_a_reported_metered_network() {
-        for form in [FormFactor::Phone, FormFactor::Tablet, FormFactor::Tv] {
+        for form in [
+            FormFactor::Phone,
+            FormFactor::Tablet,
+            FormFactor::Tv,
+            FormFactor::Desktop,
+        ] {
             let device = device(Platform::Android, form, Class::Expanded);
             for metered in [None, Some(false), Some(true)] {
                 let expected = if form == FormFactor::Phone && metered == Some(true) {
@@ -657,6 +660,11 @@ mod tests {
                 assert_eq!(multiview_offer(device, true, Some(2), metered), expected);
             }
         }
+        let phone = device(Platform::Android, FormFactor::Phone, Class::Compact);
+        assert_eq!(
+            multiview_offer(phone, false, Some(1), Some(true)),
+            MultiviewOffer::Omitted(Reason::MeteredNetwork),
+        );
     }
 
     #[test]

@@ -905,6 +905,8 @@ pub fn App() -> impl IntoElement {
 fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
+    // Establish host-report signals before eager feature bindings subscribe.
+    let device_bridge = device::bridge();
     let ui = Ui::new(SharedUi::new(), player::Player::new());
     settings::bind(ui);
     browse_playback::bind(ui);
@@ -997,7 +999,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         // The picture-in-picture window shows only the video (`pip.rs`).
         .child(backup::service_layer(ui))
         .child(keyboard::bridge())
-        .child(device::bridge())
+        .child(device_bridge)
         .child(panels::backdrop(ui))
         .child(video::layer(ui, 0))
         .children((1..player::SURFACES).map(move |s| {
