@@ -64,10 +64,11 @@ installs. Screen captures and logs use fresh synthetic profiles only.
 
 | Journey | Tablet emulator | TV emulator |
 | --- | --- | --- |
-| Normal launcher and first run | Pending | Pending |
-| Playlist import / playback | Pending: public synthetic endpoint required | Pending: public synthetic endpoint required |
+| Normal launcher and first run | Passed: API 36 ARM64, library setup visible | Pending |
+| Playlist import | Passed: generated local M3U via normal Android file picker, 3 channels in 3 groups | Pending |
+| Playback and XMLTV refresh | Pending: public synthetic endpoint required | Pending: public synthetic endpoint required |
 | PiP | Pending active playback; handheld PiP retained by #222 | Pending: verify Leanback exclusion with #222 candidate |
-| Backup/restore | Pending visible document picker journey | Pending visible document picker journey |
+| Backup/restore | Export warning and Android save picker reached; completed export and restore pending | Pending visible document picker journey |
 | Recording | Pending synthetic playback and device capability checks | Pending synthetic playback and device capability checks |
 
 The production network policy excludes private upstream addresses. The local
@@ -76,6 +77,17 @@ No tester-controlled public endpoint was available in this pass. Provide a
 public endpoint serving only generated playlists, XMLTV and authorized demo
 media, then follow [signed release acceptance](android-validation.md#signed-release-acceptance).
 Do not weaken production transport restrictions to obtain a pass.
+
+Tablet evidence is retained locally in
+`target/android-validation/run-6mvw1koy` (APK hash above; launch-only operation
+completed, remaining automated checklist items explicitly pending). Manual
+screens and accessibility observations in `target/release-220/tab-*` show the
+local file source picker, import completion, imported guide and export warning.
+The generated file uses reserved `media.example.invalid` upstream URLs, so it
+proves import without attempting a real service. No playback or EPG-fetch pass
+is inferred from that import. The held emulator expired before export completion
+and restore were verified; its crash buffer had no fatal entries. The original
+AVD profiles and viewer installs were not changed.
 
 ## Physical-device acceptance
 
