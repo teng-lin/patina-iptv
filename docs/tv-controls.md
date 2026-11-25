@@ -217,21 +217,31 @@ Back always dismisses the nearest surface, one step per press
 8. In the guide: the hint card, the programs on air, the groups column,
    the rail, then leave.
 
-At the top level (the rail, with nothing open, nothing playing behind
-the overlay layout's guide and no channel number being typed) the app
-registers no Back handler, so Back follows the platform's convention
-(#277): Android TV returns to the launcher in one press, and Android
-phones and tablets show the predictive back animation (on Android 15 and
-later; on Android 14 only with the developer option "Predictive back
-animations"). No second press is asked for. On a desktop, Escape there
-does nothing; the window closes the operating system's way. Samsung's
-Tizen TVs are the exception: Samsung's termination guide asks for an exit
-confirmation on Return at the app's first screen, so both Tizen hosts
-keep Back there and ask "Close Patina?" with No (focused) and Yes; Back
-closes the question, and only Yes leaves. The remote's Exit key is left
-to the system there and leaves without asking. The former `general.confirm_exit` and
-`general.confirm_exit_window` settings are no longer offered, and stored
-values are ignored.
+Where Back ends navigation, the app registers no Back handler: the guide's
+rail with nothing open (and nothing playing behind the overlay layout), the
+first-run welcome, and library recovery with details closed. An active channel
+number or pending Long Back release still keeps a handler. Android returns
+home in one press and can show the system predictive preview: Android 13/14
+needs the developer animation option, while Android 15+ enables it by default
+for opted-in apps. On a desktop, Escape at a root does nothing; the window
+closes the operating system's way.
+
+Both Tizen hosts currently retain the handler at their roots and ask "Close
+Patina?" with No focused, following Samsung's termination guide. The NSH host
+includes recovery with details closed. Back dismisses the question and Yes
+leaves. The bridge toggles its answers with Up/Down; the NSH chooser clamps:
+Up or Left selects No, Down or Right selects Yes. Samsung checklist CO-US-05
+instead describes immediate Return exit at the home page; the owner decision
+between these policies remains pending.
+
+Neither Tizen host registers Exit. A system IME/popup is separate from the
+app-rendered exit question. App termination over Patina's question is an
+implementation inference pending TV observation. CO-US-04's generic popup rule
+has no stated exclusion for app popups, so this also needs owner/Samsung
+clarification. See the [acceptance ledger](platform-back-validation.md) for
+physical-device checks and emulator visual limits. The former
+`general.confirm_exit` and `general.confirm_exit_window` settings are no longer
+offered, and stored values are ignored.
 
 Closing a chooser, menu, PIN prompt or settings screen restores focus by
 content identity (the control, program or channel), not by row position,

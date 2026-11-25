@@ -272,9 +272,7 @@ fn cold_start(home: crate::isolated::Home, hold_preparation: bool) {
     );
 }
 
-#[test]
-fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
-    let Some(home) = isolated!() else { return };
+fn newer_database(home: &crate::isolated::Home) -> (std::path::PathBuf, u32, u32) {
     let dir = home.data_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("iptv.sqlite");
@@ -292,11 +290,21 @@ fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
         )
         .unwrap();
     drop(database);
+    (path, supported, found)
+}
 
+#[test]
+fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
+    let Some(home) = isolated!() else { return };
+    let (path, supported, found) = newer_database(&home);
     let mut app = app();
     app.wait_for("id:store-startup-failure").unwrap();
     app.wait_for("text:Update Patina to open your library")
         .unwrap();
+    let handed = app
+        .back()
+        .expect_err("startup recovery without details leaves Back to the platform");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     assert!(!app.screen().matches("id:store-recovery-details").unwrap());
     assert!(!app.screen().matches("id:store-recovery-retry").unwrap());
     app.press_key("enter").unwrap();
@@ -311,10 +319,52 @@ fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
     .unwrap();
     app.back().unwrap();
     assert!(!app.screen().matches("id:store-recovery-details").unwrap());
+    let handed = app
+        .back()
+        .expect_err("after closing recovery details, Back is the platform's again");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     app.press_remote(nsh_tv::RemoteKey::Menu).unwrap();
     app.wait(Duration::from_secs(3)).unwrap();
     let screen = app.screen();
     assert!(screen.matches("id:store-startup-failure").unwrap());
     assert!(!screen.shows("Set up your library"));
     assert!(!screen.matches("id:wizard-source-picker").unwrap());
+}
+
+#[test]
+fn a_host_that_asks_before_leaving_confirms_recovery_after_details_close() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LEFT: AtomicUsize = AtomicUsize::new(0);
+    let Some(home) = isolated!() else { return };
+    newer_database(&home);
+    iptv_app::confirm_leaving(|| {
+        LEFT.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = nsh_core::platform::Idiom::Tv;
+    let mut app = Headless::start(config).unwrap();
+    app.wait_for("id:store-startup-failure").unwrap();
+    app.back().unwrap();
+    app.wait_for("id:leave-panel >> text:Close Patina?")
+        .unwrap();
+    app.press_key("enter").unwrap(); // Default No keeps recovery open.
+    app.wait_for_gone("id:leave-panel", Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(LEFT.load(Ordering::SeqCst), 0);
+    app.press("text:Show details").unwrap();
+    app.wait_for("id:store-recovery-details").unwrap();
+    app.back().unwrap();
+    assert!(!app.screen().matches("id:store-recovery-details").unwrap());
+    assert!(!app.screen().matches("id:leave-panel").unwrap());
+    app.back().unwrap();
+    app.wait_for("id:leave-panel >> text:Close Patina?")
+        .unwrap();
+    app.press_key("right").unwrap();
+    app.press_key("enter").unwrap();
+    app.wait_for_gone("id:leave-panel", Duration::from_secs(2))
+        .unwrap();
+    assert_eq!(LEFT.load(Ordering::SeqCst), 1);
 }

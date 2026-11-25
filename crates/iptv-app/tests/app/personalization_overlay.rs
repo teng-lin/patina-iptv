@@ -138,12 +138,33 @@ fn a_host_that_asks_before_leaving_confirms_back_at_the_top_level() {
     step(app.back());
     gone(app);
     assert_eq!(LEFT.load(Ordering::SeqCst), 0);
+    ask(app);
+    step(app.press_key("down"));
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
+    gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 0);
     // Down to Yes, then OK: the host leaves.
     ask(app);
     step(app.press_key("down"));
     step(app.press_key("enter"));
     gone(app);
     assert_eq!(LEFT.load(Ordering::SeqCst), 1);
+    // Right selects Yes without wrapping on repeated presses.
+    ask(app);
+    step(app.press_key("right"));
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 2);
+    // Left selects No again, even after Right selected Yes.
+    ask(app);
+    step(app.press_key("right"));
+    step(app.press_key("left"));
+    step(app.press_key("left"));
+    step(app.press_key("enter"));
+    gone(app);
+    assert_eq!(LEFT.load(Ordering::SeqCst), 2);
 }
 
 /// The first run's welcome screen is the app's first screen too: where

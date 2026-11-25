@@ -9,13 +9,15 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
-- Explain incompatible backup formats, settings and database schemas separately
-  from damaged backups in first-run setup and Settings. Show available versions
-  and persistent recovery guidance while preserving current data and queued restores (#201).
-
+- Keep Android's system Back gesture available on the first-run welcome and
+  library recovery root screens, and let all four D-pad directions select the
+  Tizen NSH exit confirmation's answers.
 - Group guide refresh, failed-source Retry, source editing and confirmed Clear
   under each playlist’s Guide data. Clear names the playlist and keeps other
   playlists, channels and guide links intact (#282).
+- Explain incompatible backup formats, settings and database schemas separately
+  from damaged backups in first-run setup and Settings. Show available versions
+  and persistent recovery guidance while preserving current data and queued restores (#201).
 - Clarify portal identity transfers in the mobile privacy policy and record
   first-release disclosure evidence and pending store checks (#221).
 - Require an embedded R8 class mapping in Android release bundles and provide
