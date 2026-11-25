@@ -57,7 +57,11 @@ python3 tools/ci/disposable-avd.py "$HOME/.android/avd/tab36.avd" \
 ```
 
 Repeat with `tv36.avd` and a free even port. `IPTV_SMOKE_HOLD=600` leaves
-the owned emulator available for visible UI journeys before cleanup. Evidence
+the owned headless emulator available for UI journeys driven through targeted
+`adb shell input`, accessibility snapshots and inspected screen captures.
+`IPTV_SMOKE_HOLD_FILE` provides the same early-finish control as fixture smoke.
+The helper observes process liveness and drains app/crash logs during the hold;
+a failed operation retains a failed checklist and available diagnostics. Evidence
 is retained beneath `target/android-validation/run-*`; failed or incomplete
 operations are not passes. Never run against the original profiles or viewer
 installs. Screen captures and logs use fresh synthetic profiles only.

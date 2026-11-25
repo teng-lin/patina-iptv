@@ -152,6 +152,8 @@ def adb(serial, *arguments, **kwargs):
     if not re.fullmatch(r"emulator-\d+", serial):
         raise ValueError("validation requires an explicit emulator serial")
     timeout = 120 if arguments and arguments[0] == "install" else 15
+    if arguments[:3] == ("shell", "am", "start"):
+        timeout = 60
     return subprocess.run(["adb", "-s", serial, *arguments], check=True, timeout=timeout,
                           capture_output=True, text=True, **kwargs).stdout.strip()
 

@@ -270,7 +270,7 @@ esac
 category=android.intent.category.LAUNCHER
 [ "$is_tv" != true ] || category=android.intent.category.LEANBACK_LAUNCHER
 act=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c "$category" -p "$pkg" | tr -d '\r' | tail -n 1)
-[[ "$act" == "$pkg/"* ]] || fail "cannot resolve the validation launcher"
+[[ "$act" =~ ^com\.hantekllc\.iptvrs\.validation/[A-Za-z0-9_.$]+$ ]] || fail "cannot resolve the validation launcher"
 adb shell am start -W -n "$act" -a android.intent.action.MAIN -c "$category" >/dev/null
 expect 'iptv startup: fonts registered' 60
 # The last start-up step: until then a slow emulator may drop keys.

@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import runpy
+import signal
 import subprocess
 import sys
 import time
@@ -48,11 +49,20 @@ def run(serial, apk):
     out = Path(os.environ["IPTV_SMOKE_OUT"])
     out.mkdir(parents=True, exist_ok=True)
     checks = dict.fromkeys(("launch", "playlist_import", "playback", "pip", "backup_restore", "recording"), "pending")
-    report = {"schema": 1, "checks": checks, "entry_point": "Android launcher intent"}
+    report = {"schema": 1, "checks": checks, "entry_point": "Android launcher intent", "result": "incomplete"}
+    def capture_logs():
+        crashes = adb("logcat", "-d", "-b", "crash")
+        with (out / "crash.log").open("a") as log:
+            log.write(crashes + "\n")
+        with (out / "app.log").open("a") as log:
+            log.write(adb("logcat", "-d", "-s", "nsh:I") + "\n")
+        adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-c")
+        if "FATAL EXCEPTION" in crashes or "Fatal signal" in crashes:
+            raise RuntimeError("release crashed; inspect retained evidence")
     try:
         # No uninstall/clear/run-as: the containing runner already wiped its
         # private copy, and never gives this helper a personal/device profile.
-        adb("install", "-r", apk)
+        adb("install", apk)
         adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-c")
         # pm reports a valid absent feature with exit status 1 on some images.
         query = subprocess.run(["adb", "-s", serial, "shell", "pm", "has-feature", "android.software.leanback"],
@@ -65,7 +75,12 @@ def run(serial, apk):
         category = "android.intent.category." + ("LEANBACK_LAUNCHER" if feature == "true" else "LAUNCHER")
         report["launcher_category"] = category
         adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
-        adb("shell", "wm", "dismiss-keyguard")
+        try:
+            adb("shell", "wm", "dismiss-keyguard")
+        except subprocess.CalledProcessError:
+            # TV profiles can lack a keyguard. Launcher/resumed checks below
+            # still require the actual Patina activity to reach the foreground.
+            pass
         resolved = adb("shell", "cmd", "package", "resolve-activity", "--brief", "-a",
                        "android.intent.action.MAIN", "-c", category, "-p", PACKAGE).splitlines()[-1]
         if not re.fullmatch(re.escape(PACKAGE) + r"/[A-Za-z0-9_.$]+", resolved):
@@ -94,24 +109,52 @@ def run(serial, apk):
             subprocess.run(["adb", "-s", serial, "exec-out", "screencap", "-p"],
                            check=True, stdout=screenshot, timeout=30)
         print("Release launch passed; remaining acceptance journeys pending. Evidence: " + str(out), flush=True)
-        hold = int(os.environ.get("IPTV_SMOKE_HOLD", "0"))
+        hold = int(os.environ.get("IPTV_SMOKE_HOLD") or "0")
+        hold_file = Path(os.environ["IPTV_SMOKE_HOLD_FILE"]) if os.environ.get("IPTV_SMOKE_HOLD_FILE") else None
+        if hold_file is not None:
+            hold_file.unlink(missing_ok=True)
         until = time.monotonic() + hold
+        next_capture = time.monotonic()
         while time.monotonic() < until:
+            check_alive(serial, resolved)
+            if time.monotonic() >= next_capture:
+                capture_logs()
+                next_capture = time.monotonic() + 30
+            if hold_file is not None and hold_file.exists():
+                break
             time.sleep(min(5, until - time.monotonic()))
-        crashes = adb("logcat", "-d", "-b", "crash")
-        (out / "crash.log").write_text(crashes)
-        (out / "app.log").write_text(adb("logcat", "-d", "-s", "nsh:I"))
-        if "FATAL EXCEPTION" in crashes or "Fatal signal" in crashes:
-            raise RuntimeError("release crashed; inspect retained evidence")
+        capture_logs()
         check_alive(serial, resolved)
-    except subprocess.CalledProcessError as error:
-        (out / "command-failure.log").write_text(str(error.stdout or "") + str(error.stderr or ""))
+        report["result"] = "launch-passed-journeys-pending"
+    except BaseException as error:
+        report["result"] = "failed"
+        checks["launch"] = "failed"
+        if isinstance(error, subprocess.CalledProcessError):
+            (out / "command-failure.log").write_text(str(error.stdout or "") + str(error.stderr or ""))
+        try:
+            with (out / "failure.png").open("wb") as screenshot:
+                subprocess.run(["adb", "-s", serial, "exec-out", "screencap", "-p"],
+                               check=True, stdout=screenshot, timeout=30)
+        except (OSError, subprocess.SubprocessError) as screenshot_error:
+            report["screenshot_error"] = type(screenshot_error).__name__
         raise
     finally:
-        (out / "release-checklist.json").write_text(json.dumps(report, indent=2) + "\n")
+        try:
+            capture_logs()
+        except (OSError, subprocess.SubprocessError, RuntimeError) as error:
+            report["diagnostics_error"] = type(error).__name__
+            if report["result"] != "failed":
+                report["result"] = "failed"
+                checks["launch"] = "failed"
+                raise
+        finally:
+            (out / "release-checklist.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
 if __name__ == "__main__":
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt("release validation interrupted")
+    signal.signal(signal.SIGTERM, interrupted)
     if len(sys.argv) != 3:
         raise SystemExit("supply the runner's explicit emulator serial and release APK")
     run(*sys.argv[1:])

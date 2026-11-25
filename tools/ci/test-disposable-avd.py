@@ -2,6 +2,7 @@
 """Disposable profile ownership, path boundaries and interruption cleanup."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import subprocess
@@ -214,6 +215,70 @@ class Profiles(unittest.TestCase):
                 a.boot_config(boot_root, self.scratch, boot_token, boot_name, "emulator", 5580)
         self.assert_original()
         a.cleanup(root, self.scratch, token)
+
+
+class ReleaseLauncher(unittest.TestCase):
+    def launch(self, feature="false", alive=True, crash=""):
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        environment = {"IPTV_SMOKE_OUT": str(root), "IPTV_SMOKE_DISPOSABLE_AVD": "patina-validation-synthetic",
+                       "IPTV_SMOKE_HOLD": ""}
+        self.enterContext(patch.dict(os.environ, environment, clear=True))
+        calls = []
+        component = a.RELEASE_PACKAGE + "/.host.TvActivity"
+        def adb(serial, *args):
+            calls.append(args)
+            if args == ("emu", "avd", "name"):
+                return environment["IPTV_SMOKE_DISPOSABLE_AVD"]
+            if args[:3] == ("shell", "cmd", "package"):
+                return component
+            if args[:3] == ("shell", "am", "start"):
+                return "Status: ok"
+            if args[:2] == ("shell", "pidof"):
+                return "123" if alive else ""
+            if args[:3] == ("shell", "dumpsys", "activity"):
+                return "mResumedActivity: ActivityRecord{ " + component + " }"
+            if args == ("logcat", "-d", "-s", "nsh:I"):
+                return "iptv startup: fonts registered\niptv pip: supported"
+            if args == ("logcat", "-d", "-b", "crash"):
+                return crash
+            return ""
+        def command(args, **kwargs):
+            if "has-feature" in args:
+                return subprocess.CompletedProcess(args, 0 if feature == "true" else 1, feature)
+            return subprocess.CompletedProcess(args, 0, "")
+        self.enterContext(patch.dict(RELEASE["AVD"], {"adb": adb}))
+        self.enterContext(patch.object(subprocess, "check_output", side_effect=[a.RELEASE_PACKAGE, "false"]))
+        self.enterContext(patch.object(subprocess, "run", side_effect=command))
+        return root, calls
+
+    def test_release_launcher_categories_and_empty_hold_preserve_pending_journeys(self):
+        for feature, category in (("false", "LAUNCHER"), ("true", "LEANBACK_LAUNCHER")):
+            with self.subTest(feature=feature):
+                root, calls = self.launch(feature)
+                RELEASE["run"]("emulator-5580", "synthetic.apk")
+                report = json.loads((root / "release-checklist.json").read_text())
+                self.assertTrue(report["launcher_category"].endswith("." + category))
+                self.assertEqual(report["result"], "launch-passed-journeys-pending")
+                self.assertEqual(report["checks"]["playlist_import"], "pending")
+                self.assertIn(("install", "synthetic.apk"), calls)
+
+    def test_startup_logs_followed_by_missing_process_retain_failed_report_and_logs(self):
+        root, _ = self.launch(alive=False)
+        with self.assertRaisesRegex(RuntimeError, "process is not running"):
+            RELEASE["run"]("emulator-5580", "synthetic.apk")
+        report = json.loads((root / "release-checklist.json").read_text())
+        self.assertEqual(report["result"], "failed")
+        self.assertEqual(report["checks"]["launch"], "failed")
+        for name in ("app.log", "crash.log", "failure.png"):
+            self.assertTrue((root / name).is_file())
+
+    def test_fatal_crash_cannot_leave_a_passing_checklist(self):
+        root, _ = self.launch(crash="FATAL EXCEPTION synthetic")
+        with self.assertRaisesRegex(RuntimeError, "release crashed"):
+            RELEASE["run"]("emulator-5580", "synthetic.apk")
+        report = json.loads((root / "release-checklist.json").read_text())
+        self.assertEqual(report["result"], "failed")
+        self.assertEqual(report["checks"]["launch"], "failed")
 
 
 if __name__ == "__main__":
