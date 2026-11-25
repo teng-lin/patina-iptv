@@ -78,6 +78,8 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Pin the macOS Android resource compiler used by local Android validation.
+
 - Keep interrupted and overlapping video touches from leaving a channel-swipe
   preview behind or starting a new swipe before all fingers lift.
 
