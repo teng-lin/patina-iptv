@@ -14,8 +14,8 @@
 //! - The connected input: a hardware keyboard or a D-pad. A desktop has a
 //!   keyboard and a browser TV its remote, from the build; Android's
 //!   activity reports `Configuration.keyboard` and `navigation`, again on
-//!   each configuration change. iPadOS's `GCKeyboard` is not read yet
-//!   ([`ipad_input_unreported`]).
+//!   each configuration change. iPadOS reports `GCKeyboard` on mount and
+//!   whenever its connect or disconnect notifications arrive.
 //! - The video decoders the device runs at once, where its host measures
 //!   them: Android's activity reports its hardware H.264 decoder's
 //!   instance limit (`MediaCodecInfo.CodecCapabilities`), which can only
@@ -39,14 +39,6 @@ use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 
 use crate::layout::Class;
-
-/// An iPad's connected input, until iPadOS's `GCKeyboard` is read: its
-/// platform's default (no keyboard, no D-pad). Reading it, and following
-/// its connect and disconnect notifications, needs the GameController
-/// framework, which nothing this app builds with binds yet.
-fn ipad_input_unreported() -> Input {
-    iptv_core::capabilities::Platform::Ipad.input()
-}
 
 /// What the host reported: nothing until it does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -97,9 +89,8 @@ pub fn recommended() -> Recommended {
 
 /// Whether assistive technology that moves through the controls at its
 /// own pace runs now (reactive): a screen reader (TalkBack, VoiceOver,
-/// Narrator, Orca, as NSH reports it) or Android's Switch Access. Panels
-/// then stay until the viewer hides them rather than on a timer. iPadOS's
-/// Switch Control is not reported yet (NSH reads VoiceOver only).
+/// Narrator, Orca, as NSH reports it), Android's Switch Access or iPadOS's
+/// Switch Control. Panels then stay until the viewer hides them.
 pub fn assistive() -> bool {
     screen_reader() || accessibility().switch_access
 }
@@ -119,7 +110,6 @@ pub fn host() -> Host {
             Idiom::Mac => FormFactor::Desktop,
             _ => FormFactor::Tablet,
         };
-        host.input = ipad_input_unreported();
     }
     let report = reported.get();
     if let Some(form_factor) = report.form_factor {
@@ -189,10 +179,11 @@ pub fn current() -> Device {
     }
 }
 
-/// Whether the native observer reports here: on Android, and in the
+/// Whether the native observer reports here: on Android, iPadOS, and in the
 /// headless scenarios that simulate it (`tests/app/device_signals.rs`).
 fn observed() -> bool {
     crate::host::ANDROID
+        || crate::host::IPAD
         || (cfg!(feature = "test-support")
             && std::env::var_os("IPTV_TEST_DEVICE_SIGNALS").is_some())
 }
@@ -237,7 +228,7 @@ fn parse_accessibility(data: &nsh_core::JsonValue, before: Accessibility) -> Acc
 }
 
 /// Keeps the device's reports for [`host`] and [`recommended`]: on
-/// Android, a zero-size native view (`tv.device`, `DeviceComponent.kt`)
+/// Android and iPadOS, a zero-size native view (`tv.device`, `DeviceComponent.kt`)
 /// that reports the form factor and the input when it attaches and on
 /// every configuration change, and the accessibility settings when it
 /// attaches and whenever they change. Mount once, in the main window's

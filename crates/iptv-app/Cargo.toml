@@ -86,8 +86,11 @@ nsh-platform-macos.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 nsh-platform-ios.workspace = true
+objc2 = "0.6.5"
+block2 = "0.6.2"
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIView", "UIResponder", "UIAccessibility"] }
 # Native backup-exclusion values used by platform_data on device and simulator.
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSError", "NSString", "NSURL", "NSValue"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSError", "NSString", "NSURL", "NSValue", "NSNotification", "NSOperation", "NSObject", "block2"] }
 
 [dev-dependencies]
 iptv-store-sqlite.workspace = true
