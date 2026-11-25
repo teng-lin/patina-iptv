@@ -166,7 +166,8 @@ fn opens(seen: &Shared) -> Vec<(String, u64)> {
 fn observe_native_workers(app: &mut Headless) {
     assert!(app.clock().is_manual());
     let at = app.clock().now();
-    let until = std::time::Instant::now() + Duration::from_millis(300);
+    let until =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_millis(300));
     while std::time::Instant::now() < until {
         std::thread::sleep(Duration::from_millis(10));
         app.catch_up();
@@ -516,6 +517,11 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.press("id:play-bar-play-pause"));
     assert_eq!(seen.lock().unwrap().props["paused"], false);
     assert_eq!(sources(&seen), movie);
+    assert_eq!(
+        opens(&seen),
+        movie_opened,
+        "pause/play does not reopen the movie"
+    );
     step(app.run_for(idle));
     assert!(
         bounds(&app, "play-bar-back").is_none(),
