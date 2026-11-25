@@ -72,21 +72,11 @@ impl Ui {
                 self.show_playing();
             }
             ProgramSelection::Live => browse_playback::select(*self),
-            ProgramSelection::Replay
-                if external_player::maybe_open(*self, channel, Some(program)) => {}
             ProgramSelection::Replay => {
-                if !allow_guide_channel(channel) {
-                    return;
-                }
-                self.play(
-                    channel,
-                    Playback::CatchUp {
-                        start: program.start,
-                        offset: 0,
-                    },
-                );
-                self.mode.apply(crate::mode::Action::EnterFullscreen);
-                self.show_playing();
+                let list = self.list.with_untracked(|list| {
+                    iptv_presentation::lists::ListId::of(list.entry(), &*crate::runtime_owner::schedule())
+                });
+                crate::archive_playback::select(*self, list, channel, program, false);
             }
             ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
                 let origin = Origin {

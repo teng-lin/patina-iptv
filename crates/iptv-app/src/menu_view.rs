@@ -473,7 +473,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         | MenuItem::Description
         | MenuItem::StartFromBeginning => {
             if let Some(origin) = program_origin(&target) {
-                perform_program(ui, item, origin);
+                perform_program(ui, item, origin, list);
             }
         }
         MenuItem::WatchInNewWindow => {
@@ -625,7 +625,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     }
 }
 
-fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
+fn perform_program(ui: Ui, item: MenuItem, origin: Origin, list: ListId) {
     match item {
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
         MenuItem::StopRecording | MenuItem::CancelRecording => {
@@ -645,15 +645,7 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
             {
                 return;
             }
-            ui.play(
-                origin.channel,
-                crate::Playback::CatchUp {
-                    start: origin.program_start,
-                    offset: 0,
-                },
-            );
-            ui.mode.apply(crate::mode::Action::EnterFullscreen);
-            ui.show_playing();
+            crate::archive_playback::select(ui, list, origin.channel, program);
         }
         _ => {}
     }

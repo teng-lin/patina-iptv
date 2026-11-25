@@ -250,6 +250,24 @@ pub fn cancel_pending(ui: Ui) {
 }
 
 pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
+    open_from(ui, channel, archive, None)
+}
+
+/// False means this valid archive choice should use the internal player.
+/// A stale choice is consumed here, never converted to internal playback.
+pub(crate) fn open_archive(ui: Ui, choice: Rc<crate::archive_playback::Choice>) -> bool {
+    let Some((channel, program)) = choice.resolve(ui) else {
+        return true;
+    };
+    open_from(ui, channel, Some(program), Some(choice))
+}
+
+fn open_from(
+    ui: Ui,
+    channel: usize,
+    archive: Option<Program>,
+    choice: Option<Rc<crate::archive_playback::Choice>>,
+) -> bool {
     if !host::EXTERNAL_PLAYER || ui.player_surface != 0 {
         return false;
     }
@@ -258,7 +276,7 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
     };
     let schedule = crate::runtime_owner::schedule();
     if !schedule.group_channels(group_index).contains(&channel) {
-        return false;
+        return choice.is_some();
     }
     // The player chosen for this group may have been removed since: the
     // caller plays the channel here instead, and the viewer may turn the
@@ -272,21 +290,21 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
     }
     let owner = crate::runtime_owner::runtime();
     let Some(target) = crate::parental_view::live_target(ui, channel) else {
-        return false;
+        return choice.is_some();
     };
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*schedule, channel) else {
-        return false;
+        return choice.is_some();
     };
     let Some(authority) = epg.resolution_authority(local) else {
-        return false;
+        return choice.is_some();
     };
     let Some((_, group_id)) =
         crate::data::combined::owner(&owner, &schedule.group_key(group_index))
     else {
-        return false;
+        return choice.is_some();
     };
     let Some(channel_key) = schedule.channel_key(channel) else {
-        return false;
+        return choice.is_some();
     };
     if !crate::player::allow_guide_channel(channel) {
         return true;
@@ -296,6 +314,8 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
     let epoch = schedule.epoch_unix();
     let epg_offset = epg.epg_offset_minutes(local);
     let expected = authority.clone();
+    let guarded = choice.clone();
+    let archive_choice = choice.is_some();
     let resolve = move || {
         let schedule = crate::runtime_owner::schedule();
         let channel = schedule.find_channel(&channel_key)?;
@@ -305,13 +325,35 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
         {
             return None;
         }
-        let archive = archive.map(|p| {
-            let offset = epg.minute(epoch);
-            Program {
-                start: p.start + offset,
-                end: p.end + offset,
+        let (archive, clock) = if let Some(choice) = &choice {
+            let (selected, program) = choice.resolve(ui)?;
+            if selected != channel {
+                return None;
             }
-        });
+            let clock = crate::runtime::playback::clock(
+                crate::time::wall_unix(),
+                Some(crate::guide::unix_of(&*schedule, program.start)),
+            );
+            let offset = epg.minute(schedule.epoch_unix());
+            (
+                Some(Program {
+                    start: program.start + offset,
+                    end: program.end + offset,
+                }),
+                clock,
+            )
+        } else {
+            (
+                archive.map(|p| {
+                    let offset = epg.minute(epoch);
+                    Program {
+                        start: p.start + offset,
+                        end: p.end + offset,
+                    }
+                }),
+                clock,
+            )
+        };
         Some((epg.resolve(local, archive, clock), epg.shared_playback()))
     };
     cancel_pending(ui);
@@ -320,8 +362,13 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
     let current = move || {
         ui.external_request.get_untracked() == ticket
             && group(ui).is_some_and(|(now, _)| now == list)
+            && guarded
+                .as_ref()
+                .is_none_or(|choice| choice.resolve(ui).is_some())
     };
-    crate::parental_view::request(ui, target.clone(), move || {
+    let before_prompt = current.clone();
+    let protected = target.clone();
+    let admitted = move || {
         if !current() {
             return;
         }
@@ -463,7 +510,13 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                 }
             }
         });
-    });
+    };
+    crate::parental_view::request_if(
+        ui,
+        protected,
+        move || !archive_choice || before_prompt(),
+        admitted,
+    );
     true
 }
 
