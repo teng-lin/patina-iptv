@@ -404,7 +404,7 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         .child(
             text(move || {
                 ui.guide_data();
-                let s = crate::schedule();
+                let s = crate::runtime_owner::schedule();
                 let unix = crate::guide::unix_of(&*s, ui.focus.with(|f| f.now));
                 date_time(
                     unix,

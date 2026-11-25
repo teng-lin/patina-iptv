@@ -184,7 +184,7 @@ pub(crate) fn zap_target(ui: Ui, step: isize) -> Option<usize> {
         |channel| list.row_of(channel),
         || ui.focus.with(|f| f.channel),
     );
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     zap_from_list(&*catalog, &list, from, step, |channel| {
         catalog.channel_block(channel) == iptv_core::organization::Block::None
     })

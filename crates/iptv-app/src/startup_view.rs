@@ -101,7 +101,7 @@ fn controls(ui: crate::Ui) -> Option<Recovery> {
 
 fn select_recovery(ui: crate::Ui, action: RecoveryAction) {
     if change_controls(ui, |controls| controls.select(action)) {
-        crate::runtime::data::retry_startup(&crate::runtime());
+        crate::runtime::data::retry_startup(&crate::runtime_owner::runtime());
     }
 }
 

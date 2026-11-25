@@ -12,7 +12,7 @@ pub fn bind(ui: Ui) {
     });
     let _menu = set_timeout(Duration::from_secs(4), move || {
         ui.mode.apply(crate::mode::Action::WalkthroughPreview);
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_SECOND_KEY")
             .ok()
             .and_then(|key| schedule.find_channel(&key))
@@ -27,7 +27,7 @@ pub fn bind(ui: Ui) {
     });
     let _next_menu = set_timeout(Duration::from_secs(14), move || {
         ui.mode.apply(crate::mode::Action::WalkthroughPreview);
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_THIRD_KEY")
             .ok()
             .and_then(|key| schedule.find_channel(&key))

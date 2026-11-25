@@ -33,7 +33,7 @@ pub struct Early {
 /// screen when it may resume and resolves from the store alone. False
 /// when it does not start (the guide's arrival resumes it, if anything).
 pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
-    let generation = crate::runtime().browser_generation();
+    let generation = crate::runtime_owner::runtime().browser_generation();
     if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
@@ -51,7 +51,9 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     };
     let id = stored.id;
     let content = ContentId::from_stored(key.clone());
-    let row = match crate::runtime::commands::channel(&crate::runtime(), id, content).await {
+    let row = match crate::runtime::commands::channel(&crate::runtime_owner::runtime(), id, content)
+        .await
+    {
         Ok(Some(row)) if !row.blocked => row,
         Ok(_) => return false,
         Err(e) => {
@@ -59,7 +61,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
             return false;
         }
     };
-    if crate::runtime().browser_generation() != generation
+    if crate::runtime_owner::runtime().browser_generation() != generation
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
         || ui.player.recorded.with_untracked(Option::is_some)
@@ -72,7 +74,7 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         Resolution::Play(source) => source,
         Resolution::StalkerLink(_) | Resolution::Unavailable(_) => return false,
     };
-    if !crate::runtime().reserve_live_viewing(0, stored.id, &key) {
+    if !crate::runtime_owner::runtime().reserve_live_viewing(0, stored.id, &key) {
         return false;
     }
     log::info!("iptv player: resuming the last channel before the guide");
@@ -113,14 +115,16 @@ pub fn adopt(ui: Ui) -> bool {
         return false;
     };
     let main = ui.player.main();
-    let Some(channel) = crate::schedule().find_channel(&early.key) else {
+    let Some(channel) = crate::runtime_owner::schedule().find_channel(&early.key) else {
         log::info!("iptv player: the early channel is not in the guide; stopping");
         ui.player.early.set(None);
         super::stop(ui);
         ui.mode.apply(crate::mode::Action::ReturnToBrowse);
         return true;
     };
-    if crate::schedule().channel_block(channel) != iptv_core::organization::Block::None {
+    if crate::runtime_owner::schedule().channel_block(channel)
+        != iptv_core::organization::Block::None
+    {
         super::stop(ui);
         ui.mode.apply(crate::mode::Action::ReturnToBrowse);
         return true;

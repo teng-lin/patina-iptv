@@ -203,7 +203,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
         ui.app.guide_pages.get();
         settled.with(|p| {
             let (_, _, _, ch, p) = (*p)?;
-            let schedule = crate::schedule();
+            let schedule = crate::runtime_owner::schedule();
             program_description(&*schedule, ch, p)
         })
     });
@@ -217,7 +217,7 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     let single_playlist = computed(move || {
         ui.app.library.version.get();
         let shown = ui.app.library.shown.get()?;
-        crate::runtime::data::library::playlists(&crate::runtime())
+        crate::runtime::data::library::playlists(&crate::runtime_owner::runtime())
             .ok()?
             .into_iter()
             .find(|playlist| playlist.id == shown)
@@ -230,7 +230,11 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
             || (String::new(), String::new()),
             |channel| {
                 single_playlist.with(|playlist| {
-                    channel_labels(&*crate::schedule(), channel, playlist.as_deref())
+                    channel_labels(
+                        &*crate::runtime_owner::schedule(),
+                        channel,
+                        playlist.as_deref(),
+                    )
                 })
             },
         )
@@ -283,7 +287,9 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
                     text(move || {
                         program.with(|p| {
                             p.map_or_else(String::new, |(_, _, _, ch, p)| {
-                                crate::listing_labels::listing(crate::schedule().listing(ch, p))
+                                crate::listing_labels::listing(
+                                    crate::runtime_owner::schedule().listing(ch, p),
+                                )
                             })
                         })
                     })

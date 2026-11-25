@@ -82,10 +82,10 @@ pub fn open_shelf(ui: Ui, shelf: Shelf) {
 
 pub fn close(ui: Ui) {
     if ui.player.vod.with_untracked(Option::is_none) {
-        crate::runtime().parental_content_closed();
+        crate::runtime_owner::runtime().parental_content_closed();
     }
     // A shelf page or focus lookup still being read is no longer wanted.
-    crate::runtime().vod_discovery_cancel();
+    crate::runtime_owner::runtime().vod_discovery_cancel();
     ui.vod.update(|s| {
         s.open = false;
         s.handoff = iptv_presentation::vod::Handoff::None;
@@ -127,7 +127,7 @@ pub fn returns_to(ui: Ui) -> Option<Kind> {
 
 pub fn back(ui: Ui) -> bool {
     if ui.player.vod.with_untracked(Option::is_none) {
-        crate::runtime().parental_content_closed();
+        crate::runtime_owner::runtime().parental_content_closed();
     }
     let (closed, refresh, end) = edit(ui, |s| {
         let pending = s.busy;
@@ -154,7 +154,7 @@ pub fn back(ui: Ui) -> bool {
     });
     crate::parental_view::enforce(ui);
     if closed {
-        crate::runtime().vod_discovery_cancel();
+        crate::runtime_owner::runtime().vod_discovery_cancel();
     } else if refresh {
         load(ui, false, Some(end));
     }
@@ -200,7 +200,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
             through,
         )
     });
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     crate::data::spawn_in_app(async move {
         // A queued host task may first run after Back or another shelf.
         // Do not start work (or supersede the newer read's token) then.
@@ -288,7 +288,7 @@ fn load_previous(ui: Ui, step_up: bool) {
     }) else {
         return;
     };
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     crate::data::spawn_in_app(async move {
         if !ui
             .vod
@@ -370,7 +370,7 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
             return;
         }
         let generation = edit(ui, |s| s.begin_operation());
-        let owner = crate::runtime();
+        let owner = crate::runtime_owner::runtime();
         crate::data::spawn_in_app(async move {
             // The preflight gives an immediate stale-action explanation.
             // The runtime also binds the credentials snapshot to this same
@@ -456,7 +456,7 @@ fn select(ui: Ui, key: Key) {
             .is_some_and(|(p, _)| p.parent.as_ref().unwrap_or(&p.key) == &key)
     });
     if !same {
-        crate::runtime().parental_content_closed();
+        crate::runtime_owner::runtime().parental_content_closed();
     }
     let generation = ui.vod.with_untracked(|s| s.generation);
     crate::parental_view::request(ui, iptv_runtime::vod::target(&key), move || {
@@ -474,7 +474,7 @@ fn select_authorized(ui: Ui, key: Key) {
         s.focused = Some(key.clone());
         s.begin_operation()
     });
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.vod_details(key.clone()).await;
         ui.vod.update(|s| {
@@ -554,7 +554,7 @@ fn play_authorized(
         incarnation: details.incarnation.clone(),
     };
     let series = details.item.key.clone();
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     crate::data::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
         // The episode that ended, its next one not played after all.
@@ -605,7 +605,7 @@ fn play_authorized(
                 if full_screen {
                     // The screen waits under the player: Back from the
                     // title returns to its details (`return_from_player`).
-                    crate::runtime().vod_discovery_cancel();
+                    crate::runtime_owner::runtime().vod_discovery_cancel();
                     ui.vod.update(|s| s.hand_to_player());
                 }
             }
@@ -641,7 +641,7 @@ fn toggle_block(ui: Ui) {
             .as_ref()
             .map(|d| iptv_runtime::vod::target(&d.item.key))
     }) {
-        let blocked = !crate::runtime().parental_explicitly_blocked(&target);
+        let blocked = !crate::runtime_owner::runtime().parental_explicitly_blocked(&target);
         crate::parental_view::block(ui, target, blocked);
     }
 }
@@ -881,10 +881,10 @@ pub fn observe(ui: Ui, position_ms: u64, duration_ms: Option<u64>, ended: bool) 
         }
     });
     if let Some((key, parent, progress, incarnation)) = write {
-        crate::runtime().queue_vod_progress(key, parent, progress, incarnation);
+        crate::runtime_owner::runtime().queue_vod_progress(key, parent, progress, incarnation);
     }
     if let Some((parent, incarnation)) = series_complete {
-        crate::runtime().queue_vod_progress(
+        crate::runtime_owner::runtime().queue_vod_progress(
             parent,
             None,
             Progress {
@@ -983,7 +983,7 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     // advance its generation) leaves the next episode waiting.
     let generation = ui.vod.with_untracked(|s| s.generation);
     crate::data::spawn_in_app(async move {
-        let owner = crate::runtime();
+        let owner = crate::runtime_owner::runtime();
         let allowed = owner
             .parental_check(&iptv_runtime::vod::target(&series))
             .await
@@ -1344,7 +1344,8 @@ fn has_next(ui: Ui) -> bool {
 fn block_label(ui: Ui) -> &'static str {
     let blocked = ui.vod.with(|s| {
         s.details.as_ref().is_some_and(|d| {
-            crate::runtime().parental_explicitly_blocked(&iptv_runtime::vod::target(&d.item.key))
+            crate::runtime_owner::runtime()
+                .parental_explicitly_blocked(&iptv_runtime::vod::target(&d.item.key))
         })
     });
     if blocked {

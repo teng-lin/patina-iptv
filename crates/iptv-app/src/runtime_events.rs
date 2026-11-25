@@ -23,7 +23,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::CatalogChanged => {
             ui.app.data_version.update(|version| *version += 1);
             crate::data::spawn_in_app(async move {
-                let _ = crate::runtime().parental_refresh().await;
+                let _ = crate::runtime_owner::runtime().parental_refresh().await;
                 crate::parental_view::enforce(ui);
             });
         }
@@ -149,7 +149,7 @@ fn schedule_changed(
             ui.app.data_version.update(|version| *version += 1);
         }
     });
-    debug_assert!(Rc::ptr_eq(&current, &crate::schedule()));
+    debug_assert!(Rc::ptr_eq(&current, &crate::runtime_owner::schedule()));
 }
 
 /// UI context supplied to the runtime's foreground scheduling hint.
@@ -161,5 +161,5 @@ pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
 /// account's connection limit (`device_wiring.rs`'s test seam).
 #[cfg(feature = "test-support")]
 pub(crate) fn account_streams_reported(limit: Option<u32>) {
-    crate::runtime().emit(RuntimeEvent::AccountStreams(limit));
+    crate::runtime_owner::runtime().emit(RuntimeEvent::AccountStreams(limit));
 }

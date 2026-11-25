@@ -262,7 +262,7 @@ mod tests {
         if let Some(parent) = std::env::var_os(CHILD) {
             let parent = PathBuf::from(parent);
             let directory = parent.join("fresh-profile");
-            assert!(!crate::has_runtime());
+            assert!(!crate::runtime_owner::has_runtime());
             assert!(install_test_data_dir(directory.clone()).is_err());
             assert!(
                 !directory.exists(),
@@ -277,7 +277,7 @@ mod tests {
             install_test_data_dir(directory.clone()).unwrap();
             assert_eq!(resolve_data_dir().unwrap(), directory);
             assert!(
-                !crate::has_runtime(),
+                !crate::runtime_owner::has_runtime(),
                 "installation does not construct an owner"
             );
             assert!(install_test_data_dir(parent.join("late-profile")).is_err());
@@ -353,7 +353,7 @@ mod tests {
                 assert_ne!(message, "Private app storage is unavailable");
             }
             app.wait_for(&format!("text:{message}")).unwrap();
-            assert!(!crate::has_runtime());
+            assert!(!crate::runtime_owner::has_runtime());
             std::fs::write(std::env::var_os(RAN).unwrap(), b"storage error shown").unwrap();
             return;
         }

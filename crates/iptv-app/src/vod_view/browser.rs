@@ -705,7 +705,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         let (Some(key), generation) = preview.get() else {
             return;
         };
-        let owner = crate::runtime();
+        let owner = crate::runtime_owner::runtime();
         let cancel = iptv_import::CancelToken::new();
         let on_drop = cancel.clone();
         cleanup(move || on_drop.cancel());

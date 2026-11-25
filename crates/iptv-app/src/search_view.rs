@@ -184,11 +184,11 @@ fn epg(schedule: &dyn Schedule) -> Option<&EpgSchedule> {
 /// Unix time of guide minute 0, for converting result times to guide
 /// minutes (the same epoch the guide and its clock labels use).
 fn guide_epoch() -> UnixTime {
-    crate::schedule().epoch_unix()
+    crate::runtime_owner::schedule().epoch_unix()
 }
 
 fn load_history() -> SearchHistory {
-    let list = crate::runtime().search_history();
+    let list = crate::runtime_owner::runtime().search_history();
     SearchHistory::from_list(list, SearchHistory::DEFAULT_CAPACITY)
 }
 
@@ -202,9 +202,10 @@ pub(crate) fn load_saved_history(ui: Ui) {
 
 pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
     let revision = ui.search_history_revision.get_untracked();
-    crate::runtime().clear_loaded_search_history();
+    crate::runtime_owner::runtime().clear_loaded_search_history();
     let legacy = crate::data::data_dir().join(LEGACY_HISTORY_FILE);
-    let loaded = crate::runtime::commands::load_search_history(&crate::runtime(), legacy);
+    let loaded =
+        crate::runtime::commands::load_search_history(&crate::runtime_owner::runtime(), legacy);
     async move {
         let list = match loaded.await {
             Ok(list) => list,
@@ -226,7 +227,7 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
                 }
             });
         }
-        crate::runtime().install_search_history(list);
+        crate::runtime_owner::runtime().install_search_history(list);
     }
 }
 
@@ -234,10 +235,10 @@ pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output =
 pub(crate) fn clear_history(ui: Ui) {
     ui.search_history_revision.update(|revision| *revision += 1);
     let saved = crate::runtime::commands::clear_search_history(
-        &crate::runtime(),
+        &crate::runtime_owner::runtime(),
         crate::data::data_dir().join(LEGACY_HISTORY_FILE),
     );
-    crate::runtime().install_search_history(Vec::new());
+    crate::runtime_owner::runtime().install_search_history(Vec::new());
     ui.search.update(|screen| {
         if let Some(screen) = screen {
             *screen.state.history_mut() = SearchHistory::default();
@@ -253,7 +254,7 @@ pub(crate) fn clear_history(ui: Ui) {
 }
 
 fn save_history(ui: Ui) {
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     // An initial or recovery read can fail independently of later writes.
     // Keep the saved entries if the screen could not load them.
     if !owner.search_history_loaded() {
@@ -292,8 +293,8 @@ fn set_programs(ui: Ui, status: ProgramSearch) {
 /// EPG), so the screen shows first.
 fn prepare(ui: Ui) {
     let version = ui.app.data_version.get_untracked();
-    let schedule = crate::schedule();
-    crate::runtime().prepare_search_channels(version, &*schedule);
+    let schedule = crate::runtime_owner::schedule();
+    crate::runtime_owner::runtime().prepare_search_channels(version, &*schedule);
     if epg(&*schedule).is_none()
         && schedule
             .as_any()
@@ -303,7 +304,7 @@ fn prepare(ui: Ui) {
         set_programs(ui, ProgramSearch::Unavailable);
         return;
     }
-    if crate::runtime().has_program_index() {
+    if crate::runtime_owner::runtime().has_program_index() {
         set_programs(ui, ProgramSearch::Ready);
         return;
     }
@@ -313,14 +314,14 @@ fn prepare(ui: Ui) {
     // closes. A timer that finds the index built does nothing.
     crate::data::spawn_in_app(async move {
         timer(Duration::from_millis(30)).await;
-        let wanted = crate::runtime().begin_program_index(version);
-        let schedule = crate::schedule();
+        let wanted = crate::runtime_owner::runtime().begin_program_index(version);
+        let schedule = crate::runtime_owner::schedule();
         if !wanted {
             return;
         }
         let t = Instant::now();
         program_index::build(&*schedule, schedule.channel_count(), move |index| {
-            let current = crate::runtime().finish_program_index(version);
+            let current = crate::runtime_owner::runtime().finish_program_index(version);
             if !current || ui.search.with_untracked(Option::is_none) {
                 return;
             }
@@ -338,7 +339,7 @@ fn prepare(ui: Ui) {
                 index.program_count(),
                 t.elapsed().as_millis()
             );
-            crate::runtime().install_program_index(index);
+            crate::runtime_owner::runtime().install_program_index(index);
             set_programs(ui, ProgramSearch::Ready);
             search_again(ui);
         });
@@ -348,13 +349,13 @@ fn prepare(ui: Ui) {
 /// Runs both searches for `query` now and hands the results to the state.
 fn run_search(ui: Ui, query: &str) {
     let favorites = ui.app.favorites.get_untracked();
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let days = |c: usize| schedule.catchup_days(c);
     let visible = |c: usize| !schedule.channel_hidden(c);
     let past_without_replay = ui
         .search
         .with_untracked(|s| s.as_ref().is_some_and(|s| s.state.past_without_replay()));
-    let mut channels = crate::runtime().search_channels(
+    let mut channels = crate::runtime_owner::runtime().search_channels(
         query,
         &favorites,
         ChannelSearchOptions {
@@ -374,10 +375,15 @@ fn run_search(ui: Ui, query: &str) {
         limit: LIMIT,
         ..Default::default()
     };
-    let mut programs =
-        crate::runtime().search_programs(query, crate::clock::wall_unix(), &*schedule, opts);
+    let mut programs = crate::runtime_owner::runtime().search_programs(
+        query,
+        crate::clock::wall_unix(),
+        &*schedule,
+        opts,
+    );
     channels.retain_mut(|hit| {
-        let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
+        let Some(channel) =
+            resolve_result_channel(&crate::runtime_owner::runtime(), &hit.identity, &*schedule)
         else {
             return false;
         };
@@ -385,7 +391,8 @@ fn run_search(ui: Ui, query: &str) {
         true
     });
     programs.retain_mut(|hit| {
-        let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
+        let Some(channel) =
+            resolve_result_channel(&crate::runtime_owner::runtime(), &hit.identity, &*schedule)
         else {
             return false;
         };
@@ -416,10 +423,10 @@ fn search_again(ui: Ui) {
 /// search hides the recent searches, and a timer owned by the tapped row
 /// would go with it (the search never ran).
 fn debounce(ui: Ui, query: String) {
-    let ticket = crate::runtime().begin_search();
+    let ticket = crate::runtime_owner::runtime().begin_search();
     crate::data::spawn_in_app(async move {
         timer(DEBOUNCE).await;
-        if crate::runtime().search_is_current(ticket) {
+        if crate::runtime_owner::runtime().search_is_current(ticket) {
             run_search(ui, &query);
         }
     });
@@ -464,7 +471,7 @@ pub fn close(ui: Ui) {
         crate::multiview::list_closed(ui);
     }
     save_history(ui);
-    crate::runtime().release_program_index();
+    crate::runtime_owner::runtime().release_program_index();
     ui.search.set(None);
     crate::input::dismiss_keyboard();
 }
@@ -531,8 +538,9 @@ fn choose(ui: Ui, id: ResultId) {
                 .cloned()
         })
     });
-    let schedule = crate::schedule();
-    let channel = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule);
+    let schedule = crate::runtime_owner::schedule();
+    let channel =
+        resolve_result_channel(&crate::runtime_owner::runtime(), id.channel(), &*schedule);
     match select_result(&id, hit.as_ref(), channel, ResultPolicy::Guide) {
         Outcome::Live(channel) => watch(ui, channel, Playback::Live),
         Outcome::CatchUp { channel, start } => {

@@ -82,13 +82,13 @@ pub fn offer_on(ui: Ui, device: Device) -> MultiviewOffer {
 fn account_streams(ui: Ui) -> Option<u32> {
     ui.app.account_streams.get().or_else(|| {
         let channel = ui.playing.get()?;
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         let all = schedule
             .as_any()?
             .downcast_ref::<iptv_guide::combined::CombinedSchedule>()?;
         let (source, _) = all.channel_source(channel)?;
         crate::data::combined::connection_limit(
-            &crate::runtime(),
+            &crate::runtime_owner::runtime(),
             crate::runtime::model::SourceId(source.id),
         )
     })
@@ -144,12 +144,12 @@ const HINT_MS: u64 = 5_000;
 /// The streams the shown source's account allows at once, if known: the
 /// failure card names it when the provider refuses a stream.
 pub fn account_limit() -> Option<u32> {
-    crate::runtime().account_limit()
+    crate::runtime_owner::runtime().account_limit()
 }
 
 /// The source on screen changed its account's allowance (`data.rs`).
 pub fn set_account_streams(allowed: Option<u32>) {
-    crate::runtime().update_account_limit(allowed);
+    crate::runtime_owner::runtime().update_account_limit(allowed);
 }
 
 /// A multiview session exists (its grid shows, or it waits for a detour).
@@ -260,7 +260,7 @@ pub fn open(ui: Ui) {
     crate::channels_view::close(ui);
     let limits = Limits {
         decoders: untracked(|| tiles(ui)),
-        connections: crate::runtime().account_limit(),
+        connections: crate::runtime_owner::runtime().account_limit(),
     };
     log::info!(
         "iptv multiview: open (device {} streams, account {:?})",
@@ -367,7 +367,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
         return false;
     }
     log::info!("iptv multiview: picked {channel}");
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let all = schedule
         .as_any()
         .and_then(|s| s.downcast_ref::<iptv_guide::combined::CombinedSchedule>());
@@ -375,7 +375,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
         let exceeded = all.and_then(|all| {
             let (source, _) = all.channel_source(channel)?;
             let allowed = crate::data::combined::connection_limit(
-                &crate::runtime(),
+                &crate::runtime_owner::runtime(),
                 crate::runtime::model::SourceId(source.id),
             )?;
             let replacing = match m.pick() {

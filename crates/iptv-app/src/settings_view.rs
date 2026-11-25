@@ -143,7 +143,7 @@ impl Notice {
 pub fn open(ui: Ui) {
     if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
             open(ui)
@@ -160,7 +160,7 @@ pub fn open(ui: Ui) {
 }
 
 pub fn close(ui: Ui) {
-    crate::runtime().parental_content_closed();
+    crate::runtime_owner::runtime().parental_content_closed();
     if let Some(page) = ui
         .settings_screen
         .with_untracked(|s| s.as_ref().map(|s| s.page().key))
@@ -243,8 +243,8 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
             if (key.starts_with("parental.")
                 || crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
                     == "blocked_content_and_settings")
-                && (!crate::runtime().parental_has_pin()
-                    || !crate::runtime().parental_settings_allowed())
+                && (!crate::runtime_owner::runtime().parental_has_pin()
+                    || !crate::runtime_owner::runtime().parental_settings_allowed())
             {
                 crate::parental_view::protected_settings(ui, move || {
                     if let Err(e) = crate::settings::set(key, value) {
@@ -286,7 +286,7 @@ fn run(ui: Ui, key: &'static str) {
     if key != "parental.change_pin"
         && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
             == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::protected_settings(ui, move || run(ui, key));
         return;
@@ -294,7 +294,7 @@ fn run(ui: Ui, key: &'static str) {
     match key {
         "history.clear" => {
             crate::player::watch_time::reset(ui);
-            let owner = crate::runtime();
+            let owner = crate::runtime_owner::runtime();
             let saved = owner.clear_watch_history();
             ui.player
                 .history
@@ -325,19 +325,21 @@ fn run(ui: Ui, key: &'static str) {
         ),
         "general.restore" => crate::backup::request_restore(ui),
         "epg.update_now" => {
-            if stored::update_now(&crate::runtime(), move || refresh(ui)) {
+            if stored::update_now(&crate::runtime_owner::runtime(), move || refresh(ui)) {
                 refresh(ui);
             } else {
                 notify(tr("This playlist has no guide source switched on"));
             }
         }
         // The combined view chooses a playlist before opening its Guide data.
-        "epg.manage_sources" | "epg.add_source" => match crate::runtime().shown_source() {
-            Some(playlist) => crate::epg_sources_view::open(ui, playlist),
-            None => crate::playlists_view::open(ui),
-        },
+        "epg.manage_sources" | "epg.add_source" => {
+            match crate::runtime_owner::runtime().shown_source() {
+                Some(playlist) => crate::epg_sources_view::open(ui, playlist),
+                None => crate::playlists_view::open(ui),
+            }
+        }
         "epg.clear" => {
-            let cleared = stored::clear(&crate::runtime(), move |deleted| {
+            let cleared = stored::clear(&crate::runtime_owner::runtime(), move |deleted| {
                 notify(if deleted {
                     tr("Guide data deleted")
                 } else {
@@ -410,10 +412,10 @@ fn lit_page(page: &Page) -> bool {
 /// What a command row shows on its right.
 fn command_value(key: &str) -> String {
     match key {
-        "general.restore" if crate::runtime().restore_is_pending() => {
+        "general.restore" if crate::runtime_owner::runtime().restore_is_pending() => {
             tr("Scheduled for next launch").to_owned()
         }
-        "epg.update_now" => match crate::runtime().guide_status() {
+        "epg.update_now" => match crate::runtime_owner::runtime().guide_status() {
             GuideStatus::NoSource => tr("No playlist").to_owned(),
             GuideStatus::Updating => tr("Updating…").to_owned(),
             GuideStatus::Empty => tr("Not downloaded").to_owned(),
@@ -449,13 +451,13 @@ fn command_value(key: &str) -> String {
 /// The "Guide sources" row's value: how many, switched on, and failed at
 /// their last download.
 fn sources_value() -> String {
-    let sources = crate::runtime().shown_sources();
+    let sources = crate::runtime_owner::runtime().shown_sources();
     if sources.is_empty() {
         return tr("No enabled playlist").to_owned();
     }
     let lines: Vec<_> = sources
         .into_iter()
-        .flat_map(|source| crate::runtime().source_lines(source))
+        .flat_map(|source| crate::runtime_owner::runtime().source_lines(source))
         .collect();
     let on = lines.iter().filter(|l| l.source.enabled).count();
     let failed = lines

@@ -166,7 +166,7 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
         ui.guide_data();
         let now = ui.focus.with(|f| f.now);
         let shown = pan.band().base + MARGIN + PAST;
-        let unix = crate::guide::unix_of(&*crate::schedule(), shown);
+        let unix = crate::guide::unix_of(&*crate::runtime_owner::schedule(), shown);
         format!(
             "{}  {}",
             iptv_presentation::clock::date(

@@ -39,7 +39,7 @@ const RESTART_NOTE: &str = crate::i18n::key(
 
 pub(crate) fn export_ui() {
     crate::data::spawn_in_app(async move {
-        let Some(busy) = crate::runtime().begin_backup() else {
+        let Some(busy) = crate::runtime_owner::runtime().begin_backup() else {
             return;
         };
         let answer = nsh_base::alert_dialog()
@@ -161,7 +161,7 @@ pub(crate) fn offered(key: &str) -> bool {
     let pickers = pickers();
     match key {
         "general.backup" => pickers.create,
-        _ => pickers.open || crate::runtime().restore_is_pending(),
+        _ => pickers.open || crate::runtime_owner::runtime().restore_is_pending(),
     }
 }
 
@@ -181,11 +181,11 @@ pub(crate) fn request_restore(ui: crate::Ui) {
 
 fn restore_ui(ui: crate::Ui) {
     crate::data::spawn_in_app(async move {
-        let Some(busy) = crate::runtime().begin_backup() else {
+        let Some(busy) = crate::runtime_owner::runtime().begin_backup() else {
             return;
         };
         let root = crate::data::data_dir();
-        if crate::runtime().restore_is_pending() {
+        if crate::runtime_owner::runtime().restore_is_pending() {
             let dialog = nsh_base::alert_dialog()
                 .title(tr("Restore scheduled"))
                 .description(tr(PENDING_NOTE))

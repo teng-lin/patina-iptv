@@ -61,7 +61,7 @@ pub fn bind(ui: Ui) {
             return;
         }
         let recording = reason != nsh_core::desktop::CloseReason::System
-            && crate::runtime().recording_background_needed();
+            && crate::runtime_owner::runtime().recording_background_needed();
         // Windows and Linux ask first, so no recorder runs without a
         // window (#275); macOS keeps recording with its Dock icon and asks
         // on Quit.
@@ -90,7 +90,7 @@ pub fn bind(ui: Ui) {
         if QUITTING.with(Cell::get) {
             return;
         }
-        if crate::runtime().recording_background_needed() {
+        if crate::runtime_owner::runtime().recording_background_needed() {
             quit_confirm::open(ui);
         } else {
             quit(ui);
@@ -113,7 +113,7 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
     if QUITTING.with(|quitting| quitting.replace(true)) {
         return;
     }
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     crate::data::spawn_in_app(async move {
         // Every job still to record: with scheduling retired (#273), each
         // is a Record now, running or waiting for a connection.
@@ -389,7 +389,7 @@ thread_local! {
 
 /// Explicit quit preserves future recording intent but stops the native host.
 pub(crate) fn quit(ui: Ui) {
-    if crate::runtime().shutdown_recording_host() {
+    if crate::runtime_owner::runtime().shutdown_recording_host() {
         crate::player::watch_time::flush(ui);
         with_window(WindowRef::close);
         // The window may be hidden (macOS), and closing it alone would

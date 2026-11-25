@@ -370,7 +370,7 @@ fn row(
         ui.guide_data();
         let base = pan.band().base;
         channel.get().map_or_else(Vec::new, |ch| {
-            crate::schedule().programs_between(ch, base, pan.minutes())
+            crate::runtime_owner::schedule().programs_between(ch, base, pan.minutes())
         })
     });
     // The focused program's start when this row has the focus (a memo

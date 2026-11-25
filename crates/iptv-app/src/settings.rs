@@ -60,16 +60,16 @@ pub fn text_factor() -> f32 {
 
 /// The effective settings of the shell's application owner.
 pub fn get() -> Arc<Settings> {
-    crate::runtime().settings()
+    crate::runtime_owner::runtime().settings()
 }
 
 pub use crate::runtime::settings::{SaveError, add_user_agent};
 /// Loads the saved settings (startup).
 pub fn load() {
-    crate::runtime().load_settings();
+    crate::runtime_owner::runtime().load_settings();
 }
 pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
-    crate::runtime().set_setting(key, value)
+    crate::runtime_owner::runtime().set_setting(key, value)
 }
 
 pub fn flag(key: iptv_settings::keys::BoolKey) -> bool {

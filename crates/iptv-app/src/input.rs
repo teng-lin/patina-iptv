@@ -1008,7 +1008,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            let combined = crate::data::combined::active(&crate::runtime());
+            let combined = crate::data::combined::active(&crate::runtime_owner::runtime());
             if (key == RemoteKey::Menu && !combined && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
                     && ui.app.library.shown.get_untracked().is_none()
@@ -1074,8 +1074,10 @@ mod tests {
     #[component]
     fn PendingHandoff() -> impl IntoElement {
         let directory = tempfile::tempdir().unwrap();
-        let runtime = Rc::new(crate::new_runtime(directory.path().to_owned()));
-        let ui = crate::with_runtime(runtime, || {
+        let runtime = Rc::new(crate::runtime_owner::new_runtime(
+            directory.path().to_owned(),
+        ));
+        let ui = crate::runtime_owner::with_runtime(runtime, || {
             Ui::new(crate::SharedUi::new(), crate::player::Player::new())
         });
         crate::external_player::cancel_pending(ui);

@@ -112,6 +112,9 @@ mod playlists_view;
 mod rail;
 mod remote_editor;
 mod runtime_events;
+mod runtime_owner;
+use runtime_owner::runtime;
+pub use runtime_owner::schedule;
 mod scale;
 mod search_view;
 mod seek;
@@ -146,7 +149,6 @@ use nsh_core::time::Instant;
 use std::time::Duration;
 
 use guide::{Focus, Pane, Program, ProgramSelection, Schedule};
-use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -562,7 +564,7 @@ impl Ui {
                 .get_untracked()
                 .and_then(|old| parental_view::live_target(*self, old))
         {
-            crate::runtime().parental_content_left(&old);
+            crate::runtime_owner::runtime().parental_content_left(&old);
         }
         if !parental_view::allow_play(*self, channel, playback) {
             return;
@@ -587,7 +589,7 @@ impl Ui {
         crate::on_demand::flush(*self, false);
         self.player.vod.set(None);
         self.player.recorded.set(None);
-        crate::runtime().close_recording_playback();
+        crate::runtime_owner::runtime().close_recording_playback();
         self.pending_zap.set(None);
         self.browse_playback.set(Default::default());
         self.playback.set(playback);
@@ -677,82 +679,6 @@ impl Ui {
     }
 }
 
-thread_local! {
-    /// The application owner this thread's shell code is working for: the
-    /// root's, or, while a task accepted by an earlier root is polled, that
-    /// task's ([`in_runtime`]). The runtime crate keeps no such handle of its
-    /// own; every call into it is given this one.
-    static RUNTIME: RefCell<Option<Rc<runtime::Runtime>>> = const { RefCell::new(None) };
-}
-
-/// The shell owns one application handle; all library state belongs to it.
-///
-/// Application-thread code only. A player, JNI or worker thread holds no
-/// handle and must be given what it needs; once a root exists, asking for
-/// the handle elsewhere is a bug, not a reason to build a second owner.
-pub(crate) fn runtime() -> Rc<runtime::Runtime> {
-    RUNTIME.with(|runtime| {
-        runtime
-            .borrow_mut()
-            .get_or_insert_with(|| {
-                // Pre-root shell tests may construct an owner. Once a root
-                // exists, callbacks must dispatch to its shell thread; a second
-                // dormant owner would silently fork state in release builds.
-                assert!(
-                    !ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire),
-                    "the application handle was requested off the application thread"
-                );
-                let directory = host::resolve_data_dir()
-                    .expect("private storage must be resolved before using runtime services");
-                Rc::new(new_runtime(directory))
-            })
-            .clone()
-    })
-}
-
-/// An application root installed its owner in this process. Only a guard
-/// against asking for the handle on another thread; it selects no owner.
-static ROOT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Whether an application owner exists (none before storage is resolved).
-pub(crate) fn has_runtime() -> bool {
-    RUNTIME.with(|runtime| runtime.borrow().is_some())
-}
-
-/// Runs `run` with `owner` as the shell's handle, then puts the previous
-/// one back (also when `run` unwinds).
-pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() -> R) -> R {
-    struct Restore(Option<Rc<runtime::Runtime>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RUNTIME.set(self.0.take());
-        }
-    }
-    let _restore = Restore(RUNTIME.replace(Some(owner)));
-    run()
-}
-
-pub(crate) fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
-    runtime::Runtime::new(host::ports(directory))
-}
-
-/// A local task always polls with the owner that accepted it, also after
-/// the root (and with it the shell's handle) was recreated.
-pub(crate) fn in_runtime(
-    future: impl std::future::Future<Output = ()> + 'static,
-) -> impl std::future::Future<Output = ()> {
-    let owner = runtime();
-    let mut future = Box::pin(future);
-    std::future::poll_fn(move |context| {
-        with_runtime(owner.clone(), || future.as_mut().poll(context))
-    })
-}
-
-/// The guide data in use (synthetic until a playlist is imported).
-pub fn schedule() -> Rc<dyn Schedule> {
-    runtime().schedule()
-}
-
 /// Whether `program` on `channel` is inside the channel's catch-up window
 /// at guide minute `now`.
 pub fn in_archive(channel: usize, program: Program, now: i32) -> bool {
@@ -790,10 +716,9 @@ pub fn App() -> impl IntoElement {
     // This root's owner becomes the shell's handle, and the one the host's
     // stop callback flushes. Only a root does this: constructing a runtime
     // elsewhere changes neither.
-    let owner = Rc::new(new_runtime(directory));
+    let owner = Rc::new(runtime_owner::new_runtime(directory));
     host::flush_on_host_stop(owner.host_handle());
-    RUNTIME.set(Some(owner));
-    ROOT_STARTED.store(true, std::sync::atomic::Ordering::Release);
+    runtime_owner::install_root(owner);
     if let Err(error) = runtime().lock_storage() {
         let message = error.message();
         return view()

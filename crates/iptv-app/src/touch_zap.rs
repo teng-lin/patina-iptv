@@ -422,7 +422,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
                             text(move || {
                                 ui.guide_data();
                                 let channel = channel();
-                                let schedule = crate::schedule();
+                                let schedule = crate::runtime_owner::schedule();
                                 let now = ui.focus.with(|f| f.now);
                                 crate::listing_labels::listing(
                                     schedule.listing(channel, schedule.program_at(channel, now)),

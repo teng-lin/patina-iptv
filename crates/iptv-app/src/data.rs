@@ -25,13 +25,13 @@ thread_local! {
 /// container, or
 /// `~/.local/share/iptv-rs` on the other desktops.
 pub fn data_dir() -> PathBuf {
-    crate::runtime().data_dir().to_owned()
+    crate::runtime_owner::runtime().data_dir().to_owned()
 }
 
 /// Runs `future` on the UI thread under the app's root owner.
 pub fn spawn_in_app(future: impl Future<Output = ()> + 'static) {
     let owner = APP_OWNER.with(Cell::get).unwrap_or_else(Owner::current);
-    let future = crate::in_runtime(future);
+    let future = crate::runtime_owner::in_runtime(future);
     owner.run(move || {
         // Dropping the handle detaches the task; it lives with the owner.
         drop(spawn(future));
@@ -42,9 +42,9 @@ pub fn spawn_in_app(future: impl Future<Output = ()> + 'static) {
 /// otherwise refresh the active source or open the wizard.
 pub fn start(ui: Ui) {
     APP_OWNER.with(|o| o.set(Some(Owner::current())));
-    crate::runtime().bind_tasks(spawn_in_app, |duration| Box::pin(timer(duration)));
-    crate::runtime().bind(move |event| crate::runtime_events::apply(ui, event));
-    crate::runtime().start_services();
+    crate::runtime_owner::runtime().bind_tasks(spawn_in_app, |duration| Box::pin(timer(duration)));
+    crate::runtime_owner::runtime().bind(move |event| crate::runtime_events::apply(ui, event));
+    crate::runtime_owner::runtime().start_services();
     crate::recordings_view::bind(ui);
     // NSH drops cleanup callbacks without invoking them when the entire Rust
     // runtime exits. Capture an RAII guard so both owner disposal and runtime
@@ -52,8 +52,8 @@ pub fn start(ui: Ui) {
     struct Drain(Rc<crate::runtime::Runtime>);
     impl Drop for Drain {
         fn drop(&mut self) {
-            crate::with_runtime(self.0.clone(), || {
-                if !crate::runtime().flush_files(Duration::from_secs(5)) {
+            crate::runtime_owner::with_runtime(self.0.clone(), || {
+                if !crate::runtime_owner::runtime().flush_files(Duration::from_secs(5)) {
                     log::error!("iptv persistence: queued file writes did not finish at shutdown");
                 }
                 if !crate::favorites::flush_on_shutdown() {
@@ -61,13 +61,13 @@ pub fn start(ui: Ui) {
                         "iptv persistence: queued favorite changes could not be saved at shutdown"
                     );
                 }
-                if !crate::runtime().drain_services() {
+                if !crate::runtime_owner::runtime().drain_services() {
                     log::error!("iptv persistence: store did not drain at shutdown");
                 }
             });
         }
     }
-    let drain = Drain(crate::runtime());
+    let drain = Drain(crate::runtime_owner::runtime());
     nsh_core::prelude::cleanup(move || drop(drain));
     // In the background the system may end the process without a teardown:
     // a zap or a settings change made just before must already be on disk.
@@ -79,25 +79,25 @@ pub fn start(ui: Ui) {
         let target = crate::host::EXTERNAL_PLAYER
             .then(|| crate::external_player::handoff_target(ui))
             .flatten();
-        crate::runtime().set_foreground_for_external(!background, target.as_ref());
+        crate::runtime_owner::runtime().set_foreground_for_external(!background, target.as_ref());
         if was_background.replace(background) && !background && crate::host::ANDROID {
             crate::external_player::returned(ui);
         }
-        if background && !crate::runtime().flush_files(Duration::from_secs(2)) {
+        if background && !crate::runtime_owner::runtime().flush_files(Duration::from_secs(2)) {
             log::warn!("iptv persistence: queued file writes did not finish in the background");
         }
     });
     APP_OWNER.with(|o| o.set(Some(Owner::current())));
     stored::bind(ui);
     crate::search_view::load_saved_history(ui);
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     owner.bind_browser(move || crate::runtime::BrowserState {
         focused_key: crate::runtime_events::focused_channel(ui)
-            .and_then(|channel| crate::schedule().channel_key(channel)),
+            .and_then(|channel| crate::runtime_owner::schedule().channel_key(channel)),
         playing: ui.playing.get_untracked().is_some(),
     });
     spawn_in_app(async move {
-        let owner = crate::runtime();
+        let owner = crate::runtime_owner::runtime();
         let _ = owner.parental_refresh().await;
         crate::runtime::data::start(&owner);
         crate::parental_view::bind(ui);

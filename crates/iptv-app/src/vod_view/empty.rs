@@ -25,7 +25,9 @@ fn problem(kind: ImportErrorKind) -> ImportProblem {
 fn sources(ui: Ui, kind: Kind) -> Vec<SourceVod> {
     ui.app.library.version.get();
     let settings = crate::settings_wiring::read(ui);
-    let playlists = crate::runtime().playlists().unwrap_or_default();
+    let playlists = crate::runtime_owner::runtime()
+        .playlists()
+        .unwrap_or_default();
     ui.app.library.activity.with(|activity| {
         playlists
             .iter()
@@ -168,7 +170,7 @@ pub(super) fn run(ui: Ui) {
             crate::playlists_view::open_on_demand(ui, SourceId(id));
         }
         EmptyAction::Retry(id) | EmptyAction::Refresh(id) => {
-            crate::data::refresh(&crate::runtime(), SourceId(id));
+            crate::data::refresh(&crate::runtime_owner::runtime(), SourceId(id));
         }
     }
 }

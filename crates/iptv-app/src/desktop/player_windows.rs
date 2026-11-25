@@ -16,7 +16,7 @@ pub fn can_open(ui: Ui, channel: usize) -> bool {
     {
         return false;
     }
-    let Some(key) = crate::schedule().channel_key(channel) else {
+    let Some(key) = crate::runtime_owner::schedule().channel_key(channel) else {
         return false;
     };
     if ui
@@ -35,7 +35,7 @@ pub fn open(ui: Ui, channel: usize) {
     if !can_open(ui, channel) {
         return;
     }
-    let Some(key) = crate::schedule().channel_key(channel) else {
+    let Some(key) = crate::runtime_owner::schedule().channel_key(channel) else {
         return;
     };
     if ui
@@ -89,12 +89,12 @@ fn follow_clock(
 }
 
 fn follow_lists(local: Ui) {
-    let catalog = std::cell::RefCell::new(crate::schedule());
+    let catalog = std::cell::RefCell::new(crate::runtime_owner::schedule());
     effect(move || {
         local.app.data_version.get();
         local.app.list_version.get();
         untracked(|| {
-            let next = crate::schedule();
+            let next = crate::runtime_owner::schedule();
             let previous = catalog.replace(next.clone());
             if !std::rc::Rc::ptr_eq(&previous, &next) {
                 let kept = crate::lists::keep_in(local, previous);
@@ -145,7 +145,7 @@ pub fn bind(ui: Ui) {
         ui.app.data_version.get();
         untracked(|| {
             let sessions = ui.player_windows.with(|w| w.sessions().to_vec());
-            let schedule = crate::schedule();
+            let schedule = crate::runtime_owner::schedule();
             for session in sessions {
                 match schedule.find_channel(&session.channel) {
                     Some(channel) => ui.player.stream(session.surface).channel.set(Some(channel)),

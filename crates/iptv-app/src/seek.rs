@@ -62,7 +62,7 @@ fn program(ui: Ui) -> Option<(i32, i32, i32)> {
     let Playback::CatchUp { start, offset } = ui.playback.get_untracked() else {
         return None;
     };
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let p = schedule.program_at(channel, start);
     let length = (p.end - p.start) * 60;
     let aired = crate::clock::wall_unix() - crate::guide::unix_of(&*schedule, p.start);
@@ -84,7 +84,7 @@ pub fn elapsed(ui: Ui) -> Option<(i32, i32)> {
         return None;
     };
     let channel = ui.playing.get()?;
-    let p = crate::schedule().program_at(channel, start);
+    let p = crate::runtime_owner::schedule().program_at(channel, start);
     let length = (p.end - p.start) * 60;
     let at = ui.seek_target.get().unwrap_or_else(|| {
         let played = i32::try_from(ui.player.main().position_ms.get() / 1000).unwrap_or(i32::MAX);

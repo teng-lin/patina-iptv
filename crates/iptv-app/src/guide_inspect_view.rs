@@ -125,7 +125,7 @@ fn audit(ui: Ui, next: bool) {
         if next {
             query.cursor = screen.next;
         }
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .epg_audit(query, screen.window, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -154,7 +154,7 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
         if next {
             query.cursor = screen.next;
         }
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .epg_candidates(subject.clone(), query, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -164,7 +164,7 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
             Ok(page) => {
                 let mut query = Query::source(screen.source);
                 query.limit = 5;
-                let programs = crate::runtime()
+                let programs = crate::runtime_owner::runtime()
                     .query_programs(query, screen.window, Some(subject.clone()), control.clone())
                     .await;
                 if !current(ui, id, &control) {
@@ -197,13 +197,15 @@ fn inspect_link(ui: Ui) {
             source: screen.source,
             target: ProbeTarget::Supplied(iptv_providers::SecretUrl::new(screen.link)),
         };
-        let result = crate::runtime().probe_feed(request, control.clone()).await;
+        let result = crate::runtime_owner::runtime()
+            .probe_feed(request, control.clone())
+            .await;
         if !current(ui, id, &control) {
             return;
         }
         match result {
             Ok(stage) => {
-                let page = crate::runtime()
+                let page = crate::runtime_owner::runtime()
                     .probe_candidates(
                         stage.evidence.clone(),
                         String::new(),
@@ -242,7 +244,7 @@ fn staged_candidates(ui: Ui) {
     };
     crate::data::spawn_in_app(async move {
         let after = screen.next;
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .probe_candidates(stage.evidence, screen.query, after, 50, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -271,7 +273,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
         }) {
             Ok(stage)
         } else {
-            crate::runtime()
+            crate::runtime_owner::runtime()
                 .probe_feed(
                     ProbeRequest {
                         source: screen.source,
@@ -292,7 +294,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
             }
         };
         let selected = candidate.clone();
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .probe_schedule(
                 stage.evidence.clone(),
                 candidate,

@@ -146,7 +146,7 @@ pub(super) fn cell(
             (Some(ch), Some(p)) => format!(
                 "{}{}",
                 crate::recordings_view::badge(ui, ch, p),
-                crate::listing_labels::listing(crate::schedule().listing(ch, p))
+                crate::listing_labels::listing(crate::runtime_owner::schedule().listing(ch, p))
             ),
             _ => String::new(),
         }
