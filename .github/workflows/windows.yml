@@ -11,6 +11,14 @@ on:
         type: choice
         default: full
         options: [full, native]
+      focus_menu:
+        description: Run only the existing synthetic menu scenario for issue 340
+        type: boolean
+        default: false
+      repetitions:
+        description: Focused scenario repetitions, an integer from 1 to 50
+        type: number
+        default: 20
 
 permissions:
   contents: read
@@ -44,7 +52,45 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Source preparation tests failed.' }
           python tools/mpv-runtime/test_package.py
           if ($LASTEXITCODE -ne 0) { throw 'Runtime packaging tests failed.' }
+      - name: Repeat the existing synthetic menu scenario
+        if: github.event_name == 'workflow_dispatch' && inputs.focus_menu
+        shell: pwsh
+        env:
+          IPTV_TEST_WAIT_SCALE: '2'
+          MENU_REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $count = 0
+          if (![int]::TryParse($env:MENU_REPETITIONS, [ref]$count) -or $count -lt 1 -or $count -gt 50) {
+            throw 'Focused repetitions must be an integer from 1 to 50.'
+          }
+          $head = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the source revision.' }
+          $nsh = git -C ../nsh-patina rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the NSH revision.' }
+          python tools/ci/pins.py check-nsh
+          if ($LASTEXITCODE -ne 0) { throw 'NSH does not match nsh.rev.' }
+          $runtime = Get-Content -Raw tools/mpv-runtime/runtime.json | ConvertFrom-Json
+          $dll = Get-FileHash target/mpv/libmpv-2.dll -Algorithm SHA256
+          Write-Host "Source=$head NSH=$nsh"
+          Write-Host "Runner=$env:RUNNER_OS image=$env:ImageOS/$env:ImageVersion PowerShell=$($PSVersionTable.PSVersion)"
+          Write-Host "Runtime=$($runtime.tag) DLL-SHA256=$($dll.Hash)"
+          rustc --version
+          if ($LASTEXITCODE -ne 0) { throw 'Could not identify the Rust toolchain.' }
+          $env:PATH = "$(Resolve-Path target/mpv);$env:PATH"
+          $scenario = 'tv_shared_controls::touch_and_pointer_reach_the_menu_without_a_shortcut'
+          $testArgs = @('test', '--locked', '--timings', '-p', 'iptv-app', '--features', 'test-support', '--test', 'app', $scenario)
+          $listed = & cargo @testArgs -- --exact --list
+          if ($LASTEXITCODE -ne 0 -or $listed -notcontains "$($scenario): test") {
+            throw 'The exact existing menu scenario did not compile or was not listed.'
+          }
+          for ($iteration = 1; $iteration -le $count; $iteration++) {
+            Write-Host "Menu scenario iteration $iteration/$count at $head"
+            & cargo @testArgs -- --exact --nocapture
+            if ($LASTEXITCODE -ne 0) { throw "Menu scenario failed on iteration $iteration/$count." }
+          }
       - name: Test and build Windows app
+        if: github.event_name != 'workflow_dispatch' || !inputs.focus_menu
         shell: pwsh
         env:
           IPTV_TEST_WAIT_SCALE: '2'
