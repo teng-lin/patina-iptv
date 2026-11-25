@@ -64,6 +64,16 @@ impl Gesture {
                 _ => {}
             });
             if event.phase != nsh_core::TouchPhase::Start {
+                if matches!(
+                    event.phase,
+                    nsh_core::TouchPhase::End | nsh_core::TouchPhase::Cancel
+                ) {
+                    // The video's handler already processed its own lift.
+                    // A sibling's lift reaches only this ancestor, and must
+                    // also release the portable gesture's cancellation lock.
+                    let outcome = self.swipe.with(|swipe| swipe.cancel(point.id));
+                    apply(ui, outcome, point.page.y.0);
+                }
                 continue;
             }
             let outcome = self.swipe.with(|swipe| {
