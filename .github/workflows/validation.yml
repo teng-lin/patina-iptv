@@ -42,6 +42,7 @@ jobs:
       credentials: ${{ steps.select.outputs.credentials }}
       credentials_on_host: ${{ steps.select.outputs.credentials_on_host }}
       helpers_full: ${{ steps.select.outputs.helpers_full }}
+      actionlint: ${{ steps.select.outputs.actionlint }}
       windows: ${{ steps.select.outputs.windows }}
       android: ${{ steps.select.outputs.android }}
       android_package: ${{ steps.select.outputs.android_package }}
@@ -109,6 +110,18 @@ jobs:
           persist-credentials: false
       - name: Test tier selection and failure propagation
         run: python3 tools/ci/test-validation-plan.py
+      - name: Lint workflow definitions
+        if: needs.plan.outputs.actionlint == 'true'
+        timeout-minutes: 3
+        run: |
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          archive="$RUNNER_TEMP/actionlint/actionlint.tar.gz"
+          curl --fail --location --retry 3 --connect-timeout 15 --max-time 90 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP/actionlint" actionlint
+          "$RUNNER_TEMP/actionlint/actionlint" -shellcheck= -pyflakes=
       - name: Read the compiler and NSH pins
         if: needs.plan.outputs.helpers_full == 'true'
         id: pins
