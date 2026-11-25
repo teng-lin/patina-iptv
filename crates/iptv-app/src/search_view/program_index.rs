@@ -60,13 +60,14 @@ pub fn build(
         let keys: Vec<_> = (0..rows)
             .map_while(|c| epg.channel(c).map(|g| g.key.clone()))
             .collect();
-        let Some(source) = crate::runtime()
+        let Some(source) = crate::runtime_owner::runtime()
             .shown_source()
             .filter(|_| epg.loaded_from().is_some())
         else {
             let mut index = ProgramIndex::build(epg.store(), &keys);
             for channel in 0..rows {
-                if let Some(identity) = crate::runtime().search_channel_identity(schedule, channel)
+                if let Some(identity) =
+                    crate::runtime_owner::runtime().search_channel_identity(schedule, channel)
                 {
                     index.set_identity(channel, identity);
                 }
@@ -92,12 +93,12 @@ pub fn build(
     }
     let keep = crate::data::stored::stored_past_days();
     let padding = i64::from(iptv_core::organization::GROUP_EPG_OFFSET_MAX) * 60;
-    let from: UnixTime = crate::time::wall_unix()
+    let from: UnixTime = crate::clock::wall_unix()
         .saturating_sub(i64::from(keep).saturating_mul(DAY))
         .saturating_sub(padding);
     let started = Instant::now();
-    let read = crate::runtime().read_program_index(sources, rows, from);
-    crate::data::spawn_in_app(async move {
+    let read = crate::runtime_owner::runtime().read_program_index(sources, rows, from);
+    crate::tasks::spawn_in_app(async move {
         match read.await {
             Ok(index) => {
                 log::info!(

@@ -16,8 +16,8 @@ use super::{PANEL_ALPHA, WHITE, device_limit, with_state};
 use crate::fonts::{OSD_BADGE, OSD_DETAIL};
 use crate::i18n::tr;
 use crate::multiview;
-use crate::play_bar::icons::{self, Icon};
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
+use crate::ui_kit::icons::{self, Icon};
 use crate::{Ui, channel_name, tint};
 
 /// The toolbar's band at the top center (px): a tile's buttons keep out

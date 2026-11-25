@@ -1,7 +1,17 @@
 name: Windows package check
 on:
   workflow_call:
+    inputs:
+      repetitions:
+        description: Fresh synthetic installer smoke executions, stopping on the first failure
+        type: number
+        default: 1
   workflow_dispatch:
+    inputs:
+      repetitions:
+        description: Fresh synthetic installer smoke executions, stopping on the first failure
+        type: number
+        default: 1
 permissions:
   contents: read
   actions: read
@@ -26,9 +36,24 @@ jobs:
           features: cli
       - name: Build and exercise the installer
         shell: pwsh
+        env:
+          SMOKE_REPETITIONS: ${{ inputs.repetitions }}
         run: |
+          if ($env:SMOKE_REPETITIONS -notmatch '^[1-5]$') { throw 'Repetitions must be an integer from 1 to 5.' }
+          $count = [int]$env:SMOKE_REPETITIONS
           ./tools/package-windows.ps1
-          ./tools/ci/check-windows-package.ps1
+          for ($index = 1; $index -le $count; $index++) {
+            Write-Host "Synthetic installer smoke $index of $count at $env:GITHUB_SHA"
+            ./tools/ci/check-windows-package.ps1
+          }
+      - name: Synthetic first-launch close evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-close-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/windows-install-smoke/*/diagnostic-*
+          if-no-files-found: warn
+          retention-days: 7
       - name: Rust compilation and linking timings
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

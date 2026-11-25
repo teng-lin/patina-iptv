@@ -1376,6 +1376,7 @@ mod tests {
             |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x73; 32])),
             Arc::new(crate::native::network::NativeNetwork),
             Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+            crate::native::entropy,
         );
         let owner = Arc::new(Service::new(ports));
         assert!(Arc::ptr_eq(
@@ -1409,6 +1410,7 @@ mod tests {
             |_| Ok(iptv_store_sqlite::DatabaseKey::from_bytes([0x74; 32])),
             Arc::new(crate::native::network::NativeNetwork),
             Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+            crate::native::entropy,
         );
         let owner = Arc::new(Service::new(ports));
         owner.epochs.begin();

@@ -71,6 +71,7 @@ python3 tools/ci/test-check-parity.py
 python3 tools/ci/test-check-plan.py
 python3 tools/ci/test-layers.py
 python3 tools/ci/test-validation-plan.py
+python3 tools/ci/test-validation-timeline.py
 python3 tools/ci/test-fuzz-targets.py
 python3 tools/performance/test_journeys.py
 python3 tools/ci/test-disposable-avd.py
@@ -79,6 +80,8 @@ python3 tools/ci/test-release-contract.py
 python3 tools/ci/test-repeat-hls-fixtures.py
 python3 tools/ci/test-mock-server.py
 python3 tools/ci/test-validation-workflow.py
+python3 tools/ci/test-nightly-alert.py
 python3 tools/ci/test-dependency-candidate.py
+python3 tools/ci/test-candidate-handoff.py
 fi
 echo "all checks passed"

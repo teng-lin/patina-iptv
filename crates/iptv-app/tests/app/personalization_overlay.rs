@@ -71,6 +71,149 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }
 
+#[test]
+fn fullscreen_and_overlay_shortcuts_reuse_the_player_with_overlay_preferred() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, overlay(None), true);
+    let app = &mut f.app;
+    let id = player(app).id;
+    let wait_for_width = |app: &mut crate::headless::Headless, full_width| {
+        step(app.wait_until(
+            "the requested video layout",
+            Duration::from_secs(2),
+            |screen| {
+                screen
+                    .layout_nodes()
+                    .iter()
+                    .any(|node| node.id == id && (node.bounds.size.width.0 == 1920.0) == full_width)
+            },
+        ));
+    };
+    step(app.press_key("f"));
+    step(app.press_key("f"));
+    wait_for_width(app, false);
+    step(app.press_key("o"));
+    wait_for_width(app, true);
+    step(app.press_key("o"));
+    wait_for_width(app, false);
+    assert_eq!(player(app).id, id);
+}
+
+#[test]
+fn returning_from_a_compact_window_does_not_restore_a_forced_overlay() {
+    let Some(home) = isolated!() else { return };
+    let mut f = start(home, Settings::new(), true);
+    let app = &mut f.app;
+    let id = player(app).id;
+    let assert_width = |app: &mut crate::headless::Headless, width, full_width| {
+        step(app.wait_until(
+            "the resized video layout",
+            Duration::from_secs(2),
+            |screen| {
+                screen
+                    .layout_nodes()
+                    .iter()
+                    .any(|node| node.id == id && (node.bounds.size.width.0 == width) == full_width)
+            },
+        ));
+    };
+    step(app.press_key("o"));
+    assert_width(app, 1920.0, true);
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(400.0),
+        nsh_core::prelude::px(700.0),
+    )));
+    app.settle();
+    assert_width(app, 400.0, false);
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(1920.0),
+        nsh_core::prelude::px(1080.0),
+    )));
+    app.settle();
+    assert_width(app, 1920.0, false);
+    step(app.press_key("o"));
+    assert_width(app, 1920.0, true);
+    assert_eq!(player(app).id, id);
+}
+
+#[test]
+fn disabling_the_playing_playlist_keeps_the_overlay_and_player_surface() {
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source, SourceConfig},
+    };
+
+    let Some(home) = isolated!() else { return };
+    let mut f = personalization::launch_prepared(
+        home,
+        overlay(Some(true)),
+        true,
+        |path, first| {
+            let mut store = crate::isolated::open_database(path).unwrap();
+            let text = personalization::M3U.replace("Local ", "Second ");
+            let file = path.with_file_name("second.m3u");
+            std::fs::write(&file, &text).unwrap();
+            let source = store
+                .add_source(&Source {
+                    name: "Synthetic second playlist".into(),
+                    config: SourceConfig::M3u(M3uSourceConfig {
+                        location: SecretUrl::new(file.to_string_lossy()),
+                        user_agent: None,
+                        referrer: None,
+                    }),
+                })
+                .unwrap();
+            let catalog = iptv_providers::m3u::parse_m3u(&text);
+            store
+                .replace_catalog(source, &catalog.groups, &catalog.channels.items, &[], &[])
+                .unwrap();
+            store.set_active_source(first).unwrap();
+            store.set_all_playlists(false).unwrap();
+            store
+                .set_source_policy(
+                    source,
+                    iptv_store_sqlite::SourcePolicy {
+                        enabled: false,
+                        refresh_on_start: false,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut f.app;
+    step(app.open_guide_groups());
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.run_for(Duration::from_millis(500)));
+    step(
+        app.wait_until("the first playlist plays", Duration::from_secs(5), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    let id = player(app).id;
+
+    step(app.open_guide_groups());
+    step(app.press_key("left"));
+    step(app.press_key("left"));
+    step(app.press("text:Playlists >> nth=0"));
+    step(app.wait_for("text:Synthetic second playlist"));
+    step(app.press("text:Synthetic second playlist"));
+    step(app.wait_for("text:Playlist enabled: No"));
+    step(app.press("text:Playlist enabled: No"));
+    step(app.wait_for("text:Playlist enabled: Yes"));
+    step(app.back());
+    step(app.press("text:Synthetic personalization"));
+    step(app.wait_for("text:Playlist enabled: Yes"));
+    step(app.press("text:Playlist enabled: Yes"));
+    step(app.wait_for("id:guide-ui >> label:Second A"));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(player(app).id, id);
+    assert_eq!(player(app).bounds.size.width.0, 1920.0);
+}
+
 /// Back at the top level is the platform's (#277) in the overlay layout
 /// too: with nothing playing, the rail registers no Back handler, so
 /// Android leaves at once and shows its predictive back. A channel number

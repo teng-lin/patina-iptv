@@ -1,4 +1,5 @@
 //! Shell effects for an early cached playback start.
+use super::{ScheduleUpdate, commit_schedule};
 use crate::model::StoredSource;
 pub use crate::opening::Held;
 pub(crate) use crate::opening::send_stored;
@@ -9,8 +10,8 @@ use std::rc::Rc;
 /// Cold start with stored source `stored` (the store open): the guide's
 /// empty shell, and the last channel when it can start at once.
 pub async fn begin(owner: &Rc<crate::Runtime>, stored: &StoredSource) {
-    let shell = EpgSchedule::new(Vec::new(), GuideStore::default(), super::now_unix());
-    owner.emit(crate::RuntimeEvent::ScheduleReady(Rc::new(shell)));
+    let shell = EpgSchedule::new(Vec::new(), GuideStore::default(), crate::time::now_unix());
+    commit_schedule(owner, ScheduleUpdate::Catalog(Rc::new(shell)), || {});
     let (done, wait) = futures_channel::oneshot::channel();
     owner.emit(crate::RuntimeEvent::EarlyResume {
         source: Box::new(stored.clone()),

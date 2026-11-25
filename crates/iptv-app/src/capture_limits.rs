@@ -74,7 +74,7 @@ pub(crate) fn now() -> CaptureLimits {
 /// What the viewer is told as a capture starts on the device as it is
 /// now: the notices joined, or that it is starting.
 pub(crate) fn start_notice() -> String {
-    let host = nsh_core::prelude::untracked(crate::capabilities::host);
+    let host = nsh_core::prelude::untracked(crate::device::host);
     let notices = iptv_presentation::capabilities::record_now_notices(host, now());
     if notices.is_empty() {
         return crate::i18n::tr("Starting recording").to_owned();

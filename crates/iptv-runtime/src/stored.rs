@@ -637,7 +637,7 @@ pub(crate) async fn download_now(
     tx: &Sender<Msg>,
     cancel: &CancelToken,
 ) {
-    let now = super::imports::now_unix();
+    let now = crate::time::now_unix();
     let (groups, channels, overrides) = match matching_inputs(services, source) {
         Ok(inputs) => inputs,
         Err(e) => {

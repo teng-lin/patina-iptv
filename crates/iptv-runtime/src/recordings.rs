@@ -35,6 +35,30 @@ type PlaybackCompletion = (
     tokio::sync::oneshot::Receiver<()>,
 );
 
+/// Bounded, synthetic-only observations of the actual recording worker.
+#[cfg(feature = "test-support")]
+#[derive(Clone, Debug)]
+pub struct OperationObservation {
+    pub elapsed: Duration,
+    pub job: JobId,
+    pub phase: &'static str,
+}
+
+#[cfg(feature = "test-support")]
+struct OperationHistory {
+    started: std::time::Instant,
+    entries: std::collections::VecDeque<OperationObservation>,
+}
+#[cfg(feature = "test-support")]
+impl Default for OperationHistory {
+    fn default() -> Self {
+        Self {
+            started: std::time::Instant::now(),
+            entries: Default::default(),
+        }
+    }
+}
+
 // Captured before service/provider waits, checked again by the accepting writer.
 #[derive(Clone)]
 struct Admission {
@@ -277,11 +301,30 @@ pub(crate) struct State {
     #[cfg(all(test, feature = "test-support"))]
     account_refresh: Mutex<Option<Arc<crate::testing::GateState>>>,
     media_ops: tokio::sync::Mutex<()>,
+    #[cfg(feature = "test-support")]
+    operation_history: Mutex<OperationHistory>,
     #[cfg(test)]
     playback_completion: Mutex<Option<PlaybackCompletion>>,
     playback: Mutex<Option<(JobId, iptv_net::recording_file::RecordingFile)>>,
 }
 impl State {
+    #[cfg(feature = "test-support")]
+    fn observe_operation(&self, job: JobId, phase: &'static str) {
+        let mut history = self
+            .operation_history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let elapsed = history.started.elapsed();
+        if history.entries.len() == 64 {
+            history.entries.pop_front();
+        }
+        history.entries.push_back(OperationObservation {
+            elapsed,
+            job,
+            phase,
+        });
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Data> {
         self.data
             .lock()
@@ -660,7 +703,11 @@ impl Runtime {
                     "Recording could not be scheduled; check the channel and recording times",
                 )
             })?;
+        #[cfg(feature = "test-support")]
+        self.recordings.observe_operation(id, "intent persisted");
         self.acknowledge_recording(id).await?;
+        #[cfg(feature = "test-support")]
+        self.recordings.observe_operation(id, "start acknowledged");
         Ok(id)
     }
     pub(crate) async fn acknowledge_recording(&self, id: JobId) -> Result<(), Error> {
@@ -701,6 +748,8 @@ impl Runtime {
     }
 
     pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
+        #[cfg(feature = "test-support")]
+        self.recordings.observe_operation(id, "stop requested");
         if let Some(job) = self
             .services()
             .read(move |store| store.recording_job(id))
@@ -752,6 +801,9 @@ impl Runtime {
                 Ok(())
             })
             .await?;
+        #[cfg(feature = "test-support")]
+        self.recordings
+            .observe_operation(id, "stop request processed");
         Ok(())
     }
     pub async fn recording_jobs(&self) -> Result<Vec<Job>, Error> {
@@ -1290,6 +1342,8 @@ async fn run(services: Services, state: Arc<State>, shutdown: CancelToken) {
                     continue;
                 }
             }
+            #[cfg(feature = "test-support")]
+            state.observe_operation(job.id, "recording claimed");
             job.status = Status::Recording;
             let services = services.clone();
             let state = state.clone();
@@ -1505,7 +1559,9 @@ async fn record(
                 }
             };
             let source = resolved.source;
-            let net = crate::settings::net_config(&services.settings());
+            let net = crate::native::network::adapter_config(&crate::settings::network_config(
+                &services.settings(),
+            ));
             let policy = PlaybackPolicy {
                 public_only: source.public_only,
                 extra_roots_der: net.extra_roots_der,
@@ -1596,17 +1652,35 @@ async fn record(
         } => Ok("Recording finished"),
         result = result => result.map(|_| "Recording finished"),
     };
+    #[cfg(feature = "test-support")]
+    state.observe_operation(
+        job.id,
+        match outcome {
+            Ok("Stopped by you") => "capture stopped by viewer",
+            Ok(_) => "capture reached its end",
+            Err("Interrupted when the app closed") => "capture interrupted by shutdown",
+            Err(_) => "capture ended with failure",
+        },
+    );
     // The canceled receive future no longer owns file writes. Keep the active
     // reservation until its worker acknowledges drain, sync and descriptor close.
     let outcome = match file {
         Some(file) => {
             if file.finish().await.is_ok() {
+                #[cfg(feature = "test-support")]
+                state.observe_operation(job.id, "capture worker drained");
                 outcome
             } else {
+                #[cfg(feature = "test-support")]
+                state.observe_operation(job.id, "capture worker drain failed");
                 Err("Recording storage unavailable")
             }
         }
-        None => Err("Recording storage unavailable"),
+        None => {
+            #[cfg(feature = "test-support")]
+            state.observe_operation(job.id, "capture file unavailable");
+            Err("Recording storage unavailable")
+        }
     };
     // The host stopped it early (`host::stop_captures`): kept as partial with
     // the reason, also when the recorder's shutdown followed, which would

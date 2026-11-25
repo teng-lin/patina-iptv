@@ -116,6 +116,15 @@ fn tablet(size: (f32, f32)) -> EngineConfig {
     config
 }
 
+/// These long touch journeys own their clock: host scheduling cannot expire
+/// chrome between a visibility check and its following touch. Pending guide
+/// frames still run as input settles, before the next selector is resolved.
+fn manual_tablet(size: (f32, f32)) -> EngineConfig {
+    let mut config = tablet(size);
+    config.clock = nsh_core::time::Clock::manual(SystemTime::now());
+    config
+}
+
 fn player(app: &Headless) -> NodeId {
     let players: Vec<_> = app
         .screen()
@@ -149,6 +158,25 @@ fn sources(seen: &Shared) -> Vec<String> {
 
 fn opens(seen: &Shared) -> Vec<(String, u64)> {
     seen.lock().unwrap().opens.clone()
+}
+
+/// Engine idle does not include native authorization and source-preparation
+/// workers. Retain a bounded observation window at negative playback boundaries,
+/// as touch_zap's quiet check does, without spending the UI's manual deadlines.
+fn observe_native_workers(app: &mut Headless) {
+    assert!(app.clock().is_manual());
+    let at = app.clock().now();
+    let until =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_millis(300));
+    while std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+        app.catch_up();
+    }
+    assert_eq!(
+        app.clock().now(),
+        at,
+        "worker observation keeps UI time fixed"
+    );
 }
 
 fn video_width(app: &Headless) -> f32 {
@@ -291,7 +319,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
 
-    let mut app = Headless::start(tablet(LANDSCAPE)).unwrap();
+    let mut app = Headless::start(manual_tablet(LANDSCAPE)).unwrap();
     let seen = observe(&mut app);
     app.on_pick(move |_| {
         vec![PickedFile::new(
@@ -320,27 +348,53 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     full_screen(&mut app, LANDSCAPE.0);
     assert_eq!(sources(&seen), ["http://stream.example.test/two.m3u8"]);
     assert_eq!(video_width(&app), LANDSCAPE.0, "full screen");
+    let live_opened = opens(&seen);
+    assert_eq!(live_opened.len(), 1);
     step(app.press("id:play-bar-back"));
     step(app.wait_for("text:Other 0"));
     assert!(
         video_width(&app) < LANDSCAPE.0,
         "back in the guide's preview"
     );
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen).len(), 1, "Back opens nothing");
+    assert_eq!(
+        opens(&seen),
+        live_opened,
+        "Back does not reopen the live stream"
+    );
 
     // A past program in the archive: a timeline drag browses back to it,
     // and a tap replays it full screen.
     step(app.drag_and_hold("id:guide-row >> nth=0", Point::new(px(600.0), px(0.0))));
     step(app.wait_for("text:Recital Replay"));
     step(app.drop_held());
+    assert!(app.settle(), "the released guide reaches frame/engine idle");
     step(app.press("text:Recital Replay"));
     full_screen(&mut app, LANDSCAPE.0);
+    app.wait_until_fixed_clock("replay source published", WAIT, |_| {
+        sources(&seen).len() == 2
+    });
     let replay = sources(&seen);
     assert_eq!(replay.len(), 2, "{replay:?}");
     assert!(
         replay[1].contains("one"),
         "the replay is channel one's: {replay:?}"
     );
+    // The schedule maps XMLTV starts to whole guide minutes. Check the replay
+    // request is Recital's exact minute, not just another archived show on one.
+    let recital_utc = ((now - 25 * 60 - 2 * SLOT).div_euclid(60) * 60).to_string();
+    let requested_utc = replay[1]
+        .split_once('?')
+        .and_then(|(_, query)| query.split('&').find_map(|pair| pair.strip_prefix("utc=")));
+    assert_eq!(
+        requested_utc,
+        Some(recital_utc.as_str()),
+        "Recital Replay start"
+    );
+    let replay_opened = opens(&seen);
+    assert_eq!(replay_opened.len(), live_opened.len() + 1);
+    assert_eq!(&replay_opened[..live_opened.len()], live_opened.as_slice());
     assert_eq!(video_width(&app), LANDSCAPE.0);
     step(app.press("id:play-bar-back"));
     step(app.wait_until("back in the guide", WAIT, |s| {
@@ -349,15 +403,25 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
             .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
     }));
 
+    observe_native_workers(&mut app);
+    assert_eq!(
+        opens(&seen),
+        replay_opened,
+        "Back does not reopen the replay"
+    );
+
     // An upcoming program's details open by a tap and offer, by
     // visible controls, what its menu holds.
     step(app.press("text:Now"));
     step(app.drag_and_hold("id:guide-row >> nth=0", Point::new(px(-600.0), px(0.0))));
     step(app.wait_for("text:Gala Evening"));
     step(app.drop_held());
+    assert!(app.settle(), "the released guide reaches frame/engine idle");
     step(app.press("text:Gala Evening"));
     step(app.wait_for("id:description-layer >> text:Gala Evening"));
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen).len(), 2, "details never play");
+    assert_eq!(opens(&seen), replay_opened, "details never reopen a stream");
     persistent(&app, &seen, surface);
 }
 
@@ -367,7 +431,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
 fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_large_text() {
     let Some(home) = isolated!() else { return };
     let _server = crate::pane_collapse::library(&home);
-    let mut app = Headless::start(tablet(LANDSCAPE)).unwrap();
+    let mut app = Headless::start(manual_tablet(LANDSCAPE)).unwrap();
     let seen = observe(&mut app);
     step(app.wait_for_within("text:Generated group", IMPORT));
     let surface = player(&app);
@@ -375,13 +439,24 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     // A movie: the rail item, its poster, Play.
     crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
+    // The container opens before its native catalog read publishes the poster.
+    app.wait_until_fixed_clock("movie poster published", WAIT, |s| {
+        s.matches("label:/^Generated Aurora ·/").unwrap()
+    });
     step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play"));
     step(app.press("text:Play"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
+    // Closing details precedes the runtime's asynchronous source publication.
+    // Wait for that result without consuming the chrome's idle deadline.
+    app.wait_until_fixed_clock("movie source published", WAIT, |_| {
+        sources(&seen).len() == 1
+    });
     let movie = sources(&seen);
     assert_eq!(movie.len(), 1);
     assert!(movie[0].ends_with("/movie/generated-user/generated-pass/10.mp4"));
+    let movie_opened = opens(&seen);
+    assert_eq!(movie_opened.len(), 1);
     let token = seen.lock().unwrap().props["source"]["token"].clone();
     // The player reports 37 s of 2 min played.
     app.engine().control().dispatch_event(
@@ -404,6 +479,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             show_bar(&mut app);
             let what = format!("movie at {size:?}, text {text}");
             assert_eq!(sources(&seen), movie, "no stream opened: {what}");
+            assert_eq!(opens(&seen), movie_opened, "no stream reopened: {what}");
             assert_eq!(video_width(&app), size.0, "still full screen: {what}");
             assert!(app.shows("0:37"), "progress kept: {what}");
             for control in ["play-bar-back", "play-bar-play-pause"] {
@@ -414,19 +490,53 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     }
     present(&mut app, LANDSCAPE, 1.0);
 
-    // Pause and play by the visible button: the same stream.
+    // Pause and play by the visible button: the same stream. Exercise real
+    // auto-hide first, then a touch just before the next idle deadline.
+    let idle = Duration::from_millis(iptv_presentation::play_bar::HIDE_AFTER_MS);
+    step(app.run_for(idle));
+    assert!(
+        bounds(&app, "play-bar-back").is_none(),
+        "idle hides the bar"
+    );
+    let shown_at = app.clock().now();
+    show_bar(&mut app);
+    let before_deadline = shown_at + idle - Duration::from_millis(1);
+    assert!(app.clock().now() < before_deadline);
+    let remaining = before_deadline.saturating_duration_since(app.clock().now());
+    step(app.run_for(remaining));
+    assert!(bounds(&app, "play-bar-back").is_some());
+    // Model a delayed host between the visibility check and the normal touch:
+    // wall time does not spend the app's explicitly driven idle deadline.
+    let checked_at = app.clock().now();
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(app.clock().now(), checked_at);
     show_bar(&mut app);
     step(app.press("id:play-bar-play-pause"));
     assert_eq!(seen.lock().unwrap().props["paused"], true);
+    step(app.run_for(Duration::from_millis(2)));
+    assert!(
+        bounds(&app, "play-bar-back").is_some(),
+        "the touch resets the old deadline"
+    );
     step(app.press("id:play-bar-play-pause"));
     assert_eq!(seen.lock().unwrap().props["paused"], false);
     assert_eq!(sources(&seen), movie);
+    assert_eq!(
+        opens(&seen),
+        movie_opened,
+        "pause/play does not reopen the movie"
+    );
+    step(app.run_for(idle));
+    assert!(
+        bounds(&app, "play-bar-back").is_none(),
+        "fresh idle still hides the bar"
+    );
 
     // The visible ‹ (Movies) returns to the movie's details over the
     // same player, Resume chosen at its progress (#147); Close then
     // leaves the details for the movies, and the movies for the guide,
     // the movie playing on in its preview.
-    let opened = opens(&seen);
+    let opened = movie_opened.clone();
     show_bar(&mut app);
     back_says(&app, "Movies");
     step(app.press("id:play-bar-back"));
@@ -438,7 +548,9 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             .is_ok_and(|s| s.selected),
         "the movie's details, on Resume"
     );
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), movie, "Back opens nothing");
+    assert_eq!(opens(&seen), movie_opened, "Back does not reopen the movie");
     persistent(&app, &seen, surface);
     step(app.press("id:vod-screen >> label:Close"));
     step(app.wait_for("label:/^Generated Aurora ·/"));
@@ -451,6 +563,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.press("id:vod-screen >> label:Close"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
     in_preview(&mut app);
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), movie, "Back opens nothing");
     assert_eq!(
         opens(&seen),
@@ -462,14 +575,32 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     // An episode: the rail item, the show, the episode.
     crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
+    // The container opens before its native catalog read publishes the poster.
+    app.wait_until_fixed_clock("show poster published", WAIT, |s| {
+        s.matches("label:/^Generated Voyage ·/").unwrap()
+    });
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
     step(app.press("text:/Generated Second/"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
     full_screen(&mut app, LANDSCAPE.0);
+    app.wait_until_fixed_clock("episode source published", WAIT, |_| {
+        sources(&seen).len() == 2
+    });
     let episode = sources(&seen);
     assert_eq!(episode.len(), 2, "{episode:?}");
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
+    let episode_opened = opens(&seen);
+    assert_eq!(
+        episode_opened.len(),
+        movie_opened.len() + 1,
+        "one added episode open"
+    );
+    assert_eq!(
+        &episode_opened[..movie_opened.len()],
+        movie_opened.as_slice(),
+        "the movie open history is unchanged"
+    );
     // The player reports 3 min of the episode's 10 played.
     let token = seen.lock().unwrap().props["source"]["token"].clone();
     app.engine().control().dispatch_event(
@@ -483,7 +614,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     app.settle();
     // The visible ‹ (Shows) returns to the show's details, the played
     // episode selected.
-    let opened = opens(&seen);
+    let opened = episode_opened.clone();
     show_bar(&mut app);
     back_says(&app, "Shows");
     step(app.press("id:play-bar-back"));
@@ -495,6 +626,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             .is_ok_and(|s| s.selected),
         "the played episode selected"
     );
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), episode, "Back opens nothing");
     assert_eq!(
         opens(&seen),
@@ -529,6 +661,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             assert_eq!(episodes(&app), selected, "episode kept: {what}");
             assert!(app.shows("Generated Voyage"), "details open: {what}");
             assert_eq!(sources(&seen), episode, "no stream opened: {what}");
+            assert_eq!(opens(&seen), episode_opened, "no stream reopened: {what}");
             let close = app
                 .screen()
                 .id("id:vod-screen >> label:Close")
@@ -569,7 +702,13 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
         step(app.press("id:vod-screen >> label:Close"));
     }
     step(app.wait_for_gone("id:vod-screen", WAIT));
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), episode);
+    assert_eq!(
+        opens(&seen),
+        episode_opened,
+        "closing details opens nothing"
+    );
     persistent(&app, &seen, surface);
 }
 

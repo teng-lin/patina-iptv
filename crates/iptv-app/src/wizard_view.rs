@@ -24,10 +24,10 @@ use nsh_core::prelude::*;
 
 use crate::data::{self, Job, Purpose, Update};
 use crate::list_rows::Mark;
-use crate::play_bar::icons::{self, Icon};
 use crate::scale::Scale;
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
+use crate::ui_kit::icons::{self, Icon};
 use crate::ui_kit::{self, ERROR};
 use crate::{Ui, tint};
 
@@ -78,7 +78,9 @@ pub fn open_add(ui: Ui) {
     if imports_unavailable() {
         return;
     }
-    if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed() {
+    if crate::runtime_owner::runtime().parental_has_pin()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
+    {
         crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
             open_add(ui)
         });
@@ -103,8 +105,8 @@ pub fn send(ui: Ui, event: WizardEvent) {
         || (matches!(&event, WizardEvent::Ok)
             && read(ui, |w| w.focus() == Some(Target::Submit)).unwrap_or(false));
     if submit
-        && crate::runtime().parental_has_pin()
-        && !crate::runtime().parental_settings_allowed()
+        && crate::runtime_owner::runtime().parental_has_pin()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
             send(ui, event)
@@ -124,9 +126,9 @@ pub fn send(ui: Ui, event: WizardEvent) {
 }
 
 /// The M3U link form starts with the development playlist's URL, when the
-/// build has one ([`data::DEV_PLAYLIST`]).
+/// build has one ([`crate::runtime::build_config::DEV_PLAYLIST`]).
 fn prefill(ui: Ui) {
-    let Some(url) = data::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
+    let Some(url) = crate::runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
         return;
     };
     let due = read(ui, |w| {
@@ -153,7 +155,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
     match effect {
         WizardEffect::RestoreBackup => crate::backup::request_restore(ui),
         WizardEffect::EditField { field } => entry::begin(ui, field),
-        WizardEffect::ReadClipboard { field } => data::spawn_in_app(async move {
+        WizardEffect::ReadClipboard { field } => crate::tasks::spawn_in_app(async move {
             let text = clipboard_string().await;
             send(
                 ui,
@@ -163,10 +165,10 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 },
             );
         }),
-        WizardEffect::PickFile => data::spawn_in_app(async move {
+        WizardEffect::PickFile => crate::tasks::spawn_in_app(async move {
             let files = pick_files(FilePickRequest::new(false, 1)).await;
             let path = if let Some(file) = files.first() {
-                crate::runtime()
+                crate::runtime_owner::runtime()
                     .keep_picked_file(&file.name, file.data.bytes())
                     .await
                     .inspect_err(|e| log::warn!("iptv wizard: keeping the file failed: {e}"))
@@ -187,7 +189,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 purpose: Purpose::Add,
                 edit: false,
             };
-            let token = data::start_import(&crate::runtime(), job, move |update| {
+            let token = data::start_import(&crate::runtime_owner::runtime(), job, move |update| {
                 send(
                     ui,
                     match update {
@@ -197,14 +199,16 @@ fn perform(ui: Ui, effect: WizardEffect) {
                     },
                 )
             });
-            crate::runtime().remember_wizard_import(id, token);
+            crate::runtime_owner::runtime().remember_wizard_import(id, token);
         }
-        WizardEffect::CancelImport { id } => crate::runtime().cancel_wizard_import(id),
+        WizardEffect::CancelImport { id } => {
+            crate::runtime_owner::runtime().cancel_wizard_import(id)
+        }
         WizardEffect::Close(exit) => {
-            crate::runtime().parental_content_closed();
+            crate::runtime_owner::runtime().parental_content_closed();
             log::info!("iptv wizard: closed ({exit:?})");
             if let WizardExit::Added { .. } = exit {
-                crate::runtime().finish_wizard_import();
+                crate::runtime_owner::runtime().finish_wizard_import();
                 // Added from the playlists screen: "Watch" goes to the guide.
                 crate::playlists_view::close(ui);
             }

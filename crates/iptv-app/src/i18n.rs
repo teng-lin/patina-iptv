@@ -39,7 +39,7 @@ fn preferences() -> std::sync::Arc<iptv_settings::Settings> {
     if let Some(settings) = WORDING_SETTINGS.with(|settings| settings.borrow().clone()) {
         return settings;
     }
-    if crate::has_runtime() {
+    if crate::runtime_owner::has_runtime() {
         crate::settings::get()
     } else {
         std::sync::Arc::new(iptv_settings::Settings::new())
@@ -66,7 +66,7 @@ pub fn clock_style() -> Style {
         "system" => system().unwrap_or("en"),
         chosen => chosen,
     };
-    let system_clock = crate::settings::handheld(crate::device::host().form_factor)
+    let system_clock = crate::device::handheld(crate::device::host().form_factor)
         .then(crate::device::system_24_hour)
         .flatten();
     let hours = match system_clock {

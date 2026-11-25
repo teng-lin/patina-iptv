@@ -55,14 +55,14 @@ pub(super) fn cell(
         }
     };
     let show_logo = move || {
-        crate::settings::read(ui);
+        crate::settings_wiring::read(ui);
         crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_LOGOS)
     };
     let logo = move || {
         ui.guide_data();
         channel
             .get()
-            .and_then(|ch| crate::schedule().channel_logo(ch))
+            .and_then(|ch| crate::runtime_owner::schedule().channel_logo(ch))
             .unwrap_or_else(no_logo)
     };
     let is_selected = move || {
@@ -135,7 +135,7 @@ pub(super) fn cell(
         .child(
             // The place in the list on screen.
             text(move || {
-                crate::settings::read(ui);
+                crate::settings_wiring::read(ui);
                 if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
                     (at.index() + 1).to_string()
                 } else {

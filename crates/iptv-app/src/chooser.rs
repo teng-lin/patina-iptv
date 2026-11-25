@@ -23,7 +23,7 @@ use crate::list_rows::{self, Mark, ROW};
 use crate::scale::Scale;
 use crate::theme::RADIUS_LARGE;
 use crate::ui_kit;
-use crate::{Playback, Ui, ViewMode, tint};
+use crate::{Playback, Ui, tint};
 
 /// Rows shown at once; longer lists scroll (seven fit a TV's 540 dp).
 const MAX_ROWS: usize = 7;
@@ -100,9 +100,9 @@ pub(crate) fn picture_identity(ui: Ui, surface: usize) -> Option<String> {
         return None;
     }
     let key = ui.player.stream(surface).key.get()?;
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let channel = schedule.find_channel(&key)?;
-    let identity = crate::runtime().search_channel_identity(&*schedule, channel)?;
+    let identity = crate::runtime_owner::runtime().search_channel_identity(&*schedule, channel)?;
     Some(serde_json::json!([identity.source, identity.incarnation(), identity.content]).to_string())
 }
 
@@ -202,7 +202,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
 /// Recently watched list), newest first, numbered as on the player card:
 /// "12  Name ▶ · now". The focus starts on the one playing.
 fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
-    let s = crate::schedule();
+    let s = crate::runtime_owner::schedule();
     let now = ui.focus.with_untracked(|f| f.now);
     let h = crate::favorites::history(ui.playing.get_untracked());
     let labels = h
@@ -360,7 +360,7 @@ fn play_recent(ui: Ui, key: &str) {
     if ui.playing.get_untracked() != Some(channel) || !live {
         ui.play(channel, Playback::Live);
     }
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.update_panels(|p, now| {
         p.hide();
         p.show_banner(now);

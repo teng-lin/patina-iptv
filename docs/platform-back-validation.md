@@ -8,34 +8,26 @@ Headless tests and emulator results do not establish physical-device acceptance.
 
 ## Samsung policy decision
 
-Rechecked the official pages on **2026-11-25 UTC**. They still conflict:
+On **2026-11-25 UTC**, the project chose Samsung's Terminating Applications
+guide for both Tizen hosts. Return from the app home screen opens the Yes/No
+confirmation, with No focused. Yes exits. Return from a detail page goes
+back, and the TV handles the Exit key and held Return/Exit. #295 implements
+this behavior.
 
 | Official source | Top-level Return policy |
 | --- | --- |
 | [Terminating Applications, Return Key Policy](https://developer.samsung.com/smarttv/develop/guides/fundamentals/terminating-applications.html) | Show an exit confirmation on the application home page; terminate only after Yes. Do not register the Return/Exit long press. |
 | [Common certification checklist, CO-US-05](https://developer.samsung.com/smarttv/develop/development-checklist/common.html) | Return on the application home page closes the application. For 2016 and later models, the destination is the TV channel screen. The checklist links back to the termination guide. |
 
-**Owner decision pending:** retain the termination-guide Yes/No popup, or adopt
-the checklist's immediate close on top-level Return for certification. #295
-implemented the popup requested in #277. That is the current behavior; it is
-not a determination that Samsung certification accepts it. Do not change it
-without recording the owner's choice and the applicable Samsung guidance.
+The checklist describes an immediate close for the same home-screen press.
+Whether Seller Office accepts the guide's confirmation remains a certification
+question. Run the physical checks at the guide rail, welcome or setup, and
+recovery roots.
 
-If immediate close is chosen, both hosts must change together: the NSH host's
-`iptv_app::confirm_leaving` hook in `hosts/tizen-nsh/src/lib.rs` and the bridge's
-`leave` event/popup flow in `crates/iptv-web` and `hosts/tizen/app/main.js`.
-Recheck the first-run welcome and recovery roots as well as the guide's rail. The Exit key remains
-unregistered and is handled by the system under either policy. A policy decision
-does not replace the independent device checks.
-
-CO-US-04 also says Exit closes an open popup or IME. Its wording does not
-exclude app-rendered popups. Patina's HTML/NSH exit question is part of the app,
-not a system popup, and neither host registers Exit. App termination over that
-question is therefore the expected **inference from the implementation**, not a
-verified TV result or a claim that firmware dismisses the app's popup. This is
-a potential CO-US-04 certification conflict requiring owner/Samsung
-clarification. Test a system-owned IME separately. No Exit binding or window
-policy changes here resolve either pending certification question.
+CO-US-04 also asks Exit to close an open popup or IME. Both hosts leave Exit
+to the TV. App termination over Patina's own question is an implementation
+inference pending a physical TV run and Samsung clarification. Check the
+system-owned IME separately.
 
 ## Evidence at the audited revision
 
@@ -213,8 +205,8 @@ and emulators in separate evidence records.
 | --- | --- | --- |
 | `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. Repeat one-press exit from first-run welcome and recovery with details closed. A form or open recovery details consumes the first Back, then its root hands the next Back to the system. | Final integrated `984417e6` owned TV run passes all three roots and form/details checks; exact artifact and retained record above. |
 | Android phone, API 34+ | At each root (guide rail, first-run welcome, recovery with details closed), observe committed and canceled edge gestures: the predictive home preview shows, commit returns home, cancel keeps Patina on the same screen. Forms and recovery details still consume Back. A Back key event or launcher-at-end assertion alone is insufficient. | Pending unlocked phone session; no physical run. |
-| Tizen bridge | On the guide's rail and first-launch setup, Return shows the localized question with No focused. Left/Right select the corresponding answer; Up/Down change selection; OK on No and Back dismiss without exiting; Yes exits. | Pending connected test TV and policy choice. |
-| Tizen NSH host | On the guide's rail, first-run welcome and recovery with details closed, Return shows the question with No focused. Left or Up selects No; Right or Down selects Yes, with no wrapping. OK chooses, Back dismisses and Yes exits. Open recovery details consumes Return before the exit question. | Pending connected test TV and policy choice. |
+| Tizen bridge | On the guide's rail and first-launch setup, Return shows the localized question with No focused. Left/Right select the corresponding answer; Up/Down change selection; OK on No and Back dismiss without exiting; Yes exits. | Pending connected test TV. |
+| Tizen NSH host | On the guide's rail, first-run welcome and recovery with details closed, Return shows the question with No focused. Left or Up selects No; Right or Down selects Yes, with no wrapping. OK chooses, Back dismisses and Yes exits. Open recovery details consumes Return before the exit question. | Pending connected test TV. |
 | Both Tizen hosts, Exit on an app page or app-rendered popup | Confirm Exit remains unregistered. App-page termination is expected; termination over Patina's own popup is an implementation inference to verify. CO-US-04 has no stated app-popup exclusion, so this may conflict with its popup-closing rule. | Pending TV observation and owner/Samsung clarification of CO-US-04. |
 | Both Tizen hosts, Exit with system IME/popup | Open the TV's own keyboard or popup and record whether Exit dismisses it before app termination, as CO-US-04 requires. This is separate from Patina's rendered exit chooser. | Pending connected test TV; no firmware result. |
 | Both Tizen hosts, held Return/Exit | Hold the physical remote's Return/Exit key until the firmware's forced termination. It must terminate through the system without requiring Yes. Exercise an application page and an open confirmation; record any app action before the firmware takes over. | Pending connected test TV; no firmware result. |

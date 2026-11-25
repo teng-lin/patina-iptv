@@ -40,6 +40,42 @@ class Workflows(unittest.TestCase):
         for path in (ROOT / "tools/ci").glob("test-*.py"):
             self.assertIn(path.relative_to(ROOT).as_posix(), wrapper)
 
+    def test_helpers_lint_workflows_with_a_checksum_pinned_actionlint(self):
+        text = (ROOT / ".github/workflows/validation.yml").read_text()
+        self.assertIn("actionlint: ${{ steps.select.outputs.actionlint }}", text)
+        helpers = text.split("  helpers:\n", 1)[1].split("  host:\n", 1)[0]
+        lint = helpers.split("      - name: Lint workflow definitions\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: needs.plan.outputs.actionlint == 'true'", lint)
+        self.assertIn("timeout-minutes: 3", lint)
+        self.assertIn("v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz", lint)
+        self.assertIn("8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8", lint)
+        self.assertLess(lint.index("sha256sum --check"), lint.index("tar -xzf"))
+        self.assertIn('"$RUNNER_TEMP/actionlint/actionlint" -shellcheck= -pyflakes=', lint)
+        # Workflow lint precedes the expensive compiler/NSH helper setup.
+        self.assertLess(helpers.index("Lint workflow definitions"), helpers.index("Read the compiler and NSH pins"))
+
+    def test_windows_installer_repetition_defaults_cover_both_entrypoints(self):
+        text = (ROOT / ".github/workflows/windows-package-check.yml").read_text()
+        triggers = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
+        # A reusable workflow keeps its caller's event name. Manual Validation
+        # must receive the same safe default as a direct package dispatch.
+        for event in ("workflow_call", "workflow_dispatch"):
+            block = triggers.split(f"  {event}:\n", 1)[1].split("\n  workflow_", 1)[0]
+            self.assertIn("      repetitions:", block)
+            self.assertIn("        type: number", block)
+            self.assertIn("        default: 1", block)
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        call = validation.split("uses: ./.github/workflows/windows-package-check.yml", 1)[1].split("\n  ", 1)[0]
+        self.assertNotIn("repetitions:", call)
+        run = text.split("      - name: Build and exercise the installer\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("SMOKE_REPETITIONS: ${{ inputs.repetitions }}", run)
+        self.assertIn("$env:SMOKE_REPETITIONS -notmatch '^[1-5]$'", run)
+        self.assertNotIn("GITHUB_EVENT_NAME", run)
+        self.assertNotIn("github.event_name", run)
+        self.assertNotIn("|| 1", run)
+        self.assertLess(run.index("-notmatch"), run.index("./tools/package-windows.ps1"))
+        self.assertIn("./tools/ci/check-windows-package.ps1", run)
+
     def test_standalone_lanes_do_not_emit_legacy_required_names(self):
         host = (ROOT / ".github/workflows/ci.yml").read_text()
         android = (ROOT / ".github/workflows/android.yml").read_text()
@@ -283,6 +319,30 @@ class Workflows(unittest.TestCase):
                 self.assertEqual(expressions.evaluate(condition, {
                     'needs': {'android-native': {'result': result}}, 'workflow_cancelled': cancelled,
                 }), expected)
+
+    def test_smoke_rust_profile_trials_are_manual_and_uncached(self):
+        expressions = module('test-release-workflow')
+        workflow = (ROOT / '.github/workflows/android-smoke.yml').read_text()
+        called, dispatched = workflow.split('  workflow_dispatch:\n', 1)
+        self.assertNotIn('rust-profile:', called)
+        self.assertIn('options: [pinned, pinned-uncached, opt1-uncached]', dispatched)
+        self.assertIn('default: pinned', dispatched)
+        build = workflow.split('  build:\n', 1)[1].split('\n  streams:\n', 1)[0]
+        self.assertIn("PATINA_SMOKE_RUST_PROFILE: ${{ inputs.rust-profile || 'pinned' }}", build)
+        cache = build.split('uses: Swatinem/rust-cache@', 1)[1]
+        condition = re.search(r'^        if: (.+)$', cache, re.M)[1]
+        for profile in ('pinned', 'pinned-uncached', 'opt1-uncached'):
+            for cold in (True, False):
+                with self.subTest(profile=profile, cold=cold):
+                    self.assertEqual(expressions.evaluate(condition, {
+                        'inputs': {'cold': cold}, 'env': {'PATINA_SMOKE_RUST_PROFILE': profile},
+                    }), not cold and profile == 'pinned')
+        build_step = build.split('name: Build the development APK', 1)
+        self.assertEqual(workflow.count('CARGO_PROFILE_RELEASE_OPT_LEVEL'), 1)
+        self.assertIn('if [[ "$PATINA_SMOKE_RUST_PROFILE" == opt1-uncached ]]; then\n'
+                      '            export CARGO_PROFILE_RELEASE_OPT_LEVEL=1\n'
+                      '          fi', build_step[1])
+        self.assertIn('testDebugUnitTest lintDebug assembleDebug', build_step[1])
 
     def test_smoke_streams_are_encoded_beside_the_apk_build_and_the_guide_just_in_time(self):
         workflow = (ROOT / '.github/workflows/android-smoke.yml').read_text()

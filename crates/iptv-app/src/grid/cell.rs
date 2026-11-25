@@ -16,7 +16,7 @@
 
 use nsh_core::prelude::*;
 
-use super::{CELL_GAP, CELL_H, CELL_INSET, CELL_RADIUS, PAST_DIM, ROW_H, WHITE, pan::Pan};
+use super::{CELL_GAP, CELL_H, CELL_INSET, CELL_RADIUS, PAST_DIM, WHITE, pan::Pan};
 use crate::fonts::{CELL_TITLE, CONDENSED};
 use crate::guide::{Program, floor_of};
 use crate::scale::Scale;
@@ -131,7 +131,9 @@ pub(super) fn cell(
     });
     let colors = computed(move || {
         let overlay = match ui.mode.get() {
-            ViewMode::Overlay => Some(crate::settings::overlay_alpha(&crate::settings::read(ui))),
+            ViewMode::Overlay => Some(crate::theme::overlay_alpha(&crate::settings_wiring::read(
+                ui,
+            ))),
             ViewMode::Guide | ViewMode::Fullscreen => None,
         };
         let (g, window) = ui.app.theme.with(|t| (t.guide(), t.background.window));
@@ -144,7 +146,7 @@ pub(super) fn cell(
             (Some(ch), Some(p)) => format!(
                 "{}{}",
                 crate::recordings_view::badge(ui, ch, p),
-                crate::listing_labels::listing(crate::schedule().listing(ch, p))
+                crate::listing_labels::listing(crate::runtime_owner::schedule().listing(ch, p))
             ),
             _ => String::new(),
         }
@@ -183,7 +185,7 @@ pub(super) fn cell(
         .on_long_press(open_actions)
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| open_actions())
         .absolute()
-        .top(move || px(((size.whole(ROW_H) - size.whole(CELL_H)) / 2.0).floor()))
+        .top(move || px(((size.whole(crate::list_rows::ROW) - size.whole(CELL_H)) / 2.0).floor()))
         .h(move || px(size.whole(CELL_H)))
         .left(move || px(geometry().0 + size.of(CELL_GAP) / 2.0))
         .w(move || px((geometry().1 - size.of(CELL_GAP)).max(0.0)))

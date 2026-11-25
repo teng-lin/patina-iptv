@@ -227,7 +227,7 @@ fn history(ui: Ui, size: Scale) -> impl IntoElement {
         .flex_1()
         .gap(move || size.px(8.0))
         .child(ui_kit::heading(size, move || {
-            if !options(&crate::settings::read(ui)).show_history {
+            if !options(&crate::settings_wiring::read(ui)).show_history {
                 ""
             } else if count() == 0 {
                 tr("No recent searches yet")
@@ -304,8 +304,9 @@ fn result_at(ui: Ui, i: usize) -> Option<(ResultId, Option<ProgramHit>)> {
     })
     .flatten()
     .and_then(|(id, mut hit)| {
-        let schedule = crate::schedule();
-        let channel = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule)?;
+        let schedule = crate::runtime_owner::schedule();
+        let channel =
+            resolve_result_channel(&crate::runtime_owner::runtime(), id.channel(), &*schedule)?;
         if let Some(hit) = hit.as_mut() {
             hit.channel = channel;
         }
@@ -382,14 +383,15 @@ fn result_row(
     let mark = move || mark(ui, focused());
     let line1 = move || match item() {
         Some((ResultId::Channel(id), _)) => {
-            let schedule = crate::schedule();
-            let Some(c) = crate::runtime().resolve_search_channel(&id, &*schedule) else {
+            let schedule = crate::runtime_owner::schedule();
+            let Some(c) = crate::runtime_owner::runtime().resolve_search_channel(&id, &*schedule)
+            else {
                 return String::new();
             };
             let star = ui.app.favorites.with(|f| f.contains(&c));
             format!(
                 "{}   {}{}",
-                crate::schedule().channel_number(c),
+                crate::runtime_owner::schedule().channel_number(c),
                 if star { "★ " } else { "" },
                 channel_name(c)
             )
@@ -400,8 +402,8 @@ fn result_row(
     };
     let line2 = move || match item() {
         Some((ResultId::Channel(id), _))
-            if crate::runtime()
-                .resolve_search_channel(&id, &*crate::schedule())
+            if crate::runtime_owner::runtime()
+                .resolve_search_channel(&id, &*crate::runtime_owner::schedule())
                 .is_some_and(|c| ui.playing.get() == Some(c)) =>
         {
             tr("Playing").to_owned()

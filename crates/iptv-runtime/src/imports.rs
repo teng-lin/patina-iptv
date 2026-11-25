@@ -2,6 +2,7 @@
 use super::private_files::Client as NetClient;
 use super::store_service::Services;
 use super::{guides, opening, stored, wizard_map};
+use crate::time::now_unix;
 use iptv_core::add_playlist::{
     FailureKind, ImportCounts, ImportFailure, ImportInput, ImportProgress, ImportStage,
 };
@@ -235,10 +236,6 @@ pub enum GuideRead {
     Check,
     RestoreAndCheck,
     CacheOnly,
-}
-
-pub fn now_unix() -> i64 {
-    crate::time::since_epoch().as_secs() as i64
 }
 
 /// The import on the calling worker, to its end (tests drive it so).
@@ -563,7 +560,8 @@ pub(crate) async fn pipeline(
     options.limits.elapsed = CATALOG_IMPORT_TIME;
     #[cfg(debug_assertions)]
     {
-        options.allow_private_fixture = cfg!(feature = "test-support") || DEV_PLAYLIST.is_some();
+        options.allow_private_fixture =
+            cfg!(feature = "test-support") || crate::build_config::DEV_PLAYLIST.is_some();
     }
     let _ = std::fs::create_dir_all(services.directory());
     let mut stage = match CatalogStage::create_in_with(services.directory(), |path| {
@@ -1338,9 +1336,3 @@ pub(crate) fn network_due(services: &Services, id: SourceId, purpose: Purpose) -
         })
         .unwrap_or(true)
 }
-
-/// Synthetic development fixture hook; never embedded in release builds.
-#[cfg(debug_assertions)]
-pub const DEV_PLAYLIST: Option<&str> = option_env!("IPTV_RS_DEV_PLAYLIST");
-#[cfg(not(debug_assertions))]
-pub const DEV_PLAYLIST: Option<&str> = None;

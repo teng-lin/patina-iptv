@@ -27,7 +27,7 @@ pub fn channels(n: u32) -> String {
 
 /// A time as the guide shows it: today's as `14:05`, others with the day.
 fn when(at: i64, now: i64) -> String {
-    crate::time::label(at, now)
+    crate::clock::label(at, now)
 }
 
 /// Why a refresh recorded in the store failed (kind only).
