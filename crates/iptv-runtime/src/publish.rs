@@ -403,15 +403,19 @@ mod tests {
     }
 
     impl Loop {
+        fn poll_round(&self, context: &mut Context<'_>) {
+            self.woken.store(false, Ordering::SeqCst);
+            let mut tasks = std::mem::take(&mut *self.tasks.lock().unwrap());
+            tasks.retain_mut(|task| task.as_mut().poll(context).is_pending());
+            self.tasks.lock().unwrap().extend(tasks);
+        }
+
         /// One delivery; false when no task is left.
         fn poll(&self) -> bool {
             let waker = Waker::from(Arc::new(Woken(self.woken.clone())));
             let mut context = Context::from_waker(&waker);
             loop {
-                self.woken.store(false, Ordering::SeqCst);
-                let mut tasks = std::mem::take(&mut *self.tasks.lock().unwrap());
-                tasks.retain_mut(|task| task.as_mut().poll(&mut context).is_pending());
-                self.tasks.lock().unwrap().extend(tasks);
+                self.poll_round(&mut context);
                 if !self.woken.load(Ordering::SeqCst) {
                     break;
                 }
@@ -421,6 +425,7 @@ mod tests {
     }
 
     const KEY: [u8; 32] = [0x5c; 32];
+    const PLAYLIST_URL: &str = "https://example.invalid/publish.m3u";
 
     #[derive(Default)]
     struct Calls {
@@ -461,7 +466,7 @@ mod tests {
         Source {
             name: "Synthetic publish".into(),
             config: SourceConfig::M3u(M3uSourceConfig {
-                location: iptv_providers::SecretUrl::new("https://example.invalid/publish.m3u"),
+                location: iptv_providers::SecretUrl::new(PLAYLIST_URL),
                 user_agent: None,
                 referrer: None,
             }),
@@ -535,13 +540,19 @@ mod tests {
     }
 
     fn setup() -> (tempfile::TempDir, Arc<Loop>, Arc<Service>, Arc<Calls>) {
+        setup_with_network(Arc::new(crate::native::network::NativeNetwork))
+    }
+
+    fn setup_with_network(
+        network: Arc<dyn crate::network::Network>,
+    ) -> (tempfile::TempDir, Arc<Loop>, Arc<Service>, Arc<Calls>) {
         let directory = tempfile::tempdir().unwrap();
         let host = Arc::new(Loop::default());
         let calls = Arc::new(Calls::default());
         let mut ports = crate::Ports::with_adapters(
             directory.path().to_owned(),
             |_| Ok(DatabaseKey::from_bytes(KEY)),
-            Arc::new(crate::native::network::NativeNetwork),
+            network,
             Arc::new(Cooperative::new(host.clone())),
         );
         ports.store_host = Some(Arc::new(FileHost {
@@ -738,4 +749,6 @@ mod tests {
         );
         assert!(service.drain_on_shutdown_with(|| {}));
     }
+
+    mod catalog_import_tests;
 }

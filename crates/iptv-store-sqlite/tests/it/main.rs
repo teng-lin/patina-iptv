@@ -45,6 +45,8 @@ mod custom_group_reset_scale;
 mod epg;
 mod epg_stream;
 mod guide_assign;
+#[cfg(not(target_family = "wasm"))]
+mod guide_repair;
 mod library_preferences;
 #[cfg(not(target_family = "wasm"))]
 mod migrations;
