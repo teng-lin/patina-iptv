@@ -138,7 +138,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
             .unwrap()
             .clone();
         assert_ne!(a, b, "equal provider IDs have source-qualified identities");
-        data::library::rename(&owner, sources[1], "Renamed generated B")
+        data::rename(&owner, sources[1], "Renamed generated B")
             .await
             .unwrap();
         assert!(
@@ -147,7 +147,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
                 .iter()
                 .any(|p| p.id == sources[1] && p.name == "Renamed generated B")
         );
-        data::library::set_policy(
+        data::set_policy(
             &owner,
             sources[0],
             SourcePolicy {
@@ -163,7 +163,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
         assert!(!data::combined::has_multiple_enabled(&owner));
-        data::library::set_policy(
+        data::set_policy(
             &owner,
             sources[0],
             SourcePolicy {
@@ -176,7 +176,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         displayed(&owner, &mut events, 8).await;
         assert!(owner.schedule().find_channel(&a).is_some());
         assert!(owner.schedule().find_channel(&b).is_some());
-        data::library::delete(&owner, sources[0]).await.unwrap();
+        data::delete(&owner, sources[0]).await.unwrap();
         displayed(&owner, &mut events, 4).await;
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
@@ -196,7 +196,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         owner
             .set_playlist_setting(sources[1], key, Value::Bool(false))
             .unwrap();
-        data::library::delete(&owner, sources[1]).await.unwrap();
+        data::delete(&owner, sources[1]).await.unwrap();
         displayed(&owner, &mut events, 0).await;
         assert_eq!(owner.settings().stored(key, &at), None);
         assert!(

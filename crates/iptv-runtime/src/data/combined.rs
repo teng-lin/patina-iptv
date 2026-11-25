@@ -117,7 +117,7 @@ pub(super) fn added(
                 if !owner.parts.with(|p| p.borrow().contains_key(&playlist.id))
                     && let Some(stored) = library::load(&owner, playlist.id)
                 {
-                    library::run(&owner, stored, Purpose::Combined, false);
+                    super::run_import(&owner, stored, Purpose::Combined, false);
                 }
             }
         }
@@ -249,7 +249,7 @@ async fn switch_all_ready(owner: &Rc<crate::Runtime>) {
             .filter(|playlist| playlist.policy.enabled)
         {
             if let Some(source) = library::load(owner, playlist.id) {
-                library::run(owner, source, Purpose::Combined, false);
+                super::run_import(owner, source, Purpose::Combined, false);
             }
         }
     }

@@ -41,11 +41,9 @@ use iptv_guide::EpgSchedule;
 use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
+use iptv_providers::model::{Source, SourceConfig};
 
-pub use library::{
-    Activity, Playlist, delete, edit_guides, playlists, refresh, refresh_all, rename, set_policy,
-    set_user_agent, source_details, switch_to, try_details,
-};
+pub use library::{Activity, Playlist, playlists, source_details};
 pub use wizard_map::source_from_draft;
 
 /// A development playlist the wizard's M3U form starts with, set when the
@@ -66,6 +64,7 @@ const MIN_WAIT: Duration = Duration::from_secs(60);
 
 use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline};
 pub use crate::imports::{Job, Purpose, Update};
+use crate::model::{StoreError, StoredSource};
 use crate::time::now_unix;
 use crate::{GuideWork, Runtime, RuntimeEvent, ScheduleCause};
 
@@ -198,6 +197,200 @@ fn commit_schedule(
     }
 }
 
+pub async fn set_policy(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    policy: crate::model::SourcePolicy,
+) -> Result<(), StoreError> {
+    library::set_policy(owner, id, policy).await?;
+    crate::favorites::refresh_vod_availability(owner).await;
+    if combined::active(owner) {
+        if !policy.enabled {
+            library::cancel_running(owner, id);
+        }
+        combined::rebuild(owner);
+        if policy.enabled
+            && let Some(source) = library::load(owner, id)
+        {
+            run_import(owner, source, Purpose::Combined, false);
+        }
+        return Ok(());
+    }
+    if !policy.enabled {
+        library::cancel_running(owner, id);
+        if owner.shown.get() == Some(id) {
+            let next = library::newest(owner)?;
+            show_nothing(owner);
+            match next {
+                Some(next) => run_import(owner, next, Purpose::Switch, false),
+                None => owner.emit(crate::RuntimeEvent::OpenPlaylists),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Shows stored playlist `id`: its stored channels and guide at once,
+/// refreshed in the background as at startup.
+pub fn switch_to(owner: &Rc<crate::Runtime>, id: SourceId) {
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if crate::favorites::flush(&owner).await {
+                switch_to_ready(&owner, id);
+            } else {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Recent changes could not be saved; try again",
+                ));
+            }
+        }
+    });
+}
+fn switch_to_ready(owner: &Rc<crate::Runtime>, id: SourceId) {
+    if library::policy(owner, id).is_ok_and(|p| !p.enabled) {
+        return;
+    }
+    if !combined::active(owner) && owner.shown.get() == Some(id) {
+        return;
+    }
+    let Some(stored) = library::load(owner, id) else {
+        return;
+    };
+    combined::leave(owner);
+    // A refresh of it in the background gives way to the shown one.
+    library::replace_running(owner, id);
+    run_import(owner, stored, Purpose::Switch, false);
+}
+
+/// Downloads stored playlist `id` again (unless that already runs): the
+/// shown one in place, another one into the store only.
+pub fn refresh(owner: &Rc<crate::Runtime>, id: SourceId) {
+    if library::running(owner, id) {
+        return;
+    }
+    let Some(stored) = library::load(owner, id) else {
+        return;
+    };
+    run_import(owner, stored, refresh_purpose(owner, id), false);
+}
+
+/// The shown playlist refreshes in place, another one into the store only.
+fn refresh_purpose(owner: &Rc<crate::Runtime>, id: SourceId) -> Purpose {
+    if combined::active(owner) {
+        Purpose::Background
+    } else if owner.shown.get() == Some(id) {
+        Purpose::Refresh
+    } else {
+        Purpose::Background
+    }
+}
+
+/// Refreshes every stored playlist (each one not refreshing already).
+pub fn refresh_all(owner: &Rc<crate::Runtime>) {
+    match playlists(owner) {
+        Ok(all) => all
+            .iter()
+            .filter(|p| p.policy.enabled)
+            .for_each(|p| refresh(owner, p.id)),
+        Err(e) => log::warn!("iptv data: the store is unavailable: {e}"),
+    }
+}
+
+pub fn try_details(owner: &Rc<crate::Runtime>, id: SourceId, source: Source) {
+    let Some(mut stored) = library::load(owner, id) else {
+        return;
+    };
+    // Only the details change; the name is the stored one.
+    stored.source.config = source.config;
+    library::replace_running(owner, id);
+    run_import(owner, stored, refresh_purpose(owner, id), true);
+}
+
+/// Sets the User-Agent of playlist `id` (`None`: the app's own), tried
+/// like other new details.
+pub fn set_user_agent(owner: &Rc<crate::Runtime>, id: SourceId, user_agent: Option<String>) {
+    let Some(mut source) = source_details(owner, id) else {
+        return;
+    };
+    match &mut source.config {
+        SourceConfig::M3u(c) => c.user_agent = user_agent,
+        SourceConfig::Xtream(c) => c.user_agent = user_agent,
+        SourceConfig::Stalker(_) => return,
+    }
+    try_details(owner, id, source);
+}
+
+pub async fn rename(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    name: &str,
+) -> Result<(), StoreError> {
+    library::rename(owner, id, name).await?;
+    if combined::active(owner) {
+        combined::rebuild(owner);
+    }
+    Ok(())
+}
+
+/// Changes the guide sources of playlist `id`; false when `edit` changes
+/// nothing. The guide on screen is checked again once the edits settle
+/// (changed feeds are downloaded); another playlist's when it is shown.
+pub async fn edit_guides(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    edit: &guides::Edit,
+) -> Result<bool, StoreError> {
+    let edited = library::edit_guides(owner, id, edit).await?;
+    if edited {
+        stored::guides_changed(owner, id);
+    }
+    Ok(edited)
+}
+
+/// Deletes stored playlist `id` with its channels, guide and favorites.
+/// The shown one gives way to the newest other playlist, or to the
+/// first-run state when none is left.
+pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), StoreError> {
+    let generation = generation(owner);
+    if let Err(error) = library::delete(owner, id).await {
+        keep_guide_check(owner, id, generation, None);
+        return Err(error);
+    }
+    if combined::active(owner) {
+        // Keep the explicitly selected aggregate usable when its last source
+        // is deleted; the playlist screen still offers Add playlist.
+        combined::rebuild(owner);
+        return Ok(());
+    }
+    if playlists(owner)?.is_empty() {
+        show_nothing(owner);
+        owner.emit(crate::RuntimeEvent::ClosePlaylists);
+        owner.emit(crate::RuntimeEvent::FirstRun);
+        return Ok(());
+    }
+    if owner.shown.get() != Some(id) {
+        return Ok(());
+    }
+    match library::newest(owner)? {
+        Some(next) => run_import(owner, next, Purpose::Switch, false),
+        None => {
+            show_nothing(owner);
+            owner.emit(crate::RuntimeEvent::ClosePlaylists);
+            if playlists(owner)?.is_empty() {
+                owner.emit(crate::RuntimeEvent::FirstRun);
+            } else {
+                owner.emit(crate::RuntimeEvent::OpenPlaylists);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn run_import(owner: &Rc<Runtime>, source: StoredSource, purpose: Purpose, edit: bool) {
+    let (job, cancel, report) = library::prepare_import(owner, source, purpose, edit);
+    start_import_with(owner, job, cancel, report);
+}
+
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     start_library(owner, false);
 }
@@ -263,7 +456,7 @@ fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
                 Ok((_, true, _)) => combined::start(&owner),
                 Ok((Some(stored), false, _)) => {
                     opening::begin(&owner, &stored).await;
-                    library::run(&owner, stored, Purpose::Startup, false);
+                    run_import(&owner, stored, Purpose::Startup, false);
                 }
                 Ok((None, false, true)) => {
                     show_nothing(&owner);

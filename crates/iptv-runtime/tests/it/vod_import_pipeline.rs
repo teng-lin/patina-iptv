@@ -456,7 +456,7 @@ async fn a_live_only_playlist_on_screen_still_offers_the_cross_source_shelves() 
             .await
             .unwrap();
             let previous = host.publications.get();
-            data::library::switch_to(&host.owner, shown);
+            data::switch_to(&host.owner, shown);
             host.availability_after(previous, false, true).await;
             assert_ne!(shown, with_films);
             assert!(!data::combined::active(&host.owner));
@@ -475,7 +475,7 @@ async fn a_live_only_playlist_on_screen_still_offers_the_cross_source_shelves() 
             .await
             .unwrap();
             let previous = host.publications.get();
-            data::library::switch_to(&host.owner, with_films);
+            data::switch_to(&host.owner, with_films);
             host.availability_after(previous, true, true).await;
             if let Some(finished) = host.owner.pending_import_completion(with_films) {
                 tokio::time::timeout(Duration::from_secs(20), finished)
@@ -526,7 +526,7 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
             host.discovery_after(previous, true).await;
             data::set_policy(&host.owner, shown, enabled).await.unwrap();
             let previous = host.publications.get();
-            data::library::switch_to(&host.owner, shown);
+            data::switch_to(&host.owner, shown);
             host.availability_after(previous, false, true).await;
             assert_ne!(hidden, shown);
             assert!(!data::combined::active(&host.owner));
@@ -562,7 +562,7 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
             assert_eq!(host.any_vod.get(), Some(true), "enable is awaited");
             unchanged();
             // A normal hidden-source import removes its old on-demand catalog.
-            data::library::refresh(&host.owner, hidden);
+            data::refresh(&host.owner, hidden);
             tokio::time::timeout(Duration::from_secs(20), async {
                 while host.any_vod.get() != Some(false) {
                     tokio::time::sleep(Duration::from_millis(2)).await;
@@ -581,7 +581,7 @@ async fn hidden_playlist_mutations_update_shelves_without_republishing_the_guide
                 )
                 .unwrap();
             host.settings(&settings);
-            data::library::refresh(&host.owner, hidden);
+            data::refresh(&host.owner, hidden);
             tokio::time::timeout(Duration::from_secs(20), async {
                 while host.any_vod.get() != Some(true) {
                     tokio::time::sleep(Duration::from_millis(2)).await;

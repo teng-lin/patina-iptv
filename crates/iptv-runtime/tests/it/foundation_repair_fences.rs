@@ -473,8 +473,7 @@ fn last_single_source_deletion_installs_an_empty_guide_without_a_subscriber() {
     owner.record_played(&key);
     host.drive(owner.flush_favorites());
 
-    host.drive(data::library::delete(owner, channel.source))
-        .unwrap();
+    host.drive(data::delete(owner, channel.source)).unwrap();
     assert!(owner.shown_source().is_none());
     assert_eq!(owner.schedule().channel_count(), 0);
     assert!(owner.favorites_channel_of(&key).is_none());
