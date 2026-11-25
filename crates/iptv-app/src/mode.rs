@@ -99,11 +99,6 @@ pub(crate) enum Action {
     ReturnToPlayer,
     PipBackToApp,
     Restore(ViewMode),
-    #[cfg(all(
-        feature = "test-support",
-        any(target_os = "linux", target_os = "macos")
-    ))]
-    WalkthroughPreview,
 }
 
 fn transition(state: Navigation, action: Action, browse: BrowseLayout) -> Navigation {
@@ -132,11 +127,6 @@ fn transition(state: Navigation, action: Action, browse: BrowseLayout) -> Naviga
         ToggleFullscreen => Navigation::Fullscreen,
         Restore(ViewMode::Guide) => browse.open(Layout::Guide),
         Restore(ViewMode::Overlay) => browse.open(browse.over_video),
-        #[cfg(all(
-            feature = "test-support",
-            any(target_os = "linux", target_os = "macos")
-        ))]
-        WalkthroughPreview => browse.open(Layout::Guide),
     }
 }
 
