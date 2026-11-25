@@ -316,7 +316,7 @@ class Workflows(unittest.TestCase):
                         'inputs': {'cold': cold}, 'env': {'PATINA_SMOKE_RUST_PROFILE': profile},
                     }), not cold and profile == 'pinned')
         build_step = build.split('name: Build the development APK', 1)
-        self.assertNotIn('CARGO_PROFILE_RELEASE_OPT_LEVEL', build_step[0])
+        self.assertEqual(workflow.count('CARGO_PROFILE_RELEASE_OPT_LEVEL'), 1)
         self.assertIn('if [[ "$PATINA_SMOKE_RUST_PROFILE" == opt1-uncached ]]; then\n'
                       '            export CARGO_PROFILE_RELEASE_OPT_LEVEL=1\n'
                       '          fi', build_step[1])
