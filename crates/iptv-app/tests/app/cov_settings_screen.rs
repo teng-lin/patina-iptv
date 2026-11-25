@@ -554,7 +554,11 @@ fn guide_data(app: &mut Headless, home: &Path) {
     step(app.press("text:Delete stored guide data"));
     let confirm = "text:/^Delete guide data for /";
     step(app.wait_for(confirm));
-    step(app.wait_for("text:The stored programs from every guide source of this playlist are deleted. Channels, guide sources and other playlists are kept. The guide stays empty until it is downloaded again."));
+    step(app.wait_for(concat!(
+        "text:The stored programs from every guide source of this playlist are deleted. ",
+        "Channels, guide sources and other playlists are kept. ",
+        "The guide stays empty until it is downloaded again."
+    )));
     step(app.press("text:Cancel"));
     step(app.wait_for_gone(confirm, GONE));
     step(app.press("text:Delete stored guide data"));
