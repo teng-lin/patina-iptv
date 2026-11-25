@@ -64,6 +64,8 @@ profile and native-library overrides are refused. The helper reads only
 fixed nonsecret identity fields and never serializes or hashes the whole
 environment. Runner path strings are not compared as input identities;
 tool and native input bytes are. SDK/image/tool differences fail closed.
+The pinned toolchain action's exact `CARGO_INCREMENTAL=0` setting is allowed
+and explicitly bound; other nonempty incremental overrides are refused.
 
 The consumer receives expected SHA-256 values through trusted `needs`
 outputs, not from the downloaded manifest alone. It verifies this workflow

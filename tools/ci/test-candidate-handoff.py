@@ -148,6 +148,7 @@ class Contract(unittest.TestCase):
             "CARGO_TARGET_DIR",
             "CARGO_PROFILE_RELEASE_LTO",
             "CARGO_BUILD_RUSTC",
+            "CARGO_INCREMENTAL",
             "CC_x86_64_pc_windows_msvc",
             "OPENSSL_DIR",
             "CMAKE_GENERATOR",
@@ -156,6 +157,10 @@ class Contract(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "^Unsupported build environment override$"):
                 handoff.validate_environment({name: "synthetic-private-value"})
         handoff.validate_environment({"GH_TOKEN": "synthetic-do-not-record", "CARGO_HOME": "synthetic", "CARGO_TERM_COLOR": "always"})
+        handoff.validate_environment({"CARGO_INCREMENTAL": "0"})
+        for value in ("1", "false", "00"):
+            with self.subTest(incremental=value), self.assertRaises(ValueError):
+                handoff.validate_environment({"CARGO_INCREMENTAL": value})
 
     def test_failed_or_running_or_wrong_attempt_producer_cannot_fallback(self):
         for field, value in [("conclusion", "failure"), ("status", "in_progress"), ("run_attempt", 2), ("run_id", 102), ("name", "Other job"), ("head_sha", "b" * 40)]:

@@ -130,6 +130,8 @@ def validate_environment(environment):
     }
     for name, value in environment.items():
         name = name.upper()
+        if name == "CARGO_INCREMENTAL" and value == "0":
+            continue  # Exact setting exported by the pinned toolchain action.
         if value and (name in forbidden or name.startswith(prefixes) or (name.startswith("CARGO_") and name not in cargo_allowed)):
             raise ValueError("Unsupported build environment override")
 
@@ -178,6 +180,7 @@ def inputs(root=ROOT):
         "recipe": ["tools/build-windows.ps1", "-Release"],
         "profile": "release",
         "features": "default; no test-support",
+        "build_environment": {"CARGO_INCREMENTAL": os.environ.get("CARGO_INCREMENTAL", "unset")},
         "target": "x86_64-pc-windows-msvc",
         "version": tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["package"]["version"],
         "rustc": rustc,
