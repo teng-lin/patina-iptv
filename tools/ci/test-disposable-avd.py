@@ -17,7 +17,8 @@ class Profiles(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        # macOS's default temporary directory passes through /var -> /private/var.
+        self.root = Path(temporary.name).resolve()
         self.source = self.root / ".android/avd/tab36.avd"
         self.source.mkdir(parents=True)
         (self.source / "config.ini").write_text(f"AvdId=tab36\ndisk.dataPartition.path={self.source}/userdata-qemu.img\n")
@@ -36,6 +37,15 @@ class Profiles(unittest.TestCase):
         for bad in ("0", "1801", "18000", "-5", "1e3", "99999999999999999999", " 60", "60s"):
             with self.assertRaises(ValueError, msg=bad):
                 a.smoke_timeout({"IPTV_SMOKE_HOLD": bad})
+
+    def test_production_apk_only_allowed_explicitly_and_without_debugging(self):
+        a.validate_apk(a.PACKAGE, "true", False)
+        a.validate_apk(a.RELEASE_PACKAGE, "false", True)
+        for package, debug, release in ((a.RELEASE_PACKAGE, "false", False),
+                                         (a.PACKAGE, "false", True),
+                                         (a.RELEASE_PACKAGE, "true", True)):
+            with self.assertRaises(ValueError):
+                a.validate_apk(package, debug, release)
 
     def test_complete_copy_rewrites_only_copy_and_cleanup_preserves_original(self):
         root, token, name = a.prepare(self.source, self.scratch)

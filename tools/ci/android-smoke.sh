@@ -77,7 +77,6 @@ if [ "$actual_avd" != "$expected_avd" ]; then
   exit 2
 fi
 pkg=com.hantekllc.iptvrs.validation
-act=$pkg/com.hantekllc.iptvrs.host.TvActivity
 if [ -n "$apk" ]; then
   analyzer=${ANDROID_HOME:-$HOME/Android/Sdk}/cmdline-tools/latest/bin/apkanalyzer
   if [ "$("$analyzer" manifest application-id "$apk")" != "$pkg" ]; then
@@ -261,10 +260,6 @@ adb shell input keyevent KEYCODE_WAKEUP
 adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
 adb shell am force-stop $pkg
 adb logcat -b main -b system -b crash -c
-adb shell am start -W -n $act >/dev/null
-expect 'iptv startup: fonts registered' 60
-# The last start-up step: until then a slow emulator may drop keys.
-expect 'iptv pip: supported' 60
 # pm returns a nonzero status for a valid false result. Validate its output
 # so tablets proceed while an adb/query failure still fails the smoke.
 is_tv=$(adb shell pm has-feature android.software.leanback | tr -d '\r' || true)
@@ -272,6 +267,14 @@ case "$is_tv" in
   true|false) ;;
   *) fail "could not determine the Android TV feature" ;;
 esac
+category=android.intent.category.LAUNCHER
+[ "$is_tv" != true ] || category=android.intent.category.LEANBACK_LAUNCHER
+act=$(adb shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c "$category" -p "$pkg" | tr -d '\r' | tail -n 1)
+[[ "$act" == "$pkg/"* ]] || fail "cannot resolve the validation launcher"
+adb shell am start -W -n "$act" -a android.intent.action.MAIN -c "$category" >/dev/null
+expect 'iptv startup: fonts registered' 60
+# The last start-up step: until then a slow emulator may drop keys.
+expect 'iptv pip: supported' 60
 pause 3
 shot 01-first-run
 
@@ -517,7 +520,7 @@ pause 3
 alive || fail "the app died in the background"
 adb shell dumpsys activity -p "$pkg" activities > "$out/activities-stopped.log"
 mark
-adb shell am start -W -n $act >/dev/null
+adb shell am start -W -n "$act" >/dev/null
 adb shell dumpsys activity -p "$pkg" activities > "$out/activities-resumed.log"
 expect 'iptv player 0 state: ready' 60
 expect 'iptv player 1 state: ready' 60

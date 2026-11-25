@@ -11,6 +11,8 @@ is below 1.0, a minor release may change behavior.
 
 - Clarify portal identity transfers in the mobile privacy policy and record
   first-release disclosure evidence and pending store checks (#221).
+- Require an embedded R8 class mapping in Android release bundles and provide
+  a disposable emulator launch check for unmodified signed APKs.
 
 - Cancel a channel swipe when a second finger lands on another player control.
 
