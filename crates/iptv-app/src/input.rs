@@ -352,6 +352,12 @@ fn named_key_options(key: RemoteKey) -> KeyOptions {
     }
 }
 
+/// Actions that a held key may activate only once on the current surface.
+fn one_shot_action(action: Action, mode: ViewMode, context: Context) -> bool {
+    matches!(action, Action::ShowMenu | Action::ToggleFavorite)
+        || (action == Action::Select && mode == ViewMode::Guide && context == Context::Guide)
+}
+
 pub(crate) fn bind(ui: Ui) -> InputScope {
     focus_remote_root();
     number::bind(ui);
@@ -366,14 +372,11 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         .enumerate()
         .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
     let consumed = input.nav.borrow().consumed;
-    let guide_active =
-        computed(move || ui.mode.get() == ViewMode::Guide && context(&ui) == Context::Guide);
     // Named bindings omit the repeat phase. Ask NSH to suppress repeats
-    // of remapped Select keys while they activate the guide's preview.
-    let guide_select_keys = computed(move || {
-        if !guide_active.get() {
-            return Vec::new();
-        }
+    // according to the current action, including custom key bindings.
+    let one_shot_keys = computed(move || {
+        let mode = ui.mode.get();
+        let context = context(&ui);
         ui.app.settings.get();
         let keymap = crate::remote_editor::keymap();
         KEYS.iter()
@@ -381,7 +384,9 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
             .chain((0..DIGITS.len() as u8).map(RemoteKey::Digit))
             .filter(|&key| {
                 named_key_options(key).repeat
-                    && keymap.resolve(Context::Guide, key, Press::Short) == Some(Action::Select)
+                    && keymap
+                        .resolve(context, key, Press::Short)
+                        .is_some_and(|action| one_shot_action(action, mode, context))
             })
             .collect::<Vec<_>>()
     });
@@ -393,7 +398,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
             // auto-repeats), so only a fresh press reaches it.
             let held_off = computed(move || {
                 consumed.with(|c| c.contains(&key))
-                    || guide_select_keys.with(|keys| keys.contains(&key))
+                    || one_shot_keys.with(|keys| keys.contains(&key))
             });
             effect(move || {
                 let mut options = named_key_options(key);
@@ -758,12 +763,7 @@ fn keep_controls_until(ui: Ui, at: u64) {
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     // A held key must not reopen a menu, toggle a favorite repeatedly or
     // turn a guide preview into fullscreen. Remapped keys can repeat too.
-    if repeat
-        && (matches!(action, Action::ShowMenu | Action::ToggleFavorite)
-            || (action == Action::Select
-                && ui.mode.get_untracked() == ViewMode::Guide
-                && context(&ui) == Context::Guide))
-    {
+    if repeat && one_shot_action(action, ui.mode.get_untracked(), context(&ui)) {
         return;
     }
     if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {

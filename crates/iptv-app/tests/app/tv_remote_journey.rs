@@ -554,6 +554,66 @@ fn a_remapped_select_only_activates_once_per_remote_press() {
 }
 
 #[test]
+fn a_desktop_favorite_remap_holds_repeats_and_restores_menu_navigation() {
+    let Some(home) = tv_isolated!() else { return };
+    let mut settings = Settings::new();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    settings
+        .set(
+            keys::KEY_OVERRIDES.as_str(),
+            Value::KeyBindings(vec![
+                KeyBinding::new(Some("guide"), "down", PressKind::Short, "toggle_favorite"),
+                KeyBinding::new(Some("guide"), "up", PressKind::Short, "show_menu"),
+            ]),
+        )
+        .unwrap();
+    let keymap = Arc::new(Mutex::new(None));
+    let observed = keymap.clone();
+    let mut fixture = personalization::start_with_setup(home, settings, true, |app| {
+        app.observe(move |_, batch| {
+            for item in &batch.items {
+                if let nsh_core::MountItem::Keymap(keys) = item {
+                    *observed.lock().unwrap() = Some(keys.clone());
+                }
+            }
+        });
+    });
+    let app = &mut fixture.app;
+    let repeat = |app: &mut crate::Headless, key: &str| {
+        let keys = keymap.lock().unwrap().clone().expect("mounted keymap");
+        app.repeat_key_binding(key, &keys).unwrap()
+    };
+
+    step(app.press_key("down"));
+    let repeated = repeat(app, "down");
+    step(app.press_key("m"));
+    compact_menu_for(app, "Local A", false);
+    assert_eq!(repeated, nsh_core::keymap::KeyMatch::Held);
+
+    // In the menu the same Down binding resolves to MoveDown and may
+    // repeat; it must not retain the guide's one-shot policy.
+    let favorite = "id:menu-panel >> role:menuitem[Add to favorites]";
+    assert!(app.screen().accessibility_state(favorite).unwrap().selected);
+    assert!(repeat(app, "down").fired().is_some());
+    assert!(!app.screen().accessibility_state(favorite).unwrap().selected);
+    step(app.press_key("m"));
+
+    // A fresh press toggles exactly once. The custom menu shortcut is
+    // also held in the guide, then becomes a navigation key in the menu.
+    step(app.press_key("down"));
+    assert_eq!(repeat(app, "up"), nsh_core::keymap::KeyMatch::Held);
+    assert!(!menu_open(app));
+    step(app.press_key("up"));
+    compact_menu_for(app, "Local A", true);
+    assert!(repeat(app, "up").fired().is_some());
+    assert!(menu_open(app));
+    step(app.press_key("m"));
+    assert_eq!(iptv_app::keyboard_repeats("down"), Some(false));
+    assert_eq!(iptv_app::keyboard_repeats("up"), Some(false));
+    assert_eq!(iptv_app::player_opens(0), 0);
+}
+
+#[test]
 fn a_desktop_key_remapped_to_select_repeats_only_outside_the_guide_grid() {
     let Some(home) = tv_isolated!() else { return };
     let mut settings = Settings::new();

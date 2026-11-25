@@ -13,8 +13,8 @@ is below 1.0, a minor release may change behavior.
   for remote Long OK and Menu, touch holds, and desktop right-clicks. Menu
   in the player's channel list also opens that row's compact actions.
   **More options** retains access to full program and group actions.
-- Holding a remote favorite key changes the favorite once, including
-  custom key bindings.
+- Holding a favorite key changes the favorite once, including custom
+  remote and desktop keyboard bindings.
 
 ## [0.1.9] - 2026-11-25
 

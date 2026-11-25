@@ -165,6 +165,27 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_opens_the_play_bar() {
     // OK opens the archive there at once.
     step(app.press_key("right"));
     step(app.wait_for(&format!("{LINE} >> text:⇢ 5:00")));
+    // Native named-key repeats still seek: the one-shot action policy
+    // must not turn a held seek arrow into a single step.
+    let keys = lifetime
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::Keymap(keys) => Some(keys.clone()),
+            _ => None,
+        })
+        .expect("mounted keymap");
+    assert!(
+        app.repeat_key_binding("right", &keys)
+            .unwrap()
+            .fired()
+            .is_some()
+    );
+    step(app.wait_for(&format!("{LINE} >> text:⇢ 10:00")));
+    step(app.press_key("left"));
+    step(app.wait_for(&format!("{LINE} >> text:⇢ 5:00")));
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^⇢/", Duration::from_secs(2)));
     step(app.wait_for(&format!("{LINE} >> text:5:00")));
