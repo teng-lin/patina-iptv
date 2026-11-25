@@ -18,7 +18,11 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     time::Duration,
 };
 
@@ -78,10 +82,12 @@ fn plays(app: &mut Headless, props: &Props, episode: &str) {
     ));
 }
 
-/// A generated series of three episodes, the viewer at `at` with its first
-/// episode playing.
-fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run {
-    let server = Server::start(&[("/player_api.php", SERIES_INFO.into())]);
+fn seed_series(
+    home: &crate::isolated::Home,
+    base: &str,
+    autoplay: bool,
+    lock: Lock,
+) -> (PathBuf, iptv_core::vod::Key) {
     let root = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = iptv_settings::Settings::new();
@@ -102,7 +108,7 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
         .add_source(&Source {
             name: "Generated on-demand playlist".into(),
             config: SourceConfig::Xtream(XtreamCredentials {
-                server_url: server.base.clone(),
+                server_url: base.into(),
                 username: Secret::new("generated-user"),
                 password: Secret::new("generated-pass"),
                 user_agent: None,
@@ -162,7 +168,35 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
             .set_parental_blocked(&iptv_runtime::vod::target(&locked), true)
             .unwrap();
     }
-    drop(store);
+    (path, series_key)
+}
+
+fn unlock(app: &mut Headless) {
+    step(app.wait_for_within(PIN, Duration::from_secs(20)));
+    for digit in "2468".chars() {
+        step(app.press_key(&digit.to_string()));
+    }
+    step(app.press("id:parental-layer >> text:Continue"));
+    step(app.wait_for_gone(PIN, Duration::from_secs(20)));
+}
+
+fn lock(app: &mut Headless, surface: NodeId) {
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: Value::Null,
+        },
+    );
+    app.settle();
+}
+
+/// A generated series of three episodes, the viewer at `at` with its first
+/// episode playing.
+fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run {
+    let server = Server::start(&[("/player_api.php", SERIES_INFO.into())]);
+    let (path, series_key) = seed_series(&home, &server.base, autoplay, lock);
     let mut app = Headless::start(engine(nsh_core::platform::Idiom::Tv)).unwrap();
     let props = observe_props(&mut app);
     step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
@@ -171,12 +205,7 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
     step(app.wait_for("id:vod-screen"));
     step(app.press(SERIES));
     if lock == Lock::Series {
-        step(app.wait_for_within(PIN, Duration::from_secs(20)));
-        for digit in "2468".chars() {
-            step(app.press_key(&digit.to_string()));
-        }
-        step(app.press("id:parental-layer >> text:Continue"));
-        step(app.wait_for_gone(PIN, Duration::from_secs(20)));
+        unlock(&mut app);
     }
     step(app.wait_for(FIRST));
     step(app.press(FIRST));
@@ -212,6 +241,54 @@ fn watch(home: crate::isolated::Home, at: At, autoplay: bool, lock: Lock) -> Run
         path,
         series: series_key,
     }
+}
+
+#[test]
+fn revoking_a_series_grant_hides_existing_and_pending_details() {
+    let Some(home) = isolated!() else { return };
+    let entered = Arc::new(AtomicBool::new(false));
+    let request_entered = entered.clone();
+    let (release, waiting) = mpsc::channel();
+    let waiting = Mutex::new(Some(waiting));
+    let server = Server::start_with(&[("/player_api.php", SERIES_INFO.into())], move |target| {
+        if target.contains("action=get_series_info") {
+            let held = waiting.lock().unwrap().take();
+            if let Some(held) = held {
+                request_entered.store(true, Ordering::Release);
+                let _ = held.recv_timeout(Duration::from_secs(20));
+            }
+        }
+    });
+    seed_series(&home, &server.base, false, Lock::Series);
+    let mut app = Headless::start(engine(nsh_core::platform::Idiom::Tv)).unwrap();
+    step(app.wait_for_within("text:Generated group", Duration::from_secs(20)));
+    let surface = player(&app);
+    crate::browse_fixture::open_rail_item(&mut app, "Shows");
+    step(app.wait_for("id:vod-screen"));
+
+    step(app.press(SERIES));
+    unlock(&mut app);
+    step(app.wait_until(
+        "the provider is holding the details reply",
+        Duration::from_secs(10),
+        |_| entered.load(Ordering::Acquire),
+    ));
+    lock(&mut app, surface);
+    release.send(()).unwrap();
+    step(app.wait_for_within(
+        "text:Details unavailable; refresh the playlist and try again",
+        Duration::from_secs(15),
+    ));
+    assert!(!app.shows(FIRST));
+
+    step(app.press(SERIES));
+    unlock(&mut app);
+    step(app.wait_for(FIRST));
+    lock(&mut app, surface);
+    step(app.wait_for_gone(FIRST, Duration::from_secs(5)));
+    step(app.wait_for(SERIES));
+    assert_eq!(player(&app), surface);
+    assert_eq!(iptv_app::player_opens(0), 0);
 }
 
 /// The player reports the playing episode's last frame, then its end.
