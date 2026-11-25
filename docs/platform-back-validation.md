@@ -24,13 +24,18 @@ without recording the owner's choice and the applicable Samsung guidance.
 If immediate close is chosen, both hosts must change together: the NSH host's
 `iptv_app::confirm_leaving` hook in `hosts/tizen-nsh/src/lib.rs` and the bridge's
 `leave` event/popup flow in `crates/iptv-web` and `hosts/tizen/app/main.js`.
-Recheck the first-run screens as well as the guide's rail. The Exit key remains
+Recheck the first-run welcome and recovery roots as well as the guide's rail. The Exit key remains
 unregistered and is handled by the system under either policy. A policy decision
 does not replace the independent device checks.
 
-CO-US-04 distinguishes an open popup/IME (Exit closes it) from an application
-page (Exit closes the app). Patina must leave those transitions to the system;
-do not infer that pressing Exit over every popup always terminates the app.
+CO-US-04 also says Exit closes an open popup or IME. Its wording does not
+exclude app-rendered popups. Patina's HTML/NSH exit question is part of the app,
+not a system popup, and neither host registers Exit. App termination over that
+question is therefore the expected **inference from the implementation**, not a
+verified TV result or a claim that firmware dismisses the app's popup. This is
+a potential CO-US-04 certification conflict requiring owner/Samsung
+clarification. Test a system-owned IME separately. No Exit binding or window
+policy changes here resolve either pending certification question.
 
 ## Evidence at the audited revision
 
@@ -51,10 +56,16 @@ Subsequent merge `9513c431` integrates master `45ea24a9`, including its More
 chooser, device, scale and Android changes. At that integrated source, core
 tests (37), presentation tests (465 unit, 53 integration, 2 doctests), both wasm
 builds and the app build pass. The focused Back scenarios (5 overlay, 1 wizard,
-1 recovery), chooser unit scenario, strict app/presentation Clippy and line/diff
+1 recovery), `chooser::tests::every_chooser_and_picture_size_has_its_own_name`,
+strict app/presentation Clippy and line/diff
 checks also pass. Independent native review verifies that the More reconciliation
 stays separate from the fixed No/Yes chooser. Native APK evidence from an earlier
 source revision must not be treated as validation of this combined base.
+
+### Check table: production revision `2cc73bf4`
+
+The counts and commands in this table are the initial source revision only;
+separate integration paragraphs record later reruns.
 
 | Check | Result and limit |
 | --- | --- |
@@ -83,6 +94,38 @@ and fixed No/Yes selection are unchanged by that integration. Final-head checks
 and APK operation manifests must name their own exact source revision; the
 pre-integration device results below remain scoped to `cc494298`.
 
+## Final integrated Android evidence at `984417e6`
+
+At application `984417e683e56bd3e01679a244108dee2f0b8483`, the required core
+and presentation tests (37 core; 468 presentation unit, 53 integration,
+2 doctests), both wasm builds, app build, focused Back scenarios, 61 web tests,
+strict Clippy, JavaScript syntax and line/target-budget checks pass.
+The final APK SHA-256 is
+`de34843f738bd44a00ef92bc0a323867b3ed12133082e3360f9ce95653adc15a`.
+The exact NSH pin, CLI and runtime hashes were reverified after building it.
+Later documentation/test-only review fixes do not change Android production
+code; this artifact remains attributed to `984417e6`, not a later commit.
+
+Both final API 36/Android 16 ARM64 owned copies passed their bounded root,
+form and recovery-details checks with no application crash or refused player
+load. The TV guest (`sdk_google_atv64_arm64`, port 5590) returned to its launcher
+with one Back at the guide rail, welcome and recovery root. The tablet guest
+(`sdk_gphone64_arm64`, `tab36`, port 5592) retained Patina on cancellation and
+returned to Nexus Launcher on commit at all three roots. Visual review of all
+six final recordings confirmed the rounded root window over the launcher,
+including guide cancellation. This supersedes the earlier tablet's incomplete
+visual result for emulator evidence only; it establishes no physical-phone or
+Tizen acceptance.
+
+The retained workspace root is `target/android-validation/skywalker-277/` in
+this owned worktree. Final records are `patina277-final9844-tv/run-5ur3vdco` and
+`patina277-final9844-tab/run-1oi33ohq`, alongside the APK, provenance JSON,
+frozen helpers, checksums and a README index. The tablet's six MP4s are in its
+`platform-back` directory; `final9844-review-frames` holds the reviewed frames.
+These generated artifacts are retained outside Git for local review, and the
+pull request records their source and result. Keep this evidence-bearing
+worktree when cleaning up worktrees.
+
 ## Owned emulator follow-up on 2026-11-25 UTC
 
 These runs used application `cc494298c8ff3cc0fed9d68699f273ae1a848c61`,
@@ -105,9 +148,10 @@ or establish either Tizen host's physical acceptance.
 | API 36 `tab36`, owned port 5592 | Guest model `sdk_gphone64_arm64`, Android 16, ARM64, gesture navigation. Cancel retained Patina and commit returned to Nexus Launcher at all three roots. Forms and recovery details consumed Back. No application crash or refused player load. |
 | Tablet visual inspection | Rounded Patina-over-launcher previews were observed for committed guide Back and for committed and canceled welcome/recovery Back. The guide cancellation recording showed the system Back arrow, with Patina retained, but did not establish the rounded home preview. All-root predictive animation acceptance is therefore still incomplete. |
 
-TV evidence is under
-`/private/tmp/patina277-focused-tv/run-cua4xt11` on HanSolo; tablet evidence is
-under `/private/tmp/patina277-focused-tab-final/run-_b8wncn0`. Each has an
+Retained workspace evidence is under
+`target/android-validation/skywalker-277/` in the owned Back worktree. The
+historical TV record is `patina277-focused-tv/run-cua4xt11`; the historical
+tablet record is `patina277-focused-tab-final/run-_b8wncn0`. Each has an
 `operation.json`, native action log, application/crash logs, XML and screenshots;
 the tablet run also retains six gesture MP4s, guest properties, navigation
 settings and frozen Python/Java helpers with hashes. The app was alive at each
@@ -134,8 +178,10 @@ The follow-up in this change addresses two additional source-level defects:
   and Right selects Yes, without changing the other choosers.
 
 Existing app scenarios were extended for welcome/form transitions, recovery
-details and repeated Left/Right selections. Each new regression failed on the
-audited baseline. Their headless observations establish callback registration
+details and repeated Left/Right selections. The initial new regression assertions failed on the
+audited baseline. Additional existing-harness scenarios cover Left/Right
+remaining inert in an ordinary chooser and the Tizen hook confirming recovery
+only after details close. Their headless observations establish callback registration
 and chooser behavior, not a physical predictive animation or TV result.
 
 ## Available hardware and blockers
@@ -165,11 +211,12 @@ and emulators in separate evidence records.
 
 | Target | Required observations | Status |
 | --- | --- | --- |
-| `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. Repeat one-press exit from first-run welcome and recovery with details closed. A form or open recovery details consumes the first Back, then its root hands the next Back to the system. | Focused one-press rail/welcome/recovery results pass at `cc494298`; exact APK and limits above. A later integrated APK needs its own validation. |
+| `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. Repeat one-press exit from first-run welcome and recovery with details closed. A form or open recovery details consumes the first Back, then its root hands the next Back to the system. | Final integrated `984417e6` owned TV run passes all three roots and form/details checks; exact artifact and retained record above. |
 | Android phone, API 34+ | At each root (guide rail, first-run welcome, recovery with details closed), observe committed and canceled edge gestures: the predictive home preview shows, commit returns home, cancel keeps Patina on the same screen. Forms and recovery details still consume Back. A Back key event or launcher-at-end assertion alone is insufficient. | Pending unlocked phone session; no physical run. |
 | Tizen bridge | On the guide's rail and first-launch setup, Return shows the localized question with No focused. Left/Right select the corresponding answer; Up/Down change selection; OK on No and Back dismiss without exiting; Yes exits. | Pending connected test TV and policy choice. |
-| Tizen NSH host | On the guide's rail, first-run welcome and recovery with details closed, Return shows the question with No focused. Left/Right select No/Yes, Up/Down change selection, OK chooses, Back dismisses and Yes exits. Open recovery details consumes Return before the exit question. | Pending connected test TV and policy choice. |
-| Both Tizen hosts, system Exit | From an application page, verify the system closes the app and returns to the TV channel screen. With a popup/IME open, CO-US-04 expects it to close first; record the actual firmware transition and report a mismatch rather than claiming unconditional app termination. Confirm the page does not register or consume Exit. | Pending connected test TV; no firmware result. |
+| Tizen NSH host | On the guide's rail, first-run welcome and recovery with details closed, Return shows the question with No focused. Left or Up selects No; Right or Down selects Yes, with no wrapping. OK chooses, Back dismisses and Yes exits. Open recovery details consumes Return before the exit question. | Pending connected test TV and policy choice. |
+| Both Tizen hosts, Exit on an app page or app-rendered popup | Confirm Exit remains unregistered. App-page termination is expected; termination over Patina's own popup is an implementation inference to verify. CO-US-04 has no stated app-popup exclusion, so this may conflict with its popup-closing rule. | Pending TV observation and owner/Samsung clarification of CO-US-04. |
+| Both Tizen hosts, Exit with system IME/popup | Open the TV's own keyboard or popup and record whether Exit dismisses it before app termination, as CO-US-04 requires. This is separate from Patina's rendered exit chooser. | Pending connected test TV; no firmware result. |
 | Both Tizen hosts, held Return/Exit | Hold the physical remote's Return/Exit key until the firmware's forced termination. It must terminate through the system without requiring Yes. Exercise an application page and an open confirmation; record any app action before the firmware takes over. | Pending connected test TV; no firmware result. |
 | Tizen 5.5 bridge localization | Start in a non-English TV language; confirm the Worker's synchronous XHR loads packaged `i18n/<tag>.tsv` and the popup's title/answers use that language. Inspect the packaged app/Worker on the TV, not a desktop mock. | Pending Tizen 5.5 hardware. |
 

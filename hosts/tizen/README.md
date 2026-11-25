@@ -56,9 +56,10 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   Yes, Up and Down to the other answer, OK chooses, Back closes the
   question. Only Yes leaves. The focused answer has the page's focus, so
   Voice Guide reads it. The remote's Exit key is the system's; the page does not
-  register it. Samsung's CO-US-04 checklist distinguishes closing a popup/IME
-  from closing an application page; verify the TV's system transition rather
-  than assuming Exit always terminates over a popup. The question is in the
+  register it. Its HTML question is not a system popup: app termination over
+  it is expected from that implementation, but remains unverified on TV.
+  CO-US-04 does not exclude app popups from its popup-closing rule, so clarification
+  from the owner and Samsung is pending. Test the TV's own IME separately. The question is in the
   TV's language. See the [acceptance ledger](../../docs/platform-back-validation.md)
   for the unresolved Return policy and pending physical-TV checks.
 - The guide screen: the preview of the playing channel at the top left

@@ -801,7 +801,9 @@ function exit() {
 /* Samsung's exit confirmation: Back (Return) at the app's first screen
  * (the guide's rail, or the first launch's setup) asks, with No focused;
  * the app leaves only on Yes. The remote's Exit key is never registered;
- * the system decides whether to close a popup/IME or the application. */
+ * the TV's IME is separate from this HTML popup. Termination over our popup
+ * is expected but unverified on TV; CO-US-04's generic popup-closing rule and
+ * CO-US-05's Return policy need owner/Samsung clarification (acceptance ledger). */
 var leave = { open: false, yes: false };
 function openLeave(m) {
     /* A second answer (two quick Returns) keeps the choice already made. */

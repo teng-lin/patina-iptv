@@ -372,8 +372,19 @@ fn choosers(app: &mut Headless) {
     step(app.wait_for("text:/^Sleep timer/"));
     step(app.press("text:/^Sleep timer/"));
     step(app.wait_for("text:✓  Off"));
+    // The leave question's Right/Left override must not move other choosers.
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:✓  Off", GONE));
+    step(app.press("text:/^Sleep timer/"));
+    step(app.wait_for("text:✓  Off"));
     step(app.press("text:30 minutes"));
     step(app.wait_for_gone("text:✓  Off", GONE));
+    step(app.press("text:/^Sleep timer/"));
+    step(app.wait_for("text:✓  30 minutes"));
+    step(app.press_key("left"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("text:✓  30 minutes", GONE));
     step(app.press("text:/^Sleep timer/"));
     step(app.wait_for("text:✓  30 minutes"));
     step(app.press_key("up"));

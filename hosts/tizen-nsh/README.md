@@ -27,8 +27,11 @@ then Yes), as
 Samsung's termination guide asks of a TV app: `src/lib.rs` calls
 `iptv_app::confirm_leaving`, and Yes sends `{"leave": true}` to the page
 (`nsh_platform_tizen::host`, the page's `onHost`), which exits. The
-platform never registers the remote's Exit key, so the system handles it.
-Up/Down move between the answers; Left selects No and Right selects Yes.
+platform never registers the remote's Exit key. Patina's chooser is rendered
+inside the app; expected termination over it is an implementation inference,
+not a verified popup dismissal by firmware. The generic CO-US-04 popup rule
+needs owner/Samsung clarification; test the system IME separately.
+Up or Left selects No; Down or Right selects Yes, without wrapping.
 OK chooses and Back dismisses. The [acceptance ledger](../../docs/platform-back-validation.md)
 separates these source/headless guarantees from pending physical-TV checks,
 including the firmware's held-Return/Exit behavior and the unresolved Samsung
