@@ -4,7 +4,7 @@ This pass began on November 24, 2026 from `origin/master` `0c76709d`, with
 NSH pinned to `413cfb65bf87a7bd9937f223fdc56896d8a718c8`. It records partial
 progress on [#222](https://github.com/teng-lin/patina-iptv/issues/222), not
 authorization to submit a first release. The [privacy evidence](store-privacy.md)
-and [optimized Android validation](android-release-220.md) have
+and [optimized Android validation](https://github.com/teng-lin/patina-iptv/issues/220) have
 separate owners. All fixture journeys use generated playlists and EPG, local
 mock servers and authorized demo media. No store account information, signing
 identities, provisioning profiles or provider data belongs in public evidence.
@@ -50,7 +50,7 @@ Run the redacted inventory against a finished bundle:
 python3 tools/ci/inspect-ios-bundle.py target/ios/Patina.app
 ```
 
-It reports executable digest, bundle/platform keys, linked framework bundles,
+It reports executable digest, bundle/platform keys, embedded framework bundles,
 bundled privacy-manifest declarations and signature verification. It omits
 certificate identities and profile/entitlement contents. Run it again on the
 **signed final** bundle; a local unsigned/ad-hoc result cannot prove distribution
@@ -74,6 +74,17 @@ and [required-reason rules](https://developer.apple.com/documentation/bundlereso
 require accurate declarations for applicable APIs, including SDK use. App
 Privacy console answers are tracked by #221; they do not replace manifests.
 
+The pinned NSH iOS adapter reads the system's `AppleTemperatureUnit` through
+`NSUserDefaults` in `nsh-platform-ios/src/surface.rs`. This needs an API or
+approved-reason review: Apple's `CA92.1` reason for app-private defaults does
+not authorize reading a system-written setting. The recording runtime checks
+available space with `statvfs`, and file storage uses Rust file-metadata APIs.
+These provide concrete disk-space and file-metadata audit leads. None of the
+downloaded MPVKit XCFramework inputs contains `PrivacyInfo.xcprivacy`. Do not
+substitute a blanket app-private-defaults declaration for this dependency
+review. Consult Apple's current
+[API category and reason list](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+
 ## Emulator and physical-device evidence
 
 | Evidence class | Result in this lane |
@@ -89,7 +100,7 @@ does not waive it. Keep emulator observations separate from physical evidence.
 
 ## Console and owner handoff
 
-The in-app browser could not attach: its network-policy prerequisite requires
+The Chrome browser integration could not attach: its network-policy prerequisite requires
 a desktop-app update. Consequently neither store console was reached, no
 account facts were verified and no fields were changed. Account-dependent
 items below remain **unverified**, not implicitly complete.
@@ -116,6 +127,8 @@ The exact pinned Rust 1.99.1 passed `cargo test -p iptv-core -p
 iptv-presentation` (37 core tests, 463 presentation unit tests, 53 presentation
 integration tests and 2 doctests), and both portable crates built for
 `wasm32-unknown-unknown`. The redacted bundle-inventory and provisioning helper
-suite passed all 4 tests. The native app build, final bundle audit and review/CI
+suite passed all 4 tests. The pinned native `cargo build -p iptv-app`, Android
+host tests after the final Kotlin formatting changes, pinned ktlint 1.3.1 and
+targeted Ruff 0.11.13 checks also passed. The final bundle audit and review/CI
 results are recorded as they complete; unchecked store/device criteria keep
 this issue open (`Refs #222`).

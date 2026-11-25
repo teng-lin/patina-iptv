@@ -14,5 +14,4 @@ internal fun appLaunchIntent(context: Context): Intent =
         launcherActivity(context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)),
     )
 
-internal fun launcherActivity(tv: Boolean): Class<out TvActivity> =
-    if (tv) LeanbackActivity::class.java else TvActivity::class.java
+internal fun launcherActivity(tv: Boolean): Class<out TvActivity> = if (tv) LeanbackActivity::class.java else TvActivity::class.java
