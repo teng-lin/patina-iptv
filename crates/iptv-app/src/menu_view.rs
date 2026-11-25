@@ -140,10 +140,10 @@ pub fn open(ui: Ui) {
 }
 
 pub fn open_for(ui: Ui, channel: usize, minute: i32) {
-    open_program_at(ui, channel, minute, current_list(ui));
+    open_program_at(ui, channel, minute, current_list(ui), false);
 }
 
-fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
+fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_context: bool) {
     let schedule = crate::runtime_owner::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
@@ -159,7 +159,9 @@ fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
         channel: key,
         start: program.start,
     };
-    ui.menu.set(Some(Menu::new(rows, target, list)));
+    let mut menu = Menu::new(rows, target, list);
+    menu.playing_context = playing_context;
+    ui.menu.set(Some(menu));
 }
 
 fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &ListId) -> Vec<Row> {
@@ -235,10 +237,16 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
 
 /// The player list has no timeline cursor. Its channel actions use the live block.
 pub fn open_channel(ui: Ui, channel: usize) {
-    open_channel_at(ui, channel, crate::clock::now_minute(), current_list(ui));
+    open_channel_at(
+        ui,
+        channel,
+        crate::clock::now_minute(),
+        current_list(ui),
+        false,
+    );
 }
 
-fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
+fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_context: bool) {
     let schedule = crate::runtime_owner::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
@@ -250,7 +258,7 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
     };
     let offset = crate::player::guide_offset(&*schedule, channel);
     let rows = channel_rows(ui, origin, &list, true);
-    ui.menu.set(Some(Menu::new(
+    let mut menu = Menu::new(
         rows,
         Target::Channel {
             channel: key,
@@ -258,7 +266,9 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
             offset,
         },
         list,
-    )));
+    );
+    menu.playing_context = playing_context;
+    ui.menu.set(Some(menu));
 }
 
 fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row> {
@@ -465,10 +475,22 @@ pub fn perform(ui: Ui, item: MenuItem) {
         if origin_program(&*schedule, origin) != *program
             || crate::player::guide_offset(&*schedule, origin.channel) != *offset
         {
-            open_channel_at(ui, origin.channel, origin.program_start, list);
+            open_channel_at(
+                ui,
+                origin.channel,
+                origin.program_start,
+                list,
+                playing_context,
+            );
             return;
         }
-        open_program_at(ui, origin.channel, origin.program_start, list);
+        open_program_at(
+            ui,
+            origin.channel,
+            origin.program_start,
+            list,
+            playing_context,
+        );
         ui.menu.update(|menu| {
             if let Some(menu) = menu {
                 menu.parent = parent.map(Box::new);
@@ -492,14 +514,20 @@ pub fn perform(ui: Ui, item: MenuItem) {
             || origin_program(&*schedule, origin) != program
             || !crate::recordings_view::perform_channel_action(ui, origin, item)
         {
-            open_channel_at(ui, origin.channel, program.start, list);
+            open_channel_at(ui, origin.channel, program.start, list, playing_context);
         }
         return;
     }
     match item {
         MenuItem::ChannelActions => {
             if let Some(origin) = program_origin(&target) {
-                open_channel_at(ui, origin.channel, origin.program_start, list);
+                open_channel_at(
+                    ui,
+                    origin.channel,
+                    origin.program_start,
+                    list,
+                    playing_context,
+                );
             }
         }
         MenuItem::BlockChannel | MenuItem::BlockGroup => {
@@ -1430,7 +1458,7 @@ pub fn open_at(ui: Ui, channel: usize) {
         crate::lists::tap(ui, channel, minute);
         crate::browse_playback::hold(ui);
         let minute = ui.focus.with_untracked(|focus| focus.cursor);
-        open_channel_at(ui, channel, minute, current_list(ui));
+        open_channel_at(ui, channel, minute, current_list(ui), false);
     });
 }
 
@@ -1441,7 +1469,7 @@ pub fn open_timeline_context(ui: Ui) {
     crate::browse_playback::hold(ui);
     if let Some(channel) = crate::lists::focused_channel(ui) {
         let minute = ui.focus.with_untracked(|focus| focus.cursor);
-        open_channel_at(ui, channel, minute, current_list(ui));
+        open_channel_at(ui, channel, minute, current_list(ui), false);
     }
 }
 
