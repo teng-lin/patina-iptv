@@ -68,7 +68,7 @@ installs. Screen captures and logs use fresh synthetic profiles only.
 
 | Journey | Tablet emulator | TV emulator |
 | --- | --- | --- |
-| Normal launcher and first run | Passed: API 36 ARM64, library setup visible | Pending |
+| Normal launcher and first run | Passed: API 36 ARM64, library setup visible | Passed: API 36 ARM64, Leanback launcher and library setup visible |
 | Playlist import | Passed: generated local M3U via normal Android file picker, 3 channels in 3 groups | Pending |
 | Playback and XMLTV refresh | Pending: public synthetic endpoint required | Pending: public synthetic endpoint required |
 | PiP | Pending active playback; handheld PiP retained by #222 | Pending: verify Leanback exclusion with #222 candidate |
@@ -92,6 +92,15 @@ proves import without attempting a real service. No playback or EPG-fetch pass
 is inferred from that import. The held emulator expired before export completion
 and restore were verified; its crash buffer had no fatal entries. The original
 AVD profiles and viewer installs were not changed.
+
+TV evidence is retained in `target/android-validation/run-okri31o4`, using the
+same public APK hash and compiled source. The operation completed with
+`launch-passed-journeys-pending`; the launcher category is
+`android.intent.category.LEANBACK_LAUNCHER`, the resolved historical activity
+is `.host.TvActivity`, and normal source selection responded to D-pad input.
+The process and resolved resumed activity were checked; no fatal crash entries
+were retained. This historical TV run does not verify the new `.LeanbackActivity`
+or its PiP exclusion in #222.
 
 ## Physical-device acceptance
 
@@ -121,3 +130,18 @@ Android vitals memory across available RAM tiers and states. Record unavailable
 or insufficient data explicitly. Confirm the signing certificate against the
 owner-approved upload certificate, preserve the exact map, and rerun the full
 journey matrix for the final candidate including #222 before closing #220.
+
+## Repository checks and review
+
+Pinned Rust 1.99.1 passed core/presentation tests, both wasm builds and
+`cargo build -p iptv-app`, using a separate target directory. Artifact helper
+tests (10), disposable ownership/release-flow tests (21), lifecycle tests (16)
+and ShellCheck pass. Signing helper tests pass with three Linux-only/SDK
+scenarios skipped on macOS; their generated AAB fixture now carries a valid
+synthetic R8 map. Full final-head CI remains the PR gate.
+
+Independent native review and Antigravity review found failure-reporting,
+process-liveness, signing-fixture and hold-control gaps, which were fixed and
+covered by helper regressions. Claude Code could not review because its CLI
+authorization had expired; no store account or signing material was provided
+to either reviewer.
