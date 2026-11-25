@@ -86,7 +86,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             ui.store_startup_failure.set(None);
         }),
         RuntimeEvent::StoreStartupFailed { path, error } => {
-            crate::startup::store_failed(ui, path, error)
+            crate::startup_view::store_failed(ui, path, error)
         }
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {

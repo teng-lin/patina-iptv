@@ -118,6 +118,7 @@ mod settings;
 mod settings_view;
 mod setup_view;
 pub mod startup;
+mod startup_view;
 /// The app's guide clock and its UI tick.
 pub mod time {
     pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
@@ -323,7 +324,7 @@ pub struct Ui {
     /// The question before quitting during a capture, with its focused
     /// answer (`desktop::quit_confirm`).
     quit_confirm: Signal<Option<desktop::quit_confirm::Choice>>,
-    store_startup_failure: Signal<Option<startup::StoreFailure>>,
+    store_startup_failure: Signal<Option<startup_view::StoreFailure>>,
     store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
     pub playlists: Signal<Option<playlists_view::Open>>,
@@ -870,7 +871,7 @@ pub fn App() -> impl IntoElement {
                     })
                 })),
         )
-        .child(when(splash, startup::splash))
+        .child(when(splash, startup_view::splash))
 }
 
 /// Constructed once after recovery; all player surfaces belong to this owner.
@@ -1085,7 +1086,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(wizard_view::layer(ui))
         .child(backup::layer(ui))
         .child(parental_view::layer(ui))
-        .child(startup::store_failure_layer(ui))
+        .child(startup_view::store_failure_layer(ui))
         .child(desktop::quit_confirm::layer(ui))
         // The question before leaving, over every screen it can be asked
         // from (the first run's welcome screen too); mounted only while it
@@ -1275,7 +1276,9 @@ fn bind_back(ui: Ui) {
         // being typed and a pending Long Back release are handled first.
         let leaves = match ui.top_overlay() {
             Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
-            Some(overlays::Overlay::StoreStartupFailure) => startup::store_failure_back_leaves(ui),
+            Some(overlays::Overlay::StoreStartupFailure) => {
+                startup_view::store_failure_back_leaves(ui)
+            }
             None if !desktop::fullscreen() => match back_target.get() {
                 (ViewMode::Guide, Pane::Rail, false) => true,
                 (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
@@ -1320,7 +1323,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 chooser::close(ui);
                 true
             }
-            _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
+            _ if top == Some(Overlay::StoreStartupFailure) => startup_view::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
                 true

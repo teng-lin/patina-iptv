@@ -810,7 +810,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::StoreStartupFailure) {
-        crate::startup::store_failure_key(ui, action);
+        crate::startup_view::store_failure_key(ui, action);
         return;
     }
     if top == Some(Overlay::Vod) {
