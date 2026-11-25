@@ -77,6 +77,12 @@ class FavoritesAccessibility(unittest.TestCase):
         tree[1].set("selected", "false")
         self.assertTrue(UI.selected(tree, "Manage favorites…"))
 
+    def test_context_absence_observes_text_and_labels_and_requires_a_snapshot(self):
+        self.assertFalse(UI.absent(self.tree(), "More options"))
+        self.assertFalse(UI.absent(self.tree({"text": "More options"}), "More options"))
+        self.assertFalse(UI.absent(self.tree({"content-desc": "Channel options…"}), "Channel options…"))
+        self.assertTrue(UI.absent(self.tree({"text": "Generated guide channel"}), "More options"))
+
     def test_selection_and_editor_observations_fail_closed_until_ready(self):
         for tree in (self.tree(), self.tree({"selected": "true", "content-desc": "Generated one"},
                                           {"selected": "true", "content-desc": "Generated two"})):
@@ -119,6 +125,53 @@ class FavoritesAccessibility(unittest.TestCase):
 
 
 class FavoritesObservationWait(unittest.TestCase):
+    def run_menu_pick(self, observations, wanted):
+        with tempfile.TemporaryDirectory(prefix="patina-menu-pick-") as temporary:
+            root = Path(temporary)
+            for index, label in enumerate(observations, 1):
+                tree = ET.Element("hierarchy")
+                ET.SubElement(tree, "node", {"selected": "true", "content-desc": label})
+                ET.ElementTree(tree).write(root / f"{index}.xml")
+            functions = "\n".join(re.search(rf"(?ms)^{name}\(\) \{{\n.*?^\}}", SOURCE)[0]
+                                  for name in ("ui_wait", "ui_selected_changed", "ui_pick_menu_item"))
+            script = r'''
+ui_probe=$UI_PROBE
+ui_xml=$UI_CASE/current.xml
+samples=0
+python3() { "$UI_PYTHON" "$@"; }
+ui_dump() {
+  samples=$((samples + 1))
+  observed=$samples
+  [ "$observed" -le "$UI_OBSERVATIONS" ] || observed=$UI_OBSERVATIONS
+  cp "$UI_CASE/$observed.xml" "$ui_xml"
+}
+keys() { printf '%s\n' "$*" >> "$UI_CASE/keys.txt"; }
+pause() { :; }
+fail() { echo "$* samples=$samples" >&2; exit 1; }
+cp "$UI_CASE/1.xml" "$ui_xml"
+''' + functions + '\nui_pick_menu_item "$UI_WANTED"\n'
+            result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                                    env=dict(os.environ, UI_CASE=str(root), UI_PYTHON=sys.executable,
+                                             UI_PROBE=str(ROOT / "tools/ci/android/ui-snapshot.py"),
+                                             UI_OBSERVATIONS=str(len(observations)), UI_WANTED=wanted), timeout=15)
+            return result, (root / "keys.txt").read_text().splitlines()
+
+    def test_compact_more_waits_for_a_changed_selection_before_selecting(self):
+        result, actions = self.run_menu_pick(["Add to favorites", "Add to favorites", "More options"], "More options")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(actions, ["KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_CENTER"])
+
+    def test_advanced_menu_walk_uses_actual_labels_and_selects_once(self):
+        result, actions = self.run_menu_pick(["Search", "Generated action", "Manage favorites…"], "Manage favorites…")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(actions, ["KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_DOWN", "KEYCODE_DPAD_CENTER"])
+
+    def test_stuck_compact_menu_does_not_replay_down_or_select(self):
+        result, actions = self.run_menu_pick(["Add to favorites"], "More options")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("samples=6", result.stderr)
+        self.assertEqual(actions, ["KEYCODE_DPAD_DOWN"])
+
     def run_menu_wait(self, observations):
         with tempfile.TemporaryDirectory(prefix="patina-ui-wait-") as temporary:
             root = Path(temporary)

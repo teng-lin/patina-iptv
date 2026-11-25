@@ -18,6 +18,11 @@ def selected(root, label):
                for node in root.iter("node"))
 
 
+def absent(root, label):
+    return (next(root.iter("node"), None) is not None
+            and not any(label in labels(node) for node in root.iter("node")))
+
+
 def selected_label(root):
     names = {node.get("content-desc") or node.get("text")
              for node in root.iter("node") if node.get("selected") == "true"}
@@ -90,16 +95,17 @@ def covered_button_center(before, modal, label):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("snapshot", type=Path)
-    parser.add_argument("action", choices=("selected", "selected-label", "count", "confirmation", "editor-closed", "tap", "covered-tap"))
+    parser.add_argument("action", choices=("selected", "absent", "selected-label", "count", "confirmation", "editor-closed", "tap", "covered-tap"))
     parser.add_argument("label", nargs="?")
     parser.add_argument("--before", type=Path, help="snapshot before opening the confirmation")
     args = parser.parse_args()
     try:
         root = ET.parse(args.snapshot).getroot()
-        if args.action == "selected":
+        if args.action in {"selected", "absent"}:
             if not args.label:
-                parser.error("selected requires a label")
-            return 0 if selected(root, args.label) else 1
+                parser.error(f"{args.action} requires a label")
+            observed = selected(root, args.label) if args.action == "selected" else absent(root, args.label)
+            return 0 if observed else 1
         if args.action == "selected-label":
             print(selected_label(root))
         elif args.action == "count":
