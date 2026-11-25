@@ -636,6 +636,25 @@ fn manual_guide_updates_keep_the_backoff_that_refused_work_canceled() {
     assert!(!s.pending(), "no periodic check with updates on request");
 }
 
+#[test]
+fn a_catalog_refresh_closes_the_open_channel_menu() {
+    let Some(home) = isolated!() else { return };
+    let mut s = Scenario::start(&home, false, false);
+    iptv_app::hold_reports(true);
+    s.refresh();
+    until(&mut s.app, "refresh report held", IMPORT, |_| {
+        iptv_app::reports_waiting() > 0
+    });
+    to_guide(&mut s.app);
+    step(s.app.open_guide_groups());
+    step(s.app.press_key("right"));
+    step(s.app.press_key("m"));
+    step(s.app.wait_for("id:menu-panel >> text:Choose guide data…"));
+    iptv_app::hold_reports(false);
+    step(s.app.wait_for_gone("id:menu-panel", IMPORT));
+    step(s.app.wait_for_within("text:Alpha Now", IMPORT));
+}
+
 /// A refresh reads its stored guide, then reports its channels with it.
 /// "Delete stored guide data" in between revokes the refresh: its report
 /// still shows the channels, with the guide as stored now, not the

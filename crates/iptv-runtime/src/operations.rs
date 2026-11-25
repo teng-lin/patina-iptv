@@ -332,10 +332,6 @@ impl Runtime {
         crate::favorites::reset(self);
     }
 
-    pub fn favorites_catalog_changed(&self, catalog: &dyn iptv_core::guide::Schedule) {
-        crate::favorites::catalog_changed(self, catalog);
-    }
-
     pub fn favorite_channels(&self) -> Vec<usize> {
         crate::favorites::favorite_channels(self)
     }

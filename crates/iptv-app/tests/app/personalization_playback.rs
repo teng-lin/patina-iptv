@@ -21,6 +21,81 @@ fn preview(app: &crate::headless::Headless) -> bool {
 }
 
 #[test]
+fn a_clock_edit_with_reordered_rows_keeps_the_menu_focus_and_preview() {
+    use crate::tv_shared_controls::{persistent, preview_fixture_with};
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+
+    let Some(home) = isolated!() else { return };
+    let (mut f, lifetime) = preview_fixture_with(home, |settings| {
+        settings.set("guide.switch_delay", Value::ms(500)).unwrap();
+    });
+    let app = &mut f.app;
+    step(app.set_environment("desktop keyboard and pointer", |env| {
+        env.idiom = nsh_core::platform::Idiom::Desktop;
+    }));
+    group(app, "News");
+    step(app.run_for(Duration::from_millis(600)));
+    step(app.wait_until(
+        "Local A plays in the preview",
+        Duration::from_secs(5),
+        |_| {
+            lifetime
+                .lock()
+                .unwrap()
+                .sources
+                .last()
+                .is_some_and(|url| url == "http://example.test/a")
+        },
+    ));
+    assert!(preview(app));
+    let player = lifetime.lock().unwrap().players[0];
+    let opens = iptv_app::player_opens(0);
+
+    // Stage a saved reorder without publishing it. The clock edit will
+    // reload both changes from the same organization snapshot.
+    let store = crate::isolated::open_database(&f.path).unwrap();
+    let news = store
+        .groups(f.source, None)
+        .unwrap()
+        .into_iter()
+        .find(|group| group.name == "News")
+        .unwrap();
+    store
+        .set_guide_sort(
+            f.source,
+            &OrganizationScope::GroupChannels(news.id),
+            Sort::NameDescending,
+        )
+        .unwrap();
+    drop(store);
+    step(app.open_guide_groups());
+    let group_menu = "id:guide-groups >> text:News";
+    step(app.long_press(group_menu));
+    step(app.press("id:menu-panel >> text:Guide time offset"));
+    step(app.press_key("right"));
+    step(app.wait_for("id:menu-panel >> text:Guide time offset · +0:15"));
+    let writer = iptv_app::hold_writer();
+    step(app.press("id:menu-panel >> text:Save"));
+    step(app.long_press(group_menu));
+    step(app.wait_for("id:menu-panel >> role:header[News]"));
+    drop(writer);
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
+    step(app.wait_for("id:menu-panel >> role:header[News]"));
+    step(app.back());
+    step(app.press_key("right"));
+    assert!(
+        app.screen()
+            .accessibility_state("id:guide-ui >> label:Local A")
+            .unwrap()
+            .selected
+    );
+    step(app.run_for(Duration::from_millis(600)));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    persistent(app, &lifetime, player);
+}
+
+#[test]
 fn guide_activates_a_live_channel_twice_and_wraps_rows_and_groups() {
     use crate::tv_shared_controls::{persistent, record_players};
 

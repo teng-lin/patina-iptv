@@ -1,4 +1,5 @@
 //! Apply user organization to the guide without replacing playback channels.
+use super::{CommitOutcome, ScheduleUpdate, commit_schedule};
 use crate::model::SourceId;
 use iptv_guide::EpgSchedule;
 use std::rc::Rc;
@@ -126,13 +127,14 @@ async fn replace_single(owner: &Rc<crate::Runtime>, source: SourceId, ticket: u6
     let Some(replacement) = apply(owner, epg, source).await else {
         return false;
     };
-    let replacement = Rc::new(replacement);
-    owner.emit(crate::RuntimeEvent::OrganizationReady {
-        source,
-        ticket,
-        schedule,
-        replacement: replacement.clone(),
-    });
-    let installed: Rc<dyn iptv_core::guide::Schedule> = replacement;
-    Rc::ptr_eq(&owner.schedule(), &installed)
+    commit_schedule(
+        owner,
+        ScheduleUpdate::Organization {
+            source,
+            ticket,
+            expected: epg,
+            schedule: Rc::new(replacement),
+        },
+        || {},
+    ) == CommitOutcome::Installed
 }

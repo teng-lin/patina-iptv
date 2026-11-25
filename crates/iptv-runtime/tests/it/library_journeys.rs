@@ -85,13 +85,20 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         );
         let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
         let weak = Rc::downgrade(&owner);
+        let last = std::cell::RefCell::new(owner.schedule());
         owner.bind(move |event| {
-            if let RuntimeEvent::ScheduleReady(schedule) = event {
+            if let RuntimeEvent::ScheduleChanged {
+                previous, current, ..
+            } = event
+            {
                 let owner = weak.upgrade().unwrap();
-                let count = schedule.channel_count();
-                owner.set_schedule(schedule.clone());
-                owner.favorites_catalog_changed(schedule.as_ref());
-                sender.send(count).unwrap();
+                assert!(Rc::ptr_eq(&last.replace(current.clone()), &previous));
+                assert!(Rc::ptr_eq(&owner.schedule(), &current));
+                for channel in 0..current.channel_count() {
+                    let key = current.channel_key(channel).unwrap();
+                    assert_eq!(owner.favorites_channel_of(&key), Some(channel));
+                }
+                sender.send(current.channel_count()).unwrap();
             }
         });
         owner.start_services();

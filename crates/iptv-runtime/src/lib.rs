@@ -56,15 +56,12 @@ pub use testing::TestGate;
 pub struct BrowserState {
     pub focused_key: Option<String>,
     pub playing: bool,
-    pub has_vod: bool,
-    /// Some enabled playlist has movies or shows.
-    pub any_vod: bool,
 }
 
 mod guide_checks;
 pub use guide_checks::GuideWork;
 pub(crate) mod state;
-pub use events::RuntimeEvent;
+pub use events::{RuntimeEvent, ScheduleCause};
 
 use iptv_core::guide::{Schedule, SyntheticSchedule};
 use std::{cell::RefCell, rc::Rc};
@@ -160,6 +157,7 @@ pub struct Runtime {
     organization_revision: Slot<Cell<u64>>,
     watch_sort_dirty: std::cell::RefCell<std::collections::BTreeSet<model::SourceId>>,
     schedule: RefCell<Rc<dyn Schedule>>,
+    schedule_revision: Cell<u64>,
     events: RefCell<Option<EventSink>>,
     tasks: RefCell<Option<Rc<TaskHost>>>,
     foreground: Cell<bool>,
@@ -184,6 +182,7 @@ impl Runtime {
         let guide_checks = guide_checks::GuideChecks::mirrored(store.guide_checks.clone());
         #[cfg(not(feature = "test-support"))]
         let guide_checks = guide_checks::GuideChecks::default();
+        let schedule = Rc::new(SyntheticSchedule);
         Self {
             parental: RefCell::default(),
             recordings,
@@ -206,7 +205,7 @@ impl Runtime {
             session_only_noted: Cell::new(false),
             backup_progress: Cell::new(backup::Progress::Idle),
             search: search::State::default(),
-            favorites: Slot::default(),
+            favorites: Slot(RefCell::new(favorites::State::with_catalog(&*schedule))),
             favorite_writer: Slot::default(),
             favorite_unsaved: Default::default(),
             favorite_failed: Default::default(),
@@ -231,7 +230,8 @@ impl Runtime {
             page_waiters: Slot::default(),
             organization_revision: Slot::default(),
             watch_sort_dirty: Default::default(),
-            schedule: RefCell::new(Rc::new(SyntheticSchedule)),
+            schedule: RefCell::new(schedule),
+            schedule_revision: Cell::new(0),
             events: RefCell::new(None),
             tasks: RefCell::new(None),
             foreground: Cell::new(true),
@@ -356,13 +356,13 @@ impl Runtime {
         }
     }
 
-    pub fn begin_organization_edit(&self, source: SourceId) -> u64 {
+    pub(crate) fn begin_organization_edit(&self, source: SourceId) -> u64 {
         let mut edits = self.organization_edits.borrow_mut();
         let ticket = edits.entry(source).or_default();
         *ticket = ticket.wrapping_add(1);
         *ticket
     }
-    pub fn organization_edit_current(&self, source: SourceId, ticket: u64) -> bool {
+    pub(crate) fn organization_edit_current(&self, source: SourceId, ticket: u64) -> bool {
         self.organization_edits.borrow().get(&source) == Some(&ticket)
     }
 
@@ -385,8 +385,8 @@ impl Runtime {
         self.schedule.borrow().clone()
     }
 
-    pub fn set_schedule(&self, schedule: Rc<dyn Schedule>) {
-        *self.schedule.borrow_mut() = schedule;
+    pub(crate) fn set_schedule(&self, schedule: Rc<dyn Schedule>) -> Rc<dyn Schedule> {
+        self.schedule.replace(schedule)
     }
 }
 
@@ -626,21 +626,22 @@ mod tests {
     }
 
     #[test]
-    fn independent_runtimes_can_apply_events_during_delivery() {
+    fn independent_runtimes_index_their_synthetic_schedules_without_a_sink() {
         let first = Rc::new(Runtime::default());
         let second = Runtime::default();
-        let original_second = second.schedule();
-        let target: Rc<dyn Schedule> = Rc::new(SyntheticSchedule);
-        let weak = Rc::downgrade(&first);
-        first.bind(move |event| {
-            if let RuntimeEvent::ScheduleReady(schedule) = event {
-                weak.upgrade().unwrap().set_schedule(schedule);
-            }
-        });
-        first.emit(RuntimeEvent::ScheduleReady(target.clone()));
-        assert!(Rc::ptr_eq(&first.schedule(), &target));
-        assert!(Rc::ptr_eq(&second.schedule(), &original_second));
-        assert!(!Rc::ptr_eq(&second.schedule(), &target));
+        let first_catalog = first.schedule();
+        let second_catalog = second.schedule();
+        let key = first_catalog.channel_key(0).unwrap();
+        assert_eq!(first.favorites_channel_of(&key), Some(0));
+        assert_eq!(second.favorites_channel_of(&key), Some(0));
+        first.toggle_favorite(0);
+        assert_eq!(first.favorite_channels(), [0]);
+        assert!(second.favorite_channels().is_empty());
+        first.reset_favorites();
+        assert!(first.favorite_channels().is_empty());
+        assert_eq!(first.favorites_channel_of(&key), Some(0));
+        assert!(Rc::ptr_eq(&first.schedule(), &first_catalog));
+        assert!(Rc::ptr_eq(&second.schedule(), &second_catalog));
     }
 
     #[test]

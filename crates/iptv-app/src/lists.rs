@@ -152,13 +152,8 @@ pub struct Kept {
     player: Option<KeptPlayerList>,
 }
 
-/// Before a catalog swap (`set_schedule`).
-pub fn keep(ui: Ui) -> Kept {
-    keep_in(ui, crate::schedule())
-}
-
-/// A window can observe a catalog replacement after the runtime installed it.
-/// Resolve its old row identities against the catalog that built its list.
+/// Resolve old rows against the catalog that built the list, which the
+/// runtime may have replaced already.
 pub(super) fn keep_in(ui: Ui, catalog: Rc<dyn Schedule>) -> Kept {
     let player = keep_player_list(ui, &*catalog);
     let mut kept = keep_list(ui.focus.get_untracked(), ui.list.get_untracked(), catalog);
@@ -178,20 +173,22 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
 
 /// After a catalog swap: the same list and channel by identity, at the new
 /// catalog's now, with the same column focused.
-pub fn restore(ui: Ui, mut kept: Kept) {
+pub(super) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     let player = kept.player.take();
+    let now = crate::time::now_minute_in(&*catalog);
     let (mut focus, list) = restored_list(
         kept,
-        crate::schedule(),
+        catalog.clone(),
         &crate::favorites::favorite_channels(),
         &crate::favorites::recent_channels(),
-        crate::time::now_minute(),
+        now,
     );
     focus.retain_rail(&rail_untracked(ui));
+    let view = ListView::new(catalog, list.clone());
     batch(|| {
         ui.list.set(list);
         ui.focus.set(focus);
-        restore_player_list(ui, player, &view(ui));
+        restore_player_list(ui, player, &view);
     });
 }
 

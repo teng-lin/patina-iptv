@@ -98,7 +98,7 @@ fn follow_lists(local: Ui) {
             let previous = catalog.replace(next.clone());
             if !std::rc::Rc::ptr_eq(&previous, &next) {
                 let kept = crate::lists::keep_in(local, previous);
-                crate::lists::restore(local, kept);
+                crate::lists::restore(local, kept, next);
                 // These open presentations also contain catalog row indices.
                 local.menu.set(None);
                 local.description.set(None);

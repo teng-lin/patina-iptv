@@ -51,7 +51,11 @@ fn shown_secs() -> u64 {
 /// The guide minute it is now on the current schedule (not reactive: views
 /// read [`iptv_presentation::guide::Focus::now`], which the tick keeps equal to this).
 pub fn now_minute() -> i32 {
-    guide::now_minute(&*schedule(), wall_unix(), shown_secs())
+    now_minute_in(&*schedule())
+}
+
+pub(crate) fn now_minute_in(schedule: &dyn guide::Schedule) -> i32 {
+    guide::now_minute(schedule, wall_unix(), shown_secs())
 }
 
 /// Guide `minute` as local wall-clock time on the current schedule, with

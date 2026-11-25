@@ -364,8 +364,7 @@ pub fn allow_guide_channel(channel: usize) -> bool {
 }
 
 /// Applies newly published guide blocks to live and catch-up sessions.
-pub fn enforce_guide_blocks(ui: Ui) {
-    let schedule = crate::schedule();
+pub(crate) fn enforce_guide_blocks(ui: Ui, schedule: &dyn Schedule) {
     if let Some(early) = resume::source(ui)
         && early_guide_blocked(&early)
     {
@@ -783,7 +782,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     }
     let schedule = crate::schedule();
     // An older day's program: capture semantic identity and UTC before
-    // waiting. ScheduleReady can synchronously complete this waiter before
+    // waiting. A catalog replacement can synchronously complete this waiter before
     // the deferred follow_playing effect has remapped the numeric row.
     if let Playback::CatchUp { start, offset } = playback {
         let pending = PendingArchive::capture(&*schedule, channel, start, offset);
@@ -1342,12 +1341,12 @@ fn gone(ui: Ui) {
     }
 }
 
-/// `set_schedule` swapped in a guide with fewer rows than the playing
+/// The replacement guide has fewer rows than the playing
 /// channel's: it is found again by key, as [`follow_playing`] finds it,
 /// else nothing plays (multiview follows its tiles itself).
-pub fn row_dropped(ui: Ui) {
+pub(crate) fn row_dropped(ui: Ui, schedule: &dyn Schedule) {
     let key = ui.player.main().key.get_untracked();
-    match key.and_then(|k| crate::schedule().find_channel(&k)) {
+    match key.and_then(|k| schedule.find_channel(&k)) {
         Some(row) => ui.playing.set(Some(row)),
         None if crate::multiview::session(ui) => ui.playing.set(None),
         None => gone(ui),
@@ -1441,8 +1440,8 @@ mod pending_archive_regressions {
     fn pending_catchup_remaps_identity_and_utc_before_replacement_retry() {
         let before = guide(false, 1_800_000_000, "generated-original");
         let pending = PendingArchive::capture(&before, 0, -1800, 73).unwrap();
-        // Simulate the successful waiter running synchronously on ScheduleReady,
-        // while the UI still holds old row 0 and minute -1800.
+        // Simulate a successful replacement wakeup for a request captured
+        // against old row 0 and minute -1800.
         let after = guide(true, before.epoch_unix() + 86400, "generated-original");
         assert_eq!(before.channel_count(), after.channel_count());
         assert_ne!(before.channel_key(0), after.channel_key(0));
