@@ -120,6 +120,8 @@ fn title(channel: usize, p: crate::guide::Program) -> String {
 /// playing channel's current program).
 pub fn open(ui: Ui) {
     let now = ui.focus.with(|f| f.now);
+    let playing_context =
+        ui.mode.get_untracked() == ViewMode::Fullscreen && ui.playing.get_untracked().is_some();
     let (channel, minute) = match (ui.mode.get(), ui.playing.get()) {
         (ViewMode::Fullscreen, Some(ch)) => (ch, now),
         _ => {
@@ -130,6 +132,11 @@ pub fn open(ui: Ui) {
         }
     };
     open_for(ui, channel, minute);
+    ui.menu.update(|menu| {
+        if let Some(menu) = menu {
+            menu.playing_context = playing_context;
+        }
+    });
 }
 
 pub fn open_for(ui: Ui, channel: usize, minute: i32) {
@@ -386,14 +393,21 @@ pub fn close(ui: Ui) {
 }
 
 pub fn perform(ui: Ui, item: MenuItem) {
-    let Some((target, list, offset)) = ui.menu.with(|menu| {
+    let Some((target, list, offset, playing_context)) = ui.menu.with(|menu| {
         let menu = menu.as_ref()?;
         menu.rows
             .contains(&Row::Action {
                 item,
                 enabled: true,
             })
-            .then(|| (menu.target.clone(), menu.list.clone(), menu.group_offset))
+            .then(|| {
+                (
+                    menu.target.clone(),
+                    menu.list.clone(),
+                    menu.group_offset,
+                    menu.playing_context,
+                )
+            })
     }) else {
         return;
     };
@@ -540,7 +554,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         | MenuItem::Description
         | MenuItem::StartFromBeginning => {
             if let Some(origin) = program_origin(&target) {
-                perform_program(ui, item, origin);
+                perform_program(ui, item, origin, list, playing_context);
             }
         }
         MenuItem::WatchInNewWindow => {
@@ -692,7 +706,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     }
 }
 
-fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
+fn perform_program(ui: Ui, item: MenuItem, origin: Origin, list: ListId, playing_context: bool) {
     match item {
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
         MenuItem::StopRecording | MenuItem::CancelRecording => {
@@ -712,15 +726,7 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
             {
                 return;
             }
-            ui.play(
-                origin.channel,
-                crate::Playback::CatchUp {
-                    start: origin.program_start,
-                    offset: 0,
-                },
-            );
-            ui.mode.apply(crate::mode::Action::EnterFullscreen);
-            ui.show_playing();
+            crate::archive_playback::select(ui, list, origin.channel, program, playing_context);
         }
         _ => {}
     }

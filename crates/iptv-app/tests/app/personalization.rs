@@ -123,7 +123,7 @@ pub fn launch_prepared(
     launch_playlist(home, settings, manual, M3U, prepare, configure, setup)
 }
 
-fn launch_playlist(
+pub(super) fn launch_playlist(
     home: Home,
     settings: Settings,
     manual: bool,

@@ -36,6 +36,7 @@ pub mod guide {
 mod guide_window_walkthrough;
 pub mod theme;
 
+mod archive_playback;
 mod backup;
 /// The document pickers a device has, and the ones headless apps get.
 #[cfg(feature = "test-support")]

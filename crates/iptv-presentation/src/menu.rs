@@ -124,6 +124,9 @@ pub struct Menu {
     pub group_offset: Option<i32>,
     /// The compact context to return to after inspecting its full options.
     pub parent: Option<Box<Menu>>,
+    /// The program menu was opened for the full-screen player's channel.
+    /// That target can be outside the guide list the viewer last browsed.
+    pub playing_context: bool,
 }
 
 impl Menu {
@@ -137,6 +140,7 @@ impl Menu {
             list,
             group_offset: None,
             parent: None,
+            playing_context: false,
         }
     }
 

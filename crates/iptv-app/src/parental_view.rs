@@ -134,9 +134,28 @@ fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
 }
 /// Always re-resolve durable ancestry before executing a content action.
 pub fn request(ui: Ui, target: Target, done: impl FnOnce() + 'static) {
+    request_if(ui, target, || true, done);
+}
+
+/// A superseded content choice must not open a late PIN prompt or resume it.
+pub(crate) fn request_if(
+    ui: Ui,
+    target: Target,
+    current: impl Fn() -> bool + 'static,
+    done: impl FnOnce() + 'static,
+) {
     crate::tasks::spawn_in_app(async move {
         let owner = crate::runtime_owner::runtime();
-        match owner.parental_check(&target).await {
+        let result = owner.parental_check(&target).await;
+        if !current() {
+            return;
+        }
+        let done = move || {
+            if current() {
+                done();
+            }
+        };
+        match result {
             Ok(()) => done(),
             Err(crate::runtime::parental::Error::Locked) => {
                 let phase = if owner.parental_has_pin() {
