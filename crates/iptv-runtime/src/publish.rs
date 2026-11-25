@@ -139,6 +139,14 @@ impl<R: Replacement> Replacing<R> {
         }
     }
 
+    /// Borrows the report while the copy is used for a following replacement.
+    pub(crate) fn report(&self) -> Option<&R::Done> {
+        match self {
+            Self::Done(_, done) => Some(done),
+            _ => None,
+        }
+    }
+
     /// What the finished job reported.
     pub(crate) fn done(self) -> Option<R::Done> {
         match self {
@@ -433,11 +441,13 @@ mod tests {
         begun: AtomicU32,
         finished: AtomicU32,
         abandoned: AtomicU32,
+        cancel_after_swap: Mutex<Option<iptv_import::CancelToken>>,
     }
 
     struct FileHost {
         path: std::path::PathBuf,
         calls: Arc<Calls>,
+        detached_copy: bool,
     }
 
     impl StoreHost for FileHost {
@@ -447,13 +457,32 @@ mod tests {
         fn committed(&self, _store: &Store, _again: Persist) {
             self.calls.persisted.fetch_add(1, Ordering::SeqCst);
         }
-        fn begin_publish(&self, _store: &mut Store) -> Result<Store, StoreError> {
+        fn begin_publish(&self, store: &mut Store) -> Result<Store, StoreError> {
             self.calls.begun.fetch_add(1, Ordering::SeqCst);
-            self.open()
+            if self.detached_copy {
+                assert!(
+                    store.sources()?.is_empty(),
+                    "this fixture copies an empty store"
+                );
+                Store::open_encrypted(
+                    self.path.with_extension("publish"),
+                    &DatabaseKey::from_bytes(KEY),
+                )
+            } else {
+                self.open()
+            }
         }
-        fn finish_publish(&self, _store: &mut Store, copy: Store) -> Result<(), StoreError> {
+        fn finish_publish(&self, store: &mut Store, copy: Store) -> Result<(), StoreError> {
+            if self.detached_copy {
+                *store = copy;
+            } else {
+                drop(copy);
+            }
             self.calls.finished.fetch_add(1, Ordering::SeqCst);
-            drop(copy);
+            let cancel = self.calls.cancel_after_swap.lock().unwrap().take();
+            if let Some(cancel) = cancel {
+                cancel.cancel();
+            }
             Ok(())
         }
         fn abandon_publish(&self, _store: &mut Store, copy: Store) {
@@ -546,6 +575,13 @@ mod tests {
     fn setup_with_network(
         network: Arc<dyn crate::network::Network>,
     ) -> (tempfile::TempDir, Arc<Loop>, Arc<Service>, Arc<Calls>) {
+        setup_file_host(network, false)
+    }
+
+    fn setup_file_host(
+        network: Arc<dyn crate::network::Network>,
+        detached_copy: bool,
+    ) -> (tempfile::TempDir, Arc<Loop>, Arc<Service>, Arc<Calls>) {
         let directory = tempfile::tempdir().unwrap();
         let host = Arc::new(Loop::default());
         let calls = Arc::new(Calls::default());
@@ -558,6 +594,7 @@ mod tests {
         ports.store_host = Some(Arc::new(FileHost {
             path: directory.path().join("synthetic.sqlite"),
             calls: calls.clone(),
+            detached_copy,
         }));
         (directory, host, Service::started_for_tests(ports), calls)
     }

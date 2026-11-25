@@ -258,6 +258,9 @@ fn start_import_with(
                     return;
                 }
                 if cancel.is_canceled() {
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Canceled,
+                    ))));
                     return;
                 }
                 if !services.can_import() {
