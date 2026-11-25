@@ -155,7 +155,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
     match effect {
         WizardEffect::RestoreBackup => crate::backup::request_restore(ui),
         WizardEffect::EditField { field } => entry::begin(ui, field),
-        WizardEffect::ReadClipboard { field } => data::spawn_in_app(async move {
+        WizardEffect::ReadClipboard { field } => crate::tasks::spawn_in_app(async move {
             let text = clipboard_string().await;
             send(
                 ui,
@@ -165,7 +165,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 },
             );
         }),
-        WizardEffect::PickFile => data::spawn_in_app(async move {
+        WizardEffect::PickFile => crate::tasks::spawn_in_app(async move {
             let files = pick_files(FilePickRequest::new(false, 1)).await;
             let path = if let Some(file) = files.first() {
                 crate::runtime_owner::runtime()

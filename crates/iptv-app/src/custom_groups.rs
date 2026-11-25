@@ -106,7 +106,7 @@ fn request<R: Send + 'static>(
 ) {
     let generation = GENERATION.get();
     let result = operation;
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = result.await;
         if GENERATION.get() == generation && is_open(ui) {
             done(ui, result);
@@ -121,7 +121,7 @@ fn mutate<R: Send + 'static>(
 ) {
     let generation = GENERATION.get();
     let result = operation;
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = result.await;
         // A committed edit affects the guide even if its editor was closed.
         if result.is_ok() {

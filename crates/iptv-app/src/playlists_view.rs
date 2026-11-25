@@ -168,7 +168,7 @@ fn perform(ui: Ui, effect: Effect) {
         });
         return;
     }
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         log::info!("iptv playlists: {}", effect_name(&effect));
         let result = match effect {
             Effect::AllPlaylists => {

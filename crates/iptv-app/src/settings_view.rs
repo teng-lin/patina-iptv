@@ -299,7 +299,7 @@ fn run(ui: Ui, key: &'static str) {
             ui.player
                 .history
                 .set(iptv_presentation::playback::ChannelHistory::default());
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if saved.await {
                     crate::lists::favorites_changed(ui);
                     owner.refresh_watch_order();
@@ -312,7 +312,7 @@ fn run(ui: Ui, key: &'static str) {
         "parental.change_pin" => crate::parental_view::change_pin(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if !opened.await {
                     notify(PRIVACY_POLICY_URL);
                 }

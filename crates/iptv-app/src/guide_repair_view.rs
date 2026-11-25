@@ -139,7 +139,7 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         ..Default::default()
     };
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = owner.inspect_channel(channel.clone(), control).await;
         if cancel.is_canceled()
             || inspection
@@ -218,7 +218,7 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
     };
     let cancel = control.cancel.clone();
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match owner.recent_guide_repairs(source, 20, control).await {
             Ok(history) => {
                 update(ui, |s| {
@@ -241,7 +241,7 @@ fn preview(ui: Ui) {
     if let Some(preview) = screen.preview {
         let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
     }
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match owner.preview_guide_repair(screen.request, control).await {
             Ok(preview) => {
                 if state(ui, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
@@ -285,7 +285,7 @@ fn apply(ui: Ui) {
         return;
     };
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = owner
             .apply_guide_repair(preview.id.clone(), preview.digest, control)
             .await;
@@ -329,7 +329,7 @@ fn status(ui: Ui, id: Option<String>) {
         return;
     };
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match owner.guide_repair_operation(id).await {
             Ok(operation) => {
                 update(ui, |s| {
@@ -366,7 +366,7 @@ fn verify(ui: Ui) {
         return;
     };
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match owner
             .verify_guide_repair(id, screen.request.window, control)
             .await
@@ -396,7 +396,7 @@ fn undo(ui: Ui) {
         return;
     };
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match owner.undo_guide_repair(id, control).await {
             Ok(outcome) => {
                 update(ui, |s| {

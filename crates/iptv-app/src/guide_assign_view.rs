@@ -59,7 +59,7 @@ pub fn open(ui: Ui, channel: usize) {
         channels: Vec::new(),
         feeds: Vec::new(),
     })));
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let mut channels = assign::guide_channels(&crate::runtime_owner::runtime(), playlist).await;
         if REQUEST.with(|current| current.get()) != request {
             return;

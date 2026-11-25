@@ -154,7 +154,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
         Effect::Inspect => crate::guide_inspect_view::open(ui, playlist),
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if let Err(e) =
                     crate::data::edit_guides(&crate::runtime_owner::runtime(), playlist, &edit)
                         .await

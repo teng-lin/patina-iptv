@@ -504,7 +504,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                     source,
                     target.id,
                 );
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     match saved.await {
                         Ok(()) => crate::data::organization::changed(
                             &crate::runtime_owner::runtime(),
@@ -581,7 +581,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                     id.as_str().to_owned(),
                     String::new(),
                 );
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     match save.await {
                         Ok(()) => crate::data::organization::changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
@@ -610,7 +610,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 let source = SourceId(target.source);
                 let owner = crate::runtime_owner::runtime();
                 let save = crate::runtime::commands::hide_group(&owner, source, target.id);
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     match save.await {
                         Ok(()) => crate::data::organization::changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
@@ -857,7 +857,7 @@ fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPr
     let owner = crate::runtime_owner::runtime();
     let save =
         crate::runtime::commands::set_group_preference(&owner, source, target.id, preference);
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match save.await {
             Ok(()) => crate::data::organization::changed(&owner, source),
             Err(_) => crate::settings_view::notify(tr(

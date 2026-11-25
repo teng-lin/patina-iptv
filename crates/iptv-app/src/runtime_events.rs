@@ -22,12 +22,12 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
         RuntimeEvent::CatalogChanged => {
             ui.app.data_version.update(|version| *version += 1);
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 let _ = crate::runtime_owner::runtime().parental_refresh().await;
                 crate::parental_view::enforce(ui);
             });
         }
-        RuntimeEvent::EarlyResume { source, done } => crate::data::spawn_in_app(async move {
+        RuntimeEvent::EarlyResume { source, done } => crate::tasks::spawn_in_app(async move {
             crate::player::resume::early(ui, &source).await;
             let _ = done.send(());
         }),
@@ -79,7 +79,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
         RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
-        RuntimeEvent::StoreStartupRecovered => crate::data::spawn_in_app(async move {
+        RuntimeEvent::StoreStartupRecovered => crate::tasks::spawn_in_app(async move {
             // A failed initial read left recent searches unloaded. Reload
             // before unblocking input so a new search cannot overwrite them.
             crate::search_view::refresh_saved_history(ui).await;

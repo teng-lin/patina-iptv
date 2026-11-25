@@ -134,7 +134,7 @@ fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
 }
 /// Always re-resolve durable ancestry before executing a content action.
 pub fn request(ui: Ui, target: Target, done: impl FnOnce() + 'static) {
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let owner = crate::runtime_owner::runtime();
         match owner.parental_check(&target).await {
             Ok(()) => done(),
@@ -160,7 +160,7 @@ pub fn protected_settings(ui: Ui, done: impl FnOnce() + 'static) {
     });
 }
 pub fn change_pin(ui: Ui) {
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let owner = crate::runtime_owner::runtime();
         if owner.parental_refresh().await.is_err() {
             notify_message("Parental settings are unavailable");
@@ -241,7 +241,7 @@ pub fn block(ui: Ui, target: Target, blocked: bool) {
             });
             return;
         }
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let owner = crate::runtime_owner::runtime();
             let key = if matches!(target.kind, ContentKind::Live | ContentKind::Group) {
                 "parental.live_enabled"
@@ -543,7 +543,7 @@ fn submit(ui: Ui) {
     match submission {
         Submission::None => {}
         Submission::Done => finish(ui),
-        submission => crate::data::spawn_in_app(async move {
+        submission => crate::tasks::spawn_in_app(async move {
             let owner = crate::runtime_owner::runtime();
             let result = match submission {
                 Submission::Verify(pin) => {

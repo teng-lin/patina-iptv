@@ -98,7 +98,7 @@ pub fn build(
         .saturating_sub(padding);
     let started = Instant::now();
     let read = crate::runtime_owner::runtime().read_program_index(sources, rows, from);
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match read.await {
             Ok(index) => {
                 log::info!(

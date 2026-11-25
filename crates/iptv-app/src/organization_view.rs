@@ -217,7 +217,7 @@ fn open_with(
         bulk_visibility: None,
         dragging: false,
     }));
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
         let loaded = items(source, &kind, custom.then_some(Sort::Manual)).await;
         if !still_open(ui, generation) || !is_open(ui) {
@@ -310,7 +310,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
     let generation = ui.organization_generation.get_untracked();
     let owner = crate::runtime_owner::runtime();
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if save.await.is_err() {
             crate::settings_view::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
@@ -576,7 +576,7 @@ fn save_order(ui: Ui) {
     };
     let generation = ui.organization_generation.get_untracked();
     let owner = crate::runtime_owner::runtime();
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = if kind == Kind::Favorites {
             owner.save_favorite_order(source, original, order).await
         } else {
@@ -718,7 +718,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             source,
             keys,
         );
-        data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let ordered = ordered.await;
             if !still_open(ui, generation) {
                 return;
@@ -761,7 +761,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             false,
         );
         update(ui, |s| s.saving = true);
-        data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             finish(ui, &s, generation, result.await);
         });
         return;
@@ -784,7 +784,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         edit,
         s.editor.selected,
     );
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         finish(ui, &finished, generation, result.await);
     });
 }
@@ -797,7 +797,7 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
     );
     let expected = s.clone();
     update(ui, |s| s.saving = true);
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = result.await;
         if still_open(ui, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
@@ -830,7 +830,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         return;
     }
     let expected = s.clone();
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let loaded = items(expected.source, &expected.kind, None).await;
         if still_open(ui, generation) {
             update(ui, |s| {
@@ -883,7 +883,7 @@ fn commit(ui: Ui) {
     );
     dismiss_keyboard();
     update(ui, |s| s.saving = true);
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         finish(ui, &s, generation, result.await);
     });
 }
@@ -1745,7 +1745,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .flatten()
         }) {
             let generation = ui.organization_generation.get_untracked();
-            data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if let Ok(loaded) = items(source, &kind, None).await
                     && still_open(ui, generation)
                 {

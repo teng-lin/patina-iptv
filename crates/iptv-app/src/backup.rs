@@ -38,7 +38,7 @@ const RESTART_NOTE: &str = crate::i18n::key(
 );
 
 pub(crate) fn export_ui() {
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let Some(busy) = crate::runtime_owner::runtime().begin_backup() else {
             return;
         };
@@ -180,7 +180,7 @@ pub(crate) fn request_restore(ui: crate::Ui) {
 }
 
 fn restore_ui(ui: crate::Ui) {
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let Some(busy) = crate::runtime_owner::runtime().begin_backup() else {
             return;
         };

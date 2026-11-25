@@ -119,7 +119,7 @@ fn audit(ui: Ui, next: bool) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let mut query = Query::source(screen.source);
         query.text = screen.query;
         if next {
@@ -148,7 +148,7 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let mut query = Query::source(screen.source);
         query.text = screen.query;
         if next {
@@ -192,7 +192,7 @@ fn inspect_link(ui: Ui) {
         return;
     };
     dismiss_keyboard();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let request = ProbeRequest {
             source: screen.source,
             target: ProbeTarget::Supplied(iptv_providers::SecretUrl::new(screen.link)),
@@ -242,7 +242,7 @@ fn staged_candidates(ui: Ui) {
     let Some(stage) = screen.stage else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let after = screen.next;
         let result = crate::runtime_owner::runtime()
             .probe_candidates(stage.evidence, screen.query, after, 50, control.clone())
@@ -266,7 +266,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let stage = if let Some(stage) = screen.stage.filter(|s| {
             s.evidence.feed.unwrap_or(iptv_epg::FeedId(0)) == candidate.feed
                 && s.evidence.incarnation == candidate.incarnation

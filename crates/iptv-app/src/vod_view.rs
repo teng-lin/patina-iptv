@@ -201,7 +201,7 @@ fn load(ui: Ui, append: bool, keep: Option<u32>) {
         )
     });
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         // A queued host task may first run after Back or another shelf.
         // Do not start work (or supersede the newer read's token) then.
         if !ui
@@ -289,7 +289,7 @@ fn load_previous(ui: Ui, step_up: bool) {
         return;
     };
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if !ui
             .vod
             .with_untracked(|s| s.open && s.generation == generation && s.start == start)
@@ -371,7 +371,7 @@ fn retry_play(ui: Ui, item: Key, key: Key, restart: bool, incarnation: String) {
         }
         let generation = edit(ui, |s| s.begin_operation());
         let owner = crate::runtime_owner::runtime();
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             // The preflight gives an immediate stale-action explanation.
             // The runtime also binds the credentials snapshot to this same
             // incarnation before I/O, so an edit racing this check cannot
@@ -475,7 +475,7 @@ fn select_authorized(ui: Ui, key: Key) {
         s.begin_operation()
     });
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = owner.vod_details(key.clone()).await;
         ui.vod.update(|s| {
             if s.generation != generation || !s.open {
@@ -555,7 +555,7 @@ fn play_authorized(
     };
     let series = details.item.key.clone();
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = owner.vod_play(details, key, restart).await;
         // The episode that ended, its next one not played after all.
         let not_played = {
@@ -982,7 +982,7 @@ fn autoplay_next(ui: Ui, ended: Key, details: Details, key: Key, season: u32) {
     // The viewer acting on the screen meanwhile (`play_key` and Back
     // advance its generation) leaves the next episode waiting.
     let generation = ui.vod.with_untracked(|s| s.generation);
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let owner = crate::runtime_owner::runtime();
         let allowed = owner
             .parental_check(&iptv_runtime::vod::target(&series))

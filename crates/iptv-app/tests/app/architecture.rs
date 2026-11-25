@@ -23,7 +23,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
     ("custom_groups.rs", "GENERATION"),             // Discard stale dialog replies.
-    ("data.rs", "APP_OWNER"),                       // UI root owner for detached local tasks.
+    ("tasks.rs", "APP_OWNER"),                      // UI root owner for detached local tasks.
     ("desktop.rs", "WINDOW"),                       // Native window handle.
     ("desktop.rs", "POINTER"),                      // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.

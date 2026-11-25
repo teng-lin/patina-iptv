@@ -114,7 +114,7 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
         return;
     }
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         // Every job still to record: with scheduling retired (#273), each
         // is a Record now, running or waiting for a connection.
         let running: Vec<_> = owner

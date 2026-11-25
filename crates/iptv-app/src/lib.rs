@@ -65,6 +65,7 @@ mod guide_repair_view;
 mod header;
 mod host;
 pub mod layout;
+mod tasks;
 pub mod timeline;
 // A browser host exports nothing: the glob is empty there.
 #[allow(unused_imports)]
@@ -113,6 +114,7 @@ mod rail;
 mod remote_editor;
 mod runtime_events;
 mod runtime_owner;
+mod runtime_wiring;
 use runtime_owner::runtime;
 pub use runtime_owner::schedule;
 mod scale;
@@ -825,7 +827,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     input.replace(Some(input::bind(ui)));
     #[cfg(feature = "test-support")]
     performance_probe::bind(ui);
-    data::start(ui);
+    runtime_wiring::start(ui);
     guide_clock::start(ui);
     player::bind(ui);
     player::watch_time::bind(ui);

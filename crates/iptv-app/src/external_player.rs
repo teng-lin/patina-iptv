@@ -37,7 +37,7 @@ pub fn enforce(ui: Ui) {
         return;
     }
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let allowed = owner
             .external_playback_allowed(active.authority, active.group)
             .await;
@@ -331,7 +331,7 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
         };
         let config = crate::settings::network_config();
         let owner = crate::runtime_owner::runtime();
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let source = if let Resolution::StalkerLink(link) = resolution {
                 let StalkerLink {
                     session: mut portal,
@@ -452,7 +452,7 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                     session,
                 };
                 ui.external_playback.set(Some(active.clone()));
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     active.session.wait_retired().await;
                     clear_retired(ui, &active);
                 });

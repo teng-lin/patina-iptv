@@ -709,7 +709,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         let cancel = iptv_import::CancelToken::new();
         let on_drop = cancel.clone();
         cleanup(move || on_drop.cancel());
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             timer(std::time::Duration::from_millis(250)).await;
             if cancel.is_canceled()
                 || !ui.vod.with_untracked(|s| {

@@ -622,7 +622,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
                 .unwrap_or_else(|| ui.player.main().timeline.get_untracked().position_ms)
         };
         let key = playing.key.clone();
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let owner = crate::runtime_owner::runtime();
             let resolved = owner.vod_play(playing.details, key.clone(), false).await;
             if ui.player.main().health.with_untracked(|h| h.session()) != session
@@ -680,7 +680,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
     if let Some((channel, _)) = target(ui, surface)
         && let Some(target) = crate::parental_view::live_target(ui, channel)
     {
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let owner = crate::runtime_owner::runtime();
             let allowed = owner
                 .live_channel_allowed(iptv_library::SourceId(target.source), target.id)
@@ -719,7 +719,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                 .unwrap_or_else(|| ui.player.main().timeline.get_untracked().position_ms)
         };
         let owner = crate::runtime_owner::runtime();
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let target = iptv_core::parental::Target::live(job.request.source, job.request.channel);
             let allowed = owner.parental_check(&target).await.is_ok();
             if ui.player.main().health.with_untracked(|h| h.session()) != session {
@@ -739,7 +739,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     let Some((channel, playback)) = target(ui, surface) else {
         // A retry of the last channel started before the guide arrived.
         match resume::source(ui).filter(|_| surface == 0) {
-            Some(early) => crate::data::spawn_in_app(async move {
+            Some(early) => crate::tasks::spawn_in_app(async move {
                 let owner = crate::runtime_owner::runtime();
                 let source = iptv_library::SourceId(early.source_id);
                 let channel = iptv_providers::ContentId::from_stored(early.key.clone());
@@ -998,7 +998,7 @@ fn load_authorized(
             return;
         };
         let prepared = owner.prepare_live_source(surface, source_id, channel, source, authority);
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             match prepared.await {
                 Ok(source) => publish_source(ui, surface, session, source),
                 Err(error) => {
@@ -1045,7 +1045,7 @@ fn load_authorized(
             }
         });
         let prepared = owner.prepare_independent_source(surface, provider, source, authority);
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let source = match prepared.await {
                 Ok(source) => source,
                 Err(error) => {

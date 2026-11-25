@@ -197,7 +197,7 @@ fn load_history() -> SearchHistory {
 /// then deleted). A screen opened before the answer started empty and is
 /// given them unless a search was made meanwhile.
 pub(crate) fn load_saved_history(ui: Ui) {
-    crate::data::spawn_in_app(refresh_saved_history(ui));
+    crate::tasks::spawn_in_app(refresh_saved_history(ui));
 }
 
 pub(crate) fn refresh_saved_history(ui: Ui) -> impl std::future::Future<Output = ()> {
@@ -244,7 +244,7 @@ pub(crate) fn clear_history(ui: Ui) {
             *screen.state.history_mut() = SearchHistory::default();
         }
     });
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if saved.await.is_err() {
             crate::settings_view::notify(tr(
                 "Recent channel changes could not be saved; try again",
@@ -273,7 +273,7 @@ fn save_history(ui: Ui) {
     }
     owner.install_search_history(list.clone());
     let saved = crate::runtime::commands::save_search_history(&owner, list);
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if let Err(error) = saved.await {
             log::warn!("iptv search: could not save the recent searches: {error}");
         }
@@ -312,7 +312,7 @@ fn prepare(ui: Ui) {
     // Under the app's owner: a timer dies with its owner, and multiview's
     // Search and add opens the screen from a menu item that goes as it
     // closes. A timer that finds the index built does nothing.
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         timer(Duration::from_millis(30)).await;
         let wanted = crate::runtime_owner::runtime().begin_program_index(version);
         let schedule = crate::runtime_owner::schedule();
@@ -424,7 +424,7 @@ fn search_again(ui: Ui) {
 /// would go with it (the search never ran).
 fn debounce(ui: Ui, query: String) {
     let ticket = crate::runtime_owner::runtime().begin_search();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         timer(DEBOUNCE).await;
         if crate::runtime_owner::runtime().search_is_current(ticket) {
             run_search(ui, &query);

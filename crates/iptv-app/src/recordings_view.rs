@@ -59,7 +59,7 @@ fn reload(ui: Ui) {
         s.read_generation += 1;
         generation = s.read_generation;
     });
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
         let retired = owner
@@ -85,7 +85,7 @@ fn reload(ui: Ui) {
 /// canceled what an earlier version had scheduled; Recordings lists it until
 /// the viewer has opened and closed that screen.
 fn announce_retired(ui: Ui) {
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if crate::runtime_owner::runtime()
             .announce_retired_recordings()
             .await
@@ -105,7 +105,7 @@ fn announce_retired(ui: Ui) {
                 return;
             }
             ui.recordings.update(|s| s.retired.clear());
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 // On failure the list stays stored and shows again next time.
                 if let Err(error) = crate::runtime_owner::runtime()
                     .dismiss_retired_recording_schedules()
@@ -127,7 +127,7 @@ pub fn bind(ui: Ui) {
     if crate::performance_probe::enabled() {
         return;
     }
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         loop {
             timer(Duration::from_secs(1)).await;
             crate::runtime_owner::runtime().sync_recording_contexts();
@@ -467,7 +467,7 @@ fn start(ui: Ui, mut request: Request) {
         s.starting = Some(request.clone());
     });
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = owner.schedule_recording(request).await;
         match &result {
             // What can stop it, said as it starts (#275).
@@ -475,7 +475,7 @@ fn start(ui: Ui, mut request: Request) {
                 crate::settings_view::notify(&crate::capture_limits::start_notice());
                 if crate::host::ANDROID {
                     // The system prompt must not delay Start or Stop.
-                    crate::data::spawn_in_app(
+                    crate::tasks::spawn_in_app(
                         crate::host::request_recording_notification_permission(),
                     );
                 }
@@ -667,7 +667,7 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
         s.error = None;
     });
     let owner = crate::runtime_owner::runtime();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = if matches!(
             action,
             "Play recording" | "Resume recording" | "Play from beginning"
