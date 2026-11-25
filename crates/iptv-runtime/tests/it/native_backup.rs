@@ -740,6 +740,33 @@ fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore()
         Rejection::Damaged,
     ));
 
+    for (label, parent_first) in [
+        ("parent-file entry before child", true),
+        ("parent-file entry after child", false),
+    ] {
+        cases.push((
+            label,
+            rewrite_generated_archive(&accepted, |header, payloads| {
+                let entries = header["files"].as_array_mut().unwrap();
+                let child = entries
+                    .iter()
+                    .position(|entry| entry["name"].as_str().unwrap().starts_with("playlists/"))
+                    .unwrap();
+                let parent = entries[child]["name"]
+                    .as_str()
+                    .unwrap()
+                    .rsplit_once('/')
+                    .unwrap()
+                    .0
+                    .to_owned();
+                let at = child + usize::from(!parent_first);
+                entries.insert(at, json!({"name": parent, "length": 0}));
+                payloads.insert(at, b"Generated conflicting archive entry".to_vec());
+            }),
+            Rejection::Damaged,
+        ));
+    }
+
     // These are valid versioned documents whose values this build cannot
     // restore faithfully. An older release may allow another enum, range or
     // override scope, so refusal must not call the archive damaged.
@@ -787,6 +814,15 @@ fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore()
         let error =
             block_on(busy.worker(move |archive| archive.stage(&mut bytes.as_slice()))).unwrap_err();
         assert_eq!(error.rejection(), Some(expected), "{label}: {error}");
+        match label {
+            "referenced local playlist parent is a file" => {
+                assert_eq!(error.message(), "Backup is missing a local playlist file");
+            }
+            "parent-file entry before child" | "parent-file entry after child" => {
+                assert_eq!(error.message(), "Could not stage backup files");
+            }
+            _ => {}
+        }
         assert!(!error.to_string().contains("generated-private-format-token"));
         assert_eq!(
             generated_tree(&pending),
