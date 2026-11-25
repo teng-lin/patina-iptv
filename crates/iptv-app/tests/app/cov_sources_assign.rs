@@ -112,7 +112,12 @@ fn add_sources(t: &mut T, srv: &Server) {
     t.wait("text:Its name (optional)", 2);
     t.enter("Alt Guide");
     t.wait("text:3.  Alt Guide", 5);
-    t.press("text:Update the guide now");
+    let action = if t.shows("text:Retry") {
+        "text:Retry"
+    } else {
+        "text:Update the guide now"
+    };
+    t.press(action);
     t.wait("text:Guide updated", 15);
     t.wait("text:Quiet Harbour", 5);
     leave_settings(t);

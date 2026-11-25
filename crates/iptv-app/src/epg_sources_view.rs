@@ -47,6 +47,9 @@ const CARD_W: f32 = 660.0;
 /// Opens the screen for `playlist`.
 pub fn open(ui: Ui, playlist: SourceId) {
     ui.guide_sources.set(Some(screen(playlist)));
+    // Timer failures can occur without publishing a new visible guide.
+    // Opening the controls always reads the latest persisted refresh result.
+    crate::runtime::data::stored::refresh_status(&crate::runtime());
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide

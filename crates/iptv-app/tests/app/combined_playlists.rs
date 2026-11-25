@@ -1365,7 +1365,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.wait_for("text:Delete stored guide data"));
         step(app.press("text:Delete stored guide data"));
         step(app.wait_for("text:/^Delete guide data for /"));
-        step(app.press("text:Delete"));
+        step(app.press("id:guide-sources-screen >> text:Delete"));
         step(app.wait_for_gone("text:Previous original guide", Duration::from_secs(5)));
     }
     *release.0.lock().unwrap() = true;
