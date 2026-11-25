@@ -54,6 +54,7 @@ pub fn multiview_offer_on(ui: Ui, device: Device) -> MultiviewOffer {
         device,
         w.width.0 > w.height.0,
         account_streams(ui),
+        crate::capture_limits::now().metered,
     )
 }
 
@@ -116,6 +117,7 @@ pub fn reason(reason: Reason) -> &'static str {
         Reason::NotOnThisDevice => tr("Multiview is not available on this device yet"),
         Reason::PhoneUpright => tr("Turn the phone sideways for multiview"),
         Reason::WindowTooSmall => tr("Make the window larger for multiview"),
+        Reason::MeteredNetwork => tr("Multiview is unavailable on a metered network"),
         Reason::ConnectionLimit => tr("Your provider allows one stream at a time"),
     }
 }

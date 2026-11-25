@@ -243,6 +243,7 @@ fn parse_accessibility(data: &nsh_core::JsonValue, before: Accessibility) -> Acc
 /// attaches and whenever they change. Mount once, in the main window's
 /// root.
 pub(crate) fn bridge() -> impl IntoElement {
+    crate::capture_limits::init();
     let reported = signal(Report::default());
     REPORTED.with(|cell| cell.set(Some(reported)));
     let accessibility = signal(Accessibility::default());
