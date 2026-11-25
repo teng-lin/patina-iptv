@@ -433,7 +433,7 @@ async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool(
         let mut ports = crate::Ports::new(root.clone(), |_| {
             Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
         });
-        ports.recording_standby = || true;
+        ports.recording_standby = Some(|| true);
         ports.recording_failed = |reason| NOTICES.lock().unwrap().push(reason);
         let owner = Runtime::new(ports);
         owner.start_services();

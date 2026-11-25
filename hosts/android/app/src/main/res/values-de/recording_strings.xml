@@ -5,7 +5,7 @@
     <string name="recording_background">Deine Aufnahme läuft im Hintergrund weiter</string>
     <string name="recording_stopped_channel">Vorzeitig beendete Aufnahmen</string>
     <string name="recording_stopped_title">Aufnahme beendet</string>
-    <string name="recording_stopped_tv_off">Der Fernseher wurde ausgeschaltet. Das bis dahin Aufgenommene ist unter Aufnahmen.</string>
+    <string name="recording_stopped_tv_off">Der Fernseher wurde ausgeschaltet. Details stehen unter Aufnahmen.</string>
     <string name="recording_stopped_background_limit">Androids Zeitlimit für die Arbeit im Hintergrund wurde erreicht. Das bis dahin Aufgenommene ist unter Aufnahmen.</string>
     <string name="recording_failed_background">Eine Aufnahme im Hintergrund wurde unterbrochen.</string>
 </resources>

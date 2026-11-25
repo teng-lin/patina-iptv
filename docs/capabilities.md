@@ -171,8 +171,8 @@ file. Play Console declarations cover each type used by the release.
 [Android foreground-service types](https://developer.android.com/develop/background-work/services/fgs/service-types#media)
 · [Play Console foreground-service declarations](https://support.google.com/googleplay/android-developer/answer/13392821).
 
-On Android, the first accepted Record now can ask for notification
-permission. Recording can continue if the viewer declines. With notifications
+When you start a recording, Android can ask for notification permission.
+Recording can continue if the viewer declines. With notifications
 enabled, an unexpected background interruption posts a local alert after
 the library saves the outcome. Recordings keeps the reason and any playable
 partial media.

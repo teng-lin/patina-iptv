@@ -60,8 +60,8 @@ pub struct Ports {
     /// may notify a viewer in the background. No recording metadata crosses.
     pub recording_failed: fn(RecordingFailure),
     /// Read whether TV standby currently prevents a capture from opening
-    /// or resuming. Runs on a native capture worker.
-    pub recording_standby: fn() -> bool,
+    /// or resuming. Runs on a native blocking worker.
+    pub recording_standby: Option<fn() -> bool>,
     pub database_key: Arc<KeyBroker>,
     pub exclude_from_backup: fn(&Path) -> io::Result<()>,
     pub startup_mark: fn(&'static str, String),
@@ -116,7 +116,7 @@ impl Ports {
             background_recordings: false,
             recording_schedule: |_| {},
             recording_failed: |_| {},
-            recording_standby: || false,
+            recording_standby: None,
             database_key: Arc::new(database_key),
             exclude_from_backup: |_| Ok(()),
             startup_mark: |_, _| {},

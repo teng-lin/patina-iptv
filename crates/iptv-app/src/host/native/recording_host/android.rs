@@ -110,7 +110,7 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_start(
         ports.background_recordings = true;
         ports.recording_schedule = schedule;
         ports.recording_failed = notify_failed;
-        ports.recording_standby = standby_blocks_recording;
+        ports.recording_standby = Some(standby_blocks_recording);
         ports.exclude_from_backup = crate::host::native::platform_data::exclude_from_backup;
         crate::runtime::recordings::host::start_background_host(ports).ok()?;
         Some(1)
