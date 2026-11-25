@@ -178,6 +178,18 @@ fn touched(ui: Ui) {
 /// then no tap. A keyboard's or a screen reader's press always is.
 pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, gesture: Gesture) -> E {
     let Gesture { swipe, swiped, .. } = gesture;
+    // An overlay can take touch delivery before the video sees End/Cancel.
+    // Clear the gesture as soon as video stops admitting it.
+    effect(move || {
+        if !takes_swipes(ui) {
+            untracked(|| {
+                swipe.with(Swipe::reset);
+                if ui.swipe.get_untracked().is_some() {
+                    ui.swipe.set(None);
+                }
+            });
+        }
+    });
     // Made again mid-swipe (live video turned into a replay): its banner
     // goes with it.
     cleanup(move || {
