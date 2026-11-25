@@ -1,0 +1,33 @@
+name: Nightly Validation alert
+on:
+  workflow_run:
+    workflows: [Validation]
+    types: [completed]
+    branches: [master]
+permissions: {}
+concurrency:
+  group: nightly-validation-tracker
+  cancel-in-progress: false
+jobs:
+  alert:
+    if: >-
+      github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/master' &&
+      github.event.workflow_run.event == 'schedule' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+      checks: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Execute the observer from the trusted default branch, never run artifacts.
+          ref: master
+          persist-credentials: false
+      - name: Reconcile scheduled failures and verified runner acquisition retries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/nightly-alert.py

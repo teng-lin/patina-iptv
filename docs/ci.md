@@ -117,7 +117,18 @@ either standalone workflow run that workflow even when host tests also run.
 
 Changes confined to the Rust app's test directory run host correctness and
 Windows test compilation. Edits to a leaf validation workflow select its
-own lane. Shared workflow and shipping dependency changes use broad validation.
+own lane. Validation's transitive local reusable-workflow call graph determines
+which workflows participate; workflows outside that graph run only helper checks.
+Unrecognised or missing local workflow references keep broad validation. Composite
+actions remain shared CI inputs. Workflow/action edits also run pinned actionlint over all workflow consumers.
+
+Markdown at any depth is documentation unless it is embedded or packaged.
+`docs/capabilities.md` keeps host checks; font provenance, vendored Markdown and
+`tools/mpv-runtime*/**` keep their build/package consumers. Repository issue/PR
+templates, CODEOWNERS and Dependabot configuration run helper checks. Unknown
+non-documentation inputs and `.gitattributes` retain native validation. A scanner
+regression checks Rust `include_str!`/`include_bytes!` Markdown consumers so adding
+an embedded document requires an explicit planner exception.
 
 ## Required checks and migration
 
@@ -135,11 +146,49 @@ mirrors the whole aggregate. Reusable host jobs have distinct prefixed check
 names; the old independent event subscriptions are removed to avoid ambiguous
 or duplicate protected checks.
 
-Verify the aggregate check on PRs and merge-queue runs, then add `validation`
-as a required check with the existing GitHub Actions app binding. Once that
-requirement is effective, remove the three alias requirements and set the
-repository variable `PATINA_REQUIRE_AGGREGATE_ONLY` to `true` to skip the alias
-jobs. Master pushes and scheduled runs use the aggregate directly.
+Issue [#338](https://github.com/teng-lin/patina-iptv/issues/338) tracks a separate
+admin cutover and follow-up measurements. The routing PR implements tasks 2–5;
+it does not authorize or perform settings changes. Live branch protection and
+repository-variable writes require explicit repository-owner approval.
+
+The read-only preflight on November 25, 2026 found the three legacy requirements,
+all bound to GitHub Actions (`app_id: 15368`), `strict: false`, and no
+`PATINA_REQUIRE_AGGREGATE_ONLY` variable. Re-read those settings at execution time
+and preserve the current configuration, including unrelated protection rules.
+With owner approval, execute in this safe order:
+
+1. Retain all aliases and leave the variable absent/false. Verify `validation`
+   reports the exact PR head and merge-queue revision, including a documentation
+   selection and a selected-lane failure that makes the aggregate fail.
+2. Add `validation` as a required check with the existing GitHub Actions app
+   binding **while all three legacy checks remain required**. Read branch
+   protection back and verify the new requirement is effective.
+3. Remove only the three legacy required contexts, preserving `validation`, its
+   app binding, strictness, and all unrelated protection settings. Read back and
+   verify `validation` remains required before proceeding.
+4. Only then set `PATINA_REQUIRE_AGGREGATE_ONLY=true`. Confirm a new exact-head PR
+   run reports `validation`, skips the aliases, and satisfies required checks.
+   Master pushes and scheduled runs already use the aggregate directly.
+
+Never set the variable before removing legacy requirements: skipped aliases
+cannot satisfy those required checks. The operations are ordered, not atomic;
+stop and inspect after any failed write/readback, keeping a required aggregate
+or the still-running legacy aliases throughout.
+
+For rollback, first remove or set the variable false, start a fresh PR validation
+run, and verify all three aggregate-mirroring aliases report. Restore the saved
+legacy requirements and verify them before optionally removing the aggregate
+requirement. Restoring legacy requirements while aliases are disabled blocks PRs.
+
+After the owner cutover, collect at least 20 successful docs-only PR runs and
+at least 20 successful PR runs for the gate-to-end comparison. Record run IDs,
+head SHAs, attempts, UTC cutover time, routing plans, queue-inclusive wall time
+(`created_at` to completion), and elapsed time from the `validation` job's
+start to run completion. Keep reruns and non-doc plans identifiable. Report the
+nearest-rank p90 for each cohort against the issue's 26-minute docs-only and
+9.7-minute gate-to-end baselines. The routing change alone is not evidence that
+queue delays improved; retain `Refs #338` until the settings step and measured
+cohorts are complete.
 
 ## Release artifacts
 
@@ -330,7 +379,9 @@ compilation with the checked unsigned shipping artifacts. The release depends
 on the candidate's full validation, never a different nightly SHA. Workflow failures
 remain visible in Actions; maintainers should enable GitHub workflow-failure
 notifications and inspect the full nightly result before release preparation.
-No automatic issue posting or account notification setting is configured here.
+The [nightly observer](#nightly-failure-signal-and-bounded-infrastructure-retry)
+maintains a tracking issue for scheduled failures. Account notification settings
+remain the maintainer’s choice.
 
 ## Dependency update candidates
 
@@ -344,3 +395,81 @@ It has read-only permissions and never pushes, posts or opens a PR. Maintainers
 review the diff, reconcile generated shipping-runner locks and submit it through
 normal PR/native/package gates before adoption. Actions and Gradle updates remain
 on Dependabot. A workflow definition is not evidence its first scheduled run passed.
+
+
+## Nightly failure signal and bounded infrastructure retry
+
+[Nightly Validation alert](../.github/workflows/nightly-alert.yml) observes
+completed scheduled Validation runs on master. It executes only the observer
+from the trusted default branch, without downloading run artifacts. Its token
+can read contents/checks, update issues and re-run Actions. It does not modify
+the Validation plan, selected lanes, aggregate gate or required checks.
+
+The observer creates one bot-owned tracking issue with a stable hidden marker,
+updates it on failures, closes it after the latest observed successful schedule,
+and reopens that same issue on a later failure. The issue records run/attempt
+links, unsuccessful jobs and schedule delay separately. Duplicate deliveries and
+out-of-order events are harmless. A workflow concurrency group serializes issue
+writes, and each observer reconciles ten recent schedules so replacement of a
+pending observer does not drop the previous nightly. The issue retains thirty
+attempts in its state journal and displays twenty. Missing/corrupt state and API
+errors fail the observer visibly rather than discarding retry history.
+
+An automatic retry requires the newest scheduled run's first attempt to fail
+solely because a selected job was cancelled before any steps and its check has
+the exact GitHub annotation: “The job was not acquired by Runner of type hosted
+even after multiple attempts”. The aggregate and legacy proxy failures are
+consequences of that abandoned lane. A missing log, generic cancellation,
+execution timeout or mixed product failure cannot qualify. This deliberately
+covers the observed runner-acquisition failure; other runner losses need new
+positive evidence and tests before eligibility expands.
+
+The observer records its one retry claim in the issue before calling GitHub's
+[re-run-failed-jobs API](https://docs.github.com/en/rest/actions/workflow-runs#re-run-failed-jobs-from-a-workflow-run).
+That endpoint re-runs failed jobs and their dependent jobs, preserving successful
+selected lanes and re-evaluating the aggregate gate. If the API response is
+ambiguous or rejected, the claim remains visible and no automatic second request
+is made; investigate and retry manually if appropriate. A second Validation
+attempt never qualifies for another automatic retry. Alert API failure leaves
+the observer red and requires normal Actions monitoring.
+
+### November 18–25, 2026 triage
+
+Run creation was 8–10 hours after the existing 03:17 UTC cron. This is schedule
+delivery delay, separate from job runner acquisition or product failures. No
+cron change is justified as a measured fix by this historical sample alone.
+
+| Date / scheduled run | Distinct evidence | Disposition |
+|---|---|---|
+| Nov 18 / [44298766906](https://github.com/teng-lin/patina-iptv/actions/runs/44298766906) | `stress / memory` job 134782738674 cancelled with a 30-minute execution-time annotation while apt setup was downloading; iOS compile job 134782738404 never acquired a hosted runner | Setup timeout belongs to #159; runner capacity is separate. Mixed failure does not qualify for automatic retry |
+| Nov 19 / [44518418478](https://github.com/teng-lin/patina-iptv/actions/runs/44518418478) | iOS and macOS packaging never acquired runners; credential broker hit its 45-minute timeout; smoke build and Linux host setup failed apt with exit 100; AppImage Docker smoke failed apt installation with exit 100 | Setup/mirror history belongs to #159. Missing performance artifact followed failed setup, not a separate product defect |
+| Nov 20 / [44730991426](https://github.com/teng-lin/patina-iptv/actions/runs/44730991426) | macOS `personalization_groups` timed out waiting for `Content blocked` at line 278; Windows `tv_shared_controls` timed out waiting for `Manage favourites…` at line 534 | macOS already tracked by #152 and related #333. Windows failure tracked by #340 with current-head reproduction unverified; no runner-loss retry |
+| Nov 21 / [44898563431](https://github.com/teng-lin/patina-iptv/actions/runs/44898563431) | macOS isolated guide-input budget test reported 56.83475 ms against 50 ms at `store_latency.rs:156` | Already tracked by #204 and related #333; later #265 replaced the shared-runner wall-clock gate |
+| Nov 22 / [45018228691](https://github.com/teng-lin/patina-iptv/actions/runs/45018228691) | Linux host and both package jobs rejected `url 2.5.8` with RUSTSEC-2026-0592; Windows `desktop_workflows.rs:433` found identical recording rows before/after wheel input | Audit failure is distinct from a package smoke execution failure; master now pins `url 2.5.9` in both lockfiles. Windows wheel evidence relates to #333; do not duplicate the existing test-family tracking |
+| Nov 23 / [45180533817](https://github.com/teng-lin/patina-iptv/actions/runs/45180533817) | Linux host and both package jobs rejected `cookie 0.18.2` with RUSTSEC-2026-0594; Android and smoke setup exited 124 after bounded apt retries; macOS guide budget reported 91.83625 ms | Master now pins `cookie 0.18.3` in both lockfiles. Setup belongs to #159, guide budget to #204/#333; these are separate causes |
+| Nov 24 / [45408172559](https://github.com/teng-lin/patina-iptv/actions/runs/45408172559) | macOS package job 138494731938 cancelled after 15m01s with no steps and explicit runner-acquisition failure annotation; aggregate gate failed | Hosted runner capacity/acquisition failure, not the package job's 120-minute execution timeout |
+| Nov 25 / [45620516253](https://github.com/teng-lin/patina-iptv/actions/runs/45620516253) | macOS package job 139227313677 cancelled after 16m27s with the same acquisition annotation and no steps; aggregate gate failed | Same infrastructure failure as Nov 24, with no product-lane failure |
+
+The cancelled macOS jobs also have GitHub's notice about macOS arm64 runner
+capacity. An unavailable log is not the basis for classification: check-run
+annotations provide the positive evidence. The older setup and audit failures
+must not be turned green by infrastructure retry policy.
+
+An authorized maintainer-token API check on November 25 used fresh run and
+check data: the classifier accepted run 45620516253 attempt 1, and GitHub
+accepted one `rerun-failed-jobs` request. [Attempt 2](https://github.com/teng-lin/patina-iptv/actions/runs/45620516253/attempts/2)
+queued macOS package job 139258097505 while carrying the other successful
+selected lanes forward. At that observation, the dependent aggregate gate was
+still pending the package job; its success was not yet established. This checks
+the backend retry path with a maintainer token. The deployed observer's
+`GITHUB_TOKEN` permissions and delivery of the API retry's `workflow_run`
+completion still require live verification; the next scheduled completion also
+reconciles recent attempts. Do not request another retry for this run: attempt 2
+is the automatic retry cap.
+
+Measured creation delays in minutes were 516, 513, 514, 482, 500, 588, 636 and
+591 respectively (Nov 18–25): p50 515 minutes, range 482–636. Refs #337 retains
+follow-up measurement of delivery delay and the first deployed observer/retry.
+Changing the schedule or moving its trigger remains a separate evidence-based
+decision. No live branch-protection, repository-variable or PR #330 hold change
+is part of the observer.
