@@ -2,15 +2,16 @@
 """Report PR Validation timelines from immutable run/job snapshots, without running CI."""
 import argparse
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
 from pathlib import Path
 import re
 import statistics
+from urllib.parse import parse_qs, urlsplit
 
-SCHEMA = 2
+SCHEMA = 3
 GATES = {"validation", "test (ubuntu-24.04)", "test (macos-15)", "android"}
 FORMS = ("tablet", "tv")
 AVDS = {"tablet": ("google_apis", "pixel_tablet"), "tv": ("android-tv", "tv_1080p")}
@@ -36,7 +37,67 @@ def load(path):
     return json.loads(Path(path).read_text())
 
 
-def capture(source, strategy):
+def capture_request(metadata, canonical_digest, runs):
+    if metadata is None:
+        return None
+    if metadata["run_list_canonical_sha256"] != canonical_digest:
+        raise ValueError("capture request metadata does not match the run snapshot")
+    parsed = urlsplit(metadata["request_path"])
+    match = re.fullmatch(r"repos/([^/]+/[^/]+)/actions/workflows/([^/]+)/runs", parsed.path)
+    if parsed.scheme or parsed.netloc or not match:
+        raise ValueError("capture request must be a relative GitHub workflow-run API path")
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    allowed = {"event", "status", "created", "per_page", "page", "branch", "actor", "head_sha", "exclude_pull_requests", "check_suite_id"}
+    if set(query) - allowed or any(len(values) != 1 for values in query.values()):
+        raise ValueError("capture request contains unsupported or ambiguous filters")
+    query = {key: values[0] for key, values in query.items()}
+    if query.get("event") != "pull_request" or query.get("status") != "success":
+        raise ValueError("capture request must select successful pull-request runs")
+    if any(run["repository"]["full_name"] != match[1] or run["path"].split("@", 1)[0].rsplit("/", 1)[-1] != match[2]
+           for run in runs):
+        raise ValueError("capture request repository/workflow differs from the run snapshot")
+    if metadata["pagination"] not in {"first-page", "all-pages"} or metadata["time_basis"] not in {"request-start", "write-completion"}:
+        raise ValueError("capture pagination/time basis is unsupported")
+    timestamp(metadata["captured_at"])
+    return {"request_path": metadata["request_path"], "repository": match[1], "workflow": match[2], "query": query,
+            "captured_at": metadata["captured_at"], "time_basis": metadata["time_basis"], "pagination": metadata["pagination"]}
+
+
+def date_bound(value, end=False):
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        day = datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
+        return (day + (timedelta(days=1) if end else timedelta())).timestamp()
+    return timestamp(value) + (1 if end else 0)  # GitHub's created range is inclusive, at API-second resolution.
+
+
+def window_coverage(sample, selector):
+    request = sample.get("capture_request")
+    if request is None:
+        return {"status": "unknown", "reason": "Capture request/time metadata is missing"}
+    if sample["strategy"] == "fixed-candidates":
+        return {"status": "fixed-sample", "reason": "Explicit bounded candidates; no date-window population coverage claimed"}
+    if not selector["since_inclusive"] or not selector["until_exclusive"] or request["time_basis"] != "request-start":
+        return {"status": "unknown", "reason": "Complete window needs finite selection bounds and a request-start time"}
+    lower, upper = timestamp(selector["since_inclusive"]), timestamp(selector["until_exclusive"])
+    query = request["query"]
+    if set(query) - {"event", "status", "created", "per_page", "page"}:
+        return {"status": "not-covered", "reason": "Conservatively unsupported extra query parameters prevent coverage validation"}
+    query_lower, query_upper = -math.inf, math.inf
+    if "created" in query:
+        parts = query["created"].split("..")
+        if len(parts) != 2 or not all(parts):
+            return {"status": "unknown", "reason": "Unsupported created query; use a finite inclusive range"}
+        try:
+            query_lower, query_upper = date_bound(parts[0]), date_bound(parts[1], end=True)
+        except ValueError:
+            return {"status": "unknown", "reason": "Unsupported created bounds; use finite ISO dates/timestamps with encoded timezone offsets"}
+    covered = query_lower <= lower < upper <= query_upper and upper <= timestamp(request["captured_at"])
+    return {"status": "covered" if covered else "not-covered",
+            "reason": "Query/request-start cover successful-completed runs visible at capture; in-flight or later-finishing runs may be missing"
+            if covered else "Selection exceeds query or request-start coverage"}
+
+
+def capture(source, strategy, metadata=None):
     runs, total = source["workflow_runs"], source["total_count"]
     if type(total) is not int or total < len(runs):
         raise ValueError("run capture total_count is inconsistent")
@@ -47,11 +108,39 @@ def capture(source, strategy):
     ids = [run["id"] for run in runs]
     if len(ids) != len(set(ids)):
         raise ValueError("duplicate run IDs in candidate capture")
-    digest = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps(source, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return runs, {"strategy": strategy, "api_total_count": total, "retrieved_count": len(runs),
                   "capture_complete": total == len(runs), "candidate_run_ids": ids,
                   "canonical_snapshot_sha256": digest,
-                  "digest_encoding": "UTF-8 compact JSON with sorted keys"}
+                  "digest_encoding": "UTF-8 of Python json.dumps(ensure_ascii=True, sort_keys=True, separators=(',', ':'))",
+                  "capture_request": capture_request(metadata, digest, runs)}
+
+
+def log_identity(text, run, job):
+    run_ids, checkouts, next_checkout = set(), set(), False
+    for line in text.splitlines():
+        date, separator, message = line.partition(" ")
+        if not separator or not re.match(r"\d{4}-\d{2}-\d{2}T", date):
+            continue
+        if not timestamp(job["started_at"]) <= timestamp(date) <= timestamp(job["completed_at"]):
+            continue
+        match = re.fullmatch(r"\s*run-id: (\d+)\s*", message)
+        if match:
+            run_ids.add(int(match[1]))
+        if next_checkout:
+            if re.fullmatch(r"[0-9a-f]{40}", message):
+                checkouts.add(message)
+            next_checkout = False
+        if message.startswith("[command]") and message.endswith("git log -1 --format=%H"):
+            next_checkout = True
+    expected = {workflow["sha"] for workflow in run.get("referenced_workflows", [])
+                if workflow["path"].startswith(run["repository"]["full_name"] + "/.github/workflows/android-smoke.yml@")}
+    if run_ids != {run["id"]}:
+        raise ValueError("smoke log declared run ID differs from the API run")
+    if len(expected) != 1 or checkouts != expected:
+        raise ValueError("smoke log checkout differs from the referenced local smoke workflow revision")
+    return {"run_id": run["id"], "job_id": job["id"], "api_head_sha": run["head_sha"],
+            "checkout_sha": next(iter(checkouts)), "basis": "Declared same-run artifact inputs and default checkout of local reusable workflow"}
 
 
 def phases(text, began=None, ended=None, form=None):
@@ -106,8 +195,8 @@ def summarize(rows):
 
 
 def report(source, jobs_directory, logs_directory=None, since=None, until=None, phase_runs=20, latest=None,
-           sampling="complete-capture"):
-    runs, sampling_info = capture(source, sampling)
+           sampling="complete-capture", capture_metadata=None):
+    runs, sampling_info = capture(source, sampling, capture_metadata)
     if phase_runs < 0:
         raise ValueError("phase-runs must not be negative")
     if latest is not None and latest < 1:
@@ -212,7 +301,7 @@ def report(source, jobs_directory, logs_directory=None, since=None, until=None, 
                "tools_result": tool_result, "tools_job_names": [job["name"] for job in tool_jobs],
                "separate_streams_job": "present" if streams else "absent"}
         if logs_directory and len(rows) < phase_runs:
-            pair, gaps, log_digests = {}, [], {}
+            pair, gaps, log_digests, identities = {}, [], {}, {}
             for form, job in smoke.items():
                 checkout = next(step for step in job["steps"] if step["name"].startswith("Run actions/checkout@"))
                 driver = next(step for step in job["steps"] if step["name"].startswith("Smoke test on the "))
@@ -222,7 +311,9 @@ def report(source, jobs_directory, logs_directory=None, since=None, until=None, 
                     raise ValueError(f"run {identity}: checkout/launcher chronology is inconsistent for {form}")
                 log_bytes = (Path(logs_directory) / f"smoke-{identity}-{form}.log").read_bytes()
                 log_digests[form] = hashlib.sha256(log_bytes).hexdigest()
-                pair[form] = phases(log_bytes.decode(), driver_lower, driver_upper, form)
+                text = log_bytes.decode()
+                identities[form] = log_identity(text, run, job)
+                pair[form] = phases(text, driver_lower, driver_upper, form)
                 gaps.append(driver_lower - checkout_end)
             others = [timestamp(job["completed_at"]) for job in selected
                       if not job["name"].startswith("smoke / smoke (")]
@@ -232,7 +323,7 @@ def report(source, jobs_directory, logs_directory=None, since=None, until=None, 
                               for form in FORMS}
             ideal_end = max(*ideal_finishes.values(), *others)
             row["conditional_eager_model"] = {
-                "phases": pair, "log_sha256": log_digests,
+                "phases": pair, "log_sha256": log_digests, "log_identity": identities,
                 "assumed_input_window_seconds": ready - build_start,
                 "ideal_install_timestamps": ideal_installs, "ideal_finish_timestamps": ideal_finishes,
                 # Both savings and idle use the SAME conditional eager schedule.
@@ -252,6 +343,7 @@ def report(source, jobs_directory, logs_directory=None, since=None, until=None, 
         "quantiles": "p50 conventional median; p90 nearest rank ceil(0.9*n)",
         "summary": summarize(rows), "excluded": dict(excluded), "runs": rows}
     result["sampling"]["selected_run_ids"] = [row["run_id"] for row in rows]
+    result["sampling"]["selection_window_coverage"] = window_coverage(result["sampling"], result["selector"])
     models = [row["conditional_eager_model"] for row in rows if "conditional_eager_model" in row]
     if models:
         result["conditional_eager_model"] = {
@@ -303,6 +395,14 @@ def compare(before, after, comparable=False):
         reason = "Sampling strategies differ"
     elif before["sampling"]["strategy"] == "fixed-candidates" and before["sampling"]["retrieved_count"] != after["sampling"]["retrieved_count"]:
         reason = "Fixed candidate capture widths differ"
+    elif any(item["sampling"].get("capture_request") is None for item in (before, after)):
+        reason = "Capture request/time metadata is missing"
+    elif any(before["sampling"]["capture_request"][key] != after["sampling"]["capture_request"][key]
+             for key in ("repository", "workflow")):
+        reason = "Capture repositories or workflows differ"
+    elif any(item["sampling"]["strategy"] == "complete-capture" and window_coverage(item["sampling"], item["selector"])["status"] != "covered"
+             for item in (before, after)):
+        reason = "Capture query/time does not establish complete selection-window coverage"
     elif not comparable:
         reason = "Owner has not established cohort/intervention comparability"
     elif len(left) < 20 or len(right) < 20:
@@ -314,14 +414,21 @@ def compare(before, after, comparable=False):
     elif any(before["selector"][key] != after["selector"][key]
              for key in ("attempt", "event", "conclusion", "both_emulators_required")):
         reason = "Cohort selection contracts differ"
-    observed = {"before": summarize(left)["actual"].get("whole_minutes", {"n": 0}),
-                "after": summarize(right)["actual"].get("whole_minutes", {"n": 0})}
+    summaries = {"before": summarize(left), "after": summarize(right)}
+    observed = {name: summary["actual"].get("whole_minutes", {"n": 0}) for name, summary in summaries.items()}
+    cluster_keys = ("distinct_api_head_shas", "repeated_api_head_runs", "distinct_known_pr_numbers",
+                    "repeated_known_pr_occurrences", "runs_without_pr_number", "distinct_head_branches", "repeated_head_branch_runs")
+    sample_keys = ("strategy", "api_total_count", "retrieved_count", "capture_complete", "canonical_snapshot_sha256", "capture_request")
     return {"status": "pending" if reason else "measured", "reason": reason, "actual_whole_minutes": observed,
             "after_median_at_most_18_minutes": None if reason else observed["after"]["p50"] <= 18,
-            "cohort_repetition": {"before": {key: summarize(left)[key] for key in ("distinct_api_head_shas", "repeated_api_head_runs", "distinct_known_pr_numbers", "runs_without_pr_number")},
-                                  "after": {key: summarize(right)[key] for key in ("distinct_api_head_shas", "repeated_api_head_runs", "distinct_known_pr_numbers", "runs_without_pr_number")}},
+            "cohort_repetition": {name: {key: summary[key] for key in cluster_keys} for name, summary in summaries.items()},
+            "sampling": {name: {**{key: item["sampling"][key] for key in sample_keys},
+                                "selection_window_coverage": window_coverage(item["sampling"], item["selector"]),
+                                "selector": item["selector"]}
+                         for name, item in (("before", before), ("after", after))},
             "note": "Descriptive PR-run evidence, not statistically independent PRs. Owner comparability assessment must consider "
                     "repeat/clustered revisions, lane mix, runner/cache conditions and intervention; do not manufacture runs. "
+                    "Success-only captures can omit in-flight or later-finishing runs from the creation window; assess this selection bias. "
                     "Conditional models never count as post-change samples."}
 
 
@@ -332,6 +439,8 @@ def main():
     analyze.add_argument("--runs", type=Path, required=True)
     analyze.add_argument("--jobs-directory", type=Path, required=True)
     analyze.add_argument("--logs-directory", type=Path)
+    analyze.add_argument("--capture-metadata", type=Path,
+                         help="Request path/query, pagination, capture time/basis and bound run-list hashes")
     analyze.add_argument("--since")
     analyze.add_argument("--until")
     analyze.add_argument("--phase-runs", type=int, default=20)
@@ -348,13 +457,20 @@ def main():
         if args.command == "report":
             source_bytes = args.runs.read_bytes()
             source = json.loads(source_bytes)
+            metadata = load(args.capture_metadata) if args.capture_metadata else None
+            source_sha = hashlib.sha256(source_bytes).hexdigest()
+            if metadata and metadata["run_list_sha256"] != source_sha:
+                raise ValueError("capture request metadata does not match the raw run-list file")
             result = report(source, args.jobs_directory, args.logs_directory,
-                            args.since, args.until, args.phase_runs, args.latest, args.sampling)
+                            args.since, args.until, args.phase_runs, args.latest, args.sampling, metadata)
             result["sampling"].update(source_file=str(args.runs.resolve()),
                                       source_file_sha256=hashlib.sha256(source_bytes).hexdigest())
+            if args.capture_metadata:
+                result["sampling"].update(capture_metadata_file=str(args.capture_metadata.resolve()),
+                                          capture_metadata_file_sha256=hashlib.sha256(args.capture_metadata.read_bytes()).hexdigest())
         else:
             result = compare(load(args.before), load(args.after), args.comparable)
-    except (ValueError, KeyError, OSError, StopIteration) as error:
+    except (ValueError, KeyError, OSError, StopIteration, TypeError, AttributeError) as error:
         parser.exit(2, f"Cannot report incomplete or inconsistent evidence: {error}\n")
     print(json.dumps(result, indent=2))
 

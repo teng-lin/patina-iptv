@@ -7,7 +7,8 @@ target is claimed; there are no post-change scheduling observations.
 
 ## Fixed candidate sample
 
-At 2026-11-25 13:45:38 UTC, the first API page contained the latest **100 of 244**
+The capture file finished writing at 2026-11-25 13:45:38 UTC; request-start
+time was not recorded. The first API page contained the latest **100 of 244**
 successful pull-request Validation runs. This was a bounded candidate sample,
 not a complete Nov 23–25 population. Of those 100 candidates, 83 were completed
 first attempts with a successful APK build and both successful emulator lanes.
@@ -87,7 +88,8 @@ before inputs arrive. It preserves actual input availability, both observed
 post-install tails (including assertions), and every other selected lane's
 finish. The latest selected-lane finish is recomputed **within each run** before
 saving quantiles are taken. API step times locate the correct log interval;
-exact log timestamps avoid second-rounding errors in the post-install tail.
+the exact install log timestamp avoids rounding that endpoint. API job finish
+times remain limited to whole-second resolution.
 
 Under those conditions only, selected-lane critical savings are
 **34.5/205.318 s** at p50/p90, n=20. Summed additional idle occupancy across the
@@ -121,54 +123,104 @@ run list is `pr-runs-page1.json`, raw SHA-256:
 c2acb568b2a0faf1603646b3b3800ef3b9eb36c2cd6455ea5a04805c681fe1e3
 ```
 
+The bound `capture-context.json` records the actual one-page request, without a
+`created` filter, and labels its timestamp as write completion. It does not
+retroactively establish request-start time or date-window population coverage.
+
 The analyzer also emits candidate/selected IDs, API total versus retrieved
 counts, sampling strategy, a canonical snapshot digest, job-file digests and
-per-form log digests. CLI reports additionally record the raw source-file digest.
+per-form log digests. The canonical digest is SHA-256 of UTF-8
+`json.dumps(source, ensure_ascii=True, sort_keys=True, separators=(",", ":"))`;
+Unicode characters are escaped. CLI reports additionally record the raw
+source-file digest.
 Reports bind the analyzer source digest too; comparisons require the same
 analyzer version, so re-analyze both captures after a methodology change.
 These distinguish the retained snapshot from a later moving latest-100 page.
-For this original bounded sample, explicitly select `fixed-candidates`:
+The retained `analysis-b973aed381ae/` directory under that exact bundle path
+contains the prior analyzer snapshot and two reports; later `analysis-*`
+directories retain corrected snapshots and reports, with
+an analysis manifest hashing those files and the capture context. The
+reports point to the durable raw source paths. Reproduction writes elsewhere
+to preserve those retained artifacts. For this original bounded sample,
+explicitly select `fixed-candidates`:
 
 ```sh
 PATINA_TIMELINE_DATA="$HOME/.codex/worktree-archives/patina-334-baseline-20261125T134538Z"
+PATINA_TIMELINE_REPORT=$(mktemp -d)
 python3 tools/ci/validation-timeline.py report \
   --runs "$PATINA_TIMELINE_DATA/pr-runs-page1.json" \
   --jobs-directory "$PATINA_TIMELINE_DATA" --logs-directory "$PATINA_TIMELINE_DATA" \
   --sampling fixed-candidates --phase-runs 20 \
+  --capture-metadata "$PATINA_TIMELINE_DATA/capture-context.json" \
   --since 2026-11-23T00:00:00Z --until 2026-11-26T00:00:00Z \
-  > "$PATINA_TIMELINE_DATA/before.json"
+  > "$PATINA_TIMELINE_REPORT/before.json"
 ```
 
 Add `--latest 20` for the recent-run view. Raw snapshots remain outside the
 repository. The offline analyzer needs no credentials, executes no CI, and
-modifies no artifacts. Phase logs must lie inside the matching launcher step
-and declare that form's `AVD_TARGET` and `AVD_PROFILE`; swapped, missing or stale
-logs are rejected rather than treated as zero-cost work. Mixed run/attempt/head
-identity, incomplete job pages and inconsistent times fail closed. Retried runs
+modifies no artifacts. Phase markers must lie inside the matching launcher
+step and declare that form's `AVD_TARGET` and `AVD_PROFILE`. Logs must also show
+the matching artifact-input `run-id` and full checkout SHA inside that lane
+job's timestamps. Checkout is compared with the API's referenced local smoke
+workflow revision, separately from its PR head SHA: the checkout is normally
+the PR merge commit. These checks reject accidental wrong-run, swapped-form
+and wrong-checkout mixing in authentic exports. They do not authenticate
+modified logs, prove APK bytes, or identify every conceivable stale log.
+Mixed run/attempt/head identity, incomplete job pages and inconsistent times fail closed. Retried runs
 are excluded; allowed-failure job outcomes are explicitly unsupported rather
 than silently undercounting a successful workflow's elapsed time.
 
 ## Capture a new cohort
 
 The default `complete-capture` strategy requires `total_count` to equal the
-retrieved run count. Capture every API page for an explicitly chosen query;
+retrieved run count. That proves page completeness only. Bind the actual
+request/query and its recorded start time in `--capture-metadata`; a complete
+window comparison additionally requires finite selector bounds covered by the
+query and ending before that request began. Extra population filters cannot
+establish the general PR window; even `exclude_pull_requests` is conservatively
+unsupported for complete-window comparison. These describe successful runs visible in
+that capture, not runs that may finish later. Success-only captures can omit
+slow in-flight runs created in the window and bias the observed tail or median;
+the report and comparison explicitly disclose that limitation. There is no
+arbitrary settling timeout that proves all runs finished. Reports can analyze snapshots
+without request metadata, but their comparisons remain pending.
+
+Capture every API page for an explicitly chosen query;
 use a `created=` filter and narrower windows if API limits prevent completion.
 Do not label a first page as a complete date window. For example:
 
 ```sh
 PATINA_TIMELINE_DATA=$(mktemp -d)
-gh api --paginate --slurp \
-  'repos/teng-lin/patina-iptv/actions/workflows/validation.yml/runs?event=pull_request&status=success&created=2026-11-23..2026-11-25&per_page=100' \
-  > "$PATINA_TIMELINE_DATA/run-pages.json"
+PATINA_TIMELINE_REPORT=$(mktemp -d)
 python3 - "$PATINA_TIMELINE_DATA" <<'PY'
+from datetime import datetime, timezone
+from pathlib import Path
 import json, subprocess, sys
+root = Path(sys.argv[1])
+request = "repos/teng-lin/patina-iptv/actions/workflows/validation.yml/runs?event=pull_request&status=success&created=2026-11-23..2026-11-25&per_page=100"
+started = datetime.now(timezone.utc).isoformat()
+with (root / "run-pages.json").open("wb") as output:
+    subprocess.run(["gh", "api", "--paginate", "--slurp", request], stdout=output, check=True)
+(root / "capture-request.json").write_text(json.dumps({
+    "request_path": request, "captured_at": started,
+    "time_basis": "request-start", "pagination": "all-pages"}))
+PY
+python3 - "$PATINA_TIMELINE_DATA" <<'PY'
+import hashlib, json, subprocess, sys
 from pathlib import Path
 root = Path(sys.argv[1])
 pages = json.loads((root / 'run-pages.json').read_text())
 runs = [run for page in pages for run in page['workflow_runs']]
 assert all(page['total_count'] == pages[0]['total_count'] for page in pages)
 assert len(runs) == len({run['id'] for run in runs}) == pages[0]['total_count']
-(root / 'runs.json').write_text(json.dumps({'total_count': pages[0]['total_count'], 'workflow_runs': runs}))
+source = {"total_count": pages[0]["total_count"], "workflow_runs": runs}
+raw = json.dumps(source).encode()
+(root / "runs.json").write_bytes(raw)
+metadata = json.loads((root / "capture-request.json").read_text())
+metadata.update(run_list_sha256=hashlib.sha256(raw).hexdigest(),
+    run_list_canonical_sha256=hashlib.sha256(json.dumps(source, ensure_ascii=True,
+        sort_keys=True, separators=(",", ":")).encode()).hexdigest())
+(root / "capture-context.json").write_text(json.dumps(metadata, indent=2))
 for run in runs:
     if run['run_attempt'] != 1:
         continue
@@ -180,8 +232,9 @@ for run in runs:
 PY
 python3 tools/ci/validation-timeline.py report \
   --runs "$PATINA_TIMELINE_DATA/runs.json" --jobs-directory "$PATINA_TIMELINE_DATA" \
+  --capture-metadata "$PATINA_TIMELINE_DATA/capture-context.json" \
   --since 2026-11-23T00:00:00Z --until 2026-11-26T00:00:00Z \
-  > "$PATINA_TIMELINE_DATA/report.json"
+  > "$PATINA_TIMELINE_REPORT/report.json"
 ```
 
 For phase evidence, save each selected run's two smoke-job logs with
@@ -217,7 +270,12 @@ Comparison requires explicit consistent sampling strategies, disjoint and
 chronologically ordered actual run cohorts, and the known first-attempt,
 successful PR/tablet/TV selection contract. Fixed candidate samples must have
 the same capture width; their observed medians are sample descriptions, not
-complete-window population claims. Models never count as after observations.
+complete-window population claims. Comparison output includes each capture
+request, completeness and coverage signals, and branch/PR/head clustering.
+Both captures must name the same repository and workflow. Additional query
+differences remain part of the explicit comparability assessment.
+Missing capture metadata or unproven complete-window coverage keeps the result
+pending. Models never count as after observations.
 Only with at least 20 runs per cohort and the explicit comparability assessment
 does the tool report whether the observed after median is at most 18 minutes.
 That is descriptive evidence, not proof of causation. #334 remains open for

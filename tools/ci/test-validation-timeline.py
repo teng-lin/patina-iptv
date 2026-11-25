@@ -3,6 +3,7 @@
 import copy
 from datetime import datetime, timedelta, timezone
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -20,6 +21,14 @@ def run_capture(runs, total=None):
     return {"total_count": len(runs) if total is None else total, "workflow_runs": runs}
 
 
+def capture_metadata(source, created="2026-01-01..2026-02-28", captured_at="2026-04-01T00:00:00Z", time_basis="request-start"):
+    query = "event=pull_request&status=success&per_page=100" + (f"&created={created}" if created else "")
+    return {"request_path": "repos/synthetic/iptv/actions/workflows/validation.yml/runs?" + query,
+            "captured_at": captured_at, "time_basis": time_basis, "pagination": "all-pages",
+            "run_list_sha256": hashlib.sha256(json.dumps(source).encode()).hexdigest(),
+            "run_list_canonical_sha256": hashlib.sha256(json.dumps(source, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+
+
 def form_log(text, form):
     if form == "tv":
         return text.replace("AVD_TARGET: google_apis", "AVD_TARGET: android-tv").replace("AVD_PROFILE: pixel_tablet", "AVD_PROFILE: tv_1080p")
@@ -35,7 +44,9 @@ def generated(identity=1, day=1):
     run = {"id": identity, "event": "pull_request", "status": "completed", "conclusion": "success",
            "run_attempt": 1, "created_at": date(0), "head_sha": f"{identity:040x}",
            "html_url": f"https://example.test/generated-runs/{identity}", "head_branch": f"generated-{identity}",
-           "pull_requests": [{"number": identity}]}
+           "pull_requests": [{"number": identity}], "repository": {"full_name": "synthetic/iptv"},
+           "path": ".github/workflows/validation.yml", "referenced_workflows": [
+               {"path": "synthetic/iptv/.github/workflows/android-smoke.yml@refs/pull/generated/merge", "sha": f"{identity + 10000:040x}"}]}
     jobs = []
 
     def job(name, created, began, ended, conclusion="success", steps=()):
@@ -56,7 +67,10 @@ def generated(identity=1, day=1):
     job("android", 610, 610, 615)
     # Legitimate skipped reusable placeholder duplicates the protected alias name.
     job("android", 10, 10, 10, "skipped")
-    log = (f"{date(225)} Emulator booted in 1s\n"  # earlier helper test output is not boot evidence
+    log = (f"{date(222)} [command]/usr/bin/git log -1 --format=%H\n"
+           f"{date(222)} {identity + 10000:040x}\n"
+           f"{date(223)}   run-id: {identity}\n"
+           f"{date(225)} Emulator booted in 1s\n"  # earlier helper test output is not boot evidence
            f"{date(235)} ##[group]Run python3 tools/ci/android/ci-emulator.py generated\n"
            f"{date(235)}   AVD_TARGET: google_apis\n"
            f"{date(235)}   AVD_PROFILE: pixel_tablet\n"
@@ -215,6 +229,104 @@ class Timelines(unittest.TestCase):
         self.assertEqual(model["ideal_finish_timestamps"]["tablet"], expected)
         self.assertEqual(model["critical_saving_seconds"], 135.5)
 
+    def test_capture_page_completeness_does_not_prove_query_window_coverage(self):
+        source = run_capture([self.run])
+        missing = self.report(since="2026-01-01T00:00:00Z", until="2026-02-01T00:00:00Z")
+        self.assertEqual(missing["sampling"]["selection_window_coverage"]["status"], "unknown")
+        narrow = self.report(capture_metadata=capture_metadata(source, created="2026-01-01..2026-01-01"),
+                             since="2026-01-01T00:00:00Z", until="2026-01-08T00:00:00Z")
+        self.assertTrue(narrow["sampling"]["capture_complete"])
+        self.assertEqual(narrow["sampling"]["selection_window_coverage"]["status"], "not-covered")
+        valid = self.report(capture_metadata=capture_metadata(source), since="2026-01-01T00:00:00Z", until="2026-03-01T00:00:00Z")
+        self.assertEqual(valid["sampling"]["selection_window_coverage"]["status"], "covered")
+        sample = self.report(capture_metadata=capture_metadata(source, created=None, time_basis="write-completion"),
+                             sampling="fixed-candidates", since="2026-01-01T00:00:00Z", until="2026-03-01T00:00:00Z")
+        self.assertEqual(sample["sampling"]["selection_window_coverage"]["status"], "fixed-sample")
+
+    def test_capture_request_hash_filters_time_and_identity_are_validated(self):
+        source = run_capture([self.run])
+        for change in (lambda value: value.update(run_list_canonical_sha256="0" * 64),
+                       lambda value: value.update(captured_at="not a timestamp"),
+                       lambda value: value.update(request_path=value["request_path"].replace("synthetic/iptv", "synthetic/other")),
+                       lambda value: value.update(request_path=value["request_path"].replace("validation.yml", "release.yml")),
+                       lambda value: value.update(request_path=value["request_path"] + "&token=generated")):
+            with self.subTest(change=change):
+                metadata = capture_metadata(source)
+                change(metadata)
+                with self.assertRaises(ValueError):
+                    self.report(capture_metadata=metadata)
+        early = self.report(capture_metadata=capture_metadata(source, captured_at="2026-01-15T00:00:00Z"),
+                            since="2026-01-01T00:00:00Z", until="2026-02-01T00:00:00Z")
+        self.assertEqual(early["sampling"]["selection_window_coverage"]["status"], "not-covered")
+        done = self.report(capture_metadata=capture_metadata(source, time_basis="write-completion"),
+                           since="2026-01-01T00:00:00Z", until="2026-02-01T00:00:00Z")
+        self.assertEqual(done["sampling"]["selection_window_coverage"]["status"], "unknown")
+
+    def test_unsupported_created_bounds_are_unknown_and_covered_discloses_inflight_bias(self):
+        source = run_capture([self.run])
+        for created in ("2026-01-01..*", "2026-01-01T00:00:00+00:00..2026-02-28"):
+            value = self.report(capture_metadata=capture_metadata(source, created=created),
+                                since="2026-01-01T00:00:00Z", until="2026-02-01T00:00:00Z")
+            coverage = value["sampling"]["selection_window_coverage"]
+            self.assertEqual(coverage["status"], "unknown")
+            self.assertIn("Unsupported created bounds", coverage["reason"])
+        value = self.report(capture_metadata=capture_metadata(source),
+                            since="2026-01-01T00:00:00Z", until="2026-02-01T00:00:00Z")
+        self.assertIn("in-flight", value["sampling"]["selection_window_coverage"]["reason"])
+
+    def test_expected_checkout_requires_the_local_repository_workflow(self):
+        self.run["referenced_workflows"][0]["path"] = "other/iptv/.github/workflows/android-smoke.yml@refs/pull/generated/merge"
+        with self.assertRaisesRegex(ValueError, "referenced local"):
+            self.report(logs_directory=self.root)
+
+    def test_extra_query_parameters_are_conservatively_unsupported(self):
+        source = run_capture([self.run])
+        metadata = capture_metadata(source)
+        metadata["request_path"] += "&exclude_pull_requests=true"
+        value = self.report(capture_metadata=metadata, since="2026-01-01T00:00:00Z", until="2026-02-01T00:00:00Z")
+        coverage = value["sampling"]["selection_window_coverage"]
+        self.assertEqual(coverage["status"], "not-covered")
+        self.assertIn("Conservatively unsupported extra query parameters", coverage["reason"])
+
+    def test_cli_malformed_capture_metadata_exits_cleanly_without_traceback(self):
+        source = run_capture([self.run])
+        runs, metadata_path = self.root / "runs.json", self.root / "capture.json"
+        runs.write_text(json.dumps(source))
+        for field in ("request_path", "captured_at"):
+            for value in (None, 42):
+                with self.subTest(field=field, value=value):
+                    metadata = capture_metadata(source)
+                    metadata[field] = value
+                    metadata_path.write_text(json.dumps(metadata))
+                    result = subprocess.run([sys.executable, SCRIPT, "report", "--runs", runs,
+                                             "--jobs-directory", self.root, "--capture-metadata", metadata_path],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("Cannot report incomplete or inconsistent evidence", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+
+    def test_canonical_digest_label_preserves_ascii_escaping_for_unicode(self):
+        source = run_capture([dict(self.run, display_title="Generated … 家庭")])
+        result = TIMELINE.capture(source, "complete-capture")[1]
+        expected = hashlib.sha256(json.dumps(source, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+        self.assertEqual(result["canonical_snapshot_sha256"], expected)
+        self.assertIn("ensure_ascii=True", result["digest_encoding"])
+
+    def test_log_run_and_merge_checkout_are_distinct_from_api_head_identity(self):
+        value = self.report(logs_directory=self.root)
+        identity = value["runs"][0]["conditional_eager_model"]["log_identity"]["tablet"]
+        self.assertEqual(identity["api_head_sha"], self.run["head_sha"])
+        self.assertEqual(identity["checkout_sha"], self.run["referenced_workflows"][0]["sha"])
+        self.assertNotEqual(identity["api_head_sha"], identity["checkout_sha"])
+        tablet = self.root / "smoke-1-tablet.log"
+        # Same form, same times and checkout; only the other concurrent run's declared ID changes.
+        tablet.write_text(self.log.replace("run-id: 1", "run-id: 2"))
+        with self.assertRaisesRegex(ValueError, "run ID"):
+            self.report(logs_directory=self.root)
+        tablet.write_text(self.log.replace(self.run["referenced_workflows"][0]["sha"], self.run["head_sha"]))
+        with self.assertRaisesRegex(ValueError, "checkout"):
+            self.report(logs_directory=self.root)
+
     def test_quantiles_use_median_and_nearest_rank_not_interpolation(self):
         self.assertEqual(TIMELINE.distribution([4, 1, 3, 2]), {"n": 4, "p50": 2.5, "p90": 4})
         self.assertEqual(TIMELINE.distribution([]), {"n": 0})
@@ -343,7 +455,8 @@ class Timelines(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["summary"]["n"], 1)
 
     def comparison(self, count=20):
-        base = self.report()
+        source = run_capture([self.run])
+        base = self.report(capture_metadata=capture_metadata(source), since="2026-01-01T00:00:00Z", until="2026-03-01T00:00:00Z")
         before, after = copy.deepcopy(base), copy.deepcopy(base)
         row = base["runs"][0]
         before["runs"] = [dict(copy.deepcopy(row), run_id=i, created_at="2026-01-01T00:00:00Z") for i in range(count)]
@@ -404,6 +517,30 @@ class Timelines(unittest.TestCase):
         after["sampling"]["selected_run_ids"] = []
         with self.assertRaisesRegex(ValueError, "manifest"):
             TIMELINE.compare(before, after, True)
+
+    def test_comparison_discloses_branch_clustering_sampling_and_missing_coverage(self):
+        before, after = self.comparison()
+        result = TIMELINE.compare(before, after, True)
+        self.assertEqual(result["cohort_repetition"]["before"]["distinct_head_branches"], 1)
+        self.assertEqual(result["cohort_repetition"]["before"]["repeated_head_branch_runs"], 19)
+        self.assertEqual(result["sampling"]["before"]["strategy"], "complete-capture")
+        self.assertTrue(result["sampling"]["before"]["capture_complete"])
+        self.assertEqual(result["sampling"]["before"]["selection_window_coverage"]["status"], "covered")
+        after["sampling"]["capture_request"] = None
+        self.assertEqual(TIMELINE.compare(before, after, True)["status"], "pending")
+        before, after = self.comparison()
+        after["sampling"]["capture_request"]["query"]["created"] = "2026-01-01..2026-01-01"
+        self.assertEqual(TIMELINE.compare(before, after, True)["status"], "pending")
+
+    def test_comparison_requires_same_repository_workflow_and_discloses_inflight_bias(self):
+        for key in ("repository", "workflow"):
+            before, after = self.comparison()
+            after["sampling"]["capture_request"][key] = "generated-other"
+            result = TIMELINE.compare(before, after, True)
+            self.assertEqual(result["status"], "pending")
+            self.assertIn("repositories or workflows differ", result["reason"])
+        before, after = self.comparison()
+        self.assertIn("in-flight", TIMELINE.compare(before, after, True)["note"])
 
     def test_model_samples_summary_counts_or_duplicate_ids_cannot_satisfy_target_gate(self):
         before, after = self.comparison(19)
