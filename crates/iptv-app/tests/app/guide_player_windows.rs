@@ -61,6 +61,16 @@ fn enter_popup_pip(app: &mut crate::Headless, session: u64) {
 #[test]
 fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback() {
     let Some(home) = isolated!() else { return };
+    let _ = env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Off)
+        .filter_module(
+            "iptv_runtime::recordings::shared::source_preparation",
+            log::LevelFilter::Debug,
+        )
+        .filter_module("iptv_app::source_publication", log::LevelFilter::Debug)
+        .format_timestamp_millis()
+        .is_test(true)
+        .try_init();
     let root = home.data_dir();
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = iptv_settings::Settings::new();
