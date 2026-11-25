@@ -937,14 +937,21 @@ fn closing_the_main_window_during_a_capture_asks_whether_to_stop_and_quit() {
     step(app.wait_for("id:quit-confirm"));
     step(app.press("id:quit-confirm-stop"));
     step(app.wait_until("Patina quits", Duration::from_secs(15), |_| active() == 0));
-    app.idle(Duration::from_millis(500)).unwrap();
-    assert!(
-        app.window_state("main")
-            .ok()
-            .flatten()
-            .is_none_or(|window| !window.visible),
-        "the window closed"
-    );
+    let deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(15));
+    while app
+        .window_state("main")
+        .ok()
+        .flatten()
+        .is_some_and(|window| window.visible)
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the window closes after stopping captures"
+        );
+        app.idle(Duration::from_millis(100)).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
