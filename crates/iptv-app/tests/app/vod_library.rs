@@ -80,6 +80,9 @@ fn replay_ended_movie(
     drawings: &Drawings,
     idiom: nsh_core::platform::Idiom,
 ) {
+    // Keep controls visible through async replay work without racing the real
+    // clock's idle timer or changing the TV remote's selected action.
+    step(app.set_environment("Hold replay controls", |env| env.screen_reader = true));
     let surface = player(app);
     let opened = props.lock().unwrap()["source"].clone();
     // Native URLs include a fresh local inspection proxy on every open.
@@ -103,11 +106,7 @@ fn replay_ended_movie(
             step(app.press("id:play-bar-play-pause"));
         }
     };
-    send(
-        app,
-        "state",
-        json!({"token":opened["token"],"state":"ready"}),
-    );
+    send(app, "state", json!({"state":"ready"}));
     if idiom == nsh_core::platform::Idiom::Tv {
         step(app.press_key("m"));
     } else if !app.screen().matches("id:play-bar-layer").unwrap() {
@@ -128,11 +127,7 @@ fn replay_ended_movie(
         "timeline",
         json!({"token":opened["token"],"seekId":0,"ms":120000,"durationMs":120000,"seekable":true}),
     );
-    send(
-        app,
-        "state",
-        json!({"token":opened["token"],"state":"ended"}),
-    );
+    send(app, "state", json!({"state":"ended"}));
     step(app.wait_for("id:play-bar-layer >> label:Play again"));
     assert_eq!(
         app.screen().id("id:play-bar-layer >> label:Play again"),
@@ -161,10 +156,6 @@ fn replay_ended_movie(
     assert_eq!(player(app), surface, "replay retains the player surface");
     assert_eq!(iptv_app::player_opens(0), opens + 1, "one replay open");
     assert_eq!(props.lock().unwrap()["paused"], false);
-    assert!(
-        props.lock().unwrap().get("seek").is_none_or(Value::is_null),
-        "replay does not resume at EOF"
-    );
     step(app.wait_for("id:play-bar-layer >> label:Play or pause"));
     assert_eq!(
         center_icon(app, drawings),
@@ -172,16 +163,21 @@ fn replay_ended_movie(
         "replay draws Pause again"
     );
     let token = props.lock().unwrap()["source"]["token"].clone();
-    send(app, "state", json!({"token":token,"state":"ready"}));
+    send(app, "state", json!({"state":"ready"}));
     for ms in [0, 2000, 37000] {
         send(
             app,
             "timeline",
             json!({"token":token,"seekId":0,"ms":ms,"durationMs":120000,"seekable":true}),
         );
+        assert!(
+            props.lock().unwrap().get("seek").is_none_or(Value::is_null),
+            "replay does not resume at EOF after a native timeline tick"
+        );
         step(app.wait_for(&format!("id:play-bar-time-line >> text:0:{:02}", ms / 1000)));
     }
     // Continue the browsing/resume journey at its original 37-second point.
+    step(app.set_environment("Release replay controls", |env| env.screen_reader = false));
     step(app.back());
     step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(1)));
 }
@@ -1505,6 +1501,17 @@ fn exercise_admission(
             app.settle();
         }
         if resume == ResumeCase::PriorEndedDuringPreparation {
+            assert_eq!(
+                app.screen().id("id:play-bar-layer >> label:Play or pause"),
+                app.screen().id("id:play-bar-play-pause"),
+                "prior EOF cannot label the unpublished title Play again"
+            );
+            assert!(
+                !app.screen()
+                    .matches("id:play-bar-layer >> label:Play again")
+                    .unwrap(),
+                "the unpublished title has no Play again action"
+            );
             step(app.press("id:play-bar-play-pause"));
             assert_eq!(
                 iptv_app::player_opens(0),
