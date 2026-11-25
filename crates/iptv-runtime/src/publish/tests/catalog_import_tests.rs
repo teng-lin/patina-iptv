@@ -1,0 +1,366 @@
+//! Exercises a real catalog import with the cooperative publication driver.
+
+use super::{KEY, Loop, PLAYLIST_URL, reopen, setup_with_network, synthetic_source};
+use crate::{
+    imports::{Job, Msg, Purpose, pipeline},
+    network::{Body, Chunks, Client, NetFuture, Network, NetworkConfig, Transport},
+    store_service::Service,
+};
+use iptv_core::add_playlist::{FailureKind, ImportStage};
+use iptv_import::{BodyStream, CancelToken, FetchError, MemoryBody, StreamingResponse};
+use iptv_providers::{
+    HttpRequest, HttpResponse,
+    model::{Source, SourceConfig},
+};
+use iptv_store_sqlite::{ChannelQuery, SourceId, Store};
+use std::{
+    fmt::Write,
+    sync::{Arc, atomic::Ordering},
+    task::{Context, Waker},
+    time::Duration,
+};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+
+// The cooperative writer inserts at most 200 rows per turn.
+const CHANNELS: usize = 2_000;
+const RETAINED: &str = "Generated retained channel";
+
+#[derive(Clone)]
+struct Playlist(Arc<[u8]>);
+
+impl Playlist {
+    fn generated() -> Self {
+        let mut playlist = String::from("#EXTM3U\n");
+        for index in 0..CHANNELS {
+            writeln!(
+                playlist,
+                "#EXTINF:-1 group-title=\"Generated\",Generated channel {index}\nhttps://example.invalid/generated/{index}.ts"
+            )
+            .unwrap();
+        }
+        Self(Arc::from(playlist.into_bytes()))
+    }
+}
+
+struct PlaylistBody(MemoryBody);
+
+impl Chunks for PlaylistBody {
+    fn next_chunk(&mut self) -> NetFuture<'_, Result<Option<Vec<u8>>, FetchError>> {
+        Box::pin(self.0.next_chunk())
+    }
+}
+
+impl Network for Playlist {
+    fn client(&self, config: &NetworkConfig) -> Result<Client, FetchError> {
+        Ok(Client::new(self.clone(), config.clone()))
+    }
+}
+
+impl Transport for Playlist {
+    fn elapsed(&self) -> Duration {
+        Duration::ZERO
+    }
+
+    fn sleep(&self, _: Duration) -> NetFuture<'_, ()> {
+        panic!("the generated playlist does not retry requests");
+    }
+
+    fn fetch(&self, _: HttpRequest) -> NetFuture<'_, Result<HttpResponse, FetchError>> {
+        panic!("the generated playlist is read as a stream");
+    }
+
+    fn fetch_stream(
+        &self,
+        request: HttpRequest,
+    ) -> NetFuture<'_, Result<StreamingResponse<Body>, FetchError>> {
+        assert_eq!(request.url, PLAYLIST_URL);
+        Box::pin(std::future::ready(Ok(StreamingResponse {
+            status: 200,
+            content_length: Some(self.0.len() as u64),
+            body: Body::new(PlaylistBody(MemoryBody::new(&self.0, 8_192))),
+        })))
+    }
+}
+
+fn start(
+    host: &Loop,
+    service: &Arc<Service>,
+    job: Job,
+    cancel: &CancelToken,
+) -> UnboundedReceiver<Msg> {
+    use crate::execution::CooperativeHost;
+
+    let authority = crate::Runtime::new(crate::Ports::for_tests()).parental_snapshot();
+    let services = service.accept();
+    let cancel = cancel.clone();
+    let (sender, receiver) = unbounded_channel();
+    host.spawn(Box::pin(async move {
+        pipeline(
+            &services,
+            job,
+            &sender,
+            &cancel,
+            &CancelToken::new(),
+            &authority,
+        )
+        .await;
+    }));
+    receiver
+}
+
+/// The mock StoreHost writes through a second WAL connection. A busy writer
+/// acknowledges the replacement's transaction before the test cancels it.
+fn advance_to_writing(host: &Loop, directory: &tempfile::TempDir) {
+    let observer = rusqlite::Connection::open(directory.path().join("synthetic.sqlite")).unwrap();
+    let mut key = String::from("x'");
+    for byte in KEY {
+        write!(key, "{byte:02x}").unwrap();
+    }
+    key.push('\'');
+    observer.pragma_update(None, "key", key).unwrap();
+    observer.busy_timeout(Duration::ZERO).unwrap();
+    for _ in 0..20 {
+        assert!(host.poll(), "the catalog import is still running");
+        match observer.execute_batch("BEGIN IMMEDIATE; ROLLBACK;") {
+            Ok(()) => {}
+            Err(error) if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) => {
+                return;
+            }
+            Err(error) => panic!("observe catalog transaction: {error}"),
+        }
+    }
+    panic!("the catalog replacement should have opened a write transaction");
+}
+
+fn finish(host: &Loop) {
+    for _ in 0..200 {
+        if !host.poll() {
+            return;
+        }
+    }
+    panic!("the import and store tasks should have finished");
+}
+
+fn assert_canceled(messages: &mut UnboundedReceiver<Msg>) {
+    let mut failures = 0;
+    while let Ok(message) = messages.try_recv() {
+        match message {
+            Msg::Playlist(Err(error)) => {
+                assert_eq!(error.kind, FailureKind::Canceled);
+                failures += 1;
+            }
+            Msg::Playlist(Ok(_)) | Msg::Guide(_) | Msg::FirstScreen(..) => {
+                panic!("a canceled import published data");
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(failures, 1, "one canceled import result");
+}
+
+fn has_stage(directory: &tempfile::TempDir) -> bool {
+    std::fs::read_dir(directory.path()).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("catalog-stage-")
+    })
+}
+
+fn assert_retained(store: &Store, source: SourceId, expected: &Source) {
+    let retained = store.source(source).unwrap().unwrap().source;
+    assert_eq!(retained.name, expected.name);
+    assert_eq!(retained.config, expected.config);
+    let channels = store
+        .load_channels(source, &ChannelQuery::default())
+        .unwrap();
+    assert_eq!(channels.len(), 1, "the original catalog has one channel");
+    assert_eq!(channels[0].name, RETAINED);
+    assert!(store.import_status(source).unwrap().last_error.is_none());
+}
+
+fn seed_retained(service: &Arc<Service>) -> (SourceId, Source) {
+    let original = synthetic_source();
+    let stored = original.clone();
+    let source = service
+        .accept()
+        .blocking(move |store| {
+            let id = store.add_source(&stored)?;
+            let playlist = iptv_providers::m3u::parse_m3u(&format!(
+                "#EXTM3U\n#EXTINF:-1,{RETAINED}\nhttps://example.invalid/retained.ts\n"
+            ));
+            store.replace_catalog(id, &playlist.groups, &playlist.channels.items, &[], &[])?;
+            Ok(id)
+        })
+        .unwrap();
+    (source, original)
+}
+
+#[test]
+fn canceling_a_sliced_edit_keeps_the_prior_catalog_readable_and_allows_a_retry() {
+    let (directory, host, service, calls) = setup_with_network(Arc::new(Playlist::generated()));
+    let (source, original) = seed_retained(&service);
+    let mut edited = original.clone();
+    edited.name = "Generated edited source".into();
+    let SourceConfig::M3u(config) = &mut edited.config else {
+        panic!("the fixture uses an M3U playlist");
+    };
+    config.user_agent = Some("GeneratedEdited/1".into());
+    let job = Job {
+        source: edited.clone(),
+        stored: Some(source),
+        epg_url: None,
+        purpose: Purpose::Refresh,
+        edit: true,
+    };
+
+    let cancel = CancelToken::new();
+    let mut messages = start(&host, &service, job.clone(), &cancel);
+    advance_to_writing(&host, &directory);
+    assert_eq!(calls.begun.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.finished.load(Ordering::SeqCst), 0);
+    let expected = original.clone();
+    service
+        .accept()
+        .blocking_read(move |store| {
+            assert_retained(store, source, &expected);
+            Ok(())
+        })
+        .unwrap();
+    cancel.cancel();
+    finish(&host);
+    assert_canceled(&mut messages);
+    assert_eq!(calls.abandoned.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.finished.load(Ordering::SeqCst), 0);
+    assert_retained(&reopen(&directory), source, &original);
+    assert!(!has_stage(&directory), "cancellation removes the stage");
+
+    let mut retry = start(&host, &service, job, &CancelToken::new());
+    finish(&host);
+    let mut completed = 0;
+    while let Ok(message) = retry.try_recv() {
+        if let Msg::Playlist(result) = message {
+            let (counts, imported) = result.expect("a new import can publish after cancellation");
+            assert_eq!(imported.source, source);
+            assert_eq!(counts.channels as usize, CHANNELS);
+            assert_eq!(imported.channels.len(), CHANNELS);
+            completed += 1;
+        }
+    }
+    assert_eq!(completed, 1, "one successful retry result");
+    assert_eq!(calls.begun.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.finished.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.abandoned.load(Ordering::SeqCst), 1);
+    assert!(service.drain_on_shutdown_with(|| {}));
+
+    let store = reopen(&directory);
+    let data = store.source(source).unwrap().unwrap().source;
+    assert_eq!(data.name, edited.name);
+    assert_eq!(data.config, edited.config);
+    let channels = store
+        .load_channels(source, &ChannelQuery::default())
+        .unwrap();
+    assert_eq!(channels.len(), CHANNELS, "the entire retry is durable");
+    assert!(channels.iter().all(|channel| channel.name != RETAINED));
+    assert!(
+        !has_stage(&directory),
+        "successful publication removes the stage"
+    );
+}
+
+#[test]
+fn canceling_a_sliced_add_removes_its_provisional_source() {
+    let (directory, host, service, calls) = setup_with_network(Arc::new(Playlist::generated()));
+    let services = service.accept();
+    let existing = services
+        .blocking(|store| store.add_source(&synthetic_source()))
+        .unwrap();
+    let mut source = synthetic_source();
+    source.name = "Generated canceled source".into();
+    let job = Job {
+        source,
+        stored: None,
+        epg_url: None,
+        purpose: Purpose::Add,
+        edit: false,
+    };
+    let cancel = CancelToken::new();
+    let mut messages = start(&host, &service, job, &cancel);
+    advance_to_writing(&host, &directory);
+    services
+        .blocking_read(|store| {
+            let sources = store.sources()?;
+            let provisional = sources
+                .iter()
+                .find(|stored| stored.name == "Generated canceled source")
+                .expect("preparation registered the tentative source");
+            assert_eq!(
+                store.channel_count(provisional.id, &ChannelQuery::default())?,
+                0
+            );
+            Ok(())
+        })
+        .unwrap();
+    cancel.cancel();
+    finish(&host);
+    assert_canceled(&mut messages);
+    assert_eq!(calls.abandoned.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.finished.load(Ordering::SeqCst), 0);
+    assert!(service.drain_on_shutdown_with(|| {}));
+    let store = reopen(&directory);
+    let sources = store.sources().unwrap();
+    assert_eq!(sources.len(), 1, "only the already saved source remains");
+    assert_eq!(sources[0].id, existing);
+    assert!(!has_stage(&directory), "cancellation removes the stage");
+}
+
+#[test]
+fn a_sliced_refresh_rejects_an_edit_committed_after_staging() {
+    let (directory, host, service, calls) = setup_with_network(Arc::new(Playlist::generated()));
+    let (source, original) = seed_retained(&service);
+    finish(&host);
+    let job = Job {
+        source: original.clone(),
+        stored: Some(source),
+        epg_url: None,
+        purpose: Purpose::Refresh,
+        edit: false,
+    };
+    let mut messages = start(&host, &service, job, &CancelToken::new());
+    // Check for Saving between rounds so the newly queued writer waits
+    // until after the competing edit.
+    let mut context = Context::from_waker(Waker::noop());
+    let staged = (0..20).any(|_| {
+        host.poll_round(&mut context);
+        assert_eq!(calls.begun.load(Ordering::SeqCst), 0);
+        std::iter::from_fn(|| messages.try_recv().ok()).any(|message| match message {
+            Msg::Progress(progress) => progress.stage == ImportStage::Saving,
+            Msg::Playlist(_) | Msg::Guide(_) | Msg::FirstScreen(..) => {
+                panic!("the import reported a result before saving")
+            }
+            _ => false,
+        })
+    });
+    assert!(staged, "the staged refresh is ready to save");
+    assert!(has_stage(&directory));
+
+    let mut newer = original;
+    let SourceConfig::M3u(config) = &mut newer.config else {
+        panic!("the fixture uses an M3U playlist");
+    };
+    config.user_agent = Some("GeneratedNewer/1".into());
+    reopen(&directory).update_source(source, &newer).unwrap();
+    finish(&host);
+    assert_canceled(&mut messages);
+    assert_eq!(
+        calls.begun.load(Ordering::SeqCst),
+        0,
+        "the stale stage never starts writing"
+    );
+    assert_eq!(calls.finished.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.abandoned.load(Ordering::SeqCst), 0);
+    assert!(service.drain_on_shutdown_with(|| {}));
+    assert_retained(&reopen(&directory), source, &newer);
+    assert!(!has_stage(&directory), "supersession removes the stage");
+}

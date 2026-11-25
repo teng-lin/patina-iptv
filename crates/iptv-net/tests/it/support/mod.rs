@@ -24,6 +24,8 @@ pub struct Resp {
     pub chunks: Option<(Vec<Vec<u8>>, Duration)>,
     /// Sleep before sending anything.
     pub delay: Option<Duration>,
+    /// Simulate an upstream disconnect before any response headers.
+    pub close_without_response: bool,
 }
 
 impl Resp {
@@ -59,6 +61,13 @@ impl Resp {
     pub fn delayed(mut self, d: Duration) -> Self {
         self.delay = Some(d);
         self
+    }
+
+    pub fn disconnect() -> Self {
+        Self {
+            close_without_response: true,
+            ..Self::default()
+        }
     }
 }
 
@@ -165,6 +174,9 @@ async fn serve<S: AsyncRead + AsyncWrite + Unpin>(
     let req = SimRequest::parse(&target, headers);
     let resp = handler(&req);
     log.lock().unwrap().push(req);
+    if resp.close_without_response {
+        return;
+    }
     if let Some(d) = resp.delay {
         tokio::time::sleep(d).await;
     }
