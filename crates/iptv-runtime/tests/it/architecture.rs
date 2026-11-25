@@ -103,7 +103,7 @@ const STATICS: &[(&str, &str)] = &[
     // The standard clock's origin for unit tests of a browser build (`cfg(test)`).
     ("time.rs", "ORIGIN"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
-    ("ports.rs", "NEXT"),
+    ("native.rs", "NEXT"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
     // port is a function pointer.
     ("opening/revocation.rs", "MARKS"),

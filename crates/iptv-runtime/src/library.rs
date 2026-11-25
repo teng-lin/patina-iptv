@@ -1,5 +1,5 @@
 //! Library snapshots, refresh tickets and named persistence commands.
-use iptv_core::add_playlist::{ImportCounts, ImportFailure, ImportProgress};
+use crate::model::Activity;
 use iptv_import::CancelToken;
 use iptv_library::Playlist;
 use iptv_providers::model::{Source, SourceConfig};
@@ -9,19 +9,6 @@ use std::{
     collections::BTreeMap,
     rc::{Rc, Weak},
 };
-/// A stored playlist's refresh (or check of new details) this session.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Activity {
-    Running(Option<ImportProgress>),
-    /// Finished; on failure the stored channels stay. New details that
-    /// imported are saved.
-    Done(Result<ImportCounts, ImportFailure>),
-    /// New details are being tried.
-    Checking(Option<ImportProgress>),
-    /// New details did not import: the stored ones and their data stay.
-    Rejected(ImportFailure),
-}
-
 pub type ImportCompletion = Rc<ImportWork>;
 pub use crate::state::ImportWork;
 pub fn import_completion(cancel: CancelToken) -> ImportCompletion {

@@ -554,6 +554,7 @@ mod tests {
             |_| Ok(DatabaseKey::from_bytes(KEY)),
             network,
             Arc::new(Cooperative::new(host.clone())),
+            crate::native::entropy,
         );
         ports.store_host = Some(Arc::new(FileHost {
             path: directory.path().join("synthetic.sqlite"),

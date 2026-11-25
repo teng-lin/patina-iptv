@@ -1559,7 +1559,9 @@ async fn record(
                 }
             };
             let source = resolved.source;
-            let net = crate::settings::net_config(&services.settings());
+            let net = crate::native::network::adapter_config(&crate::settings::network_config(
+                &services.settings(),
+            ));
             let policy = PlaybackPolicy {
                 public_only: source.public_only,
                 extra_roots_der: net.extra_roots_der,

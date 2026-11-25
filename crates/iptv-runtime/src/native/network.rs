@@ -20,20 +20,9 @@ impl Network for NativeNetwork {
     }
 }
 
-/// [`crate::settings::base_network_config`] as the native adapter's
-/// configuration (trust anchors included).
-pub fn base_net_config() -> NetConfig {
-    adapter_config(&crate::settings::base_network_config())
-}
-
-/// [`crate::settings::network_config`] as the native adapter's configuration.
-pub fn net_config(settings: &iptv_settings::Settings) -> NetConfig {
-    adapter_config(&crate::settings::network_config(settings))
-}
-
 /// The adapter configuration of `config`; every field it does not name
 /// keeps `iptv-net`'s default.
-pub(crate) fn adapter_config(config: &NetworkConfig) -> NetConfig {
+pub fn adapter_config(config: &NetworkConfig) -> NetConfig {
     NetConfig {
         user_agent: config.user_agent.clone(),
         request_timeout: config.request_timeout,

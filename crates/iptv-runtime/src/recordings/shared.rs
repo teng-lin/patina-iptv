@@ -621,7 +621,9 @@ impl Runtime {
                         incarnation: incarnation.clone(),
                         channel,
                     };
-                    let net = crate::settings::net_config(&work.settings());
+                    let net = crate::native::network::adapter_config(
+                        &crate::settings::network_config(&work.settings()),
+                    );
                     source.default_header("User-Agent", &net.user_agent);
                     let policy = PlaybackPolicy {
                         public_only: source.public_only,
