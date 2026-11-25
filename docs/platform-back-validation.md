@@ -47,6 +47,15 @@ The complete app harness at documentation head `e1f51e34` passed **329 tests,
 both changelog entries; it changes no Back/exit production behavior. Later
 review corrections below are documentation and comments, not new device proof.
 
+Subsequent merge `9513c431` integrates master `45ea24a9`, including its More
+chooser, device, scale and Android changes. At that integrated source, core
+tests (37), presentation tests (465 unit, 53 integration, 2 doctests), both wasm
+builds and the app build pass. The focused Back scenarios (5 overlay, 1 wizard,
+1 recovery), chooser unit scenario, strict app/presentation Clippy and line/diff
+checks also pass. Independent native review verifies that the More reconciliation
+stays separate from the fixed No/Yes chooser. Native APK evidence from an earlier
+source revision must not be treated as validation of this combined base.
+
 | Check | Result and limit |
 | --- | --- |
 | `cargo test -p iptv-core -p iptv-presentation` | Pass: 37 core tests; 463 presentation unit tests, 53 integration tests and 2 doctests. |
