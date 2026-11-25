@@ -90,6 +90,7 @@ class Health(unittest.TestCase):
         self.assertEqual(deslop.index_health(HEALTHY.replace(deslop.BENIGN_ERROR, "")), [])
 
     def test_real_analyzer_timestamps_preserve_the_narrow_error_exception(self):
+        self.assertEqual(deslop.index_health((FIXTURES / "timestamped-healthy.log").read_text()), [])
         for timestamp in ("2026-11-25T17:56:17.58467-05:00", "2026-11-25T22:56:17.58467Z"):
             with self.subTest(timestamp=timestamp):
                 benign = timestamp + " " + deslop.BENIGN_ERROR

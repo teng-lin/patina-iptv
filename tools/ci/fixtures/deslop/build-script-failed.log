@@ -3,7 +3,7 @@ rust-analyzer synthetic
 ### exit: 0
 ### argv: scip /synthetic/workspace --output /synthetic/index.scip
 Generating SCIP start...
-2026-11-25T17:56:17.58467-05:00 ERROR Config Error(s) error_sink=ConfigErrors([])
+ERROR Config Error(s) error_sink=ConfigErrors([])
 rust-analyzer: Loading discovering sysroot
 rust-analyzer: Loading cargo metadata: finished
 Encountered duplicate scip symbols, indicating an internal rust-analyzer bug.
