@@ -1,0 +1,193 @@
+name: Candidate handoff pilot
+on:
+  # Register this isolated workflow before merge; production lanes never call it.
+  push:
+    branches: [ci/candidate-artifact-handoff-336]
+  workflow_dispatch:
+    inputs:
+      cold:
+        description: Force the consumer to build locally without reading artifacts
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: candidate-handoff-pilot-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  producer:
+    name: Pilot producer
+    if: github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
+    runs-on: windows-2025
+    timeout-minutes: 120
+    outputs:
+      run_id: ${{ steps.seal.outputs.run_id }}
+      attempt: ${{ steps.seal.outputs.attempt }}
+      job_id: ${{ steps.seal.outputs.job_id }}
+      inputs_sha256: ${{ steps.seal.outputs.inputs_sha256 }}
+      manifest_sha256: ${{ steps.seal.outputs.manifest_sha256 }}
+      file_sha256: ${{ steps.seal.outputs.file_sha256 }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows
+        with:
+          cache: 'false'
+      - name: Independently fingerprint candidate inputs
+        shell: pwsh
+        run: |
+          if (Test-Path target/release) { throw 'Producer release target is not fresh.' }
+          python tools/ci/candidate-handoff.py inputs target/pilot-inputs.json
+          if ($LASTEXITCODE -ne 0) { throw 'Producer input fingerprint failed.' }
+      - name: Set package metadata
+        shell: pwsh
+        run: python tools/ci/version.py
+      - name: Cold candidate-grade release build
+        shell: pwsh
+        run: ./tools/build-windows.ps1 -Release
+      - name: Seal exact executable and manifest
+        id: seal
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tools/ci/candidate-handoff.py seal target/pilot-payload
+          if ($LASTEXITCODE -ne 0) { throw 'Producer sealing failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        id: upload
+        with:
+          name: pilot336-exe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/pilot-payload/*
+          if-no-files-found: error
+          retention-days: 3
+  consumer:
+    name: Pilot consumer
+    needs: producer
+    if: github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
+    runs-on: windows-2025
+    timeout-minutes: 120
+    outputs:
+      decision: ${{ steps.acquire.outputs.decision }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows
+        with:
+          cache: 'false'
+      - name: Independently fingerprint candidate inputs
+        shell: pwsh
+        run: |
+          if (Test-Path target/release) { throw 'Consumer release target is not fresh.' }
+          python tools/ci/candidate-handoff.py inputs target/pilot-inputs.json
+          if ($LASTEXITCODE -ne 0) { throw 'Consumer input fingerprint failed.' }
+      - name: Verify producer, download and stage exact bytes
+        id: acquire
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCER_PROOF: ${{ toJSON(needs.producer.outputs) }}
+          FORCE_COLD: ${{ inputs.cold }}
+        run: |
+          $args = @('tools/ci/candidate-handoff.py', 'acquire', 'target/release')
+          if ($env:FORCE_COLD -eq 'true') { $args += '--cold' }
+          python @args
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate handoff failed closed.' }
+      - name: Set package metadata
+        shell: pwsh
+        run: python tools/ci/version.py
+      - name: Cold fallback only for explicit cold, absent or expired artifact
+        if: steps.acquire.outputs.decision != 'reuse'
+        shell: pwsh
+        run: ./tools/build-windows.ps1 -Release
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          cache: 'false'
+          version: 0.9.3
+          features: cli
+      - name: Installer, locked notices, SBOM, inventory and smoke checks
+        shell: pwsh
+        run: ./tools/ci/candidate-handoff.ps1 -Phase Package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: pilot336-consumer-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/pilot-inputs.json
+            target/pilot-decision.json
+            target/media-sbom/*
+            target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
+  control:
+    name: Cold control
+    if: github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-windows
+        with:
+          cache: 'false'
+      - name: Independently fingerprint candidate inputs
+        shell: pwsh
+        run: |
+          if (Test-Path target/release) { throw 'Control release target is not fresh.' }
+          python tools/ci/candidate-handoff.py inputs target/pilot-inputs.json
+          if ($LASTEXITCODE -ne 0) { throw 'Control input fingerprint failed.' }
+      - name: Set package metadata
+        shell: pwsh
+        run: python tools/ci/version.py
+      - name: Cold candidate-grade release build
+        shell: pwsh
+        run: ./tools/build-windows.ps1 -Release
+      - uses: ./.github/actions/cargo-tool
+        with:
+          name: cargo-about
+          cache: 'false'
+          version: 0.9.3
+          features: cli
+      - name: Installer, locked notices, SBOM, inventory and smoke checks
+        shell: pwsh
+        run: ./tools/ci/candidate-handoff.ps1 -Phase Package
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: pilot336-control-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/pilot-inputs.json
+            target/media-sbom/*
+            target/cargo-timings/*.html
+          if-no-files-found: warn
+          retention-days: 7
+  measurements:
+    if: always() && github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
+    needs: [producer, consumer, control]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Record queue-inclusive pilot timelines
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PILOT_DECISION: ${{ needs.consumer.outputs.decision }}
+        run: python3 tools/ci/candidate-handoff.py timeline target/pilot-timeline.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pilot336-timeline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/pilot-timeline.json
+          if-no-files-found: error
+          retention-days: 14
