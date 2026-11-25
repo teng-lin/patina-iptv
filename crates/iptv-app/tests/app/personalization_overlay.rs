@@ -150,7 +150,7 @@ fn a_host_that_asks_before_leaving_confirms_back_at_the_top_level() {
     step(app.press_key("enter"));
     gone(app);
     assert_eq!(LEFT.load(Ordering::SeqCst), 1);
-    // Right selects Yes without wrapping on a held/repeated direction.
+    // Right selects Yes without wrapping on repeated presses.
     ask(app);
     step(app.press_key("right"));
     step(app.press_key("right"));

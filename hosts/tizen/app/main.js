@@ -800,8 +800,8 @@ function exit() {
 /* ---------- leaving ---------- */
 /* Samsung's exit confirmation: Back (Return) at the app's first screen
  * (the guide's rail, or the first launch's setup) asks, with No focused;
- * the app leaves only on Yes. The remote's Exit key is the system's: it is
- * never registered, so it leaves from any screen without asking. */
+ * the app leaves only on Yes. The remote's Exit key is never registered;
+ * the system decides whether to close a popup/IME or the application. */
 var leave = { open: false, yes: false };
 function openLeave(m) {
     /* A second answer (two quick Returns) keeps the choice already made. */

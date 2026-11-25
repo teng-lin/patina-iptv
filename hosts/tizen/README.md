@@ -55,9 +55,12 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   asks "Close Patina?" with No focused: Left moves to No and Right to
   Yes, Up and Down to the other answer, OK chooses, Back closes the
   question. Only Yes leaves. The focused answer has the page's focus, so
-  Voice Guide reads it. The remote's Exit key is the system's: it leaves from any
-  screen without asking (Samsung's termination rules; the page does not
-  register it). The question is in the TV's language.
+  Voice Guide reads it. The remote's Exit key is the system's; the page does not
+  register it. Samsung's CO-US-04 checklist distinguishes closing a popup/IME
+  from closing an application page; verify the TV's system transition rather
+  than assuming Exit always terminates over a popup. The question is in the
+  TV's language. See the [acceptance ledger](../../docs/platform-back-validation.md)
+  for the unresolved Return policy and pending physical-TV checks.
 - The guide screen: the preview of the playing channel at the top left
   ("Nothing playing" until one plays), the focused program beside it
   (title, ★ for a favorite, times, progress, minutes left or until it

@@ -41,6 +41,12 @@ root-Back and exit-direction fixes, with NSH pinned to
 production change; the pull request records its exact reviewed head. Tests use
 generated fixtures only.
 
+The complete app harness at documentation head `e1f51e34` passed **329 tests,
+0 failed, 4 intentionally ignored**, in 713.00 seconds with ordinary waits and
+`IPTV_RS_TEST_JOBS=3`. Merge `cfb3fd35` brings in master `28b21c21` and preserves
+both changelog entries; it changes no Back/exit production behavior. Later
+review corrections below are documentation and comments, not new device proof.
+
 | Check | Result and limit |
 | --- | --- |
 | `cargo test -p iptv-core -p iptv-presentation` | Pass: 37 core tests; 463 presentation unit tests, 53 integration tests and 2 doctests. |
@@ -83,8 +89,8 @@ Read-only inventory on 2026-11-25 UTC found:
 - SkyWalker: no connected Android device and no registered `tab36`/`tv36` AVDs.
 - HanSolo: `tab36` and `tv36` source profiles exist. An active Android emulator
   belongs to another session; it was not used by this audit.
-- Gigabyte: a paired OnePlus **CPH2583**, Android **16/API 36**, gesture navigation
-  (`navigation_mode=2`), and a paired Samsung **SM-X210** tablet. The phone was
+- Gigabyte: a OnePlus **CPH2583**, Android **16/API 36**, gesture navigation
+  (`navigation_mode=2`), and a Samsung **SM-X210** tablet. The phone was
   dozing with keyguard showing, and had no dedicated Patina validation package.
   It was not woken, unlocked, installed to or otherwise changed. Physical phone
   acceptance needs an unlocked dedicated test session.
@@ -102,10 +108,12 @@ and emulators in separate evidence records.
 
 | Target | Required observations | Status |
 | --- | --- | --- |
-| `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. | Historical emulator result in #288; no new run in this audit. |
-| Android phone, API 34+ | From the top-level rail, one committed edge gesture returns home. Observe the predictive back animation and a canceled gesture returning to Patina; a Back key event or a launcher-at-end assertion alone is insufficient. Android 14 needs the developer animation option; Android 15+ enables the animation by default. | Pending unlocked phone session; no physical run. |
-| Tizen bridge | On the guide's rail and first-launch setup, Return shows the localized question with No focused. Left/Right select the corresponding answer; Up/Down change selection; OK on No and Back dismiss without exiting; Yes exits. Verify the system's Exit behavior from application pages and an open popup/IME. | Pending connected test TV and policy choice. |
-| Tizen NSH host | On the guide's rail and first-run welcome screen, Return shows the question with No focused. Left/Right select No/Yes, Up/Down change selection, OK chooses, Back dismisses and Yes exits. Verify the system's Exit behavior from application pages and an open popup. | Pending connected test TV and policy choice. |
+| `tv36` | From the guide, Back reaches groups and rail; one further Back leaves to the launcher without a second press or app exit notice. Repeat one-press exit from first-run welcome and recovery with details closed. A form or open recovery details consumes the first Back, then its root hands the next Back to the system. | Historical rail result in #288; welcome/recovery not newly run in this audit. |
+| Android phone, API 34+ | At each root (guide rail, first-run welcome, recovery with details closed), observe committed and canceled edge gestures: the predictive home preview shows, commit returns home, cancel keeps Patina on the same screen. Forms and recovery details still consume Back. A Back key event or launcher-at-end assertion alone is insufficient. | Pending unlocked phone session; no physical run. |
+| Tizen bridge | On the guide's rail and first-launch setup, Return shows the localized question with No focused. Left/Right select the corresponding answer; Up/Down change selection; OK on No and Back dismiss without exiting; Yes exits. | Pending connected test TV and policy choice. |
+| Tizen NSH host | On the guide's rail, first-run welcome and recovery with details closed, Return shows the question with No focused. Left/Right select No/Yes, Up/Down change selection, OK chooses, Back dismisses and Yes exits. Open recovery details consumes Return before the exit question. | Pending connected test TV and policy choice. |
+| Both Tizen hosts, system Exit | From an application page, verify the system closes the app and returns to the TV channel screen. With a popup/IME open, CO-US-04 expects it to close first; record the actual firmware transition and report a mismatch rather than claiming unconditional app termination. Confirm the page does not register or consume Exit. | Pending connected test TV; no firmware result. |
+| Both Tizen hosts, held Return/Exit | Hold the physical remote's Return/Exit key until the firmware's forced termination. It must terminate through the system without requiring Yes. Exercise an application page and an open confirmation; record any app action before the firmware takes over. | Pending connected test TV; no firmware result. |
 | Tizen 5.5 bridge localization | Start in a non-English TV language; confirm the Worker's synchronous XHR loads packaged `i18n/<tag>.tsv` and the popup's title/answers use that language. Inspect the packaged app/Worker on the TV, not a desktop mock. | Pending Tizen 5.5 hardware. |
 
 The Android animation setup follows the current
@@ -113,6 +121,12 @@ The Android animation setup follows the current
 rechecked on 2026-11-25 UTC: system root animations require the app's callbacks
 to be disabled; Android 13/14 exposes the developer animation option, while
 Android 15+ enables those animations by default for opted-in apps.
+
+The termination guide explicitly reserves the Return/Exit long press for
+firmware-forced termination. Handling short Return events or observing a local
+Long Back action does not establish whether the system's long press remains
+intact. No new long-press binding is added here; verify the physical-key path on
+each host before closing this acceptance item.
 
 For each run, retain date, application commit, NSH revision, APK/WGT SHA-256,
 device model, OS/firmware, navigation/input mode, configured language, generated
