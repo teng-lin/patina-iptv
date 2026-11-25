@@ -6,19 +6,17 @@ pub(crate) fn bridge() -> View {
     crate::capture_limits::init();
     #[cfg(feature = "test-support")]
     let probe = probe_enabled();
-    let bridge = crate::device::bridge(move |event| {
-        if event.name.as_ref() == "limits" {
-            crate::capture_limits::report(&event.data);
-            return;
-        }
+    let bridge = crate::device::bridge(move |event| match event.name.as_ref() {
+        "limits" => crate::capture_limits::report(&event.data),
         // Simulate an import reporting its connection limit in headless tests.
         #[cfg(feature = "test-support")]
-        if probe && event.name.as_ref() == "accountStreams" {
+        "accountStreams" if probe => {
             let limit = event.data["limit"]
                 .as_u64()
                 .map(|n| u32::try_from(n).unwrap_or(u32::MAX));
             crate::runtime_events::account_streams_reported(limit);
         }
+        _ => {}
     });
     #[cfg(feature = "test-support")]
     let bridge = bridge
