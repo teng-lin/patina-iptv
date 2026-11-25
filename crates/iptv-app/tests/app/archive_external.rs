@@ -8,11 +8,100 @@ use iptv_settings::{Settings, Value};
 use nsh_core::{MountItem, ViewKind, platform::Idiom};
 use std::{
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const WAIT: Duration = Duration::from_secs(10);
 type Sources = Arc<Mutex<Vec<String>>>;
+
+/// Player event files do not publish UI batches. Poll them between bounded
+/// pumps instead of waiting for a UI change to wake the readiness check.
+fn wait_for_external(
+    app: &mut Headless,
+    label: &str,
+    timeout: Duration,
+    ready: impl Fn() -> bool,
+) -> Result<(), String> {
+    let timeout = crate::isolated::scaled_duration(timeout);
+    let deadline = Instant::now() + timeout;
+    app.next_change(Duration::ZERO)?;
+    loop {
+        app.catch_up();
+        if ready() {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!(
+                "{label} never happened in {} ms; on screen: {:?}",
+                timeout.as_millis(),
+                app.screen().texts()
+            ));
+        }
+        app.next_change(remaining.min(Duration::from_millis(10)))?;
+    }
+}
+
+#[test]
+fn external_completion_is_observed_without_a_ui_batch() {
+    use nsh_core::{
+        element::{Component, NoEvent, Root, Scope},
+        prelude::*,
+    };
+    use std::{
+        cell::Cell,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
+    };
+
+    let Some(_home) = isolated!() else { return };
+    struct Quiet;
+    impl Component for Quiet {
+        type Props = ();
+        type Event = NoEvent;
+
+        fn view(_: (), _: Scope<NoEvent>) -> impl IntoElement {
+            text("Generated quiet fixture")
+        }
+    }
+    let mut app = Headless::start(nsh_engine::EngineConfig::new(Root::of::<Quiet>())).unwrap();
+    step(app.first_render());
+    let completed = Arc::new(AtomicBool::new(false));
+    let observed = completed.clone();
+    let (start, started) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        if started.recv().is_ok() {
+            // No engine handle or UI callback: just the external completion.
+            completed.store(true, Ordering::Release);
+        }
+    });
+    let first = Cell::new(true);
+    let result = wait_for_external(
+        &mut app,
+        "external completion without a UI batch",
+        Duration::from_millis(200),
+        || {
+            if first.replace(false) {
+                start.send(()).unwrap();
+                return false;
+            }
+            observed.load(Ordering::Acquire)
+        },
+    );
+    drop(start);
+    worker.join().unwrap();
+    step(result);
+    let missing = wait_for_external(
+        &mut app,
+        "missing external completion",
+        Duration::from_millis(20),
+        || false,
+    )
+    .unwrap_err();
+    assert!(missing.starts_with("missing external completion never happened in "));
+}
 
 struct Streams {
     _server: Server,
@@ -399,7 +488,7 @@ finally:
         label: &str,
         ready: impl Fn() -> bool,
     ) {
-        if let Err(error) = app.wait_until(label, WAIT, |_| ready()) {
+        if let Err(error) = wait_for_external(app, label, WAIT, ready) {
             panic!(
                 "{error}; generated player events: {:?}; upstream requests: {}",
                 std::fs::read_to_string(&self.log).unwrap_or_default(),
@@ -503,10 +592,11 @@ fn both_archive_entries_handoff_once_and_a_superseded_group_never_reaches_upstre
     std::fs::remove_file(&player.release).unwrap();
     previous(app);
     menu_replay(app);
-    step(
-        app.wait_until("third player launched but not admitted", WAIT, |_| {
-            player.count("launched") == 3
-        }),
+    player.wait_until(
+        app,
+        &server,
+        "third player launched but not admitted",
+        || player.count("launched") == 3,
     );
     let stale = player.pids("launched")[2];
     personalization::group(app, "Sport");
@@ -516,19 +606,20 @@ fn both_archive_entries_handoff_once_and_a_superseded_group_never_reaches_upstre
     personalization::group(app, "News");
     previous(app);
     step(app.press_key("enter"));
-    step(app.wait_until("fourth player launched", WAIT, |_| {
+    player.wait_until(app, &server, "fourth player launched", || {
         player.count("launched") == 4
-    }));
+    });
     let accepted = player.pids("launched")[3];
-    step(app.wait_until(
+    player.wait_until(
+        app,
+        &server,
         "fourth admitted and third rejected then exited",
-        WAIT,
-        |_| {
+        || {
             player.pids("admitted").contains(&accepted)
                 && player.pids("rejected").contains(&stale)
                 && player.pids("exited").contains(&stale)
         },
-    ));
+    );
     assert!(
         !player.pids("admitted").contains(&stale),
         "the superseded launch never received media"
