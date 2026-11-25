@@ -19,7 +19,9 @@ runs:
     - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
       with:
         distribution: temurin
-        java-version: '21'
+        # NSH runtime keys include the exact JDK that builds the Java classes.
+        # Use the same Temurin build across hosted runner images.
+        java-version: '21.0.13+9'
         cache: ${{ github.workflow != 'Release' && inputs.cache || '' }}
         cache-dependency-path: |
           hosts/android/**/*.gradle.kts
