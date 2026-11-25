@@ -159,6 +159,14 @@ merged #221 and independently verified HTTP 200 with bytes matching the source;
 the finished iPad executable includes its URL. Actual in-app opening and store
 listing fields remain unverified.
 
+The focused About → Privacy policy row now shows the public URL before
+activation. The browser action and failed-open notice remain available. This
+keeps the address readable on TV images that accept the URL intent without
+opening a usable browser. The existing isolated app scenario verifies the
+focused address before any request, its presence after accepted activation, and
+the distinct notice after a failed request. Actual TV readability and browser
+page rendering remain separate device observations in the PR evidence.
+
 ## Emulator and physical-device evidence
 
 | Evidence class | Result in this lane |
