@@ -61,7 +61,7 @@ Without `TIZEN_SIGNING_PROFILE` the script stages an unsigned package in
   CO-US-04 does not exclude app popups from its popup-closing rule, so clarification
   from the owner and Samsung is pending. Test the TV's own IME separately. The question is in the
   TV's language. See the [acceptance ledger](../../docs/platform-back-validation.md)
-  for the unresolved Return policy and pending physical-TV checks.
+  for the Return policy decision and pending physical-TV checks.
 - The guide screen: the preview of the playing channel at the top left
   ("Nothing playing" until one plays), the focused program beside it
   (title, ★ for a favorite, times, progress, minutes left or until it

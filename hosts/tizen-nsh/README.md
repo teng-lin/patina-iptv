@@ -34,8 +34,8 @@ needs owner/Samsung clarification; test the system IME separately.
 Up or Left selects No; Down or Right selects Yes, without wrapping.
 OK chooses and Back dismisses. The [acceptance ledger](../../docs/platform-back-validation.md)
 separates these source/headless guarantees from pending physical-TV checks,
-including the firmware's held-Return/Exit behavior and the unresolved Samsung
-certification policy.
+including the firmware's held-Return/Exit behavior and the remaining Samsung
+certification questions.
 
 Decisions stay in Rust: the Worker script performs the requests and
 writes the chunks it is handed; the destination policy, the store and
