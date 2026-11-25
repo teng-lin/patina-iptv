@@ -201,6 +201,8 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
         let mark = move || Mark::of(focused(), is_chosen());
         list_rows::row(size, ROW, mark)
             .role(AccessibilityRole::Tab)
+            .accessible(true)
+            .label(move || page().map_or("", |p| words::page(p.key)))
             .accessibility_state(move || AccessibilityState {
                 selected: is_chosen(),
                 ..Default::default()
