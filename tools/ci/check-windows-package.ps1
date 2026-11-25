@@ -11,6 +11,7 @@ $profile = Join-Path $scratch 'profile'
 New-Item -ItemType Directory -Force $profile | Out-Null
 $previousProfile = $env:LOCALAPPDATA
 $app = $null
+$diagnosticErrors = [Collections.Generic.List[string]]::new()
 if (!("PatinaPackageWindow" -as [type])) {
     Add-Type @"
 using System;
@@ -19,10 +20,11 @@ using System.Runtime.InteropServices;
 public static class PatinaPackageWindow {
     private delegate bool Visitor(IntPtr window, IntPtr state);
     [DllImport("user32.dll")] private static extern bool EnumWindows(Visitor visitor, IntPtr state);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder text, int count);
     [DllImport("user32.dll")] public static extern IntPtr GetClassLongPtrW(IntPtr window, int index);
-    [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessageW(IntPtr window, uint message, IntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr window);
     public static IntPtr Find(uint process) {
         IntPtr found = IntPtr.Zero;
         EnumWindows((window, state) => {
@@ -53,7 +55,8 @@ try {
     & python "$PSScriptRoot/check-windows-icon.py" (Join-Path $installed 'Patina.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Installed icon is missing.' }
     $env:LOCALAPPDATA = $profile
-    $app = Start-Process -FilePath (Join-Path $installed 'Patina.exe') -WorkingDirectory $installed -WindowStyle Hidden -PassThru
+    $app = Start-Process -FilePath (Join-Path $installed 'Patina.exe') -WorkingDirectory $installed -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput (Join-Path $scratch 'stdout.log') -RedirectStandardError (Join-Path $scratch 'stderr.log')
     $deadline = [DateTime]::UtcNow.AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 250
@@ -63,7 +66,43 @@ try {
     } while ($window -eq [IntPtr]::Zero -and [DateTime]::UtcNow -lt $deadline)
     if ($window -eq [IntPtr]::Zero) { throw 'Installed app did not create a window.' }
     if ([PatinaPackageWindow]::GetClassLongPtrW($window, -14) -eq [IntPtr]::Zero) { throw 'App window has no icon.' }
-    if (![PatinaPackageWindow]::PostMessageW($window, 0x10, [IntPtr]::Zero, [IntPtr]::Zero) -or !$app.WaitForExit(10000)) { throw 'Installed app did not close cleanly.' }
+    [uint32]$windowOwner = 0
+    $windowThread = [PatinaPackageWindow]::GetWindowThreadProcessId($window, [ref]$windowOwner)
+    $closeStarted = [DateTime]::UtcNow.ToString('o')
+    $closeClock = [Diagnostics.Stopwatch]::StartNew()
+    [Runtime.InteropServices.Marshal]::SetLastPInvokeError(0)
+    $posted = [PatinaPackageWindow]::PostMessageW($window, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)
+    $postError = if ($posted) { $null } else { [Runtime.InteropServices.Marshal]::GetLastPInvokeError() }
+    # Preserve the original short circuit and ten-second wait. Do not retry a
+    # failed post or mistake HWND creation for app-root readiness.
+    $exited = if ($posted) { $app.WaitForExit(10000) } else { $false }
+    $closeClock.Stop()
+    $app.Refresh()
+    [uint32]$ownerAfterWait = 0
+    $threadAfterWait = [PatinaPackageWindow]::GetWindowThreadProcessId($window, [ref]$ownerAfterWait)
+    try {
+        $close = [ordered]@{
+            head = (& git -C $root rev-parse HEAD)
+            nsh_pin = (Get-Content "$root/nsh.rev" -Raw).Trim()
+            nsh_head = (& git -C (Join-Path (Split-Path $root -Parent) 'nsh-patina') rev-parse HEAD)
+            image_os = $env:ImageOS; image_version = $env:ImageVersion
+            exe_sha256 = (Get-FileHash (Join-Path $installed 'Patina.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+            runtime_sha256 = $dllHash; process = $app.Id; window = $window.ToInt64()
+            window_owner = $windowOwner; window_thread = $windowThread; close_started_at = $closeStarted
+            posted = $posted; post_error = $postError; wait_exited = $exited
+            elapsed_ms = $closeClock.ElapsedMilliseconds; has_exited = $app.HasExited
+            window_still_exists = [PatinaPackageWindow]::IsWindow($window)
+            window_owner_after_wait = $ownerAfterWait; window_thread_after_wait = $threadAfterWait
+            exit_code = if ($app.HasExited) { $app.ExitCode } else { $null }
+        }
+        $close | ConvertTo-Json | Set-Content (Join-Path $scratch 'diagnostic-close.json')
+        Write-Host "Installed close observation: $($close | ConvertTo-Json -Compress)"
+    } catch {
+        $diagnosticErrors.Add("Close observation: $($_.Exception.Message)")
+        Write-Warning $diagnosticErrors[$diagnosticErrors.Count - 1]
+    }
+    if (!$posted) { throw "Installed app did not close cleanly: WM_CLOSE post failed (Win32 error $postError)." }
+    if (!$exited) { throw 'Installed app did not close cleanly: WM_CLOSE posted, process did not exit within 10000 ms.' }
     if ($app.ExitCode -ne 0) { throw "Installed app exit code: $($app.ExitCode)" }
     # A sentinel verifies uninstall never removes the application's data directory.
     $data = Join-Path $profile 'Patina'
@@ -72,6 +111,30 @@ try {
 } finally {
     $env:LOCALAPPDATA = $previousProfile
     if ($app -and !$app.HasExited) { $app.Kill(); $app.WaitForExit() }
+    # The first-launch profile is synthetic. Retain only bounded process output
+    # after the process has exited, before uninstall removes its executable.
+    try {
+        foreach ($name in @('stdout.log', 'stderr.log')) {
+            $log = Join-Path $scratch $name
+            if (Test-Path -LiteralPath $log) {
+                $stream = $null
+                $snapshot = $null
+                try {
+                    $stream = [IO.File]::Open($log, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                    $snapshot = [IO.File]::Create((Join-Path $scratch "diagnostic-$name"))
+                    $buffer = [byte[]]::new(65536)
+                    $read = $stream.Read($buffer, 0, $buffer.Length)
+                    $snapshot.Write($buffer, 0, $read)
+                } finally {
+                    try { if ($stream) { $stream.Dispose() } }
+                    finally { if ($snapshot) { $snapshot.Dispose() } }
+                }
+            }
+        }
+    } catch {
+        $diagnosticErrors.Add("Process output snapshot: $($_.Exception.Message)")
+        Write-Warning $diagnosticErrors[$diagnosticErrors.Count - 1]
+    }
     $uninstaller = Join-Path $installed 'unins000.exe'
     if (Test-Path -LiteralPath $uninstaller) {
         $remove = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -WindowStyle Hidden -Wait -PassThru
@@ -81,4 +144,5 @@ try {
 if (Test-Path -LiteralPath (Join-Path $installed 'Patina.exe')) { throw 'Uninstall left the app binary.' }
 if (!(Test-Path -LiteralPath (Join-Path $profile 'Patina/synthetic-settings.txt'))) { throw 'Uninstall removed user data.' }
 if (Test-Path -LiteralPath $registration) { throw 'Uninstall left its registration.' }
+if ($diagnosticErrors.Count) { throw "Installer checks passed, but diagnostic capture failed: $($diagnosticErrors -join '; ')" }
 Write-Host 'Windows installer: installation, icon, launch, clean exit and uninstall passed.'
