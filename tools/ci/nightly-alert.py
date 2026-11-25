@@ -148,6 +148,8 @@ def observe(client=api, environment=None):
         raise ValueError('Run identity changed')
     runs[current['id']] = current
     newest = max(runs.values(), key=lambda run: (run['created_at'], run['id']))
+    changed = False
+    retry_run = None
     for run in sorted(runs.values(), key=lambda run: (run['created_at'], run['id'])):
         if run['status'] != 'completed' or key(run) in state:
             continue
@@ -177,15 +179,20 @@ def observe(client=api, environment=None):
                     and run['conclusion'] == 'failure' and classify(jobs, annotations))
         if eligible:
             record['retry'] = 'claimed once (API outcome may be unknown)'
+            retry_run = run
         state[key(run)] = record
-        # Retain bounded history; run_attempt itself independently prevents retry
-        # on later attempts, even after older journal entries age out.
+        changed = True
+    if changed:
+        # Reconcile the whole window before publishing its latest result. Saving
+        # historical failures one by one could briefly reopen a healthy tracker
+        # or leave it stale if a later API request fails.
         state = dict(sorted(state.items(), key=lambda pair: order(pair[1]))[-30:])
         issue = save(issue, state, client)
-        if eligible:
-            client(f'actions/runs/{int(run["id"])}/rerun-failed-jobs', 'POST', {})
-            record['retry'] = 'requested once'
-            issue = save(issue, state, client)
+    if retry_run is not None:
+        # The complete journal, including this claim, is durable before the POST.
+        client(f'actions/runs/{int(retry_run["id"])}/rerun-failed-jobs', 'POST', {})
+        state[key(retry_run)]['retry'] = 'requested once'
+        save(issue, state, client)
     return state
 
 

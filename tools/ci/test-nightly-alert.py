@@ -183,15 +183,30 @@ class ObserverTests(unittest.TestCase):
             self.observe()
         self.assertFalse(self.client.retries())
 
-    def test_out_of_order_events_and_coalesced_pending_observers_preserve_newest_result(self):
+    def test_healthy_latest_run_never_creates_tracker_for_historical_failure(self):
         self.client.runs = [run(101, conclusion='success'), run()]
         self.client.jobs = [dict(item, conclusion='success') for item in jobs()]
         self.observe(event=run())
         self.assertFalse(self.client.retries())
-        self.assertEqual(self.client.issue['state'], 'closed')
-        self.assertIn('Latest scheduled run: [101]', self.client.issue['body'])
+        self.assertIsNone(self.client.issue)
+        self.assertFalse(any(call[1] == 'POST' for call in self.client.calls))
+
+    def test_out_of_order_and_coalesced_observers_publish_latest_result_once(self):
+        self.client.runs = [run(101, conclusion='success')]
+        self.client.jobs = [dict(item, conclusion='success') for item in jobs()]
+        state = self.observe()
+        self.client.issue = {'number': 5, 'body': nightly.body(state), 'state': 'closed'}
+        self.client.runs.append(run())
+        self.client.calls.clear()
         self.observe(event=run())
+        writes = [call for call in self.client.calls if call[1] == 'PATCH']
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][2]['state'], 'closed')
         self.assertIn('Latest scheduled run: [101]', self.client.issue['body'])
+        self.assertFalse(self.client.retries())
+        self.client.calls.clear()
+        self.observe(event=run())
+        self.assertFalse(any(call[1] in ('PATCH', 'POST') for call in self.client.calls))
 
     def test_trust_boundaries(self):
         for change in ({'event': 'pull_request'}, {'head_branch': 'feature'},
