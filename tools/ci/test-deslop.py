@@ -89,6 +89,16 @@ class Health(unittest.TestCase):
         self.assertEqual(deslop.index_health(HEALTHY), [])
         self.assertEqual(deslop.index_health(HEALTHY.replace(deslop.BENIGN_ERROR, "")), [])
 
+    def test_real_analyzer_timestamps_preserve_the_narrow_error_exception(self):
+        for timestamp in ("2026-11-25T17:56:17.58467-05:00", "2026-11-25T22:56:17.58467Z"):
+            with self.subTest(timestamp=timestamp):
+                benign = timestamp + " " + deslop.BENIGN_ERROR
+                self.assertEqual(deslop.index_health(HEALTHY.replace(deslop.BENIGN_ERROR, benign)), [])
+                for error in (benign + " actual failure", timestamp + " ERROR actual failure"):
+                    problems = deslop.index_health(HEALTHY.replace(deslop.BENIGN_ERROR, error))
+                    self.assertEqual(len(problems), 1)
+                    self.assertIn(error, problems[0])
+
     def test_markers_from_version_cannot_make_an_unhealthy_scip_healthy(self):
         log = "### argv: --version\nGenerating SCIP finished\n"
         log += "rust-analyzer: Loading build script fake run\n### exit: 0\n"

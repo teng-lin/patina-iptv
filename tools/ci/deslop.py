@@ -28,6 +28,7 @@ IGNORED_ENV = ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_TARGET",
                "CARGO_BUILD_RUSTFLAGS", "IPTV_ALLOW_NSH_DRIFT")
 CYCLES = {"module-cycle", "tangle"}
 BENIGN_ERROR = "ERROR Config Error(s) error_sink=ConfigErrors([])"
+TIMESTAMP = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})"
 spec = importlib.util.spec_from_file_location("deslop_pins", Path(__file__).with_name("pins.py"))
 pins = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pins)
@@ -116,7 +117,11 @@ def index_health(log_text):
     if not any(line.startswith("rust-analyzer: Loading build script ") for line in lines):
         problems.append("rust-analyzer scip loaded no build script; the index may be incomplete")
     for line in lines:
-        if (line.startswith("ERROR ") or " ERROR " in line) and line != BENIGN_ERROR:
+        # The brief's captured fixture removed timestamps; real analyzer logs
+        # retain them. Exempt only this exact benign message, with or without
+        # its tracing timestamp, while retaining all other ERROR diagnostics.
+        benign = re.fullmatch(rf"(?:{TIMESTAMP}\s+)?{re.escape(BENIGN_ERROR)}", line)
+        if (line.startswith("ERROR ") or " ERROR " in line) and not benign:
             problems.append(f"rust-analyzer error: {line}")
     return problems
 
