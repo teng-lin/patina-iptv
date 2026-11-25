@@ -197,6 +197,19 @@ class Contract(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "^Unsupported build environment override$"):
                 handoff.validate_environment({name: "synthetic-override"})
 
+    def test_native_tool_discovery_requires_one_effective_file_each(self):
+        tool = self.root / "synthetic-tool.exe"
+        tool.write_bytes(b"synthetic-native-tool")
+        tools = {name: str(tool) for name in ("cl", "link", "perl", "nasm", "cmake", "ninja")}
+        expected = {"name": tool.name, "sha256": handoff.digest(tool)}
+        self.assertEqual(handoff.fingerprint_tools(tools)["perl"], expected)
+        for value in ([str(tool), str(tool)], None, ""):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "exactly one effective file"):
+                handoff.fingerprint_tools(dict(tools, perl=value))
+        del tools["link"]
+        with self.assertRaises(ValueError):
+            handoff.fingerprint_tools(tools)
+
     def test_original_successful_producer_is_retained_on_consumer_retry(self):
         self.run["run_attempt"] = 2
         self.assertEqual(self.acquire(), "reuse")

@@ -2,6 +2,12 @@
 param([ValidateSet('Inputs', 'Package')][string]$Phase)
 $ErrorActionPreference = 'Stop'
 if ($Phase -eq 'Inputs') {
+    # Match the shipping build script's command lookup order. Get-Command may
+    # report several installed matches; ordinary invocation uses the first.
+    $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+    if (Test-Path 'C:/Strawberry/perl/bin/perl.exe') {
+        $env:PATH = "C:\Strawberry\perl\bin;C:\Strawberry\c\bin;$env:PATH"
+    }
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
     $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
     if ($LASTEXITCODE -ne 0 -or !$vs) { throw 'MSVC installation not found.' }
@@ -13,7 +19,7 @@ if ($Phase -eq 'Inputs') {
     if (!$vc -or !$sdks.Count -or !$env:ImageOS -or !$env:ImageVersion) { throw 'Native build identity missing.' }
     $tools = @{}
     foreach ($name in @('perl', 'nasm', 'cmake', 'ninja')) {
-        $tools[$name] = (Get-Command $name -CommandType Application -ErrorAction Stop).Source
+        $tools[$name] = (Get-Command $name -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     }
     $tools['cl'] = "$vs/VC/Tools/MSVC/$vc/bin/Hostx64/x64/cl.exe"
     $tools['link'] = "$vs/VC/Tools/MSVC/$vc/bin/Hostx64/x64/link.exe"

@@ -150,6 +150,12 @@ def validate_environment(environment):
 def inputs(root=ROOT):
     if os.name != "nt":
         raise ValueError("Pilot input capture requires native Windows")
+    # Probe Rust through the same command search order the shipping script
+    # establishes before invoking Cargo; do not assume the runner's first shim.
+    command_path = [str(Path(os.environ["USERPROFILE"]) / ".cargo/bin")]
+    if Path("C:/Strawberry/perl/bin/perl.exe").is_file():
+        command_path[:0] = ["C:\\Strawberry\\perl\\bin", "C:\\Strawberry\\c\\bin"]
+    os.environ["PATH"] = os.pathsep.join([*command_path, os.environ["PATH"]])
     # The shipping script owns target/release. Do not let Cargo or native build
     # overrides silently redirect it or change the release recipe.
     validate_environment(os.environ)
@@ -169,8 +175,8 @@ def inputs(root=ROOT):
                     raise ValueError("Unsupported ambient Cargo configuration")
                 configs.append(digest(path))
     native = json.loads(run(["pwsh", "-NoProfile", "-File", str(root / "tools/ci/candidate-handoff.ps1"), "-Phase", "Inputs"], root))
+    native["tools"] = fingerprint_tools(native["tools"])
     native["trees"] = {name: tree_digest(path) for name, path in native.pop("trees").items()}
-    native["tools"] = {name: {"sha256": digest(path), "name": Path(path).name} for name, path in native.pop("tools").items()}
     rust_sysroot = Path(run(["rustc", "--print", "sysroot"], root))
     rustc = run(["rustc", "-vV"], root)
     channel = tomllib.loads((root / "rust-toolchain.toml").read_text())["toolchain"]["channel"]
@@ -203,6 +209,12 @@ def inputs(root=ROOT):
         "runtime": {name: digest(runtime / name) for name in ("libmpv-2.dll", "components.json")},
         "native": native,
     }
+
+
+def fingerprint_tools(tools):
+    if not isinstance(tools, dict) or set(tools) != {"cl", "link", "perl", "nasm", "cmake", "ninja"} or any(not isinstance(path, str) or not path for path in tools.values()):
+        raise ValueError("Native discovery must identify exactly one effective file per tool")
+    return {name: {"sha256": digest(path), "name": Path(path).name} for name, path in tools.items()}
 
 
 def seal(expected, output, run_id, attempt, api=gh, root=ROOT):
