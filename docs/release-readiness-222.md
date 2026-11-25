@@ -17,10 +17,14 @@ declaration has `LEANBACK_LAUNCHER` and **no** `supportsPictureInPicture`
 attribute. It subclasses the same host to preserve lifecycle, input and the
 persistent player surface. Both declarations retain `singleTask`, resize and
 configuration-change handling. Recording and external-player notifications
-return to the matching device launcher instead of creating the other activity.
+return to the matching device launcher. A stale shortcut or explicit launch
+of the other component redirects before loading Rust or mounting a player.
+The redirected instance skips host callbacks and teardown, so it never calls
+uninitialized host objects or native methods. A Leanback component launched
+on handheld likewise redirects to the PiP-capable handheld component.
 The runtime's existing TV PiP exclusion remains in `PipHost`.
 
-Local release host checks passed: `:app:testReleaseUnitTest` (50 tests) and
+Local release host checks passed: `:app:testReleaseUnitTest` (51 tests) and
 `:app:processReleaseMainManifest`, using JDK 17 and Android SDK 36. The generated
 merged release manifest independently confirmed:
 
@@ -30,7 +34,9 @@ merged release manifest independently confirmed:
 | `com.hantekllc.iptvrs.host.LeanbackActivity` | `LEANBACK_LAUNCHER` | Absent |
 
 The existing `HostPolicyTest` harness covers the two declarations, matching
-lifecycle attributes and notification destination selection. A source/merged
+lifecycle attributes, device launcher selection and stale-shortcut redirect
+selection. Notification wiring and lifecycle behavior still need device
+validation. A source/merged
 manifest check does not prove the manifest inside a signed AAB or handheld PiP
 playback. The #220 lane owns those final-artifact and emulator checks against
 the combined candidate. Record its artifact SHA and results here after that run.
@@ -127,7 +133,7 @@ The exact pinned Rust 1.99.1 passed `cargo test -p iptv-core -p
 iptv-presentation` (37 core tests, 463 presentation unit tests, 53 presentation
 integration tests and 2 doctests), and both portable crates built for
 `wasm32-unknown-unknown`. The redacted bundle-inventory and provisioning helper
-suite passed all 4 tests. The pinned native `cargo build -p iptv-app`, Android
+suite passed all 8 tests. The pinned native `cargo build -p iptv-app`, Android
 host tests after the final Kotlin formatting changes, pinned ktlint 1.3.1 and
 targeted Ruff 0.11.13 checks also passed. The final bundle audit and review/CI
 results are recorded as they complete; unchecked store/device criteria keep

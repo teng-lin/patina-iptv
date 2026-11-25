@@ -91,9 +91,20 @@ class HostPolicyTest {
 
         fun launcher(category: String): org.w3c.dom.Element =
             activities.single { activity ->
-                val categories = activity.getElementsByTagName("category")
-                (0 until categories.length).any { index ->
-                    (categories.item(index) as org.w3c.dom.Element).getAttributeNS(android, "name") == category
+                val filters = activity.getElementsByTagName("intent-filter")
+                (0 until filters.length).any { index ->
+                    val filter = filters.item(index) as org.w3c.dom.Element
+                    val actions = filter.getElementsByTagName("action")
+                    val categories = filter.getElementsByTagName("category")
+                    val main =
+                        (0 until actions.length).any {
+                            (actions.item(it) as org.w3c.dom.Element).getAttributeNS(android, "name") == "android.intent.action.MAIN"
+                        }
+                    val matchingCategory =
+                        (0 until categories.length).any {
+                            (categories.item(it) as org.w3c.dom.Element).getAttributeNS(android, "name") == category
+                        }
+                    main && matchingCategory
                 }
             }
         val handheld = launcher("android.intent.category.LAUNCHER")
@@ -107,5 +118,12 @@ class HostPolicyTest {
         }
         assertEquals(TvActivity::class.java, launcherActivity(false))
         assertEquals(LeanbackActivity::class.java, launcherActivity(true))
+    }
+
+    @Test fun staleShortcutsRedirectToTheDeviceHostBeforeItMounts() {
+        assertNull(redirectedActivity(TvActivity::class.java, false))
+        assertNull(redirectedActivity(LeanbackActivity::class.java, true))
+        assertEquals(LeanbackActivity::class.java, redirectedActivity(TvActivity::class.java, true))
+        assertEquals(TvActivity::class.java, redirectedActivity(LeanbackActivity::class.java, false))
     }
 }

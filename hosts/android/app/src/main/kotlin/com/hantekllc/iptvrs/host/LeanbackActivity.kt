@@ -15,3 +15,8 @@ internal fun appLaunchIntent(context: Context): Intent =
     )
 
 internal fun launcherActivity(tv: Boolean): Class<out TvActivity> = if (tv) LeanbackActivity::class.java else TvActivity::class.java
+
+internal fun redirectedActivity(
+    current: Class<out TvActivity>,
+    tv: Boolean,
+): Class<out TvActivity>? = launcherActivity(tv).takeUnless { it == current }
