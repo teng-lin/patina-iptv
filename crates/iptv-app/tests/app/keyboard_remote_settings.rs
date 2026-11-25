@@ -143,9 +143,53 @@ fn a_touch_only_phone_has_no_keys_page() {
     open_settings(app);
     let listed = pages(app);
     assert!(!shows(app, KEYBOARD) && !shows(app, REMOTE), "{listed:?}");
-    // Autoplay and its delay are hidden with the keys, and nothing is
-    // advanced on a handheld.
-    assert!(!shows(app, ADVANCED), "{listed:?}");
+    // Replay jumps remain available under Advanced without connected keys.
+    assert!(shows(app, ADVANCED), "{listed:?}");
+    step(app.press(ADVANCED));
+    step(app.wait_for("text:Fast-forward jumps"));
+    assert!(!shows(app, AUTOPLAY));
+    assert!(!shows(app, "text:Wait before tuning"));
+}
+
+#[test]
+fn handheld_replay_jumps_are_editable_in_advanced_without_connected_keys() {
+    fn here() {}
+    let Some(mut fixture) = fixture(std::any::type_name_of_val(&here), Settings::new()) else {
+        return;
+    };
+    let path = fixture.path.with_file_name("settings.json");
+    let app = &mut fixture.app;
+    device_signals::report(app, "phone", false, false);
+    open_settings(app);
+    for (form, size, forward_ms, rewind_ms) in [
+        ("phone", (480.0, 900.0), 35_000, 15_000),
+        ("tablet", (1280.0, 720.0), 40_000, 20_000),
+    ] {
+        device_signals::report(app, form, false, false);
+        step(app.set_viewport(Size::new(px(size.0), px(size.1))));
+        step(app.press("role:tab[Playback]"));
+        step(app.wait_for("text:Time bar jumps"));
+        for label in ["Fast-forward jumps", "Rewind jumps"] {
+            assert!(!shows(app, &format!("text:{label}")), "{form}: {label}");
+        }
+        step(app.press(ADVANCED));
+        step(app.wait_for("text:Fast-forward jumps"));
+        step(app.wait_for("text:Rewind jumps"));
+        assert!(!shows(app, "text:Time bar jumps"), "{form}");
+        assert!(!shows(app, AUTOPLAY), "{form}");
+        for label in ["Fast-forward jumps", "Rewind jumps"] {
+            step(app.press(&format!("text:{label}")));
+            step(app.wait_for("id:settings-editor"));
+            step(app.press("id:settings-editor >> role:button[+]"));
+            step(app.press("id:settings-editor >> role:button[Keep]"));
+            step(app.wait_for_gone("id:settings-editor", WAIT));
+        }
+        personalization::saved_settings(app, &path, |s| {
+            let at = &iptv_settings::Target::Global;
+            s.duration_ms(iptv_settings::keys::FORWARD_STEP, at) == forward_ms
+                && s.duration_ms(iptv_settings::keys::REWIND_STEP, at) == rewind_ms
+        });
+    }
 }
 
 #[test]
@@ -168,7 +212,7 @@ fn a_keyboard_attached_to_a_tablet_shows_keyboard_settings_at_once() {
     let listed = pages(app);
     let at = |name: &str| listed.iter().position(|p| p == name);
     assert_eq!(at("Keyboard"), at("Playback").map(|p| p + 1), "{listed:?}");
-    assert!(!shows(app, ADVANCED), "{listed:?}");
+    assert!(shows(app, ADVANCED), "{listed:?}");
     step(app.wait_for("text:Play the last channel on start"));
     // Its shortcuts can be remapped, by touch.
     keys_page(app, KEYBOARD, "Edit keyboard shortcuts");
@@ -203,7 +247,7 @@ fn a_d_pad_shows_remote_settings_with_every_key() {
     for key in ["Key: Red", "Key: Green", "Key: Record"] {
         assert!(keys.contains(&key.to_owned()), "{keys:?}");
     }
-    assert!(!shows(app, ADVANCED));
+    assert!(shows(app, ADVANCED));
 }
 
 #[test]

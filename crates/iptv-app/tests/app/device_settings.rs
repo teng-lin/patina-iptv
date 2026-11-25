@@ -425,3 +425,47 @@ fn ipad_switch_control_holds_panels_and_releases_the_timer_when_disabled() {
     );
     hides(app, Duration::from_secs(10));
 }
+
+#[test]
+fn ipad_switch_control_holds_panels_and_the_play_bar_until_it_stops() {
+    fn here() {}
+    let home = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "ipad"),
+        ],
+    );
+    let Some(home) = home else {
+        return;
+    };
+    let mut fixture = personalization::start(home, Settings::new(), true);
+    let app = &mut fixture.app;
+    crate::browse_fixture::choose_fullscreen(app);
+    native(
+        app,
+        "accessibility",
+        serde_json::json!({"switch_access": true}),
+    );
+    open_strip(app);
+    step(app.run_for(Duration::from_secs(20)));
+    assert!(
+        app.screen().matches(STRIP).unwrap(),
+        "Switch Control holds the strip"
+    );
+    step(app.press_key("m"));
+    step(app.press("id:video"));
+    step(app.wait_for("id:play-bar-layer"));
+    step(app.run_for(Duration::from_secs(20)));
+    assert!(
+        app.screen().matches("id:play-bar-layer").unwrap(),
+        "Switch Control holds the play bar"
+    );
+    native(
+        app,
+        "accessibility",
+        serde_json::json!({"switch_access": false}),
+    );
+    step(app.run_for(Duration::from_secs(4)));
+    step(app.wait_for_gone("id:play-bar-layer", WAIT));
+}
