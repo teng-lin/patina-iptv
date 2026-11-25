@@ -9,6 +9,8 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Cancel a channel swipe when a second finger lands on another player control.
+
 - Simplify the TV Guide header and groups column by removing overflow buttons,
   the duplicate group selector and time-step arrows. Remove the unfinished
   Watchlist destination from the navigation rail.

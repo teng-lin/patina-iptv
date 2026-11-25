@@ -27,6 +27,66 @@ const PANEL_ALPHA: u8 = 0xE0;
 /// The preview banner's height, about: it is centered on the finger.
 const PREVIEW_HEIGHT: f32 = 76.0;
 
+/// Shared by the video and its UI ancestor, so a second finger on a
+/// sibling control cancels the video's gesture too.
+#[derive(Clone, Copy)]
+pub(crate) struct Gesture {
+    swipe: Stored<Swipe>,
+    touches: Stored<Vec<u32>>,
+    pub swiped: Stored<bool>,
+}
+
+impl Gesture {
+    pub(crate) fn new() -> Self {
+        Self {
+            swipe: stored(Swipe::default()),
+            touches: stored(Vec::new()),
+            swiped: stored(false),
+        }
+    }
+
+    /// Observe starts anywhere in the UI without admitting a new swipe.
+    /// Keep the original pointer ignored until it lifts: resetting here
+    /// could let the second finger start a new gesture on the video.
+    pub(crate) fn observe(self, ui: Ui, event: &nsh_core::TouchEvent) {
+        for point in event
+            .points
+            .iter()
+            .filter(|point| point.changed && point.pointer_type == nsh_core::PointerType::Touch)
+        {
+            self.touches.with(|touches| match event.phase {
+                nsh_core::TouchPhase::Start if !touches.contains(&point.id) => {
+                    touches.push(point.id)
+                }
+                nsh_core::TouchPhase::End | nsh_core::TouchPhase::Cancel => {
+                    touches.retain(|id| *id != point.id);
+                }
+                _ => {}
+            });
+            if event.phase != nsh_core::TouchPhase::Start {
+                continue;
+            }
+            let outcome = self.swipe.with(|swipe| {
+                if swipe.pointer().is_some_and(|id| id != point.id) {
+                    let size = window();
+                    swipe.down(
+                        point.id,
+                        (point.page.x.0, point.page.y.0),
+                        event.timestamp,
+                        (size.width.0, size.height.0),
+                    )
+                } else {
+                    Outcome::None
+                }
+            });
+            if outcome != Outcome::None {
+                self.swiped.with(|swiped| *swiped = true);
+            }
+            apply(ui, outcome, point.page.y.0);
+        }
+    }
+}
+
 /// The banner a swipe under way drags: the channel it would change to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Preview {
@@ -106,11 +166,13 @@ fn touched(ui: Ui) {
 /// press, which a platform may still report when the finger lifts inside
 /// the view (Android's does, the view filling the screen): that press is
 /// then no tap. A keyboard's or a screen reader's press always is.
-pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, swiped: Stored<bool>) -> E {
-    let swipe = stored(Swipe::default());
+pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, gesture: Gesture) -> E {
+    let Gesture { swipe, swiped, .. } = gesture;
     // Made again mid-swipe (live video turned into a replay): its banner
     // goes with it.
     cleanup(move || {
+        swipe.with(Swipe::reset);
+        swiped.with(|swiped| *swiped = false);
         if untracked(|| ui.swipe.try_get()).flatten().is_some() {
             ui.swipe.set(None);
         }
@@ -121,7 +183,10 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, swiped: Stored<bool>) -> E
             let outcome = match e.phase {
                 nsh_core::TouchPhase::Start => {
                     let finger = p.pointer_type == nsh_core::PointerType::Touch;
-                    let admitted = finger && untracked(|| takes_swipes(ui));
+                    let alone = gesture
+                        .touches
+                        .with(|touches| touches.iter().all(|id| *id == p.id));
+                    let admitted = finger && alone && untracked(|| takes_swipes(ui));
                     swipe.with(|s| {
                         if !s.swiping() {
                             swiped.with(|w| *w = false);
