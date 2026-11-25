@@ -419,11 +419,20 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
             rows.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
+    let all_index = computed(move || {
+        state(ui, |s| {
+            s.items()
+                .iter()
+                .position(|item| *item == Item::AllPlaylists)
+        })
+        .flatten()
+    });
     // A cell is reused for other positions; its handlers and test ID must follow.
     virtual_list(count, move |at| {
         dynamic(move || {
             let index = at.index();
-            untracked(move || row(ui, size, index, focused_index))
+            let is_all = all_index.get() == Some(index);
+            untracked(move || row(ui, size, index, focused_index, is_all))
         })
     })
     .test_id("playlists-list")
@@ -433,7 +442,13 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
     .flex_1()
 }
 
-fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) -> impl IntoElement {
+fn row(
+    ui: Ui,
+    size: Scale,
+    index: usize,
+    focused_index: Memo<Option<usize>>,
+    is_all: bool,
+) -> impl IntoElement {
     let playlist = move || state(ui, |s| s.rows().get(index).cloned()).flatten();
     let item = move || state(ui, |s| s.items().get(index).copied()).flatten();
     let refreshing = move || {
@@ -470,13 +485,11 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     };
     let mark = move || mark(ui, focused_index.get() == Some(index));
     list_rows::row(size, ROW_THREE, mark)
-        .test_id(
-            if state(ui, |s| s.items().get(index) == Some(&Item::AllPlaylists)).unwrap_or(false) {
-                "playlists-all"
-            } else {
-                "playlist-row"
-            },
-        )
+        .test_id(if is_all {
+            "playlists-all"
+        } else {
+            "playlist-row"
+        })
         .flex_row()
         .items_center()
         .justify_start()

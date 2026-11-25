@@ -235,6 +235,41 @@ fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
 }
 
 #[test]
+fn all_playlists_row_identity_follows_playlist_deletion() {
+    let Some(home) = isolated!() else { return };
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    seed(&mut store, home.path(), "Alpha");
+    seed(&mut store, home.path(), "Beta");
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    playlists(&mut app);
+    step(app.wait_for("id:playlists-all >> text:All playlists"));
+    step(app.press("id:playlists-list >> text:Beta"));
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.wait_for("text:Delete “Beta”?"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:playlists-list >> text:Beta", Duration::from_secs(10)));
+    step(app.wait_for("id:playlists-all >> text:All playlists"));
+    assert_eq!(app.screen().count("id:playlists-all").unwrap(), 1);
+    assert!(
+        !app.screen()
+            .matches("id:playlists-all >> text:+ Add playlist")
+            .unwrap()
+    );
+}
+
+#[test]
 fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion() {
     let Some(home) = isolated!() else { return };
     let dir = home.data_dir();
