@@ -511,6 +511,50 @@ async fn a_capture_that_fails_to_open_notifies_the_host_once() {
 }
 
 #[tokio::test]
+async fn an_expired_active_capture_keeps_its_media_and_reports_recovery_once() {
+    use std::sync::atomic::AtomicUsize;
+    static NOTICES: AtomicUsize = AtomicUsize::new(0);
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    let mut ports = crate::Ports::new(root.clone(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_failed = |reason| {
+        assert_eq!(reason, crate::RecordingFailure::Unexpected);
+        NOTICES.fetch_add(1, Ordering::Relaxed);
+    };
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    request.start = now() - 120;
+    request.end = now() - 60;
+    let id = JobId(911);
+    std::fs::create_dir_all(media_directory(&root)).unwrap();
+    std::fs::write(path(&owner.services(), id, true), [0x47; 188]).unwrap();
+    owner
+        .services()
+        .call(move |store| {
+            store.schedule_recording(id, &request, request.start)?;
+            let recording = store.recording_job(id)?.expect("generated job");
+            assert!(store.claim_recording(&recording)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Startup recovery is idempotent even if it sees the same terminal row again.
+    recover(&owner.services()).await.unwrap();
+    recover(&owner.services()).await.unwrap();
+    let job = until(&owner, id, |job| job.status == Status::Partial).await;
+    assert_eq!(job.bytes, 188);
+    assert_eq!(job.message, "Interrupted when the app closed");
+    let media = owner.recording_file(id).await.unwrap();
+    assert_eq!(std::fs::read(media).unwrap(), [0x47; 188]);
+    assert!(owner.drain_services());
+    assert_eq!(NOTICES.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
 async fn a_reused_playlist_id_does_not_inherit_an_old_connection_allowance() {
     let directory = tempfile::tempdir().unwrap();
     let owner = owner(&directory.path().join("generated-app"));

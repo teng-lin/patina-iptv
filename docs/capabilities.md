@@ -173,8 +173,9 @@ file. Play Console declarations cover each type used by the release.
 
 On Android, the first accepted Record now can ask for notification
 permission. Recording can continue if the viewer declines. With notifications
-enabled, an unexpected interruption in the background posts a local alert.
-Recordings keeps the reason and any playable partial media.
+enabled, an unexpected background interruption posts a local alert after
+the library saves the outcome. Recordings keeps the reason and any playable
+partial media.
 
 While a capture runs on Android, its foreground service is sticky: if
 Android kills the process, it restarts the service, which resumes the capture

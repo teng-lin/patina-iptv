@@ -7,5 +7,5 @@
     <string name="recording_stopped_title">Registrazione interrotta</string>
     <string name="recording_stopped_tv_off">La TV è stata spenta. Quanto registrato fino ad allora è in Registrazioni.</string>
     <string name="recording_stopped_background_limit">È stato raggiunto il limite di tempo in background di Android. Quanto registrato fino ad allora è in Registrazioni.</string>
-    <string name="recording_failed_background">Una registrazione in background è terminata in anticipo.</string>
+    <string name="recording_failed_background">Una registrazione in background è stata interrotta.</string>
 </resources>

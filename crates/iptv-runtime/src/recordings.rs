@@ -1087,7 +1087,7 @@ async fn recover_media(services: &Services, job: &Job) -> completion::Transition
     }
     // A capture the retirement of scheduled recording marked partial records
     // its size only now; a partial without media cannot be played.
-    transition(
+    let result = transition(
         services,
         job,
         if bytes > 0 {
@@ -1098,7 +1098,14 @@ async fn recover_media(services: &Services, job: &Job) -> completion::Transition
         bytes,
         "Interrupted when the app closed",
     )
-    .await
+    .await;
+    // An unreconciled active row can become partial or failed after its
+    // window elapsed. A receipt replay already has a known outcome.
+    completion::report_failure(
+        services,
+        result,
+        (job.status == Status::Recording).then_some(crate::RecordingFailure::Unexpected),
+    )
 }
 async fn finish_unstarted(
     services: &Services,

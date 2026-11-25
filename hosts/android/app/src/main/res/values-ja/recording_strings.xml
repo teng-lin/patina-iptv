@@ -7,5 +7,5 @@
     <string name="recording_stopped_title">録画を停止しました</string>
     <string name="recording_stopped_tv_off">テレビの電源が切れました。それまでに録画した内容は「録画」にあります。</string>
     <string name="recording_stopped_background_limit">Android のバックグラウンド時間の上限に達しました。それまでに録画した内容は「録画」にあります。</string>
-    <string name="recording_failed_background">バックグラウンドの録画が途中で終了しました。</string>
+    <string name="recording_failed_background">バックグラウンドの録画が中断されました。</string>
 </resources>
