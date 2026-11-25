@@ -1227,6 +1227,18 @@ fn verdict(file: &str, literal: &Literal) -> Verdict {
     if is(SILENT_CALLS) {
         return Verdict::Ignored;
     }
+    // Native recording test-support stores fixed phases for failure diagnostics;
+    // these never become recording messages or reach a view. Keep the exception
+    // on this sink's phase argument in its two callers, not on recording text.
+    if call == Some("observe_operation")
+        && matches!(
+            (file, literal.argument),
+            ("iptv-runtime/src/recordings.rs", 1)
+                | ("iptv-runtime/src/recordings/completion.rs", 2)
+        )
+    {
+        return Verdict::Ignored;
+    }
     if !reads_as_text(&literal.text, is(TEXT_SINKS)) {
         return Verdict::Ignored;
     }
@@ -2153,6 +2165,37 @@ fn the_verdicts_tell_messages_from_text_and_from_the_rest() {
         message: false,
     };
     let view = "iptv-app/src/some_view.rs";
+    for (file, argument) in [
+        ("iptv-runtime/src/recordings.rs", 1),
+        ("iptv-runtime/src/recordings/completion.rs", 2),
+    ] {
+        assert_eq!(
+            verdict(
+                file,
+                &literal("recording claimed", Some("observe_operation"), argument)
+            ),
+            Verdict::Ignored
+        );
+        // The exception covers neither another argument nor translated text.
+        assert_eq!(
+            verdict(
+                file,
+                &literal("Recording failed", Some("observe_operation"), 0)
+            ),
+            Verdict::Message
+        );
+        assert_eq!(
+            verdict(file, &literal("Recording failed", Some("tr"), 0)),
+            Verdict::Message
+        );
+    }
+    assert_eq!(
+        verdict(
+            view,
+            &literal("Recording failed", Some("observe_operation"), 2)
+        ),
+        Verdict::Bypass
+    );
     // A message call's literal is a message, whatever it looks like.
     assert_eq!(
         verdict(view, &literal("ended", Some("tr"), 0)),
