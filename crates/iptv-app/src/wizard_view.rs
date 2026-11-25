@@ -281,7 +281,7 @@ fn screen_of(w: &Wizard) -> Option<Screen> {
         Step::Empty => Screen::Empty,
         Step::ChooseType { .. } => Screen::ChooseType,
         Step::Form => Screen::Form(w.kind()),
-        Step::Processing { .. } => Screen::Processing,
+        Step::Processing { .. } | Step::Canceling { .. } => Screen::Processing,
         Step::Succeeded { .. } => Screen::Succeeded,
         Step::Failed { .. } => Screen::Failed,
         Step::Closed => return None,
@@ -768,6 +768,7 @@ fn form(ui: Ui, kind: PlaylistKind) -> View {
 }
 
 fn processing(ui: Ui) -> View {
+    let canceling = move || matches!(read(ui, Wizard::step), Some(Step::Canceling { .. }));
     let progress = move || {
         read(ui, |w| match w.step() {
             Step::Processing { progress, .. } => progress,
@@ -781,7 +782,16 @@ fn processing(ui: Ui) -> View {
     let scrolling = ui_kit::FocusScroll::new();
     let content = view()
         .gap(move || size.px(12.0))
-        .child(ui_kit::body(size, move || words::stage(progress())).text_color(rgb(LIST_TEXT)))
+        .child(
+            ui_kit::body(size, move || {
+                if canceling() {
+                    tr("Canceling…").to_owned()
+                } else {
+                    words::stage(progress())
+                }
+            })
+            .text_color(rgb(LIST_TEXT)),
+        )
         .child(when(
             move || percent().is_some(),
             move || {
@@ -799,7 +809,10 @@ fn processing(ui: Ui) -> View {
             },
         ))
         // OK does nothing here (no accidental cancel); Back or a tap cancels.
-        .child(button(ui, size, "Cancel", scrolling, Target::CancelImport).self_start());
+        .child(when(
+            move || !canceling(),
+            move || button(ui, size, "Cancel", scrolling, Target::CancelImport).self_start(),
+        ));
     setup_view::frame(
         ui,
         size,

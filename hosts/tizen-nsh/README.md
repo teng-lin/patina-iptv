@@ -80,6 +80,11 @@ a package). A package that installs over the same version is refused by the
 TV. Set `NSH_PACKAGE_VERSION` to a higher version to update in place
 and keep the installed app's data.
 
+When an Add includes a guide URL, the browser swaps in the playlist and
+its required guide together. Cancel during saving discards both before
+that swap. The wizard waits for the result so it can show a completed add
+if Cancel arrived after the swap.
+
 ## What does not work yet
 
 - Recording, backup files and picture in picture (no workers, one

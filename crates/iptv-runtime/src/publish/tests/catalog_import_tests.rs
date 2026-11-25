@@ -1,6 +1,8 @@
 //! Exercises a real catalog import with the cooperative publication driver.
 
-use super::{KEY, Loop, PLAYLIST_URL, reopen, setup_with_network, synthetic_source};
+use super::{
+    KEY, Loop, PLAYLIST_URL, reopen, setup_file_host, setup_with_network, synthetic_source,
+};
 use crate::{
     imports::{Job, Msg, Purpose, pipeline},
     network::{Body, Chunks, Client, NetFuture, Network, NetworkConfig, Transport},
@@ -9,7 +11,7 @@ use crate::{
 use iptv_core::add_playlist::{FailureKind, ImportStage};
 use iptv_import::{BodyStream, CancelToken, FetchError, MemoryBody, StreamingResponse};
 use iptv_providers::{
-    HttpRequest, HttpResponse,
+    HttpRequest, HttpResponse, SecretUrl,
     model::{Source, SourceConfig},
 };
 use iptv_store_sqlite::{ChannelQuery, SourceId, Store};
@@ -24,9 +26,13 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 // The cooperative writer inserts at most 200 rows per turn.
 const CHANNELS: usize = 2_000;
 const RETAINED: &str = "Generated retained channel";
+const GUIDE_URL: &str = "https://example.invalid/publish.xml";
 
 #[derive(Clone)]
-struct Playlist(Arc<[u8]>);
+struct Playlist {
+    playlist: Arc<[u8]>,
+    guide: Option<Arc<[u8]>>,
+}
 
 impl Playlist {
     fn generated() -> Self {
@@ -38,7 +44,31 @@ impl Playlist {
             )
             .unwrap();
         }
-        Self(Arc::from(playlist.into_bytes()))
+        Self {
+            playlist: Arc::from(playlist.into_bytes()),
+            guide: None,
+        }
+    }
+
+    fn with_guide(mut self) -> Self {
+        let now = chrono::Utc::now();
+        let mut guide = String::from(
+            "<tv><channel id=\"fixture\"><display-name>Generated channel 0</display-name></channel>",
+        );
+        for step in -1..399 {
+            let start = now + chrono::TimeDelta::minutes(step);
+            let next = start + chrono::TimeDelta::minutes(1);
+            writeln!(
+                guide,
+                "<programme channel=\"fixture\" start=\"{}\" stop=\"{}\"><title>Generated {step}</title></programme>",
+                start.format("%Y%m%d%H%M%S +0000"),
+                next.format("%Y%m%d%H%M%S +0000"),
+            )
+            .unwrap();
+        }
+        guide.push_str("</tv>");
+        self.guide = Some(Arc::from(guide.into_bytes()));
+        self
     }
 }
 
@@ -73,11 +103,15 @@ impl Transport for Playlist {
         &self,
         request: HttpRequest,
     ) -> NetFuture<'_, Result<StreamingResponse<Body>, FetchError>> {
-        assert_eq!(request.url, PLAYLIST_URL);
+        let bytes = match request.url.as_str() {
+            PLAYLIST_URL => &self.playlist,
+            GUIDE_URL => self.guide.as_ref().expect("the fixture includes a guide"),
+            other => panic!("unexpected synthetic URL {other}"),
+        };
         Box::pin(std::future::ready(Ok(StreamingResponse {
             status: 200,
-            content_length: Some(self.0.len() as u64),
-            body: Body::new(PlaylistBody(MemoryBody::new(&self.0, 8_192))),
+            content_length: Some(bytes.len() as u64),
+            body: Body::new(PlaylistBody(MemoryBody::new(bytes, 8_192))),
         })))
     }
 }
@@ -88,22 +122,25 @@ fn start(
     job: Job,
     cancel: &CancelToken,
 ) -> UnboundedReceiver<Msg> {
+    start_with_revocation(host, service, job, cancel, &CancelToken::new())
+}
+
+fn start_with_revocation(
+    host: &Loop,
+    service: &Arc<Service>,
+    job: Job,
+    cancel: &CancelToken,
+    revoked: &CancelToken,
+) -> UnboundedReceiver<Msg> {
     use crate::execution::CooperativeHost;
 
     let authority = crate::Runtime::new(crate::Ports::for_tests()).parental_snapshot();
     let services = service.accept();
     let cancel = cancel.clone();
+    let revoked = revoked.clone();
     let (sender, receiver) = unbounded_channel();
     host.spawn(Box::pin(async move {
-        pipeline(
-            &services,
-            job,
-            &sender,
-            &cancel,
-            &CancelToken::new(),
-            &authority,
-        )
-        .await;
+        pipeline(&services, job, &sender, &cancel, &revoked, &authority).await;
     }));
     receiver
 }
@@ -111,7 +148,18 @@ fn start(
 /// The mock StoreHost writes through a second WAL connection. A busy writer
 /// acknowledges the replacement's transaction before the test cancels it.
 fn advance_to_writing(host: &Loop, directory: &tempfile::TempDir) {
-    let observer = rusqlite::Connection::open(directory.path().join("synthetic.sqlite")).unwrap();
+    let observer = writer_observer(&directory.path().join("synthetic.sqlite"));
+    for _ in 0..20 {
+        assert!(host.poll(), "the catalog import is still running");
+        if writer_is_busy(&observer) {
+            return;
+        }
+    }
+    panic!("the catalog replacement should have opened a write transaction");
+}
+
+fn writer_observer(path: &std::path::Path) -> rusqlite::Connection {
+    let observer = rusqlite::Connection::open(path).unwrap();
     let mut key = String::from("x'");
     for byte in KEY {
         write!(key, "{byte:02x}").unwrap();
@@ -119,17 +167,15 @@ fn advance_to_writing(host: &Loop, directory: &tempfile::TempDir) {
     key.push('\'');
     observer.pragma_update(None, "key", key).unwrap();
     observer.busy_timeout(Duration::ZERO).unwrap();
-    for _ in 0..20 {
-        assert!(host.poll(), "the catalog import is still running");
-        match observer.execute_batch("BEGIN IMMEDIATE; ROLLBACK;") {
-            Ok(()) => {}
-            Err(error) if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) => {
-                return;
-            }
-            Err(error) => panic!("observe catalog transaction: {error}"),
-        }
+    observer
+}
+
+fn writer_is_busy(observer: &rusqlite::Connection) -> bool {
+    match observer.execute_batch("BEGIN IMMEDIATE; ROLLBACK;") {
+        Ok(()) => false,
+        Err(error) if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy) => true,
+        Err(error) => panic!("observe the replacement transaction: {error}"),
     }
-    panic!("the catalog replacement should have opened a write transaction");
 }
 
 fn finish(host: &Loop) {
@@ -313,6 +359,121 @@ fn canceling_a_sliced_add_removes_its_provisional_source() {
     assert_eq!(sources.len(), 1, "only the already saved source remains");
     assert_eq!(sources[0].id, existing);
     assert!(!has_stage(&directory), "cancellation removes the stage");
+}
+
+fn typed_guide_add() -> Job {
+    Job {
+        source: synthetic_source(),
+        stored: None,
+        epg_url: Some(SecretUrl::new(GUIDE_URL)),
+        purpose: Purpose::Add,
+        edit: false,
+    }
+}
+
+#[test]
+fn stopping_the_required_guide_during_its_slices_discards_the_whole_add() {
+    for revoke in [false, true] {
+        let (directory, host, service, calls) =
+            setup_file_host(Arc::new(Playlist::generated().with_guide()), true);
+        let cancel = CancelToken::new();
+        let revoked = CancelToken::new();
+        let mut messages =
+            start_with_revocation(&host, &service, typed_guide_add(), &cancel, &revoked);
+        let copy_path = directory.path().join("synthetic.publish");
+        let mut observer = None;
+        let guide_writing = (0..100).any(|_| {
+            assert!(host.poll(), "the guide is still saving");
+            if !copy_path.exists() {
+                return false;
+            }
+            let observer = observer.get_or_insert_with(|| writer_observer(&copy_path));
+            let channels: i64 = observer
+                .query_row("SELECT count(*) FROM channels", [], |row| row.get(0))
+                .unwrap();
+            channels == CHANNELS as i64 && writer_is_busy(observer)
+        });
+        assert!(
+            guide_writing,
+            "the guide reached its own sliced transaction"
+        );
+        assert_eq!(calls.begun.load(Ordering::SeqCst), 1, "one copy");
+        assert_eq!(
+            calls.finished.load(Ordering::SeqCst),
+            0,
+            "no early catalog swap"
+        );
+        assert!(
+            reopen(&directory).sources().unwrap().is_empty(),
+            "no provisional live source"
+        );
+
+        if revoke {
+            revoked.cancel();
+        } else {
+            cancel.cancel();
+        }
+        finish(&host);
+        assert_canceled(&mut messages);
+        assert_eq!(calls.abandoned.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.finished.load(Ordering::SeqCst), 0);
+        assert!(service.drain_on_shutdown_with(|| {}));
+        assert!(reopen(&directory).sources().unwrap().is_empty());
+        assert!(!has_stage(&directory));
+    }
+}
+
+#[test]
+fn cancellation_after_the_required_guide_swap_keeps_the_committed_add() {
+    let (directory, host, service, calls) =
+        setup_file_host(Arc::new(Playlist::generated().with_guide()), true);
+    let cancel = CancelToken::new();
+    *calls.cancel_after_swap.lock().unwrap() = Some(cancel.clone());
+    let mut messages = start(&host, &service, typed_guide_add(), &cancel);
+    finish(&host);
+    assert!(
+        cancel.is_canceled(),
+        "the host canceled just after the swap"
+    );
+    let results: Vec<_> = std::iter::from_fn(|| messages.try_recv().ok())
+        .filter_map(|message| match message {
+            Msg::Playlist(result) => Some(result.expect("the completed add succeeded")),
+            _ => None,
+        })
+        .collect();
+    let [(counts, imported)] = results.as_slice() else {
+        panic!("expected a single committed completion");
+    };
+    assert_eq!(counts.channels as usize, CHANNELS);
+    assert_eq!(calls.begun.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.finished.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.abandoned.load(Ordering::SeqCst), 0);
+    assert!(service.drain_on_shutdown_with(|| {}));
+    let saved = Store::open_encrypted(
+        directory.path().join("synthetic.publish"),
+        &iptv_store_sqlite::DatabaseKey::from_bytes(KEY),
+    )
+    .unwrap();
+    assert_eq!(saved.sources().unwrap().len(), 1);
+    assert_eq!(
+        saved
+            .channel_count(imported.source, &ChannelQuery::default())
+            .unwrap(),
+        CHANNELS as u64,
+    );
+    let guide = saved.epg_guide(imported.source).unwrap().unwrap();
+    assert_eq!(guide.bound_channels, 1);
+    assert!(guide.ends_at.is_some(), "the guide contains saved programs");
+    assert!(guide.match_fingerprint.is_some());
+    let feed_results = saved.epg_feed_results(imported.source).unwrap();
+    let [feed] = feed_results.as_slice() else {
+        panic!("expected the required guide feed's saved result");
+    };
+    assert_eq!(feed.error, None);
+    assert_eq!(feed.channel_count, 1);
+    assert_eq!(feed.listed_count, 1);
+    assert!(feed.program_count > 0);
+    assert!(!has_stage(&directory));
 }
 
 #[test]

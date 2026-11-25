@@ -659,7 +659,7 @@ pub(crate) async fn pipeline(
     };
     // A guide the user typed is part of adding the source: it must load
     // before the source is kept, and its failure points at its field.
-    let typed_guide = match job.epg_url {
+    let mut typed_guide = match job.epg_url {
         Some(_) => {
             match download_guide(
                 &net,
@@ -695,17 +695,38 @@ pub(crate) async fn pipeline(
     }));
     #[cfg(feature = "test-support")]
     services.before_publication();
-    let (id, counts, sources, authority) =
-        match save_published(services, &job, &catalog, &planned, stage, &publication).await {
-            Ok(saved) => saved,
-            Err(e) => {
-                log::warn!("iptv data: store: {e}");
-                if cancel.is_canceled() || !services.is_current() {
-                    return fail(ImportFailure::new(FailureKind::Canceled));
-                }
-                return fail(e.failure());
+    // A typed guide is required to finish adding a browser source. Run
+    // both replacements on the copy so Cancel can discard the whole add.
+    let required_guide = if job.stored.is_none() && services.ports().store_host.is_some() {
+        typed_guide.take().map(|download| RequiredGuide {
+            download,
+            fingerprint: matching.fingerprint(),
+            now,
+            revoked: revoked.clone(),
+        })
+    } else {
+        None
+    };
+    let (id, counts, sources, authority) = match save_published(
+        services,
+        &job,
+        &catalog,
+        &planned,
+        stage,
+        &publication,
+        required_guide,
+    )
+    .await
+    {
+        Ok(saved) => saved,
+        Err(e) => {
+            log::warn!("iptv data: store: {e}");
+            if cancel.is_canceled() || !services.is_current() {
+                return fail(ImportFailure::new(FailureKind::Canceled));
             }
-        };
+            return fail(e.failure());
+        }
+    };
     let matching = stored::Matching {
         channels: &catalog.channels,
         overrides: &overrides,
@@ -737,8 +758,12 @@ pub(crate) async fn pipeline(
         let _ = tx.send(Msg::Playlist(Ok((counts, imported(guide)))));
     };
     let guides = stored::configs_for(&sources, &job.source.config);
-    if let Some(import) = typed_guide {
-        report(keep_guide(services, id, import, &guides, matching, now, &stops).await);
+    if job.epg_url.is_some() {
+        let guide = match typed_guide {
+            Some(import) => keep_guide(services, id, import, &guides, matching, now, &stops).await,
+            None => stored::load_guide(services, id, now).unwrap_or_default(),
+        };
+        report(guide);
         return send_next_check(services, tx, id, &guides, matching);
     }
     match stored::plan_with(
@@ -924,16 +949,30 @@ pub(crate) fn save(
     Ok(saved)
 }
 
-/// [`save`], where the host keeps the store: the catalog replacement runs
-/// in slices on a publish copy (`publish.rs`), with the same checks and
-/// writes before and after it. Natively it is [`save`] itself.
-pub(crate) async fn save_published(
+/// The new browser source's required guide, staged before publication.
+struct RequiredGuide {
+    download: Downloaded,
+    fingerprint: u64,
+    now: i64,
+    revoked: CancelToken,
+}
+
+enum GuidePhase {
+    Staged(Box<RequiredGuide>),
+    Writing(Box<stored::GuidePublish>),
+    Ready(Store),
+}
+
+/// [`save`], where the host keeps the store: the catalog and any required
+/// guide run in slices on one publish copy. Natively it is [`save`] itself.
+async fn save_published(
     services: &Services,
     job: &Job,
     catalog: &Catalog,
     planned: &[GuideSource],
     stage: CatalogStage,
     publication: &Publication,
+    required_guide: Option<RequiredGuide>,
 ) -> Result<SavedCatalog, PublicationError> {
     if services.ports().store_host.is_none() {
         return save(services, job, catalog, planned, stage, publication);
@@ -946,6 +985,7 @@ pub(crate) async fn save_published(
             .map(|(_, e)| stored::error_kind(e))
     };
     let outcome = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+    let guide_revoked = required_guide.as_ref().map(|guide| guide.revoked.clone());
     let published = services
         .publish(CatalogPublish {
             job: job.clone(),
@@ -956,7 +996,10 @@ pub(crate) async fn save_published(
             publication: publication.clone(),
             outcome: outcome.clone(),
             source: None,
+            provisional_source: None,
             running: crate::publish::Replacing::Idle,
+            guide: required_guide.map(|guide| GuidePhase::Staged(Box::new(guide))),
+            guide_revoked: guide_revoked.clone(),
         })
         .await;
     match (
@@ -966,7 +1009,12 @@ pub(crate) async fn save_published(
         (Ok(saved), _) => saved,
         (Err(_), SUPERSEDED) => Err(PublicationError::Superseded),
         // Canceled between its slices ([`CatalogPublish::canceled`]).
-        (Err(_), _) if publication.cancel.is_canceled() => Err(PublicationError::Superseded),
+        (Err(_), _)
+            if publication.cancel.is_canceled()
+                || guide_revoked.is_some_and(|token| token.is_canceled()) =>
+        {
+            Err(PublicationError::Superseded)
+        }
         (Err(_), DENIED) => Err(PublicationError::Denied),
         (Err(error), _) => Err(PublicationError::Store(error)),
     }
@@ -987,9 +1035,13 @@ struct CatalogPublish {
     publication: Publication,
     /// Why `prepare` refused it, when it did ([`SUPERSEDED`], [`DENIED`]).
     outcome: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    /// The source written and whether `prepare` added it.
-    source: Option<(SourceId, bool)>,
+    /// The source written, including one that exists only on the copy.
+    source: Option<SourceId>,
+    /// An ordinary add's live row, removed if its replacement fails.
+    provisional_source: Option<SourceId>,
     running: crate::publish::Replacing<iptv_store_sqlite::CatalogReplacement<'static, Store>>,
+    guide: Option<GuidePhase>,
+    guide_revoked: Option<CancelToken>,
 }
 
 impl crate::publish::Publish for CatalogPublish {
@@ -1008,18 +1060,25 @@ impl crate::publish::Publish for CatalogPublish {
                 "import blocked by parental controls",
             ));
         }
-        let source = match self.job.stored {
-            Some(id) => (id, false),
-            None => (live.add_source(&self.job.source)?, true),
-        };
-        self.source = Some(source);
+        self.source = self.job.stored;
+        if self.source.is_none() && self.guide.is_none() {
+            let id = live.add_source(&self.job.source)?;
+            self.source = Some(id);
+            self.provisional_source = Some(id);
+        }
         Ok(())
     }
 
-    fn start(&mut self, copy: Store) -> Result<(), StoreError> {
-        let (id, added) = self.source.ok_or(StoreError::Unavailable(
-            "the catalog publish was not prepared",
-        ))?;
+    fn start(&mut self, mut copy: Store) -> Result<(), StoreError> {
+        let id = if let Some(id) = self.source {
+            id
+        } else {
+            // A new source with a required guide first becomes visible
+            // to live readers when both replacements have swapped in.
+            let id = copy.add_source(&self.job.source)?;
+            self.source = Some(id);
+            id
+        };
         let mut stage = self
             .stage
             .take()
@@ -1027,7 +1086,10 @@ impl crate::publish::Publish for CatalogPublish {
         stage.set_on_demand_errors(self.on_demand.0, self.on_demand.1);
         let mut publication = iptv_store_sqlite::StagePublication::new().provider_guides(
             std::mem::take(&mut self.guide_urls),
-            added.then(|| std::mem::take(&mut self.planned)),
+            self.job
+                .stored
+                .is_none()
+                .then(|| std::mem::take(&mut self.planned)),
         );
         if self.job.edit {
             publication = publication.details(self.job.source.clone());
@@ -1039,15 +1101,65 @@ impl crate::publish::Publish for CatalogPublish {
     }
 
     fn step(&mut self, rows: u32) -> Result<bool, StoreError> {
-        self.running.step(rows)
+        if let Some(GuidePhase::Writing(guide)) = self.guide.as_mut() {
+            if !guide.step(rows)? {
+                return Ok(false);
+            }
+            let Some(GuidePhase::Writing(mut guide)) = self.guide.take() else {
+                unreachable!("the guide completed its last slice");
+            };
+            let mut copy = guide.take_copy().ok_or(crate::publish::MISSING_COPY)?;
+            // Feed results and pruning also belong to the provisional add.
+            guide.finish(&mut copy)?;
+            self.guide = Some(GuidePhase::Ready(copy));
+            return Ok(true);
+        }
+        if matches!(self.guide, Some(GuidePhase::Ready(_))) {
+            return Ok(true);
+        }
+        if !self.running.step(rows)? {
+            return Ok(false);
+        }
+        let Some(GuidePhase::Staged(required)) = self.guide.take() else {
+            return Ok(true);
+        };
+        let required = *required;
+        let id = self.source.ok_or(StoreError::Unavailable(
+            "the catalog publish was not prepared",
+        ))?;
+        let sources = self
+            .running
+            .report()
+            .and_then(|report| report.guides.as_deref())
+            .unwrap_or_default();
+        let configs = stored::configs_for(sources, &self.job.source.config);
+        let copy = self
+            .running
+            .take_copy()
+            .ok_or(crate::publish::MISSING_COPY)?;
+        let mut guide = Box::new(stored::GuidePublish::new(
+            id,
+            required.download,
+            &configs,
+            required.fingerprint,
+            required.now,
+            stored::Stops::of(&[&required.revoked]),
+        ));
+        guide.start(copy)?;
+        self.guide = Some(GuidePhase::Writing(guide));
+        Ok(false)
     }
 
     fn take_copy(&mut self) -> Option<Store> {
-        self.running.take_copy()
+        match self.guide.take() {
+            Some(GuidePhase::Ready(copy)) => Some(copy),
+            Some(GuidePhase::Writing(mut guide)) => guide.take_copy(),
+            Some(GuidePhase::Staged(_)) | None => self.running.take_copy(),
+        }
     }
 
     fn finish(self: Box<Self>, live: &mut Store) -> Result<Self::Output, StoreError> {
-        let (id, _) = self.source.ok_or(StoreError::Unavailable(
+        let id = self.source.ok_or(StoreError::Unavailable(
             "the catalog publish was not prepared",
         ))?;
         let published = self.running.done().ok_or(StoreError::Unavailable(
@@ -1071,7 +1183,7 @@ impl crate::publish::Publish for CatalogPublish {
     }
 
     fn failed(&mut self, live: &mut Store) {
-        if let Some((id, true)) = self.source {
+        if let Some(id) = self.provisional_source {
             let _ = live.delete_source(id);
         }
     }
@@ -1080,6 +1192,10 @@ impl crate::publish::Publish for CatalogPublish {
     /// the slices that follow run in later turns.
     fn canceled(&self) -> bool {
         self.publication.cancel.is_canceled()
+            || self
+                .guide_revoked
+                .as_ref()
+                .is_some_and(CancelToken::is_canceled)
     }
 }
 

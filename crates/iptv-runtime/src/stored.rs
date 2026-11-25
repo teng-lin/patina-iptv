@@ -431,33 +431,20 @@ pub(crate) async fn replace_published(
     if services.ports().store_host.is_none() {
         return replace(services, source, guide, configs, matching, now, stops);
     }
-    let Downloaded { import, stage } = guide;
-    let results: Vec<_> = import
-        .sources
-        .iter()
-        .map(|o| (o.id, o.result.as_ref().err().map(error_kind)))
-        .collect();
-    let first_error = import
-        .sources
-        .iter()
-        .find_map(|o| o.result.as_ref().err().map(error_kind));
     services
-        .publish(GuidePublish {
+        .publish(GuidePublish::new(
             source,
-            feeds: EpgFeedMeta::from_import(&import, configs, now),
-            fingerprint: matching.fingerprint(),
-            input: Some((import, stage)),
-            results,
-            first_error,
+            guide,
+            configs,
+            matching.fingerprint(),
             now,
-            stops: Stops::of(stops),
-            running: crate::publish::Replacing::Idle,
-        })
+            Stops::of(stops),
+        ))
         .await
 }
 
 /// A guide replacement as a sliced publish ([`replace_published`]).
-struct GuidePublish {
+pub(crate) struct GuidePublish {
     source: SourceId,
     feeds: Vec<EpgFeedMeta>,
     fingerprint: u64,
@@ -468,6 +455,35 @@ struct GuidePublish {
     now: UnixTime,
     stops: Stops,
     running: crate::publish::Replacing<iptv_store_sqlite::EpgReplacement<'static, Store>>,
+}
+
+impl GuidePublish {
+    pub(crate) fn new(
+        source: SourceId,
+        guide: Downloaded,
+        configs: &[EpgSourceConfig],
+        fingerprint: u64,
+        now: UnixTime,
+        stops: Stops,
+    ) -> Self {
+        let Downloaded { import, stage } = guide;
+        let results: Vec<_> = import
+            .sources
+            .iter()
+            .map(|outcome| (outcome.id, outcome.result.as_ref().err().map(error_kind)))
+            .collect();
+        Self {
+            source,
+            feeds: EpgFeedMeta::from_import(&import, configs, now),
+            fingerprint,
+            first_error: results.iter().find_map(|(_, error)| *error),
+            input: Some((import, stage)),
+            results,
+            now,
+            stops,
+            running: crate::publish::Replacing::Idle,
+        }
+    }
 }
 
 impl crate::publish::Publish for GuidePublish {

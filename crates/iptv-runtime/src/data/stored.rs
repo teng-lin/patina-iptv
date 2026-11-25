@@ -159,7 +159,7 @@ pub(super) fn download(
         Ok(guides) => {
             let visible = visible();
             let services = owner.services();
-            let accepted = services.submit_import(visible, move |worker| async move {
+            let accepted = services.submit_import(visible, None, move |worker| async move {
                 download_now(&worker, source, guides, &tx, &cancel).await;
             });
             if !accepted {
