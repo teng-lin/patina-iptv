@@ -415,7 +415,24 @@ pub fn guides_changed(owner: &std::rc::Rc<crate::Runtime>, source: SourceId) {
 /// thread; `done` hears whether the guide was deleted. False when no
 /// playlist is on screen.
 pub fn clear(owner: &std::rc::Rc<crate::Runtime>, done: impl FnOnce(bool) + 'static) -> bool {
-    let sources = shown_sources(owner);
+    clear_sources(owner, shown_sources(owner), done)
+}
+
+/// Delete one playlist’s stored guide, independent of the combined view.
+/// Source links, channel lists and other playlists’ programs are retained.
+pub fn clear_source(
+    owner: &std::rc::Rc<crate::Runtime>,
+    source: SourceId,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    clear_sources(owner, vec![source], done)
+}
+
+fn clear_sources(
+    owner: &std::rc::Rc<crate::Runtime>,
+    sources: Vec<SourceId>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
     if sources.is_empty() {
         return false;
     }
@@ -440,8 +457,15 @@ pub fn clear(owner: &std::rc::Rc<crate::Runtime>, done: impl FnOnce(bool) + 'sta
                 return done(false);
             };
             for imported in imports {
-                super::show(&owner, Box::new(imported), generation, false).await;
+                // Clearing an unshown playlist must not navigate to it. In
+                // All playlists every enabled child still needs its empty guide.
+                if owner.shown_source() == Some(imported.source)
+                    || super::combined::includes(&owner, imported.source)
+                {
+                    super::show(&owner, Box::new(imported), generation, false).await;
+                }
             }
+            owner.emit(crate::RuntimeEvent::LibraryChanged);
             done(deleted);
         }
     });

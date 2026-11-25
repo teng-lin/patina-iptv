@@ -143,7 +143,7 @@ fn file_playlist_actions(t: &mut T) {
         "Show this playlist",
         "Rename",
         "User-Agent",
-        "Guide sources",
+        "Guide data",
         "Delete",
     ] {
         assert!(t.shows(&format!("text:{text}")), "{text}");
@@ -289,8 +289,8 @@ fn user_agent_refresh_and_keys(t: &mut T) {
 fn guide_sources(t: &mut T, srv: &Server) {
     open_playlists(t);
     t.press("text:Synthetic Renamed");
-    t.press("text:Guide sources");
-    t.wait("text:Guide sources · Synthetic Renamed", 5);
+    t.press("text:Guide data");
+    t.wait("text:Guide data · Synthetic Renamed", 5);
     t.wait(
         "text:Tap a source for what you can do with it. The first source with a channel wins",
         2,
@@ -335,7 +335,7 @@ fn guide_sources(t: &mut T, srv: &Server) {
     nothing_switched_on(t);
     // Back: the screen closes over the playlist's actions.
     t.key("backspace");
-    t.gone("text:Guide sources · Synthetic Renamed", 2);
+    t.gone("text:Guide data · Synthetic Renamed", 2);
     t.wait("text:Rename", 2);
     t.key("backspace");
     t.gone("text:Rename", 2);
@@ -486,7 +486,12 @@ fn nothing_switched_on(t: &mut T) {
         t.press_beside("Switch on");
         t.gone("text:Switch on", 2);
     }
-    t.press("text:Update the guide now");
+    let update = if t.shows("text:Retry") {
+        "text:Retry"
+    } else {
+        "text:Update the guide now"
+    };
+    t.press(update);
     t.wait("text:No guide source is switched on", 5);
     // On again, by keys: Menu on the first row, OK on "Switch on".
     t.key("up");

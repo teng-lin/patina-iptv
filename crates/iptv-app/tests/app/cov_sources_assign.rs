@@ -94,11 +94,12 @@ fn choosing_a_channels_guide_data() {
 /// screen opens on a new link), twice; then "Update the guide now".
 fn add_sources(t: &mut T, srv: &Server) {
     open_guide_settings(t);
+    t.press("text:Guide sources");
     t.open_sheet(
-        "text:Add a guide source",
+        "text:+ Add a guide source",
         "text:New guide source: link (XMLTV)",
     );
-    t.wait("text:Guide sources · synthetic", 2);
+    t.wait("text:Guide data · synthetic", 2);
     t.enter(&srv.url("/guide.xml"));
     t.wait("text:Its name (optional)", 2);
     t.enter("Main Guide");
@@ -111,7 +112,12 @@ fn add_sources(t: &mut T, srv: &Server) {
     t.wait("text:Its name (optional)", 2);
     t.enter("Alt Guide");
     t.wait("text:3.  Alt Guide", 5);
-    t.press("text:Update the guide now >> nth=1");
+    let action = if t.shows("text:Retry") {
+        "text:Retry"
+    } else {
+        "text:Update the guide now"
+    };
+    t.press(action);
     t.wait("text:Guide updated", 15);
     t.wait("text:Quiet Harbour", 5);
     leave_settings(t);
@@ -288,7 +294,7 @@ fn choices(t: &mut T, database: &std::path::Path) {
 fn every_source_off(t: &mut T) {
     open_guide_settings(t);
     t.press("text:Guide sources");
-    t.wait("text:Guide sources · synthetic", 2);
+    t.wait("text:Guide data · synthetic", 2);
     for row in [
         "1.  The provider's guide",
         "2.  Main Guide",

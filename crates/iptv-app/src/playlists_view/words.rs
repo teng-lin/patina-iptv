@@ -210,7 +210,7 @@ pub fn act(act: Act, kind: Option<SourceKind>, shown: bool, running: bool) -> &'
         Act::Details => kind.map_or(tr("Provider details"), details_title),
         Act::UserAgent => tr("User-Agent"),
         Act::Streams => tr("Streams at once"),
-        Act::Guides => tr("Guide sources"),
+        Act::Guides => tr("Guide data"),
         Act::Delete => tr("Delete"),
     }
 }
@@ -499,7 +499,7 @@ mod tests {
             streams(Some(4), Some(2)),
             "Streams at once: 4 · provider allows 2"
         );
-        assert_eq!(act(Act::Guides, None, false, false), "Guide sources");
+        assert_eq!(act(Act::Guides, None, false, false), "Guide data");
         assert_eq!(act(Act::Delete, None, false, false), "Delete");
         assert_eq!(act(Act::Rename, None, false, false), "Rename");
         assert!(notice(Notice::NameEmpty).starts_with("A playlist needs a name"));
