@@ -80,6 +80,10 @@ is below 1.0, a minor release may change behavior.
 
 - A Stalker refresh whose live pages fail keeps the last complete channel
   catalog and reports the failure for retry instead of publishing partial rows.
+- Pin the macOS Android resource compiler used by local Android validation.
+
+- Keep interrupted and overlapping video touches from leaving a channel-swipe
+  preview behind or starting a new swipe before all fingers lift.
 
 - Hide phone Multiview on metered networks, update every entry point when the
   active network changes, and keep the heard tile playing full screen when
