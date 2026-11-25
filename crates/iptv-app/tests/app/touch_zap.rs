@@ -3,7 +3,8 @@
 //! and a swipe down the one Ch− tunes, the banner of the channel it goes
 //! to following the finger, then naming it at once on release while the
 //! stream waits for `guide.switch_delay`. A burst of swipes opens only
-//! the last channel's stream. A swipe brought back, one that starts at a
+//! the last channel's stream, including a burst that mixes swipes with
+//! remote channel keys. A swipe brought back, one that starts at a
 //! screen edge, one over a replay and one over multiview change nothing.
 //! With Swipe to change channel off, a swipe does nothing, yet the play
 //! bar's channel buttons and the video's accessibility actions still
@@ -18,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::headless::Headless;
 use crate::personalization::step;
 use iptv_epg::format_xmltv_time;
-use iptv_settings::{Settings, Value};
+use iptv_settings::{Settings, Target, Value};
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{
@@ -26,6 +27,7 @@ use nsh_core::{
     TouchPhase, TouchPoint, ViewKind, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
+use nsh_tv::RemoteKey;
 
 const IMPORT: Duration = Duration::from_secs(30);
 const WAIT: Duration = Duration::from_secs(5);
@@ -149,6 +151,14 @@ fn start_with(
         .unwrap();
     settings
         .set("guide.switch_delay", Value::ms(DELAY.as_millis() as i64))
+        .unwrap();
+    // The fresh database imports the generated playlist as source 1.
+    settings
+        .set_in(
+            "playlists.max_connections",
+            &Target::playlist("1"),
+            Value::Int(2),
+        )
         .unwrap();
     for (key, value) in extra {
         settings.set(key, value.clone()).unwrap();
@@ -378,6 +388,20 @@ fn swipe(app: &mut Headless, dy: f32) {
     finger(app, from, &[(from.0, from.1 + dy)], false);
 }
 
+/// Drive only the touch route on the video catcher. A separate platform press
+/// could open an overlay and mask whether a subsequent swipe was excluded.
+pub(super) fn swipe_without_preview(app: &mut Headless, dy: f32) {
+    let from = (SCREEN.0 / 2.0, SCREEN.1 / 2.0);
+    let to = (from.0, from.1 + dy);
+    let (target, path) = video_path(app);
+    touch(app, TouchPhase::Start, target, &path, from, 1_000.0);
+    touch(app, TouchPhase::Move, target, &path, to, 1_200.0);
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch(app, TouchPhase::End, target, &path, to, 1_220.0);
+    app.settle();
+}
+
 fn banner_names(app: &Headless, n: usize) -> bool {
     app.screen()
         .matches(&format!("id:player-banner >> text:/{}$/", name(n)))
@@ -585,6 +609,7 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     // A burst of swipes up: only the last channel's stream opens, after
     // the delay. Three up from three wraps to five.
     let opened = streams(&tuned).len();
+    let opens = iptv_app::player_opens(0);
     for _ in 0..3 {
         swipe(&mut app, -300.0);
     }
@@ -598,6 +623,29 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     quiet(&mut app);
     let after: Vec<_> = streams(&tuned).into_iter().skip(opened).collect();
     assert_eq!(after, [url(5)], "only the burst's last channel opens");
+    assert_eq!(iptv_app::player_opens(0), opens + 1);
+
+    // Ch− wraps from five to one. The swipe starts from that pending
+    // channel, and Ch+ in turn starts from the swipe's pending channel.
+    let opened = streams(&tuned).len();
+    let opens = iptv_app::player_opens(0);
+    step(app.press_remote(RemoteKey::ChannelDown));
+    step(app.run_for(Duration::from_millis(400)));
+    swipe(&mut app, 300.0);
+    assert!(banner_names(&app, 2), "the swipe follows pending Ch−");
+    step(app.run_for(Duration::from_millis(400)));
+    step(app.press_remote(RemoteKey::ChannelUp));
+    assert!(banner_names(&app, 1), "Ch+ follows the pending swipe");
+    step(app.run_for(DELAY - Duration::from_millis(100)));
+    assert_eq!(
+        streams(&tuned).len(),
+        opened,
+        "only the last input's switch delay can open a stream"
+    );
+    tunes(&mut app, &tuned, 1, "the mixed burst's last channel");
+    quiet(&mut app);
+    assert_eq!(&streams(&tuned)[opened..], &[url(1)]);
+    assert_eq!(iptv_app::player_opens(0), opens + 1);
 
     // Multiview: a swipe on the video under it changes nothing.
     step(app.press("id:video"));
@@ -614,6 +662,43 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
         opened,
         "no swipe zapping in multiview"
     );
+
+    // Exercise a tile's actual touch path after the second player opens.
+    let second = format!("id:multiview-picker >> text:/  {}$/", name(2));
+    step(app.wait_for(&second));
+    step(app.press(&second));
+    step(app.wait_for_gone("id:multiview-picker", WAIT));
+    let second_url = url(2);
+    app.wait_until_fixed_clock("both multiview streams open", WAIT, |_| {
+        (0..2).all(iptv_app::player_has_source) && streams(&tuned).last() == Some(&second_url)
+    });
+    let opened = streams(&tuned);
+    let opens = [0, 1].map(iptv_app::player_opens);
+    let tile = "id:multiview-tile >> nth=0";
+    let (target, path) = element_path(&app, tile);
+    let bounds = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.id == target)
+        .unwrap()
+        .bounds;
+    let x = bounds.origin.x.0 + bounds.size.width.0 / 2.0;
+    let y = bounds.origin.y.0 + bounds.size.height.0 * 0.9;
+    touch(&mut app, TouchPhase::Start, target, &path, (x, y), 7_000.0);
+    let end = (x, y - bounds.size.height.0 * 0.8);
+    touch(&mut app, TouchPhase::Move, target, &path, end, 7_100.0);
+    touch(&mut app, TouchPhase::End, target, &path, end, 7_120.0);
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    // Also exercise the catcher's admission while the grid is active and the
+    // picker has closed. A tile's event path does not include the catcher.
+    swipe_without_preview(&mut app, -300.0);
+    swipe_without_preview(&mut app, 300.0);
+    quiet(&mut app);
+    assert_eq!(streams(&tuned), opened, "a swipe leaves both tiles tuned");
+    assert_eq!([0, 1].map(iptv_app::player_opens), opens);
+    assert_eq!(app.screen().count("id:multiview-tile").unwrap(), 2);
 }
 
 #[test]
@@ -630,7 +715,9 @@ fn a_swipe_over_a_replay_keeps_its_place() {
     quiet(&mut app);
     let replay = streams(&tuned);
     assert!(
-        replay.last().is_some_and(|u| u.contains("zap1")),
+        replay
+            .last()
+            .is_some_and(|u| u.starts_with(&format!("{}?utc=", url(1)))),
         "channel one's replay: {replay:?}"
     );
     swipe(&mut app, -300.0);
