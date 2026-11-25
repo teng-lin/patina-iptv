@@ -5,7 +5,7 @@ use crate::{
     support::Server,
 };
 use iptv_settings::{Settings, Value};
-use nsh_core::{MountItem, platform::Idiom};
+use nsh_core::{MountItem, ViewKind, platform::Idiom};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -26,7 +26,7 @@ impl Streams {
     }
 }
 
-fn start(home: crate::isolated::Home) -> (Fixture, Streams, Sources, i64) {
+fn start(home: crate::isolated::Home, external_sport: bool) -> (Fixture, Streams, Sources, i64) {
     let now = crate::support::now().div_euclid(60) * 60;
     let requests: Sources = Arc::default();
     let received = requests.clone();
@@ -86,19 +86,17 @@ fn start(home: crate::isolated::Home) -> (Fixture, Streams, Sources, i64) {
                     }],
                 )
                 .unwrap();
-            let group = store
-                .groups(source, None)
-                .unwrap()
-                .into_iter()
-                .find(|group| group.name == "News")
-                .unwrap();
-            store
-                .set_guide_group_preference(
-                    source,
-                    group.id.as_str(),
-                    iptv_core::organization::GroupPreference::ExternalPlayer(true),
-                )
-                .unwrap();
+            for group in store.groups(source, None).unwrap() {
+                if group.name == "News" || (external_sport && group.name == "Sport") {
+                    store
+                        .set_guide_group_preference(
+                            source,
+                            group.id.as_str(),
+                            iptv_core::organization::GroupPreference::ExternalPlayer(true),
+                        )
+                        .unwrap();
+                }
+            }
         },
         |config| config.environment.idiom = Idiom::Tv,
         move |app| {
@@ -145,6 +143,20 @@ fn menu_replay(app: &mut Headless) {
     step(app.press("id:menu-panel >> text:Play from the beginning"));
 }
 
+fn back_to_guide(app: &mut Headless) {
+    for _ in 0..4 {
+        if app.screen().layout_nodes().iter().any(|node| {
+            node.kind == ViewKind::Native
+                && !node.hidden
+                && (100.0..1900.0).contains(&node.bounds.size.width.0)
+        }) {
+            return;
+        }
+        step(app.back());
+    }
+    panic!("Back did not restore the guide preview");
+}
+
 fn exact_archive(url: &str, start: i64) {
     assert!(url.contains("/one.ts?"), "channel one's archive: {url}");
     assert!(
@@ -161,7 +173,7 @@ fn exact_archive(url: &str, start: i64) {
 fn both_archive_entries_fall_back_once_without_an_external_handler() {
     let Some(home) = isolated!() else { return };
     iptv_app::set_external_player_handler(Some(false));
-    let (mut fixture, _server, sources, at) = start(home);
+    let (mut fixture, _server, sources, at) = start(home, false);
     let app = &mut fixture.app;
     for menu in [false, true] {
         previous(app);
@@ -182,11 +194,7 @@ fn both_archive_entries_fall_back_once_without_an_external_handler() {
         if app.shows("id:menu-panel") {
             step(app.back());
         }
-        if app.shows("id:play-bar-layer") {
-            step(app.press("id:play-bar-back"));
-        } else {
-            step(app.back());
-        }
+        back_to_guide(app);
     }
 }
 
@@ -194,7 +202,7 @@ fn both_archive_entries_fall_back_once_without_an_external_handler() {
 fn a_menu_archive_waits_for_parental_pin_and_cancel_opens_nothing() {
     let Some(home) = isolated!() else { return };
     iptv_app::set_external_player_handler(Some(false));
-    let (mut fixture, _server, sources, at) = start(home);
+    let (mut fixture, _server, sources, at) = start(home, false);
     let app = &mut fixture.app;
     personalization::menu(app, "Protect channel with PIN");
     let pin = |app: &mut Headless| {
@@ -217,8 +225,11 @@ fn a_menu_archive_waits_for_parental_pin_and_cancel_opens_nothing() {
     menu_replay(app);
     step(app.wait_for("id:parental-layer >> text:Enter parental PIN"));
     assert_eq!(iptv_app::player_opens(0), before);
+    assert!(!app.shows("id:menu-panel >> text:Turn off external player"));
+    assert!(!app.shows("text:No external player is installed, so this channel plays here."));
     step(app.press("id:parental-cancel"));
     assert_eq!(iptv_app::player_opens(0), before);
+    assert!(!app.shows("id:menu-panel >> text:Turn off external player"));
     menu_replay(app);
     step(app.wait_for("id:parental-layer >> text:Enter parental PIN"));
     pin(app);
@@ -229,6 +240,39 @@ fn a_menu_archive_waits_for_parental_pin_and_cancel_opens_nothing() {
     );
     exact_archive(sources.lock().unwrap().last().unwrap(), at);
     assert_eq!(iptv_app::player_opens(0), before + 1);
+}
+
+#[test]
+fn fullscreen_restart_keeps_the_playing_channel_outside_the_browse_group() {
+    let Some(home) = isolated!() else { return };
+    iptv_app::set_external_player_handler(Some(false));
+    let (mut fixture, _server, sources, at) = start(home, true);
+    let app = &mut fixture.app;
+    previous(app);
+    step(app.press_key("enter"));
+    step(app.wait_until("first captured archive playing", WAIT, |_| {
+        !sources.lock().unwrap().is_empty()
+    }));
+    if app.shows("id:menu-panel") {
+        step(app.back());
+    }
+    back_to_guide(app);
+    personalization::group(app, "Sport");
+    // The ordinary fullscreen shortcut keeps channel A while the guide is on B.
+    step(app.press_key("f"));
+    step(app.press_key("shift+f10"));
+    step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
+    let before = iptv_app::player_opens(0);
+    let published = sources.lock().unwrap().len();
+    step(app.press("id:menu-panel >> text:Play from the beginning"));
+    step(
+        app.wait_until("one restart of the captured playing channel", WAIT, |_| {
+            iptv_app::player_opens(0) == before + 1 && sources.lock().unwrap().len() > published
+        }),
+    );
+    exact_archive(sources.lock().unwrap().last().unwrap(), at + 3600);
+    assert_eq!(iptv_app::player_opens(0), before + 1);
+    assert!(!app.shows("id:menu-panel >> text:Turn off external player"));
 }
 
 #[cfg(target_os = "linux")]
@@ -319,10 +363,58 @@ impl Drop for Player {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn fullscreen_same_group_restart_transfers_the_captured_player_once() {
+    let Some(home) = isolated!() else { return };
+    let player = Player::start(home.path());
+    // Start internally, then make the generated external handler available.
+    // Environment setup above precedes all app/mock-server threads.
+    iptv_app::set_external_player_handler(Some(false));
+    let (mut fixture, server, sources, at) = start(home, false);
+    let app = &mut fixture.app;
+    previous(app);
+    step(app.press_key("enter"));
+    step(
+        app.wait_until("internal archive prepared before transfer", WAIT, |_| {
+            !sources.lock().unwrap().is_empty()
+        }),
+    );
+    if app.shows("id:menu-panel") {
+        step(app.back());
+    }
+    iptv_app::set_external_player_handler(Some(true));
+    let internal = iptv_app::player_opens(0);
+    let requests = server.requests().len();
+    step(app.press_key("shift+f10"));
+    step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
+    step(app.press("id:menu-panel >> text:Play from the beginning"));
+    step(app.wait_until(
+        "same-group full-screen choice admitted externally",
+        WAIT,
+        |_| player.count("admitted") == 1,
+    ));
+    step(
+        app.wait_until("native source retired for the handoff", WAIT, |_| {
+            !iptv_app::player_has_source(0)
+        }),
+    );
+    assert_eq!(player.count("launched"), 1);
+    assert_eq!(player.count("rejected"), 0);
+    assert_eq!(
+        iptv_app::player_opens(0),
+        internal,
+        "transfer retires native playback without reopening it"
+    );
+    assert_eq!(server.requests().len(), requests + 1);
+    exact_archive(server.requests().last().unwrap(), at + 3600);
+    drop(player);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn both_archive_entries_handoff_once_and_a_superseded_group_never_reaches_upstream() {
     let Some(home) = isolated!() else { return };
     let player = Player::start(home.path());
-    let (mut fixture, server, _sources, at) = start(home);
+    let (mut fixture, server, _sources, at) = start(home, false);
     let app = &mut fixture.app;
     let internal = iptv_app::player_opens(0);
     for (index, menu) in [false, true].into_iter().enumerate() {

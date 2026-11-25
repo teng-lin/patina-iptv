@@ -7,6 +7,7 @@ use std::rc::Rc;
 
 pub(crate) struct Choice {
     list: ListId,
+    playing_context: bool,
     pending: crate::player::PendingArchive,
     end: i64,
     authority: Option<ResolutionAuthority>,
@@ -18,25 +19,33 @@ impl Choice {
         list: ListId,
         channel: usize,
         program: Program,
+        playing_context: bool,
     ) -> Option<Self> {
         let authority = iptv_guide::combined::epg_channel(schedule, channel)
             .and_then(|(epg, local)| epg.resolution_authority(local));
         Some(Self {
             list,
+            playing_context,
             pending: crate::player::PendingArchive::capture(schedule, channel, program.start, 0)?,
             end: crate::guide::unix_of(schedule, program.end),
             authority,
         })
     }
 
-    fn remap(&self, schedule: &dyn Schedule, now: i32) -> Option<(usize, Program)> {
+    fn remap(
+        &self,
+        schedule: &dyn Schedule,
+        now: i32,
+        playing: Option<usize>,
+    ) -> Option<(usize, Program)> {
         let (channel, Playback::CatchUp { start, .. }) = self.pending.remap(schedule)? else {
             return None;
         };
         let authority = iptv_guide::combined::epg_channel(schedule, channel)
             .and_then(|(epg, local)| epg.resolution_authority(local));
         let program = schedule.program_at(channel, start);
-        if authority != self.authority
+        if (self.playing_context && playing != Some(channel))
+            || authority != self.authority
             || program.start != start
             || crate::guide::unix_of(schedule, program.end) != self.end
             || !program.can_replay(now, schedule.catchup_days(channel))
@@ -47,17 +56,44 @@ impl Choice {
     }
 
     pub(crate) fn resolve(&self, ui: Ui) -> Option<(usize, Program)> {
-        let schedule = crate::schedule();
-        let entry = self.list.resolve(&*schedule)?;
-        if ui
-            .list
-            .with_untracked(|list| ListId::of(list.entry(), &*schedule))
-            != self.list
+        self.resolve_in(ui, false)
+    }
+
+    pub(crate) fn resolve_handoff(&self, ui: Ui) -> Option<(usize, Program)> {
+        self.resolve_in(ui, true)
+    }
+
+    fn resolve_in(&self, ui: Ui, handoff: bool) -> Option<(usize, Program)> {
+        let schedule = crate::runtime_owner::schedule();
+        if !self.playing_context
+            && ui
+                .list
+                .with_untracked(|list| ListId::of(list.entry(), &*schedule))
+                != self.list
         {
             return None;
         }
         let now = ui.focus.with_untracked(|focus| focus.now);
-        let (channel, program) = self.remap(&*schedule, now)?;
+        let mut playing = ui.playing.get_untracked();
+        if handoff
+            && self.playing_context
+            && playing.is_none()
+            && let Some(authority) = &self.authority
+            && crate::external_player::pending_target(ui).as_ref()
+                == Some(&iptv_core::parental::Target::live(
+                    authority.source(),
+                    authority.channel().id.as_str(),
+                ))
+        {
+            // The authorized handoff deliberately retires native playback.
+            // Only its current, same-target transfer may bridge that boundary.
+            playing = self.pending.remap(&*schedule).map(|(channel, _)| channel);
+        }
+        let (channel, program) = self.remap(&*schedule, now, playing)?;
+        if self.playing_context {
+            return Some((channel, program));
+        }
+        let entry = self.list.resolve(&*schedule)?;
         // Rebuild membership from current data: the mounted list can be waiting
         // for the same catalog publication to reach its own effect.
         let members = ChannelList::build(
@@ -69,21 +105,52 @@ impl Choice {
         members.row_of(channel)?;
         Some((channel, program))
     }
+
+    pub(crate) fn external_context(&self, ui: Ui) -> bool {
+        let schedule = crate::runtime_owner::schedule();
+        let Some(entry) = self.list.resolve(&*schedule) else {
+            return false;
+        };
+        let Some((channel, _)) = self.resolve(ui) else {
+            return false;
+        };
+        ui.list
+            .with_untracked(|list| ListId::of(list.entry(), &*schedule))
+            == self.list
+            && ChannelList::build(
+                entry,
+                &*schedule,
+                &crate::favorites::favorite_channels(),
+                &crate::favorites::recent_channels(),
+            )
+            .row_of(channel)
+            .is_some()
+    }
 }
 
-pub(crate) fn select(ui: Ui, list: ListId, channel: usize, program: Program) {
-    let Some(choice) = Choice::capture(&*crate::schedule(), list, channel, program).map(Rc::new)
+pub(crate) fn select(
+    ui: Ui,
+    list: ListId,
+    channel: usize,
+    program: Program,
+    playing_context: bool,
+) {
+    let Some(choice) =
+        Choice::capture(&*crate::runtime_owner::schedule(), list, channel, program, playing_context).map(Rc::new)
     else {
         return;
     };
     let Some((channel, _)) = choice.resolve(ui) else {
         return;
     };
-    if !crate::player::allow_guide_channel(channel)
-        || crate::external_player::open_archive(ui, choice.clone())
-    {
+    if !crate::player::allow_guide_channel(channel) {
         return;
     }
+    let missing_handler = match crate::external_player::open_archive(ui, choice.clone()) {
+        crate::external_player::Outcome::Handled => return,
+        crate::external_player::Outcome::Internal => None,
+        crate::external_player::Outcome::MissingHandler(list) => Some(list),
+    };
     // Internal fallback uses the same captured choice after PIN entry. Ui::play
     // remains the internal player operation and still applies its own gates.
     crate::external_player::cancel_pending(ui);
@@ -100,6 +167,11 @@ pub(crate) fn select(ui: Ui, list: ListId, channel: usize, program: Program) {
         let Some((channel, program)) = choice.resolve(ui) else {
             return;
         };
+        let session = ui
+            .player
+            .main()
+            .health
+            .with_untracked(|health| health.session());
         ui.play(
             channel,
             Playback::CatchUp {
@@ -107,7 +179,13 @@ pub(crate) fn select(ui: Ui, list: ListId, channel: usize, program: Program) {
                 offset: 0,
             },
         );
-        if ui.playing.get_untracked() == Some(channel)
+        if ui
+            .player
+            .main()
+            .health
+            .with_untracked(|health| health.session())
+            != session
+            && ui.playing.get_untracked() == Some(channel)
             && ui.playback.get_untracked()
                 == (Playback::CatchUp {
                     start: program.start,
@@ -116,6 +194,9 @@ pub(crate) fn select(ui: Ui, list: ListId, channel: usize, program: Program) {
         {
             ui.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
+            if let Some(list) = missing_handler {
+                crate::external_player::missing_handler(ui, list);
+            }
         }
     };
     if let Some(target) = crate::parental_view::live_target(ui, channel) {
@@ -204,13 +285,41 @@ mod tests {
     fn archive_choice_keeps_channel_and_utc_occurrence_across_reorder_and_epoch() {
         let before = guide(false, NOW, "original", NOW - 1800, false);
         let program = before.program_at(0, before.minute(NOW - 3600));
-        let choice = Choice::capture(&before, ListId::All, 0, program).unwrap();
+        let choice = Choice::capture(&before, ListId::All, 0, program, false).unwrap();
         let after = guide(true, NOW + 86400, "original", NOW - 1800, false);
-        let (channel, remapped) = choice.remap(&after, after.minute(NOW)).unwrap();
+        let (channel, remapped) = choice.remap(&after, after.minute(NOW), None).unwrap();
         assert_eq!(channel, 1);
         assert_eq!(after.channel_key(channel), before.channel_key(0));
         assert_eq!(crate::guide::unix_of(&after, remapped.start), NOW - 3600);
         assert_eq!(crate::guide::unix_of(&after, remapped.end), NOW - 1800);
+    }
+
+    #[test]
+    fn playing_context_keeps_its_target_without_borrowing_the_browse_list() {
+        let schedule = guide(false, NOW, "original", NOW - 1800, false);
+        let program = schedule.program_at(0, schedule.minute(NOW - 3600));
+        let choice = Choice::capture(
+            &schedule,
+            ListId::Group("unrelated".into()),
+            0,
+            program,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            choice.remap(&schedule, schedule.minute(NOW), Some(0)),
+            Some((0, program))
+        );
+        assert!(
+            choice
+                .remap(&schedule, schedule.minute(NOW), Some(1))
+                .is_none()
+        );
+        assert!(
+            choice
+                .remap(&schedule, schedule.minute(NOW), None)
+                .is_none()
+        );
     }
 
     #[test]
@@ -221,6 +330,7 @@ mod tests {
             ListId::All,
             0,
             before.program_at(0, before.minute(NOW - 3600)),
+            false,
         )
         .unwrap();
         for after in [
@@ -228,11 +338,11 @@ mod tests {
             guide(false, NOW, "replacement", NOW - 1800, false),
             guide(false, NOW, "original", NOW - 1800, true),
         ] {
-            assert!(choice.remap(&after, after.minute(NOW)).is_none());
+            assert!(choice.remap(&after, after.minute(NOW), None).is_none());
         }
         assert!(
             choice
-                .remap(&before, before.minute(NOW + 4 * 86400))
+                .remap(&before, before.minute(NOW + 4 * 86400), None)
                 .is_none()
         );
         before.set_organization(iptv_guide::Organization {
@@ -246,6 +356,6 @@ mod tests {
             .into(),
             ..Default::default()
         });
-        assert!(choice.remap(&before, before.minute(NOW)).is_none());
+        assert!(choice.remap(&before, before.minute(NOW), None).is_none());
     }
 }

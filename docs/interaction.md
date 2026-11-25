@@ -311,6 +311,9 @@ visible entry point for touch and pointer users.
   than a different player. The captured group, channel and program occurrence
   are rechecked after PIN entry and before a handoff; changing focus never
   substitutes another target. A removed or changed target is rejected.
+  A full-screen menu can restart the playing channel even when the guide
+  last browsed another group; that unrelated group cannot authorize an
+  external-player handoff.
   Android offers installed video apps.
   Linux tries VLC, then mpv. The option appears only while such a player is
   installed, or while it is on, so it can be turned off. A choice made after

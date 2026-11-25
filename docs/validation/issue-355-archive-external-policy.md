@@ -6,6 +6,10 @@ external-player preference. The menu action chooses a starting position,
 rather than overriding the player's group preference. Unsupported hosts,
 groups without that preference and a missing external handler retain the
 internal player path. A changed or removed captured target is rejected.
+The full-screen player's captured channel can restart outside the last
+browsed group; that unrelated group does not authorize external playback.
+Missing-handler guidance appears after authorized internal playback starts,
+so canceling a PIN leaves neither a reset menu nor a playback claim.
 
 ## Measured baseline
 
@@ -37,8 +41,8 @@ with native 1280×720 ready, and opened no additional external player.
 This directly confirms the policy difference on the baseline; it is not
 evidence of the corrected behavior.
 
-The retained baseline evidence is outside the repository in
-`/Users/tenglin/src/patina-355-evidence/`: `baseline-apk-proof.json`,
+The retained baseline evidence is in the host's out-of-repository
+issue-355 evidence directory: `baseline-apk-proof.json`,
 `baseline-comparison-proof.json` and `tv-baseline/manual` phases 07–13.
 The APK, native trees, screenshots and runtime logs are retained there.
 
@@ -48,11 +52,29 @@ The existing app harness contains generated catch-up scenarios for both
 entry points, no-handler internal fallback and PIN cancellation/approval.
 A Linux scenario uses a generated player process to request the real
 handoff relay, checking one upstream archive request per accepted choice
-and rejecting a superseded group's pending handoff. Private app tests
-check channel/UTC remapping and rejection after occurrence-end, source,
+and rejecting a superseded group's pending handoff. Another Linux scenario
+covers a same-group full-screen transfer across native source retirement.
+Private app tests check channel/UTC remapping and rejection after occurrence-end, source,
 channel authority, guide-offset or archive-window changes.
 
-At this documentation update the implementation has not been compiled or
-run: native device work owns the available build capacity. Corrected
-Android behavior, Linux execution, standard native/Wasm checks and
-independent review remain required before completion is claimed.
+After rebasing onto `6bff0438`, the final local macOS checks passed all
+three private archive-choice tests and all three app scenarios: both
+entry-point fallbacks, PIN cancellation/approval, and full-screen restart
+outside the browse group with both groups' external preferences enabled.
+The existing TV replay journey also passed. These checks used Rust
+`1.99.1` and the exact NSH revision above.
+
+The final local checks also passed:
+
+- All 211 private app tests and all six existing parental app scenarios.
+- `cargo test -p iptv-core -p iptv-presentation`: 569 native tests and
+  two compile-fail doctests.
+- Wasm builds of both portable crates, native `cargo build -p iptv-app`,
+  and the app's `wasm32-unknown-unknown` check.
+- Affected app/presentation Clippy with `test-support`, `--all-targets`
+  and `-D warnings`; scoped formatting and `git diff --check`.
+- The 32-test CI-plan suite, including the test-executable budget.
+
+Corrected Android behavior and execution of the Linux relay scenarios
+remain required before completion is claimed. The macOS host cannot run
+the Linux generated-handler process tests.
