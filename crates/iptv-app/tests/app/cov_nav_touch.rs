@@ -273,33 +273,23 @@ fn multiview_past_the_account(app: &mut Headless, now: i64) {
     step(app.wait_for_within("text:/^Xtream Channel 1 · /", IMPORT));
     // Explicitly open the account alone: this journey exercises its
     // single-account multiview picker and stream-limit warning.
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.wait_for("text:Playlists >> nth=0"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:127.0.0.1"));
-    step(app.press("text:127.0.0.1"));
+    step(app.open_playlist_actions("127.0.0.1"));
     step(app.wait_for("text:Show this playlist"));
     step(app.press("text:Show this playlist"));
+    step(app.wait_for_gone("id:playlists-task", IMPORT));
+    step(app.press("id:settings-content >> text:Close"));
     step(app.wait_for_within("text:Xtream Channel 1", IMPORT));
     // Refresh the account in single-source mode so its session limit is
     // known before opening multiview (a cached mode switch has no account fetch).
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.wait_for("text:Playlists >> nth=0"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:127.0.0.1"));
-    step(app.press("text:127.0.0.1"));
+    step(app.open_playlist_actions("127.0.0.1"));
     step(app.wait_for("text:Refresh now"));
     step(app.press("text:Refresh now"));
-    step(app.wait_for("text:127.0.0.1"));
-    step(app.press("text:127.0.0.1"));
+    step(app.wait_for_gone("id:playlists-task", IMPORT));
+    step(app.open_playlist_actions("127.0.0.1"));
     step(app.wait_for_within("text:Refresh now", IMPORT));
     step(app.back());
-    step(app.wait_for("text:Close"));
-    step(app.press("text:Close"));
+    step(app.wait_for_gone("id:playlists-task", IMPORT));
+    step(app.press("id:settings-content >> text:Close"));
     // Channel 1 full screen; Multiview asks at once.
     step(app.press("text:Xtream Channel 1"));
     step(app.press("text:Xtream Channel 1"));

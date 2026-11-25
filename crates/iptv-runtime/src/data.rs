@@ -329,6 +329,23 @@ pub async fn rename(
     Ok(())
 }
 
+/// Puts the playlists in `order` (their hand order); lists showing
+/// several follow it unless they sort by name.
+pub async fn reorder(owner: &Rc<crate::Runtime>, order: Vec<SourceId>) -> Result<(), StoreError> {
+    library::reorder(owner, order).await?;
+    order_changed(owner);
+    Ok(())
+}
+
+/// The playlists' order changed (arranged, or `playlists.sort`
+/// switched): lists showing several follow.
+pub fn order_changed(owner: &Rc<crate::Runtime>) {
+    library::order_changed(owner);
+    if combined::active(owner) {
+        rebuild_combined(owner);
+    }
+}
+
 /// Changes the guide sources of playlist `id`; false when `edit` changes
 /// nothing. The guide on screen is checked again once the edits settle
 /// (changed feeds are downloaded); another playlist's when it is shown.
@@ -1347,6 +1364,9 @@ fn start_import_with(
                     return;
                 }
                 if cancel.is_canceled() {
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Canceled,
+                    ))));
                     return;
                 }
                 if !services.can_import() {
@@ -1358,7 +1378,12 @@ fn start_import_with(
                     return;
                 }
                 let failed = tx.clone();
-                if !services.submit_import(visible, move |worker| async move {
+                // A new source with a typed guide waits for its terminal
+                // result even after Cancel. Waiting for an unrelated import
+                // on the browser lane should not delay that result.
+                let cancel_while_queued =
+                    (job.stored.is_none() && job.epg_url.is_some()).then(|| cancel.clone());
+                if !services.submit_import(visible, cancel_while_queued, move |worker| async move {
                     pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
                 }) {
                     let _ = failed.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Busy))));
@@ -1507,8 +1532,13 @@ fn start_import_with(
                 if !open {
                     if !finished {
                         failed = true;
-                        log::warn!("iptv data: import thread ended without a result");
-                        on_update(Update::Done(Err(ImportFailure::new(FailureKind::Network))));
+                        let kind = if cancel.is_canceled() {
+                            FailureKind::Canceled
+                        } else {
+                            log::warn!("iptv data: import ended without a result");
+                            FailureKind::Network
+                        };
+                        on_update(Update::Done(Err(ImportFailure::new(kind))));
                     }
                     break;
                 }
@@ -1988,9 +2018,13 @@ async fn read_guide(
         owner.end_guide_check(source);
         return;
     }
-    if !services.submit_import(source_is_visible(owner, source), move |worker| async move {
-        guide_pipeline(&worker, source, &tx, read, &cancel).await;
-    }) {
+    if !services.submit_import(
+        source_is_visible(owner, source),
+        None,
+        move |worker| async move {
+            guide_pipeline(&worker, source, &tx, read, &cancel).await;
+        },
+    ) {
         owner.end_guide_check(source);
         // What the caller asked for decides, not what running work reduced
         // it to: a read meant to check is owed one, and a background check

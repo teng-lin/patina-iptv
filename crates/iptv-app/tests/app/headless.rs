@@ -59,6 +59,64 @@ impl Headless {
         }
     }
 
+    /// Settings → Playlists (the rail's Settings, then its Playlists page):
+    /// every stored playlist with its check box, then adding, refreshing
+    /// and ordering them. The playlists replaced the rail's own entry.
+    pub fn open_settings_playlists(&mut self) -> Result<(), String> {
+        self.ready_for_input()?;
+        let page = "id:settings-content >> role:tab[Playlists]";
+        if !self.screen().matches(page)? {
+            let item = "id:navigation-rail >> label:Settings";
+            if !self.screen().matches(item)? {
+                self.open_guide_groups()?;
+                self.wait_for(item)?;
+            }
+            self.press(item)?;
+            self.wait_for(page)?;
+        }
+        self.press(page)?;
+        // Its rows: the playlists first (many push the commands below).
+        self.wait_until("the Playlists page", Duration::from_secs(5), |screen| {
+            screen
+                .matches("id:settings-content >> text:Add a playlist")
+                .unwrap_or(false)
+                || screen
+                    .matches("id:settings-content >> role:checkbox")
+                    .unwrap_or(false)
+        })
+    }
+
+    /// Playlist `name`'s own actions, from its Settings → Playlists row (a
+    /// long press there, as Menu or a right-click).
+    pub fn open_playlist_actions(&mut self, name: &str) -> Result<(), String> {
+        self.open_settings_playlists()?;
+        let row = format!(
+            "id:settings-content >> role:checkbox[/^{}/]",
+            regex_escape(name)
+        );
+        self.wait_for(&row)?;
+        self.long_press(&row)?;
+        self.wait_for("id:playlist-actions-list")
+    }
+
+    /// Closes the settings (after a playlist's task there ended): their
+    /// Close button where shown, else Back until they are gone.
+    pub fn close_settings(&mut self) -> Result<(), String> {
+        self.wait_for_gone("id:playlists-task", Duration::from_secs(10))?;
+        let close = "id:settings-content >> text:Close";
+        if self.screen().matches(close)? {
+            self.press(close)?;
+        } else {
+            for _ in 0..3 {
+                if !self.screen().matches("id:settings-screen")? {
+                    break;
+                }
+                self.back()?;
+            }
+        }
+        self.wait_for_gone("id:settings-screen", Duration::from_secs(5))
+    }
+
     pub fn play_bar_option(&mut self, name: &str) -> Result<(), String> {
         let direct = format!("id:play-bar-layer >> label:{name}");
         if self.screen().matches(&direct)? {
@@ -268,4 +326,17 @@ impl DerefMut for Headless {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
+
+/// `text` as a selector regex that matches it literally.
+fn regex_escape(text: &str) -> String {
+    text.chars()
+        .flat_map(|c| {
+            let special = "\\.+*?()|[]{}^$/".contains(c);
+            special
+                .then_some('\\')
+                .into_iter()
+                .chain(std::iter::once(c))
+        })
+        .collect()
 }

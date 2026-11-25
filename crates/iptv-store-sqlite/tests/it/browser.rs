@@ -407,6 +407,35 @@ fn a_guide_publishes_in_slices_on_the_copy_while_the_guide_stays_readable() {
     let mut saved = Saved::default();
     saved.save(&store);
 
+    // Cancel an add after a real browser copy has written its catalog
+    // and started the guide. The next IndexedDB save cannot see them.
+    let mut copy = store.begin_publish().unwrap();
+    let canceled_source = copy
+        .add_source(&m3u_source("Canceled synthetic add"))
+        .unwrap();
+    catalog(&mut copy, canceled_source, 300, "canceled");
+    let (mut stage, import, _dir) = crate::staged::stage(&copy, &build("Canceled"));
+    let mut job = EpgReplacement::new(
+        copy,
+        canceled_source,
+        &mut stage,
+        std::borrow::Cow::Owned(import),
+        feeds.to_vec(),
+        2,
+    )
+    .unwrap();
+    for _ in 0..3 {
+        assert!(matches!(job.step(400).unwrap(), Step::Pending));
+    }
+    assert!(store.source(canceled_source).unwrap().is_none());
+    store.abandon_publish(job.into_store()).unwrap();
+    drop(stage);
+    assert_eq!(title(&store, source), ["Old 7/0"]);
+    assert!(saved.save(&store).is_empty());
+    let restored = Store::open_browser(&saved.restore()).unwrap();
+    assert_eq!(title(&restored, source), ["Old 7/0"]);
+    assert!(restored.source(canceled_source).unwrap().is_none());
+
     let copy = store.begin_publish().unwrap();
     let (mut stage, import, _dir) = crate::staged::stage(&copy, &build("New"));
     let mut job = EpgReplacement::new(

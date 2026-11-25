@@ -85,6 +85,12 @@ pub fn long_press_ms() -> u64 {
     crate::runtime::settings::long_press_ms(&get())
 }
 
+/// Playlists are listed in their hand order (`playlists.sort`), which
+/// "Reorder playlists" arranges; sorted by name, it is not offered.
+pub fn playlists_by_hand() -> bool {
+    choice(keys::PLAYLIST_SORT) == "manual"
+}
+
 /// `general.user_agent`, when set.
 pub fn user_agent() -> Option<String> {
     crate::runtime::settings::user_agent(&get())

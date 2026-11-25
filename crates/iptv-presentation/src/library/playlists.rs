@@ -1,15 +1,23 @@
 //! The playlists screen's state: the stored playlists, "Refresh all" and
 //! "Add playlist" rows, a sheet of actions for one playlist, its provider
 //! details form (`details.rs`), a delete confirmation, and text entry
-//! (rename, User-Agent, a detail). Focus is kept by identity (a
+//! (rename, User-Agent, a detail), and the playlists' manual order
+//! (the shared [`Reorder`] mode). Focus is kept by identity (a
 //! playlist's id), never by list position. Pure: the view feeds it remote
 //! keys and taps and carries out the [`Effect`]s it returns.
+//!
+//! Opened for one task from elsewhere (a playlist's actions from the
+//! settings, its rename or the reorder from the groups column's menu:
+//! [`Only`]), the screen is [`Screen::finished`] once that task ends,
+//! instead of falling back to its list.
 
 use iptv_library::SourceId;
 use iptv_providers::model::{Source, SourceKind};
 
 use super::details::{Form, Param};
 use iptv_library::Playlist;
+
+use crate::reorder::{self, Exit, LeaveChoice, Outcome, Reorder};
 
 /// A focusable row of the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +33,8 @@ pub enum Item {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Act {
     Show,
+    /// Browse every enabled playlist together (with two or more).
+    AllPlaylists,
     Enabled,
     RefreshInterval,
     RefreshOnStart,
@@ -60,9 +70,27 @@ pub fn next_streams(current: Option<u32>) -> Option<u32> {
     }
 }
 
+/// The one task the screen was opened for, if not its list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Only {
+    /// One playlist's actions (the settings' playlist rows).
+    Actions,
+    /// Renaming one playlist.
+    Rename,
+    /// Arranging the playlists by hand.
+    Reorder,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layer {
     List,
+    /// The playlists in their manual order, being arranged
+    /// ([`Screen::reorder`]). Leaving with changes asks first: `save`
+    /// is the focused answer.
+    Reorder {
+        confirming: bool,
+        save: bool,
+    },
     Actions {
         id: SourceId,
         focus: Act,
@@ -108,6 +136,10 @@ pub enum Notice {
 pub enum Key {
     Up,
     Down,
+    /// Reorder mode only: the first item, or move it to the top.
+    Left,
+    /// Reorder mode only: the last item, or move it to the bottom.
+    Right,
     Ok,
     Back,
     Menu,
@@ -139,6 +171,8 @@ pub enum Effect {
     /// Move `id`'s streams-at-once ceiling on ([`next_streams`] of its own
     /// value, which the app reads).
     CycleStreams(SourceId),
+    /// Keep this manual order of the playlists.
+    Reorder(Vec<SourceId>),
     Close,
 }
 
@@ -158,6 +192,8 @@ pub struct Screen {
     editing: Option<Editing>,
     notice: Option<Notice>,
     details: Option<Form>,
+    order: Option<Reorder<SourceId>>,
+    only: Option<Only>,
 }
 
 impl Screen {
@@ -174,7 +210,165 @@ impl Screen {
             editing: None,
             notice: None,
             details: None,
+            order: None,
+            only: None,
         }
+    }
+
+    /// The screen opened for one task ([`Only`]): `id`'s actions, its
+    /// rename, or the reorder (focused on `id`). `None` when `id` is not
+    /// one of `rows` (the reorder needs two playlists or more).
+    pub fn only(rows: Vec<Playlist>, id: SourceId, only: Only) -> Option<Self> {
+        let mut screen = Self::new(rows, Some(id));
+        let opened = match only {
+            Only::Actions => screen.open_actions(id, Act::Show),
+            Only::Rename => {
+                let opened = screen.open_actions(id, Act::Rename);
+                if opened {
+                    screen.act(id, Act::Rename);
+                }
+                opened
+            }
+            Only::Reorder => screen.open_reorder(Some(id)),
+        };
+        screen.only = Some(only);
+        opened.then_some(screen)
+    }
+
+    /// What the screen was opened for, if not its list.
+    pub fn opened_for(&self) -> Option<Only> {
+        self.only
+    }
+
+    /// Opened for one task ([`Screen::only`]) and that task is over: the
+    /// app closes the screen.
+    pub fn finished(&self) -> bool {
+        let Some(only) = self.only else {
+            return false;
+        };
+        if self.editing.is_some() || self.notice.is_some() {
+            return false;
+        }
+        self.layer == Layer::List || (only == Only::Rename && self.details.is_none())
+    }
+
+    /// Starts arranging the playlists by hand, focused on `focus`.
+    /// Whether it could (two playlists or more).
+    pub fn open_reorder(&mut self, focus: Option<SourceId>) -> bool {
+        if self.rows.len() < 2 {
+            return false;
+        }
+        let ids: Vec<SourceId> = self.rows.iter().map(|r| r.id).collect();
+        self.order = Some(Reorder::new(ids, focus.as_ref()));
+        self.editing = None;
+        self.layer = Layer::Reorder {
+            confirming: false,
+            save: true,
+        };
+        true
+    }
+
+    /// The playlists being arranged ([`Layer::Reorder`]).
+    pub fn reorder(&self) -> Option<&Reorder<SourceId>> {
+        self.order.as_ref()
+    }
+
+    fn reorder_key(&mut self, key: Key, confirming: bool, save: bool) -> Option<Effect> {
+        let order = self.order.as_mut()?;
+        let outcome = if confirming {
+            match key {
+                Key::Up | Key::Down | Key::Left | Key::Right => {
+                    self.layer = Layer::Reorder {
+                        confirming,
+                        save: !save,
+                    };
+                    return None;
+                }
+                Key::Ok => order.resolve_leave(if save {
+                    LeaveChoice::Save
+                } else {
+                    LeaveChoice::Discard
+                }),
+                Key::Back | Key::Menu => order.resolve_leave(LeaveChoice::Stay),
+            }
+        } else {
+            let key = match key {
+                Key::Up => reorder::Key::Up,
+                Key::Down => reorder::Key::Down,
+                Key::Left => reorder::Key::Left,
+                Key::Right => reorder::Key::Right,
+                Key::Ok => reorder::Key::Ok,
+                Key::Back | Key::Menu => reorder::Key::Back,
+            };
+            order.key(key)
+        };
+        self.reorder_outcome(outcome)
+    }
+
+    fn reorder_outcome(&mut self, outcome: Outcome<SourceId>) -> Option<Effect> {
+        match outcome {
+            Outcome::ConfirmLeave => {
+                self.layer = Layer::Reorder {
+                    confirming: true,
+                    save: true,
+                };
+                None
+            }
+            Outcome::Done(exit) => {
+                let order = self.order.take()?;
+                if let Some(id) = order.focused() {
+                    self.focus = Item::Playlist(*id);
+                }
+                self.layer = Layer::List;
+                match exit {
+                    Exit::Saved(ids) => {
+                        let at = |id: SourceId| ids.iter().position(|o| *o == id);
+                        self.rows.sort_by_key(|r| at(r.id));
+                        Some(Effect::Reorder(ids))
+                    }
+                    Exit::Unchanged | Exit::Discarded => None,
+                }
+            }
+            _ => {
+                if self.order.as_ref().is_some_and(|o| !o.is_confirming()) {
+                    self.layer = Layer::Reorder {
+                        confirming: false,
+                        save: true,
+                    };
+                }
+                None
+            }
+        }
+    }
+
+    /// A tap on a playlist while arranging: focus it, or (focused) pick it
+    /// up or put it down.
+    pub fn tap_reorder(&mut self, id: SourceId) -> Option<Effect> {
+        let order = self.order.as_mut()?;
+        if order.is_confirming() {
+            return None;
+        }
+        let outcome = if order.focused() == Some(&id) {
+            order.toggle_selection()
+        } else {
+            order.focus_on(&id)
+        };
+        self.reorder_outcome(outcome)
+    }
+
+    /// A tap on the leave confirmation's answer while arranging.
+    pub fn resolve_reorder(&mut self, choice: LeaveChoice) -> Option<Effect> {
+        let order = self.order.as_mut()?;
+        let outcome = if order.is_confirming() {
+            order.resolve_leave(choice)
+        } else {
+            match choice {
+                LeaveChoice::Save => order.commit(),
+                LeaveChoice::Discard => order.cancel(),
+                LeaveChoice::Stay => return None,
+            }
+        };
+        self.reorder_outcome(outcome)
     }
 
     /// Opens the actions of `id` with `act` focused (from another screen,
@@ -246,6 +440,9 @@ impl Screen {
         let mut acts = Vec::new();
         if row.policy.enabled {
             acts.push(Act::Show);
+            if self.rows.iter().filter(|r| r.policy.enabled).count() > 1 {
+                acts.push(Act::AllPlaylists);
+            }
         }
         acts.extend([
             Act::Refresh,
@@ -286,6 +483,32 @@ impl Screen {
                 _ => Item::Add,
             };
         }
+        if self.order.is_some() && self.rows.len() < 2 {
+            self.order = None;
+            self.layer = Layer::List;
+        }
+        if let Some((mut was, focus)) = self
+            .order
+            .as_ref()
+            .map(|o| (o.original().to_vec(), o.focused().copied()))
+        {
+            // A playlist added or deleted meanwhile: arrange again from
+            // the new list, keeping the focus.
+            let mut now: Vec<SourceId> = self.rows.iter().map(|r| r.id).collect();
+            now.sort();
+            was.sort();
+            if now != was {
+                let layer = self.layer;
+                self.open_reorder(focus);
+                self.layer = match layer {
+                    Layer::Reorder { .. } => Layer::Reorder {
+                        confirming: false,
+                        save: true,
+                    },
+                    other => other,
+                };
+            }
+        }
         let gone = |id| !self.rows.iter().any(|r| r.id == id);
         match self.layer {
             Layer::Actions { id, .. } | Layer::Confirm { id, .. } | Layer::Details { id }
@@ -314,6 +537,7 @@ impl Screen {
         }
         match self.layer {
             Layer::List => self.list_key(key),
+            Layer::Reorder { confirming, save } => self.reorder_key(key, confirming, save),
             Layer::Actions { id, focus } => self.actions_key(id, focus, key),
             Layer::Confirm { id, delete } => match key {
                 Key::Up | Key::Down => {
@@ -325,6 +549,7 @@ impl Screen {
                 }
                 Key::Ok => self.confirm(id, delete),
                 Key::Back | Key::Menu => self.confirm(id, false),
+                Key::Left | Key::Right => None,
             },
             Layer::Details { id } => self.details_key(id, key),
         }
@@ -346,7 +571,7 @@ impl Screen {
                 };
             }
             (Key::Back, _) => return Some(Effect::Close),
-            (Key::Menu, _) => {}
+            (Key::Menu | Key::Left | Key::Right, _) => {}
         }
         None
     }
@@ -362,6 +587,7 @@ impl Screen {
                 self.layer = Layer::List;
                 return None;
             }
+            Key::Left | Key::Right => return None,
         };
         self.layer = Layer::Actions { id, focus: to };
         None
@@ -399,6 +625,7 @@ impl Screen {
             Act::CustomGroups => Some(Effect::CustomGroups(id)),
             Act::Channels | Act::Groups => Some(Effect::Organize(id, act == Act::Groups)),
             Act::Show => to_list(self, Effect::Show(id)),
+            Act::AllPlaylists => to_list(self, Effect::AllPlaylists),
             Act::Refresh => to_list(self, Effect::Refresh(id)),
             // The guide sources screen opens over the actions.
             Act::Guides => Some(Effect::Guides(id)),
@@ -456,6 +683,7 @@ impl Screen {
                 };
                 None
             }
+            Key::Left | Key::Right => None,
         }
     }
 
@@ -710,6 +938,7 @@ mod tests {
             s.acts(B),
             [
                 Act::Show,
+                Act::AllPlaylists,
                 Act::Refresh,
                 Act::Rename,
                 Act::Enabled,
@@ -729,6 +958,7 @@ mod tests {
         assert_eq!(s.layer(), Layer::List);
         // Menu opens them too; Back closes them, keeping the focus.
         s.key(Key::Menu);
+        s.key(Key::Down);
         s.key(Key::Down);
         assert_eq!(s.key(Key::Ok), Some(Effect::Refresh(B)));
         s.key(Key::Ok);
@@ -959,6 +1189,130 @@ mod tests {
             }
         );
         assert!(!s.open_actions(SourceId(9), Act::OnDemand));
+    }
+    #[test]
+    fn all_playlists_is_offered_with_another_enabled_one() {
+        let mut s = Screen::new(rows(), Some(A));
+        assert!(s.acts(A).contains(&Act::AllPlaylists));
+        assert_eq!(s.act(A, Act::AllPlaylists), Some(Effect::AllPlaylists));
+        assert_eq!(s.layer(), Layer::List);
+        let s = Screen::new(vec![row(A, "First")], Some(A));
+        assert!(!s.acts(A).contains(&Act::AllPlaylists));
+    }
+
+    fn ids(screen: &Screen) -> Vec<SourceId> {
+        screen.reorder().unwrap().items().to_vec()
+    }
+
+    #[test]
+    fn reorder_moves_a_playlist_and_saves_the_new_order() {
+        let mut s = Screen::new(rows(), Some(A));
+        assert!(s.open_reorder(Some(B)));
+        assert_eq!(s.reorder().unwrap().focused(), Some(&B));
+        // OK picks it up, Up moves it, OK puts it down, Back leaves.
+        assert_eq!(s.key(Key::Ok), None);
+        assert_eq!(s.key(Key::Up), None);
+        assert_eq!(ids(&s), [B, A, C]);
+        assert_eq!(s.key(Key::Ok), None);
+        assert_eq!(s.key(Key::Back), None);
+        assert_eq!(
+            s.layer(),
+            Layer::Reorder {
+                confirming: true,
+                save: true
+            }
+        );
+        assert_eq!(s.key(Key::Ok), Some(Effect::Reorder(vec![B, A, C])));
+        assert_eq!(s.layer(), Layer::List);
+        assert_eq!(s.focus(), Item::Playlist(B));
+        let names: Vec<SourceId> = s.rows().iter().map(|r| r.id).collect();
+        assert_eq!(names, [B, A, C]);
+    }
+
+    #[test]
+    fn reorder_can_be_discarded_or_left_unchanged() {
+        let mut s = Screen::new(rows(), Some(A));
+        s.open_reorder(Some(A));
+        s.key(Key::Ok);
+        s.key(Key::Right);
+        assert_eq!(ids(&s), [B, C, A]);
+        s.key(Key::Back);
+        // Down chooses Discard; OK confirms it.
+        s.key(Key::Down);
+        assert_eq!(s.key(Key::Ok), None);
+        assert_eq!(s.layer(), Layer::List);
+        let names: Vec<SourceId> = s.rows().iter().map(|r| r.id).collect();
+        assert_eq!(names, [A, B, C]);
+        // Nothing moved: Back leaves without asking.
+        s.open_reorder(None);
+        assert_eq!(s.key(Key::Back), None);
+        assert_eq!(s.layer(), Layer::List);
+    }
+
+    #[test]
+    fn reorder_needs_two_playlists() {
+        let mut s = Screen::new(vec![row(A, "First")], Some(A));
+        assert!(!s.open_reorder(Some(A)));
+        assert!(Screen::only(vec![row(A, "First")], A, Only::Reorder).is_none());
+    }
+
+    #[test]
+    fn taps_focus_then_pick_up_while_arranging() {
+        let mut s = Screen::new(rows(), Some(A));
+        s.open_reorder(Some(A));
+        s.tap_reorder(C);
+        assert_eq!(s.reorder().unwrap().focused(), Some(&C));
+        s.tap_reorder(C);
+        assert!(s.reorder().unwrap().selected().is_some());
+        s.key(Key::Left);
+        assert_eq!(ids(&s), [C, A, B]);
+        assert_eq!(
+            s.resolve_reorder(LeaveChoice::Save),
+            Some(Effect::Reorder(vec![C, A, B]))
+        );
+    }
+
+    #[test]
+    fn a_screen_opened_for_one_task_finishes_with_it() {
+        // Actions from the settings: Back ends them.
+        let mut s = Screen::only(rows(), B, Only::Actions).unwrap();
+        assert!(matches!(s.layer(), Layer::Actions { id: B, .. }));
+        assert!(!s.finished());
+        s.key(Key::Back);
+        assert!(s.finished());
+        // Rename: the entry is open at once; keeping a new name ends it.
+        let mut s = Screen::only(rows(), B, Only::Rename).unwrap();
+        assert_eq!(s.editing().map(|e| e.kind), Some(EditKind::Rename));
+        s.set_text("Renamed");
+        assert_eq!(s.commit(), Some(Effect::Rename(B, "Renamed".into())));
+        assert!(s.finished());
+        // An empty name says why and stays.
+        let mut s = Screen::only(rows(), B, Only::Rename).unwrap();
+        s.set_text("  ");
+        assert_eq!(s.commit(), None);
+        assert!(!s.finished());
+        // Reorder: leaving ends it.
+        let mut s = Screen::only(rows(), C, Only::Reorder).unwrap();
+        assert_eq!(s.reorder().unwrap().focused(), Some(&C));
+        s.key(Key::Back);
+        assert!(s.finished());
+        // The full screen never finishes on its own.
+        let mut s = Screen::new(rows(), Some(A));
+        s.key(Key::Ok);
+        s.key(Key::Back);
+        assert!(!s.finished());
+    }
+
+    #[test]
+    fn new_rows_while_arranging_keep_the_mode_and_its_focus() {
+        let mut s = Screen::new(rows(), Some(A));
+        s.open_reorder(Some(B));
+        s.set_rows(vec![row(A, "First"), row(B, "Second")]);
+        assert_eq!(ids(&s), [A, B]);
+        assert_eq!(s.reorder().unwrap().focused(), Some(&B));
+        s.set_rows(vec![row(A, "First")]);
+        assert!(s.reorder().is_none());
+        assert_eq!(s.layer(), Layer::List);
     }
 }
 

@@ -5,9 +5,9 @@ mod library;
 pub(crate) mod pages;
 pub(crate) mod stored;
 pub use crate::runtime::data::{
-    Activity, Job, Playlist, Purpose, Update, delete, edit_guides, organization_changed, refresh,
-    refresh_all, rename, set_policy, set_user_agent, source_from_draft, start_import, switch_all,
-    switch_to, toggle_playlist, try_details,
+    Activity, Job, Playlist, Purpose, Update, delete, edit_guides, order_changed,
+    organization_changed, refresh, refresh_all, rename, reorder, set_policy, set_user_agent,
+    source_from_draft, start_import, switch_all, switch_to, toggle_playlist, try_details,
 };
 pub use crate::runtime::data::{assign, combined};
 pub use crate::runtime::guides;
