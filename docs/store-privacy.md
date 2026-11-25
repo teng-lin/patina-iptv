@@ -55,7 +55,8 @@ artifact, SDK inventory and console evidence with the store submission record.
 
 The [November 24, 2026 evidence record](store-privacy-221.md) maps the source
 inventory to the proposed form answers and separates source, package, emulator,
-physical-device and console verification. It also records the policy deployment
-check and the remaining owner actions. An unverified worksheet is not a saved
+physical-device and console verification. It records the pre-update policy's
+deployment check and requires a fresh check after the updated policy publishes,
+along with the remaining owner actions. An unverified worksheet is not a saved
 or published store declaration. Issue #221 remains open until the candidate
 builds, both listing fields and both completed forms have been checked.
