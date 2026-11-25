@@ -786,7 +786,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .child(ui_layers(ui, groups, rows))
         // The desktops' picture-in-picture window, while it is open.
         .child(desktop::pip_window::window(ui))
-        .child(desktop::player_windows::windows(ui))
+        .child(desktop::player_windows::windows(ui, go_back))
 }
 
 /// Everything over the video: the guide, the full-screen tap catcher,
@@ -871,7 +871,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(chooser::layer(ui, false))
         // Over the popups it opens (choosers, program details), so its
         // buttons stay usable and toggle them.
-        .child(play_bar::layer(ui))
+        .child(play_bar::layer(ui, go_back))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
         .child(vod_view::layer(ui))
