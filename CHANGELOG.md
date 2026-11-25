@@ -78,6 +78,9 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Hide phone Multiview on metered networks, update every entry point when the
+  active network changes, and keep the heard tile playing full screen when
+  an existing session closes (#279).
 - Import usable channels from M3U playlists containing malformed or unsupported
   stream addresses, and report the skipped entries instead of rejecting the
   whole playlist.
