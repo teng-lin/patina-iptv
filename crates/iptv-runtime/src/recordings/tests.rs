@@ -979,7 +979,32 @@ async fn native_host_captures_after_its_ui_owner_is_drained_and_dropped() {
     assert!(job.bytes >= 188);
     assert!(path(&services, id, false).is_file());
     assert!(state.lock().viewers.is_empty());
-    state.stop();
+    // Scheduler publication can read the committed row before the capture task
+    // records its post-commit observation. Stop joins that task before inspecting
+    // its complete history; observing Completed alone does not join the worker.
+    assert!(state.stop());
+    #[cfg(feature = "test-support")]
+    {
+        let history = host::operation_history(&root);
+        let phases: Vec<_> = history
+            .iter()
+            .filter(|event| event.job == id)
+            .map(|event| event.phase)
+            .collect();
+        let claimed = phases
+            .iter()
+            .position(|phase| *phase == "recording claimed")
+            .expect("actual capture claim observed");
+        let drained = phases
+            .iter()
+            .position(|phase| *phase == "capture worker drained")
+            .expect("actual worker drain observed");
+        let committed = phases
+            .iter()
+            .position(|phase| *phase == "completion committed Completed")
+            .expect("actual terminal commit observed");
+        assert!(claimed < drained && drained < committed, "{phases:?}");
+    }
 }
 
 #[cfg(feature = "test-support")]
