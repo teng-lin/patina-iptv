@@ -33,6 +33,12 @@ writes the chunks it is handed; the destination policy, the store and
 everything else are the app's (`docs/security.md`, "Browser build of the
 app").
 
+When the page is hidden, AVPlay closes the stream and reports
+`pictureLost` for its source token. On return it opens the same source
+with its existing pause setting. Patina keeps the backdrop opaque until
+`firstRender` reports a picture for the active token. Ordinary buffering
+leaves the backdrop clear after the first frame.
+
 ## Build and install
 
 Requirements as for `hosts/tizen`: the pinned nightly with `rust-src`
