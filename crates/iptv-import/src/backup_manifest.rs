@@ -165,6 +165,19 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, &'static str> {
             length,
         });
     }
+    // Entries are files: none can also be another entry's directory. Search
+    // the completed set so order does not matter. One range query per name
+    // avoids repeated ancestor comparisons for deeply nested untrusted paths.
+    for name in &seen {
+        let prefix = format!("{name}/");
+        if seen
+            .range(prefix.as_str()..)
+            .next()
+            .is_some_and(|next| next.starts_with(&prefix))
+        {
+            return Err("Backup contains conflicting file paths");
+        }
+    }
     if !seen.contains("iptv.sqlite") || !seen.contains("settings.json") {
         return Err("Backup is missing the library or settings");
     }
@@ -177,6 +190,48 @@ pub fn parse(bytes: &[u8]) -> Result<Manifest, &'static str> {
 #[cfg(test)]
 mod windows_tests {
     use super::*;
+
+    #[test]
+    fn file_entries_cannot_also_be_directory_ancestors() {
+        let manifest = |names: &[&str]| {
+            let files = ["iptv.sqlite", "settings.json"]
+                .into_iter()
+                .chain(names.iter().copied())
+                .map(|name| serde_json::json!({"name": name, "length": 0}))
+                .collect::<Vec<_>>();
+            serde_json::to_vec(&serde_json::json!({
+                "format": "patina-whole-app", "version": 1,
+                "root": "/generated/Patina", "files": files
+            }))
+            .unwrap()
+        };
+        for names in [
+            &["playlists/a", "playlists/a/generated.m3u"][..],
+            &["playlists/a/generated.m3u", "playlists/a"][..],
+            &[
+                "playlists/a",
+                "playlists/a-thing",
+                "playlists/a/generated.m3u",
+            ][..],
+            &["playlists/家庭", "playlists/家庭/生成.m3u"][..],
+        ] {
+            assert_eq!(
+                parse(&manifest(names)),
+                Err("Backup contains conflicting file paths"),
+                "{names:?}"
+            );
+        }
+        for names in [
+            ["playlists/a", "playlists/ab"],
+            ["playlists/a/one.m3u", "playlists/a/two.m3u"],
+            ["playlists/家庭", "playlists/家庭-other/生成.m3u"],
+        ] {
+            assert!(parse(&manifest(&names)).is_ok(), "{names:?}");
+        }
+        let nested = format!("playlists/{}generated.m3u", "nested/".repeat(4096));
+        assert!(parse(&manifest(&[&nested])).is_ok());
+    }
+
     #[test]
     fn backup_roots_accept_absolute_storage_paths_but_not_device_or_relative_paths() {
         for (root, valid) in [

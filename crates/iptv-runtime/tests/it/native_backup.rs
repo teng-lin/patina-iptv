@@ -819,7 +819,7 @@ fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore()
                 assert_eq!(error.message(), "Backup is missing a local playlist file");
             }
             "parent-file entry before child" | "parent-file entry after child" => {
-                assert_eq!(error.message(), "Could not stage backup files");
+                assert_eq!(error.message(), "Backup contains conflicting file paths");
             }
             _ => {}
         }

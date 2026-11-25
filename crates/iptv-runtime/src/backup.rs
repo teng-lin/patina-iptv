@@ -747,13 +747,9 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
         let len = entry.length;
         let path = work.0.join(name);
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .context("Could not stage backup files")
-                .map_err(Error::entry_conflict)?;
+            fs::create_dir_all(parent).context("Could not stage backup files")?;
         }
-        let mut output = private_file(&path)
-            .context("Could not stage backup files")
-            .map_err(Error::entry_conflict)?;
+        let mut output = private_file(&path).context("Could not stage backup files")?;
         if io::copy(&mut input.take(len), &mut output)
             .context("Could not read backup files")
             .map_err(Error::damaged)?

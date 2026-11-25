@@ -87,18 +87,6 @@ impl Error {
         self
     }
 
-    /// Extraction owns a fresh private tree: an existing entry or a file used
-    /// as a parent is a conflict between archive paths, not existing user data.
-    pub(crate) fn entry_conflict(mut self) -> Self {
-        if matches!(
-            self.cause,
-            Cause::Io(io::ErrorKind::AlreadyExists | io::ErrorKind::NotADirectory)
-        ) {
-            self.rejection = Some(Rejection::Damaged);
-        }
-        self
-    }
-
     /// The text for the user.
     pub fn message(&self) -> &'static str {
         self.message
@@ -230,7 +218,6 @@ mod tests {
             let error = Error::new("Could not read backup files", io::Error::from(kind));
             assert_eq!(error.damaged().rejection(), None);
             assert_eq!(error.invalid_reference().rejection(), None);
-            assert_eq!(error.entry_conflict().rejection(), None);
             assert_eq!(error.cause(), Cause::Io(kind));
         }
         let absent = Error::new(
