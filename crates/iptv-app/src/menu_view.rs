@@ -307,15 +307,8 @@ pub(crate) fn invalidate_shifted_context(
     {
         ui.description.set(None);
     }
-    ui.recordings.update(|state| {
-        if state
-            .context
-            .as_ref()
-            .is_some_and(|(origin, _)| shifted(origin.channel))
-        {
-            state.context = None;
-        }
-    });
+    ui.recordings
+        .update(|state| state.invalidate_context(shifted));
 }
 
 /// Closes the menu or popover, keeping focus on its guide selection.

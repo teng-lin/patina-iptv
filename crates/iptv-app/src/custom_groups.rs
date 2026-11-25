@@ -10,6 +10,7 @@ use crate::{
     ui_kit,
     wizard_view::entry::{self, Sheet},
 };
+use iptv_core::membership::Member;
 use iptv_library::{ChannelScope, CustomGroup, CustomGroupId, SourceId};
 use iptv_nav::Action;
 use iptv_presentation::membership::Membership;
@@ -44,6 +45,114 @@ pub struct Open {
     status: String,
 }
 impl Open {
+    fn new(source: SourceId) -> Self {
+        Self {
+            source,
+            groups: Vec::new(),
+            page: Page::Groups,
+            scope: ChannelScope::All,
+            members: Membership::default(),
+            control: Some(0),
+            editing: None,
+            status: String::new(),
+        }
+    }
+
+    fn origin(&self) -> Option<CustomGroupId> {
+        if let ChannelScope::Custom(group) = self.scope {
+            Some(group)
+        } else {
+            None
+        }
+    }
+
+    fn show_page(&mut self, page: Page, control: usize) {
+        self.page = page;
+        self.control = Some(control);
+    }
+
+    fn enter_members(&mut self, scope: ChannelScope, rows: Vec<Member>) {
+        self.scope = scope;
+        self.members = Membership::new(rows);
+        self.show_page(Page::Members, 0);
+        self.status.clear();
+    }
+
+    fn reload_members(&mut self, groups: Vec<CustomGroup>, rows: Vec<Member>) {
+        self.reload_groups(groups);
+        self.members.reload(rows);
+    }
+
+    fn finish_transfer(&mut self, status: String) {
+        self.members.selected.clear();
+        self.show_page(Page::Members, 3);
+        self.status = status;
+    }
+
+    fn back_page(&mut self) {
+        match self.page {
+            Page::Groups => {}
+            Page::Destination(moving) => self.show_page(Page::Members, if moving { 4 } else { 3 }),
+            Page::Delete(group) => self.show_page(Page::Detail(group), 3),
+            Page::Members => match self.origin() {
+                Some(group) => self.show_page(Page::Detail(group), 0),
+                None => self.show_page(Page::Groups, 1),
+            },
+            Page::Detail(group) => {
+                let control = self
+                    .groups
+                    .iter()
+                    .position(|r| r.id == group)
+                    .map_or(0, |at| at + 2);
+                self.show_page(Page::Groups, control);
+            }
+        }
+    }
+
+    fn begin_text(&mut self, kind: Text) {
+        let value = match kind {
+            Text::Filter => self.members.query().to_owned(),
+            Text::Rename(group) => self
+                .groups
+                .iter()
+                .find(|r| r.id == group)
+                .map(|g| g.name.clone())
+                .unwrap_or_default(),
+            Text::Create => String::new(),
+        };
+        self.status.clear();
+        self.editing = Some((kind, value));
+    }
+
+    fn step(&mut self, by: isize, count: usize) {
+        if let Some(at) = self.control {
+            if by > 0
+                && at + 1 >= count
+                && self.page == Page::Members
+                && self.members.visible_len() > 0
+            {
+                self.control = None;
+            } else {
+                self.control = Some(at.saturating_add_signed(by).min(count.saturating_sub(1)));
+            }
+        } else if by < 0
+            && self
+                .members
+                .visible_at(0)
+                .is_some_and(|r| Some(&r.id) == self.members.focus.as_ref())
+        {
+            self.control = Some(count.saturating_sub(1));
+        } else {
+            self.members.step(by);
+        }
+    }
+
+    fn toggle_member_row(&mut self, id: &str) {
+        self.control = None;
+        self.members.focus = Some(id.into());
+        self.members.toggle(id);
+    }
+
     fn reload_groups(&mut self, groups: Vec<CustomGroup>) {
         let offset = match self.page {
             Page::Groups => Some(2),
@@ -56,7 +165,7 @@ impl Open {
                 if matches!(self.page, Page::Destination(_)) {
                     self.groups
                         .iter()
-                        .filter(|g| Some(g.id) != origin(self))
+                        .filter(|g| Some(g.id) != self.origin())
                         .nth(at)
                 } else {
                     self.groups.get(at)
@@ -68,7 +177,7 @@ impl Open {
             let at = if matches!(self.page, Page::Destination(_)) {
                 self.groups
                     .iter()
-                    .filter(|g| Some(g.id) != origin(self))
+                    .filter(|g| Some(g.id) != self.origin())
                     .position(|g| g.id == id)
             } else {
                 self.groups.iter().position(|g| g.id == id)
@@ -152,16 +261,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
         return;
     }
     advance();
-    ui.custom_groups.set(Some(Open {
-        source,
-        groups: Vec::new(),
-        page: Page::Groups,
-        scope: ChannelScope::All,
-        members: Membership::default(),
-        control: Some(0),
-        editing: None,
-        status: String::new(),
-    }));
+    ui.custom_groups.set(Some(Open::new(source)));
     request(
         ui,
         crate::runtime::commands::custom_groups(&crate::runtime(), source),
@@ -184,13 +284,6 @@ fn close(ui: Ui) {
     dismiss_keyboard();
     ui.custom_groups.set(None);
 }
-fn origin(s: &Open) -> Option<CustomGroupId> {
-    if let ChannelScope::Custom(g) = s.scope {
-        Some(g)
-    } else {
-        None
-    }
-}
 fn reload(ui: Ui) {
     let Some((source, scope)) = read(ui, |s| (s.source, s.scope.clone())) else {
         return;
@@ -200,10 +293,7 @@ fn reload(ui: Ui) {
         crate::runtime::commands::group_members(&crate::runtime(), source, scope),
         |ui, result| {
             if let Ok((groups, rows)) = result {
-                update(ui, |s| {
-                    s.reload_groups(groups);
-                    s.members.reload(rows);
-                });
+                update(ui, |s| s.reload_members(groups, rows));
             } else {
                 update(ui, |s| {
                     s.status = tr("The list could not be reloaded. Reopen it and try again.").into()
@@ -232,67 +322,27 @@ fn show_members(ui: Ui, scope: ChannelScope) {
         ui,
         crate::runtime::commands::members(&crate::runtime(), source, loaded_scope),
         move |ui, result| match result {
-            Ok(rows) => update(ui, |s| {
-                s.scope = scope;
-                s.members = Membership::new(rows);
-                s.page = Page::Members;
-                s.control = Some(0);
-                s.status.clear();
-            }),
+            Ok(rows) => update(ui, |s| s.enter_members(scope, rows)),
             Err(error) => report(ui, Err(error)),
         },
     );
 }
 pub fn back(ui: Ui) -> bool {
     advance();
-    let Some(s) = read(ui, Clone::clone) else {
+    let Some((editing, root)) = read(ui, |s| (s.editing.is_some(), s.page == Page::Groups)) else {
         return false;
     };
-    if s.editing.is_some() {
+    if editing {
         cancel_text(ui);
-        return true;
-    }
-    match s.page {
-        Page::Groups => close(ui),
-        Page::Destination(moving) => update(ui, |s| {
-            s.page = Page::Members;
-            s.control = Some(if moving { 4 } else { 3 });
-        }),
-        Page::Delete(g) => update(ui, |s| {
-            s.page = Page::Detail(g);
-            s.control = Some(3);
-        }),
-        Page::Members => update(ui, |s| {
-            s.page = origin(s).map_or(Page::Groups, Page::Detail);
-            s.control = Some(if origin(s).is_some() { 0 } else { 1 });
-        }),
-        Page::Detail(g) => update(ui, |s| {
-            s.page = Page::Groups;
-            s.control = Some(
-                s.groups
-                    .iter()
-                    .position(|r| r.id == g)
-                    .map_or(0, |at| at + 2),
-            );
-        }),
+    } else if root {
+        close(ui);
+    } else {
+        update(ui, Open::back_page);
     }
     true
 }
 fn begin_text(ui: Ui, kind: Text) {
-    update(ui, |s| {
-        let value = match kind {
-            Text::Filter => s.members.query().to_owned(),
-            Text::Rename(g) => s
-                .groups
-                .iter()
-                .find(|r| r.id == g)
-                .map(|g| g.name.clone())
-                .unwrap_or_default(),
-            Text::Create => String::new(),
-        };
-        s.status.clear();
-        s.editing = Some((kind, value));
-    });
+    update(ui, |s| s.begin_text(kind));
 }
 fn cancel_text(ui: Ui) {
     update(ui, |s| s.editing = None);
@@ -396,7 +446,7 @@ fn labels(s: &Open) -> Vec<String> {
                 tr("Clear selection").into(),
                 tr("Copy selected").into(),
             ];
-            if origin(s).is_some() {
+            if s.origin().is_some() {
                 labels.extend([tr("Move selected").into(), tr("Remove selected").into()]);
             }
             labels
@@ -405,7 +455,7 @@ fn labels(s: &Open) -> Vec<String> {
             .chain(
                 s.groups
                     .iter()
-                    .filter(|g| Some(g.id) != origin(s))
+                    .filter(|g| Some(g.id) != s.origin())
                     .map(|g| group_label(&g.name, g.channel_count)),
             )
             .collect(),
@@ -420,8 +470,8 @@ fn act(ui: Ui, index: usize) {
         return;
     };
     let removing = match s.page {
-        Page::Members if index == 5 => origin(&s),
-        Page::Destination(true) if index > 0 => origin(&s),
+        Page::Members if index == 5 => s.origin(),
+        Page::Destination(true) if index > 0 => s.origin(),
         Page::Delete(g) if index > 0 => Some(g),
         _ => None,
     };
@@ -444,10 +494,7 @@ fn act(ui: Ui, index: usize) {
             1 => show_members(ui, ChannelScope::All),
             _ => {
                 if let Some(g) = s.groups.get(index - 2) {
-                    update(ui, |s| {
-                        s.page = Page::Detail(g.id);
-                        s.control = Some(0);
-                    });
+                    update(ui, |s| s.show_page(Page::Detail(g.id), 0));
                 }
             }
         },
@@ -461,10 +508,7 @@ fn act(ui: Ui, index: usize) {
                 None,
                 iptv_presentation::organization::Mode::Reorder,
             ),
-            3 => update(ui, |s| {
-                s.page = Page::Delete(g);
-                s.control = Some(0);
-            }),
+            3 => update(ui, |s| s.show_page(Page::Delete(g), 0)),
             _ => {
                 back(ui);
             }
@@ -473,18 +517,17 @@ fn act(ui: Ui, index: usize) {
             0 => begin_text(ui, Text::Filter),
             1 => update(ui, |s| s.members.select_filtered()),
             2 => update(ui, |s| s.members.selected.clear()),
-            3 | 4 if !s.members.selected.is_empty() => update(ui, |s| {
-                s.page = Page::Destination(index == 4);
-                s.control = Some(0);
-            }),
-            5 if origin(&s).is_some() => {
+            3 | 4 if !s.members.selected.is_empty() => {
+                update(ui, |s| s.show_page(Page::Destination(index == 4), 0));
+            }
+            5 if s.origin().is_some() => {
                 let ids: Vec<_> = s
                     .members
                     .selection()
                     .into_iter()
                     .map(ContentId::from_stored)
                     .collect();
-                let origin = origin(&s).unwrap();
+                let origin = s.origin().unwrap();
                 mutate(
                     ui,
                     s.source,
@@ -502,7 +545,7 @@ fn act(ui: Ui, index: usize) {
             let Some(target) = s
                 .groups
                 .iter()
-                .filter(|g| Some(g.id) != origin(&s))
+                .filter(|g| Some(g.id) != s.origin())
                 .nth(index - 1)
             else {
                 return;
@@ -520,7 +563,7 @@ fn act(ui: Ui, index: usize) {
                 crate::runtime::commands::transfer_custom_members(
                     &crate::runtime(),
                     s.source,
-                    origin(&s),
+                    s.origin(),
                     target,
                     ids,
                     moving,
@@ -528,11 +571,8 @@ fn act(ui: Ui, index: usize) {
                 move |ui, result| match result {
                     Ok(count) => {
                         update(ui, |s| {
-                            s.members.selected.clear();
-                            s.page = Page::Members;
-                            s.control = Some(3);
                             let count = [("count", count.into())];
-                            s.status = if moving {
+                            let status = if moving {
                                 trf(
                                     "{count, plural, one {# channel moved.} \
                                      other {# channels moved.}}",
@@ -545,6 +585,7 @@ fn act(ui: Ui, index: usize) {
                                     &count,
                                 )
                             };
+                            s.finish_transfer(status);
                         });
                         report(ui, Ok(()));
                     }
@@ -562,10 +603,7 @@ fn act(ui: Ui, index: usize) {
                     crate::runtime::commands::delete_custom_group(&crate::runtime(), g),
                     |ui, result| {
                         if result.is_ok() {
-                            update(ui, |s| {
-                                s.page = Page::Groups;
-                                s.control = Some(0);
-                            });
+                            update(ui, |s| s.show_page(Page::Groups, 0));
                         }
                         report(ui, result);
                     },
@@ -601,29 +639,7 @@ pub fn key(ui: Ui, action: Action) {
         Action::MoveUp | Action::MoveDown => {
             let by = if action == Action::MoveDown { 1 } else { -1 };
             let count = read(ui, |s| labels(s).len()).unwrap_or(0);
-            update(ui, |s| {
-                if let Some(at) = s.control {
-                    if by > 0
-                        && at + 1 >= count
-                        && s.page == Page::Members
-                        && s.members.visible_len() > 0
-                    {
-                        s.control = None;
-                    } else {
-                        s.control = Some(
-                            (at as isize + by).clamp(0, count.saturating_sub(1) as isize) as usize,
-                        );
-                    }
-                } else if by < 0
-                    && s.members
-                        .visible_at(0)
-                        .is_some_and(|r| Some(&r.id) == s.members.focus.as_ref())
-                {
-                    s.control = Some(count.saturating_sub(1));
-                } else {
-                    s.members.step(by);
-                }
-            });
+            update(ui, |s| s.step(by, count));
         }
         _ => {}
     }
@@ -729,11 +745,7 @@ fn member_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
     };
     let toggle = move || {
         if let Some(row) = item() {
-            update(ui, |s| {
-                s.control = None;
-                s.members.focus = Some(row.id.clone());
-                s.members.toggle(&row.id);
-            });
+            update(ui, |s| s.toggle_member_row(&row.id));
         }
     };
     ui_kit::action(ui, size, label, focused, 0xFFFFFF, toggle)
@@ -870,6 +882,39 @@ mod tests {
         assert_eq!(s.page, Page::Groups);
         assert_eq!(s.control, Some(0));
     }
+    #[test]
+    fn membership_pages_keep_the_group_and_restore_the_action_on_back() {
+        let mut screen = screen();
+        let group = CustomGroupId(2);
+        screen.show_page(Page::Detail(group), 0);
+        screen.enter_members(
+            ChannelScope::Custom(group),
+            vec![Member {
+                id: "synthetic".into(),
+                name: "Synthetic channel".into(),
+            }],
+        );
+        screen.toggle_member_row("synthetic");
+        assert!(screen.members.selected.contains("synthetic"));
+        assert_eq!(screen.control, None);
+        screen.step(-1, 6);
+        assert_eq!(screen.control, Some(5));
+
+        screen.show_page(Page::Destination(true), 0);
+        screen.back_page();
+        assert_eq!(screen.control, Some(4));
+        screen.show_page(Page::Destination(true), 0);
+        screen.finish_transfer("Moved".into());
+        assert!(screen.members.selected.is_empty());
+        assert_eq!(screen.page, Page::Members);
+        assert_eq!(screen.control, Some(3));
+        screen.back_page();
+        assert_eq!(screen.page, Page::Detail(group));
+        screen.back_page();
+        assert_eq!(screen.page, Page::Groups);
+        assert_eq!(screen.control, Some(3));
+    }
+
     #[test]
     fn destination_excludes_source_and_retains_focused_target_identity() {
         let mut s = screen();

@@ -249,6 +249,15 @@ pub struct Server {
 impl Server {
     /// Serves `bodies` (path → body) from a free port until the test ends.
     pub fn start(bodies: &[(&str, String)]) -> Self {
+        Self::start_with(bodies, |_| {})
+    }
+
+    /// Waits for the test's callback before replying to each request target.
+    pub fn start_with(
+        bodies: &[(&str, String)],
+        before_response: impl Fn(&str) + Send + Sync + 'static,
+    ) -> Self {
+        let before_response = Arc::new(before_response);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let bodies: HashMap<String, String> = bodies
@@ -260,6 +269,7 @@ impl Server {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let served = served.clone();
+                let before_response = before_response.clone();
                 std::thread::spawn(move || {
                     let mut reader = BufReader::new(&stream);
                     let mut first = String::new();
@@ -271,8 +281,9 @@ impl Server {
                     while reader.read_line(&mut line).is_ok_and(|n| n > 2) {
                         line.clear();
                     }
-                    let path = first.split_whitespace().nth(1).unwrap_or("/");
-                    let path = path.split('?').next().unwrap_or(path);
+                    let target = first.split_whitespace().nth(1).unwrap_or("/");
+                    before_response(target);
+                    let path = target.split('?').next().unwrap_or(target);
                     let body = served.lock().unwrap().get(path).cloned();
                     let (status, body) = match body {
                         Some(b) => ("200 OK", b),
