@@ -119,6 +119,105 @@ fn playlists(app: &mut Headless) {
     step(app.wait_for("text:Tap a playlist for what you can do with it"));
 }
 
+#[test]
+fn recycled_playlist_and_guide_rows_keep_their_content_and_actions() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let mut last = SourceId(0);
+    for index in 0..36 {
+        last = seed(&mut store, home.path(), &format!("Playlist {index:02}"));
+        store.set_guide_sources(last, &[]).unwrap();
+    }
+    let guide = std::fs::read(home.path().join("Playlist 35.xml")).unwrap();
+    let feeds: Vec<_> = (0..20)
+        .map(|index| {
+            let file = home.path().join(format!("feed-{index:02}.xml"));
+            std::fs::write(&file, &guide).unwrap();
+            GuideSource {
+                feed: iptv_epg::FeedId(2000 + index),
+                provider_index: None,
+                url: SecretUrl::new(file.to_string_lossy()),
+                name: Some(format!("Feed {index:02}")),
+                enabled: true,
+                shift_minutes: 0,
+            }
+        })
+        .collect();
+    store.set_guide_sources(last, &feeds).unwrap();
+    store.set_all_playlists(false).unwrap();
+    drop(store);
+    let mut settings = Settings::new();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(960.0), px(540.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-timeline"));
+    crate::device_settings::report(&mut app, "tv", false, true);
+    playlists(&mut app);
+    for _ in 0..35 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("id:playlists-list >> text:Playlist 35"));
+    step(app.press("id:playlists-list >> text:Playlist 35"));
+    // Reach the last action after cells have represented earlier actions.
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("id:playlist-actions-list >> text:Delete"));
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.wait_for("text:Delete “Playlist 35”?"));
+    step(app.press("text:Keep it"));
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.press("id:playlist-actions-list >> text:Guide data"));
+    step(app.wait_for("text:Guide data · Playlist 35"));
+    for _ in 0..19 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("id:guide-data-list >> text:20.  Feed 19"));
+    step(app.press("id:guide-data-list >> text:20.  Feed 19"));
+    step(app.wait_for("id:guide-source-actions >> text:Feed 19"));
+    step(app.press("id:guide-source-actions >> text:Switch off"));
+    step(app.wait_until(
+        "only the selected feed is switched off",
+        Duration::from_secs(5),
+        |_| {
+            let feeds = crate::isolated::open_database(&path)
+                .unwrap()
+                .guide_sources(last)
+                .unwrap();
+            feeds.len() == 20
+                && feeds
+                    .iter()
+                    .all(|feed| feed.enabled == (feed.feed != iptv_epg::FeedId(2019)))
+        },
+    ));
+    step(app.back());
+    for _ in 0..10 {
+        step(app.press_key("down"));
+    }
+    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    step(app.wait_for("text:Delete guide data for “Playlist 35”?"));
+    step(app.press("text:Cancel"));
+}
+
 fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
     crate::isolated::open_database(path)
         .unwrap()

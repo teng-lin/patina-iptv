@@ -419,12 +419,18 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
             rows.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
-    virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
-        .test_id("playlists-list")
-        .accessibility_elements_hidden(move || contents_hidden(ui))
-        .estimated_item_size(list_rows::pitch(size, ROW_THREE))
-        .element_ref(&rows)
-        .flex_1()
+    // A cell is reused for other positions; its handlers and test ID must follow.
+    virtual_list(count, move |at| {
+        dynamic(move || {
+            let index = at.index();
+            untracked(move || row(ui, size, index, focused_index))
+        })
+    })
+    .test_id("playlists-list")
+    .accessibility_elements_hidden(move || contents_hidden(ui))
+    .estimated_item_size(list_rows::pitch(size, ROW_THREE))
+    .element_ref(&rows)
+    .flex_1()
 }
 
 fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) -> impl IntoElement {
@@ -677,10 +683,20 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                     rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
                 }
             });
-            virtual_list(move || count, move |at| act_row(acts[at.index()]))
-                .estimated_item_size(list_rows::pitch(size, list_rows::ROW))
-                .element_ref(&rows)
-                .h(move || size.px(360.0))
+            virtual_list(
+                move || count,
+                move |at| {
+                    let acts = acts.clone();
+                    dynamic(move || {
+                        let act = acts[at.index()];
+                        untracked(move || act_row(act))
+                    })
+                },
+            )
+            .test_id("playlist-actions-list")
+            .estimated_item_size(list_rows::pitch(size, list_rows::ROW))
+            .element_ref(&rows)
+            .h(move || size.px(360.0))
         })
 }
 

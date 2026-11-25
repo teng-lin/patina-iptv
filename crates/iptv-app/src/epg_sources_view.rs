@@ -320,11 +320,17 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
             rows.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
-    virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
-        .accessibility_elements_hidden(move || contents_hidden(ui))
-        .estimated_item_size(list_rows::pitch(size, ROW_THREE))
-        .element_ref(&rows)
-        .flex_1()
+    virtual_list(count, move |at| {
+        dynamic(move || {
+            let index = at.index();
+            untracked(move || row(ui, size, index, focused_index))
+        })
+    })
+    .test_id("guide-data-list")
+    .accessibility_elements_hidden(move || contents_hidden(ui))
+    .estimated_item_size(list_rows::pitch(size, ROW_THREE))
+    .element_ref(&rows)
+    .flex_1()
 }
 
 /// The tr("Update the guide now") row's status.

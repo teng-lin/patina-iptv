@@ -82,6 +82,9 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Keep recycled playlist, guide source and playlist action rows attached to
+  the content and command they currently display.
+
 - Pin the macOS Android resource compiler used by local Android validation.
 
 - Keep interrupted and overlapping video touches from leaving a channel-swipe
