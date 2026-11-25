@@ -70,7 +70,28 @@ pub fn start_with_setup(
     manual: bool,
     setup: impl FnOnce(&mut Headless),
 ) -> Fixture {
-    let mut fixture = launch(home, settings, manual, |_| {}, setup);
+    focus_guide(launch(home, settings, manual, |_| {}, setup))
+}
+
+/// Start with a scenario's generated playlist and focus its channel list.
+pub fn start_with_playlist(
+    home: Home,
+    settings: Settings,
+    manual: bool,
+    playlist: &str,
+) -> Fixture {
+    focus_guide(launch_playlist(
+        home,
+        settings,
+        manual,
+        playlist,
+        |_, _| {},
+        |_| {},
+        |_| {},
+    ))
+}
+
+fn focus_guide(mut fixture: Fixture) -> Fixture {
     let app = &mut fixture.app;
     step(app.open_guide_groups());
     step(app.press_key("right"));
@@ -99,11 +120,23 @@ pub fn launch_prepared(
     configure: impl FnOnce(&mut EngineConfig),
     setup: impl FnOnce(&mut Headless),
 ) -> Fixture {
+    launch_playlist(home, settings, manual, M3U, prepare, configure, setup)
+}
+
+fn launch_playlist(
+    home: Home,
+    settings: Settings,
+    manual: bool,
+    playlist_text: &str,
+    prepare: impl FnOnce(&Path, SourceId),
+    configure: impl FnOnce(&mut EngineConfig),
+    setup: impl FnOnce(&mut Headless),
+) -> Fixture {
     let dir = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
     let playlist = home.path().join("synthetic.m3u");
-    std::fs::write(&playlist, M3U).unwrap();
+    std::fs::write(&playlist, playlist_text).unwrap();
     let path = dir.join("iptv.sqlite");
     let mut store = crate::isolated::open_database(&path).unwrap();
     let source = store
@@ -116,7 +149,7 @@ pub fn launch_prepared(
             }),
         })
         .unwrap();
-    let m = iptv_providers::m3u::parse_m3u(M3U);
+    let m = iptv_providers::m3u::parse_m3u(playlist_text);
     store
         .replace_catalog(source, &m.groups, &m.channels.items, &[], &[])
         .unwrap();

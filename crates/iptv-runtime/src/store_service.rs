@@ -144,6 +144,8 @@ struct Lane {
     /// The lane's connection; only its jobs, one at a time, lock it.
     connection: Arc<Mutex<Connection>>,
     metrics: Arc<Mutex<QueueMetrics>>,
+    #[cfg(all(test, feature = "native"))]
+    after_barrier_lookup: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl Lane {
     fn new(name: &'static str, execution: Arc<dyn crate::execution::Execution>) -> Self {
@@ -153,6 +155,8 @@ impl Lane {
             execution,
             connection: Arc::default(),
             metrics: Arc::default(),
+            #[cfg(all(test, feature = "native"))]
+            after_barrier_lookup: Mutex::default(),
         }
     }
 
@@ -239,8 +243,6 @@ pub(crate) struct Service {
     pub(crate) hooks: super::workers::Hooks,
     #[cfg(feature = "test-support")]
     pub(crate) reads: AtomicU64,
-    #[cfg(all(test, feature = "native"))]
-    before_cold_writer_close: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl Service {
     pub(crate) fn new(ports: crate::Ports) -> Self {
@@ -276,8 +278,6 @@ impl Service {
             hooks: Default::default(),
             #[cfg(feature = "test-support")]
             reads: AtomicU64::new(0),
-            #[cfg(all(test, feature = "native"))]
-            before_cold_writer_close: Mutex::default(),
         }
     }
 
@@ -384,17 +384,28 @@ impl Service {
         self.epochs.close_admission(epoch);
         #[cfg(feature = "test-support")]
         self.hooks.admission_closed();
+        if [&self.writer, &self.reader, &self.analysis]
+            .into_iter()
+            .all(|lane| lane.jobs.get().is_none())
+        {
+            self.epochs.close(epoch);
+            after_writer();
+            #[cfg(feature = "test-support")]
+            self.hooks.drained();
+            return true;
+        }
+        if !self.shared && self.writer.jobs.get().is_none() {
+            // An admitted reader may initialize the writer to open its
+            // connection. Initialize the same lane before queuing the FIFO
+            // barrier so no racing job ahead of it loses its epoch. Starting
+            // the lane itself does not open a store.
+            self.writer.initialize();
+        }
         if let Some(lane) = self.writer.jobs.get() {
             // A cooperative publish still in slices is abandoned on shutdown.
             lane.cancel_sliced();
         } else {
-            // An admitted reader can still be starting the writer to open its
-            // connection. Fence the epoch before looking up the barrier so a
-            // writer that races this branch either gets drained or cannot open.
-            #[cfg(all(test, feature = "native"))]
-            if let Some(before_close) = self.before_cold_writer_close.lock().unwrap().take() {
-                before_close();
-            }
+            // Cooperative readers open the shared connection without a writer.
             self.epochs.close(epoch);
         }
         // The writer first: once it closed the epoch, a late read cannot open
@@ -1006,14 +1017,18 @@ fn with_epoch<R>(
 }
 
 impl Lane {
+    fn initialize(&self) -> &dyn crate::execution::Lane {
+        self.jobs
+            .get_or_init(|| self.execution.lane(self.name).expect("start store service"))
+            .as_ref()
+    }
+
     fn lane(&self) -> Result<&dyn crate::execution::Lane, StoreError> {
-        let lane = self
-            .jobs
-            .get_or_init(|| self.execution.lane(self.name).expect("start store service"));
+        let lane = self.initialize();
         if lane.is_current() {
             return Err(StoreError::Unavailable("recursive store request"));
         }
-        Ok(&**lane)
+        Ok(lane)
     }
 
     /// Wraps `job` with its queue ticket and the lane's connection.
@@ -1100,7 +1115,15 @@ impl Lane {
         limit: std::time::Duration,
         job: impl FnOnce(&mut Connection) + Send + 'static,
     ) -> bool {
-        let Some(lane) = self.jobs.get() else {
+        let lane = self.jobs.get();
+        #[cfg(all(test, feature = "native"))]
+        {
+            let hook = self.after_barrier_lookup.lock().unwrap().take();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        let Some(lane) = lane else {
             return true;
         };
         if lane.is_current() {
@@ -1375,7 +1398,10 @@ mod tests {
             Ok(channel)
         });
         assert!(owner.writer.jobs.get().is_none());
-        *owner.before_cold_writer_close.lock().unwrap() = Some(Box::new(move || {
+        // Release the read only after shutdown has looked up its writer
+        // barrier. The old code observed an absent writer, then missed
+        // closing the connection this read caused it to open.
+        *owner.writer.after_barrier_lookup.lock().unwrap() = Some(Box::new(move || {
             release.send(()).unwrap();
             observed.recv_timeout(Duration::from_secs(5)).unwrap();
         }));

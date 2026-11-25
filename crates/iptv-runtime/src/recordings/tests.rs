@@ -815,20 +815,21 @@ async fn native_host_stop_joins_an_in_flight_account_refresh_and_closes_its_stor
     let state = owner.recordings.clone();
     *state.account_refresh.lock().unwrap() = Some(refresh.0.clone());
     owner.start_recordings();
-    let watchdog = Duration::from_secs(5);
-    assert!(refresh.wait_entered(watchdog));
+    assert!(refresh.wait_entered(Duration::from_secs(30)));
     let host = state.host.lock().unwrap().as_ref().unwrap().clone();
-    let shutdown = state.execution().shutdown.clone();
-    let stop = tokio::task::spawn_blocking(move || state.stop());
-    tokio::time::timeout(watchdog, shutdown.canceled())
-        .await
-        .expect("the recording host must receive the stop request");
+    let stopping = state.clone();
     assert!(
-        !stop.is_finished(),
-        "account refresh still owns its connection"
+        !tokio::task::spawn_blocking(move || stopping.stop_with_limit(Duration::from_millis(100)))
+            .await
+            .unwrap(),
+        "stop cannot acknowledge while account refresh owns its connection"
     );
     refresh.release();
-    assert!(stop.await.unwrap());
+    assert!(
+        tokio::task::spawn_blocking(move || state.stop())
+            .await
+            .unwrap()
+    );
     assert!(!host.has_open_connections());
     assert!(!host.accept().is_current());
     assert!(

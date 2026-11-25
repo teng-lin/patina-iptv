@@ -503,6 +503,16 @@ impl Runtime {
         share: bool,
         expected: Option<iptv_guide::playback::ResolutionAuthority>,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
+        static NEXT_ATTEMPT: AtomicU64 = AtomicU64::new(0);
+        let attempt =
+            log::log_enabled!(target: "iptv_runtime::source_preparation", log::Level::Debug)
+                .then(|| NEXT_ATTEMPT.fetch_add(1, Ordering::Relaxed));
+        let trace_preparation = move |phase: &'static str| {
+            if let Some(attempt) = attempt {
+                log::debug!(target: "iptv_runtime::source_preparation",
+                    "attempt {attempt}, surface {surface}: {phase}");
+            }
+        };
         trace_preparation("requested");
         let disabled = self.recordings_detached.get()
             || self.shutdown_requested.get()
@@ -876,10 +886,6 @@ impl Runtime {
             result.map_err(|_| Error::unavailable(key("Channel unavailable")))?
         }
     }
-}
-
-fn trace_preparation(phase: &'static str) {
-    log::debug!(target: "iptv_runtime::source_preparation", "{phase}");
 }
 
 #[cfg(test)]

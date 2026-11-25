@@ -350,6 +350,10 @@ impl State {
         true
     }
     pub(crate) fn stop(&self) -> bool {
+        self.stop_with_limit(Duration::from_secs(15))
+    }
+
+    fn stop_with_limit(&self, limit: Duration) -> bool {
         self.cancel_all_preparations();
         let generation = {
             let execution = self.execution();
@@ -362,9 +366,7 @@ impl State {
         // A replacement may already be running when this waiter wakes. Wait
         // for the execution we canceled, rather than its successor's flag.
         self.changed
-            .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| {
-                d.completed_run < generation
-            })
+            .wait_timeout_while(self.lock(), limit, |d| d.completed_run < generation)
             .map(|(data, _)| data.completed_run >= generation)
             .unwrap_or(false)
     }
