@@ -291,6 +291,15 @@ pub fn move_focus(ui: Ui, step: isize) {
         .update(|c| c.iter_mut().for_each(|c| c.list.move_focus(step)));
 }
 
+/// Left selects No and Right selects Yes without wrapping on repeats.
+pub(crate) fn focus_leave(ui: Ui, yes: bool) {
+    ui.chooser.update(|open| {
+        if let Some(open) = open.as_mut().filter(|open| open.kind == Kind::Leave) {
+            open.list.focus = usize::from(yes);
+        }
+    });
+}
+
 /// OK (or a tap) on entry `index`.
 pub fn pick(ui: Ui, index: usize) {
     let Some(open) = ui.chooser.get_untracked() else {

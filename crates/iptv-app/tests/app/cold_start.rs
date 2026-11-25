@@ -297,6 +297,10 @@ fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
     app.wait_for("id:store-startup-failure").unwrap();
     app.wait_for("text:Update Patina to open your library")
         .unwrap();
+    let handed = app
+        .back()
+        .expect_err("startup recovery without details leaves Back to the platform");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     assert!(!app.screen().matches("id:store-recovery-details").unwrap());
     assert!(!app.screen().matches("id:store-recovery-retry").unwrap());
     app.press_key("enter").unwrap();
@@ -311,6 +315,10 @@ fn a_newer_database_shows_recovery_details_instead_of_the_first_run_wizard() {
     .unwrap();
     app.back().unwrap();
     assert!(!app.screen().matches("id:store-recovery-details").unwrap());
+    let handed = app
+        .back()
+        .expect_err("after closing recovery details, Back is the platform's again");
+    assert!(handed.contains("nothing to go back from"), "{handed}");
     app.press_remote(nsh_tv::RemoteKey::Menu).unwrap();
     app.wait(Duration::from_secs(3)).unwrap();
     let screen = app.screen();

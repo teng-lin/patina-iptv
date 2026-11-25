@@ -201,6 +201,11 @@ pub(crate) fn store_failure_back(ui: crate::Ui) -> bool {
     change_controls(ui, Recovery::back)
 }
 
+/// Recovery is a root screen once its details have been closed.
+pub(crate) fn store_failure_back_leaves(ui: crate::Ui) -> bool {
+    controls(ui).is_some_and(|controls| !controls.details())
+}
+
 pub(crate) fn store_failure_key(ui: crate::Ui, action: iptv_nav::Action) {
     use iptv_nav::Action;
     let focus = match action {

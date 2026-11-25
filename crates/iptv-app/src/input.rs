@@ -670,10 +670,11 @@ fn resolve(
             context: (ctx, _),
         } => {
             if ctx == Context::Menu
-                && ui.menu.with(|menu| {
-                    menu.as_ref()
-                        .is_some_and(|menu| menu.group_offset.is_some())
-                })
+                && (ui.top_overlay() == Some(crate::overlays::Overlay::Leave)
+                    || ui.menu.with(|menu| {
+                        menu.as_ref()
+                            .is_some_and(|menu| menu.group_offset.is_some())
+                    }))
             {
                 match key {
                     RemoteKey::Left => return Some((key, press, Action::MoveLeft)),
@@ -874,6 +875,12 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         match action {
             Action::MoveUp => crate::chooser::move_focus(ui, -1),
             Action::MoveDown => crate::chooser::move_focus(ui, 1),
+            Action::MoveLeft if top == Some(Overlay::Leave) => {
+                crate::chooser::focus_leave(ui, false)
+            }
+            Action::MoveRight if top == Some(Overlay::Leave) => {
+                crate::chooser::focus_leave(ui, true)
+            }
             Action::Select => {
                 if let Some(i) = ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)) {
                     crate::chooser::pick(ui, i);

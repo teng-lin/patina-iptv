@@ -9,6 +9,10 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Keep Android's system Back gesture available on the first-run welcome and
+  library recovery root screens, and let all four D-pad directions select the
+  Tizen NSH exit confirmation's answers.
+
 - Cancel a channel swipe when a second finger lands on another player control.
 
 - Follow iPad hardware keyboard attachment and Switch Control at runtime.

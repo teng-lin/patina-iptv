@@ -245,14 +245,20 @@ pub fn back(ui: Ui) -> bool {
         entry::commit(ui);
         return true;
     }
-    let root = read(ui, |w| {
-        w.origin() == Origin::FirstRun && w.step() == Step::Empty
-    });
-    if root == Some(true) {
+    if back_leaves(ui) {
         return false;
     }
     send(ui, WizardEvent::Back);
     true
+}
+
+/// The welcome screen has no previous step. Keep the platform's Back
+/// gesture available there, unless text entry still needs to close.
+pub(crate) fn back_leaves(ui: Ui) -> bool {
+    !entry::is_editing(ui)
+        && read(ui, |w| {
+            w.origin() == Origin::FirstRun && w.step() == Step::Empty
+        }) == Some(true)
 }
 
 /// Which screen shows: rebuilt only when this changes.
