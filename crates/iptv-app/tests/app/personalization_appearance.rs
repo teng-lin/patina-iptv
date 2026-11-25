@@ -136,18 +136,28 @@ fn appearance_controls_apply_live_persist_and_change_actual_guide_geometry() {
 }
 
 #[test]
-fn the_about_page_opens_the_privacy_policy_and_shows_its_address_when_opening_fails() {
+fn the_about_page_shows_the_privacy_address_before_opening_and_after_browser_failure() {
     const URL: &str = "https://teng-lin.github.io/patina-iptv/privacy-policy/";
     let Some(home) = isolated!() else { return };
     let mut fixture = start(home, Settings::new(), false);
     let app = &mut fixture.app;
     settings(app);
     step(app.press("text:About"));
+    step(app.press_key("right"));
+    step(app.press_key("down"));
+    step(app.wait_for(&format!("id:settings-screen >> text:{URL}")));
+    assert!(app.screen().opened_urls().is_empty());
+
     step(app.press("text:Privacy policy"));
     assert_eq!(app.screen().opened_urls(), [URL]);
+    assert!(
+        app.screen()
+            .matches(&format!("id:settings-screen >> text:{URL}"))
+            .unwrap()
+    );
 
     step(app.fail_open_urls(URL));
     step(app.press("text:Privacy policy"));
-    step(app.wait_for(&format!("text:{URL}")));
+    step(app.wait_for(&format!("id:app-notice >> text:{URL}")));
     assert_eq!(app.screen().opened_urls(), [URL, URL]);
 }
