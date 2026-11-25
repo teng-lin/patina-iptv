@@ -294,17 +294,26 @@ impl Host {
             counts, expected,
             "discovery/wizard counts must expose imported movies and series"
         );
-        let source = stored.unwrap_or_else(|| self.owner.shown_source().unwrap());
-        if let Some(finished) = self.owner.pending_import_completion(source) {
-            tokio::time::timeout(Duration::from_secs(20), finished)
-                .await
-                .unwrap();
-        }
         let store = Store::open_encrypted(
             self.directory.path().join("iptv.sqlite"),
             &DatabaseKey::from_bytes(KEY),
         )
         .unwrap();
+        // A second Add can already have switched the browser to All playlists.
+        let source = stored.unwrap_or_else(|| {
+            store
+                .sources()
+                .unwrap()
+                .into_iter()
+                .find(|saved| saved.name == source.name)
+                .expect("the generated source was saved")
+                .id
+        });
+        if let Some(finished) = self.owner.pending_import_completion(source) {
+            tokio::time::timeout(Duration::from_secs(20), finished)
+                .await
+                .unwrap();
+        }
         assert_eq!(
             store
                 .load_channels(source, &ChannelQuery::default())
