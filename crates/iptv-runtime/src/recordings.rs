@@ -1727,16 +1727,22 @@ fn available_space(directory: &Path) -> Option<u64> {
         ) -> i32;
     }
 
-    let directory = directory.canonicalize().ok()?;
+    // A mapped directory can be listable while one of its parent components
+    // cannot be queried for the normalized path.
+    let normalized = directory.canonicalize().ok();
+    let directory = normalized.as_deref().unwrap_or(directory);
     let mut path: Vec<_> = directory.as_os_str().encode_wide().collect();
+    if path.contains(&0) {
+        return None;
+    }
     // UNC roots require a trailing separator. This is a directory on every path.
     if path.last() != Some(&u16::from(b'\\')) {
         path.push(u16::from(b'\\'));
     }
     path.push(0);
     let mut available = 0;
-    // SAFETY: canonicalize rejected embedded NULs. The path is terminated
-    // and the caller's free-space output is writable. Other outputs are optional.
+    // SAFETY: the path has exactly one terminating NUL. The caller's
+    // free-space output is writable and the remaining outputs are optional.
     let ok = unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut available, null_mut(), null_mut()) };
     (ok != 0).then_some(available)
 }

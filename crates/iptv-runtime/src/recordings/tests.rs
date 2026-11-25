@@ -373,6 +373,8 @@ fn recording_storage_queries_free_space_on_the_windows_data_volume() {
     std::fs::create_dir(&root).unwrap();
     assert!(available_space(&root).is_some());
     assert_eq!(available_space(&root.join("missing")), None);
+    let truncated = directory.path().join("Generated recording library\0suffix");
+    assert_eq!(available_space(&truncated), None);
 }
 
 #[tokio::test]
