@@ -86,6 +86,29 @@ iptv-runtime/src/settings.rs	User-Agent
 iptv-runtime/src/recordings/shared.rs	User-Agent
 iptv-guide/src/playback.rs	Referer
 iptv-guide/src/playback.rs	User-Agent
+# Fixed playback preparation phases written only to the debug log.
+iptv-runtime/src/recordings/shared.rs	acquired surface gate
+iptv-runtime/src/recordings/shared.rs	closing failed shared input
+iptv-runtime/src/recordings/shared.rs	failed preparation inputs retired
+iptv-runtime/src/recordings/shared.rs	failed shared input closed
+iptv-runtime/src/recordings/shared.rs	queued worker
+iptv-runtime/src/recordings/shared.rs	reading source authority
+iptv-runtime/src/recordings/shared.rs	replaced input retired
+iptv-runtime/src/recordings/shared.rs	retiring failed preparation inputs
+iptv-runtime/src/recordings/shared.rs	retiring replaced input
+iptv-runtime/src/recordings/shared.rs	retiring uninstalled inputs
+iptv-runtime/src/recordings/shared.rs	retiring unused inputs
+iptv-runtime/src/recordings/shared.rs	shared input ready
+iptv-runtime/src/recordings/shared.rs	source authority read returned
+iptv-runtime/src/recordings/shared.rs	source authority validation returned
+iptv-runtime/src/recordings/shared.rs	uninstalled inputs retired
+iptv-runtime/src/recordings/shared.rs	unused inputs retired
+iptv-runtime/src/recordings/shared.rs	validating source authority
+iptv-runtime/src/recordings/shared.rs	waiting for shared input readiness
+iptv-runtime/src/recordings/shared.rs	waiting for surface gate
+iptv-runtime/src/recordings/shared.rs	worker prepared source
+iptv-runtime/src/recordings/shared.rs	worker refused source
+iptv-runtime/src/recordings/shared.rs	worker reply received
 # Markup: icons drawn as SVG.
 iptv-app/src/grid/channel.rs	data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E
 iptv-app/src/play_bar/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 11v6'/><circle fill='currentColor' stroke='none' cx='12' cy='7.5' r='1.3'/>

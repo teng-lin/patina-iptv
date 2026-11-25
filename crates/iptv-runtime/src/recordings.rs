@@ -270,9 +270,12 @@ pub(crate) struct State {
     inputs_changed: tokio::sync::Notify,
     // Connection IDs belong to this directory-owned registry, including retries.
     next_input: AtomicU64,
+    next_preparation: AtomicU64,
     preparations: Mutex<HashMap<usize, SurfacePreparation>>,
     #[cfg(test)]
     preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,
+    #[cfg(all(test, feature = "test-support"))]
+    account_refresh: Mutex<Option<Arc<crate::testing::GateState>>>,
     media_ops: tokio::sync::Mutex<()>,
     #[cfg(test)]
     playback_completion: Mutex<Option<PlaybackCompletion>>,
@@ -348,6 +351,10 @@ impl State {
         true
     }
     pub(crate) fn stop(&self) -> bool {
+        self.stop_with_limit(Duration::from_secs(15))
+    }
+
+    fn stop_with_limit(&self, limit: Duration) -> bool {
         self.cancel_all_preparations();
         let generation = {
             let execution = self.execution();
@@ -360,9 +367,7 @@ impl State {
         // A replacement may already be running when this waiter wakes. Wait
         // for the execution we canceled, rather than its successor's flag.
         self.changed
-            .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| {
-                d.completed_run < generation
-            })
+            .wait_timeout_while(self.lock(), limit, |d| d.completed_run < generation)
             .map(|(data, _)| data.completed_run >= generation)
             .unwrap_or(false)
     }
@@ -986,8 +991,14 @@ async fn refresh_accounts(
     services: &Services,
     state: &State,
 ) -> Result<(), crate::model::StoreError> {
+    #[cfg(all(test, feature = "test-support"))]
+    let pause = state.account_refresh.lock().unwrap().take();
     let sources = services
-        .read(|store| {
+        .read(move |store| {
+            #[cfg(all(test, feature = "test-support"))]
+            if let Some(pause) = pause {
+                pause.pause();
+            }
             store
                 .sources()?
                 .into_iter()

@@ -982,6 +982,45 @@ async fn native_host_captures_after_its_ui_owner_is_drained_and_dropped() {
     state.stop();
 }
 
+#[cfg(feature = "test-support")]
+#[tokio::test]
+async fn native_host_stop_joins_an_in_flight_account_refresh_and_closes_its_store() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut ports = crate::Ports::new(directory.path().join("generated-app"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.background_recordings = true;
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    seed(&owner, "http://example.test/generated.ts").await;
+    let refresh = crate::TestGate::new();
+    let state = owner.recordings.clone();
+    *state.account_refresh.lock().unwrap() = Some(refresh.0.clone());
+    owner.start_recordings();
+    assert!(refresh.wait_entered(Duration::from_secs(30)));
+    let host = state.host.lock().unwrap().as_ref().unwrap().clone();
+    let stopping = state.clone();
+    assert!(
+        !tokio::task::spawn_blocking(move || stopping.stop_with_limit(Duration::from_millis(100)))
+            .await
+            .unwrap(),
+        "stop cannot acknowledge while account refresh owns its connection"
+    );
+    refresh.release();
+    assert!(
+        tokio::task::spawn_blocking(move || state.stop())
+            .await
+            .unwrap()
+    );
+    assert!(!host.has_open_connections());
+    assert!(!host.accept().is_current());
+    assert!(
+        owner.services().is_current(),
+        "the UI store is still running"
+    );
+    assert!(owner.drain_services());
+}
+
 #[test]
 fn mobile_handoff_reserves_all_returning_surfaces_before_any_reconnect() {
     let directory = tempfile::tempdir().unwrap();
