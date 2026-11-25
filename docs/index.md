@@ -10,6 +10,7 @@ link to them instead of duplicating release or validation instructions.
 | Contributor subsystem map and checks | [Contributing](contributing.md) |
 | CI selection and required-check migration | [Validation tiers](ci.md) |
 | Publishing, signing, provenance and recovery | [Release runbook](release.md#release-contract-and-recovery) |
+| First mobile submissions and privacy disclosures | [Readiness record](release-readiness-222.md), [privacy worksheet](store-privacy.md) |
 | Disposable emulator operation and evidence | [Android validation](android-validation.md) |
 | Optimized Android release artifact checks | [Android release evidence](android-release-220.md) |
 | iOS simulator build, entitlements and synthetic run | [iOS simulator validation](ios-validation.md) |

@@ -22,6 +22,10 @@ is below 1.0, a minor release may change behavior.
   first-release disclosure evidence and pending store checks (#221).
 - Require an embedded R8 class mapping in Android release bundles and provide
   a disposable emulator launch check for unmodified signed APKs.
+- Give Android TV its own launcher activity without picture in picture,
+  preserving handheld picture in picture and notification return behavior.
+- Keep the public privacy policy address readable in About before opening a
+  browser, including on TV images without a usable browser.
 
 - Cancel a channel swipe when a second finger lands on another player control.
 

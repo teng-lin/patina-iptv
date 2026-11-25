@@ -40,8 +40,9 @@ import dev.nshtv.RemoteKeys
  * and portrait waits for its own design. Tablets, an unfolded phone, TVs
  * and windows of 600 dp and wider rotate freely ([landscapeOnPhones]).
  */
-class TvActivity : Activity() {
+open class TvActivity : Activity() {
     private lateinit var nsh: NshView
+    private var hostMounted = false
 
     /** The mounted players (multiview mounts more than one). */
     private val players = LinkedHashSet<PlayerComponent>()
@@ -54,6 +55,14 @@ class TvActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        redirectedActivity(javaClass, tv)?.let { destination ->
+            // Old shortcuts and external callers can still name either host.
+            // Redirect before loading Rust or creating a second player surface.
+            startActivity(Intent(intent).setClass(this, destination))
+            finish()
+            return
+        }
         mark("activity created")
         edgeToEdge()
         landscapeOnPhones(resources.configuration)
@@ -92,6 +101,7 @@ class TvActivity : Activity() {
         nsh.handleNotificationIntent(intent)
         if (state == null) nsh.handleUrlSchemeIntent(intent)
         nsh.runRustApp("nsh")
+        hostMounted = true
         mark("rust app started")
     }
 
@@ -109,6 +119,7 @@ class TvActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        if (!hostMounted) return
         started = true
         val allowed = RecordingHost.resumeViewing(filesDir.absolutePath)
         for (p in players.toList()) p.foreground(allowed)
@@ -116,11 +127,16 @@ class TvActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (!hostMounted) return
         // The backup rows follow the document pickers that resolve now.
         backups.resumed()
     }
 
     override fun onStop() {
+        if (!hostMounted) {
+            super.onStop()
+            return
+        }
         started = false
         for (p in players.toList()) p.background()
         RecordingHost.suspendViewing(filesDir.absolutePath)
@@ -132,7 +148,7 @@ class TvActivity : Activity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        pip.userLeaving()
+        if (hostMounted) pip.userLeaving()
     }
 
     override fun onPictureInPictureModeChanged(
@@ -140,7 +156,7 @@ class TvActivity : Activity() {
         config: Configuration,
     ) {
         super.onPictureInPictureModeChanged(inPip, config)
-        pip.modeChanged(inPip)
+        if (hostMounted) pip.modeChanged(inPip)
         landscapeOnPhones(config)
     }
 
@@ -229,6 +245,7 @@ class TvActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (!hostMounted) return
         nsh.handleNotificationIntent(intent)
         nsh.handleUrlSchemeIntent(intent)
     }
@@ -239,7 +256,7 @@ class TvActivity : Activity() {
         resultCode: Int,
         data: Intent?,
     ) {
-        if (!backups.activityResult(requestCode, resultCode, data)) {
+        if (!hostMounted || !backups.activityResult(requestCode, resultCode, data)) {
             super.onActivityResult(requestCode, resultCode, data)
         }
     }
@@ -252,14 +269,16 @@ class TvActivity : Activity() {
 
     @Deprecated("Back is also handled by NshView's OnBackInvokedCallback on API 33+")
     override fun onBackPressed() {
-        if (!nsh.handleBack()) super.onBackPressed()
+        if (!hostMounted || !nsh.handleBack()) super.onBackPressed()
     }
 
     override fun onDestroy() {
-        backups.destroy()
-        pip.destroy()
-        audio.destroy()
-        nsh.destroy()
+        if (hostMounted) {
+            backups.destroy()
+            pip.destroy()
+            audio.destroy()
+            nsh.destroy()
+        }
         super.onDestroy()
     }
 }

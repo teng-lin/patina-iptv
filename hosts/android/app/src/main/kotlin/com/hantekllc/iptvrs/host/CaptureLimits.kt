@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
@@ -126,7 +125,7 @@ internal object CaptureLimits {
                 PendingIntent.getActivity(
                     context,
                     1,
-                    Intent(context, TvActivity::class.java),
+                    appLaunchIntent(context),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             val builder =

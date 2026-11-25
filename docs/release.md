@@ -17,6 +17,12 @@ checks of public signed artifacts from candidate, emulator, physical-device
 and Play Console acceptance. Follow its remaining checklist for the exact
 artifact intended for submission.
 
+The [first-submission readiness record](release-readiness-222.md) separates
+built-bundle checks from physical-device and store-console acceptance. The
+[mobile privacy worksheet](store-privacy.md) tracks the disclosures and policy.
+An owner-dependent item remains pending until verified against the candidate
+and the relevant store account.
+
 ## Packaging and releases
 
 Desktop installer checks run on PRs that change packaging recipes, shipped
@@ -182,8 +188,8 @@ For the optional all-platform run, also set:
   IOS_PROFILE_BASE64: a certificate and matching distribution profile for
   com.hantekllc.iptvrs. Ad hoc profiles install only on registered devices.
 
-The Android version code is the release workflow run number. Preserve its
-monotonicity when migrating workflows or publishing to Play.
+The Android distribution version code follows the version-derived formula
+above. Preserve its monotonicity when migrating workflows or publishing to Play.
 Run `python3 tools/bump-version.py patch` (or `minor`, `major`, or an explicit
 version such as `0.2.1`) from the repository root using Python 3.11 or newer.
 Add `--dry-run` to preview. The script also accepts an absolute path when

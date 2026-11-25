@@ -310,7 +310,7 @@ pub fn description(key: &str) -> Option<&'static str> {
         "remote.customize" => {
             tr("Choose a key, press and action per screen; capture keys or restore defaults.")
         }
-        "about.privacy_policy" => tr("Open the privacy policy in your browser."),
+        "about.privacy_policy" => super::PRIVACY_POLICY_URL,
         "general.about" => tr(
             "The version of this app. Text is set in Roboto and Roboto Condensed (Google, \
              SIL Open Font License 1.1).",

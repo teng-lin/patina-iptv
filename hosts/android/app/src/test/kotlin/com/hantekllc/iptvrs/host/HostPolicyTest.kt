@@ -81,4 +81,49 @@ class HostPolicyTest {
             }
         }
     }
+
+    @Test fun leanbackLauncherHasNoPipWhileHandheldKeepsIt() {
+        val parser = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }.newDocumentBuilder()
+        val manifest = parser.parse(File("src/main/AndroidManifest.xml"))
+        val android = "http://schemas.android.com/apk/res/android"
+        val nodes = manifest.getElementsByTagName("activity")
+        val activities = (0 until nodes.length).map { nodes.item(it) as org.w3c.dom.Element }
+
+        fun launcher(category: String): org.w3c.dom.Element =
+            activities.single { activity ->
+                val filters = activity.getElementsByTagName("intent-filter")
+                (0 until filters.length).any { index ->
+                    val filter = filters.item(index) as org.w3c.dom.Element
+                    val actions = filter.getElementsByTagName("action")
+                    val categories = filter.getElementsByTagName("category")
+                    val main =
+                        (0 until actions.length).any {
+                            (actions.item(it) as org.w3c.dom.Element).getAttributeNS(android, "name") == "android.intent.action.MAIN"
+                        }
+                    val matchingCategory =
+                        (0 until categories.length).any {
+                            (categories.item(it) as org.w3c.dom.Element).getAttributeNS(android, "name") == category
+                        }
+                    main && matchingCategory
+                }
+            }
+        val handheld = launcher("android.intent.category.LAUNCHER")
+        val tv = launcher("android.intent.category.LEANBACK_LAUNCHER")
+        assertEquals(".TvActivity", handheld.getAttributeNS(android, "name"))
+        assertEquals("true", handheld.getAttributeNS(android, "supportsPictureInPicture"))
+        assertEquals(".LeanbackActivity", tv.getAttributeNS(android, "name"))
+        assertFalse(tv.hasAttributeNS(android, "supportsPictureInPicture"))
+        for (attribute in listOf("exported", "resizeableActivity", "launchMode", "configChanges", "windowSoftInputMode")) {
+            assertEquals(handheld.getAttributeNS(android, attribute), tv.getAttributeNS(android, attribute))
+        }
+        assertEquals(TvActivity::class.java, launcherActivity(false))
+        assertEquals(LeanbackActivity::class.java, launcherActivity(true))
+    }
+
+    @Test fun staleShortcutsRedirectToTheDeviceHostBeforeItMounts() {
+        assertNull(redirectedActivity(TvActivity::class.java, false))
+        assertNull(redirectedActivity(LeanbackActivity::class.java, true))
+        assertEquals(LeanbackActivity::class.java, redirectedActivity(TvActivity::class.java, true))
+        assertEquals(TvActivity::class.java, redirectedActivity(LeanbackActivity::class.java, false))
+    }
 }
