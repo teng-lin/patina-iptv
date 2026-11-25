@@ -1227,9 +1227,8 @@ fn exercise_admission(
     if check_movie_swipes {
         // Exercise the full-screen video's touch path with a real VOD
         // source selected and a live channel available in the same catalog.
-        let video = app.screen().id("id:video").unwrap();
         assert!(app.screen().layout_nodes().iter().any(|node| {
-            node.id == video && node.bounds.size == Size::new(px(1920.0), px(1080.0))
+            node.id == surface && node.bounds.size == Size::new(px(1920.0), px(1080.0))
         }));
         let opens = iptv_app::player_opens(0);
         for dy in [-300.0, 300.0] {
