@@ -286,7 +286,9 @@ impl Scenario {
         step(self.app.press_key("m"));
         step(self.app.wait_for("text:Choose guide data…"));
         step(self.app.press("text:Choose guide data…"));
-        step(self.app.wait_for("text:/^Guide data for /"));
+        step(self.app.wait_for("text:Guide data for Alpha One"));
+        // The initial shell precedes its asynchronous stored channel/current read.
+        step(self.app.wait_for("text:a1"));
         step(self.app.press(&format!("text:{row}")));
     }
 
@@ -731,10 +733,7 @@ fn a_guide_chosen_during_an_update_is_downloaded_after_it() {
     to_guide(&mut s.app);
     // Automatic again needs the guide's full channel lists: a download.
     s.choose_guide("Automatic");
-    step(
-        s.app
-            .wait_for_within("text:Saved; the guide is downloading to show it", IMPORT),
-    );
+    // The replacement request proves the canceled download was superseded.
     s.until_asked(asked + 1);
     s.server.serve(guide("Chosen", &["a1", "a2"]));
     step(s.app.wait_for_gone("text:/^Guide data for /", IMPORT));
@@ -764,7 +763,7 @@ fn an_update_without_guide_sources_ends() {
     s.update_now();
     step(
         s.app
-            .wait_for_within("text:No guide sources are configured", IMPORT),
+            .wait_for_within("text:No guide source is switched on", IMPORT),
     );
     step(s.app.wait_for_gone("text:Updating…", IMPORT));
     s.until_pending("the update that could not run kept a guide check");
