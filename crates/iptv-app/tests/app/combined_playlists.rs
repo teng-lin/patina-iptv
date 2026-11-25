@@ -218,6 +218,112 @@ fn recycled_playlist_and_guide_rows_keep_their_content_and_actions() {
     step(app.press("text:Cancel"));
 }
 
+#[test]
+fn failed_guide_source_actions_follow_focus_inside_large_text_tv() {
+    let Some(home) = isolated!() else { return };
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    seed(&mut store, home.path(), "Generated guide actions");
+    drop(store);
+    let guide = home.path().join("Generated guide actions.xml");
+    let xml = std::fs::read(&guide).unwrap();
+    std::fs::remove_file(&guide).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("epg.update", Value::choice("on_request"))
+        .unwrap();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut config = EngineConfig {
+        viewport: Size::new(px(960.0), px(540.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = nsh_core::platform::Idiom::Tv;
+    config.environment.font_scale = 1.3;
+    let mut app = Headless::start(config).unwrap();
+    playlists(&mut app);
+    step(app.press("id:playlists-list >> text:Generated guide actions"));
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.press("id:playlist-actions-list >> text:Guide data"));
+    if !app
+        .screen()
+        .matches("id:guide-data-list >> text:Retry")
+        .unwrap()
+    {
+        step(app.press("id:guide-data-list >> text:Update the guide now"));
+    }
+    step(app.wait_for("id:guide-data-list >> text:Retry"));
+    step(app.press("id:guide-data-list >> text:1.  Generated guide actions guide"));
+    step(app.wait_for("id:guide-source-actions >> text:Retry"));
+    step(app.press_key("up"));
+    let inside = |screen: &nsh_testing::Screen, selector: &str| {
+        let nodes = screen.layout_nodes();
+        let bounds = |selector| {
+            let id = screen.id(selector).unwrap();
+            nodes.iter().find(|n| n.id == id).unwrap().bounds
+        };
+        let card = bounds("id:guide-source-actions");
+        let row = bounds(selector);
+        card.origin.y.0 >= 0.0
+            && card.origin.y.0 + card.size.height.0 <= 540.0
+            && row.origin.y.0 >= card.origin.y.0
+            && row.origin.y.0 + row.size.height.0 <= card.origin.y.0 + card.size.height.0
+    };
+    for label in [
+        "Retry",
+        "Switch off",
+        "Move up (used first)",
+        "Move down",
+        "No time shift",
+        "Name",
+        "Change the link",
+        "Remove",
+    ] {
+        let selector = format!("id:guide-source-actions >> label:{label}");
+        step(app.wait_until(
+            "focused action is visible",
+            Duration::from_secs(5),
+            |screen| inside(screen, &selector),
+        ));
+        assert_eq!(
+            app.screen()
+                .span_style(&format!("{selector} >> text:{label}"))
+                .unwrap()
+                .color,
+            nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
+            "D-pad focus reached {label}"
+        );
+        if label != "Remove" {
+            step(app.press_key("down"));
+        }
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Remove “Generated guide actions guide”?"));
+    step(app.press("text:Keep it"));
+    for _ in 0..7 {
+        step(app.press_key("up"));
+    }
+    std::fs::write(&guide, xml).unwrap();
+    step(app.press_key("enter"));
+    step(app.wait_for_gone(
+        "id:guide-source-actions >> text:Retry",
+        Duration::from_secs(5),
+    ));
+    step(app.wait_until(
+        "replacement focus is visible",
+        Duration::from_secs(5),
+        |screen| inside(screen, "id:guide-source-actions >> label:Switch off"),
+    ));
+}
+
 fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
     crate::isolated::open_database(path)
         .unwrap()

@@ -51,6 +51,138 @@ fn settings_menu(app: &mut Headless) {
     step(app.wait_for("id:menu-panel"));
     step(app.press("id:menu-panel >> text:Settings"));
 }
+
+#[test]
+fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
+    let Some(home) = isolated!() else { return };
+    let guide = home.path().join("generated-guide.xml");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    std::fs::write(&guide, format!(
+        "<tv><channel id=\"local-a\"><display-name>Local A</display-name></channel>\
+         <programme channel=\"local-a\" start=\"{}\" stop=\"{}\"><title>Generated bulletin</title></programme></tv>",
+        iptv_epg::format_xmltv_time(now - 60), iptv_epg::format_xmltv_time(now + 3600),
+    )).unwrap();
+    let mut settings = Settings::new();
+    for (key, value) in [
+        ("general.resume_last_channel", Value::Bool(false)),
+        ("guide.autoplay", Value::Bool(false)),
+        ("epg.update", Value::choice("on_request")),
+        (
+            "parental.require_pin_for",
+            Value::choice("blocked_content_and_settings"),
+        ),
+        ("parental.unlock_window", Value::choice("every_time")),
+    ] {
+        settings.set(key, value).unwrap();
+    }
+    let fixture = personalization::launch_prepared(
+        home,
+        settings,
+        false,
+        |path, source| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_guide_sources(
+                    source,
+                    &[iptv_store_sqlite::GuideSource {
+                        feed: iptv_epg::FeedId(700),
+                        provider_index: None,
+                        url: iptv_providers::SecretUrl::new(guide.to_string_lossy()),
+                        name: Some("Generated protected feed".into()),
+                        enabled: true,
+                        shift_minutes: 0,
+                    }],
+                )
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let (mut app, path, source) = (fixture.app, fixture.path, fixture.source);
+    step(app.open_guide_groups());
+    step(app.press_key("right"));
+    personalization::menu(&mut app, "Protect channel with PIN");
+    wait(&mut app, "Choose a new PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    wait(&mut app, "Confirm new PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    wait(&mut app, "Save your recovery code");
+    step(app.press("text:I saved the code"));
+    personalization::menu(&mut app, "Manage PIN-protected content…");
+    wait(&mut app, "Blocked content");
+    step(app.press("text:Lock now"));
+    step(app.open_guide_groups());
+    step(app.press_key("left"));
+    step(app.press_key("left"));
+    step(app.press("text:Playlists >> nth=0"));
+    step(app.press("id:playlists-list >> text:Synthetic personalization"));
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.press("id:playlist-actions-list >> text:Guide data"));
+    step(app.wait_for("text:Guide data · Synthetic personalization"));
+    let snapshot = || {
+        let store = crate::isolated::open_database(&path).unwrap();
+        (
+            store.epg_guide(source).unwrap(),
+            store.guide_sources(source).unwrap(),
+        )
+    };
+    let before = snapshot();
+    assert_eq!(before.0.as_ref().unwrap().feeds[0].program_count, 1);
+    // Update, editing and confirmed Clear all require the PIN even when
+    // Guide data was reached through Playlists instead of Settings.
+    step(app.press("id:guide-data-list >> text:Update the guide now"));
+    wait(&mut app, "Enter parental PIN");
+    step(app.press("id:parental-cancel"));
+    assert_eq!(snapshot(), before);
+    step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
+    step(app.press("id:guide-source-actions >> text:Switch off"));
+    wait(&mut app, "Enter parental PIN");
+    step(app.press("id:parental-cancel"));
+    assert_eq!(snapshot(), before);
+    step(app.back());
+    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    wait(&mut app, "Enter parental PIN");
+    step(app.press("id:parental-cancel"));
+    assert_eq!(snapshot(), before);
+    // Unlock resumes the selected update, then editing. Closing the
+    // per-use screen revokes that grant before Clear is attempted.
+    step(app.press("id:guide-data-list >> text:Update the guide now"));
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    step(app.wait_for("text:Guide updated"));
+    step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
+    step(app.press("id:guide-source-actions >> text:Switch off"));
+    step(app.wait_until(
+        "authorized source edit is saved",
+        Duration::from_secs(5),
+        |_| !snapshot().1[0].enabled,
+    ));
+    step(app.back());
+    step(app.back());
+    step(app.press("id:playlist-actions-list >> text:Guide data"));
+    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    step(app.wait_for("text:Guide data deleted"));
+    assert!(snapshot().0.is_none());
+    assert_eq!(snapshot().1.len(), 1, "Clear retains the guide source");
+}
+
 #[test]
 fn setup_block_remote_unlock_change_and_recovery() {
     let Some(home) = isolated!() else { return };

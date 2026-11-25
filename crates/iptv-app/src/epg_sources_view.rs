@@ -556,6 +556,7 @@ fn step(
 fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement {
     let line = move || state(ui, |s| s.line(feed).cloned()).flatten();
     let acts = computed(move || state(ui, |s| s.acts(feed)).unwrap_or_default());
+    let scrolling = ui_kit::FocusScroll::new();
     let act_row = move |act: Act| {
         let focused = move || {
             state(ui, |s| s.layer() == Layer::Actions { feed, focus: act }).unwrap_or(false)
@@ -569,7 +570,7 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
         let row = ui_kit::action(ui, size, label, focused, color, move || {
             update(ui, |s| s.act(feed, act));
         });
-        if act == Act::Shift {
+        let row = if act == Act::Shift {
             row.flex_row()
                 .items_center()
                 .justify_start()
@@ -579,10 +580,16 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
                 .child(step(ui, size, "+", feed, 1))
         } else {
             row
-        }
+        };
+        scrolling.control(row, focused)
     };
     card(ui, size)
         .test_id("guide-source-actions")
+        .max_h(percentage(0.95))
+        .h(move || {
+            px((window().height.0 * 0.95)
+                .min(size.of(600.0) * crate::settings::text_factor().max(1.0)))
+        })
         .child(ui_kit::title(size, move || {
             line().map(|l| words::title(&l.source)).unwrap_or_default()
         }))
@@ -601,9 +608,15 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
             .number_of_lines(1),
         )
         .child(view().h(move || size.px(6.0)))
-        .child(dynamic(move || {
-            view().children(acts.get().into_iter().map(act_row))
-        }))
+        .child(
+            scrolling
+                .view()
+                .test_id("guide-source-actions-scroll")
+                .flex_1()
+                .child(dynamic(move || {
+                    view().children(acts.get().into_iter().map(act_row))
+                })),
+        )
 }
 
 fn clear_card(ui: Ui, size: Scale) -> impl IntoElement {
