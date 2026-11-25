@@ -209,6 +209,7 @@ class RecordingAlarm : BroadcastReceiver() {
 /** Native capture survives activity/engine destruction; it never owns a player view. */
 class RecordingService : Service() {
     private val wakeHandler = Handler(Looper.getMainLooper())
+    private val foregroundServiceType by lazy { CaptureLimits.foregroundServiceType(CaptureLimits.tv(this)) }
 
     /** Low Power Standby cuts the network when the TV is turned off: the
      * capture stops then, keeping what was written, rather than failing
@@ -261,16 +262,19 @@ class RecordingService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)
-        startForeground(
-            472,
+        val notification =
             builder
                 .setContentTitle(localized.getString(R.string.recording_title))
                 .setContentText(localized.getString(R.string.recording_background))
                 .setSmallIcon(android.R.drawable.ic_menu_save)
                 .setContentIntent(open)
                 .setOngoing(true)
-                .build(),
-        )
+                .build()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(472, notification, foregroundServiceType)
+        } else {
+            startForeground(472, notification)
+        }
     }
 
     override fun onCreate() {

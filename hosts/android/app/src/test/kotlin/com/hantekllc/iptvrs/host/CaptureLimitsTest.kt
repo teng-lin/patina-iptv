@@ -1,5 +1,7 @@
 package com.hantekllc.iptvrs.host
 
+import android.content.pm.ServiceInfo
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,9 +21,17 @@ class CaptureLimitsTest {
     }
 
     @Test
-    fun theSixHourLimitAppliesFromAndroid15() {
-        assertFalse(CaptureLimits.backgroundHours(34))
-        assertTrue(CaptureLimits.backgroundHours(35))
-        assertTrue(CaptureLimits.backgroundHours(36))
+    fun androidTvUsesMediaPlaybackForRecording() {
+        assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK, CaptureLimits.foregroundServiceType(tv = true))
+        assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC, CaptureLimits.foregroundServiceType(tv = false))
+    }
+
+    @Test
+    fun theSixHourLimitAppliesToHandheldsFromAndroid15() {
+        assertFalse(CaptureLimits.backgroundHours(sdk = 34, tv = false))
+        assertTrue(CaptureLimits.backgroundHours(sdk = 35, tv = false))
+        assertTrue(CaptureLimits.backgroundHours(sdk = 36, tv = false))
+        assertFalse(CaptureLimits.backgroundHours(sdk = 35, tv = true))
+        assertFalse(CaptureLimits.backgroundHours(sdk = 36, tv = true))
     }
 }

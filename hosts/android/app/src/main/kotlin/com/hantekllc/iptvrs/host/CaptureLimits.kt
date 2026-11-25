@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.PowerManager
@@ -46,8 +47,15 @@ internal object CaptureLimits {
         }
     }
 
+    /** Android TV's DVR uses media playback. Handhelds download media to a file. */
+    fun foregroundServiceType(tv: Boolean): Int =
+        if (tv) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+
     /** Whether Android limits a background capture to six hours a day. */
-    fun backgroundHours(sdk: Int): Boolean = sdk >= BACKGROUND_LIMIT_SDK
+    fun backgroundHours(
+        sdk: Int,
+        tv: Boolean,
+    ): Boolean = sdk >= BACKGROUND_LIMIT_SDK && foregroundServiceType(tv) == ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 
     /** Whether the active network is metered; null when it cannot be read. */
     fun metered(context: Context): Boolean? =
@@ -62,7 +70,7 @@ internal object CaptureLimits {
         val report =
             mutableMapOf<String, Any>(
                 "standbyStops" to standbyStops(context),
-                "backgroundHours" to backgroundHours(Build.VERSION.SDK_INT),
+                "backgroundHours" to backgroundHours(Build.VERSION.SDK_INT, tv(context)),
             )
         metered(context)?.let { report["metered"] = it }
         return report

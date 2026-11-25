@@ -7,8 +7,8 @@
 //!   `DeviceComponent.kt`) when it attaches, on each configuration change
 //!   and when the network changes: whether the active network is metered,
 //!   whether Low Power Standby stops Patina when the TV is turned off
-//!   (Android 13 and later), and whether Android limits a background
-//!   capture to six hours a day (Android 15 and later).
+//!   (Android 13 and later), and whether Android limits a handheld
+//!   background capture to six hours a day (Android 15 and later).
 //! - A desktop reports whether it could keep the computer awake for the
 //!   capture (`host::keep_awake`).
 //! - Other hosts report nothing: no metered-network signal, no standby.

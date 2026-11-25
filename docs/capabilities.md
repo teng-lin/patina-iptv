@@ -161,11 +161,17 @@ it ([`record_now_notices`](../crates/iptv-presentation/src/capabilities.rs),
 | --- | --- | --- | --- |
 | Android TV | Low Power Standby on and Patina not exempt (`PowerManager`, API 33 and 34) | Turning the TV off stops the recording | The screen turning off ends the capture as a partial recording with the reason, and a notification says so |
 | Android phone and tablet | `ConnectivityManager.isActiveNetworkMetered` | A metered network can use several GB an hour | — |
-| Android (TV, phone and tablet), Android 15 and later | The data-sync service's six hours a day | Android stops background recording after six hours | `onTimeout` ends the capture as partial, notifies, and stops the service |
+| Android phone and tablet, Android 15 and later | The data-sync service's six hours a day | Android stops background recording after six hours | `onTimeout` ends the capture as partial, notifies, and stops the service |
 | Desktop | The idle-sleep inhibitor (IOKit assertion, logind or portal inhibitor, `SetThreadExecutionState`) could not be taken | Keep the computer awake | — |
 
 The iPad has no metered-network signal here; it does not record, so nothing is
-checked. While a capture runs on Android, its foreground service is sticky: if
+checked. Android TV uses the `mediaPlayback` foreground-service type for
+recording. Phones and tablets use `dataSync` to download media into a local
+file. Play Console declarations cover each type used by the release.
+[Android foreground-service types](https://developer.android.com/develop/background-work/services/fgs/service-types#media)
+· [Play Console foreground-service declarations](https://support.google.com/googleplay/android-developer/answer/13392821).
+
+While a capture runs on Android, its foreground service is sticky: if
 Android kills the process, it restarts the service, which resumes the capture
 from what was written. Before Android 12 a 120-second exact watchdog alarm
 also restarts it. Patina does not ask for exact alarms, and from Android 12 an
