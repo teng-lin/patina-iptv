@@ -135,7 +135,7 @@ journey matrix for the final candidate including #222 before closing #220.
 
 Pinned Rust 1.99.1 passed core/presentation tests, both wasm builds and
 `cargo build -p iptv-app`, using a separate target directory. Artifact helper
-tests (10), disposable ownership/release-flow tests (21), lifecycle tests (16)
+tests (10), disposable ownership/release-flow tests (22), lifecycle tests (16)
 and ShellCheck pass. Signing helper tests pass with three Linux-only/SDK
 scenarios skipped on macOS; their generated AAB fixture now carries a valid
 synthetic R8 map. Full final-head CI remains the PR gate.

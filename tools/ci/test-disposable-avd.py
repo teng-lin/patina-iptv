@@ -305,6 +305,16 @@ class ReleaseLauncher(unittest.TestCase):
         report = json.loads((root / "release-checklist.json").read_text())
         self.assertEqual(report["result"], "launch-passed-journeys-pending")
 
+    def test_slow_observation_crossing_hold_deadline_never_sleeps_negative_time(self):
+        root, _ = self.launch()
+        os.environ["IPTV_SMOKE_HOLD"] = "1"
+        with patch.object(RELEASE["time"], "monotonic", side_effect=[0, 0, 0, 0, 0, 0, 2, 2]), \
+                patch.object(RELEASE["time"], "sleep") as sleep:
+            RELEASE["run"]("emulator-5580", "synthetic.apk")
+        sleep.assert_not_called()
+        report = json.loads((root / "release-checklist.json").read_text())
+        self.assertEqual(report["result"], "launch-passed-journeys-pending")
+
 
 if __name__ == "__main__":
     unittest.main()

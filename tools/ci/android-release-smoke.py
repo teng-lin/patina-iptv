@@ -122,7 +122,10 @@ def run(serial, apk):
                 next_capture = time.monotonic() + 30
             if hold_file is not None and hold_file.exists():
                 break
-            time.sleep(min(5, until - time.monotonic()))
+            remaining = until - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(5, remaining))
         capture_logs()
         check_alive(serial, resolved)
         report["result"] = "launch-passed-journeys-pending"
