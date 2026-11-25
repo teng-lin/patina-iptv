@@ -131,7 +131,7 @@ pub(crate) fn key_name(key: RemoteKey) -> String {
         RemoteKey::Search => tr("/ or Ctrl+F"),
         _ => "",
     };
-    if crate::settings::keys_now() != Some(Keys::Keyboard) || keyboard.is_empty() {
+    if crate::input::keys_now() != Some(Keys::Keyboard) || keyboard.is_empty() {
         name.to_owned()
     } else {
         trf(

@@ -176,6 +176,11 @@ fn built() -> Host {
     crate::host::BUILT
 }
 
+/// A phone or a tablet: the device is held, and touched first.
+pub fn handheld(form_factor: FormFactor) -> bool {
+    matches!(form_factor, FormFactor::Phone | FormFactor::Tablet)
+}
+
 /// All three signals now (reactive).
 pub fn current() -> Device {
     Device {

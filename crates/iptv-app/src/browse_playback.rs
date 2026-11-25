@@ -1,5 +1,6 @@
 //! Adapter for the core's cancelable live-preview policy.
 use crate::{Playback, Ui, ViewMode};
+use iptv_core::capabilities::Host;
 use iptv_core::guide::Airing;
 use iptv_nav::Context;
 use iptv_presentation::browse_playback::{BrowsePlayback, Effect, Policy, Surface, Target};
@@ -67,19 +68,25 @@ fn current(ui: Ui) -> Option<Target> {
         surface,
     })
 }
+/// Handhelds need connected keys before guide autoplay and its delay
+/// apply. Desktops and TVs keep them regardless of the input report.
+pub(crate) fn autoplay_supported(host: Host) -> bool {
+    !crate::device::handheld(host.form_factor) || crate::input::keys_for(host).is_some()
+}
+
 fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     let s = crate::settings::read(ui);
     let at = &iptv_settings::Target::Global;
     // The form factor only: a resized window changes nothing here.
-    let form_factor = crate::device::host().form_factor;
+    let host = crate::device::host();
+    let form_factor = host.form_factor;
     Policy {
         // Off while its row is not offered (a phone or a tablet with no
         // keyboard or D-pad, #280), whatever is stored.
         autoplay: !crate::desktop::recorder_only_startup()
             && surface != Some(Surface::Player)
             && s.bool(keys::AUTOPLAY, at)
-            && crate::settings::offer_now(keys::AUTOPLAY.as_str())
-                != iptv_presentation::settings::screen::Offer::Hidden,
+            && autoplay_supported(host),
         delay_ms: s.duration_ms(keys::SWITCH_DELAY, at).max(0) as u64,
         fullscreen_ms: if surface == Some(Surface::Player) {
             0

@@ -155,6 +155,9 @@ pub(crate) fn probe_pickers() {
 /// a file. Restoring needs one that opens a file, except to review, keep
 /// or cancel a restore already scheduled, which needs none.
 pub(crate) fn offered(key: &str) -> bool {
+    if !crate::host::HAS_WORKERS {
+        return false;
+    }
     let pickers = pickers();
     match key {
         "general.backup" => pickers.create,
@@ -165,10 +168,7 @@ pub(crate) fn offered(key: &str) -> bool {
 /// Whether this host offers the restore entry point (the welcome screen's
 /// and Settings').
 pub(crate) fn available() -> bool {
-    matches!(
-        crate::settings::offer_now("general.restore"),
-        iptv_presentation::settings::screen::Offer::Active
-    )
+    offered("general.restore")
 }
 
 pub(crate) fn request_restore(ui: crate::Ui) {

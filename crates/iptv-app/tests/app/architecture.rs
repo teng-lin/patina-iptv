@@ -55,7 +55,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("seek.rs", "PRESSES"),                            // Key gesture state.
     ("seek.rs", "HOLD"),                               // Held-key gesture state.
     ("settings.rs", "REVISION"),                       // Reactive settings subscription handle.
-    ("settings.rs", "PIP"), // The host's picture-in-picture report, for the settings offer.
+    ("pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
     ("settings_view.rs", "PAGES"), // Immutable screen definitions.
     ("settings_view.rs", "LAST"), // Last selected settings tab.
     ("settings_view.rs", "NOTICE"), // Toast signal handle.

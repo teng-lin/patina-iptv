@@ -71,7 +71,7 @@ fn offered_rows(device: iptv_presentation::capabilities::Device) -> String {
     // A row on the Advanced page counts as offered.
     let offered = ROWS.iter().copied().filter(|key| {
         matches!(
-            crate::settings::offer(device, key),
+            crate::settings_offer::offer(device, key),
             Offer::Active | Offer::Advanced
         )
     });

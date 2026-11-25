@@ -27,6 +27,12 @@ const PANEL_ALPHA: u8 = 0xE0;
 /// The preview banner's height, about: it is centered on the finger.
 const PREVIEW_HEIGHT: f32 = 76.0;
 
+/// Swiping over video needs a touch-capable layout. Outside a running
+/// app, where no device is known, offer the setting.
+pub(crate) fn swipe_offered() -> bool {
+    try_os().is_none() || crate::play_bar::pointer_available()
+}
+
 /// Shared by the video and its UI ancestor, so a second finger on a
 /// sibling control cancels the video's gesture too.
 #[derive(Clone, Copy)]

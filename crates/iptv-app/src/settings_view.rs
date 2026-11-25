@@ -8,7 +8,7 @@
 //!
 //! Globally unimplemented settings are hidden consistently on every build; none of
 //! the rows it acts on can be switched off by another setting yet;
-//! device-level features of TV boxes are left out (`settings::offer`). Remote: Up/Down move, Right/OK
+//! device-level features of TV boxes are left out (`settings_offer::offer`). Remote: Up/Down move, Right/OK
 //! enter a page, OK changes a row, Left/Back go back, Back on the pages
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
 //! own (`words`). Also the short notices of the app (`notify`).
@@ -81,7 +81,7 @@ pub static PAGES: &[Page] = &[
             Part::Section(Section::Catchup),
         ],
     },
-    // Keyboard or Remote settings (`settings::keys`): shown while there
+    // Keyboard or Remote settings (`input::keys_for`): shown while there
     // are keys to set up, named after them (`words::page`).
     Page {
         key: "remote",
@@ -218,7 +218,7 @@ fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
     let settings = crate::settings::get();
     f(&Ctx {
         settings: &settings,
-        offer: &crate::settings::offer_now,
+        offer: &crate::settings_offer::offer_now,
     })
 }
 
@@ -281,7 +281,7 @@ pub(crate) fn refresh(ui: Ui) {
     ui.app.settings.update(|v| *v += 1);
 }
 
-/// Runs a command (`settings::COMMANDS`).
+/// Runs a command (`settings_offer::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
     if key != "parental.change_pin"
         && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
@@ -363,7 +363,7 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 fn status(settings: &Settings, row: &Row) -> Status {
     Ctx {
         settings,
-        offer: &crate::settings::offer_now,
+        offer: &crate::settings_offer::offer_now,
     }
     .status(row)
 }
@@ -530,7 +530,7 @@ mod tests {
             page,
             &Ctx {
                 settings,
-                offer: &crate::settings::offer_now,
+                offer: &crate::settings_offer::offer_now,
             },
         )
         .into_iter()
@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn no_wired_setting_is_switched_off_by_another() {
         use iptv_settings::schema::Effect as DependencyEffect;
-        for key in crate::settings::WIRED {
+        for key in crate::settings_offer::WIRED {
             let s = catalog::setting(key).unwrap();
             assert!(
                 s.depends

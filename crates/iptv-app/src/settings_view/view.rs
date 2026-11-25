@@ -69,12 +69,12 @@ pub(crate) fn notice_layer() -> impl IntoElement {
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = computed(move || {
         let settings = crate::settings::read(ui);
-        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.pip.with(|p| p.supported);
         state(ui, |s| {
             s.rows(&Ctx {
                 settings: &settings,
-                offer: &crate::settings::offer_now,
+                offer: &crate::settings_offer::offer_now,
             })
         })
         .unwrap_or_default()
@@ -88,7 +88,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         let settings = crate::settings::read(ui);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings::offer_now,
+            offer: &crate::settings_offer::offer_now,
         };
         PAGES
             .iter()
@@ -448,11 +448,11 @@ fn row_view(
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
         let settings = crate::settings::read(ui);
-        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings::offer_now,
+            offer: &crate::settings_offer::offer_now,
         };
         state(ui, |s| match s.focused_row(&ctx) {
             Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),

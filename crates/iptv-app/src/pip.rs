@@ -192,6 +192,21 @@ pub fn prop(ui: Ui, surface: usize) -> Option<iptv_player_mpv::PipProps> {
     })
 }
 
+thread_local! {
+    /// The host's last report of support for a picture-in-picture window.
+    static PIP_SUPPORTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn set_supported(supported: bool) {
+    PIP_SUPPORTED.set(supported);
+}
+
+/// Picture in picture on leaving is offered on an Android handheld whose
+/// host says it can open the window.
+pub(crate) fn offers_on_leave(host: iptv_core::capabilities::Host) -> bool {
+    host.automatic_pip() && PIP_SUPPORTED.get()
+}
+
 /// The host's `pip` event.
 pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
     let mut next = ui.pip.get_untracked();
@@ -201,7 +216,7 @@ pub fn on_state(ui: Ui, supported: bool, tv: bool, active: bool) {
     }
     // Before the signal changes: settings rows that read it then see the
     // setting `player.pip_on_leave` come or go with the window.
-    crate::settings::offer_pip(next.supported);
+    set_supported(next.supported);
     ui.pip.set(next);
     match change {
         Change::Entered => entered(ui),

@@ -116,6 +116,7 @@ mod scale;
 mod search_view;
 mod seek;
 mod settings;
+mod settings_offer;
 mod settings_view;
 mod setup_view;
 pub mod startup;
