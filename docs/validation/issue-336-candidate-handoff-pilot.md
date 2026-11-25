@@ -130,8 +130,15 @@ duplicate run IDs and mixed fallback decisions. It also separates clean
 and retried cohorts, preserves failed/canceled
 earlier attempts, and reports all-attempt execution/queue costs per run and
 job alongside final path endpoints. A successful retry does not erase a
-failed attempt from reliability or runner-cost evidence. Reports must state cohort
-size, runner/tool identity, missing evidence and failures alongside
+failed attempt from reliability or runner-cost evidence.
+The requested cold/reuse mode is recorded independently from consumer
+outputs, so failed/canceled/skipped consumers with unavailable decisions
+stay in the intended cohort and failure counts. A successful consumer must
+have a concrete decision; distinct concrete fallback decisions stay separate.
+Inherited-attempt or invalid queue intervals are unavailable: GitHub may
+rewrite carried-forward job creation times. Raw timestamps remain, and
+reports sum only known queue durations with an unknown-attempt count.
+Reports must state cohort size, runner/tool identity, missing evidence and failures alongside
 percentiles. There is no production integration or whole-Validation gain
 claim in this PR. Any adoption requires a separate coordinated change and
 measurements of its real integrated critical path.

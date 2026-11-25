@@ -184,6 +184,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PILOT_DECISION: ${{ needs.consumer.outputs.decision }}
+          PILOT_INTENDED_MODE: ${{ inputs.cold && 'cold' || 'reuse' }}
         run: python3 tools/ci/candidate-handoff.py timeline target/pilot-timeline.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

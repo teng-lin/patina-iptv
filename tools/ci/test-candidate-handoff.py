@@ -2,8 +2,11 @@
 """Synthetic provenance, hostile archive, fallback and measurement contracts."""
 
 import copy
+from contextlib import chdir
 import hashlib
 import importlib.util
+import json
+import os
 from pathlib import Path
 import stat
 import tempfile
@@ -311,14 +314,14 @@ class Contract(unittest.TestCase):
 
     def test_measurement_statistics_include_failures_and_small_cohorts(self):
         runs = [{"conclusion": "success", "seconds": value} for value in range(1, 21)] + [{"conclusion": "failure", "seconds": 99}]
-        self.assertEqual(handoff.measurements(runs), {"n": 21, "successful_n": 20, "failures": 1, "p50_seconds": 10.5, "p90_seconds": 18})
+        self.assertEqual(handoff.measurements(runs), {"n": 21, "successful_n": 20, "measured_successful_n": 20, "unavailable_n": 0, "failures": 1, "p50_seconds": 10.5, "p90_seconds": 18})
         self.assertIsNone(handoff.measurements([])["p90_seconds"])
 
     def test_actual_parallel_endpoints_and_failure_counts(self):
         jobs = []
         for identifier, name, endpoint in ((201, handoff.PRODUCER, 100), (202, "Pilot consumer", 160), (203, "Cold control", 130)):
             jobs.append({"id": identifier, "name": name, "attempt": 1, "conclusion": "success", "trigger_to_completion_seconds": endpoint, "queue_seconds": 10, "execution_seconds": 90})
-        timeline = {"run_id": 101, "commit": "a" * 40, "decision": "reuse", "jobs": jobs}
+        timeline = {"run_id": 101, "commit": "a" * 40, "intended_mode": "reuse", "decision": "reuse", "jobs": jobs}
         summary = handoff.summarize([timeline])
         self.assertEqual(summary["paths"]["producer_consumer_path"]["p50_seconds"], 160)
         self.assertEqual(summary["paths"]["whole_pilot"]["p50_seconds"], 160)
@@ -332,8 +335,8 @@ class Contract(unittest.TestCase):
         self.assertEqual(summary["paths"]["cold_control_path"]["successful_n"], 2)
 
     def test_measurement_cohorts_do_not_mix_heads_decisions_or_duplicate_runs(self):
-        first = {"run_id": 101, "commit": "a" * 40, "decision": "reuse", "jobs": []}
-        for field, value in (("commit", "b" * 40), ("decision", "expired"), ("run_id", 101)):
+        first = {"run_id": 101, "commit": "a" * 40, "intended_mode": "reuse", "decision": "reuse", "jobs": []}
+        for field, value in (("commit", "b" * 40), ("decision", "expired"), ("intended_mode", "cold"), ("run_id", 101)):
             other = dict(first, run_id=102)
             other[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError):
@@ -348,7 +351,7 @@ class Contract(unittest.TestCase):
             (204, "Pilot consumer", 2, "success", 250, 60),
         ):
             jobs.append({"id": identifier, "name": name, "attempt": attempt, "conclusion": conclusion, "trigger_to_completion_seconds": endpoint, "queue_seconds": 10, "execution_seconds": cost})
-        timeline = {"run_id": 101, "attempt": 2, "commit": "a" * 40, "decision": "reuse", "jobs": jobs}
+        timeline = {"run_id": 101, "attempt": 2, "commit": "a" * 40, "intended_mode": "reuse", "decision": "reuse", "jobs": jobs}
         summary = handoff.summarize([timeline])
         self.assertEqual(summary["cohort"], "retried")
         self.assertEqual(summary["paths"]["whole_pilot"]["p50_seconds"], 250)
@@ -373,10 +376,97 @@ class Contract(unittest.TestCase):
         def api(endpoint):
             return {"jobs": [job]} if "/jobs?" in endpoint else run
 
-        timeline = handoff.timeline(101, api)
+        with patch.dict(os.environ, {"PILOT_INTENDED_MODE": "reuse"}):
+            timeline = handoff.timeline(101, api)
         self.assertEqual(timeline["jobs"][0]["queue_seconds"], 10)
         self.assertEqual(timeline["jobs"][0]["execution_seconds"], 0)
         self.assertEqual(timeline["jobs"][0]["trigger_to_completion_seconds"], 12)
+
+    def test_missing_failed_consumer_outputs_are_retained_in_intended_cohort(self):
+        job = {"id": 201, "name": "Pilot consumer", "attempt": 1, "conclusion": "success", "trigger_to_completion_seconds": 160, "queue_seconds": 10, "execution_seconds": 90}
+        jobs = [dict(job, name=handoff.PRODUCER, id=200), job, dict(job, name="Cold control", id=202)]
+        passing = {"run_id": 101, "commit": "a" * 40, "intended_mode": "reuse", "decision": "reuse", "jobs": jobs}
+        for conclusion in ("failure", "cancelled", "skipped"):
+            for decision in ("", "unavailable"):
+                failed = dict(passing, run_id=102, decision=decision, jobs=[jobs[0], dict(job, id=203, conclusion=conclusion), jobs[2]])
+                with self.subTest(conclusion=conclusion, decision=decision):
+                    summary = handoff.summarize([passing, failed])
+                    self.assertEqual(summary["paths"]["whole_pilot"]["n"], 2)
+                    self.assertEqual(summary["paths"]["whole_pilot"]["failures"], 1)
+                    self.assertEqual(summary["attempts_by_job"]["Pilot consumer"]["n"], 2)
+                    self.assertEqual(summary["runs"][1]["decision"], "unavailable")
+                    self.assertEqual(summary["segments"]["Pilot consumer/execution_seconds"]["failures"], 1)
+        with self.assertRaisesRegex(ValueError, "Successful consumer"):
+            handoff.summarize([dict(passing, decision="")])
+
+    def test_additional_effective_native_overrides_are_refused(self):
+        for name in ("SQLCIPHER_LIB_DIR", "SQLCIPHER_STATIC", "PERL", "NASM", "RUSTC_BOOTSTRAP", "RUSTC_LINKER"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                handoff.validate_environment({name: "synthetic-native-override"})
+
+    def test_inherited_and_invalid_queue_intervals_are_unavailable(self):
+        observed = {"head_sha": "a" * 40, "run_attempt": 2, "created_at": "2026-01-01T00:00:00Z"}
+        base = {"name": handoff.PRODUCER, "conclusion": "success", "created_at": "2026-01-01T00:02:00Z", "started_at": "2026-01-01T00:00:10Z", "completed_at": "2026-01-01T00:01:00Z"}
+        jobs = [dict(base, id=201, run_attempt=1), dict(base, name="Pilot consumer", id=202, run_attempt=2)]
+
+        def api(endpoint):
+            return {"jobs": jobs} if "/jobs?" in endpoint else observed
+
+        with patch.dict(os.environ, {"PILOT_INTENDED_MODE": "reuse", "PILOT_DECISION": "reuse"}):
+            timeline = handoff.timeline(101, api)
+        self.assertEqual([job["queue_seconds"] for job in timeline["jobs"]], [None, None])
+        self.assertEqual([job["execution_seconds"] for job in timeline["jobs"]], [50, 50])
+        self.assertTrue(timeline["jobs"][0]["inherited_from_previous_attempt"])
+        summary = handoff.summarize([timeline])
+        attempts = summary["runs"][0]["attempts"]
+        self.assertEqual(attempts["unknown_queue_attempts"], 2)
+        self.assertEqual(attempts["known_queue_seconds_sum"], 0)
+        self.assertEqual(attempts["total_execution_seconds"], 100)
+        self.assertEqual(summary["segments"]["Pilot consumer/queue_seconds"]["unavailable_n"], 1)
+
+    def test_seal_binds_original_job_identity_and_rejects_ambiguity(self):
+        executable = self.root / "target/release/iptv-app.exe"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(self.exe)
+        output = self.root / "sealed"
+        proof = handoff.seal(self.expected, output, 101, 1, lambda _: {"jobs": [self.job]}, self.root)
+        self.assertEqual(proof["job_id"], "201")
+        self.assertEqual(proof["manifest_sha256"], handoff.digest(output / "manifest.json"))
+        self.assertEqual(json.loads((output / "manifest.json").read_text())["producer"]["attempt"], 1)
+        for jobs in ([], [self.job, self.job], [dict(self.job, run_attempt=2)]):
+            with self.subTest(jobs=jobs), self.assertRaisesRegex(ValueError, "ambiguous"):
+                handoff.seal(self.expected, self.root / "refused", 101, 1, lambda _: {"jobs": jobs}, self.root)
+            self.assertFalse((self.root / "refused").exists())
+
+    def test_native_tree_identity_refuses_empty_and_linked_inputs(self):
+        directory = self.root / "native-inputs"
+        directory.mkdir()
+        with self.assertRaisesRegex(ValueError, "Empty"):
+            handoff.tree_digest(directory)
+        (directory / "header.h").write_bytes(b"synthetic native header")
+        before = handoff.tree_digest(directory)
+        (directory / "header.h").write_bytes(b"changed synthetic header")
+        self.assertNotEqual(handoff.tree_digest(directory)["sha256"], before["sha256"])
+        (directory / "linked.h").symlink_to(directory / "header.h")
+        with self.assertRaisesRegex(ValueError, "links"):
+            handoff.tree_digest(directory)
+
+    def test_cli_refuses_wrong_repository_branch_head_and_run_before_acquisition(self):
+        (self.root / "target").mkdir()
+        handoff.write_json(self.root / "target/pilot-inputs.json", self.expected)
+        environment = {
+            "GITHUB_REPOSITORY": handoff.REPOSITORY,
+            "GITHUB_REF": "refs/heads/" + handoff.BRANCH,
+            "GITHUB_SHA": self.expected["commit"],
+            "GITHUB_RUN_ID": "101",
+            "PRODUCER_PROOF": json.dumps(self.proof),
+        }
+        for key, value in (("GITHUB_REPOSITORY", "synthetic/fork"), ("GITHUB_REF", "refs/heads/master"), ("GITHUB_SHA", "b" * 40), ("GITHUB_RUN_ID", "102")):
+            with self.subTest(key=key), chdir(self.root), patch.dict(os.environ, dict(environment, **{key: value}), clear=True):
+                with patch("sys.argv", ["candidate-handoff.py", "acquire", "target/release"]), patch.object(handoff, "acquire") as acquire:
+                    with self.assertRaises(ValueError):
+                        handoff.main()
+                    acquire.assert_not_called()
 
     def test_workflow_is_isolated_and_retains_full_package_checks(self):
         root = Path(__file__).resolve().parents[2]

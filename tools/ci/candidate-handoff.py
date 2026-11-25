@@ -23,6 +23,7 @@ WORKFLOW = ".github/workflows/candidate-handoff-pilot.yml"
 PRODUCER = "Pilot producer"
 FILES = {"manifest.json", "iptv-app.exe"}
 MAX_EXE = 512 * 1024 * 1024
+MAX_MANIFEST = 2 * 1024 * 1024
 SHA = re.compile(r"[a-f0-9]{64}")
 
 
@@ -96,7 +97,7 @@ def tree_digest(directory):
 
 def validate_environment(environment):
     """Reject build overrides without recording values or unrelated secrets."""
-    prefixes = ("CC_", "CXX_", "AR_", "LD_", "OPENSSL_", "DEP_", "BINDGEN_", "PKG_CONFIG", "CMAKE_", "SQLITE", "LIBSQLITE")
+    prefixes = ("CC_", "CXX_", "AR_", "LD_", "OPENSSL_", "DEP_", "BINDGEN_", "PKG_CONFIG", "CMAKE_", "SQLITE", "SQLCIPHER_", "LIBSQLITE")
     cargo_allowed = {"CARGO_HOME", "CARGO_TERM_COLOR", "CARGO_NET_GIT_FETCH_WITH_CLI"}
     native_override = re.compile(
         r"^(?:(?:HOST|TARGET)_)?(?:CC_MASM_ASM|CXXSTDLIB_STATIC|CXXSTDLIB|RANLIBFLAGS|RANLIB|"
@@ -107,6 +108,10 @@ def validate_environment(environment):
         "RUSTC",
         "RUSTC_WRAPPER",
         "RUSTC_WORKSPACE_WRAPPER",
+        "RUSTC_BOOTSTRAP",
+        "RUSTC_LINKER",
+        "PERL",
+        "NASM",
         "RUSTDOCFLAGS",
         "CC",
         "CXX",
@@ -166,7 +171,7 @@ def inputs(root=ROOT):
     if run(["git", "rev-parse", "HEAD"], nsh) != pin or run(["git", "status", "--porcelain"], nsh):
         raise ValueError("NSH differs from the exact clean pin")
     configs = []
-    cargo_home = Path(os.environ.get("CARGO_HOME", Path.home() / ".cargo"))
+    cargo_home = Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo")
     for directory in (root, *root.parents, cargo_home):
         for filename in ("config", "config.toml") if directory == cargo_home else (".cargo/config", ".cargo/config.toml"):
             path = directory / filename
@@ -307,10 +312,13 @@ def unpack(archive, expected, proof, destination):
                 or (stat.S_IFMT(mode) not in (0, stat.S_IFREG))
                 or item.flag_bits & 1
                 or item.file_size < 1
-                or item.file_size > (MAX_EXE if item.filename == "iptv-app.exe" else 2 * 1024 * 1024)
+                or item.file_size > (MAX_EXE if item.filename == "iptv-app.exe" else MAX_MANIFEST)
             ):
                 raise ValueError("Unsafe artifact member")
-        raw = incoming.read("manifest.json")
+        with incoming.open("manifest.json") as source:
+            raw = source.read(MAX_MANIFEST + 1)
+        if len(raw) > MAX_MANIFEST:
+            raise ValueError("Manifest exceeds pilot size bound")
         if hashlib.sha256(raw).hexdigest() != checksum(proof["manifest_sha256"]):
             raise ValueError("Manifest checksum mismatch")
         manifest = json.loads(raw)
@@ -364,11 +372,14 @@ def acquire(expected, proof, destination, api=gh, download=None, cold=False):
 def measurements(runs):
     # Include failed/canceled runs explicitly; successful durations alone must
     # never hide reliability failures or be called a Validation speedup.
-    values = sorted(item["seconds"] for item in runs if item["conclusion"] == "success")
+    successes = [item for item in runs if item["conclusion"] == "success"]
+    values = sorted(item["seconds"] for item in successes if item["seconds"] is not None)
     return {
         "n": len(runs),
-        "successful_n": len(values),
-        "failures": len(runs) - len(values),
+        "successful_n": len(successes),
+        "measured_successful_n": len(values),
+        "unavailable_n": sum(item["seconds"] is None for item in runs),
+        "failures": len(runs) - len(successes),
         "p50_seconds": __import__("statistics").median(values) if values else None,
         "p90_seconds": values[math.ceil(0.9 * len(values)) - 1] if values else None,
     }
@@ -381,7 +392,10 @@ def summarize(timelines):
     commits = {item["commit"] for item in timelines}
     if len(commits) > 1:
         raise ValueError("Measure each exact code revision as a separate cohort")
-    if len({item.get("decision", "unavailable") for item in timelines}) > 1:
+    intended = {item["intended_mode"] for item in timelines}
+    if not intended <= {"cold", "reuse"} or len(intended) > 1:
+        raise ValueError("Measure each intended cold/reuse mode as a separate cohort")
+    if len({item.get("decision") or "unavailable" for item in timelines} - {"unavailable"}) > 1:
         raise ValueError("Measure reuse, cold and fallback as separate cohorts")
     if len({item["run_id"] for item in timelines}) != len(timelines):
         raise ValueError("Duplicate workflow run in measurement cohort")
@@ -400,8 +414,11 @@ def summarize(timelines):
             "failed": sum(job["conclusion"] not in ("success", "cancelled", "skipped") for job in jobs),
             "canceled": sum(job["conclusion"] == "cancelled" for job in jobs),
             "skipped": sum(job["conclusion"] == "skipped" for job in jobs),
-            "total_execution_seconds": sum(job["execution_seconds"] for job in jobs),
-            "total_queue_seconds": sum(job["queue_seconds"] for job in jobs),
+            "total_execution_seconds": sum(job["execution_seconds"] for job in jobs) if all(job["execution_seconds"] is not None for job in jobs) else None,
+            "known_execution_seconds_sum": sum(job["execution_seconds"] for job in jobs if job["execution_seconds"] is not None),
+            "unknown_execution_attempts": sum(job["execution_seconds"] is None for job in jobs),
+            "known_queue_seconds_sum": sum(job["queue_seconds"] for job in jobs if job["queue_seconds"] is not None),
+            "unknown_queue_attempts": sum(job["queue_seconds"] is None for job in jobs),
         }
 
     attempts_by_job = {}
@@ -414,6 +431,8 @@ def summarize(timelines):
             old = latest.get(job["name"])
             if old is None or (job["attempt"], job["id"]) > (old["attempt"], old["id"]):
                 latest[job["name"]] = job
+        if (item.get("decision") or "unavailable") == "unavailable" and latest.get("Pilot consumer", {}).get("conclusion") == "success":
+            raise ValueError("Successful consumer is missing its handoff decision")
         for name, members in (("producer_consumer_path", (PRODUCER, "Pilot consumer")), ("cold_control_path", ("Cold control",)), ("whole_pilot", (PRODUCER, "Pilot consumer", "Cold control"))):
             rows = [latest[member] for member in members if member in latest]
             success = len(rows) == len(members) and all(job["conclusion"] == "success" for job in rows)
@@ -422,7 +441,8 @@ def summarize(timelines):
         "schema": 1,
         "commit": next(iter(commits), None),
         "cohort": next(iter(cohorts), None),
-        "runs": [{"run_id": item["run_id"], "attempts": attempt_evidence(item["jobs"])} for item in timelines],
+        "intended_mode": next(iter(intended), None),
+        "runs": [{"run_id": item["run_id"], "decision": item.get("decision") or "unavailable", "attempts": attempt_evidence(item["jobs"])} for item in timelines],
         "attempts_by_job": {name: attempt_evidence(jobs) for name, jobs in attempts_by_job.items()},
         "paths": {name: measurements(rows) for name, rows in samples.items()},
         "segments": {name: measurements(rows) for name, rows in segments.items()},
@@ -435,7 +455,10 @@ def timeline(run_id, api=gh):
     jobs = pages(f"repos/{REPOSITORY}/actions/runs/{positive(run_id)}/jobs?filter=all", "jobs", api)
 
     def seconds(first, last):
-        return (datetime.fromisoformat(last.replace("Z", "+00:00")) - datetime.fromisoformat(first.replace("Z", "+00:00"))).total_seconds()
+        if not first or not last:
+            return None
+        value = (datetime.fromisoformat(last.replace("Z", "+00:00")) - datetime.fromisoformat(first.replace("Z", "+00:00"))).total_seconds()
+        return value if value >= 0 else None
 
     rows = []
     for job in jobs:
@@ -450,7 +473,10 @@ def timeline(run_id, api=gh):
                 "created_at": job["created_at"],
                 "started_at": job["started_at"],
                 "completed_at": job["completed_at"],
-                "queue_seconds": seconds(job["created_at"], job["started_at"] or job["completed_at"]),
+                # GitHub may rewrite created_at on inherited successful jobs.
+                # Preserve raw timestamps but never sum these as measured queue.
+                "queue_seconds": seconds(job["created_at"], job["started_at"] or job["completed_at"]) if job["run_attempt"] == observed["run_attempt"] else None,
+                "inherited_from_previous_attempt": job["run_attempt"] < observed["run_attempt"],
                 "execution_seconds": seconds(job["started_at"], job["completed_at"]) if job["started_at"] else 0,
                 "trigger_to_completion_seconds": seconds(observed["created_at"], job["completed_at"]),
                 "steps": job.get("steps", []),
@@ -463,6 +489,7 @@ def timeline(run_id, api=gh):
         "commit": observed["head_sha"],
         "created_at": observed["created_at"],
         "decision": os.environ.get("PILOT_DECISION") or "unavailable",
+        "intended_mode": os.environ["PILOT_INTENDED_MODE"],
         "jobs": rows,
         "claim": "Contract/overhead pilot only; no whole-Validation improvement measured.",
     }
