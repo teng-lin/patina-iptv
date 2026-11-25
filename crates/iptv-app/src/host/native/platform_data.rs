@@ -202,7 +202,7 @@ pub(crate) fn initialize() -> io::Result<PathBuf> {
 /// for runners that do not.
 pub fn exit_background_recorder_launch() {
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    if crate::host::recorder_only_startup() {
+    if std::env::args().any(|arg| arg == "--background-recordings") {
         match resolve_data_dir() {
             Ok(directory) => {
                 crate::host::native::recording_host::retire_registrations(&directory, true);

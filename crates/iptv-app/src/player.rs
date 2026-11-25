@@ -1354,8 +1354,7 @@ pub(crate) fn row_dropped(ui: Ui, schedule: &dyn Schedule) {
 /// the last channel starts once (`general.resume_last_channel`), unless
 /// something already plays.
 pub fn source_ready(ui: Ui, refresh: bool) {
-    if crate::host::recorder_only_startup()
-        || ui.player.recorded.with_untracked(Option::is_some)
+    if ui.player.recorded.with_untracked(Option::is_some)
         || ui.player.vod.with_untracked(Option::is_some)
     {
         return;

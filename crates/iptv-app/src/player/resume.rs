@@ -34,8 +34,7 @@ pub struct Early {
 /// when it does not start (the guide's arrival resumes it, if anything).
 pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     let generation = crate::runtime().browser_generation();
-    if crate::host::recorder_only_startup()
-        || !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
+    if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
         || ui.wizard.with_untracked(Option::is_some)
         || ui.playing.get_untracked().is_some()
         || ui.player.recorded.with_untracked(Option::is_some)

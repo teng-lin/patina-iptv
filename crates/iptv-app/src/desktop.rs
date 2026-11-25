@@ -96,9 +96,6 @@ pub fn bind(ui: Ui) {
             quit(ui);
         }
     });
-    if crate::host::recorder_only_startup() {
-        window.hide();
-    }
 }
 
 /// Shows the main window, in front, also when closing it hid it.
