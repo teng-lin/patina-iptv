@@ -99,6 +99,8 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         ReorderGroups => tr("Reorder groups"),
         ManageGroups => tr("Manage groups"),
         RenameGroup => tr("Rename group"),
+        RenamePlaylist => tr("Rename playlist"),
+        ReorderPlaylists => tr("Reorder playlists"),
         ResetGroupName => tr("Restore group name"),
         ShowFavoritesOnly => tr("Show favorites only"),
         GroupExternalPlayer => tr("Use external player"),
@@ -668,6 +670,16 @@ pub fn perform(ui: Ui, item: MenuItem) {
             let minutes = list_preferences(&list).epg_offset_minutes;
             ui.menu.set(Some(group_offset_menu(list, minutes)));
         }
+        MenuItem::RenamePlaylist | MenuItem::ReorderPlaylists => {
+            if let Some(id) = heading_playlist(&list) {
+                let only = if item == MenuItem::RenamePlaylist {
+                    crate::playlists_view::Only::Rename
+                } else {
+                    crate::playlists_view::Only::Reorder
+                };
+                crate::playlists_view::open_only(ui, id, only);
+            }
+        }
         MenuItem::RenameGroup => {
             if let Some(target) = group_target(scope.as_ref()) {
                 organization_view::rename_group(ui, SourceId(target.source), target.id);
@@ -904,7 +916,12 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
             list.resolve(&*schedule).map(Entry::at),
             Some(Entry::Group(group)) if matches!(schedule.group_label(group), GroupName::Named(_))
         );
+    let playlist = heading_playlist(&list).is_some();
     let rows = group_options(|item| match item {
+        // A playlist's heading (the combined view): its own name, and the
+        // order of the playlists, which it shows with another one.
+        RenamePlaylist => playlist,
+        ReorderPlaylists => playlist && crate::settings::playlists_by_hand(),
         RenameGroup | BlockGroup | HideGroup | ShowFavoritesOnly => named,
         ResetGroupName | GroupEpgOffset => matches!(kind, Kind::GroupChannels(_)),
         // Hidden without a player to hand streams to, unless it is on:
@@ -922,6 +939,15 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
     });
     ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
     true
+}
+
+/// The playlist whose heading `list` is (the combined view's groups
+/// column), if it is one.
+fn heading_playlist(list: &ListId) -> Option<SourceId> {
+    match list {
+        ListId::Group(key) => Some(SourceId(key.strip_prefix("playlist:")?.parse().ok()?)),
+        _ => None,
+    }
 }
 
 /// Offers to turn off `list`'s external player after a channel chosen in

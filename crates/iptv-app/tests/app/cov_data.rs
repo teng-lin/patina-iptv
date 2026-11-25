@@ -156,8 +156,13 @@ pub(super) fn start() -> Headless {
     Headless::start(config).unwrap()
 }
 
-/// The groups, then the rail beside them, then one of its items.
+/// The groups, then the rail beside them, then one of its items. The
+/// playlists are on the settings' Playlists page.
 pub(super) fn rail(app: &mut Headless, item: &str) {
+    if item == "Playlists" {
+        step(app.open_settings_playlists());
+        return;
+    }
     step(app.open_guide_groups());
     step(app.press_key("left"));
     step(app.press_key("left"));
@@ -165,9 +170,10 @@ pub(super) fn rail(app: &mut Headless, item: &str) {
     step(app.press(&format!("text:{item} >> nth=0")));
 }
 
-/// On the playlists screen: playlist `name`'s actions, then `act`.
+/// Playlist `name`'s actions (from its Settings → Playlists row, or its
+/// row on the playlists screen), then `act`.
 pub(super) fn act(app: &mut Headless, name: &str, act: &str) {
-    step(app.press(&format!("text:{name}")));
+    open_actions(app, name);
     step(app.wait_for(&format!("text:{act}")));
     step(app.press(&format!("text:{act}")));
 }
@@ -202,9 +208,13 @@ fn add(app: &mut Headless, name: &str) {
 
 /// Closes the screens over the guide, the top one first.
 pub(super) fn to_guide(app: &mut Headless) {
-    for _ in 0..4 {
+    for _ in 0..5 {
         let open = app.screen().count("text:Close").unwrap();
-        if open > 0 {
+        let task = app.screen().matches("id:playlist-actions-list").unwrap();
+        if task && open == 1 {
+            // A playlist's actions over the settings: Back closes them.
+            step(app.back());
+        } else if open > 0 {
             step(app.press(&format!("text:Close >> nth={}", open - 1)));
         } else if app.screen().matches("text:TV guide data").unwrap() {
             // The settings screen: Back to its pages, then closed.
@@ -245,10 +255,22 @@ fn guide_failed(data: &Path, source: SourceId) -> bool {
         .is_some_and(|g| g.last_error.is_some())
 }
 
-/// On the playlists screen: waits until playlist `name`'s refresh is done
-/// (its actions offer it again), then closes its actions.
+/// Playlist `name`'s actions: a long press on its Settings → Playlists
+/// row, else a press on its row of the playlists screen.
+pub(super) fn open_actions(app: &mut Headless, name: &str) {
+    let row = format!("id:settings-content >> role:checkbox[/^{name}/]");
+    if app.screen().matches(&row).unwrap() {
+        step(app.long_press(&row));
+    } else {
+        step(app.press(&format!("text:{name}")));
+    }
+    step(app.wait_for("id:playlist-actions-list"));
+}
+
+/// Waits until playlist `name`'s refresh is done (its actions offer it
+/// again), then closes its actions.
 pub(super) fn refreshed(app: &mut Headless, name: &str) {
-    step(app.press(&format!("text:{name}")));
+    open_actions(app, name);
     step(app.wait_for_within("text:Refresh now", IMPORT));
     step(app.back());
 }
@@ -340,7 +362,7 @@ fn stored_playlists_switch_refresh_and_go() {
     // explicit single-source browsing still stops the previous playback.
     rail(&mut app, "Playlists");
     step(app.wait_for("text:first"));
-    step(app.press("id:playlists-screen >> text:+ Add playlist"));
+    step(app.press("id:settings-content >> text:Add a playlist"));
     add(&mut app, "second.m3u");
     step(app.wait_for_within("text:Beta One · second", IMPORT));
     step(app.wait_for("text:★ Alpha Two · first"));
@@ -381,13 +403,10 @@ fn stored_playlists_switch_refresh_and_go() {
     .unwrap();
     rail(&mut app, "Playlists");
     act(&mut app, "first", "On screen now: back to the guide");
-    step(app.wait_for_gone(
-        "text:Tap a playlist for what you can do with it",
-        Duration::from_secs(1),
-    ));
+    step(app.wait_for_gone("id:playlists-task", Duration::from_secs(1)));
     rail(&mut app, "Playlists");
     act(&mut app, "second", "Refresh now");
-    step(app.wait_for_within("text:M3U playlist · 4 channels", IMPORT));
+    step(app.wait_for_within("text:/^M3U playlist · 4 channels( · |$)/", IMPORT));
     to_guide(&mut app);
     assert!(app.screen().matches("text:Alpha Now").unwrap());
 
@@ -419,7 +438,7 @@ fn stored_playlists_switch_refresh_and_go() {
     act(&mut app, "first", "Refreshing…");
     held.execute_batch("ROLLBACK").unwrap();
     drop(held);
-    step(app.wait_for_within("text:M3U playlist · 3 channels", IMPORT));
+    step(app.wait_for_within("text:/^M3U playlist · 3 channels( · |$)/", IMPORT));
     to_guide(&mut app);
     step(app.wait_for("text:Alpha Zero"));
     assert!(iptv_app::player_has_source(0), "still playing");
@@ -433,7 +452,7 @@ fn stored_playlists_switch_refresh_and_go() {
     .unwrap();
     rail(&mut app, "Playlists");
     act(&mut app, "first", "Refresh now");
-    step(app.wait_for_within("text:M3U playlist · 2 channels", IMPORT));
+    step(app.wait_for_within("text:/^M3U playlist · 2 channels( · |$)/", IMPORT));
     to_guide(&mut app);
     step(app.wait_for_gone("text:Alpha Zero", IMPORT));
     step(app.run_for(Duration::from_secs(1)));
@@ -447,8 +466,8 @@ fn stored_playlists_switch_refresh_and_go() {
     )
     .unwrap();
     rail(&mut app, "Playlists");
-    step(app.press("text:Refresh all playlists"));
-    step(app.wait_for_within("text:M3U playlist · 2 channels", IMPORT));
+    step(app.press("text:Refresh all playlists now"));
+    step(app.wait_for_within("text:/^M3U playlist · 2 channels( · |$)/", IMPORT));
     until(&mut app, "playback stopped", IMPORT, |_| {
         !iptv_app::player_has_source(0)
     });
@@ -473,12 +492,12 @@ fn stored_playlists_switch_refresh_and_go() {
     replace_copy(&data, &first_copy, "not a playlist").unwrap();
     act(&mut app, "first", "User-Agent");
     enter_text(&mut app, "OtherAgent/2.0");
-    step(app.wait_for_within("text:/^New details not saved/", IMPORT));
+    step(app.wait_for_within("text:/ · New details not saved/", IMPORT));
     assert_eq!(agent(&data).as_deref(), Some("SyntheticAgent/1.0"));
     // A refresh fails too: the channels stay, the row says why; so does
     // one of an empty playlist.
     act(&mut app, "first", "Refresh now");
-    step(app.wait_for_within("text:/^Refresh failed/", IMPORT));
+    step(app.wait_for_within("text:/ · Refresh failed/", IMPORT));
     replace_copy(&data, &first_copy, "#EXTM3U\n").unwrap();
     act(&mut app, "first", "Refresh now");
     step(app.wait_for_within("text:/nothing to watch in it/", IMPORT));
@@ -643,7 +662,7 @@ fn stored_playlists_switch_refresh_and_go() {
     // Its guide typed in the form must load: first a link that does not,
     // then one that does.
     rail(&mut app, "Playlists");
-    step(app.press("id:playlists-screen >> text:+ Add playlist"));
+    step(app.press("id:settings-content >> text:Add a playlist"));
     step(app.press("id:wizard-source-type"));
     step(app.wait_for("text:Playlist file"));
     step(app.press("text:Playlist file"));
@@ -669,10 +688,9 @@ fn stored_playlists_switch_refresh_and_go() {
     step(app.wait_for_within("text:Alpha One · first", IMPORT));
     act(&mut app, "first", "Delete");
     step(app.press("text:Delete"));
-    step(app.wait_for_within(
-        "text:M3U link or file, Xtream Codes login, Stalker portal",
-        IMPORT,
-    ));
+    // The Playlists page keeps only "Add a playlist".
+    step(app.wait_for_gone("id:settings-content >> role:checkbox", IMPORT));
+    step(app.wait_for("id:settings-content >> text:Add a playlist"));
     step(app.wait_for_gone("id:guide-channel-name", IMPORT));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 0);
     assert!(store(&data).sources().unwrap().is_empty());

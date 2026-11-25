@@ -718,22 +718,26 @@ fn modal_screens_and_editors_hide_only_their_underlay_and_restore_it_on_back() {
     step(app.back());
     step(app.back());
     exposure.shown(app, "guide-ui", true);
-    step(app.press("label:Playlists"));
-    step(app.wait_for("id:playlists-screen"));
+    // Settings → Playlists: a playlist's actions hide the page under
+    // them; the wizard over the settings hides their whole layer.
+    step(app.open_settings_playlists());
     exposure.shown(app, "guide-ui", false);
-    exposure.shown(app, "playlists-list", true);
-    step(app.press("text:Synthetic personalization"));
-    exposure.shown(app, "playlists-list", false);
+    exposure.shown(app, "settings-content", true);
+    step(app.long_press("role:checkbox[/^Synthetic personalization/]"));
+    step(app.wait_for("id:playlist-actions-list"));
+    exposure.shown(app, "playlists-task", true);
+    exposure.shown(app, "settings-content", false);
     step(app.back());
-    exposure.shown(app, "playlists-list", true);
-    step(app.press("id:playlists-screen >> text:+ Add playlist"));
+    step(app.wait_for_gone("id:playlists-task", Duration::from_secs(2)));
+    exposure.shown(app, "settings-content", true);
+    step(app.press("id:settings-content >> text:Add a playlist"));
     step(app.wait_for("text:Playlist link"));
-    exposure.shown(app, "playlists-screen", false);
     // Settings alerts are siblings of its screen and can outlive it. A
     // higher opaque screen must hide the whole layer, including an alert.
     exposure.shown(app, "settings-layer", false);
     step(app.back());
-    exposure.shown(app, "playlists-screen", true);
+    exposure.shown(app, "settings-content", true);
+    step(app.back());
     step(app.back());
     exposure.shown(app, "guide-ui", true);
     exposure.shown(app, "settings-layer", true);

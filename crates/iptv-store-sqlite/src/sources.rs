@@ -284,6 +284,36 @@ impl Store {
         Ok(())
     }
 
+    /// Puts the sources in the order of `order` (the playlists' manual
+    /// order). Sources it leaves out follow, in their current order.
+    pub fn set_source_order(&mut self, order: &[SourceId]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let current: Vec<i64> = {
+            let mut stmt = tx.prepare("SELECT id FROM sources ORDER BY position, id")?;
+            stmt.query_map([], |r| r.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<_>>()?
+        };
+        let mut ids: Vec<i64> = order
+            .iter()
+            .map(|id| id.0)
+            .filter(|id| current.contains(id))
+            .collect();
+        ids.dedup();
+        for id in current {
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        {
+            let mut stmt = tx.prepare("UPDATE sources SET position = ?2 WHERE id = ?1")?;
+            for (position, id) in ids.iter().enumerate() {
+                stmt.execute(params![id, position as i64])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Deletes the source with its catalog, credentials, settings, stored
     /// guide, customizations and history (and forgets it as the shown
     /// source). Returns `false` if it did not exist.

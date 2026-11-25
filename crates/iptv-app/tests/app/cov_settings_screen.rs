@@ -281,35 +281,6 @@ fn input(app: &mut Headless) -> String {
     format!("view:{}", field_id(app.screen()).unwrap())
 }
 
-/// Presses the text sheet's button `label` (the favorites editor, mounted
-/// while closed, has a Done too).
-#[track_caller]
-fn sheet_button(app: &mut Headless, label: &str) {
-    let field = field_id(app.screen()).expect("the text sheet");
-    let nodes = app.screen().layout_nodes();
-    let parent = |id: u32| nodes.iter().find(|n| n.id == id).map(|n| n.parent);
-    let inside = |mut id: u32, around: u32| {
-        while let Some(up) = parent(id) {
-            if up == around {
-                return true;
-            }
-            id = up;
-        }
-        false
-    };
-    let mut around = field;
-    while let Some(up) = parent(around) {
-        around = up;
-        let holds = nodes.iter().any(|n| {
-            n.text.as_ref().is_some_and(|t| *t.text.text == *label) && inside(n.id, around)
-        });
-        if holds {
-            break;
-        }
-    }
-    step(app.press(&format!("view:{around} >> text:{label}")));
-}
-
 #[track_caller]
 fn sheet_closed(app: &mut Headless) {
     step(app.wait_until("the text sheet closed", GONE, |s| field_id(s).is_none()));
@@ -398,39 +369,21 @@ fn settings(app: &mut Headless, home: &Path) {
     assert!(!app.screen().matches("text:On-screen keyboard").unwrap());
     assert!(!app.screen().matches("text:Not available yet").unwrap());
 
-    // Text: the entry sheet; too long a value is refused, a good one kept.
-    // The default User-Agent is with the playlists (#282).
-    assert!(!app.screen().matches("text:Default User-Agent").unwrap());
+    // The Playlists page: each playlist with its check box, then adding,
+    // refreshing and ordering them; no default User-Agent (#366).
     step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Manage playlists"));
-    step(app.press("text:Default User-Agent"));
-    let field = input(app);
-    step(app.type_text(&field, &"x".repeat(513)));
-    sheet_button(app, "Done");
-    step(app.wait_for("text:That is not a valid value here"));
-    step(app.clear(&field));
-    step(app.wait_for_gone("text:That is not a valid value here", GONE));
-    step(app.type_text(&field, "SyntheticPlayer/1.0\n"));
-    sheet_closed(app);
-    row_value(app, "Default User-Agent", "SyntheticPlayer/1.0");
-    saved(
-        app,
-        home,
-        "general.user_agent",
-        Value::text("SyntheticPlayer/1.0"),
+    step(app.wait_for("text:Add a playlist"));
+    assert!(!app.screen().matches("text:Default User-Agent").unwrap());
+    assert!(!app.screen().matches("text:Manage playlists").unwrap());
+    step(app.wait_for("role:checkbox[/^synthetic/]"));
+    // One playlist: nothing to arrange.
+    assert!(!app.screen().matches("text:Reorder playlists").unwrap());
+    // Shown in lists (its check box; `combined_playlists` hides one).
+    assert!(
+        app.screen()
+            .accessibility_state("role:checkbox[/^synthetic/]")
+            .is_ok_and(|state| state.checked == Some(nsh_core::Checked::True))
     );
-    // Cancel and Back leave it as it was.
-    step(app.press("text:Default User-Agent"));
-    let field = input(app);
-    step(app.type_text(&field, " extra"));
-    sheet_button(app, "Cancel");
-    sheet_closed(app);
-    step(app.press("text:Default User-Agent"));
-    let field = input(app);
-    step(app.type_text(&field, " extra"));
-    step(app.back());
-    sheet_closed(app);
-    row_value(app, "Default User-Agent", "SyntheticPlayer/1.0");
 
     appearance(app, home);
     guide_data(app, home);
@@ -582,23 +535,27 @@ fn other_pages(app: &mut Headless) {
         env!("CARGO_PKG_VERSION"),
         env!("IPTV_GIT_HASH")
     )));
-    // Playlists: its screen over the settings; a rename there types in
-    // the wizard's text sheet.
+    // Playlists: a long press on a playlist opens its actions over the
+    // settings; a rename there types in the wizard's text sheet. Back
+    // closes them, back to the page.
     step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Manage playlists"));
-    step(app.press("text:Manage playlists"));
-    let shown = |s: &Screen| s.count("text:Playlists").unwrap_or(0);
-    step(app.wait_until("the playlists screen", GONE, |s| shown(s) > 1));
-    step(app.press("text:synthetic"));
-    step(app.wait_for("text:Rename"));
+    step(app.long_press("role:checkbox[/^synthetic/]"));
+    step(app.wait_for("id:playlist-actions-list"));
     step(app.press("text:Rename"));
     let field = input(app);
     step(app.wait_for("text:Playlist name"));
     step(app.clear(&field));
     step(app.type_text(&field, "Renamed list\n"));
     sheet_closed(app);
-    step(app.wait_for("text:Renamed list"));
-    back_until(app, |s| shown(s) == 1);
+    step(app.wait_for_gone("id:playlists-task", GONE));
+    step(app.wait_for("role:checkbox[/^Renamed list/]"));
+    // Menu on the row opens them too.
+    step(app.press_key("right"));
+    step(app.press_remote(nsh_tv::RemoteKey::Menu));
+    step(app.wait_for("id:playlist-actions-list"));
+    step(app.back());
+    step(app.wait_for_gone("id:playlists-task", GONE));
+    step(app.wait_for("text:Add a playlist"));
     // The keyboard's shortcuts (a desktop's keys): their editor opens over
     // the settings (its own test, tests/app/library_management.rs, edits
     // them); Back closes it.

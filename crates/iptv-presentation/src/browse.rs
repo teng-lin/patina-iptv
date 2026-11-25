@@ -39,15 +39,14 @@ pub enum RailItem {
     Movies,
     Shows,
     Recordings,
-    /// iptv-rs's own entry: the playlists screen.
-    Playlists,
+    /// The settings, which also hold the playlists.
     Settings,
 }
 
 impl RailItem {
     /// Kept at the bottom of the rail.
     pub fn at_bottom(self) -> bool {
-        matches!(self, RailItem::Playlists | RailItem::Settings)
+        self == RailItem::Settings
     }
 }
 
@@ -97,11 +96,7 @@ pub fn rail_items(vod: VodAvailability) -> Vec<RailItem> {
     if vod.any || vod.shown {
         items.extend([RailItem::Continue, RailItem::Recent]);
     }
-    items.extend([
-        RailItem::Recordings,
-        RailItem::Playlists,
-        RailItem::Settings,
-    ]);
+    items.extend([RailItem::Recordings, RailItem::Settings]);
     items
 }
 

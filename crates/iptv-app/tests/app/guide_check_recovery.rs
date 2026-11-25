@@ -295,7 +295,7 @@ impl Scenario {
     /// From the guide: the wizard's "Add playlist" with `link`, submitted.
     fn add_playlist(&mut self, link: &str) {
         rail(&mut self.app, "Playlists");
-        step(self.app.press("id:playlists-screen >> text:+ Add playlist"));
+        step(self.app.press("id:settings-content >> text:Add a playlist"));
         let placeholder = "text:http://…/playlist.m3u";
         step(self.app.wait_for("text:Playlist link"));
         step(self.app.wait_for(placeholder));
@@ -398,7 +398,7 @@ fn a_failed_refresh_over_a_canceled_guide_download_keeps_the_guide_timer() {
     // The second fails before any guide work.
     s.break_playlist();
     act(&mut s.app, "first", "Refresh now");
-    step(s.app.wait_for_within("text:/^Refresh failed/", IMPORT));
+    step(s.app.wait_for_within("text:/ · Refresh failed/", IMPORT));
     s.until_pending("the failed refresh kept a guide check");
     s.check_downloads("Fresh", RETRY);
 }
@@ -449,7 +449,7 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
     s.break_playlist();
     to_guide(&mut s.app);
     rail(&mut s.app, "Playlists");
-    step(s.app.wait_for_within("text:/^Refresh failed/", IMPORT));
+    step(s.app.wait_for_within("text:/ · Refresh failed/", IMPORT));
     assert!(s.pending(), "the failed refresh left the waiting check");
     s.check_downloads("Again", RETRY);
 }
@@ -497,7 +497,7 @@ fn a_failed_add_keeps_the_guide_timer_of_the_playlist_on_screen() {
     let second = Server::start("second.m3u", "audio/x-mpegurl", String::new());
     second.hold();
     rail(&mut s.app, "Playlists");
-    step(s.app.press("id:playlists-screen >> text:+ Add playlist"));
+    step(s.app.press("id:settings-content >> text:Add a playlist"));
     let placeholder = "text:http://…/playlist.m3u";
     step(s.app.wait_for("text:Playlist link"));
     step(s.app.wait_for(placeholder));
@@ -538,7 +538,7 @@ fn manual_guide_updates_arm_no_check_after_failed_work() {
     s.until_asked(asked);
     s.break_playlist();
     act(&mut s.app, "first", "Refresh now");
-    step(s.app.wait_for_within("text:/^Refresh failed/", IMPORT));
+    step(s.app.wait_for_within("text:/ · Refresh failed/", IMPORT));
     s.server.serve(guide("Fresh", &["a1", "a2"]));
     let asked = s.server.requests();
     to_guide(&mut s.app);
@@ -609,7 +609,7 @@ fn manual_guide_updates_keep_the_backoff_that_refused_work_canceled() {
     s.refresh();
     step(
         s.app
-            .wait_for_within("text:/^Refresh failed: too many/", IMPORT),
+            .wait_for_within("text:/ · Refresh failed: too many/", IMPORT),
     );
     s.until_pending("the refused refresh left the back-off");
     // Not sooner than the policy asked for.
