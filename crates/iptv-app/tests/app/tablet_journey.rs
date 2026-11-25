@@ -160,6 +160,24 @@ fn opens(seen: &Shared) -> Vec<(String, u64)> {
     seen.lock().unwrap().opens.clone()
 }
 
+/// Engine idle does not include native authorization and source-preparation
+/// workers. Retain a bounded observation window at negative playback boundaries,
+/// as touch_zap's quiet check does, without spending the UI's manual deadlines.
+fn observe_native_workers(app: &mut Headless) {
+    assert!(app.clock().is_manual());
+    let at = app.clock().now();
+    let until = std::time::Instant::now() + Duration::from_millis(300);
+    while std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+        app.catch_up();
+    }
+    assert_eq!(
+        app.clock().now(),
+        at,
+        "worker observation keeps UI time fixed"
+    );
+}
+
 fn video_width(app: &Headless) -> f32 {
     let surface = player(app);
     app.screen()
@@ -329,13 +347,21 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     full_screen(&mut app, LANDSCAPE.0);
     assert_eq!(sources(&seen), ["http://stream.example.test/two.m3u8"]);
     assert_eq!(video_width(&app), LANDSCAPE.0, "full screen");
+    let live_opened = opens(&seen);
+    assert_eq!(live_opened.len(), 1);
     step(app.press("id:play-bar-back"));
     step(app.wait_for("text:Other 0"));
     assert!(
         video_width(&app) < LANDSCAPE.0,
         "back in the guide's preview"
     );
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen).len(), 1, "Back opens nothing");
+    assert_eq!(
+        opens(&seen),
+        live_opened,
+        "Back does not reopen the live stream"
+    );
 
     // A past program in the archive: a timeline drag browses back to it,
     // and a tap replays it full screen.
@@ -345,12 +371,29 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     assert!(app.settle(), "the released guide reaches frame/engine idle");
     step(app.press("text:Recital Replay"));
     full_screen(&mut app, LANDSCAPE.0);
+    app.wait_until_fixed_clock("replay source published", WAIT, |_| {
+        sources(&seen).len() == 2
+    });
     let replay = sources(&seen);
     assert_eq!(replay.len(), 2, "{replay:?}");
     assert!(
         replay[1].contains("one"),
         "the replay is channel one's: {replay:?}"
     );
+    // The schedule maps XMLTV starts to whole guide minutes. Check the replay
+    // request is Recital's exact minute, not just another archived show on one.
+    let recital_utc = ((now - 25 * 60 - 2 * SLOT).div_euclid(60) * 60).to_string();
+    let requested_utc = replay[1]
+        .split_once('?')
+        .and_then(|(_, query)| query.split('&').find_map(|pair| pair.strip_prefix("utc=")));
+    assert_eq!(
+        requested_utc,
+        Some(recital_utc.as_str()),
+        "Recital Replay start"
+    );
+    let replay_opened = opens(&seen);
+    assert_eq!(replay_opened.len(), live_opened.len() + 1);
+    assert_eq!(&replay_opened[..live_opened.len()], live_opened.as_slice());
     assert_eq!(video_width(&app), LANDSCAPE.0);
     step(app.press("id:play-bar-back"));
     step(app.wait_until("back in the guide", WAIT, |s| {
@@ -358,6 +401,13 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
             .iter()
             .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
     }));
+
+    observe_native_workers(&mut app);
+    assert_eq!(
+        opens(&seen),
+        replay_opened,
+        "Back does not reopen the replay"
+    );
 
     // An upcoming program's details open by a tap and offer, by
     // visible controls, what its menu holds.
@@ -368,7 +418,9 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     assert!(app.settle(), "the released guide reaches frame/engine idle");
     step(app.press("text:Gala Evening"));
     step(app.wait_for("id:description-layer >> text:Gala Evening"));
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen).len(), 2, "details never play");
+    assert_eq!(opens(&seen), replay_opened, "details never reopen a stream");
     persistent(&app, &seen, surface);
 }
 
@@ -398,6 +450,8 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     let movie = sources(&seen);
     assert_eq!(movie.len(), 1);
     assert!(movie[0].ends_with("/movie/generated-user/generated-pass/10.mp4"));
+    let movie_opened = opens(&seen);
+    assert_eq!(movie_opened.len(), 1);
     let token = seen.lock().unwrap().props["source"]["token"].clone();
     // The player reports 37 s of 2 min played.
     app.engine().control().dispatch_event(
@@ -420,6 +474,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             show_bar(&mut app);
             let what = format!("movie at {size:?}, text {text}");
             assert_eq!(sources(&seen), movie, "no stream opened: {what}");
+            assert_eq!(opens(&seen), movie_opened, "no stream reopened: {what}");
             assert_eq!(video_width(&app), size.0, "still full screen: {what}");
             assert!(app.shows("0:37"), "progress kept: {what}");
             for control in ["play-bar-back", "play-bar-play-pause"] {
@@ -471,7 +526,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     // same player, Resume chosen at its progress (#147); Close then
     // leaves the details for the movies, and the movies for the guide,
     // the movie playing on in its preview.
-    let opened = opens(&seen);
+    let opened = movie_opened.clone();
     show_bar(&mut app);
     back_says(&app, "Movies");
     step(app.press("id:play-bar-back"));
@@ -483,7 +538,9 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             .is_ok_and(|s| s.selected),
         "the movie's details, on Resume"
     );
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), movie, "Back opens nothing");
+    assert_eq!(opens(&seen), movie_opened, "Back does not reopen the movie");
     persistent(&app, &seen, surface);
     step(app.press("id:vod-screen >> label:Close"));
     step(app.wait_for("label:/^Generated Aurora ·/"));
@@ -496,6 +553,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.press("id:vod-screen >> label:Close"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
     in_preview(&mut app);
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), movie, "Back opens nothing");
     assert_eq!(
         opens(&seen),
@@ -518,6 +576,17 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     let episode = sources(&seen);
     assert_eq!(episode.len(), 2, "{episode:?}");
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
+    let episode_opened = opens(&seen);
+    assert_eq!(
+        episode_opened.len(),
+        movie_opened.len() + 1,
+        "one added episode open"
+    );
+    assert_eq!(
+        &episode_opened[..movie_opened.len()],
+        movie_opened.as_slice(),
+        "the movie open history is unchanged"
+    );
     // The player reports 3 min of the episode's 10 played.
     let token = seen.lock().unwrap().props["source"]["token"].clone();
     app.engine().control().dispatch_event(
@@ -531,7 +600,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     app.settle();
     // The visible ‹ (Shows) returns to the show's details, the played
     // episode selected.
-    let opened = opens(&seen);
+    let opened = episode_opened.clone();
     show_bar(&mut app);
     back_says(&app, "Shows");
     step(app.press("id:play-bar-back"));
@@ -543,6 +612,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             .is_ok_and(|s| s.selected),
         "the played episode selected"
     );
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), episode, "Back opens nothing");
     assert_eq!(
         opens(&seen),
@@ -577,6 +647,7 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
             assert_eq!(episodes(&app), selected, "episode kept: {what}");
             assert!(app.shows("Generated Voyage"), "details open: {what}");
             assert_eq!(sources(&seen), episode, "no stream opened: {what}");
+            assert_eq!(opens(&seen), episode_opened, "no stream reopened: {what}");
             let close = app
                 .screen()
                 .id("id:vod-screen >> label:Close")
@@ -617,7 +688,13 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
         step(app.press("id:vod-screen >> label:Close"));
     }
     step(app.wait_for_gone("id:vod-screen", WAIT));
+    observe_native_workers(&mut app);
     assert_eq!(sources(&seen), episode);
+    assert_eq!(
+        opens(&seen),
+        episode_opened,
+        "closing details opens nothing"
+    );
     persistent(&app, &seen, surface);
 }
 
