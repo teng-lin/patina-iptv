@@ -80,6 +80,35 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     let Some(home) = isolated!() else {
         return;
     };
+    repair_journey(home, false);
+}
+
+#[test]
+fn protected_repair_apply_and_history_undo_recheck_pin_after_preview() {
+    let Some(home) = isolated!() else { return };
+    repair_journey(home, true);
+}
+
+fn pin(t: &mut T, digits: &str) {
+    for digit in digits.chars() {
+        t.key(&digit.to_string());
+    }
+    t.press("id:parental-layer >> text:Continue");
+}
+
+fn lock(t: &mut T, player: NodeId) {
+    t.app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: serde_json::Value::Null,
+        },
+    );
+    t.app.settle();
+}
+
+fn repair_journey(home: crate::isolated::Home, protected: bool) {
     let directory = crate::isolated::data_dir(home.path());
     std::fs::create_dir_all(&directory).unwrap();
     let server = Server::start(&[
@@ -175,6 +204,20 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     settings
         .set("epg.update", iptv_settings::Value::choice("on_request"))
         .unwrap();
+    if protected {
+        settings
+            .set(
+                "parental.require_pin_for",
+                iptv_settings::Value::choice("blocked_content_and_settings"),
+            )
+            .unwrap();
+        settings
+            .set(
+                "parental.unlock_window",
+                iptv_settings::Value::choice("every_time"),
+            )
+            .unwrap();
+    }
     std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
     let mut t = T::new(EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -202,6 +245,24 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
         }
     });
     t.wait("text:/Synthetic Viewer/", 10);
+    if protected {
+        t.app.open_guide_groups().unwrap();
+        t.key("left");
+        t.key("left");
+        t.press("text:Settings >> nth=0");
+        t.wait("id:settings-screen", 5);
+        t.press("text:Parental control >> nth=0");
+        t.press("text:Set the PIN");
+        t.wait("id:parental-layer >> text:Choose a new PIN", 20);
+        pin(&mut t, "2468");
+        t.wait("id:parental-layer >> text:Confirm new PIN", 20);
+        pin(&mut t, "2468");
+        t.wait("id:parental-layer >> text:Save your recovery code", 20);
+        t.press("id:parental-layer >> text:I saved the code");
+        t.wait("id:settings-screen", 5);
+        t.press("id:settings-screen >> text:Close");
+        t.gone("id:settings-screen", 5);
+    }
     t.app.open_guide_groups().unwrap();
     t.key("left");
     t.key("left");
@@ -258,6 +319,10 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     t.press("text:Guide data");
     t.wait("text:Guide data · Synthetic inspection", 5);
     t.press("text:Update the guide now");
+    if protected {
+        t.wait("id:parental-layer >> text:Enter parental PIN", 20);
+        pin(&mut t, "2468");
+    }
     t.wait("text:Guide updated", 15);
     t.press("text:Inspect guide coverage");
     t.wait("id:guide-inspection-screen", 5);
@@ -292,7 +357,39 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
             .is_empty(),
         "preview does not mutate saved choices"
     );
-    t.press("text:Apply guide changes");
+    let durable = || {
+        let store = crate::isolated::open_database(directory.join("iptv.sqlite")).unwrap();
+        (
+            store.epg_overrides(sources[1]).unwrap(),
+            store.recent_guide_repairs(sources[1], 20).unwrap(),
+        )
+    };
+    if protected {
+        let before = durable();
+        assert!(before.0.is_empty() && before.1.is_empty());
+        // Preview grants no authority: revoke the earlier source-update
+        // grant after the immutable plan has already been produced.
+        lock(&mut t, player);
+        t.press("text:Apply guide changes");
+        t.wait("id:parental-layer >> text:Enter parental PIN", 20);
+        t.press("id:parental-cancel");
+        assert_eq!(durable(), before);
+        // Re-preview is still read-only and available while locked.
+        t.press("text:Preview guide changes");
+        t.wait("text:Apply guide changes", 10);
+        assert!(!t.shows("id:parental-layer >> text:Enter parental PIN"));
+        t.press("text:Apply guide changes");
+        t.wait("id:parental-layer >> text:Enter parental PIN", 20);
+        pin(&mut t, "2469");
+        t.wait(
+            "id:parental-layer >> text:Incorrect PIN or recovery code",
+            20,
+        );
+        assert_eq!(durable(), before);
+        pin(&mut t, "2468");
+    } else {
+        t.press("text:Apply guide changes");
+    }
     t.wait("text:Guide choices saved; verification pending", 10);
     crate::cov_data::until(
         &mut t.app,
@@ -317,7 +414,35 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     assert_eq!(store.epg_overrides(sources[1]).unwrap().len(), 2);
     assert_eq!(store.active_source().unwrap(), Some(sources[0]));
     drop(store);
-    t.press("text:Undo guide changes");
+    if protected {
+        // Re-open a durable history entry instead of relying on the
+        // just-applied screen's retained outcome or authorization.
+        t.key("backspace");
+        t.press("text:Recent guide repairs");
+        t.wait("text:/^History · /", 10);
+        t.press("text:/^History · /");
+        t.wait("text:Undo guide changes", 10);
+        let before = durable();
+        assert_eq!(before.0.len(), 2);
+        assert_eq!(before.1.len(), 1);
+        assert!(!before.1[0].undone);
+        lock(&mut t, player);
+        t.press("text:Undo guide changes");
+        t.wait("id:parental-layer >> text:Enter parental PIN", 20);
+        t.press("id:parental-cancel");
+        assert_eq!(durable(), before);
+        t.press("text:Undo guide changes");
+        t.wait("id:parental-layer >> text:Enter parental PIN", 20);
+        pin(&mut t, "2469");
+        t.wait(
+            "id:parental-layer >> text:Incorrect PIN or recovery code",
+            20,
+        );
+        assert_eq!(durable(), before);
+        pin(&mut t, "2468");
+    } else {
+        t.press("text:Undo guide changes");
+    }
     t.wait("text:Guide changes undone", 10);
     assert_playback_unchanged(&t, &observed, player, &ancestry, command_count, opens);
     assert!(
@@ -326,5 +451,9 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
             .epg_overrides(sources[1])
             .unwrap()
             .is_empty()
+    );
+    assert!(
+        durable().1[0].undone,
+        "Undo updates the durable history entry"
     );
 }
