@@ -7,125 +7,57 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-11-25
+
+### Added
+
+- Swipe up or down on full-screen live TV to change channels on phones and
+  tablets. The play bar and screen reader actions also offer channel switching.
+  You can turn the swipe off in Settings.
+
 ### Changed
 
-- Keep Android's system Back gesture available on the first-run welcome and
-  library recovery root screens, and let all four D-pad directions select the
-  Tizen NSH exit confirmation's answers.
-- Group guide refresh, failed-source Retry, source editing and confirmed Clear
-  under each playlist’s Guide data. Clear names the playlist and keeps other
-  playlists, channels and guide links intact (#282).
-- Explain incompatible backup formats, settings and database schemas separately
-  from damaged backups in first-run setup and Settings. Show available versions
-  and persistent recovery guidance while preserving current data and queued restores (#201).
-- Clarify portal identity transfers in the mobile privacy policy and record
-  first-release disclosure evidence and pending store checks (#221).
-- Require an embedded R8 class mapping in Android release bundles and provide
-  a disposable emulator launch check for unmodified signed APKs.
-- Give Android TV its own launcher activity without picture in picture,
-  preserving handheld picture in picture and notification return behavior.
-- Keep the public privacy policy address readable in About before opening a
-  browser, including on TV images without a usable browser.
-
-- Cancel a channel swipe when a second finger lands on another player control.
-
-- Follow iPad hardware keyboard attachment and Switch Control at runtime.
-  Refresh these signals when returning to the app, keep panels open for
-  assistive navigation, collapse multiview to the heard tile when its decoder
-  budget shrinks, and offer panel timeout settings only on TV under
-  Advanced; handhelds and desktop use defaults with system accessibility timing.
-
-- Simplify the TV Guide header and groups column by removing overflow buttons,
-  the duplicate group selector and time-step arrows. Remove the unfinished
-  Watchlist destination from the navigation rail.
-- Remove placeholder controls: the program menu's Save to my list, Remind me
-  and Open in another player, and the control strip's Channel options and
-  Settings. The control strip leaves out Record, Recordings, Picture in
-  picture and Multiview where the device can never offer them, and the
-  browser TV host shows no recording rows, buttons or Recordings entry.
-- Movies and Shows are no longer offered when every enabled playlist is M3U.
-- Stop offering scheduled and repeating recordings: the guide, program menu,
-  program details, Record key and Recordings no longer schedule or edit a
-  future recording, and the recorder login startup and precise wakeup settings
-  are hidden. Record now is unchanged.
-- Simplify source, guide-data, search and PIN settings (#282). Each
-  playlist's Streams at once is set among its actions on the playlists
-  screen, with the provider's reported allowance beside it; a value set for
-  all playlists before moves to each stored playlist. The User-Agent setting
-  is the Default User-Agent on the Playlists page. The movie and series
-  catalog keeps the order its Sort chose. One "Update guide" choice replaces
-  the guide's update interval and update-at-start switch; guides always update
-  after their playlist changes, keep descriptions where the guide is stored on
-  disk, and keep finished programs for the longest catch-up archive (at least a
-  week, at most 14 days). Search always ranks favorites first, returns to the
-  results after watching one, and offers finished programs without replay as a
-  filter in its results. In the PIN prompt, OK on a digit submits after digits
-  typed on number keys; on the on-screen keypad it presses the focused key, so
-  a PIN of any length can be entered with arrows and OK and submitted with
-  Continue. Movie and series settings are hidden when no enabled playlist can
-  supply a catalog.
-- Settings show Keyboard or Remote control only while there are keys to set
-  up: always on a TV and a desktop, and on a phone or a tablet while a
-  hardware keyboard or a D-pad is connected. The page holds the replay seek
-  keys; the keyboard's leaves out keys only a remote has, and a hold is offered
-  only where keys report their release. Guide autoplay and its delay move to
-  a new Advanced page on desktop and TV, and on a phone or a tablet show only
-  with a keyboard or D-pad, autoplay staying off without one.
-- Let the device decide several guide, player and display settings. Phones and
-  tablets follow the system's 12/24-hour clock and go full screen when a channel
-  is chosen from the guide overlay or channel list. On desktops and TVs, one
-  "After choosing a channel" choice replaces the two "Keep … after choosing"
-  switches. "Go full screen after" is on the Advanced page on TVs. A compact
-  window shows the guide beside its preview and hides the layout and transparency
-  rows. "Show info on a channel change" is hidden on an Android phone or tablet
-  without a keyboard or D-pad. Back in the guide always returns to the programs
-  on air first.
-- Move the rewind and fast-forward jumps to the Advanced page on every device.
-  The player's
-  panels and play bar now wait at least Android's recommended accessibility
-  timeout, and stay until hidden while a screen reader or Switch Access runs.
-- Android TV no longer offers picture in picture: Home during playback returns
-  to the launcher and stops the stream, and the control and the
-  picture-in-picture-on-leaving setting are gone there. Phones and tablets keep
-  it, entering on Home only from full-screen playback.
+- Each playlist's **Guide data** page puts refresh, retry, source editing and
+  clearing guide data in one place. Clearing guide data asks for confirmation
+  and affects only the selected playlist.
+- Simplified the TV Guide and player controls and removed the unfinished
+  Watchlist. Movies and Shows appear when an enabled playlist can provide an
+  on-demand catalog.
+- Keyboard and remote settings follow connected input devices. Android
+  accessibility timeouts and iPad Switch Control give viewers more time to use
+  playback controls.
+- Multiview availability follows screen size, decoder capacity and stream
+  limits. On phones it is available in landscape on unmetered networks. If an
+  open session can no longer show multiple tiles, the tile you were listening
+  to continues full screen.
+- Android TV returns to the launcher and stops playback when you press Home.
+  Picture in picture remains available on supported phones and tablets.
+- Backup and restore appear where the device has a compatible file picker.
+  Settings → About shows the privacy policy address before opening a browser.
 
 ### Removed
 
-- Scheduled and repeating recording: the recording editor with its Repeat and
-  padding, the guide's scheduled mark, and the Background recording
-  requirements, Start recorder at login, Remove recorder login startup, Allow
-  precise recording wakeups and Stop recorder and quit settings. Android no
-  longer asks for exact alarms or starts on boot or after an update; its
-  recording notification no longer mentions scheduling. From Android 12 a
-  capture whose process Android killed is restarted by its sticky foreground
-  service rather than by the watchdog alarm, which stays only before
-  Android 12. Record now and the Recordings library are otherwise
-  unchanged.
+- Scheduled and repeating recordings have been retired. **Record now** and
+  the Recordings library remain available on supported devices.
 
 ### Fixed
 
-- Keep recycled playlist, guide source and playlist action rows attached to
-  the content and command they currently display.
-
-- A Stalker refresh whose live pages fail keeps the last complete channel
-  catalog and reports the failure for retry instead of publishing partial rows.
-- Android TV recordings use the TV foreground-service type, and captures keep
-  partial media when Low Power Standby prevents a restart. Android can notify
-  when a background capture fails. Windows checks free space before recording.
-- Pin the macOS Android resource compiler used by local Android validation.
-- Keep Android tablets at tablet scale in split screen and refresh hardware
-  keyboard and D-pad controls as devices attach or detach. Open player and
-  guide menus follow available actions and keep Stop recording reachable (#272).
-
-- Keep interrupted and overlapping video touches from leaving a channel-swipe
-  preview behind or starting a new swipe before all fingers lift.
-
-- Hide phone Multiview on metered networks, update every entry point when the
-  active network changes, and keep the heard tile playing full screen when
-  an existing session closes (#279).
-- Import usable channels from M3U playlists containing malformed or unsupported
-  stream addresses, and report the skipped entries instead of rejecting the
-  whole playlist.
+- M3U import keeps usable channels and reports skipped entries when some stream
+  addresses are invalid. A failed Stalker refresh keeps the last complete
+  channel list and offers a retry.
+- Restore explains whether a backup is damaged or uses an unsupported format,
+  settings version or database version, while preserving current data.
+- The play bar shows **Play again** when on-demand playback finishes. On
+  Android, external playback keeps streaming while the other player is open.
+  Patina plays the channel itself if the external player is unavailable.
+- Android's system Back gesture works from the welcome and library recovery
+  screens. Samsung Tizen's home-screen Return opens an exit confirmation that
+  you can navigate with the D-pad.
+- On Samsung Tizen, the normal backdrop returns when you come back to the app
+  with playback paused, and the picture returns when you resume.
+- Recording reports failures to start and preserves partial captures when
+  Android's Low Power Standby prevents a restart. Windows checks free space
+  before starting a recording.
 
 ## [0.1.8] - 2026-11-23
 
@@ -610,7 +542,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...HEAD
+[0.1.9]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/teng-lin/patina-iptv/compare/v0.1.5...v0.1.6
