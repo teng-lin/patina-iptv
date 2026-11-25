@@ -298,6 +298,30 @@ class Workflows(unittest.TestCase):
                     'needs': {'android-native': {'result': result}}, 'workflow_cancelled': cancelled,
                 }), expected)
 
+    def test_smoke_rust_profile_trials_are_manual_and_uncached(self):
+        expressions = module('test-release-workflow')
+        workflow = (ROOT / '.github/workflows/android-smoke.yml').read_text()
+        called, dispatched = workflow.split('  workflow_dispatch:\n', 1)
+        self.assertNotIn('rust-profile:', called)
+        self.assertIn('options: [pinned, pinned-uncached, opt1-uncached]', dispatched)
+        self.assertIn('default: pinned', dispatched)
+        build = workflow.split('  build:\n', 1)[1].split('\n  streams:\n', 1)[0]
+        self.assertIn("PATINA_SMOKE_RUST_PROFILE: ${{ inputs.rust-profile || 'pinned' }}", build)
+        cache = build.split('uses: Swatinem/rust-cache@', 1)[1]
+        condition = re.search(r'^        if: (.+)$', cache, re.M)[1]
+        for profile in ('pinned', 'pinned-uncached', 'opt1-uncached'):
+            for cold in (True, False):
+                with self.subTest(profile=profile, cold=cold):
+                    self.assertEqual(expressions.evaluate(condition, {
+                        'inputs': {'cold': cold}, 'env': {'PATINA_SMOKE_RUST_PROFILE': profile},
+                    }), not cold and profile == 'pinned')
+        build_step = build.split('name: Build the development APK', 1)
+        self.assertNotIn('CARGO_PROFILE_RELEASE_OPT_LEVEL', build_step[0])
+        self.assertIn('if [[ "$PATINA_SMOKE_RUST_PROFILE" == opt1-uncached ]]; then\n'
+                      '            export CARGO_PROFILE_RELEASE_OPT_LEVEL=1\n'
+                      '          fi', build_step[1])
+        self.assertIn('testDebugUnitTest lintDebug assembleDebug', build_step[1])
+
     def test_smoke_streams_are_encoded_beside_the_apk_build_and_the_guide_just_in_time(self):
         workflow = (ROOT / '.github/workflows/android-smoke.yml').read_text()
         build = workflow.split('  build:\n', 1)[1].split('\n  streams:\n', 1)[0]

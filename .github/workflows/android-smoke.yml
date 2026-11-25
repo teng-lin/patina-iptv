@@ -20,6 +20,11 @@ on:
         type: choice
         options: ['off', thin]
         default: 'off'
+      rust-profile:
+        description: Rust optimization for the development APK. The uncached options bypass the Cargo cache for a paired comparison.
+        type: choice
+        options: [pinned, pinned-uncached, opt1-uncached]
+        default: pinned
 
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('android-smoke-pr-{0}', github.event.pull_request.number) || format('android-smoke-run-{0}', github.run_id) }}
@@ -37,6 +42,7 @@ jobs:
     timeout-minutes: 60
     env:
       PATINA_SMOKE_LTO: ${{ inputs.lto || 'off' }}
+      PATINA_SMOKE_RUST_PROFILE: ${{ inputs.rust-profile || 'pinned' }}
       PATINA_SMOKE_CODEGEN_UNITS: '16'
       PATINA_SMOKE_DEBUG_ASSERTIONS: 'true'
     steps:
@@ -60,6 +66,10 @@ jobs:
         shell: bash
         run: |
           case "$PATINA_SMOKE_LTO" in off|thin) ;; *) echo 'Expected off or thin LTO' >&2; exit 2 ;; esac
+          case "$PATINA_SMOKE_RUST_PROFILE" in
+            pinned|pinned-uncached|opt1-uncached) ;;
+            *) echo 'Unknown Android smoke Rust profile' >&2; exit 2 ;;
+          esac
           compiler=$(rustc -vV)
           host_compiler=$(cc --version)
           ndk=$(cat "$ANDROID_NDK_HOME/source.properties")
@@ -70,7 +80,7 @@ jobs:
           } | sha256sum | cut -c1-16)
           echo "key=$identity" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: inputs.cold != true
+        if: inputs.cold != true && env.PATINA_SMOKE_RUST_PROFILE == 'pinned'
         with:
           key: android-smoke-x86_64-v5-${{ steps.compiler.outputs.key }}-${{ hashFiles('nsh.rev', 'tools/ci/package.Cargo.lock', 'Cargo.toml', 'crates/**/Cargo.toml', 'crates/iptv-app/nsh.json', 'tools/sync-host.sh', 'tools/ci/locked-cargo.py', 'tools/ci/android-ndk-env.sh', '.cargo/config.toml') }}
           # The checked-in runner lock supplies the identity before NSH generates
@@ -93,6 +103,10 @@ jobs:
           IPTV_CARGO_TIMINGS: '1'
           NSH_VERBOSE: '1'
         run: |
+          if [[ "$PATINA_SMOKE_RUST_PROFILE" == opt1-uncached ]]; then
+            export CARGO_PROFILE_RELEASE_OPT_LEVEL=1
+          fi
+          echo "Android smoke Rust profile: $PATINA_SMOKE_RUST_PROFILE"
           bash tools/sync-host.sh
           (cd hosts/android && ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug)
       - name: Rust compilation and linking timings
