@@ -65,11 +65,9 @@ fn navigation(ui: Ui, size: Scale) -> View {
                     close(ui);
                 })
                 .child(
-                    svg(crate::play_bar::icons::src(
-                        crate::play_bar::icons::Icon::Close,
-                    ))
-                    .size(move || size.px(24.0))
-                    .text_color(rgb(crate::theme::LIST_TEXT)),
+                    svg(crate::ui_kit::icons::src(crate::ui_kit::icons::Icon::Close))
+                        .size(move || size.px(24.0))
+                        .text_color(rgb(crate::theme::LIST_TEXT)),
                 ),
         )
         .child(view().flex_1())
@@ -385,7 +383,7 @@ fn tools(ui: Ui, size: Scale) -> View {
                         svg(if control == Control::Search {
                             crate::rail::icon(RailItem::Search)
                         } else {
-                            crate::play_bar::icons::src(crate::play_bar::icons::Icon::Sort)
+                            crate::ui_kit::icons::src(crate::ui_kit::icons::Icon::Sort)
                         })
                         .size(move || size.px(26.0))
                         .text_color(move || {

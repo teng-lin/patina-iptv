@@ -317,11 +317,11 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
     let (id, icon) = match direction {
         Direction::Next => (
             "play-bar-next-channel",
-            crate::play_bar::icons::Icon::ChannelNext,
+            crate::ui_kit::icons::Icon::ChannelNext,
         ),
         Direction::Previous => (
             "play-bar-previous-channel",
-            crate::play_bar::icons::Icon::ChannelPrevious,
+            crate::ui_kit::icons::Icon::ChannelPrevious,
         ),
     };
     let label = move || match direction {
@@ -347,7 +347,7 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
             zap(ui, direction);
         })
         .child(
-            svg(move || crate::play_bar::icons::src(icon))
+            svg(move || crate::ui_kit::icons::src(icon))
                 .size(px(18.0))
                 .text_color(rgb(WHITE)),
         )

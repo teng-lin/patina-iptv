@@ -7,6 +7,8 @@
 //! the desktop window (`scale.rs`). Sizes live here and in `fonts.rs`
 //! only: `tests/app/type_drift.rs` fails on a literal text size elsewhere.
 
+pub(crate) mod icons;
+
 use crate::i18n::tr;
 
 use nsh_core::element::ImageSrc;
@@ -54,7 +56,7 @@ pub fn round_more(
     label: impl Fn() -> String + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
-    let dots = crate::play_bar::icons::src(crate::play_bar::icons::Icon::More);
+    let dots = icons::src(icons::Icon::More);
     let slop = move || ((TOUCH - side()) / 2.0).max(0.0);
     round_icon(side, slop, bg, dots, label, on_press)
 }

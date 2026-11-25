@@ -18,7 +18,6 @@
 
 use crate::i18n::tr;
 
-pub(crate) mod icons;
 mod info;
 mod progress;
 
@@ -36,8 +35,8 @@ use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};
 
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_DISABLED_ALPHA};
+use crate::ui_kit::icons::{self, Icon};
 use crate::{Playback, Ui, ViewMode, tint};
-use icons::Icon;
 
 const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;

@@ -1,6 +1,6 @@
 //! Primary row actions, inline management and a separate destructive confirmation.
 use super::*;
-use crate::play_bar::icons::{self, Icon};
+use crate::ui_kit::icons::{self, Icon};
 
 fn control(
     ui: Ui,
