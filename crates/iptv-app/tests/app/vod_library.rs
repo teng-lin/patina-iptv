@@ -59,6 +59,133 @@ pub(crate) fn is_selected(app: &Headless, selector: &str) -> bool {
         .is_ok_and(|state| state.selected)
 }
 
+type Drawings = Arc<Mutex<HashMap<NodeId, Arc<nsh_core::canvas::Drawing>>>>;
+
+fn center_icon(app: &Headless, drawings: &Drawings) -> Arc<nsh_core::canvas::Drawing> {
+    let button = app.screen().id("id:play-bar-play-pause").unwrap();
+    let icon = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.parent == button && node.kind == ViewKind::Canvas)
+        .expect("the center action's drawn icon");
+    drawings.lock().unwrap()[&icon.id].clone()
+}
+
+/// The native host reaches EOF, then the viewer replays through the ordinary
+/// bar button. Observe the mounted icon as well as its accessible action.
+fn replay_ended_movie(
+    app: &mut Headless,
+    props: &Arc<Mutex<HashMap<String, Value>>>,
+    drawings: &Drawings,
+    idiom: nsh_core::platform::Idiom,
+) {
+    let surface = player(app);
+    let opened = props.lock().unwrap()["source"].clone();
+    // Native URLs include a fresh local inspection proxy on every open.
+    let upstream = crate::support::upstream_source(&opened);
+    let send = |app: &mut Headless, name: &str, data: Value| {
+        app.engine().control().dispatch_event(
+            surface,
+            EventKind::NativeEvent,
+            EventPayload::Native {
+                name: name.into(),
+                data,
+            },
+        );
+        app.settle();
+    };
+    let activate_center = |app: &mut Headless| {
+        if idiom == nsh_core::platform::Idiom::Tv {
+            assert!(is_selected(app, "id:play-bar-play-pause"));
+            step(app.press_key("enter"));
+        } else {
+            step(app.press("id:play-bar-play-pause"));
+        }
+    };
+    send(
+        app,
+        "state",
+        json!({"token":opened["token"],"state":"ready"}),
+    );
+    if idiom == nsh_core::platform::Idiom::Tv {
+        step(app.press_key("m"));
+    } else if !app.screen().matches("id:play-bar-layer").unwrap() {
+        step(app.press("id:video"));
+    }
+    step(app.wait_for("id:play-bar-layer >> label:Play or pause"));
+    let pause_icon = center_icon(app, drawings);
+    activate_center(app);
+    assert_eq!(props.lock().unwrap()["paused"], true);
+    let play_icon = center_icon(app, drawings);
+    assert_ne!(play_icon, pause_icon, "pausing changes Pause to Play");
+    activate_center(app);
+    assert_eq!(props.lock().unwrap()["paused"], false);
+    assert_eq!(center_icon(app, drawings), pause_icon);
+
+    send(
+        app,
+        "timeline",
+        json!({"token":opened["token"],"seekId":0,"ms":120000,"durationMs":120000,"seekable":true}),
+    );
+    send(
+        app,
+        "state",
+        json!({"token":opened["token"],"state":"ended"}),
+    );
+    step(app.wait_for("id:play-bar-layer >> label:Play again"));
+    assert_eq!(
+        app.screen().id("id:play-bar-layer >> label:Play again"),
+        app.screen().id("id:play-bar-play-pause"),
+        "the center button exposes Play again"
+    );
+    assert_eq!(
+        props.lock().unwrap()["paused"],
+        false,
+        "natural EOF is not pause"
+    );
+    assert_eq!(center_icon(app, drawings), play_icon, "EOF draws Play");
+    let opens = iptv_app::player_opens(0);
+    activate_center(app);
+    step(app.wait_until(
+        "the movie reopens from the bar",
+        Duration::from_secs(5),
+        |_| {
+            let props = props.lock().unwrap();
+            props.get("source").is_some_and(|source| {
+                crate::support::upstream_source(source)["url"] == upstream["url"]
+                    && source["token"] != opened["token"]
+            })
+        },
+    ));
+    assert_eq!(player(app), surface, "replay retains the player surface");
+    assert_eq!(iptv_app::player_opens(0), opens + 1, "one replay open");
+    assert_eq!(props.lock().unwrap()["paused"], false);
+    assert!(
+        props.lock().unwrap().get("seek").is_none_or(Value::is_null),
+        "replay does not resume at EOF"
+    );
+    step(app.wait_for("id:play-bar-layer >> label:Play or pause"));
+    assert_eq!(
+        center_icon(app, drawings),
+        pause_icon,
+        "replay draws Pause again"
+    );
+    let token = props.lock().unwrap()["source"]["token"].clone();
+    send(app, "state", json!({"token":token,"state":"ready"}));
+    for ms in [0, 2000, 37000] {
+        send(
+            app,
+            "timeline",
+            json!({"token":token,"seekId":0,"ms":ms,"durationMs":120000,"seekable":true}),
+        );
+        step(app.wait_for(&format!("id:play-bar-time-line >> text:0:{:02}", ms / 1000)));
+    }
+    // Continue the browsing/resume journey at its original 37-second point.
+    step(app.back());
+    step(app.wait_for_gone("id:play-bar-layer", Duration::from_secs(1)));
+}
+
 #[test]
 fn movies_and_series_reach_playback_and_resume_by_identity() {
     let Some(home) = isolated!() else { return };
@@ -1147,8 +1274,13 @@ fn exercise_admission(
     let mut app = Headless::start(config).unwrap();
     let props: Arc<Mutex<HashMap<String, Value>>> = Arc::default();
     let observed = props.clone();
+    let drawings: Drawings = Arc::default();
+    let drawn = drawings.clone();
     app.observe(move |_, batch| {
         for item in &batch.items {
+            if let MountItem::Canvas { id, drawing } = item {
+                drawn.lock().unwrap().insert(*id, drawing.clone());
+            }
             if let MountItem::ComponentProps { props: changed, .. } = item {
                 for (key, value) in changed {
                     observed
@@ -1240,6 +1372,9 @@ fn exercise_admission(
             assert_eq!(iptv_app::player_opens(0), opens);
             assert_eq!(props.lock().unwrap()["source"], opened);
         }
+    }
+    if resume == ResumeCase::Seekable {
+        replay_ended_movie(&mut app, &props, &drawings, idiom);
     }
     // Back returns to the movie's details on Resume, over the same
     // player, opening nothing; Back again to the movies on that title
