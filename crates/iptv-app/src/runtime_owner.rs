@@ -72,7 +72,9 @@ pub(crate) fn with_runtime<R>(owner: Rc<Runtime>, run: impl FnOnce() -> R) -> R 
 }
 
 pub(crate) fn new_runtime(directory: std::path::PathBuf) -> Runtime {
-    Runtime::new(host::ports(directory))
+    let mut ports = host::ports(directory);
+    ports.startup_mark = crate::startup::mark_with;
+    Runtime::new(ports)
 }
 
 /// A local task always polls with the owner that accepted it, also after
