@@ -73,7 +73,9 @@ class TvActivity : Activity() {
             BackupComponent(this, context, backups)
         }
         nsh.registerComponent(ImeVisibilityComponent.NAME, ::ImeVisibilityComponent)
-        nsh.registerComponent(DeviceComponent.NAME, ::DeviceComponent)
+        nsh.registerComponent(DeviceComponent.NAME) { context ->
+            DeviceComponent(context, ::updatePhoneOrientation)
+        }
         val gone = { p: PlayerComponent ->
             players.remove(p)
             pip.destroyed(p)
@@ -173,11 +175,14 @@ class TvActivity : Activity() {
      * (a configuration change).
      */
     private fun landscapeOnPhones(config: Configuration) {
-        val tv = packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        val tv = DeviceSignals.tv(config.uiMode, packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK))
+        updatePhoneOrientation(!tv && DeviceSignals.phone(DeviceSignals.displaySmallestDp(this, config)))
+    }
+
+    private fun updatePhoneOrientation(phone: Boolean) {
         val windowed = isInMultiWindowMode || isInPictureInPictureMode
-        val phone = !tv && !windowed && config.smallestScreenWidthDp in 1 until PHONE_MAX_DP
         val wanted =
-            if (phone) {
+            if (phone && !windowed) {
                 ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
             } else {
                 ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -256,10 +261,5 @@ class TvActivity : Activity() {
         audio.destroy()
         nsh.destroy()
         super.onDestroy()
-    }
-
-    private companion object {
-        /** A screen narrower than this, at its smallest, is a phone's. */
-        const val PHONE_MAX_DP = 600
     }
 }

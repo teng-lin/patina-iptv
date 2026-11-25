@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use crate::headless::Headless;
 use crate::personalization::step;
-use crate::recordings::{fixture, local_capture};
+use crate::recordings::{GuideFixture, fixture, local_capture};
 use nsh_core::platform::Idiom;
 use nsh_core::{EventKind, EventPayload};
 use nsh_tv::RemoteKey;
@@ -202,15 +202,74 @@ fn android_phones_and_tablets_put_record_now_under_more_and_show_the_library_onc
 }
 
 #[test]
+fn android_rail_follows_a_form_change_while_open() {
+    fn here() {}
+    let Some(home) = home(std::any::type_name_of_val(&here), "android") else {
+        return;
+    };
+    let (url, server) = local_capture();
+    let (mut app, _, _, _) = fixture(&home, Idiom::Tv, &url, None);
+    report(&mut app, "tv");
+    step(app.open_guide_groups());
+    let recordings = "id:navigation-rail >> label:Recordings";
+    step(app.wait_for(recordings));
+    report(&mut app, "tablet");
+    step(app.wait_for_gone(recordings, WAIT));
+    step(app.wait_for("id:navigation-rail >> label:Playlists"));
+    report(&mut app, "tv");
+    step(app.wait_for(recordings));
+    drop(app);
+    server.join().unwrap();
+}
+
+#[test]
+fn the_program_menu_keeps_stop_available_after_a_form_change() {
+    fn here() {}
+    let Some(home) = home(std::any::type_name_of_val(&here), "android") else {
+        return;
+    };
+    let (url, server) = local_capture();
+    let (mut app, path, _, _) = fixture(
+        &home,
+        Idiom::Desktop,
+        &url,
+        Some(GuideFixture::Listing("Generated future program")),
+    );
+    report(&mut app, "tv");
+    step(app.wait_for("text:Generated live program"));
+    step(app.press_key("m"));
+    step(app.press("id:menu-panel >> label:Record"));
+    step(app.wait_until("a capture runs", WAIT, |_| active(&path) > 0));
+    step(app.press_key("m"));
+    let stop = "id:menu-panel >> label:Stop recording";
+    step(app.wait_for(stop));
+    report(&mut app, "tablet");
+    step(app.press(stop));
+    step(app.wait_until("the capture stops", WAIT, |_| active(&path) == 0));
+    drop(app);
+    server.join().unwrap();
+}
+
+#[test]
 fn an_ipad_offers_no_record_now_and_no_empty_library() {
     fn here() {}
     let Some(home) = home(std::any::type_name_of_val(&here), "ipad") else {
         return;
     };
     let (url, server) = local_capture();
-    let (mut app, path, _, _) = fixture(&home, Idiom::Pad, &url, None);
+    let (mut app, path, _, _) = fixture(
+        &home,
+        Idiom::Pad,
+        &url,
+        Some(GuideFixture::Listing("Generated future program")),
+    );
     report(&mut app, "tablet");
     assert!(!rail_offers(&mut app, "Recordings"));
+    step(app.wait_for("text:Generated live program"));
+    step(app.press_key("m"));
+    step(app.wait_for("id:menu-panel >> label:Details"));
+    assert!(!shown(&app, "id:menu-panel >> label:Record"));
+    step(app.back());
     no_record_now(&mut app, &path);
     drop(app);
     server.join().unwrap();

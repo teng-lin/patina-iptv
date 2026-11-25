@@ -5,8 +5,8 @@
 //! and the question before leaving where the host asks it
 //! (`crate::confirm_leaving`).
 //! Option sets follow the choosers observed in the reference UX;
-//! wording is ours. Entries are taken when a chooser
-//! opens; Up/Down move, OK (or a tap) picks and closes, Back closes.
+//! wording is ours. More follows the available controls; Up/Down move,
+//! OK (or a tap) picks and closes, Back closes.
 
 use crate::i18n::{tr, trf};
 
@@ -391,23 +391,38 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         crate::overlays::Overlay::Chooser
     };
     let width = signal(None);
-    effect(move || {
-        let stale = ui.chooser.with(|chooser| {
-            chooser
-                .as_ref()
-                .and_then(|chooser| chooser.more.as_ref())
-                .is_some_and(|more| {
-                    width
-                        .get()
-                        .is_some_and(|width| crate::play_bar::overflow(ui, width) != more.controls)
-                })
+    if !leave {
+        let more_open = computed(move || {
+            ui.chooser
+                .with(|chooser| chooser.as_ref().is_some_and(|c| c.kind == Kind::More))
         });
-        // Keep row identities stable for an in-flight press. A change in
-        // availability or fit dismisses the old list before it can be used.
-        if stale && !leave {
-            close(ui);
-        }
-    });
+        effect(move || {
+            if !more_open.get() {
+                return;
+            }
+            let Some(width) = width.get() else {
+                return;
+            };
+            let controls = crate::play_bar::overflow(ui, width);
+            if controls.is_empty() {
+                close(ui);
+            } else if ui.chooser.with_untracked(|chooser| {
+                chooser
+                    .as_ref()
+                    .and_then(|c| c.more.as_ref())
+                    .is_some_and(|more| more.controls != controls)
+            }) {
+                ui.chooser.update(|chooser| {
+                    if let Some(open) = chooser
+                        && let Some(more) = &mut open.more
+                    {
+                        open.list.replace_actions(&more.controls, &controls);
+                        more.controls = controls;
+                    }
+                });
+            }
+        });
+    }
     let count = move || {
         if open() {
             ui.chooser.with(|c| c.as_ref().map_or(0, |c| c.list.len))
@@ -584,6 +599,21 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                 )
                 .child(
                     virtual_list(count, row)
+                        // A More row keeps its node when another control
+                        // comes or goes around it.
+                        .keys(move || {
+                            let len = count();
+                            ui.chooser.with(|chooser| {
+                                match chooser.as_ref().and_then(|c| c.more.as_ref()) {
+                                    Some(more) if len != 0 => more
+                                        .controls
+                                        .iter()
+                                        .map(|&control| (Some(control), 0))
+                                        .collect::<Vec<_>>(),
+                                    _ => (0..len).map(|index| (None, index)).collect(),
+                                }
+                            })
+                        })
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
                         .test_id(if leave {

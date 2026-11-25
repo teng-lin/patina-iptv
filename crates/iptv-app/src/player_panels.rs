@@ -150,7 +150,10 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
     match control {
         // Where the device offers them (`capabilities::record_now` and
         // `recordings_library`).
-        Control::Record => main && crate::capabilities::record_now().offered(),
+        Control::Record => {
+            main && (crate::capabilities::record_now().offered()
+                || crate::recordings_view::recording_active(ui))
+        }
         Control::Recordings => main && crate::capabilities::recordings_library(ui),
         Control::Search => main,
         // As the device and its window offer it (#279): a phone upright, a
@@ -169,14 +172,15 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
     match control {
         Control::Multiview => crate::capabilities::multiview(ui).available(),
         Control::Record => {
-            crate::capabilities::record_now().offered()
-                && ui.player_surface == 0
+            ui.player_surface == 0
                 && ui.playback.get() == crate::Playback::Live
                 && !ui.recordings.with(|s| s.busy || s.starting.is_some())
-                && ui
-                    .playing
-                    .get()
-                    .is_some_and(crate::recordings_view::available)
+                && (crate::recordings_view::recording_active(ui)
+                    || (crate::capabilities::record_now().offered()
+                        && ui
+                            .playing
+                            .get()
+                            .is_some_and(crate::recordings_view::available)))
         }
         Control::Recordings => {
             ui.player_surface == 0 && crate::capabilities::recordings_library(ui)

@@ -1,6 +1,7 @@
 package com.hantekllc.iptvrs.host
 
 import android.content.res.Configuration
+import android.view.InputDevice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -58,6 +59,56 @@ class DeviceSignalsTest {
         assertTrue(DeviceSignals.dpad(Configuration.NAVIGATION_DPAD, Configuration.NAVIGATIONHIDDEN_NO))
         assertFalse(DeviceSignals.dpad(Configuration.NAVIGATION_DPAD, Configuration.NAVIGATIONHIDDEN_YES))
         assertFalse(DeviceSignals.dpad(Configuration.NAVIGATION_NONAV, Configuration.NAVIGATIONHIDDEN_NO))
+    }
+
+    @Test
+    fun connectedDevicesCanReportBothKeyboardAndDpad() {
+        val keyboard = DeviceSignals.KeyDevice(external = false, keyboard = true, dpad = false)
+        val pad = DeviceSignals.KeyDevice(external = true, keyboard = false, dpad = true)
+        val config =
+            DeviceSignals.ConfiguredKeys(
+                Configuration.KEYBOARD_QWERTY,
+                Configuration.HARDKEYBOARDHIDDEN_NO,
+                Configuration.NAVIGATION_DPAD,
+                Configuration.NAVIGATIONHIDDEN_YES,
+            )
+        val hidden = config.copy(keyboardHidden = Configuration.HARDKEYBOARDHIDDEN_YES)
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.connectedKeys(listOf(keyboard, pad), config, tv = false))
+        assertEquals(DeviceSignals.Input(false, true), DeviceSignals.connectedKeys(listOf(keyboard, pad), hidden, tv = false))
+        assertEquals(DeviceSignals.Input(true, false), DeviceSignals.connectedKeys(listOf(keyboard), config, tv = false))
+        assertEquals(DeviceSignals.Input(false, false), DeviceSignals.connectedKeys(emptyList(), config, tv = false))
+    }
+
+    @Test
+    fun staleConfigurationDoesNotMaskNewlyConnectedKeysOnOlderAndroid() {
+        val keyboard = DeviceSignals.KeyDevice(external = false, keyboard = true, dpad = false)
+        val pad = DeviceSignals.KeyDevice(external = false, keyboard = false, dpad = true)
+        val absent =
+            DeviceSignals.ConfiguredKeys(
+                Configuration.KEYBOARD_NOKEYS,
+                Configuration.HARDKEYBOARDHIDDEN_YES,
+                Configuration.NAVIGATION_NONAV,
+                Configuration.NAVIGATIONHIDDEN_YES,
+            )
+        val present =
+            DeviceSignals.ConfiguredKeys(
+                Configuration.KEYBOARD_QWERTY,
+                Configuration.HARDKEYBOARDHIDDEN_NO,
+                Configuration.NAVIGATION_DPAD,
+                Configuration.NAVIGATIONHIDDEN_NO,
+            )
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.connectedKeys(listOf(keyboard, pad), absent, tv = false))
+        assertEquals(DeviceSignals.Input(false, false), DeviceSignals.connectedKeys(emptyList(), present, tv = false))
+        assertEquals(DeviceSignals.Input(false, true), DeviceSignals.connectedKeys(emptyList(), present, tv = true))
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.connectedKeys(null, present, tv = false))
+    }
+
+    @Test
+    fun hatAxesCountOnControllersButTrackballsAndAnalogSticksAloneDoNot() {
+        assertTrue(DeviceSignals.dpadSource(InputDevice.SOURCE_DPAD or InputDevice.SOURCE_TRACKBALL, hats = false))
+        assertTrue(DeviceSignals.dpadSource(InputDevice.SOURCE_GAMEPAD or InputDevice.SOURCE_JOYSTICK, hats = true))
+        assertFalse(DeviceSignals.dpadSource(InputDevice.SOURCE_GAMEPAD or InputDevice.SOURCE_JOYSTICK, hats = false))
+        assertFalse(DeviceSignals.dpadSource(InputDevice.SOURCE_TRACKBALL, hats = true))
     }
 
     @Test
