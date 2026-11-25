@@ -24,7 +24,7 @@ uninitialized host objects or native methods. A Leanback component launched
 on handheld likewise redirects to the PiP-capable handheld component.
 The runtime's existing TV PiP exclusion remains in `PipHost`.
 
-Local release host checks passed: `:app:testReleaseUnitTest` (51 tests) and
+Local release host checks passed: `:app:testReleaseUnitTest` (54 tests) and
 `:app:processReleaseMainManifest`, using JDK 17 and Android SDK 36. The generated
 merged release manifest independently confirmed:
 
@@ -40,9 +40,10 @@ a signed AAB or prove playback PiP on the changed host.
 
 ### Android artifact snapshot — November 25, 2026
 
-The #220 lane keeps these distinct artifacts and results. Later device results
-belong in the PR evidence, with the artifact identity, rather than being inferred
-from this snapshot.
+This artifact snapshot was recorded before the refresh onto master `39d0a09c`
+(#325). The #220 lane keeps these distinct artifacts and results. Later device
+results belong in the PR evidence, with the artifact identity, rather than being
+inferred from this snapshot.
 
 | Artifact | Verified observations and limits |
 | --- | --- |
@@ -65,6 +66,9 @@ The local unsigned device-target bundle was built on November 25, 2026 through
 MPVKit inputs. The app and iOS runner builds passed. Its executable SHA-256 is
 `bb593b151088f51ff77c931e6ee9e87f0deee4db5cc1860ed2af8ce15860c052`.
 The coordinator independently reran the redacted inspector and confirmed it.
+These results apply to that prior source. The later refresh onto master
+`39d0a09c` changes app/device behavior; a submission candidate must be rebuilt
+and audited from its exact final source before signed distribution validation.
 No pre-existing Patina iPad bundle/IPA was available locally or among the public
 v0.1.8 release assets.
 
@@ -194,13 +198,17 @@ the review fixture externally before submission.
 ## Local checks
 
 The exact pinned Rust 1.99.1 passed `cargo test -p iptv-core -p
-iptv-presentation` (37 core tests, 463 presentation unit tests, 53 presentation
+iptv-presentation` (37 core tests, 465 presentation unit tests, 53 presentation
 integration tests and 2 doctests), and both portable crates built for
 `wasm32-unknown-unknown`. The redacted bundle-inventory and provisioning helper
 suite passed all 8 tests. The pinned native `cargo build -p iptv-app`, Android
 host tests after the final Kotlin formatting changes, pinned ktlint 1.3.1 and
 targeted Ruff 0.11.13 checks also passed. The local unsigned bundle audit and
-normal preparation passed as described above. Native Codex and Antigravity reviews were reconciled, including launcher
-lifecycle and inventory redaction/error cases. Claude Code CLI review could not
+normal preparation passed for the prior source as described above. After the
+refresh onto master `39d0a09c`, the required Rust/wasm/native builds, 54 Android
+host tests and merged-manifest checks passed again. An independent native
+integration review confirmed live device reporting, orientation and redirect
+guards remain intact. Native Codex and Antigravity reviews were reconciled,
+including launcher lifecycle and inventory redaction/error cases. Claude Code CLI review could not
 run because authentication was unavailable. Final-head CI is tracked in the PR;
 unchecked store/device criteria keep this issue open (`Refs #222`).
