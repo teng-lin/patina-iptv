@@ -20,6 +20,7 @@ import time
 import uuid
 
 PACKAGE = "com.hantekllc.iptvrs.validation"
+RELEASE_PACKAGE = "com.hantekllc.iptvrs"
 MARKER = ".patina-owned-avd.json"
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -150,7 +151,10 @@ def cleanup(root, scratch, token):
 def adb(serial, *arguments, **kwargs):
     if not re.fullmatch(r"emulator-\d+", serial):
         raise ValueError("validation requires an explicit emulator serial")
-    return subprocess.run(["adb", "-s", serial, *arguments], check=True, timeout=15,
+    timeout = 120 if arguments and arguments[0] == "install" else 15
+    if arguments[:3] == ("shell", "am", "start"):
+        timeout = 60
+    return subprocess.run(["adb", "-s", serial, *arguments], check=True, timeout=timeout,
                           capture_output=True, text=True, **kwargs).stdout.strip()
 
 
@@ -189,10 +193,22 @@ def smoke_timeout(env):
     return SMOKE_BUDGET + int(hold)
 
 
+def validate_apk(package, debuggable, release):
+    expected = RELEASE_PACKAGE if release else PACKAGE
+    if package != expected:
+        raise ValueError(f"APK must use {expected}")
+    if release and debuggable != "false":
+        raise ValueError("release smoke requires a non-debuggable APK")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="existing source .avd directory; never modified")
     parser.add_argument("apk", type=Path, help="synthetic validation-ID debug APK")
+    parser.add_argument("--release", action="store_true",
+                        help="launch a non-debuggable production-ID APK; remaining journeys stay pending")
+    parser.add_argument("--artifact-commit", help="verified compiled source SHA; separate from harness checkout")
+    parser.add_argument("--artifact-nsh", help="verified compiled NSH SHA; separate from harness checkout")
     parser.add_argument("--scratch", type=Path, default=ROOT / "target/disposable-avds")
     parser.add_argument("--out", type=Path, default=ROOT / "target/android-validation")
     parser.add_argument("--port", type=int, default=5580)
@@ -201,6 +217,9 @@ def main():
                         default="swiftshader", help="renderer to record and compare during emulator diagnostics")
     parser.add_argument("--qemu-img", default=shutil.which("qemu-img"), help="SDK qemu-img or a compatible host tool")
     args = parser.parse_args()
+    for revision in (args.artifact_commit, args.artifact_nsh):
+        if revision is not None and not re.fullmatch(r"[0-9a-f]{40}", revision):
+            parser.error("artifact source revisions must be full lowercase Git SHAs")
     try:
         budget = smoke_timeout(os.environ)
     except ValueError as error:
@@ -214,8 +233,12 @@ def main():
     apk = args.apk.resolve(strict=True)
     # Refuse a normal app APK before any device action, including uninstall/install.
     package = subprocess.check_output(["apkanalyzer", "manifest", "application-id", str(apk)], text=True, timeout=30).strip()
-    if package != PACKAGE:
-        parser.error("APK must use the dedicated validation application ID")
+    debuggable = subprocess.check_output(["apkanalyzer", "manifest", "debuggable", str(apk)],
+                                        text=True, timeout=30).strip()
+    try:
+        validate_apk(package, debuggable, args.release)
+    except ValueError as error:
+        parser.error(str(error))
     for port in (args.port, args.port + 1):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", port))
@@ -237,6 +260,10 @@ def main():
                      "source": str(args.source.resolve()), "copy": str(root), "audio_enabled": False,
                      "fresh_userdata": True,
                      "gpu": args.gpu,
+                     "mode": "release-launch" if args.release else "fixture-smoke",
+                     "checkout_nsh_revision": (ROOT / "nsh.rev").read_text().strip(),
+                     "artifact_commit": args.artifact_commit,
+                     "artifact_nsh_revision": args.artifact_nsh,
                      "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
                      "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                      "result": "incomplete"}
@@ -264,11 +291,13 @@ def main():
             time.sleep(1)
         else:
             raise RuntimeError("owned emulator boot timed out")
-        smoke = subprocess.Popen(["bash", str(ROOT / "tools/ci/android-smoke.sh"), serial, str(apk)],
+        command = (["python3", str(ROOT / "tools/ci/android-release-smoke.py")] if args.release else
+                   ["bash", str(ROOT / "tools/ci/android-smoke.sh")])
+        smoke = subprocess.Popen([*command, serial, str(apk)],
                                  env=env, start_new_session=True)
         if smoke.wait(timeout=budget):
             raise RuntimeError("synthetic smoke failed; evidence retained")
-        operation["result"] = "passed"
+        operation["result"] = "launch-passed-journeys-pending" if args.release else "passed"
         manifest.write_text(json.dumps(operation, indent=2) + "\n")
         print(f"Evidence: {output}")
     finally:

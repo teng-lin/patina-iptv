@@ -313,6 +313,8 @@ class RealPackaging(Signing):
                 package.writestr(name, data)
         with zipfile.ZipFile(unsigned / "app-release.aab", "w") as bundle:
             bundle.writestr("base/manifest/AndroidManifest.xml", self.MANIFEST)
+            bundle.writestr("BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map",
+                            "# compiler: R8\ninvalid.synthetic.Synthetic -> a:\n")
             for name, data in self.CONTENT.items():
                 bundle.writestr("base/" + name, data)
         (unsigned / "Patina-9.8.7-android-classpath-sbom.cdx.json").write_text("{}\n")
