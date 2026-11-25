@@ -47,12 +47,7 @@ pub fn report(operation: &str, error: Error) -> &'static str {
     log::warn!("iptv backup: {operation} failed: {error}");
     error.message()
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Progress {
-    Idle,
-    Selecting,
-    Working,
-}
+pub use crate::model::BackupProgress as Progress;
 
 fn progress(runtime: &super::Runtime, phase: Progress) {
     runtime.backup_progress.set(phase);

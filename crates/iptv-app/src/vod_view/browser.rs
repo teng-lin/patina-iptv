@@ -3,7 +3,7 @@
 use super::*;
 use iptv_core::vod::Card;
 use iptv_presentation::browse::RailItem;
-use iptv_presentation::vod::Destination;
+use iptv_presentation::vod::{CatalogGroup, Destination};
 
 fn all_label(ui: Ui) -> &'static str {
     if ui.vod.with(|s| s.query.kind == Kind::Series) {
@@ -65,11 +65,9 @@ fn navigation(ui: Ui, size: Scale) -> View {
                     close(ui);
                 })
                 .child(
-                    svg(crate::play_bar::icons::src(
-                        crate::play_bar::icons::Icon::Close,
-                    ))
-                    .size(move || size.px(24.0))
-                    .text_color(rgb(crate::theme::LIST_TEXT)),
+                    svg(crate::ui_kit::icons::src(crate::ui_kit::icons::Icon::Close))
+                        .size(move || size.px(24.0))
+                        .text_color(rgb(crate::theme::LIST_TEXT)),
                 ),
         )
         .child(view().flex_1())
@@ -155,13 +153,9 @@ fn navigation(ui: Ui, size: Scale) -> View {
         .child(view().flex_1())
 }
 
-fn choose_category(ui: Ui, category: Option<(i64, String)>, continuing: bool) {
+fn choose_category(ui: Ui, group: CatalogGroup) {
     ui.touched();
-    ui.vod.update(|s| {
-        s.control = Control::Category;
-        s.query.category = category;
-        s.query.continue_watching = continuing;
-    });
+    ui.vod.update(|s| s.choose_catalog_group(group));
     reload(ui, false);
 }
 
@@ -276,11 +270,16 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                                     selected() && ui.vod.with(|s| s.control == Control::Category)
                                 },
                                 move || {
-                                    choose_category(
-                                        ui,
-                                        category().map(|c| (c.source, c.id)),
-                                        at.index() == 0,
-                                    );
+                                    let group = match at.index() {
+                                        0 => CatalogGroup::ContinueWatching,
+                                        _ => category().map_or(CatalogGroup::All, |c| {
+                                            CatalogGroup::Category {
+                                                source: c.source,
+                                                id: c.id,
+                                            }
+                                        }),
+                                    };
+                                    choose_category(ui, group);
                                 },
                             )
                             .test_id({
@@ -385,7 +384,7 @@ fn tools(ui: Ui, size: Scale) -> View {
                         svg(if control == Control::Search {
                             crate::rail::icon(RailItem::Search)
                         } else {
-                            crate::play_bar::icons::src(crate::play_bar::icons::Icon::Sort)
+                            crate::ui_kit::icons::src(crate::ui_kit::icons::Icon::Sort)
                         })
                         .size(move || size.px(26.0))
                         .text_color(move || {
@@ -707,11 +706,11 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         let (Some(key), generation) = preview.get() else {
             return;
         };
-        let owner = crate::runtime();
+        let owner = crate::runtime_owner::runtime();
         let cancel = iptv_import::CancelToken::new();
         let on_drop = cancel.clone();
         cleanup(move || on_drop.cancel());
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             timer(std::time::Duration::from_millis(250)).await;
             if cancel.is_canceled()
                 || !ui.vod.with_untracked(|s| {

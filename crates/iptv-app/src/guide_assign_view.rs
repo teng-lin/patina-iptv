@@ -43,10 +43,10 @@ fn next_request() -> u64 {
 /// screen; a notice when there is none or it has no guide at all.
 pub fn open(ui: Ui, channel: usize) {
     let request = next_request();
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let Some((playlist, key)) = schedule
         .channel_key(channel)
-        .and_then(|k| crate::data::combined::owner(&crate::runtime(), &k))
+        .and_then(|k| crate::data::combined::owner(&crate::runtime_owner::runtime(), &k))
     else {
         crate::settings_view::notify(tr("No playlist on screen"));
         return;
@@ -59,8 +59,8 @@ pub fn open(ui: Ui, channel: usize) {
         channels: Vec::new(),
         feeds: Vec::new(),
     })));
-    crate::data::spawn_in_app(async move {
-        let mut channels = assign::guide_channels(&crate::runtime(), playlist).await;
+    crate::tasks::spawn_in_app(async move {
+        let mut channels = assign::guide_channels(&crate::runtime_owner::runtime(), playlist).await;
         if REQUEST.with(|current| current.get()) != request {
             return;
         }
@@ -69,7 +69,7 @@ pub fn open(ui: Ui, channel: usize) {
             crate::settings_view::notify(tr("No guide data is stored yet: update the guide first"));
             return;
         }
-        let feeds: Vec<_> = crate::runtime()
+        let feeds: Vec<_> = crate::runtime_owner::runtime()
             .source_lines(playlist)
             .iter()
             .map(|line| {
@@ -88,7 +88,7 @@ pub fn open(ui: Ui, channel: usize) {
         });
         let subject = Subject {
             playlist,
-            current: assign::current(&crate::runtime(), playlist, &key).await,
+            current: assign::current(&crate::runtime_owner::runtime(), playlist, &key).await,
             name: schedule.channel_name(channel),
             key,
             channels,
@@ -158,12 +158,18 @@ fn perform(ui: Ui, playlist: SourceId, key: String, effect: Effect) {
         Effect::Choose(choice) => {
             log::info!("iptv guide choice: {}", choice_name(&choice));
             let request = next_request();
-            assign::choose(&crate::runtime(), playlist, key, choice, move |applied| {
-                if REQUEST.with(|current| current.get()) == request {
-                    crate::settings_view::notify(applied_words(applied));
-                    close(ui);
-                }
-            });
+            assign::choose(
+                &crate::runtime_owner::runtime(),
+                playlist,
+                key,
+                choice,
+                move |applied| {
+                    if REQUEST.with(|current| current.get()) == request {
+                        crate::settings_view::notify(applied_words(applied));
+                        close(ui);
+                    }
+                },
+            );
         }
     }
 }

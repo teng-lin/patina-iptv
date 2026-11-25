@@ -113,7 +113,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
 }
 
 fn title(channel: usize, p: crate::guide::Program) -> String {
-    crate::listing_labels::listing(crate::schedule().listing(channel, p))
+    crate::listing_labels::listing(crate::runtime_owner::schedule().listing(channel, p))
 }
 
 /// The full menu reached from the program header (in full screen, the
@@ -137,7 +137,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
 }
 
 fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
     };
@@ -158,7 +158,7 @@ fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
 fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &ListId) -> Vec<Row> {
     let now = ui.focus.with(|focus| focus.now);
     let channel = origin.channel;
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let scope = channel_scope(ui, list);
     let recording = crate::recordings_view::channel_menu_action(ui, origin).map(|action| {
         if action == MenuItem::RecordNow {
@@ -228,11 +228,11 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
 
 /// The player list has no timeline cursor. Its channel actions use the live block.
 pub fn open_channel(ui: Ui, channel: usize) {
-    open_channel_at(ui, channel, crate::time::now_minute(), current_list(ui));
+    open_channel_at(ui, channel, crate::clock::now_minute(), current_list(ui));
 }
 
 fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
     };
@@ -280,7 +280,7 @@ fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row
 }
 
 fn menu_channel(target: &Target) -> Option<usize> {
-    crate::schedule().find_channel(target.channel_key()?)
+    crate::runtime_owner::schedule().find_channel(target.channel_key()?)
 }
 
 fn program_origin(target: &Target) -> Option<Origin> {
@@ -324,15 +324,8 @@ pub(crate) fn invalidate_shifted_context(
     {
         ui.description.set(None);
     }
-    ui.recordings.update(|state| {
-        if state
-            .context
-            .as_ref()
-            .is_some_and(|(origin, _)| shifted(origin.channel))
-        {
-            state.context = None;
-        }
-    });
+    ui.recordings
+        .update(|state| state.invalidate_context(shifted));
 }
 
 /// Back from full options restores their compact context and its focus.
@@ -435,7 +428,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         });
     ui.menu.set(None);
     let scope = list
-        .resolve(&*crate::schedule())
+        .resolve(&*crate::runtime_owner::schedule())
         .and_then(|_| channel_scope(ui, &list));
     if target == Target::Group && scope.is_none() {
         return;
@@ -454,7 +447,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         else {
             return;
         };
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         if origin_program(&*schedule, origin) != *program
             || crate::player::guide_offset(&*schedule, origin.channel) != *offset
         {
@@ -480,7 +473,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         let Some(origin) = program_origin(&target) else {
             return;
         };
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         if crate::player::guide_offset(&*schedule, origin.channel) != offset
             || origin_program(&*schedule, origin) != program
             || !crate::recordings_view::perform_channel_action(ui, origin, item)
@@ -497,7 +490,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::BlockChannel | MenuItem::BlockGroup => {
             if item == MenuItem::BlockChannel
-                && channel.is_some_and(|ch| crate::schedule().channel_block(ch) == Block::Group)
+                && channel.is_some_and(|ch| {
+                    crate::runtime_owner::schedule().channel_block(ch) == Block::Group
+                })
             {
                 crate::settings_view::notify(tr("This channel is blocked by a group."));
                 return;
@@ -564,11 +559,17 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::HideChannel => {
             if let Some(target) = channel.and_then(|ch| crate::parental_view::live_target(ui, ch)) {
                 let source = SourceId(target.source);
-                let saved =
-                    crate::runtime::commands::hide_channel(&crate::runtime(), source, target.id);
-                crate::data::spawn_in_app(async move {
+                let saved = crate::runtime::commands::hide_channel(
+                    &crate::runtime_owner::runtime(),
+                    source,
+                    target.id,
+                );
+                crate::tasks::spawn_in_app(async move {
                     match saved.await {
-                        Ok(()) => crate::data::organization::changed(&crate::runtime(), source),
+                        Ok(()) => crate::data::organization_changed(
+                            &crate::runtime_owner::runtime(),
+                            source,
+                        ),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -632,7 +633,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::ResetGroupName => {
             if let Some((source, Kind::GroupChannels(id))) = scope {
-                let owner = crate::runtime();
+                let owner = crate::runtime_owner::runtime();
                 let save = crate::runtime::commands::rename_organization_item(
                     &owner,
                     source,
@@ -640,9 +641,9 @@ pub fn perform(ui: Ui, item: MenuItem) {
                     id.as_str().to_owned(),
                     String::new(),
                 );
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     match save.await {
-                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Ok(()) => crate::data::organization_changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -667,11 +668,11 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::HideGroup => {
             if let Some(target) = group_target(scope.as_ref()) {
                 let source = SourceId(target.source);
-                let owner = crate::runtime();
+                let owner = crate::runtime_owner::runtime();
                 let save = crate::runtime::commands::hide_group(&owner, source, target.id);
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     match save.await {
-                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Ok(()) => crate::data::organization_changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -695,14 +696,14 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
     match item {
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
         MenuItem::StopRecording | MenuItem::CancelRecording => {
-            let program = origin_program(&*crate::schedule(), origin);
+            let program = origin_program(&*crate::runtime_owner::schedule(), origin);
             if program.start == origin.program_start {
                 crate::recordings_view::perform_channel_action(ui, origin, item);
             }
         }
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::StartFromBeginning => {
-            let schedule = crate::schedule();
+            let schedule = crate::runtime_owner::schedule();
             let now = ui.focus.with_untracked(|focus| focus.now);
             let program = origin_program(&*schedule, origin);
             if program.start != origin.program_start
@@ -718,7 +719,7 @@ fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
                     offset: 0,
                 },
             );
-            ui.mode.set(ViewMode::Fullscreen);
+            ui.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         _ => {}
@@ -755,7 +756,7 @@ fn block_target(
 }
 
 fn directly_blocked(list: &ListId, item: MenuItem, channel: Option<usize>) -> bool {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     match item {
         MenuItem::BlockChannel => {
             channel.is_some_and(|ch| schedule.channel_block(ch) == Block::Channel)
@@ -770,7 +771,9 @@ fn directly_blocked(list: &ListId, item: MenuItem, channel: Option<usize>) -> bo
 fn management_source(ui: Ui, list: &ListId, scope: Option<&(SourceId, Kind)>) -> Option<SourceId> {
     if let Some((source, _)) = scope {
         Some(*source)
-    } else if *list == ListId::Recent && !crate::data::combined::active(&crate::runtime()) {
+    } else if *list == ListId::Recent
+        && !crate::data::combined::active(&crate::runtime_owner::runtime())
+    {
         ui.app.library.shown.get_untracked()
     } else {
         None
@@ -794,12 +797,12 @@ fn copy_scope(
 fn current_list(ui: Ui) -> ListId {
     ListId::of(
         ui.list.with_untracked(|list| list.entry()),
-        &*crate::schedule(),
+        &*crate::runtime_owner::schedule(),
     )
 }
 
 fn channel_scope(ui: Ui, list: &ListId) -> Option<(SourceId, Kind)> {
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     match list {
         ListId::Group(key) => {
             if let Some(source) = key.strip_prefix("playlist:") {
@@ -836,7 +839,7 @@ fn open_channel_editor(ui: Ui, channel: usize, mode: Mode, scope: Option<(Source
 /// Whether entry `entry` of a groups column has group options (what
 /// [`open_group_options`] would open): its row shows a ⋯ for them.
 pub fn has_group_options(ui: Ui, entry: usize) -> bool {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     if entry >= iptv_presentation::lists::entry_count(&*schedule) {
         return false;
     }
@@ -846,7 +849,7 @@ pub fn has_group_options(ui: Ui, entry: usize) -> bool {
 
 /// A focused group is actionable even when none of its channels are visible.
 pub fn open_group_options(ui: Ui, entry: usize) -> bool {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     if entry >= iptv_presentation::lists::entry_count(&*schedule) {
         return false;
     }
@@ -861,7 +864,7 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
         return false;
     };
     let named = group_target(scope.as_ref()).is_some();
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let reorderable = named
         && matches!(
             list.resolve(&*schedule).map(Entry::at),
@@ -898,7 +901,7 @@ pub(crate) fn offer_external_player_reset(ui: Ui, list: ListId) {
 }
 
 fn list_preferences(list: &ListId) -> GroupPreferences {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     match list.resolve(&*schedule).map(Entry::at) {
         Some(Entry::Group(group)) => schedule.group_preferences(group),
         Some(Entry::All) => GroupPreferences {
@@ -911,12 +914,12 @@ fn list_preferences(list: &ListId) -> GroupPreferences {
 
 fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPreference) {
     let source = SourceId(target.source);
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     let save =
         crate::runtime::commands::set_group_preference(&owner, source, target.id, preference);
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match save.await {
-            Ok(()) => crate::data::organization::changed(&owner, source),
+            Ok(()) => crate::data::organization_changed(&owner, source),
             Err(_) => crate::settings_view::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             )),
@@ -945,7 +948,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
         }
         match heading {
             Heading::Program => program_origin(&menu.target).map_or_else(String::new, |origin| {
-                let p = origin_program(&*crate::schedule(), origin);
+                let p = origin_program(&*crate::runtime_owner::schedule(), origin);
                 format!(
                     "{} · {}–{}",
                     title(origin.channel, p),
@@ -955,7 +958,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
             }),
             Heading::Channel => menu_channel(&menu.target).map_or_else(String::new, channel_name),
             Heading::Group => {
-                let catalog = crate::schedule();
+                let catalog = crate::runtime_owner::schedule();
                 menu.list
                     .resolve(&*catalog)
                     .map_or_else(String::new, |entry| {
@@ -1028,7 +1031,7 @@ fn bind_live_rows(ui: Ui) {
         // The runtime's recording snapshot is published to the UI when it
         // reloads. Recheck the current action for the occurrence already open.
         ui.recordings.with(|_| ());
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         let program = origin_program(&*schedule, origin);
         let rows = match target {
             Target::Program { start, .. } if program.start == start => {
@@ -1294,9 +1297,12 @@ fn description(ui: Ui) -> impl IntoElement {
     });
     let program = move || {
         ui.guide_data();
-        ui.description
-            .get()
-            .map(|origin| (origin.channel, origin_program(&*crate::schedule(), origin)))
+        ui.description.get().map(|origin| {
+            (
+                origin.channel,
+                origin_program(&*crate::runtime_owner::schedule(), origin),
+            )
+        })
     };
     view()
         .absolute()
@@ -1369,7 +1375,7 @@ fn description(ui: Ui) -> impl IntoElement {
                                 program()
                                     .and_then(|(channel, program)| {
                                         crate::header::program_description(
-                                            &*crate::schedule(),
+                                            &*crate::runtime_owner::schedule(),
                                             channel,
                                             program,
                                         )

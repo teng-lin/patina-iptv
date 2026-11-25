@@ -3,6 +3,8 @@
 //! dark accent fills keep white control labels readable. Saved color names
 //! remain stable so existing preferences select the corresponding new tones.
 
+use iptv_settings::{Settings, Target, keys};
+
 use crate::i18n::key;
 
 /// An accent bundle: lighter tone and main accent (`0xRRGGBB`). The focus
@@ -175,9 +177,41 @@ impl Theme {
     }
 }
 
+/// A theme bundle's palette key (`"Blue gray"` → `blue_gray`).
+pub(crate) fn palette_key(name: &str) -> String {
+    name.to_lowercase().replace(' ', "_")
+}
+
+/// The colors chosen in `appearance.*`.
+pub(crate) fn theme_of(s: &Settings) -> Theme {
+    let at = &Target::Global;
+    let (accent, background) = (s.color(keys::ACCENT, at), s.color(keys::BACKGROUND, at));
+    let fallback = Theme::default();
+    Theme {
+        accent: ACCENTS
+            .iter()
+            .find(|a| palette_key(a.name) == accent)
+            .copied()
+            .unwrap_or(fallback.accent),
+        background: BACKGROUNDS
+            .iter()
+            .find(|b| palette_key(b.name) == background)
+            .copied()
+            .unwrap_or(fallback.background),
+    }
+}
+
+/// Alpha of browsing surfaces drawn over full-screen video, from
+/// `appearance.ui_transparency` (percent of the video showing through).
+pub(crate) fn overlay_alpha(s: &Settings) -> u8 {
+    let percent = s.int(keys::UI_TRANSPARENCY, &Target::Global).clamp(0, 100);
+    u8::try_from(255 - percent * 255 / 100).unwrap_or(u8::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iptv_settings::{Value, catalog};
 
     #[test]
     fn alpha_packs_after_rgb() {
@@ -277,5 +311,32 @@ mod tests {
         names.dedup();
         assert_eq!(names.len(), 16);
         assert_eq!(BACKGROUNDS.len(), 18);
+    }
+
+    #[test]
+    fn colors_follow_the_appearance_settings() {
+        let mut s = Settings::new();
+        assert_eq!(theme_of(&s), Theme::default());
+        s.set("appearance.accent", Value::color("red")).unwrap();
+        s.set("appearance.background", Value::color("blue_gray"))
+            .unwrap();
+        let theme = theme_of(&s);
+        assert_eq!(theme.accent.name, "Red");
+        assert_eq!(theme.background.name, "Blue gray");
+        // Every palette key names a bundle.
+        for name in catalog::choices::ACCENT.variants {
+            s.set("appearance.accent", Value::color(name)).unwrap();
+            assert_eq!(palette_key(theme_of(&s).accent.name), *name);
+        }
+    }
+
+    #[test]
+    fn transparency_sets_the_overlay_alpha() {
+        let mut s = Settings::new();
+        assert_eq!(overlay_alpha(&s), 204, "20 % by default");
+        s.set("appearance.ui_transparency", Value::Int(0)).unwrap();
+        assert_eq!(overlay_alpha(&s), 255);
+        s.set("appearance.ui_transparency", Value::Int(80)).unwrap();
+        assert_eq!(overlay_alpha(&s), 51);
     }
 }

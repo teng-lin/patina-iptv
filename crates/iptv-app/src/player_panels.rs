@@ -33,6 +33,22 @@ mod words;
 pub use status::status;
 pub(crate) use words::{failure_message, waiting_text};
 
+impl Ui {
+    /// What just started playing over full-screen video: the banner for
+    /// a live channel, the card with its seek bar for a replay.
+    pub fn show_playing(&self) {
+        let live =
+            self.playback.get_untracked() == Playback::Live && !crate::on_demand::active(*self);
+        self.update_panels(|p, now| {
+            if live {
+                p.show_banner(now);
+            } else {
+                p.show_info(now);
+            }
+        });
+    }
+}
+
 const WHITE: u32 = 0xFFFFFF;
 /// Panel fill over video: the theme's panel color, mostly opaque.
 const PANEL_ALPHA: u8 = 0xE0;
@@ -65,7 +81,7 @@ fn label(ui: Ui, control: Control) -> String {
         // Disabled with its reason (a TV at the account's limit, #279).
         Multiview => with(
             tr("Multiview"),
-            match crate::capabilities::multiview_offer(ui) {
+            match crate::multiview::offer(ui) {
                 iptv_presentation::capabilities::MultiviewOffer::Disabled(reason) => {
                     Some(crate::capabilities::reason(reason).to_owned())
                 }
@@ -158,7 +174,7 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
         Control::Search => main,
         // As the device and its window offer it (#279): a phone upright, a
         // tablet in split screen, an iPad and a browser TV leave it out.
-        Control::Multiview => main && crate::capabilities::multiview_offer_on(ui, device).shown(),
+        Control::Multiview => main && crate::multiview::offer_on(ui, device).shown(),
         // Shown until the host reports, then only where it can: never a TV
         // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
         Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
@@ -170,7 +186,7 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
 pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
-        Control::Multiview => crate::capabilities::multiview(ui).available(),
+        Control::Multiview => crate::multiview::availability(ui).available(),
         Control::Record => {
             ui.player_surface == 0
                 && ui.playback.get() == crate::Playback::Live
@@ -404,11 +420,11 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         .child(
             text(move || {
                 ui.guide_data();
-                let s = crate::schedule();
+                let s = crate::runtime_owner::schedule();
                 let unix = crate::guide::unix_of(&*s, ui.focus.with(|f| f.now));
                 date_time(
                     unix,
-                    crate::time::offset_minutes(unix),
+                    crate::clock::offset_minutes(unix),
                     crate::i18n::clock_style(),
                 )
             })
@@ -488,7 +504,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
             words::quick_label(action, is_favorite(ui), detour).to_owned()
         },
         focused,
-        move || action == QuickAction::Multiview && !crate::capabilities::multiview(ui).available(),
+        move || action == QuickAction::Multiview && !crate::multiview::availability(ui).available(),
         move || {
             ui.panels.update(|p| p.quick = Some(i));
             crate::player_keys::press_quick(ui, action);
@@ -497,7 +513,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
     // Why a dimmed Multiview cannot open, said on focus (#279).
     .optional_accessibility_description(move || {
         (action == QuickAction::Multiview)
-            .then(|| crate::capabilities::multiview_disabled(ui))
+            .then(|| crate::multiview::disabled_reason(ui))
             .flatten()
             .map(SharedString::from)
     })

@@ -21,7 +21,7 @@ impl Library {
     }
 }
 
-pub use crate::runtime::data::library::Activity;
+pub use crate::runtime::model::Activity;
 use iptv_library::SourceId;
 use nsh_core::prelude::*;
 use std::collections::BTreeMap;

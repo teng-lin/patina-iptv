@@ -302,10 +302,25 @@ fn custom_channel_order_from_a_group_menu_opens_the_drag_editor() {
 #[test]
 fn fullscreen_channel_order_preserves_the_focused_channel() {
     let Some(home) = isolated!() else { return };
+    fullscreen_channel_order(home, false);
+}
+
+#[test]
+fn fullscreen_organization_returns_to_the_selected_overlay_without_reopening_video() {
+    let Some(home) = isolated!() else { return };
+    fullscreen_channel_order(home, true);
+}
+
+fn fullscreen_channel_order(home: crate::isolated::Home, overlay: bool) {
     let mut settings = Settings::new();
     settings
         .set("guide.stay_on_list", iptv_settings::Value::Bool(true))
         .unwrap();
+    if overlay {
+        settings
+            .set("guide.browse_mode", iptv_settings::Value::choice("overlay"))
+            .unwrap();
+    }
     let visibility = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
     let observed = visibility.clone();
     let mut f = start_with_setup(home, settings, false, move |app| {
@@ -355,6 +370,14 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
 
     // Target B from the player list while A keeps playing.
     let opens = iptv_app::player_opens(0);
+    let player = |app: &crate::Headless| {
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.kind == nsh_core::ViewKind::Native)
+            .expect("persistent player")
+    };
+    let id = player(app).id;
     step(app.press_key("left"));
     step(app.wait_until(
         "the channel list reopens",
@@ -377,6 +400,8 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
             .selected,
         "the guide keeps the channel targeted in the player list"
     );
+    assert_eq!(player(app).id, id);
+    assert_eq!(player(app).bounds.size.width.0 == 1920.0, overlay);
     assert_eq!(iptv_app::player_opens(0), opens);
     assert!(
         iptv_app::player_has_source(0),

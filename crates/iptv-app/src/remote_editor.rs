@@ -1,6 +1,6 @@
 //! Live, validated remote overrides. Editor/menu input stays at defaults.
 //!
-//! The keys offered follow the keys connected now (`settings::keys`): a
+//! The keys offered follow the keys connected now (`input::keys_for`): a
 //! keyboard's leave out the keys only a remote has. A hold is offered
 //! only where keys report their release (`input::long_press`).
 use crate::i18n::{tr, trf};
@@ -63,7 +63,7 @@ pub fn overridden(context: Context, key: RemoteKey) -> bool {
 /// The keys set up now: a remote's where none are connected (the
 /// editor opens only from the keys' page).
 fn keys_now() -> Keys {
-    settings::keys_now().unwrap_or(Keys::Remote)
+    crate::input::keys_now().unwrap_or(Keys::Remote)
 }
 
 /// The keys the editor cycles through now.
@@ -189,12 +189,8 @@ fn same(s: &Editor, b: &KeyBinding) -> bool {
         && b.key == s.key.name()
         && (b.press == PressKind::Long) == (s.press == Press::Long)
 }
-fn store(ui: Ui, bindings: Vec<KeyBinding>) {
-    if let Err(e) = settings::set(
-        ui,
-        keys::KEY_OVERRIDES.as_str(),
-        Value::KeyBindings(bindings),
-    ) {
+fn store(bindings: Vec<KeyBinding>) {
+    if let Err(e) = settings::set(keys::KEY_OVERRIDES.as_str(), Value::KeyBindings(bindings)) {
         log::warn!("iptv remote: {e}");
     }
 }
@@ -215,7 +211,7 @@ fn save(ui: Ui) {
         },
         b.action.token(),
     ));
-    store(ui, bindings);
+    store(bindings);
     update(ui, |s| s.confirm = None);
 }
 fn activate(ui: Ui, field: Field) {
@@ -227,7 +223,7 @@ fn activate(ui: Ui, field: Field) {
         if s.accept {
             match confirm {
                 Confirm::Replace => save(ui),
-                Confirm::Reset => store(ui, Vec::new()),
+                Confirm::Reset => store(Vec::new()),
             }
         }
         update(ui, |s| s.confirm = None);
@@ -251,7 +247,7 @@ fn activate(ui: Ui, field: Field) {
         Field::Clear => {
             let mut b = saved();
             b.retain(|b| !same(&s, b));
-            store(ui, b);
+            store(b);
         }
         Field::Reset => update(ui, |s| {
             s.confirm = Some(Confirm::Reset);
@@ -413,7 +409,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     // The keys it sets up attached or detached while it is open: it
     // closes, as the keys' page follows them (#280), so it never offers
     // keys, or a title, of keys no longer there.
-    let keys = computed(settings::keys_now);
+    let keys = computed(crate::input::keys_now);
     effect(move || {
         keys.with(|_| ());
         untracked(|| {

@@ -332,10 +332,6 @@ impl Runtime {
         crate::favorites::reset(self);
     }
 
-    pub fn favorites_catalog_changed(&self, catalog: &dyn iptv_core::guide::Schedule) {
-        crate::favorites::catalog_changed(self, catalog);
-    }
-
     pub fn favorite_channels(&self) -> Vec<usize> {
         crate::favorites::favorite_channels(self)
     }
@@ -400,7 +396,7 @@ impl Runtime {
             match sources {
                 Ok(sources) => {
                     for source in sources {
-                        crate::data::organization::watch_changed(&owner, source);
+                        crate::data::watch_order_changed(&owner, source);
                     }
                 }
                 Err(_) => owner.watch_sort_dirty.borrow_mut().extend(dirty),

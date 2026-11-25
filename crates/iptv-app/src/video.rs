@@ -78,7 +78,7 @@ pub fn synthetic_url(channel: usize, playback: crate::Playback) -> Option<String
     Some(match playback {
         crate::Playback::Live => format!("{MOCK_SERVER}/ch{}/index.m3u8", channel % 3),
         crate::Playback::CatchUp { start, offset } => {
-            let s = crate::schedule();
+            let s = crate::runtime_owner::schedule();
             let p = s.program_at(channel, start);
             let utc = crate::guide::unix_of(&*s, p.start) + i64::from(offset);
             let duration = (p.end - p.start) * 60 - offset;
@@ -284,7 +284,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
     player.on_native_event(move |e: &NativeEvent| {
         #[cfg(feature = "test-support")]
         if e.name.as_ref() == "test.parental.lock" {
-            crate::runtime().parental_lock();
+            crate::runtime_owner::runtime().parental_lock();
             return;
         }
         match PlayerEvent::decode(&e.name, &e.data) {

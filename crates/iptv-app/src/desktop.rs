@@ -23,14 +23,6 @@ pub(crate) mod quit_confirm;
 /// Linux, macOS and Windows.
 pub const DESKTOP: bool = crate::host::LINUX || crate::host::MACOS || crate::host::WINDOWS;
 
-/// A launch by an earlier version's login item or task. Scheduled recording
-/// is retired: such a launch removes those registrations and exits before
-/// the app starts (`exit_background_recorder_launch`), so the flag stays
-/// recognized while no running app sees it set.
-pub(crate) fn recorder_only_startup() -> bool {
-    DESKTOP && std::env::args().any(|arg| arg == "--background-recordings")
-}
-
 thread_local! {
     static WINDOW: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
     /// Where the mouse last was (window points).
@@ -69,7 +61,7 @@ pub fn bind(ui: Ui) {
             return;
         }
         let recording = reason != nsh_core::desktop::CloseReason::System
-            && crate::runtime().recording_background_needed();
+            && crate::runtime_owner::runtime().recording_background_needed();
         // Windows and Linux ask first, so no recorder runs without a
         // window (#275); macOS keeps recording with its Dock icon and asks
         // on Quit.
@@ -98,15 +90,12 @@ pub fn bind(ui: Ui) {
         if QUITTING.with(Cell::get) {
             return;
         }
-        if crate::runtime().recording_background_needed() {
+        if crate::runtime_owner::runtime().recording_background_needed() {
             quit_confirm::open(ui);
         } else {
             quit(ui);
         }
     });
-    if recorder_only_startup() {
-        window.hide();
-    }
 }
 
 /// Shows the main window, in front, also when closing it hid it.
@@ -124,8 +113,8 @@ pub(crate) fn stop_recordings_and_quit(ui: Ui) {
     if QUITTING.with(|quitting| quitting.replace(true)) {
         return;
     }
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         // Every job still to record: with scheduling retired (#273), each
         // is a Record now, running or waiting for a connection.
         let running: Vec<_> = owner
@@ -400,7 +389,7 @@ thread_local! {
 
 /// Explicit quit preserves future recording intent but stops the native host.
 pub(crate) fn quit(ui: Ui) {
-    if crate::runtime().shutdown_recording_host() {
+    if crate::runtime_owner::runtime().shutdown_recording_host() {
         crate::player::watch_time::flush(ui);
         with_window(WindowRef::close);
         // The window may be hidden (macOS), and closing it alone would

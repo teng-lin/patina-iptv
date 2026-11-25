@@ -37,10 +37,9 @@ use crate::scale::Scale;
 use crate::theme::{RADIUS, TEXT_SECONDARY_ALPHA};
 use crate::{Ui, ViewMode, tint};
 
-/// Row pitch; a program's height (the rest is the gap between rows), the
+/// A program's height (the rest is the gap between rows), the
 /// gap between programs, their corner radius and text inset (full size:
 /// [`Scale`] scales them, the pitch and height in whole px).
-pub const ROW_H: f32 = 50.0;
 const CELL_H: f32 = 46.0;
 const CELL_GAP: f32 = 3.0;
 const CELL_RADIUS: f32 = 4.0;
@@ -72,7 +71,7 @@ pub fn channel_width() -> f32 {
 /// overlay's alpha (`appearance.ui_transparency`).
 pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
     let alpha = match ui.mode.get() {
-        ViewMode::Overlay => crate::settings::overlay_alpha(&crate::settings::read(ui)),
+        ViewMode::Overlay => crate::theme::overlay_alpha(&crate::settings_wiring::read(ui)),
         ViewMode::Guide | ViewMode::Fullscreen => 0xFF,
     };
     tint(rgb_hex, alpha)
@@ -122,7 +121,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let column: fn() -> f32 = channel_width;
     // Rows are numbered by place: the list's length is its widest number.
     let number_w = computed(move || {
-        crate::settings::read(ui);
+        crate::settings_wiring::read(ui);
         if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
             crate::numbers::column_width(
                 ui.list.with(|l| l.len()),
@@ -181,7 +180,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                             )
                         },
                     )
-                    .estimated_item_size(move || px(size.whole(ROW_H)))
+                    .estimated_item_size(move || px(size.whole(crate::list_rows::ROW)))
                     .element_ref(&rows)
                     .on_scroll(move |event: &ScrollEvent| drag.scrolled(*event))
                     // Scrolling the channels never tunes: a preview
@@ -371,7 +370,7 @@ fn row(
         ui.guide_data();
         let base = pan.band().base;
         channel.get().map_or_else(Vec::new, |ch| {
-            crate::schedule().programs_between(ch, base, pan.minutes())
+            crate::runtime_owner::schedule().programs_between(ch, base, pan.minutes())
         })
     });
     // The focused program's start when this row has the focus (a memo
@@ -404,7 +403,7 @@ fn row(
     let cell = move |i| cell::cell(ui, (at, i), (programs, channel), focus, now, (pan, size));
     view()
         .test_id("guide-row")
-        .h(move || px(size.whole(ROW_H)))
+        .h(move || px(size.whole(crate::list_rows::ROW)))
         .flex_row()
         .child(channel::cell(
             ui,

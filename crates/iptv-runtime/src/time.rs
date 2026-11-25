@@ -44,6 +44,11 @@ pub fn since_epoch() -> Duration {
     (host::clock().wall)()
 }
 
+/// Wall-clock seconds since the Unix epoch.
+pub(crate) fn now_unix() -> i64 {
+    since_epoch().as_secs() as i64
+}
+
 /// Whether `deadline` has passed, as the store's bounded reads ask it.
 pub(crate) fn expiry(deadline: Instant) -> impl Fn() -> bool + Send + Sync + 'static {
     move || Instant::now() >= deadline

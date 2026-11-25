@@ -85,13 +85,20 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         );
         let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
         let weak = Rc::downgrade(&owner);
+        let last = std::cell::RefCell::new(owner.schedule());
         owner.bind(move |event| {
-            if let RuntimeEvent::ScheduleReady(schedule) = event {
+            if let RuntimeEvent::ScheduleChanged {
+                previous, current, ..
+            } = event
+            {
                 let owner = weak.upgrade().unwrap();
-                let count = schedule.channel_count();
-                owner.set_schedule(schedule.clone());
-                owner.favorites_catalog_changed(schedule.as_ref());
-                sender.send(count).unwrap();
+                assert!(Rc::ptr_eq(&last.replace(current.clone()), &previous));
+                assert!(Rc::ptr_eq(&owner.schedule(), &current));
+                for channel in 0..current.channel_count() {
+                    let key = current.channel_key(channel).unwrap();
+                    assert_eq!(owner.favorites_channel_of(&key), Some(channel));
+                }
+                sender.send(current.channel_count()).unwrap();
             }
         });
         owner.start_services();
@@ -116,7 +123,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         assert_eq!(streams(&kept), Some(Value::Int(4)), "its own value stays");
         assert_eq!(streams(&other), Some(Value::Int(3)), "the shared value");
         assert_eq!(streams(&iptv_settings::Target::Global), None);
-        assert!(data::combined::has_multiple_enabled(&owner));
+        assert!(data::has_multiple_enabled(&owner));
         let keys: Vec<_> = (0..8)
             .map(|i| owner.schedule().channel_key(i).unwrap())
             .collect();
@@ -131,7 +138,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
             .unwrap()
             .clone();
         assert_ne!(a, b, "equal provider IDs have source-qualified identities");
-        data::library::rename(&owner, sources[1], "Renamed generated B")
+        data::rename(&owner, sources[1], "Renamed generated B")
             .await
             .unwrap();
         assert!(
@@ -140,7 +147,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
                 .iter()
                 .any(|p| p.id == sources[1] && p.name == "Renamed generated B")
         );
-        data::library::set_policy(
+        data::set_policy(
             &owner,
             sources[0],
             SourcePolicy {
@@ -152,11 +159,11 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         .await
         .unwrap();
         displayed(&owner, &mut events, 4).await;
-        assert!(!data::combined::includes(&owner, sources[0]));
+        assert!(!data::combined_includes(&owner, sources[0]));
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
-        assert!(!data::combined::has_multiple_enabled(&owner));
-        data::library::set_policy(
+        assert!(!data::has_multiple_enabled(&owner));
+        data::set_policy(
             &owner,
             sources[0],
             SourcePolicy {
@@ -169,7 +176,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         displayed(&owner, &mut events, 8).await;
         assert!(owner.schedule().find_channel(&a).is_some());
         assert!(owner.schedule().find_channel(&b).is_some());
-        data::library::delete(&owner, sources[0]).await.unwrap();
+        data::delete(&owner, sources[0]).await.unwrap();
         displayed(&owner, &mut events, 4).await;
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
@@ -189,7 +196,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         owner
             .set_playlist_setting(sources[1], key, Value::Bool(false))
             .unwrap();
-        data::library::delete(&owner, sources[1]).await.unwrap();
+        data::delete(&owner, sources[1]).await.unwrap();
         displayed(&owner, &mut events, 0).await;
         assert_eq!(owner.settings().stored(key, &at), None);
         assert!(

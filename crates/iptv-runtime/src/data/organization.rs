@@ -3,7 +3,7 @@ use crate::model::SourceId;
 use iptv_guide::EpgSchedule;
 use std::rc::Rc;
 
-pub fn revision(owner: &Rc<crate::Runtime>) -> u64 {
+pub(super) fn revision(owner: &Rc<crate::Runtime>) -> u64 {
     owner.organization_revision.get()
 }
 
@@ -19,7 +19,7 @@ use crate::commands::load_organization as load;
 /// guide, then the refreshed one). So the data is made on the shared
 /// runtime's blocking threads (`EpgSchedule::prepare`) and only turned into
 /// the schedule here, which moves it.
-pub async fn build(
+pub(super) async fn build(
     owner: &crate::Runtime,
     source: SourceId,
     groups: Vec<iptv_providers::model::Group>,
@@ -61,7 +61,7 @@ pub async fn build(
         }
     }
 }
-pub async fn apply(
+pub(super) async fn apply(
     owner: &Rc<crate::Runtime>,
     schedule: &EpgSchedule,
     source: SourceId,
@@ -83,56 +83,4 @@ pub async fn apply(
         .await
         .ok()?;
     Some(schedule.with_prepared_organization(prepared))
-}
-pub fn changed(owner: &Rc<crate::Runtime>, source: SourceId) {
-    schedule_reload(owner, source, false);
-}
-
-/// A watch sort remains eligible for the next guide entry until installed.
-pub(crate) fn watch_changed(owner: &Rc<crate::Runtime>, source: SourceId) {
-    schedule_reload(owner, source, true);
-}
-
-fn schedule_reload(owner: &Rc<crate::Runtime>, source: SourceId, retry_watch_order: bool) {
-    owner
-        .organization_revision
-        .set(owner.organization_revision.get().wrapping_add(1));
-    let ticket = owner.begin_organization_edit(source);
-    owner.emit(crate::RuntimeEvent::LibraryChanged);
-    let task = owner.clone();
-    owner.spawn(async move {
-        let installed = if super::combined::active(&task) {
-            super::combined::organization_changed(&task, source, ticket).await
-        } else {
-            replace_single(&task, source, ticket).await
-        };
-        if retry_watch_order && !installed {
-            task.watch_sort_dirty.borrow_mut().insert(source);
-        }
-    });
-}
-
-async fn replace_single(owner: &Rc<crate::Runtime>, source: SourceId, ticket: u64) -> bool {
-    if owner.shown.get() != Some(source) {
-        return false;
-    }
-    let schedule = owner.schedule();
-    let Some(epg) = schedule
-        .as_any()
-        .and_then(|s| s.downcast_ref::<EpgSchedule>())
-    else {
-        return false;
-    };
-    let Some(replacement) = apply(owner, epg, source).await else {
-        return false;
-    };
-    let replacement = Rc::new(replacement);
-    owner.emit(crate::RuntimeEvent::OrganizationReady {
-        source,
-        ticket,
-        schedule,
-        replacement: replacement.clone(),
-    });
-    let installed: Rc<dyn iptv_core::guide::Schedule> = replacement;
-    Rc::ptr_eq(&owner.schedule(), &installed)
 }

@@ -103,7 +103,7 @@ const STATICS: &[(&str, &str)] = &[
     // The standard clock's origin for unit tests of a browser build (`cfg(test)`).
     ("time.rs", "ORIGIN"),
     // Unique unopened directories of unit-test owners (`cfg(test)`).
-    ("ports.rs", "NEXT"),
+    ("native.rs", "NEXT"),
     // Startup marks seen by one opening unit test (`cfg(test)`): the mark
     // port is a function pointer.
     ("opening/revocation.rs", "MARKS"),
@@ -257,6 +257,23 @@ fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
         .map(|(name, _)| name)
         .collect();
     exact(&users, STORE_ADAPTER_USERS, "store adapter user");
+}
+
+#[test]
+fn stored_guide_and_combined_state_leave_orchestration_to_data() {
+    let sources = runtime_sources();
+    for (name, forbidden) in [
+        ("data/stored.rs", &["super::", "crate::data"][..]),
+        (
+            "data/combined.rs",
+            &["super::", "crate::data", "library::", "stored::"][..],
+        ),
+    ] {
+        let (_, code) = sources.iter().find(|(path, _)| path == name).unwrap();
+        for upward in forbidden {
+            assert!(!code.contains(upward), "{name} depends on {upward}");
+        }
+    }
 }
 
 /// Declarations, including macro bodies and function-local statics;

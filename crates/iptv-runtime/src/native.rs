@@ -4,6 +4,49 @@
 pub(crate) mod execution;
 pub(crate) mod network;
 
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use crate::Ports;
+use crate::model::{DatabaseKey, StoreError};
+
+impl Ports {
+    /// The ports of a native host: `iptv-net` for networking, threads and
+    /// Tokio for execution, and the operating system's random source.
+    pub fn new(
+        directory: PathBuf,
+        database_key: impl Fn(&Path) -> Result<DatabaseKey, StoreError> + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_adapters(
+            directory,
+            database_key,
+            Arc::new(network::NativeNetwork),
+            Arc::new(execution::NativeExecution),
+            entropy,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        Self::new(
+            std::env::temp_dir().join(format!(
+                "patina-runtime-unopened-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            )),
+            |_| {
+                Err(StoreError::unavailable(
+                    "synthetic database key was not installed",
+                ))
+            },
+        )
+    }
+}
+
 /// The operating system's secure random source ([`crate::Ports::entropy`]).
 pub(crate) fn entropy(bytes: &mut [u8]) -> std::io::Result<()> {
     getrandom::fill(bytes).map_err(|error| std::io::Error::other(error.to_string()))

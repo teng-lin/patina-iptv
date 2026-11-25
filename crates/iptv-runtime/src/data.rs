@@ -8,7 +8,8 @@
 //! through [`start_import`]. A new source is stored only once its import
 //! succeeded, so a failed or canceled attempt leaves nothing behind. The
 //! playlists screen switches, refreshes, renames and deletes stored
-//! sources through [`library`].
+//! sources through this module. The library prepares imports and persists changes,
+//! and this module applies the corresponding guide and browser transitions.
 //!
 //! A stored source's saved channels and guide are on screen before its
 //! refresh reaches the network, and stay when the refresh fails. Its guide
@@ -19,15 +20,14 @@
 pub mod assign;
 pub mod combined;
 pub use crate::guides;
-pub use combined::switch_all;
 pub mod library;
 pub mod opening;
-pub mod organization;
+mod organization;
 pub mod pages;
 pub mod stored;
 pub use crate::wizard_map;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::time::Duration;
@@ -35,22 +35,16 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::unbounded_channel;
 
 use iptv_core::add_playlist::{FailureKind, ImportFailure};
+use iptv_core::guide::Schedule;
 use iptv_epg::GuideStore;
 use iptv_guide::EpgSchedule;
+use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
 use iptv_import::CancelToken;
 use iptv_library::SourceId;
+use iptv_providers::model::{Source, SourceConfig};
 
-pub use library::{
-    Activity, Playlist, delete, edit_guides, playlists, refresh, refresh_all, rename, set_policy,
-    set_user_agent, source_details, switch_to, try_details,
-};
+pub use library::{Activity, Playlist, playlists, source_details};
 pub use wizard_map::source_from_draft;
-
-/// A development playlist the wizard's M3U form starts with, set when the
-/// app is built (`IPTV_RS_DEV_PLAYLIST=http://10.0.2.2:8089/iptv/playlist.m3u`
-/// for the mock server, `tools/mock-server.py`, from an emulator). Without
-/// it, as in every release build, the link field starts empty.
-pub use crate::imports::DEV_PLAYLIST;
 
 /// The shortest time between two progress reports shown while an import
 /// runs. Reports wake the UI themselves (an awaited channel, no polling);
@@ -61,10 +55,1105 @@ const PROGRESS_FRAME: Duration = Duration::from_millis(100);
 const MAX_WAIT: Duration = Duration::from_secs(6 * 3600);
 /// ...and at least this long.
 const MIN_WAIT: Duration = Duration::from_secs(60);
+/// Let multiple edits to the guide's feeds settle before checking them.
+const GUIDE_EDIT_SETTLE: Duration = Duration::from_secs(2);
 
-use crate::GuideWork;
-use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, now_unix, pipeline};
+use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline};
 pub use crate::imports::{Job, Purpose, Update};
+use crate::model::{StoreError, StoredSource};
+use crate::state::SingleSchedule;
+use crate::time::now_unix;
+use crate::{GuideWork, Runtime, RuntimeEvent, ScheduleCause};
+
+enum ScheduleUpdate<'a> {
+    Source {
+        source: SourceId,
+        generation: u64,
+        guide_revision: u64,
+        schedule: Rc<EpgSchedule>,
+    },
+    Combined {
+        generation: u64,
+        revision: u64,
+        sources: Vec<SourceSchedule>,
+        collapsed: Vec<i64>,
+    },
+    Organization {
+        source: SourceId,
+        ticket: u64,
+        expected: &'a EpgSchedule,
+        schedule: Rc<EpgSchedule>,
+    },
+    /// Opening, an empty guide, or an expansion toggle leaves page waiters pending.
+    Catalog(Rc<dyn Schedule>),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum CommitOutcome {
+    Refused,
+    Installed,
+    Superseded,
+}
+
+/// Install and reconcile synchronously. Source imports and combined rebuilds
+/// pass prepared favorites. The sink may read the new schedule or install
+/// another one during delivery, so hold no state borrows across emits.
+fn commit_schedule(
+    owner: &Rc<Runtime>,
+    update: ScheduleUpdate<'_>,
+    install_favorites: impl FnOnce(),
+) -> CommitOutcome {
+    let catalog_changed = !matches!(update, ScheduleUpdate::Organization { .. });
+    let wake_waiters = matches!(
+        update,
+        ScheduleUpdate::Source { .. } | ScheduleUpdate::Combined { .. }
+    );
+    let current: Rc<dyn Schedule> = match update {
+        ScheduleUpdate::Source {
+            source,
+            generation,
+            guide_revision,
+            schedule,
+        } => {
+            if owner.generation.get() != generation
+                || combined::active(owner)
+                || crate::stored::guide_edit_revision(owner, source) != guide_revision
+            {
+                return CommitOutcome::Refused;
+            }
+            install_favorites();
+            remember_single(owner, source, schedule.clone());
+            schedule
+        }
+        ScheduleUpdate::Combined {
+            generation,
+            revision,
+            sources,
+            collapsed,
+        } => {
+            if !combined::active(owner)
+                || owner.generation.get() != generation
+                || owner.rebuild.get() != revision
+            {
+                return CommitOutcome::Refused;
+            }
+            install_favorites();
+            let schedule =
+                CombinedSchedule::new(sources, owner.epoch.get()).with_collapsed_sources(collapsed);
+            Rc::new(schedule)
+        }
+        ScheduleUpdate::Organization {
+            source,
+            ticket,
+            expected,
+            schedule,
+        } => {
+            let actual = owner.schedule();
+            let same_catalog = actual
+                .as_any()
+                .and_then(|schedule| schedule.downcast_ref::<EpgSchedule>())
+                .is_some_and(|actual| expected.same_catalog(actual));
+            if owner.shown.get() != Some(source)
+                || !owner.organization_edit_current(source, ticket)
+                || !same_catalog
+            {
+                return CommitOutcome::Refused;
+            }
+            remember_single(owner, source, schedule.clone());
+            schedule
+        }
+        ScheduleUpdate::Catalog(schedule) => schedule,
+    };
+    let previous = owner.set_schedule(current.clone());
+    let revision = owner.schedule_revision.get().wrapping_add(1);
+    owner.schedule_revision.set(revision);
+    let cause = if catalog_changed {
+        crate::favorites::rebuild_index(owner, &*current);
+        let (has_vod, any_vod) = crate::favorites::vod_availability(owner);
+        ScheduleCause::Catalog { has_vod, any_vod }
+    } else {
+        ScheduleCause::Organization
+    };
+    owner.emit(RuntimeEvent::ScheduleChanged {
+        previous,
+        current,
+        cause,
+    });
+    if catalog_changed && owner.schedule_revision.get() == revision {
+        crate::favorites::publish(owner);
+    }
+    // A nested projection may supersede this commit without waking waiters.
+    // Finish the replacement's wakeup even in that case.
+    if wake_waiters {
+        pages::replaced(owner);
+    }
+    if owner.schedule_revision.get() == revision {
+        CommitOutcome::Installed
+    } else {
+        CommitOutcome::Superseded
+    }
+}
+
+pub async fn set_policy(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    policy: crate::model::SourcePolicy,
+) -> Result<(), StoreError> {
+    library::set_policy(owner, id, policy).await?;
+    crate::favorites::refresh_vod_availability(owner).await;
+    if combined::active(owner) {
+        if !policy.enabled {
+            crate::library::cancel_running(owner, id);
+        }
+        rebuild_combined(owner);
+        if policy.enabled
+            && let Some(source) = crate::library::load(owner, id)
+        {
+            run_import(owner, source, Purpose::Combined, false);
+        }
+        return Ok(());
+    }
+    if !policy.enabled {
+        crate::library::cancel_running(owner, id);
+        if owner.shown.get() == Some(id) {
+            let next = crate::library::newest(owner)?;
+            show_nothing(owner);
+            match next {
+                Some(next) => run_import(owner, next, Purpose::Switch, false),
+                None => owner.emit(crate::RuntimeEvent::OpenPlaylists),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Shows stored playlist `id`: its stored channels and guide at once,
+/// refreshed in the background as at startup.
+pub fn switch_to(owner: &Rc<crate::Runtime>, id: SourceId) {
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if crate::favorites::flush(&owner).await {
+                switch_to_ready(&owner, id);
+            } else {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Recent changes could not be saved; try again",
+                ));
+            }
+        }
+    });
+}
+fn switch_to_ready(owner: &Rc<crate::Runtime>, id: SourceId) {
+    if library::policy(owner, id).is_ok_and(|p| !p.enabled) {
+        return;
+    }
+    if !combined::active(owner) && owner.shown.get() == Some(id) {
+        return;
+    }
+    let Some(stored) = crate::library::load(owner, id) else {
+        return;
+    };
+    leave_combined(owner);
+    // A refresh of it in the background gives way to the shown one.
+    crate::library::replace_running(owner, id);
+    run_import(owner, stored, Purpose::Switch, false);
+}
+
+/// Downloads stored playlist `id` again (unless that already runs): the
+/// shown one in place, another one into the store only.
+pub fn refresh(owner: &Rc<crate::Runtime>, id: SourceId) {
+    if crate::library::running(owner, id) {
+        return;
+    }
+    let Some(stored) = crate::library::load(owner, id) else {
+        return;
+    };
+    run_import(owner, stored, refresh_purpose(owner, id), false);
+}
+
+/// The shown playlist refreshes in place, another one into the store only.
+fn refresh_purpose(owner: &Rc<crate::Runtime>, id: SourceId) -> Purpose {
+    if combined::active(owner) {
+        Purpose::Background
+    } else if owner.shown.get() == Some(id) {
+        Purpose::Refresh
+    } else {
+        Purpose::Background
+    }
+}
+
+/// Refreshes every stored playlist (each one not refreshing already).
+pub fn refresh_all(owner: &Rc<crate::Runtime>) {
+    match playlists(owner) {
+        Ok(all) => all
+            .iter()
+            .filter(|p| p.policy.enabled)
+            .for_each(|p| refresh(owner, p.id)),
+        Err(e) => log::warn!("iptv data: the store is unavailable: {e}"),
+    }
+}
+
+pub fn try_details(owner: &Rc<crate::Runtime>, id: SourceId, source: Source) {
+    let Some(mut stored) = crate::library::load(owner, id) else {
+        return;
+    };
+    // Only the details change; the name is the stored one.
+    stored.source.config = source.config;
+    crate::library::replace_running(owner, id);
+    run_import(owner, stored, refresh_purpose(owner, id), true);
+}
+
+/// Sets the User-Agent of playlist `id` (`None`: the app's own), tried
+/// like other new details.
+pub fn set_user_agent(owner: &Rc<crate::Runtime>, id: SourceId, user_agent: Option<String>) {
+    let Some(mut source) = source_details(owner, id) else {
+        return;
+    };
+    match &mut source.config {
+        SourceConfig::M3u(c) => c.user_agent = user_agent,
+        SourceConfig::Xtream(c) => c.user_agent = user_agent,
+        SourceConfig::Stalker(_) => return,
+    }
+    try_details(owner, id, source);
+}
+
+pub async fn rename(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    name: &str,
+) -> Result<(), StoreError> {
+    library::rename(owner, id, name).await?;
+    if combined::active(owner) {
+        rebuild_combined(owner);
+    }
+    Ok(())
+}
+
+/// Changes the guide sources of playlist `id`; false when `edit` changes
+/// nothing. The guide on screen is checked again once the edits settle
+/// (changed feeds are downloaded); another playlist's when it is shown.
+pub async fn edit_guides(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    edit: &guides::Edit,
+) -> Result<bool, StoreError> {
+    let edited = library::edit_guides(owner, id, edit).await?;
+    if edited {
+        guides_changed(owner, id);
+    }
+    Ok(edited)
+}
+
+/// Deletes stored playlist `id` with its channels, guide and favorites.
+/// The shown one gives way to the newest other playlist, or to the
+/// first-run state when none is left.
+pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), StoreError> {
+    let generation = generation(owner);
+    if let Err(error) = library::delete(owner, id).await {
+        keep_guide_check(owner, id, generation, None);
+        return Err(error);
+    }
+    if combined::active(owner) {
+        // Keep the explicitly selected aggregate usable when its last source
+        // is deleted; the playlist screen still offers Add playlist.
+        rebuild_combined(owner);
+        return Ok(());
+    }
+    if playlists(owner)?.is_empty() {
+        show_nothing(owner);
+        owner.emit(crate::RuntimeEvent::ClosePlaylists);
+        owner.emit(crate::RuntimeEvent::FirstRun);
+        return Ok(());
+    }
+    if owner.shown.get() != Some(id) {
+        return Ok(());
+    }
+    match crate::library::newest(owner)? {
+        Some(next) => run_import(owner, next, Purpose::Switch, false),
+        None => {
+            show_nothing(owner);
+            owner.emit(crate::RuntimeEvent::ClosePlaylists);
+            if playlists(owner)?.is_empty() {
+                owner.emit(crate::RuntimeEvent::FirstRun);
+            } else {
+                owner.emit(crate::RuntimeEvent::OpenPlaylists);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn run_import(owner: &Rc<Runtime>, source: StoredSource, purpose: Purpose, edit: bool) {
+    let (job, cancel, report) = library::prepare_import(owner, source, purpose, edit);
+    start_import_with(owner, job, cancel, report);
+}
+
+pub fn refresh_guide_status(owner: &Rc<Runtime>) {
+    let loaded = stored::load_status(owner);
+    let owner = owner.clone();
+    owner.clone().spawn(async move {
+        if let Some(library_changed) = loaded.await {
+            if library_changed && combined::active(&owner) {
+                rebuild_combined(&owner);
+            }
+            owner.emit(RuntimeEvent::SettingsChanged);
+        }
+    });
+}
+
+/// Requeue the guide check interrupted by a clear, assignment, or repair.
+pub(crate) fn keep_interrupted_check(
+    owner: &Rc<Runtime>,
+    source: SourceId,
+    generation: u64,
+    at: i64,
+    work: Option<GuideWork>,
+) {
+    match work {
+        Some(GuideWork::Check) => keep_guide_check(owner, source, generation, Some(at)),
+        Some(_) => keep_guide_check(owner, source, generation, None),
+        None => {}
+    }
+}
+
+/// "Update the guide now" of the source on screen: see [`update_source_guide`].
+pub fn update_guide_now(owner: &Rc<crate::Runtime>, done: impl FnOnce() + 'static) -> bool {
+    let sources = crate::stored::shown_sources(owner);
+    if sources.is_empty() {
+        return false;
+    }
+    let remaining = Rc::new(Cell::new(sources.len()));
+    let done = Rc::new(RefCell::new(Some(done)));
+    let mut started = false;
+    for source in sources {
+        let left = remaining.clone();
+        let complete = done.clone();
+        let finish = move || {
+            left.set(left.get() - 1);
+            if left.get() == 0
+                && let Some(done) = complete.borrow_mut().take()
+            {
+                done();
+            }
+        };
+        if crate::stored::update_current(owner, source) {
+            remaining.set(remaining.get() - 1);
+            started = true;
+            continue;
+        }
+        if update_source_guide(owner, source, move |_| finish()) {
+            started = true;
+        } else {
+            remaining.set(remaining.get() - 1);
+        }
+    }
+    if started
+        && remaining.get() == 0
+        && let Some(done) = done.borrow_mut().take()
+    {
+        done();
+    }
+    started
+}
+
+/// Downloads `source`'s guide now (every guide source switched on, with
+/// the storage settings and guide choices of now); the guide on screen
+/// changes when it is `source`'s. `done` runs on the UI thread when it
+/// finished. False when there is no guide to download.
+///
+/// A request joins an update that runs already, unless a guide action
+/// superseded that one: it then downloads nothing any more, and this
+/// request starts an update of its own once that one has unwound.
+pub fn update_source_guide(
+    owner: &std::rc::Rc<crate::Runtime>,
+    source: SourceId,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    if crate::stored::update_current(owner, source) {
+        return true;
+    }
+    start_update(owner, source, None, false, done)
+}
+
+/// [`update_source_guide`] for a change the download has to include (a
+/// channel's guide choice just saved): an update that runs already read
+/// the store before it, and is replaced instead of joined. `after`: work
+/// that change canceled, which the download starts after.
+fn restart_update(
+    owner: &std::rc::Rc<crate::Runtime>,
+    source: SourceId,
+    after: Option<crate::library::ImportCompletion>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    start_update(owner, source, after, false, done)
+}
+
+pub(crate) fn restart_repair_update(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    after: Option<crate::library::ImportCompletion>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    start_update(owner, source, after, true, done)
+}
+
+fn start_update(
+    owner: &std::rc::Rc<crate::Runtime>,
+    source: SourceId,
+    after: Option<crate::library::ImportCompletion>,
+    force: bool,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    if !force && !stored::has_enabled_guides(owner, source) {
+        return false;
+    }
+    // This update owns the source's guide from now on: work it replaces
+    // is revoked. What that canceled, and an update a guide action
+    // superseded before, only unwinds: this one starts after it.
+    let mut unwinding = crate::stored::unwinding_updates(owner, source);
+    unwinding.extend(crate::library::replace_import(owner, source));
+    unwinding.extend(after);
+    let cancel = CancelToken::new();
+    let completion = crate::library::import_completion(cancel.clone());
+    completion.playlist_done(); // This worker owns guide work only.
+    crate::library::track_import(owner, source, &completion);
+    crate::stored::begin_update(owner, source, &completion);
+    let generation = owner.generation.with(Cell::get);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            for job in unwinding {
+                job.until_finished().await;
+            }
+            let guides = stored::configured_guides(&owner, source).await;
+            let (accepted, mut rx) = stored::download(&owner, source, guides, cancel, || {
+                source_is_visible(&owner, source)
+            });
+            // Whether this update set the next check, or settled that the
+            // policy asks for none.
+            let mut answered = false;
+            // The next check this update asked for after it was superseded.
+            let mut unscheduled = None;
+            loop {
+                let shown = || {
+                    owner.shown.with(Cell::get) == Some(source) || combined_includes(&owner, source)
+                };
+                let current = || crate::library::import_is_current(&owner, source, &completion);
+                match rx.recv().await {
+                    Some(Msg::Guide(imported)) if shown() && current() => {
+                        show(&owner, imported, generation, false).await
+                    }
+                    Some(Msg::NextCheck { source, at }) if shown() && current() => {
+                        // Not when a newer generation began meanwhile: should
+                        // that fail and leave this playlist on screen, this
+                        // is what it is owed.
+                        if !schedule_check(&owner, source, at, generation) {
+                            owner.owe_guide_check(source, at);
+                        }
+                        answered = true;
+                    }
+                    Some(Msg::NextCheck { at, .. }) => unscheduled = Some(at),
+                    Some(Msg::NoCheck { .. }) if current() => {
+                        owner.take_owed_guide_check(source);
+                        answered = true;
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+            completion.finish();
+            crate::stored::end_update(&owner, source, &completion);
+            // This update canceled the source's timer and did not answer for
+            // it: a guide action superseded it (its NextCheck was dropped),
+            // the worker pool refused it, or the store could not be read.
+            // Newer work that replaced it answers instead.
+            if !answered && !completion.superseded.get() {
+                keep_guide_check(&owner, source, generation, unscheduled);
+            }
+            owner.emit(crate::RuntimeEvent::LibraryChanged);
+            done(accepted);
+        }
+    });
+    true
+}
+
+/// `source`'s guide sources changed: its guide is checked once the edits
+/// settle (the refresh policy downloads changed feeds). Only for the
+/// source on screen; another one is checked when it is shown.
+fn guides_changed(owner: &std::rc::Rc<crate::Runtime>, source: SourceId) {
+    let previous = crate::library::pending_import(owner, source);
+    crate::library::revoke_import_handoff(owner, source);
+    if owner.shown.with(Cell::get) != Some(source) && !combined_includes(owner, source) {
+        return;
+    }
+    // A check under way would download and store the feeds as they were.
+    // The check below answers for it, or the update that runs instead.
+    owner.interrupt_guide_read(source);
+    let edit = crate::stored::next_guide_edit(owner, source);
+    let generation = owner.generation.with(Cell::get);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            owner.delay(GUIDE_EDIT_SETTLE).await;
+            // A refresh may still be installing its old guide configuration. Wait
+            // for that handoff before checking the edited feeds, rather than turning
+            // this check into a cache-only read and losing the edit's refresh.
+            if let Some(previous) = previous {
+                previous.until_finished().await;
+            }
+            while let Some(pending) = crate::library::pending_import(&owner, source) {
+                pending.until_finished().await;
+            }
+            let current = owner.generation.with(Cell::get) == generation
+                && crate::stored::guide_edit_is_current(&owner, source, edit);
+            if current && !crate::stored::updating(&owner, source) {
+                log::info!("iptv data: guide sources changed; checking the guide");
+                check_guide(&owner, source, generation);
+            }
+        }
+    });
+}
+
+/// "Delete stored guide data": the source on screen keeps its channels
+/// without programs until its guide is downloaded again (at the next
+/// start, refresh, or "Update the guide now"). The store works off the UI
+/// thread; `done` hears whether the guide was deleted. False when no
+/// playlist is on screen.
+pub fn clear_guide(owner: &std::rc::Rc<crate::Runtime>, done: impl FnOnce(bool) + 'static) -> bool {
+    clear_sources(owner, crate::stored::shown_sources(owner), done)
+}
+
+/// Delete one playlist’s stored guide, independent of the combined view.
+/// Source links, channel lists and other playlists’ programs are retained.
+pub fn clear_source_guide(
+    owner: &std::rc::Rc<crate::Runtime>,
+    source: SourceId,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    clear_sources(owner, vec![source], done)
+}
+
+fn clear_sources(
+    owner: &std::rc::Rc<crate::Runtime>,
+    sources: Vec<SourceId>,
+    done: impl FnOnce(bool) + 'static,
+) -> bool {
+    if sources.is_empty() {
+        return false;
+    }
+    // Work under way would show the guide again or store it anew.
+    let superseded: Vec<_> = sources
+        .iter()
+        .map(|source| (*source, stored::supersede(owner, *source)))
+        .collect();
+    let generation = owner.generation.with(Cell::get);
+    let saved = crate::commands::clear_guides(owner, sources);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            let outcome = saved.await;
+            // A check stopped for it stays owed, as after a download that
+            // was canceled: still due, later, not at once.
+            let later = crate::time::now_unix() + crate::stored::RETRY_DUE;
+            for (source, superseded) in superseded {
+                keep_interrupted_check(&owner, source, generation, later, superseded.read);
+            }
+            let Ok((deleted, imports)) = outcome else {
+                return done(false);
+            };
+            for imported in imports {
+                // Clearing an unshown playlist must not navigate to it. In
+                // All playlists every enabled child still needs its empty guide.
+                if owner.shown_source() == Some(imported.source)
+                    || combined_includes(&owner, imported.source)
+                {
+                    show(&owner, Box::new(imported), generation, false).await;
+                }
+            }
+            owner.emit(crate::RuntimeEvent::LibraryChanged);
+            done(deleted);
+        }
+    });
+    true
+}
+
+fn remember_single(owner: &Rc<Runtime>, source: SourceId, schedule: Rc<EpgSchedule>) {
+    combined::remember_single(
+        owner,
+        source,
+        schedule,
+        crate::library::import_revision(owner, source),
+    );
+}
+
+/// Snapshot before Add advances the generation. An unfinished account refresh
+/// can still replace a cached source's provisional playback metadata, so that
+/// source must go through the normal combined loader instead of being retained.
+fn ready_single(owner: &Rc<crate::Runtime>) -> Option<SingleSchedule> {
+    combined::single(owner)
+        .filter(|s| !crate::library::running(owner, s.source) && s.schedule.playback().is_some())
+        .map(|mut s| {
+            s.pending = crate::library::pending_import(owner, s.source);
+            s.revision = crate::library::import_revision(owner, s.source);
+            s
+        })
+}
+/// Add already owns the current generation. Keep that generation so its guide
+/// download and future guide checks continue after the browser joins sources.
+fn join_after_add(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    generation: u64,
+    previous: Option<SingleSchedule>,
+) {
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if !crate::favorites::flush(&owner).await {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Recent changes could not be saved; try again",
+                ));
+                return;
+            }
+            if combined::active(&owner)
+                || owner.generation.with(Cell::get) != generation
+                || !has_multiple_enabled(&owner)
+            {
+                return;
+            }
+            // Guide messages may have arrived while writes flushed: take the latest
+            // schedule, rather than the first channel-only Add result.
+            let Some(added) = combined::single(&owner).filter(|s| s.source == source) else {
+                return;
+            };
+            if let Err(e) = crate::library::save_all(&owner, true).await {
+                log::warn!("iptv combined: cannot save browsing mode: {e}");
+                return;
+            }
+            if owner.generation.with(Cell::get) != generation || combined::active(&owner) {
+                return;
+            }
+            let Ok(playlists) = library::playlists(&owner) else {
+                return;
+            };
+            let enabled = |id| playlists.iter().any(|p| p.id == id && p.policy.enabled);
+            source_changed(&owner, None);
+            crate::stored::note_shown(&owner, None);
+            crate::library::set_all(&owner, true);
+            combined::clear_parts(&owner);
+            let previous = previous.filter(|s| {
+                enabled(s.source)
+                    && crate::library::import_revision_is_current(&owner, s.source, &s.revision)
+            });
+            let previous_guide = previous.as_ref().map(|s| (s.source, s.pending.clone()));
+            for kept in previous.into_iter().chain(std::iter::once(added)) {
+                combined::retain_single(&owner, kept);
+            }
+            combined::reset_single(&owner);
+            owner.emit(crate::RuntimeEvent::AccountStreams(None));
+            combined::reset_epoch(&owner, now_unix());
+            rebuild_combined(&owner);
+            // The previous single source's timer belonged to its older generation.
+            // Reattach guide work without fetching its playlist/account again.
+            if let Some((previous, pending)) = previous_guide.filter(|(id, _)| *id != source) {
+                reattach_guide(&owner, previous, generation, pending);
+            }
+            for playlist in playlists.into_iter().filter(|p| p.policy.enabled) {
+                if combined::part(&owner, playlist.id).is_none()
+                    && let Some(stored) = crate::library::load(&owner, playlist.id)
+                {
+                    run_import(&owner, stored, Purpose::Combined, false);
+                }
+            }
+        }
+    });
+}
+
+/// A previous source can finish its original EPG download after Add has moved
+/// the browser to a new generation. Keep the worker identity until its final
+/// cache is restored; newer imports and explicit guide changes revoke it.
+fn reattach_guide(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    generation: u64,
+    pending: Option<crate::library::ImportCompletion>,
+) {
+    let Some(pending) = pending else {
+        restore_guide(owner, source, generation);
+        return;
+    };
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            let current = || {
+                owner.generation.with(Cell::get) == generation
+                    && combined_includes(&owner, source)
+                    && crate::library::import_is_current(&owner, source, &pending)
+            };
+            if !current() {
+                return;
+            }
+            // Complete this initial restore before the final one so an older cache
+            // read cannot arrive after the original download's successful result.
+            read_guide(
+                &owner,
+                source,
+                generation,
+                GuideRead::CacheOnly,
+                Some(pending.clone()),
+                false,
+            )
+            .await;
+            if current() {
+                pending.until_finished().await;
+            }
+            if current() {
+                read_guide(
+                    &owner,
+                    source,
+                    generation,
+                    GuideRead::RestoreAndCheck,
+                    Some(pending),
+                    false,
+                )
+                .await;
+            }
+        }
+    });
+}
+
+/// Whether the combined guide may include the enabled playlist.
+pub fn combined_includes(owner: &Rc<crate::Runtime>, id: SourceId) -> bool {
+    combined::active(owner) && library::policy(owner, id).is_ok_and(|p| p.enabled)
+}
+/// The normal browser includes every enabled source once there is a choice.
+pub fn has_multiple_enabled(owner: &Rc<crate::Runtime>) -> bool {
+    library::playlists(owner)
+        .is_ok_and(|sources| sources.iter().filter(|s| s.policy.enabled).take(2).count() == 2)
+}
+
+fn start_combined(owner: &Rc<crate::Runtime>) {
+    owner.resume.with(|r| r.set(true));
+    // Startup precedes user edits; install the empty real guide at once.
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            switch_all_ready(&owner).await;
+        }
+    });
+}
+
+pub fn switch_all(owner: &Rc<crate::Runtime>) {
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if crate::favorites::flush(&owner).await {
+                switch_all_ready(&owner).await;
+            } else {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Recent changes could not be saved; try again",
+                ));
+            }
+        }
+    });
+}
+async fn switch_all_ready(owner: &Rc<crate::Runtime>) {
+    let generation = owner.generation.with(Cell::get);
+    if combined::active(owner) {
+        return;
+    }
+    if let Err(e) = crate::library::save_all(owner, true).await {
+        log::warn!("iptv combined: cannot save browsing mode: {e}");
+        return;
+    }
+    if owner.generation.with(Cell::get) != generation || combined::active(owner) {
+        return;
+    }
+    next_generation(owner, None);
+    combined::reset_single(owner);
+    source_changed(owner, None);
+    crate::stored::note_shown(owner, None);
+    crate::library::set_all(owner, true);
+    combined::clear_parts(owner);
+    owner.emit(crate::RuntimeEvent::AccountStreams(None));
+    combined::reset_epoch(owner, now_unix());
+    rebuild_combined(owner);
+    if let Ok(playlists) = library::playlists(owner) {
+        for playlist in playlists
+            .into_iter()
+            .filter(|playlist| playlist.policy.enabled)
+        {
+            if let Some(source) = crate::library::load(owner, playlist.id) {
+                run_import(owner, source, Purpose::Combined, false);
+            }
+        }
+    }
+}
+
+fn leave_combined(owner: &Rc<crate::Runtime>) {
+    combined::reset_single(owner);
+    owner.resume.with(|r| r.set(false));
+    crate::library::set_all(owner, false);
+    combined::clear_parts(owner);
+    let saved = crate::library::save_all(owner, false);
+    owner.spawn(async move {
+        if let Err(error) = saved.await {
+            log::warn!("iptv combined: cannot save browsing mode: {error}");
+        }
+    });
+}
+
+async fn show_combined(
+    owner: &Rc<crate::Runtime>,
+    imported: Box<Imported>,
+    held: Option<opening::Held>,
+) {
+    if !combined_includes(owner, imported.source) {
+        return;
+    }
+    let source = imported.source;
+    let generation = owner.generation.with(Cell::get);
+    let revision = crate::library::import_revision(owner, source);
+    let guide_revision = crate::stored::guide_edit_revision(owner, source);
+    let current = || {
+        combined_includes(owner, source)
+            && owner.generation.with(Cell::get) == generation
+            && crate::library::import_revision_is_current(owner, source, &revision)
+            && crate::stored::guide_edit_revision(owner, source) == guide_revision
+    };
+    let Imported {
+        groups,
+        channels,
+        playback,
+        guide,
+        now,
+        resume: can_resume,
+        ..
+    } = *imported;
+    let mut organization_revision = organization::revision(owner);
+    let mut schedule = organization::build(owner, source, groups, channels, guide, now).await;
+    if !current() {
+        return;
+    }
+    schedule = match playback {
+        Streams::New(context, allowed, authority) => {
+            combined::note_account_limit(owner, source, allowed);
+            schedule
+                .with_playback(context)
+                .with_source_authority(Some(authority))
+        }
+        Streams::Current => {
+            let (context, authority) = combined::part(owner, source)
+                .map(|s| (s.shared_playback(), s.source_authority()))
+                .unwrap_or_default();
+            schedule
+                .with_shared_playback(context)
+                .with_source_authority(authority)
+        }
+    };
+    if let Some(lookup) = stored::description_lookup(owner, source) {
+        schedule = schedule.with_description_lookup(lookup);
+    }
+    schedule = match held {
+        Some(h) => schedule.held_only(h.from, h.to).held_channels(h.keys),
+        None => pages::paged(owner, schedule, source, now).await,
+    };
+    while current() && organization::revision(owner) != organization_revision {
+        organization_revision = organization::revision(owner);
+        if let Some(replacement) = organization::apply(owner, &schedule, source).await {
+            schedule = replacement;
+        }
+    }
+    if !current() {
+        return;
+    }
+    combined::store_part(owner, source, Rc::new(schedule));
+    rebuild_combined_ready(owner).await;
+    if can_resume && owner.resume.with(Cell::get) {
+        resume_combined(owner);
+    }
+}
+
+fn rebuild_combined(owner: &Rc<crate::Runtime>) {
+    let task = owner.clone();
+    owner.spawn(async move {
+        rebuild_combined_ready(&task).await;
+    });
+}
+
+async fn rebuild_combined_ready(owner: &Rc<crate::Runtime>) -> bool {
+    let generation = owner.generation.with(Cell::get);
+    let revision = combined::invalidate_rebuild(owner);
+    if !combined::active(owner) {
+        return false;
+    }
+    let Ok(playlists) = library::playlists(owner) else {
+        return false;
+    };
+    let enabled = playlists
+        .into_iter()
+        .filter(|playlist| playlist.policy.enabled)
+        .map(|playlist| (playlist.id, playlist.name))
+        .collect();
+    let sources = combined::source_schedules(owner, enabled);
+    let Some(install_favorites) = crate::favorites::prepare_combined(owner).await else {
+        return false;
+    };
+    if !combined::active(owner) {
+        return false;
+    }
+    let collapsed = crate::library::collapsed(owner).await.unwrap_or_default();
+    commit_schedule(
+        owner,
+        ScheduleUpdate::Combined {
+            generation,
+            revision,
+            sources,
+            collapsed,
+        },
+        install_favorites,
+    ) == CommitOutcome::Installed
+}
+
+async fn replace_combined_organization(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    ticket: u64,
+) -> bool {
+    let Some(schedule) = combined::part(owner, source) else {
+        return false;
+    };
+    let Some(replacement) = organization::apply(owner, &schedule, source).await else {
+        return false;
+    };
+    let current = combined::part(owner, source).is_some_and(|s| s.same_catalog(&schedule));
+    if !current || !owner.organization_edit_current(source, ticket) {
+        return false;
+    }
+    combined::store_part(owner, source, Rc::new(replacement));
+    rebuild_combined_ready(owner).await
+}
+
+fn resume_combined(owner: &Rc<crate::Runtime>) {
+    if !crate::settings::flag(&owner.settings(), iptv_settings::keys::RESUME_LAST_CHANNEL)
+        || owner.browser().playing
+    {
+        owner.resume.with(|r| r.set(false));
+        return;
+    }
+    let loaded = crate::commands::combined_resume_key(owner);
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            let key = loaded.await.ok().flatten();
+            if !owner.resume.with(Cell::get) || owner.browser().playing || !combined::active(&owner)
+            {
+                return;
+            }
+            let schedule = owner.schedule();
+            if let Some(c) = key.and_then(|k| schedule.find_channel(&k)) {
+                // Another playlist's import may call resume while the target portal is
+                // still only cached rows. Wait for that owning source's authentication.
+                if iptv_guide::combined::epg_channel(&*schedule, c)
+                    .is_none_or(|(child, _)| child.playback().is_none())
+                {
+                    return;
+                }
+                owner.resume.with(|r| r.set(false));
+                if schedule.channel_block(c) != iptv_core::organization::Block::None {
+                    return;
+                }
+                owner.emit(crate::RuntimeEvent::ResumeChannel(c));
+                owner.emit(crate::RuntimeEvent::ResumeFullscreen);
+            }
+        }
+    });
+}
+
+/// Toggle a parent row without changing the channel catalog or player surface.
+pub fn toggle_playlist(owner: &Rc<crate::Runtime>, group: usize) -> bool {
+    let Some((projection, collapsed)) = combined::toggled_playlist(owner, group) else {
+        return false;
+    };
+    let saved = crate::library::save_collapsed(owner, collapsed);
+    // A following key must see the new rows, even while persistence waits.
+    // Invalidate assemblies that began before this projection was chosen.
+    combined::invalidate_rebuild(owner);
+    commit_schedule(owner, ScheduleUpdate::Catalog(projection), || {});
+    owner.spawn({
+        let owner = owner.clone();
+        async move {
+            if let Err(error) = saved.await {
+                log::warn!("iptv browser: could not save expansion: {error}");
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "The change could not be saved. Reopen the list and try again.",
+                ));
+                // Restore persisted expansion on failure. This read follows all
+                // newer queued choices, and later choices invalidate its revision.
+                rebuild_combined(&owner);
+            }
+        }
+    });
+    true
+}
+
+pub fn organization_changed(owner: &Rc<crate::Runtime>, source: SourceId) {
+    reload_organization(owner, source, false);
+}
+
+/// A watch sort remains eligible for the next guide entry until installed.
+pub(crate) fn watch_order_changed(owner: &Rc<crate::Runtime>, source: SourceId) {
+    reload_organization(owner, source, true);
+}
+
+fn reload_organization(owner: &Rc<crate::Runtime>, source: SourceId, retry_watch_order: bool) {
+    owner
+        .organization_revision
+        .set(owner.organization_revision.get().wrapping_add(1));
+    let ticket = owner.begin_organization_edit(source);
+    owner.emit(crate::RuntimeEvent::LibraryChanged);
+    let task = owner.clone();
+    owner.spawn(async move {
+        let installed = if combined::active(&task) {
+            replace_combined_organization(&task, source, ticket).await
+        } else {
+            replace_single_organization(&task, source, ticket).await
+        };
+        if retry_watch_order && !installed {
+            task.watch_sort_dirty.borrow_mut().insert(source);
+        }
+    });
+}
+
+async fn replace_single_organization(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    ticket: u64,
+) -> bool {
+    if owner.shown.get() != Some(source) {
+        return false;
+    }
+    let schedule = owner.schedule();
+    let Some(epg) = schedule
+        .as_any()
+        .and_then(|s| s.downcast_ref::<EpgSchedule>())
+    else {
+        return false;
+    };
+    let Some(replacement) = organization::apply(owner, epg, source).await else {
+        return false;
+    };
+    commit_schedule(
+        owner,
+        ScheduleUpdate::Organization {
+            source,
+            ticket,
+            expected: epg,
+            schedule: Rc::new(replacement),
+        },
+        || {},
+    ) == CommitOutcome::Installed
+}
 
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {
     start_library(owner, false);
@@ -77,7 +1166,7 @@ pub fn retry_startup(owner: &std::rc::Rc<crate::Runtime>) {
 
 fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
     combined::reset_single(owner);
-    library::reset_imports(owner);
+    crate::library::reset_imports(owner);
     let started = crate::time::Instant::now();
     let services = owner.services();
     let startup = crate::commands::startup_library(&services);
@@ -106,7 +1195,7 @@ fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
             }
             let startup = startup.map(|(source, combined, any, snapshot)| {
                 let stored: Vec<_> = snapshot.playlists.iter().map(|p| p.id).collect();
-                library::install(&owner, snapshot);
+                crate::library::install(&owner, snapshot);
                 // A deletion whose settings save was lost must not hand its
                 // playlist's own settings to a new playlist with its id.
                 if let Err(error) = crate::settings::forget_import_switches(&owner, None, &stored) {
@@ -128,10 +1217,10 @@ fn start_library(owner: &std::rc::Rc<crate::Runtime>, recovering: bool) {
                 }
             }
             match startup {
-                Ok((_, true, _)) => combined::start(&owner),
+                Ok((_, true, _)) => start_combined(&owner),
                 Ok((Some(stored), false, _)) => {
                     opening::begin(&owner, &stored).await;
-                    library::run(&owner, stored, Purpose::Startup, false);
+                    run_import(&owner, stored, Purpose::Startup, false);
                 }
                 Ok((None, false, true)) => {
                     show_nothing(&owner);
@@ -188,13 +1277,13 @@ fn start_import_with(
 ) {
     let purpose = job.purpose;
     let mut import_source = job.stored;
-    let completion = library::import_completion(cancel.clone());
+    let completion = crate::library::import_completion(cancel.clone());
     if let Some(source) = import_source {
-        library::track_import(owner, source, &completion);
+        crate::library::track_import(owner, source, &completion);
     }
     let previous = Cell::new(
         (purpose == Purpose::Add)
-            .then(|| combined::ready_single(owner))
+            .then(|| ready_single(owner))
             .flatten(),
     );
     let shows = purpose.shows() && !combined::active(owner);
@@ -290,12 +1379,12 @@ fn start_import_with(
                 let merge = purpose == Purpose::Add
                     && !combined::active(&owner)
                     && !merge_requested.get()
-                    && combined::has_multiple_enabled(&owner);
+                    && has_multiple_enabled(&owner);
                 let source = imported.source;
                 show_part(&owner, imported, generation, resume, held, Some(&job)).await;
                 if merge {
                     merge_requested.set(true);
-                    combined::added(&owner, source, generation, previous.take());
+                    join_after_add(&owner, source, generation, previous.take());
                 }
             }
         }
@@ -325,7 +1414,11 @@ fn start_import_with(
                                 && let Ok((_, imported)) = &result
                             {
                                 import_source = Some(imported.source);
-                                library::track_added_import(&owner, imported.source, &completion);
+                                crate::library::track_added_import(
+                                    &owner,
+                                    imported.source,
+                                    &completion,
+                                );
                                 // A new playlist may have a deleted one's id:
                                 // it starts from the global settings.
                                 if let Err(error) = crate::settings::forget_import_switches(
@@ -339,7 +1432,7 @@ fn start_import_with(
                                 }
                             }
                             if import_source.is_some_and(|source| {
-                                !library::import_is_current(&owner, source, &completion)
+                                !crate::library::import_is_current(&owner, source, &completion)
                             }) {
                                 // A guide action can revoke handoff while authentication
                                 // is still running. Keep its successful playback metadata,
@@ -361,7 +1454,11 @@ fn start_import_with(
                             on_update(Update::Done(result));
                         }
                         Ok(Msg::Guide(imported)) => {
-                            if library::import_is_current(&owner, imported.source, &completion) {
+                            if crate::library::import_is_current(
+                                &owner,
+                                imported.source,
+                                &completion,
+                            ) {
                                 show(imported, None).await;
                             }
                         }
@@ -371,8 +1468,12 @@ fn start_import_with(
                             drop(shown);
                         }
                         Ok(Msg::NextCheck { source, at })
-                            if (shows || combined::includes(&owner, source))
-                                && library::import_is_current(&owner, source, &completion) =>
+                            if (shows || combined_includes(&owner, source))
+                                && crate::library::import_is_current(
+                                    &owner,
+                                    source,
+                                    &completion,
+                                ) =>
                         {
                             // Not when a newer generation began meanwhile
                             // (an Add, a switch): should that fail and leave
@@ -384,7 +1485,7 @@ fn start_import_with(
                         }
                         Ok(Msg::NextCheck { at, .. }) => unscheduled = Some(at),
                         Ok(Msg::NoCheck { source }) => {
-                            if library::import_is_current(&owner, source, &completion) {
+                            if crate::library::import_is_current(&owner, source, &completion) {
                                 // Nothing is owed any more: the policy answered.
                                 owner.take_owed_guide_check(source);
                                 answered = true;
@@ -424,7 +1525,7 @@ fn start_import_with(
             // Newer work that replaced it answers instead.
             if let Some(source) = import_source
                 && !answered
-                && (shows || combined::includes(&owner, source))
+                && (shows || combined_includes(&owner, source))
                 && !completion.superseded.get()
             {
                 keep_guide_check(&owner, source, generation, unscheduled);
@@ -445,7 +1546,7 @@ fn start_import_with(
 
 /// Puts `imported` on screen unless a newer import owns the guide.
 pub(crate) fn repair_source_shown(owner: &Rc<crate::Runtime>, source: SourceId) -> bool {
-    owner.shown.get() == Some(source) || combined::includes(owner, source)
+    owner.shown.get() == Some(source) || combined_includes(owner, source)
 }
 
 pub(crate) async fn show_repair(
@@ -488,29 +1589,29 @@ async fn show_part(
     generation: u64,
     resume: bool,
     mut held: Option<opening::Held>,
-    job: Option<&library::ImportCompletion>,
+    job: Option<&crate::library::ImportCompletion>,
 ) {
     if owner.generation.with(Cell::get) != generation {
         return;
     }
-    let guide_source = imported.source;
-    let guide_revision = crate::stored::guide_edit_revision(owner, guide_source);
-    let _turn = owner.show_turn(imported.source).await;
-    if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
+    let source = imported.source;
+    let guide_revision = crate::stored::guide_edit_revision(owner, source);
+    let _turn = owner.show_turn(source).await;
+    if crate::stored::guide_edit_revision(owner, source) != guide_revision {
         return;
     }
     if owner.generation.with(Cell::get) != generation {
         return;
     }
     if let Some(job) = job
-        && !library::import_is_current(owner, imported.source, job)
+        && !crate::library::import_is_current(owner, source, job)
     {
-        let stored = crate::commands::stored_guide(owner, imported.source, imported.now).await;
+        let stored = crate::commands::stored_guide(owner, source, imported.now).await;
         // Unreadable: without programs rather than with ones that may
         // just have been deleted, until the stored guide can be read.
         imported.guide = stored.unwrap_or_else(|error| {
             log::warn!("iptv data: the stored guide cannot be read: {error}");
-            restore_guide(owner, imported.source, generation);
+            restore_guide(owner, source, generation);
             GuideStore::default()
         });
         held = None;
@@ -518,21 +1619,21 @@ async fn show_part(
             return;
         }
     }
-    if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
+    if crate::stored::guide_edit_revision(owner, source) != guide_revision {
         return;
     }
     let first_screen = held.is_some();
     if combined::active(owner) {
-        combined::show(owner, imported, held).await;
+        show_combined(owner, imported, held).await;
         if resume {
-            combined::resume(owner);
+            resume_combined(owner);
         }
         return;
     }
-    if Some(imported.source) != owner.shown.get() {
-        source_changed(owner, Some(imported.source));
+    if Some(source) != owner.shown.get() {
+        source_changed(owner, Some(source));
     }
-    stored::note_shown(owner, Some(imported.source));
+    crate::stored::note_shown(owner, Some(source));
     let channels = imported.channels.len();
     let started = crate::time::Instant::now();
     let Imported {
@@ -541,14 +1642,14 @@ async fn show_part(
         playback,
         guide,
         now,
-        source,
         resume: resumes,
+        ..
     } = *imported;
     let mut organization_revision = organization::revision(owner);
     let schedule = organization::build(owner, source, groups, catalog, guide, now).await;
     if owner.generation.with(Cell::get) != generation
         || combined::active(owner)
-        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+        || crate::stored::guide_edit_revision(owner, source) != guide_revision
     {
         return;
     }
@@ -588,7 +1689,7 @@ async fn show_part(
     };
     if owner.generation.with(Cell::get) != generation
         || combined::active(owner)
-        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+        || crate::stored::guide_edit_revision(owner, source) != guide_revision
     {
         return;
     }
@@ -604,18 +1705,20 @@ async fn show_part(
             schedule = replacement;
         }
     }
-    if owner.generation.with(Cell::get) != generation
-        || combined::active(owner)
-        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
-    {
+    let favorites = started.elapsed();
+    let outcome = commit_schedule(
+        owner,
+        ScheduleUpdate::Source {
+            source,
+            generation,
+            guide_revision,
+            schedule: Rc::new(schedule),
+        },
+        install_favorites,
+    );
+    if outcome == CommitOutcome::Refused {
         return;
     }
-    let favorites = started.elapsed();
-    install_favorites();
-    let schedule = Rc::new(schedule);
-    combined::remember_single(owner, source, schedule.clone());
-    owner.emit(crate::RuntimeEvent::ScheduleReady(schedule));
-    pages::replaced(owner);
     owner.emit(crate::RuntimeEvent::SchedulePresented(vec![
         ("schedule", built),
         ("pages", wrapped),
@@ -635,10 +1738,11 @@ async fn show_part(
 fn source_changed(owner: &std::rc::Rc<crate::Runtime>, source: Option<SourceId>) {
     log::info!("iptv data: showing source {:?}", source.map(|id| id.0));
     owner.emit(crate::RuntimeEvent::SourceChanged);
+    let (has_vod, any_vod) = crate::favorites::vod_availability(owner);
     owner.emit(crate::RuntimeEvent::FavoritesChanged {
         channels: BTreeSet::new(),
-        has_vod: owner.browser().has_vod,
-        any_vod: owner.browser().any_vod,
+        has_vod,
+        any_vod,
     });
     crate::library::set_shown(owner, source);
     if let Some(id) = source {
@@ -652,9 +1756,15 @@ fn show_nothing(owner: &std::rc::Rc<crate::Runtime>) {
     combined::reset_single(owner);
     next_generation(owner, None);
     source_changed(owner, None);
-    owner.emit(crate::RuntimeEvent::ScheduleReady(Rc::new(
-        EpgSchedule::new(Vec::new(), GuideStore::default(), now_unix()),
-    )));
+    commit_schedule(
+        owner,
+        ScheduleUpdate::Catalog(Rc::new(EpgSchedule::new(
+            Vec::new(),
+            GuideStore::default(),
+            now_unix(),
+        ))),
+        || {},
+    );
 }
 
 /// Work that canceled `source`'s guide timer ended without answering for
@@ -679,8 +1789,8 @@ fn keep_guide_check(
     asked: Option<i64>,
 ) {
     if owner.has_guide_check(source)
-        || library::pending_import(owner, source).is_some()
-        || !(owner.shown.get() == Some(source) || combined::includes(owner, source))
+        || crate::library::pending_import(owner, source).is_some()
+        || !(owner.shown.get() == Some(source) || combined_includes(owner, source))
     {
         return;
     }
@@ -720,7 +1830,7 @@ fn keep_shown_check(owner: &std::rc::Rc<crate::Runtime>, source: SourceId, gener
     owner.spawn({
         let owner = owner.clone();
         async move {
-            while let Some(pending) = library::pending_import(&owner, source) {
+            while let Some(pending) = crate::library::pending_import(&owner, source) {
                 pending.until_finished().await;
             }
             if owner.generation.with(Cell::get) == generation {
@@ -776,14 +1886,14 @@ fn schedule_check(
                 return;
             }
             if owner.generation.with(Cell::get) != generation
-                || (combined::active(&owner) && !combined::includes(&owner, source))
+                || (combined::active(&owner) && !combined_includes(&owner, source))
             {
                 // No longer this timer's to check (the source left All
                 // playlists): its entry must not outlive it.
                 owner.end_guide_check(source);
-            } else if library::running(&owner, source)
-                || stored::updating(&owner, source)
-                || library::pending_import(&owner, source).is_some()
+            } else if crate::library::running(&owner, source)
+                || crate::stored::updating(&owner, source)
+                || crate::library::pending_import(&owner, source).is_some()
             {
                 // The work under way owns the guide: a check now would only
                 // read the cache and end without a next check.
@@ -845,11 +1955,11 @@ async fn read_guide(
     source: SourceId,
     generation: u64,
     read: GuideRead,
-    handoff: Option<library::ImportCompletion>,
+    handoff: Option<crate::library::ImportCompletion>,
     quiet: bool,
 ) {
     let requested = read;
-    let read = if library::running(owner, source) {
+    let read = if crate::library::running(owner, source) {
         GuideRead::CacheOnly
     } else {
         read
@@ -903,7 +2013,7 @@ async fn read_guide(
     loop {
         if handoff
             .as_ref()
-            .is_some_and(|job| !library::import_is_current(owner, source, job))
+            .is_some_and(|job| !crate::library::import_is_current(owner, source, job))
         {
             // A guide action revoked the job this read restores for: end
             // the read with its entry, and keep the source a check.
@@ -941,7 +2051,7 @@ async fn read_guide(
             // read the store, or its worker ended early): it was owed and
             // still is, later. Whatever the refresh policy: a check that
             // ran had been asked for.
-            let later = now_unix() + stored::RETRY_DUE;
+            let later = now_unix() + crate::stored::RETRY_DUE;
             schedule_check(owner, source, later, generation);
         }
     }

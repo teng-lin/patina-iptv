@@ -161,3 +161,42 @@ fn the_about_page_shows_the_privacy_address_before_opening_and_after_browser_fai
     step(app.wait_for(&format!("id:app-notice >> text:{URL}")));
     assert_eq!(app.screen().opened_urls(), [URL, URL]);
 }
+
+#[test]
+fn changing_the_guide_layout_preference_retires_the_keyboard_override() {
+    let Some(home) = isolated!() else { return };
+    let mut preference = Settings::new();
+    preference
+        .set("guide.browse_mode", iptv_settings::Value::choice("overlay"))
+        .unwrap();
+    let mut f = start(home, preference, true);
+    let app = &mut f.app;
+    let player = |app: &Headless| {
+        app.screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.kind == nsh_core::ViewKind::Native)
+            .expect("persistent player")
+    };
+    let id = player(app).id;
+    assert_eq!(player(app).bounds.size.width.0, 1920.0);
+    step(app.press_key("o"));
+    assert!(player(app).bounds.size.width.0 < 1920.0);
+
+    for choice in ["Video beside the list", "List over the video"] {
+        settings(app);
+        // The rows also have a heading called Guide layout. Locate the
+        // editable row by the accessible label that includes its value.
+        for _ in 0..100 {
+            if app.press("label:/^Guide layout · /").is_ok() {
+                break;
+            }
+            step(app.press_key("down"));
+        }
+        step(app.wait_for("id:settings-editor"));
+        step(app.press(&format!("id:settings-editor >> text:/{choice}/")));
+        close(app);
+    }
+    assert_eq!(player(app).bounds.size.width.0, 1920.0);
+    assert_eq!(player(app).id, id);
+}

@@ -121,7 +121,7 @@ fn over_video(ui: Ui) -> bool {
 /// column's length, then does what it asks.
 fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, usize) -> Outcome) {
     let list = ui.list.get_untracked();
-    let entries = entry_count(&*crate::schedule());
+    let entries = entry_count(&*crate::runtime_owner::schedule());
     let mut outcome = Outcome::Stay;
     ui.channels.update(|c| {
         if let Some(c) = c.as_mut() {
@@ -278,7 +278,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             virtual_list(
                 move || {
                     ui.app.data_version.get();
-                    entry_count(&*crate::schedule())
+                    entry_count(&*crate::runtime_owner::schedule())
                 },
                 move |at| entry_row(ui, at, entry_focus, size),
             )
@@ -398,7 +398,7 @@ fn entry_row(
         .child(
             list_rows::name(size, move || {
                 ui.app.data_version.get();
-                let schedule = crate::schedule();
+                let schedule = crate::runtime_owner::schedule();
                 let name = entry_name(at.index(), &*schedule);
                 if let Entry::Group(g) = Entry::at(at.index())
                     && schedule.group_depth(g) > 0
@@ -425,7 +425,7 @@ fn entry_row(
             move || !crate::multiview::picking(ui),
             move || {
                 ui.app.data_version.get();
-                entry_name(at.index(), &*crate::schedule())
+                entry_name(at.index(), &*crate::runtime_owner::schedule())
             },
         ))
 }
@@ -506,7 +506,7 @@ fn channel_row(
     let entry = move || {
         ui.app.data_version.get();
         let ch = ui.list.with(|l| l.channel(at.index()))?;
-        let s = crate::schedule();
+        let s = crate::runtime_owner::schedule();
         let now = ui.focus.with(|f| f.now);
         let playing = if ui.playing.get() == Some(ch) {
             "  ▶"
@@ -628,7 +628,7 @@ fn preview_info(ui: Ui, size: Scale) -> impl IntoElement {
         ui.app.data_version.get();
         let row = ui.channels.get()?.row;
         let ch = ui.list.with(|l| l.channel(row))?;
-        let s = crate::schedule();
+        let s = crate::runtime_owner::schedule();
         let now = ui.focus.with(|f| f.now);
         let p = s.program_at(ch, now);
         Some((
