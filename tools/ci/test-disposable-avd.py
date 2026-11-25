@@ -280,6 +280,31 @@ class ReleaseLauncher(unittest.TestCase):
         self.assertEqual(report["result"], "failed")
         self.assertEqual(report["checks"]["launch"], "failed")
 
+    def test_owned_avd_is_required_before_any_device_command(self):
+        root, calls = self.launch()
+        os.environ["IPTV_SMOKE_DISPOSABLE_AVD"] = "tab36"
+        with self.assertRaisesRegex(ValueError, "owned disposable"):
+            RELEASE["run"]("emulator-5580", "synthetic.apk")
+        self.assertEqual(calls, [])
+        self.assertFalse((root / "release-checklist.json").exists())
+
+    def test_invalid_feature_answer_fails_and_retains_diagnostics(self):
+        root, _ = self.launch(feature="unexpected")
+        with self.assertRaisesRegex(ValueError, "form factor"):
+            RELEASE["run"]("emulator-5580", "synthetic.apk")
+        report = json.loads((root / "release-checklist.json").read_text())
+        self.assertEqual(report["result"], "failed")
+
+    def test_hold_control_file_ends_hold_after_periodic_observation(self):
+        root, _ = self.launch()
+        control = root / "finish"
+        os.environ.update(IPTV_SMOKE_HOLD="60", IPTV_SMOKE_HOLD_FILE=str(control))
+        with patch.object(RELEASE["time"], "sleep", side_effect=lambda _: control.touch()) as sleep:
+            RELEASE["run"]("emulator-5580", "synthetic.apk")
+        sleep.assert_called_once()
+        report = json.loads((root / "release-checklist.json").read_text())
+        self.assertEqual(report["result"], "launch-passed-journeys-pending")
+
 
 if __name__ == "__main__":
     unittest.main()
