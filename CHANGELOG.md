@@ -9,6 +9,10 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Group guide refresh, failed-source Retry, source editing and confirmed Clear
+  under each playlist’s Guide data. Clear names the playlist and keeps other
+  playlists, channels and guide links intact (#282).
+
 - Simplify the TV Guide header and groups column by removing overflow buttons,
   the duplicate group selector and time-step arrows. Remove the unfinished
   Watchlist destination from the navigation rail.

@@ -573,6 +573,7 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
         }
     };
     card(ui, size)
+        .test_id("guide-source-actions")
         .child(ui_kit::title(size, move || {
             line().map(|l| words::title(&l.source)).unwrap_or_default()
         }))

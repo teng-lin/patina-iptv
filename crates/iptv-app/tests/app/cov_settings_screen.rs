@@ -543,9 +543,14 @@ fn guide_data(app: &mut Headless, home: &Path) {
     std::fs::remove_file(&guide_path).unwrap();
     step(app.press("text:Update the guide now"));
     step(app.wait_for_within("text:Retry", IMPORT));
+    step(app.press("text:1.  The provider's guide"));
+    step(app.wait_for("id:guide-source-actions >> text:Retry"));
     std::fs::write(&guide_path, kept).unwrap();
-    step(app.press("text:Retry"));
+    step(app.press("id:guide-source-actions >> text:Retry"));
     step(app.wait_for_gone("text:Retry", IMPORT));
+    step(app.wait_for("id:guide-source-actions >> text:Switch off"));
+    step(app.back());
+    step(app.wait_for_gone("id:guide-source-actions", GONE));
     step(app.press("text:Delete stored guide data"));
     let confirm = "text:/^Delete guide data for /";
     step(app.wait_for(confirm));
