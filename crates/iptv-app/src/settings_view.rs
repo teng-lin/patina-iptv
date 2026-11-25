@@ -602,12 +602,12 @@ mod tests {
     fn pages_count_what_they_offer() {
         let playback = PAGES.iter().find(|p| p.key == "playback").unwrap();
         let (active, _) = counts(playback);
-        // Panel timeouts, channel-change info, multiview's sound following
+        // Channel-change info, multiview's sound following
         // the selected tile, the time-bar step and swiping to change
         // channel; the seek keys are with the keyboard or remote settings
         // (#280), and the rewind and fast-forward jumps on the Advanced
         // page off a phone or a tablet (#281).
-        assert_eq!(active, 6);
+        assert_eq!(active, 4);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
         // Only the two enable switches and PIN command are visible by default;
         // dependent preferences appear after live or VOD protection is enabled.

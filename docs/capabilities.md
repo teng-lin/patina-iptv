@@ -28,7 +28,7 @@ TV, so gates also take three signals that can change while the app runs
 | --- | --- | --- |
 | Form factor: phone, tablet, TV or desktop | Android: the TV UI mode or the leanback feature, otherwise the physical display's smallest width (under 600 dp is a phone), never the window's, so a tablet in split screen stays a tablet ([`DeviceComponent.kt`](../hosts/android/app/src/main/kotlin/com/hantekllc/iptvrs/host/DeviceComponent.kt)). iPad: the system's idiom. Desktops: the build. Tizen: a TV. | Which capabilities exist |
 | Window size class: compact, medium or expanded | The [layout class](../crates/iptv-presentation/src/layout.rs) of the current window at the guide's scale and text size | Layouts |
-| Connected input: a hardware keyboard, a D-pad | Android: `Configuration.keyboard` and `navigation`, unless hidden. Desktops: a keyboard. Tizen: its remote's D-pad. iPad: none yet (`GCKeyboard` is not read). | Keyboard and remote features |
+| Connected input: a hardware keyboard, a D-pad | Android: `Configuration.keyboard` and `navigation`, unless hidden. Desktops: a keyboard. Tizen: its remote's D-pad. iPad: the current `GCKeyboard` report, refreshed on attachment, detachment and activation. | Keyboard and remote features |
 
 Android reports the form factor and the input when the app starts and on every
 configuration change; before that report an Android build counts as a tablet
@@ -48,6 +48,8 @@ H.264 decoder the player picks supports at once
 decoder, when Media3 decodes in software. The
 report can only lower the platform's surface budget, so a device that cannot
 run two hardware decoders at once loses multiview rather than gaining tiles.
+A lower decoder or form-factor budget collapses an open session to its heard
+tile, even when the smaller budget still offers a new multiview session.
 
 Settings the signals decide (#281, `settings::offer`). The rewind and
 fast-forward jumps (`catchup.forward_step`, `catchup.rewind_step`) are on the
@@ -60,7 +62,7 @@ page, keeps them with the replay jumps:
 | `appearance.ui_transparency`, `guide.browse_mode`, `guide.list_browse_mode` | Shown | Shown | Shown | Hidden: the guide, the Guide key over full-screen video included, shows its preview; the channel list puts the video beside it wherever it has room |
 | `guide.fullscreen_timeout` | Hidden, never | Hidden, never | On the Advanced page | As the device |
 | `guide.after_choosing` | Hidden: the guide over the video and the channel list always go full screen | Shown | Shown | As the device |
-| `player.info_on_switch` | Hidden on Android unless a keyboard or a D-pad is connected; shown on an iPad, whose input is not reported yet | Shown | Shown | As the device |
+| `player.info_on_switch` | Hidden unless a keyboard or a D-pad is connected | Shown | Shown | As the device |
 
 Android's activity also reports its accessibility settings: the timeouts
 `AccessibilityManager.getRecommendedTimeoutMillis` gives for controls and for
@@ -70,8 +72,10 @@ accessibility services (`SwitchAccessService`, `UniversalSwitchService`),
 since no service property marks a switch service. The
 player's panels and the play bar never hide sooner than the recommended
 timeout, and stay until the viewer hides them while a screen reader (as NSH
-reports it, on every host) or Switch Access runs. iPadOS's Switch Control is
-not detected: NSH reports VoiceOver only.
+reports it, on every host), Switch Access or iPadOS Switch Control runs.
+The iPad observer reads GCKeyboard and UIKit Switch Control state on mount,
+follows their notifications, refreshes both when the app or scene becomes
+active, and removes every observer on unmount.
 
 Every row above stays in the settings catalog, so its stored value loads and
 restores on any device. A hidden row's value is kept and applies again on a
@@ -179,3 +183,9 @@ registers no wakes, login items or alarms for scheduled recordings. See
 Validation combines portable profile/decision tests, native startup/restart
 tests, headless control scenarios and native host smoke checks. Real-device
 and emulator evidence must remain distinguishable.
+
+The panel timeout rows are Advanced settings on TV and hidden elsewhere.
+On phones, tablets and desktops their stored values are ignored, both at
+startup and after restoring a backup; fixed defaults apply, extended by the
+system recommendation and suspended while assistive technology runs. TV
+keeps the stored values. No stored values are deleted or migrated.

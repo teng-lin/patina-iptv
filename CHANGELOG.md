@@ -12,6 +12,11 @@ is below 1.0, a minor release may change behavior.
 - Group guide refresh, failed-source Retry, source editing and confirmed Clear
   under each playlist’s Guide data. Clear names the playlist and keeps other
   playlists, channels and guide links intact (#282).
+- Follow iPad hardware keyboard attachment and Switch Control at runtime.
+  Refresh these signals when returning to the app, keep panels open for
+  assistive navigation, collapse multiview to the heard tile when its decoder
+  budget shrinks, and offer panel timeout settings only on TV under
+  Advanced; handhelds and desktop use defaults with system accessibility timing.
 
 - Simplify the TV Guide header and groups column by removing overflow buttons,
   the duplicate group selector and time-step arrows. Remove the unfinished
@@ -58,8 +63,8 @@ is below 1.0, a minor release may change behavior.
   rows. "Show info on a channel change" is hidden on an Android phone or tablet
   without a keyboard or D-pad. Back in the guide always returns to the programs
   on air first.
-- Move the panel timeouts under Playback → Accessibility, and the rewind and
-  fast-forward jumps to the Advanced page on desktops and TVs. The player's
+- Move the rewind and fast-forward jumps to the Advanced page on desktops and
+  TVs. The player's
   panels and play bar now wait at least Android's recommended accessibility
   timeout, and stay until hidden while a screen reader or Switch Access runs.
 - Android TV no longer offers picture in picture: Home during playback returns
@@ -85,6 +90,8 @@ is below 1.0, a minor release may change behavior.
 - Keep recycled playlist, guide source and playlist action rows attached to
   the content and command they currently display.
 
+- A Stalker refresh whose live pages fail keeps the last complete channel
+  catalog and reports the failure for retry instead of publishing partial rows.
 - Pin the macOS Android resource compiler used by local Android validation.
 
 - Keep interrupted and overlapping video touches from leaving a channel-swipe

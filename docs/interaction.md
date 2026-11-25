@@ -136,9 +136,10 @@ In the guide:
   `iptv_presentation::play_bar`). Multiview's pointer chrome, on the bar's timer,
   stays the same way. So do the remote's panels (the banner, the info card
   and the control strip, `iptv_presentation::panels`), and all of them stay
-  the same way while Android's Switch Access runs. Otherwise they never
+  the same way while Android's Switch Access or iPadOS Switch Control runs. Otherwise they never
   hide sooner than Android's recommended accessibility timeout; their own
-  timeouts are under **Playback → Accessibility** on every host.
+  timeouts are fixed defaults on handhelds and desktop; TV keeps them
+  under Advanced settings.
 
 ### Touch gestures in the guide
 
