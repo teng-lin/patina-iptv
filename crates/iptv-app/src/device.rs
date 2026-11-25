@@ -240,7 +240,10 @@ pub(crate) fn bridge() -> impl IntoElement {
     let accessibility = signal(Accessibility::default());
     ACCESSIBILITY.with(|cell| cell.set(Some(accessibility)));
     let observed = observed();
-    let probe = cfg!(feature = "test-support") && observed && !crate::host::ANDROID;
+    let probe = cfg!(feature = "test-support")
+        && std::env::var_os("IPTV_TEST_DEVICE_SIGNALS").is_some()
+        && !crate::host::ANDROID
+        && !crate::host::IPAD;
     view()
         .absolute()
         .w(px(0.0))

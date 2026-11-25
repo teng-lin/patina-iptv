@@ -369,21 +369,21 @@ fn the_control_strip_follows_switch_access_and_the_recommended_timeout() {
         serde_json::json!({ "controls_ms": 0, "text_ms": 0, "switch_access": true }),
     );
     stays(app, "Switch Access");
-    // Switch Access off, a "time to take action" of 4 s: the strip waits
-    // that long rather than its own 1 s.
+    // Switch Access off, a "time to take action" of 10 s: the strip waits
+    // that long rather than the tablet’s fixed 7 s.
     native(
         app,
         "accessibility",
-        serde_json::json!({ "controls_ms": 4_000, "text_ms": 0, "switch_access": false }),
+        serde_json::json!({ "controls_ms": 10_000, "text_ms": 0, "switch_access": false }),
     );
     open_strip(app);
     step(app.press_key("right"));
-    step(app.run_for(Duration::from_millis(2_500)));
+    step(app.run_for(Duration::from_millis(8_000)));
     assert!(
         app.screen().matches(STRIP).unwrap(),
-        "the strip waits the recommended 4 s"
+        "the strip waits the recommended 10 s"
     );
-    hides(app, Duration::from_millis(2_000));
+    hides(app, Duration::from_millis(2_500));
 }
 
 #[test]

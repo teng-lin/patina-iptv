@@ -58,6 +58,17 @@ fn logged(text: &str) -> usize {
         .count()
 }
 
+// TV scenarios feed the same explicit form-factor signal as the native host.
+macro_rules! tv_isolated {
+    () => {{
+        fn here() {}
+        crate::isolated::run_with_env(
+            std::any::type_name_of_val(&here),
+            &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+        )
+    }};
+}
+
 /// A TV on Android at 960×540 with remote phases and autoplay disabled.
 fn tv(
     home: crate::isolated::Home,
@@ -101,6 +112,7 @@ fn tv_with(
     );
     let lifetime = lifetime.lock().unwrap().take().unwrap();
     let mut fixture = fixture;
+    crate::device_signals::report(&mut fixture.app, "tv", false, true);
     // The remaining navigation opens groups; the remote's Right enters the
     // guide's channels, focus on Local A.
     step(fixture.app.open_guide_groups());
@@ -122,7 +134,7 @@ fn shows(app: &crate::Headless, selector: &str) -> bool {
 
 #[test]
 fn long_ok_on_a_group_reorders_it_in_the_guide() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, _, _) = tv(home, |_| {});
     let app = &mut fixture.app;
     hold(app, RemoteKey::Left, 700, true);
@@ -269,7 +281,7 @@ fn remap_guide_down_to_select(settings: &mut Settings) {
 
 #[test]
 fn a_remapped_select_only_activates_once_per_remote_press() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, remap_guide_down_to_select);
     let app = &mut fixture.app;
 
@@ -288,7 +300,7 @@ fn a_remapped_select_only_activates_once_per_remote_press() {
 
 #[test]
 fn a_desktop_key_remapped_to_select_repeats_only_outside_the_guide_grid() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let mut settings = Settings::new();
     remap_guide_down_to_select(&mut settings);
     let mut fixture = personalization::start(home, settings, true);
@@ -316,7 +328,7 @@ fn a_desktop_key_remapped_to_select_repeats_only_outside_the_guide_grid() {
 
 #[test]
 fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |_| {});
     let app = &mut fixture.app;
 
@@ -414,7 +426,7 @@ fn long_ok_rapid_taps_and_a_surface_change_during_a_hold() {
 
 #[test]
 fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |_| {});
     let app = &mut fixture.app;
 
@@ -553,7 +565,7 @@ const BAR: [&str; 14] = [
 
 #[test]
 fn extra_large_text_keeps_every_focused_bar_control_on_screen() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |settings| {
         settings
             .set("appearance.font_size", Value::Enum("extra_large".into()))
@@ -604,7 +616,7 @@ fn extra_large_text_keeps_every_focused_bar_control_on_screen() {
 
 #[test]
 fn a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv_with(
         home,
         |settings| {
@@ -728,7 +740,7 @@ fn a_press_belongs_to_its_owner_and_a_prompt_takes_its_keys() {
 
 #[test]
 fn holds_keep_their_card_decide_once_and_menu_does_not_toggle() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |settings| {
         bind_ok_to_info_card(settings);
         // The card's own timeout is shorter than the long press.
@@ -799,7 +811,7 @@ fn holds_keep_their_card_decide_once_and_menu_does_not_toggle() {
 
 #[test]
 fn a_back_or_ok_held_into_a_pin_prompt_stays_cut_short() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv_with(
         home,
         |settings| {
@@ -882,7 +894,7 @@ fn a_back_or_ok_held_into_a_pin_prompt_stays_cut_short() {
 
 #[test]
 fn touch_around_a_held_key_leaves_it_cut_short_and_back_with_its_prompt() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv_with(
         home,
         |settings| {
@@ -1001,7 +1013,7 @@ fn touch_around_a_held_key_leaves_it_cut_short_and_back_with_its_prompt() {
 
 #[test]
 fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |settings| {
         bind_ok_to_info_card(settings);
         // The card's own timeout is shorter than the long press.
@@ -1080,7 +1092,7 @@ fn a_zap_or_menu_during_a_hold_does_not_cut_it_short_or_restart_it() {
 /// the binding's repeat rule, which the platform's keymap follows.)
 #[test]
 fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let mut settings = Settings::new();
     settings.set("guide.autoplay", Value::Bool(false)).unwrap();
     settings
@@ -1128,7 +1140,7 @@ fn a_keyboard_key_a_prompt_took_holds_its_repeats_until_pressed_again() {
 #[test]
 fn a_remote_changes_the_sound_follows_the_selected_tile_row() {
     use crate::multiview_heard::{follows_on, saved_follows, to_follows_row};
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let path = home.data_dir().join("settings.json");
     let (mut fixture, _, _) = tv(home, |_| {});
     let app = &mut fixture.app;
@@ -1171,7 +1183,7 @@ mod remote_trace;
 fn a_late_release_cannot_apply_the_displaced_guide_press() {
     use iptv_nav::{Phase, RemoteKey as NavKey};
 
-    let Some(home) = isolated!() else { return };
+    let Some(home) = tv_isolated!() else { return };
     let (mut fixture, lifetime, player) = tv(home, |_| {});
     let app = &mut fixture.app;
     let mut last = 0;

@@ -15,7 +15,7 @@ use objc2_foundation::{
 };
 use objc2_ui_kit::{
     UIAccessibilityIsSwitchControlRunning, UIAccessibilitySwitchControlStatusDidChangeNotification,
-    UIView,
+    UIApplicationDidBecomeActiveNotification, UISceneDidActivateNotification, UIView,
 };
 
 // GCKeyboard is available since iOS 14; Patina's minimum is iOS 15.
@@ -63,6 +63,8 @@ impl Device {
                 GCKeyboardDidConnectNotification,
                 GCKeyboardDidDisconnectNotification,
                 UIAccessibilitySwitchControlStatusDidChangeNotification,
+                UIApplicationDidBecomeActiveNotification,
+                UISceneDidActivateNotification,
             ]
         };
         let observers = names

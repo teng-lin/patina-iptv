@@ -72,7 +72,8 @@ player's panels and the play bar never hide sooner than the recommended
 timeout, and stay until the viewer hides them while a screen reader (as NSH
 reports it, on every host), Switch Access or iPadOS Switch Control runs.
 The iPad observer reads GCKeyboard and UIKit Switch Control state on mount,
-follows their notifications, and removes every observer on unmount.
+follows their notifications, refreshes both when the app or scene becomes
+active, and removes every observer on unmount.
 
 Every row above stays in the settings catalog, so its stored value loads and
 restores on any device. A hidden row's value is kept and applies again on a
