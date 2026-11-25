@@ -36,6 +36,38 @@ pub(crate) fn original_player_source(directory: &Path, url: &str) -> Option<Play
     state.original_player_source(url)
 }
 
+/// Synthetic diagnostics only: fixed phase names and job identities, no media or provider data.
+#[cfg(feature = "test-support")]
+pub fn operation_history(directory: &Path) -> Vec<OperationObservation> {
+    let state = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned();
+    state.map_or_else(Vec::new, |state| {
+        state
+            .operation_history
+            .lock()
+            .unwrap()
+            .entries
+            .iter()
+            .cloned()
+            .collect()
+    })
+}
+
+#[cfg(feature = "test-support")]
+pub(super) fn observe_operation(directory: &Path, job: JobId, phase: &'static str) {
+    if let Some(state) = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned()
+    {
+        state.observe_operation(job, phase);
+    }
+}
+
 pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
     if !ports.background_recordings {
         return Arc::default();

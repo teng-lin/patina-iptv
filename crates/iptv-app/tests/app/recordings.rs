@@ -659,11 +659,66 @@ fn local_capture_serves_two_streams_without_waiting_for_either_to_close() {
     server.join().unwrap();
 }
 
+/// Observes the existing journey without waiting for another recording phase.
+/// Bounded phase changes preserve the timing and assertions being investigated.
+struct RecordNowObservation {
+    path: std::path::PathBuf,
+    started: std::time::Instant,
+    phases: std::cell::RefCell<std::collections::VecDeque<(String, Duration)>>,
+}
+impl RecordNowObservation {
+    fn new(path: &std::path::Path) -> Self {
+        Self {
+            path: path.into(),
+            started: std::time::Instant::now(),
+            phases: Default::default(),
+        }
+    }
+    fn observe(&self, phase: &str, screen: &nsh_testing::Screen) {
+        let toggle = screen
+            .accessibility_state("id:play-bar-record")
+            .ok()
+            .map(|state| (state.pressed, state.disabled));
+        let value = format!("{phase}: toggle {toggle:?}");
+        let mut phases = self.phases.borrow_mut();
+        if phases.back().is_some_and(|(last, _)| last == &value) {
+            return;
+        }
+        if phases.len() == 32 {
+            phases.pop_front();
+        }
+        phases.push_back((value, self.started.elapsed()));
+    }
+    fn report(&self) -> String {
+        let persisted = crate::isolated::open_database(&self.path)
+            .and_then(|store| store.recording_jobs())
+            .map(|jobs| {
+                jobs.into_iter()
+                    .map(|job| (job.id, job.status, job.bytes, job.message))
+                    .collect::<Vec<_>>()
+            });
+        let operations =
+            iptv_runtime::recordings::host::operation_history(self.path.parent().unwrap());
+        format!(
+            "persisted={persisted:?}; UI phases={:?}; runtime phases={operations:?}",
+            self.phases.borrow()
+        )
+    }
+}
+impl Drop for RecordNowObservation {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("Record now failure observation: {}", self.report());
+        }
+    }
+}
+
 #[test]
 fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     let Some(home) = isolated!() else { return };
     let (url, server) = local_capture();
     let (mut app, path, _, _) = fixture(&home, Idiom::Pad, &url, None);
+    let observation = RecordNowObservation::new(&path);
     step(app.press("text:A"));
     step(app.press("text:A"));
     step(app.wait_for_within("text:▶", Duration::from_secs(15)));
@@ -678,10 +733,12 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
         .unwrap()
         .id;
     let opens = iptv_app::player_opens(0);
+    observation.observe("start requested", app.screen());
     step(app.press("label:Record"));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     step(
         app.wait_until("active record toggle", Duration::from_secs(15), |screen| {
+            observation.observe("await active toggle", screen);
             screen
                 .accessibility_state("id:play-bar-record")
                 .is_ok_and(|s| s.pressed == Some(nsh_core::Checked::True) && !s.disabled)
@@ -695,23 +752,34 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             .iter()
             .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
     );
+    observation.observe("stop requested", app.screen());
     step(app.press("id:play-bar-record"));
     step(
         app.wait_until("idle record toggle", Duration::from_secs(15), |screen| {
+            observation.observe("await idle toggle", screen);
             screen
                 .accessibility_state("id:play-bar-record")
                 .is_ok_and(|s| s.pressed == Some(nsh_core::Checked::False) && !s.disabled)
         }),
     );
+    observation.observe("idle toggle acknowledged", app.screen());
     let jobs = crate::isolated::open_database(&path)
         .unwrap()
         .recording_jobs()
         .unwrap();
-    assert_eq!(jobs.len(), 1);
-    assert!(matches!(
+    assert_eq!(jobs.len(), 1, "{}", observation.report());
+    assert!(
+        matches!(
+            jobs[0].status,
+            iptv_core::recording::Status::Completed | iptv_core::recording::Status::Canceled
+        ),
+        "actual persisted status={:?}, bytes={}, message={:?}; {}",
         jobs[0].status,
-        iptv_core::recording::Status::Completed | iptv_core::recording::Status::Canceled
-    ));
+        jobs[0].bytes,
+        jobs[0].message,
+        observation.report()
+    );
+    eprintln!("Record now observation: {}", observation.report());
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     assert_eq!(iptv_app::player_opens(0), opens);
     server.join().unwrap();

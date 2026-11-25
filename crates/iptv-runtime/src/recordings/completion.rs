@@ -148,10 +148,22 @@ async fn reconcile(
         return Transition::Failed;
     }
     let incomplete = completion.status != Status::Completed;
+    #[cfg(feature = "test-support")]
+    let completion_job = completion.job;
     let result = retry(services, move |store| {
         store.commit_recording_completion(&completion)
     })
     .await;
+    #[cfg(feature = "test-support")]
+    host::observe_operation(
+        services.directory(),
+        completion_job,
+        match result {
+            Transition::Applied => "completion committed",
+            Transition::Superseded => "completion commit superseded",
+            Transition::Failed => "completion commit failed",
+        },
+    );
     report_failure(services, result, notify_failure.filter(|_| incomplete))
 }
 
@@ -187,6 +199,8 @@ pub(super) async fn finish(
             return report_failure(services, result, notify_failure);
         }
     };
+    #[cfg(feature = "test-support")]
+    host::observe_operation(services.directory(), job.id, "completion media inspected");
     let status = if bytes == 0 {
         Status::Failed
     } else if outcome.is_ok() {
@@ -212,7 +226,11 @@ pub(super) async fn finish(
     })
     .await
     {
-        Transition::Applied => reconcile(services, completion, notify_failure).await,
+        Transition::Applied => {
+            #[cfg(feature = "test-support")]
+            host::observe_operation(services.directory(), job.id, "completion intent prepared");
+            reconcile(services, completion, notify_failure).await
+        }
         other => other,
     }
 }
