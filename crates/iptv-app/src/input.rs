@@ -25,6 +25,21 @@ pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
 
+impl Ui {
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub fn touched(&self) {
+        // PIN entry continues the choice that opened the prompt. Dismissing
+        // the prompt cancels it in `parental_view::abort`.
+        if self.top_overlay() != Some(crate::overlays::Overlay::Parental) {
+            crate::external_player::cancel_pending(*self);
+        }
+        self.pending_zap.set(None);
+        crate::browse_playback::activity(*self);
+        self.input.set(self.last_press.get_untracked());
+    }
+}
+
 /// A TV remote's profile (Android, a browser TV) distinguishes a tap from
 /// a held key.
 const REMOTE_KEYS: bool = crate::host::REMOTE_KEYS;

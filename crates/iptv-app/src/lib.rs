@@ -150,7 +150,7 @@ pub(crate) const IOS: bool = crate::host::IPAD;
 use nsh_core::time::Instant;
 use std::time::Duration;
 
-use guide::{Focus, Pane, Program, ProgramSelection, Schedule};
+use guide::{Focus, Pane, Program};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -500,119 +500,6 @@ impl Ui {
         self.app.data_version.get() << 32 | (self.app.guide_pages.get() & 0xFFFF_FFFF)
     }
 
-    /// OK or a tap on the focused program: a live one plays (OK on the
-    /// channel already playing goes full screen). An available replay plays
-    /// from the archive. Other listings open their details.
-    pub fn watch(&self) {
-        let view = lists::view(*self);
-        let (row, program, now) = self.focus.with(|f| (f.channel, f.program(&view), f.now));
-        let Some(channel) = view.channel(row) else {
-            return;
-        };
-        let live = (self.playback.get() == Playback::Live)
-            .then(|| self.playing.get())
-            .flatten();
-        let selection =
-            ProgramSelection::for_program(&program, now, view.catchup_days(row), channel, live);
-        match selection {
-            ProgramSelection::AlreadyLive if external_player::maybe_open(*self, channel, None) => {}
-            ProgramSelection::AlreadyLive => {
-                self.mode.apply(crate::mode::Action::EnterFullscreen);
-                self.show_playing();
-            }
-            ProgramSelection::Live => browse_playback::select(*self),
-            ProgramSelection::Replay
-                if external_player::maybe_open(*self, channel, Some(program)) => {}
-            ProgramSelection::Replay => {
-                if !player::allow_guide_channel(channel) {
-                    return;
-                }
-                self.play(
-                    channel,
-                    Playback::CatchUp {
-                        start: program.start,
-                        offset: 0,
-                    },
-                );
-                self.mode.apply(crate::mode::Action::EnterFullscreen);
-                self.show_playing();
-            }
-            ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
-                let origin = Origin {
-                    channel,
-                    program_start: program.start,
-                };
-                if selection == ProgramSelection::Upcoming {
-                    recordings_view::remember(*self, origin);
-                }
-                self.description.set(Some(origin));
-            }
-        }
-    }
-
-    /// Starts `channel` live or from the archive.
-    pub fn play(&self, channel: usize, playback: Playback) {
-        external_player::cancel_pending(*self);
-        if !player::allow_guide_channel(channel) {
-            return;
-        }
-        if self.player_surface == 0
-            && self
-                .playing
-                .get_untracked()
-                .is_some_and(|old| old != channel)
-            && let Some(old) = self
-                .playing
-                .get_untracked()
-                .and_then(|old| parental_view::live_target(*self, old))
-        {
-            crate::runtime_owner::runtime().parental_content_left(&old);
-        }
-        if !parental_view::allow_play(*self, channel, playback) {
-            return;
-        }
-        if self.player_surface != 0 {
-            self.pending_zap.set(None);
-            if player::start_surface(*self, self.player_surface, channel) {
-                // Accepted: the viewer's playback now (`interruption.rs`).
-                crate::interruption::viewer_acted(*self);
-                self.playback.set(Playback::Live);
-                self.paused.set(false);
-            }
-            return;
-        }
-        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
-        {
-            return;
-        }
-        // Accepted: the viewer's playback now (`interruption.rs`).
-        crate::interruption::viewer_acted(*self);
-        seek::cancel(*self);
-        crate::on_demand::flush(*self, false);
-        self.player.vod.set(None);
-        self.player.recorded.set(None);
-        crate::runtime_owner::runtime().close_recording_playback();
-        self.pending_zap.set(None);
-        self.browse_playback.set(Default::default());
-        self.playback.set(playback);
-        self.playing.set(Some(channel));
-        self.paused.set(false);
-        player::start(self, channel);
-    }
-
-    /// A touch or a click on any control: touch or pointer mode, whichever
-    /// made the press.
-    pub fn touched(&self) {
-        // PIN entry continues the choice that opened the prompt. Dismissing
-        // the prompt cancels it in `parental_view::abort`.
-        if self.top_overlay() != Some(overlays::Overlay::Parental) {
-            external_player::cancel_pending(*self);
-        }
-        self.pending_zap.set(None);
-        browse_playback::activity(*self);
-        self.input.set(self.last_press.get_untracked());
-    }
-
     pub fn keys_shown(&self) -> bool {
         self.input.get().key_hints()
     }
@@ -658,20 +545,6 @@ impl Ui {
         nsh_core::time::now()
             .saturating_duration_since(self.app.epoch)
             .as_millis() as u64
-    }
-
-    /// What just started playing over full-screen video: the banner for
-    /// a live channel, the card with its seek bar for a replay.
-    pub fn show_playing(&self) {
-        let live =
-            self.playback.get_untracked() == Playback::Live && !crate::on_demand::active(*self);
-        self.update_panels(|p, now| {
-            if live {
-                p.show_banner(now);
-            } else {
-                p.show_info(now);
-            }
-        });
     }
 
     /// Changes the panels at the current point in the app's clock.

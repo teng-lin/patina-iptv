@@ -29,6 +29,7 @@ use iptv_core::playback::{ErrorKind, PlaySource};
 use iptv_core::tracks::Tracks;
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
+use iptv_presentation::menu::Origin;
 use iptv_presentation::playback::ChannelHistory;
 use iptv_presentation::playback_health::Health;
 use iptv_presentation::playback_health::Retry;
@@ -37,8 +38,10 @@ use iptv_presentation::tracks::Choice;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
-use crate::guide::Schedule;
-use crate::{Playback, Ui, ViewMode};
+use crate::guide::{ProgramSelection, Schedule};
+use crate::runtime_owner::runtime;
+use crate::{Playback, Ui, ViewMode, browse_playback, external_player, lists, parental_view};
+use crate::{recordings_view, seek};
 
 mod recover;
 pub(crate) mod resume;
@@ -46,6 +49,108 @@ pub(crate) mod watch_time;
 
 use recover::{fail, watch_stall};
 pub use recover::{failed, on_error, on_state, retry, retry_surface, surface_failed};
+
+impl Ui {
+    /// OK or a tap on the focused program: a live one plays (OK on the
+    /// channel already playing goes full screen). An available replay plays
+    /// from the archive. Other listings open their details.
+    pub fn watch(&self) {
+        let view = lists::view(*self);
+        let (row, program, now) = self.focus.with(|f| (f.channel, f.program(&view), f.now));
+        let Some(channel) = view.channel(row) else {
+            return;
+        };
+        let live = (self.playback.get() == Playback::Live)
+            .then(|| self.playing.get())
+            .flatten();
+        let selection =
+            ProgramSelection::for_program(&program, now, view.catchup_days(row), channel, live);
+        match selection {
+            ProgramSelection::AlreadyLive if external_player::maybe_open(*self, channel, None) => {}
+            ProgramSelection::AlreadyLive => {
+                self.mode.apply(crate::mode::Action::EnterFullscreen);
+                self.show_playing();
+            }
+            ProgramSelection::Live => browse_playback::select(*self),
+            ProgramSelection::Replay
+                if external_player::maybe_open(*self, channel, Some(program)) => {}
+            ProgramSelection::Replay => {
+                if !allow_guide_channel(channel) {
+                    return;
+                }
+                self.play(
+                    channel,
+                    Playback::CatchUp {
+                        start: program.start,
+                        offset: 0,
+                    },
+                );
+                self.mode.apply(crate::mode::Action::EnterFullscreen);
+                self.show_playing();
+            }
+            ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
+                let origin = Origin {
+                    channel,
+                    program_start: program.start,
+                };
+                if selection == ProgramSelection::Upcoming {
+                    recordings_view::remember(*self, origin);
+                }
+                self.description.set(Some(origin));
+            }
+        }
+    }
+
+    /// Starts `channel` live or from the archive.
+    pub fn play(&self, channel: usize, playback: Playback) {
+        external_player::cancel_pending(*self);
+        if !allow_guide_channel(channel) {
+            return;
+        }
+        if self.player_surface == 0
+            && self
+                .playing
+                .get_untracked()
+                .is_some_and(|old| old != channel)
+            && let Some(old) = self
+                .playing
+                .get_untracked()
+                .and_then(|old| parental_view::live_target(*self, old))
+        {
+            runtime().parental_content_left(&old);
+        }
+        if !parental_view::allow_play(*self, channel, playback) {
+            return;
+        }
+        if self.player_surface != 0 {
+            self.pending_zap.set(None);
+            if start_surface(*self, self.player_surface, channel) {
+                // Accepted: the viewer's playback now (`interruption.rs`).
+                crate::interruption::viewer_acted(*self);
+                self.playback.set(Playback::Live);
+                self.paused.set(false);
+            }
+            return;
+        }
+        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
+        {
+            return;
+        }
+        // Accepted: the viewer's playback now (`interruption.rs`).
+        crate::interruption::viewer_acted(*self);
+        seek::cancel(*self);
+        crate::on_demand::flush(*self, false);
+        self.player.vod.set(None);
+        self.player.recorded.set(None);
+        runtime().close_recording_playback();
+        self.pending_zap.set(None);
+        self.browse_playback.set(Default::default());
+        self.playback.set(playback);
+        self.playing.set(Some(channel));
+        self.paused.set(false);
+        start(self, channel);
+    }
+}
 
 /// Player surfaces: the full-screen one and multiview's others.
 pub const SURFACES: usize = iptv_core::multiview::MAX_SURFACES;
