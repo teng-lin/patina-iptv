@@ -13,7 +13,7 @@ use iptv_providers::model::{Source, SourceConfig};
 
 use super::{Job, Purpose, Update, guides, start_import_with, stored};
 
-pub use crate::library::Activity;
+pub use crate::model::Activity;
 
 pub use iptv_library::Playlist;
 

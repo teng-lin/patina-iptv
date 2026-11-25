@@ -1,5 +1,6 @@
 //! Value types exposed by application commands. No connection or SQL API.
 pub use crate::Error as StoreError;
+use iptv_core::add_playlist::{ImportCounts, ImportFailure, ImportProgress};
 pub use iptv_library::{
     ChannelScope, CustomGroup, CustomGroupId, GuideChannel, GuideSnapshot, GuideSource,
     ImportErrorKind, SourceId, SourcePolicy, StoredSource,
@@ -15,6 +16,37 @@ pub(crate) use iptv_store_sqlite::StoredGuide;
 pub struct PlaybackChannel {
     pub channel: iptv_providers::model::Channel,
     pub blocked: bool,
+}
+
+/// A stored playlist's refresh (or check of new details) this session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Activity {
+    Running(Option<ImportProgress>),
+    /// Finished; on failure the stored channels stay. New details that
+    /// imported are saved.
+    Done(Result<ImportCounts, ImportFailure>),
+    /// New details are being tried.
+    Checking(Option<ImportProgress>),
+    /// New details did not import: the stored ones and their data stay.
+    Rejected(ImportFailure),
+}
+
+/// The current phase of the runtime's backup or restore operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackupProgress {
+    Idle,
+    Selecting,
+    Working,
+}
+
+/// What the UI must distinguish after an asynchronous save failure.
+/// Detailed OS errors remain in diagnostics, outside user-facing messages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SaveFailure {
+    /// The write did not publish a replacement settings file.
+    NotPublished,
+    /// The replacement is live, but its directory synchronization failed.
+    DurabilityUnconfirmed,
 }
 
 #[cfg(test)]

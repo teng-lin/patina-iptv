@@ -46,7 +46,7 @@ const SHELL_MAY_NAME: &[&str] = &[
     "parental",
     "recordings",
     "vod",
-    // Effective setting values and the save error.
+    // Effective setting values.
     "settings",
     // Private-directory protection, before any owner exists.
     "storage",

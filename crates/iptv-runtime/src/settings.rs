@@ -1,5 +1,6 @@
 //! Settings persistence and effective values, owned by the application runtime.
 use super::file_writer::WriteError;
+pub use crate::model::SaveFailure;
 use crate::network::NetworkConfig;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
@@ -144,16 +145,6 @@ pub enum SaveError {
     Storage(std::io::ErrorKind),
     /// Published to disk, but directory synchronization failed.
     Durability(std::io::ErrorKind),
-}
-
-/// What the UI must distinguish after an asynchronous save failure.
-/// Detailed OS errors remain in diagnostics, outside user-facing messages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SaveFailure {
-    /// The write did not publish a replacement settings file.
-    NotPublished,
-    /// The replacement is live, but its directory synchronization failed.
-    DurabilityUnconfirmed,
 }
 
 impl From<WriteError> for SaveFailure {
