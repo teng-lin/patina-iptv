@@ -45,12 +45,19 @@ fn start(home: crate::isolated::Home, external_sport: bool) -> (Fixture, Streams
         ));
         for slot in -2..=1 {
             let start = now - 1200 + i64::from(slot) * 3600;
-            xml.push_str(&format!("<programme channel=\"{id}\" start=\"{}\" stop=\"{}\"><title>Generated {suffix} {slot}</title></programme>", iptv_epg::format_xmltv_time(start), iptv_epg::format_xmltv_time(start + 3600)));
+            xml.push_str(&format!(
+                "<programme channel=\"{id}\" start=\"{}\" stop=\"{}\">\
+                 <title>Generated {suffix} {slot}</title></programme>",
+                iptv_epg::format_xmltv_time(start),
+                iptv_epg::format_xmltv_time(start + 3600)
+            ));
         }
     }
     std::fs::write(&guide, xml + "</tv>").unwrap();
     let playlist = format!(
-        "#EXTM3U\n#EXTINF:-1 tvg-id=\"one\" group-title=\"News\" catchup=\"shift\" catchup-days=\"3\",Local A\n{}\n#EXTINF:-1 tvg-id=\"two\" group-title=\"Sport\" catchup=\"shift\" catchup-days=\"3\",Local B\n{}\n",
+        "#EXTM3U\n\
+         #EXTINF:-1 tvg-id=\"one\" group-title=\"News\" catchup=\"shift\" catchup-days=\"3\",Local A\n{}\n\
+         #EXTINF:-1 tvg-id=\"two\" group-title=\"Sport\" catchup=\"shift\" catchup-days=\"3\",Local B\n{}\n",
         server.url("/one.ts"),
         server.url("/two.ts")
     );
