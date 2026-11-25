@@ -95,7 +95,7 @@ through the virtual touchscreen.
   activation of both menu entries remains unverified. The runner disabled
   audio, so speech was unobserved. [TalkBack menu gesture][talkback]
 
-## Local headless checks
+## Local builds and headless checks
 
 - `cargo test -p iptv-core -p iptv-presentation` passed, including the portable
   gesture tests for edges, cancellation, second contacts, short/slow gestures
@@ -105,6 +105,24 @@ through the virtual touchscreen.
 - `cargo build -p iptv-app` passed on the zfs host in the Ubuntu 24.04 build
   environment with the pinned NSH and libmpv. The worktree used its own Cargo
   target directory.
+- The existing `iptv-app` integration executable passed all eight selected
+  tests at source revision `bd176dc6`. The seven `touch_zap` scenarios send
+  headless touch events with the same contact snapshots as the native host.
+  They cover edge rejection, cancellation, interrupted contacts, second fingers
+  on sibling controls, catch-up replay, active multiview and the disabled swipe
+  setting with both buttons and actions available. The pure-swipe and mixed
+  Ch±/swipe bursts each open one stream.
+  The mixed burst checks that the earlier deadlines elapse before the last
+  input's own 1500 ms switch delay allows an open. The movie scenario confirms
+  a full-screen VOD source, swipes in both directions and asserts that the same
+  player surface and exact source remain in use without another open.
+- `python3 -B tools/ci/test-check-plan.py` and
+  `python3 -B tools/ci/test-disposable-avd.py` passed (32 and 13 tests).
+
+```sh
+cargo test -p iptv-app --features test-support --test app -- \
+  touch_zap:: vod_library::movies_and_series_reach_playback_and_resume_by_identity
+```
 
 [issue]: https://github.com/teng-lin/patina-iptv/issues/285
 [pr296]: https://github.com/teng-lin/patina-iptv/pull/296
