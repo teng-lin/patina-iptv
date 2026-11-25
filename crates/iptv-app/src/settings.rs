@@ -209,8 +209,7 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 ///   phone, a tablet or a desktop never goes full screen by itself
 ///   ([`fullscreen_timeout_ms`]).
 /// - `catchup.forward_step`, `catchup.rewind_step`: on the Advanced page
-///   on a desktop or a TV. A phone or a tablet has no Advanced page
-///   (#280): they stay with the replay jumps there.
+///   on every device. The touch play bar uses these jumps too.
 /// - `guide.after_choosing`: a phone or a tablet always goes full screen
 ///   ([`stays_after_choosing`]).
 /// - `player.info_on_switch`: it applies to zapping with keys, which a
@@ -230,7 +229,7 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
         });
     }
     match key {
-        "catchup.forward_step" | "catchup.rewind_step" if !handheld(device.form_factor()) => {
+        "catchup.forward_step" | "catchup.rewind_step" => {
             return Some(Offer::Advanced);
         }
         "guide.fullscreen_timeout" if device.form_factor() == FormFactor::Tv => {
@@ -721,14 +720,9 @@ mod tests {
             for key in ["catchup.timebar_step", "guide.visible_minutes"] {
                 assert_eq!(offer(key), Offer::Active, "{key}");
             }
-            // On the Advanced page on a desktop or a TV; a phone or a
-            // tablet has none (#281, #280).
-            let steps = match device.form_factor() {
-                FormFactor::Phone | FormFactor::Tablet => Offer::Active,
-                FormFactor::Desktop | FormFactor::Tv => Offer::Advanced,
-            };
+            // The touch play bar uses these too: Advanced on every host.
             for key in ["catchup.forward_step", "catchup.rewind_step"] {
-                assert_eq!(offer(key), steps, "{key}");
+                assert_eq!(offer(key), Offer::Advanced, "{key}");
             }
             // Sound follows the selected tile: never on a phone (#279);
             // elsewhere where this build has multiview.

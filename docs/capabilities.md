@@ -53,8 +53,8 @@ tile, even when the smaller budget still offers a new multiview session.
 
 Settings the signals decide (#281, `settings::offer`). The rewind and
 fast-forward jumps (`catchup.forward_step`, `catchup.rewind_step`) are on the
-Advanced page on a desktop or a TV; a phone or a tablet, which has no Advanced
-page, keeps them with the replay jumps:
+Advanced page on every device, including phones and tablets whose touch play
+bar uses these jumps. The time-bar interval stays with the replay settings:
 
 | Setting | Phone, tablet | Desktop | TV | Compact window |
 | --- | --- | --- | --- | --- |

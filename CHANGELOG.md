@@ -60,8 +60,8 @@ is below 1.0, a minor release may change behavior.
   rows. "Show info on a channel change" is hidden on an Android phone or tablet
   without a keyboard or D-pad. Back in the guide always returns to the programs
   on air first.
-- Move the rewind and fast-forward jumps to the Advanced page on desktops and
-  TVs. The player's
+- Move the rewind and fast-forward jumps to the Advanced page on every device.
+  The player's
   panels and play bar now wait at least Android's recommended accessibility
   timeout, and stay until hidden while a screen reader or Switch Access runs.
 - Android TV no longer offers picture in picture: Home during playback returns
