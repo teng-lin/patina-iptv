@@ -260,7 +260,22 @@ fn preview(ui: Ui) {
         }
     });
 }
+// Read-only previews and history entries carry no settings authorization.
+// Check again at mutation admission, including after the PIN prompt resumes.
+fn request_settings_pin(ui: Ui, retry: fn(Ui)) -> bool {
+    let required = crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+        == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed();
+    if required {
+        crate::parental_view::protected_settings(ui, move || retry(ui));
+    }
+    required
+}
+
 fn apply(ui: Ui) {
+    if request_settings_pin(ui, apply) {
+        return;
+    }
     let Some((screen, generation, control)) = begin(ui) else {
         return;
     };
@@ -369,6 +384,9 @@ fn verify(ui: Ui) {
     });
 }
 fn undo(ui: Ui) {
+    if request_settings_pin(ui, undo) {
+        return;
+    }
     let Some((screen, generation, control)) = begin(ui) else {
         return;
     };

@@ -120,8 +120,8 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
     t.key("left");
     t.press("text:Playlists >> nth=0");
     t.press("text:Synthetic inspection");
-    t.press("text:Guide sources");
-    t.wait("text:Guide sources · Synthetic inspection", 5);
+    t.press("text:Guide data");
+    t.wait("text:Guide data · Synthetic inspection", 5);
     t.press("text:Update the guide now");
     t.wait("text:Guide updated", 15);
     t.press("text:Inspect guide coverage");

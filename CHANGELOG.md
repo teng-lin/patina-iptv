@@ -13,6 +13,9 @@ is below 1.0, a minor release may change behavior.
   from damaged backups in first-run setup and Settings. Show available versions
   and persistent recovery guidance while preserving current data and queued restores (#201).
 
+- Group guide refresh, failed-source Retry, source editing and confirmed Clear
+  under each playlist’s Guide data. Clear names the playlist and keeps other
+  playlists, channels and guide links intact (#282).
 - Clarify portal identity transfers in the mobile privacy policy and record
   first-release disclosure evidence and pending store checks (#221).
 - Require an embedded R8 class mapping in Android release bundles and provide
@@ -94,6 +97,9 @@ is below 1.0, a minor release may change behavior.
   unchanged.
 
 ### Fixed
+
+- Keep recycled playlist, guide source and playlist action rows attached to
+  the content and command they currently display.
 
 - A Stalker refresh whose live pages fail keeps the last complete channel
   catalog and reports the failure for retry instead of publishing partial rows.

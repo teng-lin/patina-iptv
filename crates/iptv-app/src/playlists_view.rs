@@ -419,15 +419,36 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
             rows.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
-    virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
-        .test_id("playlists-list")
-        .accessibility_elements_hidden(move || contents_hidden(ui))
-        .estimated_item_size(list_rows::pitch(size, ROW_THREE))
-        .element_ref(&rows)
-        .flex_1()
+    let all_index = computed(move || {
+        state(ui, |s| {
+            s.items()
+                .iter()
+                .position(|item| *item == Item::AllPlaylists)
+        })
+        .flatten()
+    });
+    // A cell is reused for other positions; its handlers and test ID must follow.
+    virtual_list(count, move |at| {
+        dynamic(move || {
+            let index = at.index();
+            let is_all = all_index.get() == Some(index);
+            untracked(move || row(ui, size, index, focused_index, is_all))
+        })
+    })
+    .test_id("playlists-list")
+    .accessibility_elements_hidden(move || contents_hidden(ui))
+    .estimated_item_size(list_rows::pitch(size, ROW_THREE))
+    .element_ref(&rows)
+    .flex_1()
 }
 
-fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) -> impl IntoElement {
+fn row(
+    ui: Ui,
+    size: Scale,
+    index: usize,
+    focused_index: Memo<Option<usize>>,
+    is_all: bool,
+) -> impl IntoElement {
     let playlist = move || state(ui, |s| s.rows().get(index).cloned()).flatten();
     let item = move || state(ui, |s| s.items().get(index).copied()).flatten();
     let refreshing = move || {
@@ -464,13 +485,11 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     };
     let mark = move || mark(ui, focused_index.get() == Some(index));
     list_rows::row(size, ROW_THREE, mark)
-        .test_id(
-            if state(ui, |s| s.items().get(index) == Some(&Item::AllPlaylists)).unwrap_or(false) {
-                "playlists-all"
-            } else {
-                "playlist-row"
-            },
-        )
+        .test_id(if is_all {
+            "playlists-all"
+        } else {
+            "playlist-row"
+        })
         .flex_row()
         .items_center()
         .justify_start()
@@ -677,10 +696,20 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                     rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
                 }
             });
-            virtual_list(move || count, move |at| act_row(acts[at.index()]))
-                .estimated_item_size(list_rows::pitch(size, list_rows::ROW))
-                .element_ref(&rows)
-                .h(move || size.px(360.0))
+            virtual_list(
+                move || count,
+                move |at| {
+                    let acts = acts.clone();
+                    dynamic(move || {
+                        let act = acts[at.index()];
+                        untracked(move || act_row(act))
+                    })
+                },
+            )
+            .test_id("playlist-actions-list")
+            .estimated_item_size(list_rows::pitch(size, list_rows::ROW))
+            .element_ref(&rows)
+            .h(move || size.px(360.0))
         })
 }
 
