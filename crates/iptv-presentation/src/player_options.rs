@@ -159,6 +159,15 @@ impl Chooser {
         }
     }
 
+    /// Replaces action entries, keeping the focused action when it remains.
+    pub fn replace_actions<T: PartialEq>(&mut self, before: &[T], after: &[T]) {
+        let focus = before
+            .get(self.focus)
+            .and_then(|focused| after.iter().position(|entry| entry == focused))
+            .unwrap_or(self.focus);
+        *self = Self::new(after.len(), focus);
+    }
+
     pub fn move_focus(&mut self, step: isize) {
         let last = self.len.saturating_sub(1) as isize;
         self.focus = (self.focus as isize + step).clamp(0, last) as usize;
@@ -168,6 +177,15 @@ impl Chooser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overflow_focus_stays_with_the_action_and_falls_back_when_it_leaves() {
+        let mut chooser = Chooser::new(3, 1);
+        chooser.replace_actions(&["Tracks", "Record", "Display"], &["Record", "Display"]);
+        assert_eq!((chooser.focus, chooser.len), (0, 2));
+        chooser.replace_actions(&["Record", "Display"], &["Display"]);
+        assert_eq!((chooser.focus, chooser.len), (0, 1));
+    }
 
     #[test]
     fn picture_size_is_per_channel_until_applied_to_all() {

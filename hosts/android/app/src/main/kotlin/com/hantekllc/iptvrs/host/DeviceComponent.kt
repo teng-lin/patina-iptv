@@ -9,6 +9,8 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.database.ContentObserver
+import android.hardware.display.DisplayManager
+import android.hardware.input.InputManager
 import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaFormat
@@ -22,6 +24,8 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.util.Log
+import android.view.InputDevice
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
@@ -31,10 +35,9 @@ import com.longbridge.nsh.NshComponentContext
 /**
  * Reports the device's form factor, connected input and video decoder
  * capacity to the Rust app (`device.rs`) as a `device` event, `{"form",
- * "keyboard", "dpad", "decoders"?}`: when it attaches, and again on each
- * configuration change that alters them
- * (the activity handles `keyboard`, `keyboardHidden`, `navigation`,
- * `screenSize` and `smallestScreenSize` itself, so its views receive them).
+ * "keyboard", "dpad", "decoders"?}`: on attach and when the display,
+ * configuration or input devices change. A display listener also catches
+ * fold and display changes that do not reach the view's configuration.
  *
  * Also the accessibility settings that panels hiding by themselves follow,
  * as an `accessibility` event, `{"controls_ms", "text_ms",
@@ -49,6 +52,7 @@ import com.longbridge.nsh.NshComponentContext
  */
 internal class DeviceComponent(
     private val context: NshComponentContext,
+    private val updatePhoneOrientation: (Boolean) -> Unit,
 ) : NshComponent {
     companion object {
         const val NAME = "tv.device"
@@ -58,6 +62,27 @@ internal class DeviceComponent(
     private var reportedAccessibility: Map<String, Any>? = null
     private var limits: Map<String, Any>? = null
     private val main = Handler(Looper.getMainLooper())
+    private val inputs = context.context.getSystemService(InputManager::class.java)
+    private val displays = context.context.getSystemService(DisplayManager::class.java)
+    private val refreshDevice = Runnable {
+        if (observer.isAttachedToWindow) report(observer.resources.configuration)
+    }
+    private val inputChanges =
+        object : InputManager.InputDeviceListener {
+            override fun onInputDeviceAdded(id: Int) = refreshDeviceSoon()
+
+            override fun onInputDeviceRemoved(id: Int) = refreshDeviceSoon()
+
+            override fun onInputDeviceChanged(id: Int) = refreshDeviceSoon()
+        }
+    private val displayChanges =
+        object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(id: Int) = refreshDeviceSoon()
+
+            override fun onDisplayRemoved(id: Int) = refreshDeviceSoon()
+
+            override fun onDisplayChanged(id: Int) = refreshDeviceSoon()
+        }
     private val accessibility = context.context.getSystemService(AccessibilityManager::class.java)
     private val accessibilityChanged = AccessibilityManager.AccessibilityStateChangeListener { reportAccessibilitySoon() }
     private val accessibilitySettings =
@@ -91,6 +116,8 @@ internal class DeviceComponent(
         object : View(context.context) {
             override fun onAttachedToWindow() {
                 super.onAttachedToWindow()
+                inputs?.registerInputDeviceListener(inputChanges, main)
+                displays?.registerDisplayListener(displayChanges, main)
                 report(resources.configuration)
                 accessibility?.addAccessibilityStateChangeListener(accessibilityChanged)
                 for (name in AccessibilitySignals.SETTINGS) {
@@ -106,17 +133,22 @@ internal class DeviceComponent(
             }
 
             override fun onDetachedFromWindow() {
+                inputs?.unregisterInputDeviceListener(inputChanges)
+                displays?.unregisterDisplayListener(displayChanges)
                 accessibility?.removeAccessibilityStateChangeListener(accessibilityChanged)
                 context.contentResolver.unregisterContentObserver(accessibilitySettings)
                 watchLimits(false)
-                // Drop accessibility and network reports queued before detaching.
+                // Drop reports queued before detaching.
                 main.removeCallbacksAndMessages(null)
                 super.onDetachedFromWindow()
             }
 
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
-                if (hasWindowFocus) reportAccessibility()
+                if (hasWindowFocus) {
+                    report(resources.configuration)
+                    reportAccessibility()
+                }
             }
 
             override fun onConfigurationChanged(config: Configuration) {
@@ -129,22 +161,31 @@ internal class DeviceComponent(
             isFocusable = false
         }
 
+    private fun refreshDeviceSoon() {
+        main.removeCallbacks(refreshDevice)
+        main.post(refreshDevice)
+    }
+
     private fun report(config: Configuration) {
         val host = observer.context
         val leanback = host.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         val tv = DeviceSignals.tv(config.uiMode, leanback)
         val display = DeviceSignals.displaySmallestDp(host, config)
+        val keys = DeviceSignals.inputs(inputs, config)
+        val form = DeviceSignals.form(tv, display)
         val next =
             buildMap {
-                put("form", DeviceSignals.form(tv, display))
-                put("keyboard", DeviceSignals.keyboard(config.keyboard, config.hardKeyboardHidden))
-                put("dpad", DeviceSignals.dpad(config.navigation, config.navigationHidden))
+                put("form", form)
+                put("keyboard", keys.keyboard)
+                put("dpad", keys.dpad)
                 decoders?.let { put("decoders", it) }
             }
         Log.i("nsh", "iptv device: $next (display ${display}dp, window ${config.smallestScreenWidthDp}dp)")
         if (next != reported) {
+            val formChanged = reported?.get("form") != form
             reported = next
             context.emit("device", next)
+            if (formChanged) updatePhoneOrientation(form == "phone")
         }
     }
 
@@ -248,9 +289,60 @@ internal object DeviceSignals {
     ): String =
         when {
             tv -> "tv"
-            displaySmallestDp in 1 until PHONE_MAX_DP -> "phone"
+            phone(displaySmallestDp) -> "phone"
             else -> "tablet"
         }
+
+    fun phone(displaySmallestDp: Int): Boolean = displaySmallestDp in 1 until PHONE_MAX_DP
+
+    data class Input(val keyboard: Boolean, val dpad: Boolean)
+
+    data class KeyDevice(
+        val external: Boolean,
+        val keyboard: Boolean,
+        val dpad: Boolean,
+    )
+
+    fun inputs(
+        manager: InputManager?,
+        config: Configuration,
+    ): Input {
+        // The enumerated devices are current even while Configuration still
+        // describes the keyboard or controller that was just disconnected.
+        val devices = manager?.inputDeviceIds?.asIterable()?.mapNotNull { id ->
+            val device = manager.getInputDevice(id) ?: return@mapNotNull null
+            if (device.isVirtual || (Build.VERSION.SDK_INT >= 27 && !device.isEnabled)) {
+                return@mapNotNull null
+            }
+            val hats = device.getMotionRange(MotionEvent.AXIS_HAT_X) != null &&
+                device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null
+            KeyDevice(
+                external = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && device.isExternal,
+                keyboard = device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC,
+                dpad = dpadSource(device.sources, hats),
+            )
+        }
+        return if (devices == null) {
+            Input(
+                keyboard(config.keyboard, config.hardKeyboardHidden),
+                dpad(config.navigation, config.navigationHidden),
+            )
+        } else {
+            attachedKeys(devices, config.hardKeyboardHidden, config.navigationHidden)
+        }
+    }
+
+    fun dpadSource(sources: Int, hats: Boolean): Boolean {
+        val supports = { source: Int -> (sources and source) == source }
+        return supports(InputDevice.SOURCE_DPAD) ||
+            (hats && (supports(InputDevice.SOURCE_GAMEPAD) || supports(InputDevice.SOURCE_JOYSTICK)))
+    }
+
+    fun attachedKeys(devices: List<KeyDevice>, keyboardHidden: Int, navigationHidden: Int): Input =
+        Input(
+            keyboard = devices.any { it.keyboard && (it.external || keyboardHidden != Configuration.HARDKEYBOARDHIDDEN_YES) },
+            dpad = devices.any { it.dpad && (it.external || navigationHidden != Configuration.NAVIGATIONHIDDEN_YES) },
+        )
 
     /** What the decoder probe reads of one codec. */
     data class Decoder(

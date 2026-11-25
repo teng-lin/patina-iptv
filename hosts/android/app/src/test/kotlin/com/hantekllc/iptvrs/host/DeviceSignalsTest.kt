@@ -1,6 +1,7 @@
 package com.hantekllc.iptvrs.host
 
 import android.content.res.Configuration
+import android.view.InputDevice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -58,6 +59,27 @@ class DeviceSignalsTest {
         assertTrue(DeviceSignals.dpad(Configuration.NAVIGATION_DPAD, Configuration.NAVIGATIONHIDDEN_NO))
         assertFalse(DeviceSignals.dpad(Configuration.NAVIGATION_DPAD, Configuration.NAVIGATIONHIDDEN_YES))
         assertFalse(DeviceSignals.dpad(Configuration.NAVIGATION_NONAV, Configuration.NAVIGATIONHIDDEN_NO))
+    }
+
+    @Test
+    fun connectedDevicesCanReportBothKeyboardAndDpad() {
+        val keyboard = DeviceSignals.KeyDevice(external = false, keyboard = true, dpad = false)
+        val pad = DeviceSignals.KeyDevice(external = true, keyboard = false, dpad = true)
+        val visible = Configuration.HARDKEYBOARDHIDDEN_NO
+        val hidden = Configuration.HARDKEYBOARDHIDDEN_YES
+        val navigation = Configuration.NAVIGATIONHIDDEN_YES
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.attachedKeys(listOf(keyboard, pad), visible, navigation))
+        assertEquals(DeviceSignals.Input(false, true), DeviceSignals.attachedKeys(listOf(keyboard, pad), hidden, navigation))
+        assertEquals(DeviceSignals.Input(true, false), DeviceSignals.attachedKeys(listOf(keyboard), visible, navigation))
+        assertEquals(DeviceSignals.Input(false, false), DeviceSignals.attachedKeys(emptyList(), visible, navigation))
+    }
+
+    @Test
+    fun hatAxesCountOnControllersButTrackballsAndAnalogSticksAloneDoNot() {
+        assertTrue(DeviceSignals.dpadSource(InputDevice.SOURCE_DPAD or InputDevice.SOURCE_TRACKBALL, hats = false))
+        assertTrue(DeviceSignals.dpadSource(InputDevice.SOURCE_GAMEPAD or InputDevice.SOURCE_JOYSTICK, hats = true))
+        assertFalse(DeviceSignals.dpadSource(InputDevice.SOURCE_GAMEPAD or InputDevice.SOURCE_JOYSTICK, hats = false))
+        assertFalse(DeviceSignals.dpadSource(InputDevice.SOURCE_TRACKBALL, hats = true))
     }
 
     @Test

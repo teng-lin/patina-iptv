@@ -116,6 +116,34 @@ fn a_window_class_change_reaches_the_gates() {
 }
 
 #[test]
+fn a_narrow_android_tablet_keeps_its_scale_and_a_tv_uses_its_reported_form() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "android"),
+        ],
+    ) else {
+        return;
+    };
+    let mut fixture = personalization::start(home, iptv_settings::Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_viewport(Size::new(px(490.0), px(660.0))));
+    step(app.set_environment("narrow Android window", |env| {
+        env.idiom = nsh_core::platform::Idiom::Phone;
+        env.os = nsh_core::platform::Os::Android;
+    }));
+    report(app, "phone", false, false);
+    expect(app, "phone medium");
+    report(app, "tablet", false, false);
+    expect(app, "tablet compact");
+    step(app.set_viewport(Size::new(px(800.0), px(600.0))));
+    report(app, "tv", false, false);
+    expect(app, "tv expanded");
+}
+
+#[test]
 fn a_keyboard_attach_and_detach_keeps_the_strip_focus() {
     fn here() {}
     let Some(mut fixture) = fixture(std::any::type_name_of_val(&here)) else {

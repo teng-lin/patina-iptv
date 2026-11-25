@@ -131,19 +131,44 @@ pub fn open(ui: Ui) {
 }
 
 pub fn open_for(ui: Ui, channel: usize, minute: i32) {
-    let now = ui.focus.with(|f| f.now);
     let schedule = crate::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
     };
-    let list = current_list(ui);
-    let scope = channel_scope(ui, &list);
     let program = schedule.program_at(channel, minute);
-    let mut rows = program_menu(program, schedule.catchup_days(channel), now, |item| {
-        if item == MenuItem::Record {
-            return ui.player_surface == 0 && crate::recordings_view::available(channel);
+    let origin = Origin {
+        channel,
+        program_start: program.start,
+    };
+    let list = current_list(ui);
+    let rows = program_rows(ui, origin, program, &list);
+    crate::recordings_view::remember(ui, origin);
+    let target = Target::Program {
+        channel: key,
+        start: program.start,
+    };
+    ui.menu.set(Some(Menu::new(rows, target, list)));
+}
+
+fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &ListId) -> Vec<Row> {
+    let now = ui.focus.with(|focus| focus.now);
+    let channel = origin.channel;
+    let schedule = crate::schedule();
+    let scope = channel_scope(ui, list);
+    let recording = crate::recordings_view::channel_menu_action(ui, origin).map(|action| {
+        if action == MenuItem::RecordNow {
+            MenuItem::Record
+        } else {
+            action
         }
-        match item {
+    });
+    let mut rows = program_menu(
+        program,
+        schedule.catchup_days(channel),
+        now,
+        recording,
+        |item| match item {
+            MenuItem::Record | MenuItem::StopRecording | MenuItem::CancelRecording => true,
             MenuItem::ManageHidden | MenuItem::ManageBlocked | MenuItem::ReorderChannels => {
                 scope.is_some()
             }
@@ -151,24 +176,12 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             MenuItem::SortChannels => scope
                 .as_ref()
                 .is_some_and(|(_, kind)| *kind != Kind::Favorites),
-            MenuItem::CopyChannels => copy_scope(ui, &list, scope.as_ref()).is_some(),
-            MenuItem::CreateGroup => management_source(ui, &list, scope.as_ref()).is_some(),
+            MenuItem::CopyChannels => copy_scope(ui, list, scope.as_ref()).is_some(),
+            MenuItem::CreateGroup => management_source(ui, list, scope.as_ref()).is_some(),
             _ => implemented(item, ui.player_surface),
-        }
-    });
+        },
+    );
     let auxiliary = ui.player_surface != 0;
-    if !crate::host::HAS_WORKERS || auxiliary {
-        // Recording never runs here: leave its rows out.
-        rows.retain(|row| {
-            !matches!(
-                row,
-                Row::Action {
-                    item: MenuItem::Record,
-                    ..
-                }
-            )
-        });
-    }
     if auxiliary {
         // Auxiliary player windows play live streams only.
         rows.retain(|row| {
@@ -205,16 +218,7 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
             },
         );
     }
-    let origin = Origin {
-        channel,
-        program_start: program.start,
-    };
-    crate::recordings_view::remember(ui, origin);
-    let target = Target::Program {
-        channel: key,
-        start: program.start,
-    };
-    ui.menu.set(Some(Menu::new(rows, target, list)));
+    rows
 }
 
 /// The player list has no timeline cursor. Its channel actions use the live block.
@@ -232,16 +236,8 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
         channel,
         program_start: program.start,
     };
-    let scope = channel_scope(ui, &list);
     let offset = crate::player::guide_offset(&*schedule, channel);
-    // Only the main window opens player windows.
-    let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
-        .then(|| crate::desktop::player_windows::can_open(ui, channel));
-    let rows = channel_menu(
-        crate::recordings_view::channel_menu_action(ui, origin),
-        new_window,
-        scope.is_some(),
-    );
+    let rows = channel_rows(ui, origin, &list, true);
     ui.menu.set(Some(Menu::new(
         rows,
         Target::Channel {
@@ -251,6 +247,19 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
         },
         list,
     )));
+}
+
+fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row> {
+    // Only the main window opens player windows.
+    let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
+        .then(|| crate::desktop::player_windows::can_open(ui, origin.channel));
+    channel_menu(
+        current
+            .then(|| crate::recordings_view::channel_menu_action(ui, origin))
+            .flatten(),
+        new_window,
+        channel_scope(ui, list).is_some(),
+    )
 }
 
 fn menu_channel(target: &Target) -> Option<usize> {
@@ -463,7 +472,11 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 organization_view::open_mode(ui, source, kind, None, mode);
             }
         }
-        MenuItem::Record | MenuItem::Description | MenuItem::StartFromBeginning => {
+        MenuItem::Record
+        | MenuItem::StopRecording
+        | MenuItem::CancelRecording
+        | MenuItem::Description
+        | MenuItem::StartFromBeginning => {
             if let Some(origin) = program_origin(&target) {
                 perform_program(ui, item, origin);
             }
@@ -614,6 +627,12 @@ pub fn perform(ui: Ui, item: MenuItem) {
 fn perform_program(ui: Ui, item: MenuItem, origin: Origin) {
     match item {
         MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
+        MenuItem::StopRecording | MenuItem::CancelRecording => {
+            let program = origin_program(&*crate::schedule(), origin);
+            if program.start == origin.program_start {
+                crate::recordings_view::perform_channel_action(ui, origin, item);
+            }
+        }
         MenuItem::Description => ui.description.set(Some(origin)),
         MenuItem::StartFromBeginning => {
             let schedule = crate::schedule();
@@ -922,7 +941,59 @@ fn action_detail(ui: Ui, item: MenuItem) -> String {
     })
 }
 
+fn bind_live_rows(ui: Ui) {
+    let target = computed(move || {
+        ui.menu.with(|menu| {
+            let menu = menu.as_ref()?;
+            menu.target.channel_key()?;
+            Some((menu.target.clone(), menu.list.clone()))
+        })
+    });
+    effect(move || {
+        let Some((target, list)) = target.get() else {
+            return;
+        };
+        ui.guide_data();
+        let Some(origin) = program_origin(&target) else {
+            return;
+        };
+        // The runtime's recording snapshot is published to the UI when it
+        // reloads. Recheck the current action for the occurrence already open.
+        ui.recordings.with(|_| ());
+        let schedule = crate::schedule();
+        let program = origin_program(&*schedule, origin);
+        let rows = match target {
+            Target::Program { start, .. } if program.start == start => {
+                program_rows(ui, origin, program, &list)
+            }
+            Target::Channel {
+                program: opened,
+                offset,
+                ..
+            } => channel_rows(
+                ui,
+                origin,
+                &list,
+                opened == program
+                    && offset == crate::player::guide_offset(&*schedule, origin.channel),
+            ),
+            Target::Program { .. } | Target::Group => return,
+        };
+        if ui
+            .menu
+            .with_untracked(|menu| menu.as_ref().is_some_and(|menu| menu.rows != rows))
+        {
+            ui.menu.update(|menu| {
+                if let Some(menu) = menu {
+                    menu.replace_rows(rows);
+                }
+            });
+        }
+    });
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
+    bind_live_rows(ui);
     let open = move || ui.menu.with(Option::is_some);
     let fixed_heading = move || {
         ui.menu.with(|menu| match menu.as_ref()?.target {
@@ -1104,6 +1175,17 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
                 .child(
                     virtual_list(count, row)
+                        .keys(move || {
+                            ui.menu.with(|menu| {
+                                menu.iter()
+                                    .flat_map(|menu| &menu.rows)
+                                    .map(|row| match *row {
+                                        Row::Action { item, .. } => Ok(item),
+                                        Row::Heading(heading) => Err(heading),
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                        })
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
                         .flex_1(),
