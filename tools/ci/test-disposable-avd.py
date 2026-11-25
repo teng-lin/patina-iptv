@@ -5,12 +5,14 @@ import json
 from pathlib import Path
 import tempfile
 import subprocess
+import runpy
 import unittest
 from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("avd", Path(__file__).with_name("disposable-avd.py"))
 a = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(a)
+RELEASE = runpy.run_path(str(Path(__file__).with_name("android-release-smoke.py")))
 
 
 class Profiles(unittest.TestCase):
@@ -46,6 +48,19 @@ class Profiles(unittest.TestCase):
                                          (a.RELEASE_PACKAGE, "true", True)):
             with self.assertRaises(ValueError):
                 a.validate_apk(package, debug, release)
+
+    def test_release_startup_markers_cannot_replace_process_and_foreground_checks(self):
+        component = a.RELEASE_PACKAGE + "/.host.TvActivity"
+        with patch.dict(RELEASE["AVD"], {"adb": lambda *args: ""}):
+            with self.assertRaisesRegex(RuntimeError, "process is not running"):
+                RELEASE["check_alive"]("emulator-5580", component)
+        with patch.dict(RELEASE["AVD"], {"adb": lambda *args: "123"}):
+            with self.assertRaisesRegex(RuntimeError, "not resumed"):
+                RELEASE["check_alive"]("emulator-5580", component, foreground=True)
+        def alive_and_resumed(serial, *args):
+            return "123" if args[1] == "pidof" else "mResumedActivity: ActivityRecord{ " + component + " }"
+        with patch.dict(RELEASE["AVD"], {"adb": alive_and_resumed}):
+            RELEASE["check_alive"]("emulator-5580", component, foreground=True)
 
     def test_complete_copy_rewrites_only_copy_and_cleanup_preserves_original(self):
         root, token, name = a.prepare(self.source, self.scratch)

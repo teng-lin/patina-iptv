@@ -18,6 +18,19 @@ AVD = runpy.run_path(str(Path(__file__).with_name("disposable-avd.py")))
 PACKAGE = AVD["RELEASE_PACKAGE"]
 
 
+def check_alive(serial, component, foreground=False):
+    pid = AVD["adb"](serial, "shell", "pidof", PACKAGE)
+    if not re.fullmatch(r"[0-9]+(?: [0-9]+)*", pid):
+        raise RuntimeError("release process is not running")
+    if foreground:
+        activities = AVD["adb"](serial, "shell", "dumpsys", "activity", "activities")
+        package, activity = component.split("/", 1)
+        expanded = package + "/" + (package + activity if activity.startswith(".") else activity)
+        if not any(re.search(r"(?:mResumedActivity|topResumedActivity|ResumedActivity)", line)
+                   and (component in line or expanded in line) for line in activities.splitlines()):
+            raise RuntimeError("resolved release launcher is not resumed")
+
+
 def run(serial, apk):
     expected = os.environ.get("IPTV_SMOKE_DISPOSABLE_AVD", "")
     if not re.fullmatch(r"patina-validation-[a-zA-Z0-9_-]+", expected):
@@ -66,6 +79,7 @@ def run(serial, apk):
         while time.monotonic() < deadline:
             log = adb("logcat", "-d", "-s", "nsh:I")
             if "iptv startup: fonts registered" in log and "iptv pip: supported" in log:
+                check_alive(serial, resolved, foreground=True)
                 checks["launch"] = "passed"
                 break
             time.sleep(1)
@@ -89,6 +103,7 @@ def run(serial, apk):
         (out / "app.log").write_text(adb("logcat", "-d", "-s", "nsh:I"))
         if "FATAL EXCEPTION" in crashes or "Fatal signal" in crashes:
             raise RuntimeError("release crashed; inspect retained evidence")
+        check_alive(serial, resolved)
     except subprocess.CalledProcessError as error:
         (out / "command-failure.log").write_text(str(error.stdout or "") + str(error.stderr or ""))
         raise
