@@ -1139,6 +1139,11 @@ fn exercise_admission(
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     };
     config.environment.idiom = idiom;
+    let check_movie_swipes =
+        idiom == nsh_core::platform::Idiom::Pad && resume == ResumeCase::Seekable;
+    if check_movie_swipes {
+        config.environment.os = nsh_core::platform::Os::Android;
+    }
     let mut app = Headless::start(config).unwrap();
     let props: Arc<Mutex<HashMap<String, Value>>> = Arc::default();
     let observed = props.clone();
@@ -1219,6 +1224,18 @@ fn exercise_admission(
         },
     );
     app.settle();
+    if check_movie_swipes {
+        // Exercise the full-screen video's touch path with a real VOD
+        // source selected and a live channel available in the same catalog.
+        let opens = iptv_app::player_opens(0);
+        crate::touch_zap::swipe(&mut app, -300.0);
+        crate::touch_zap::swipe(&mut app, 300.0);
+        assert!(!app.screen().matches("id:swipe-preview").unwrap());
+        step(app.run_for(Duration::from_secs(2)));
+        assert_eq!(player(&app), surface);
+        assert_eq!(iptv_app::player_opens(0), opens);
+        assert_eq!(props.lock().unwrap()["source"], opened);
+    }
     // Back returns to the movie's details on Resume, over the same
     // player, opening nothing; Back again to the movies on that title
     // (#147).
