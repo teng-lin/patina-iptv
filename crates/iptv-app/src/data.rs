@@ -6,11 +6,11 @@ pub(crate) mod pages;
 pub(crate) mod stored;
 use crate::Ui;
 pub use crate::runtime::data::{
-    Activity, DEV_PLAYLIST, Job, Playlist, Purpose, Update, delete, edit_guides, refresh,
-    refresh_all, rename, set_policy, set_user_agent, source_from_draft, start_import, switch_all,
-    switch_to, try_details,
+    Activity, DEV_PLAYLIST, Job, Playlist, Purpose, Update, delete, edit_guides,
+    organization_changed, refresh, refresh_all, rename, set_policy, set_user_agent,
+    source_from_draft, start_import, switch_all, switch_to, toggle_playlist, try_details,
 };
-pub use crate::runtime::data::{assign, combined, organization};
+pub use crate::runtime::data::{assign, combined};
 pub use crate::runtime::guides;
 pub use library::Library;
 use nsh_core::prelude::*;

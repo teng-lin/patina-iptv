@@ -67,7 +67,7 @@ fn an_unreadable_store_keeps_automatic_guide_checks() {
         )
         .interval;
         assert!(interval.is_some(), "automatic guide updates are on");
-        let before = crate::imports::now_unix();
+        let before = crate::time::now_unix();
         let checks = next_checks(&owner);
         assert_eq!(
             checks.len(),
@@ -186,7 +186,7 @@ fn unreadable_guide_sources_are_not_taken_for_no_guide_configured() {
     let (owner, source) = stored(directory.path());
     {
         owner.start_services();
-        let before = crate::imports::now_unix();
+        let before = crate::time::now_unix();
         // Readable: the policy backs off after the failed download.
         let (checks, others) = timer_check(&owner, source);
         assert_eq!((checks.len(), others), (1, 0), "{checks:?}");

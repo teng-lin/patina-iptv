@@ -137,7 +137,7 @@ fn save_and_rebind(
         if !rebound {
             return Ok(None);
         }
-        let now = super::imports::now_unix();
+        let now = crate::time::now_unix();
         Ok(Some(Box::new(Imported {
             guide: store.load_epg(
                 source,

@@ -259,6 +259,23 @@ fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
     exact(&users, STORE_ADAPTER_USERS, "store adapter user");
 }
 
+#[test]
+fn stored_guide_and_combined_state_leave_orchestration_to_data() {
+    let sources = runtime_sources();
+    for (name, forbidden) in [
+        ("data/stored.rs", &["super::", "crate::data"][..]),
+        (
+            "data/combined.rs",
+            &["super::", "crate::data", "library::", "stored::"][..],
+        ),
+    ] {
+        let (_, code) = sources.iter().find(|(path, _)| path == name).unwrap();
+        for upward in forbidden {
+            assert!(!code.contains(upward), "{name} depends on {upward}");
+        }
+    }
+}
+
 /// Declarations, including macro bodies and function-local statics;
 /// lifetimes such as `&'static str` and `+ 'static` are not declarations.
 fn statics(code: &str) -> Vec<&str> {
