@@ -413,6 +413,50 @@ fn timeline_pointer_context_is_compact_on_desktop_tablet_and_tv() {
 }
 
 #[test]
+fn pointer_more_options_returns_key_focus_to_more_without_toggling_favorites() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
+    for touch in [true, false] {
+        let device = if touch { "tablet" } else { "desktop" };
+        step(app.set_environment(device, |env| {
+            env.idiom = if touch { Idiom::Pad } else { Idiom::Desktop };
+            env.os = if touch { Os::Android } else { Os::Linux };
+        }));
+        crate::device_signals::report(app, device, true, true);
+        if touch {
+            step(app.long_press(cell));
+        } else {
+            step(app.right_click(cell));
+        }
+        compact_menu_for(app, "Local A", true);
+        // A pointer activates More without moving the D-pad's initial
+        // favorite focus. Back must remember the action that was activated.
+        step(app.press("id:menu-panel >> text:More options"));
+        step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+        assert!(shows(app, "id:menu-panel >> role:header[Local A]"));
+        // Android delivers raw Back phases, then the platform Back callback.
+        step(app.remote_tap(RemoteKey::Back));
+        step(app.back());
+        compact_menu_for(app, "Local A", true);
+        assert!(
+            app.screen()
+                .accessibility_state("id:menu-panel >> role:menuitem[More options]")
+                .unwrap()
+                .selected,
+            "Back after {device} More returns key focus to More"
+        );
+        step(app.remote_tap(RemoteKey::Ok));
+        step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+        assert!(shows(app, "id:menu-panel >> text:Remove from favorites"));
+        step(app.remote_tap(RemoteKey::Menu));
+        assert!(!menu_open(app));
+    }
+    assert_eq!(iptv_app::player_opens(0), 0, "menu inspection never tunes");
+}
+
+#[test]
 fn favorite_actions_run_once_per_remote_hold_for_default_and_custom_keys() {
     let Some(home) = tv_isolated!() else { return };
     let (mut fixture, _, _) = tv(home, |settings| {

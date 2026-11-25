@@ -419,7 +419,20 @@ pub fn perform(ui: Ui, item: MenuItem) {
     }
     let parent = (item == MenuItem::ProgramActions)
         .then(|| ui.menu.get_untracked())
-        .flatten();
+        .flatten()
+        .map(|mut parent| {
+            // Touch and pointer activation do not move key focus first.
+            // Back returns to the action that opened the full options.
+            if let Some(focus) = parent.rows.iter().position(|row| {
+                *row == Row::Action {
+                    item,
+                    enabled: true,
+                }
+            }) {
+                parent.focus = focus;
+            }
+            parent
+        });
     ui.menu.set(None);
     let scope = list
         .resolve(&*crate::schedule())
