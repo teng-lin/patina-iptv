@@ -163,16 +163,18 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     continue_entry(&mut app);
     step(app.wait_for("text:Guide updated"));
     step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
-    step(app.press("id:guide-source-actions >> text:Switch off"));
+    step(app.press("id:guide-source-actions >> text:No time shift"));
     step(app.wait_until(
         "authorized source edit is saved",
         Duration::from_secs(5),
-        |_| !snapshot().1[0].enabled,
+        |_| snapshot().1[0].shift_minutes == 30,
     ));
     step(app.back());
     step(app.back());
     step(app.press("id:playlist-actions-list >> text:Guide data"));
     step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    let before_clear = snapshot();
+    assert_eq!(before_clear.0.as_ref().unwrap().feeds[0].program_count, 1);
     step(app.press_key("down"));
     step(app.press_key("enter"));
     wait(&mut app, "Enter parental PIN");
@@ -180,7 +182,11 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     continue_entry(&mut app);
     step(app.wait_for("text:Guide data deleted"));
     assert!(snapshot().0.is_none());
-    assert_eq!(snapshot().1.len(), 1, "Clear retains the guide source");
+    assert_eq!(
+        snapshot().1,
+        before_clear.1,
+        "Clear retains the guide source"
+    );
 }
 
 #[test]
