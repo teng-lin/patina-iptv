@@ -939,6 +939,15 @@ impl Screen {
             }
         }
     }
+    /// Close the details page when its title lost authorization.
+    pub fn close_blocked_details(&mut self, denied: &Key) {
+        if self.details.as_ref().is_some_and(|d| &d.item.key == denied) {
+            self.details = None;
+            self.episode = None;
+            self.control = Control::Catalog;
+        }
+    }
+
     pub fn publish_preview(&mut self, generation: u64, details: Details) -> bool {
         if !self.open
             || self.generation != generation
@@ -1070,6 +1079,13 @@ impl Screen {
                 .map(|e| e.key.clone());
         }
     }
+    /// Dismiss the catalog and invalidate replies from its previous session.
+    pub fn close(&mut self) {
+        self.open = false;
+        self.handoff = Handoff::None;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
     /// A title chosen here now plays full screen: the screen closes but
     /// keeps its list, focus and details, for Back from that title
     /// ([`Screen::return_from_player`]).
@@ -1165,10 +1181,10 @@ impl Screen {
             }
         }
         if self.details.take().is_none() {
-            self.open = false;
-            self.generation = self.generation.wrapping_add(1);
+            self.close();
+        } else {
+            self.handoff = Handoff::None;
         }
-        self.handoff = Handoff::None;
     }
 }
 #[cfg(test)]

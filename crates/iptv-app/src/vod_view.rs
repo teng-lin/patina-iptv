@@ -87,11 +87,7 @@ pub fn close(ui: Ui) {
     }
     // A shelf page or focus lookup still being read is no longer wanted.
     crate::runtime().vod_discovery_cancel();
-    ui.vod.update(|s| {
-        s.open = false;
-        s.handoff = iptv_presentation::vod::Handoff::None;
-        s.generation = s.generation.wrapping_add(1);
-    });
+    ui.vod.update(iptv_presentation::vod::Screen::close);
 }
 
 /// Back from a movie or episode playing full screen: its details reopen

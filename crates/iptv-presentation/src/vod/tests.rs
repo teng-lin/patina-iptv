@@ -1751,3 +1751,39 @@ fn the_rail_leaves_out_destinations_that_can_never_show_anything() {
     s.browse_vertical(1);
     assert_eq!(s.destination, Destination::Recordings);
 }
+
+#[test]
+fn closing_the_catalog_discards_the_player_handoff_and_stale_replies() {
+    let mut screen = Screen::default();
+    screen.begin(Kind::Series);
+    let details = series_details(2);
+    let key = details.item.key.clone();
+    screen.show_details(details);
+    screen.hand_to_player();
+    assert!(screen.returns_to(&key));
+    let generation = screen.generation;
+    screen.close();
+    assert!(!screen.open);
+    assert!(!screen.returns_to(&key));
+    assert_ne!(screen.generation, generation);
+    assert!(!screen.publish(generation, vec![card("late")], false, false));
+}
+
+#[test]
+fn losing_title_authorization_clears_the_details_and_episode_by_identity() {
+    let mut screen = Screen::default();
+    screen.begin(Kind::Series);
+    let details = series_details(2);
+    let key = details.item.key.clone();
+    screen.show_details(details);
+    screen.close_blocked_details(&card("other").key);
+    assert_eq!(screen.control, Control::Play);
+    assert!(screen.episode.is_some());
+
+    screen.close_blocked_details(&key);
+    assert!(screen.open);
+    assert_eq!(screen.focused, Some(key));
+    assert!(screen.details.is_none());
+    assert!(screen.episode.is_none());
+    assert_eq!(screen.control, Control::Catalog);
+}
