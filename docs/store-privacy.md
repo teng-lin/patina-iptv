@@ -17,6 +17,11 @@ the same URL in Play Console and App Store Connect.
 | Diagnostics and accounts | Local app and platform logs. No automatic Patina diagnostics upload, analytics, ads or Patina account. Google may collect diagnostics under its own OS or store settings. | Same app behavior. Apple may collect diagnostics under its own OS or store settings. |
 | Bundled components | NSH, AndroidX/Media3, SQLCipher and Rust libraries. See the Android classpath and Rust SBOMs for the release graph. | NSH, MPVKit (including libmpv and FFmpeg), SQLCipher and Rust libraries. See the verified MPVKit inventory and Rust SBOM. |
 
+Portal authentication also transmits viewer-supplied MAC, serial and device
+identifiers when configured, with portal language/time zone and protocol
+profile fields. These are provider identity settings, not a hardware MAC read
+from Android or iPad. Include them when assessing identifier disclosures.
+
 The [security model](security.md) documents the encryption boundaries, explicit
 HTTP support and export handling. The policy covers transfers to configured
 providers, provider-selected hosts, external players and storage destinations.
@@ -45,3 +50,12 @@ providers, provider-selected hosts, external players and storage destinations.
 
 Verify the deployed policy URL from each app and listing. Keep release
 artifact, SDK inventory and console evidence with the store submission record.
+
+## First-release evidence and proposed answers
+
+The [November 24, 2026 evidence record](store-privacy-221.md) maps the source
+inventory to the proposed form answers and separates source, package, emulator,
+physical-device and console verification. It also records the policy deployment
+check and the remaining owner actions. An unverified worksheet is not a saved
+or published store declaration. Issue #221 remains open until the candidate
+builds, both listing fields and both completed forms have been checked.
