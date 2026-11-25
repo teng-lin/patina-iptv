@@ -62,6 +62,22 @@ pub enum Control {
     /// Shown with an error: runs the failed operation again.
     Retry,
 }
+/// The category pane's filter for a catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CatalogGroup {
+    ContinueWatching,
+    All,
+    Category { source: i64, id: String },
+}
+
+/// What the shell should do after Back settles the library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackOutcome {
+    Closed,
+    Reload { through: u32 },
+    Stay,
+}
+
 /// An operation that failed, which Retry runs again exactly.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
@@ -213,6 +229,11 @@ impl Screen {
     }
 
     pub fn begin(&mut self, kind: Kind) -> u64 {
+        self.begin_sorted(kind, Sort::default())
+    }
+
+    /// Open a kind of catalog using the saved catalog order.
+    pub fn begin_sorted(&mut self, kind: Kind, sort: Sort) -> u64 {
         *self = Self {
             open: true,
             destination: if kind == Kind::Series {
@@ -224,6 +245,7 @@ impl Screen {
             control: Control::Category,
             query: Query {
                 kind,
+                sort,
                 ..Default::default()
             },
             generation: self.generation.wrapping_add(1),
@@ -560,6 +582,21 @@ impl Screen {
         }
         true
     }
+    /// Settle a page above the current shelf, including when the window moved first.
+    pub fn finish_previous(
+        &mut self,
+        generation: u64,
+        start: u32,
+        page: DiscoveryPage,
+        step_up: bool,
+    ) {
+        if self.accepts_reply(generation)
+            && !self.publish_previous(generation, start, page, step_up)
+        {
+            self.busy = false;
+        }
+    }
+
     /// A shelf window arrived (a reopened shelf around its focused title):
     /// its titles replace the list from shelf position `page.start`, and
     /// the focus stays on its title by identity, or falls to the first one
@@ -574,11 +611,57 @@ impl Screen {
         self.end = end;
         true
     }
+    /// Apply a catalog's available filter choices with its title page.
+    pub fn publish_catalog(
+        &mut self,
+        generation: u64,
+        page: DiscoveryPage,
+        sources: Vec<Source>,
+        categories: Vec<Category>,
+        append: bool,
+    ) -> bool {
+        if !self.accepts_reply(generation) {
+            return false;
+        }
+        self.sources = sources;
+        self.categories = categories;
+        if append {
+            self.publish(generation, page.cards, page.more, true)
+        } else {
+            self.publish_window(generation, page)
+        }
+    }
+
+    /// Whether an open screen still owns this title or catalog reply.
+    pub fn accepts_reply(&self, generation: u64) -> bool {
+        self.open && self.generation == generation
+    }
+
+    /// Keep focus on the title just selected while its details load.
+    pub fn begin_details(&mut self, key: Key) -> u64 {
+        self.focused = Some(key);
+        self.begin_operation()
+    }
+
+    /// Settle an operation owned by the current open screen.
+    pub fn finish_operation(&mut self, generation: u64) -> bool {
+        if !self.accepts_reply(generation) {
+            return false;
+        }
+        self.busy = false;
+        true
+    }
+
     /// Starts opening details or playing: a newer generation, so an older
     /// reply is ignored, with any failure shown before cleared.
     pub fn begin_operation(&mut self) -> u64 {
         self.busy = true;
         self.clear_failure();
+        self.supersede_operation()
+    }
+
+    /// Fence a pending operation before starting a new authorization check.
+    pub fn supersede_operation(&mut self) -> u64 {
         self.generation = self.generation.wrapping_add(1);
         self.generation
     }
@@ -656,6 +739,31 @@ impl Screen {
     /// again, or edited, under the same id): the stale details close and
     /// nothing plays; the title stays focused in the list, to be chosen
     /// again from the playlist as it is now.
+    /// Apply a retried title read, retaining the selected episode if it still exists.
+    pub fn accept_retried_details(
+        &mut self,
+        details: Details,
+        title: &Key,
+        incarnation: &str,
+        unavailable: &str,
+    ) -> Option<Details> {
+        match self.show_details_keeping(details.clone(), title, incarnation) {
+            Retried::Ready => Some(details),
+            Retried::EpisodeGone | Retried::PlaylistChanged => {
+                self.error = Some(unavailable.into());
+                None
+            }
+        }
+    }
+
+    /// Refuse playback from a playlist whose identity changed since selection.
+    pub fn reject_replaced_playlist(&mut self, generation: u64, unavailable: &str) {
+        if self.accepts_reply(generation) {
+            self.playlist_changed();
+            self.error = Some(unavailable.into());
+        }
+    }
+
     pub fn playlist_changed(&mut self) {
         self.busy = false;
         self.details = None;
@@ -923,6 +1031,45 @@ impl Screen {
         }
         false
     }
+    /// Move to the next source, resetting the category from the previous source.
+    pub fn cycle_source(&mut self) {
+        let at = self
+            .query
+            .source
+            .and_then(|id| self.sources.iter().position(|s| s.id == id));
+        self.query.source = match at {
+            None => self.sources.first().map(|s| s.id),
+            Some(at) => self.sources.get(at + 1).map(|s| s.id),
+        };
+        self.query.category = None;
+    }
+
+    /// Cycle the catalog category filter.
+    pub fn cycle_category(&mut self) {
+        let at = self.query.category.as_ref().and_then(|(source, id)| {
+            self.categories
+                .iter()
+                .position(|c| c.source == *source && c.id == *id)
+        });
+        self.query.category = match at {
+            None => self.categories.first().map(|c| (c.source, c.id.clone())),
+            Some(at) => self
+                .categories
+                .get(at + 1)
+                .map(|c| (c.source, c.id.clone())),
+        };
+    }
+
+    /// Choose a category pane filter and focus it.
+    pub fn choose_catalog_group(&mut self, group: CatalogGroup) {
+        self.control = Control::Category;
+        self.query.continue_watching = group == CatalogGroup::ContinueWatching;
+        self.query.category = match group {
+            CatalogGroup::Category { source, id } => Some((source, id)),
+            CatalogGroup::ContinueWatching | CatalogGroup::All => None,
+        };
+    }
+
     /// Remove protected artwork/synopses when a runtime grant expires.
     pub fn redact_metadata(&mut self, denied: &[Key]) {
         if self
@@ -1079,6 +1226,41 @@ impl Screen {
                 .map(|e| e.key.clone());
         }
     }
+    /// Focus an episode chosen by content identity.
+    pub fn select_episode(&mut self, key: Key) {
+        self.episode = Some(key);
+        self.control = Control::Episodes;
+    }
+
+    /// Keep the current details page with the next episode and updated progress.
+    pub fn select_next_episode(
+        &mut self,
+        details: Details,
+        key: Key,
+        season: u32,
+        notice: Option<&str>,
+    ) {
+        self.details = Some(details);
+        self.episode = Some(key);
+        self.season = Some(season);
+        self.notice = notice.map(str::to_owned);
+    }
+
+    /// Reopen details from full-screen playback for a next episode waiting to play.
+    pub fn reopen_for_next_episode(
+        &mut self,
+        details: Details,
+        key: Key,
+        season: u32,
+        notice: &str,
+    ) {
+        self.open = true;
+        self.show_details(details);
+        self.episode = Some(key);
+        self.season = Some(season);
+        self.notice = Some(notice.into());
+    }
+
     /// Dismiss the catalog and invalidate replies from its previous session.
     pub fn close(&mut self) {
         self.open = false;
@@ -1148,10 +1330,29 @@ impl Screen {
         }
         self.handoff = Handoff::Returned;
     }
-    pub fn back(&mut self) {
-        // A pending catalog read is canceled here and read again by the
-        // shell ([`Screen::reload`]).
-        let pending = self.busy && !self.is_shelf() && self.details.is_none();
+    /// Handle Back and report whether the catalog must refresh to keep its focus.
+    pub fn back(&mut self) -> BackOutcome {
+        let had_details = self.details.is_some();
+        let pending_catalog = self.busy && !self.is_shelf() && !had_details;
+        // Watched progress can reorder these views. Other lists already have the
+        // updated card and keep the page window the viewer was looking at.
+        let watched = had_details
+            && self.handoff == Handoff::Returned
+            && (self.is_shelf() || self.query.continue_watching);
+        self.traverse_back(pending_catalog);
+        if had_details {
+            self.control = Control::Catalog;
+        }
+        if !self.open {
+            BackOutcome::Closed
+        } else if watched || pending_catalog {
+            BackOutcome::Reload { through: self.end }
+        } else {
+            BackOutcome::Stay
+        }
+    }
+
+    fn traverse_back(&mut self, pending_catalog: bool) {
         self.preview = None;
         self.pending_down = None;
         self.generation = self.generation.wrapping_add(1);
@@ -1163,7 +1364,7 @@ impl Screen {
         }
         if !self.is_shelf() && self.details.is_none() {
             if self.search_open {
-                self.close_search_with(pending);
+                self.close_search_with(pending_catalog);
                 return;
             }
             if !self.categories_open && !self.one_pane() {

@@ -1787,3 +1787,78 @@ fn losing_title_authorization_clears_the_details_and_episode_by_identity() {
     assert!(screen.episode.is_none());
     assert_eq!(screen.control, Control::Catalog);
 }
+
+#[test]
+fn catalog_filters_and_title_page_belong_to_the_same_read() {
+    let mut screen = Screen::default();
+    let generation = screen.begin_sorted(Kind::Movie, Sort::Rating);
+    assert_eq!(screen.query.sort, Sort::Rating);
+    let page = DiscoveryPage {
+        cards: vec![card("generated")],
+        more: false,
+        start: 0,
+    };
+    let source = Source {
+        id: 1,
+        name: "Generated playlist".into(),
+    };
+    assert!(!screen.publish_catalog(
+        generation.wrapping_sub(1),
+        page.clone(),
+        vec![source.clone()],
+        vec![],
+        false
+    ));
+    assert!(screen.sources.is_empty());
+    assert!(screen.publish_catalog(generation, page, vec![source], vec![], false));
+    assert_eq!(screen.cards.len(), 1);
+    screen.choose_catalog_group(CatalogGroup::ContinueWatching);
+    assert_eq!(screen.control, Control::Category);
+    assert!(screen.query.continue_watching);
+    screen.choose_catalog_group(CatalogGroup::Category {
+        source: 1,
+        id: "generated".into(),
+    });
+    assert_eq!(screen.query.category, Some((1, "generated".into())));
+    assert!(!screen.query.continue_watching);
+    screen.cycle_source();
+    assert_eq!(screen.query.source, Some(1));
+    assert!(screen.query.category.is_none());
+}
+
+#[test]
+fn back_refreshes_changed_progress_without_forgetting_a_deep_catalog_page() {
+    let mut screen = Screen::default();
+    let generation = screen.begin(Kind::Series);
+    let details = series_details(2);
+    let key = details.item.key.clone();
+    screen.publish(generation, vec![details.item.clone()], true, false);
+    screen.choose_catalog_group(CatalogGroup::ContinueWatching);
+    screen.show_details(details.clone());
+    screen.hand_to_player();
+    screen.return_from_player(details, &key, false);
+    assert_eq!(screen.back(), BackOutcome::Reload { through: 1 });
+    assert_eq!(screen.control, Control::Catalog);
+    assert_eq!(screen.focused, Some(key));
+}
+
+#[test]
+fn the_next_episode_can_be_offered_in_existing_or_reopened_details() {
+    let mut screen = Screen::default();
+    screen.begin(Kind::Series);
+    let details = series_details(2);
+    let key = details.episodes[1].key.clone();
+    let season = details.episodes[1].season;
+    screen.show_details(details.clone());
+    screen.select_episode(key.clone());
+    assert_eq!(screen.control, Control::Episodes);
+    screen.select_next_episode(details.clone(), key.clone(), season, None);
+    assert_eq!(screen.control, Control::Episodes);
+    screen.hand_to_player();
+    screen.reopen_for_next_episode(details, key.clone(), season, "Ready");
+    assert!(screen.open && !screen.busy);
+    assert_eq!(screen.control, Control::Play);
+    assert_eq!(screen.episode, Some(key));
+    assert_eq!(screen.season, Some(season));
+    assert_eq!(screen.notice.as_deref(), Some("Ready"));
+}
