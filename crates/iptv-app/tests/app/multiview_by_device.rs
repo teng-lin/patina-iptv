@@ -192,6 +192,32 @@ fn metered(app: &mut Headless, metered: bool) {
 }
 
 #[test]
+fn an_open_more_list_updates_after_a_network_change() {
+    fn here() {}
+    let Some(mut fixture) = fixture(std::any::type_name_of_val(&here)) else {
+        return;
+    };
+    let app = &mut fixture.app;
+    report(app, "phone", false, false);
+    full_screen(app);
+    resize(app, (470.0, 430.0));
+    metered(app, false);
+    bar(app);
+    step(app.press(MORE));
+    step(app.wait_for(MORE_MULTIVIEW));
+    let display = "id:chooser-items >> text:Display";
+    step(app.wait_for(display));
+
+    metered(app, true);
+    step(app.wait_for_gone(MORE_MULTIVIEW, Duration::from_secs(2)));
+    assert!(app.screen().matches(display).unwrap(), "More stays open");
+    metered(app, false);
+    step(app.wait_for(MORE_MULTIVIEW));
+    step(app.press(display));
+    step(app.wait_for("id:chooser-panel >> text:Picture size"));
+}
+
+#[test]
 fn a_phone_metered_network_hides_multiview_and_collapses_the_session() {
     fn here() {}
     let Some(mut fixture) = fixture(std::any::type_name_of_val(&here)) else {
@@ -205,12 +231,15 @@ fn a_phone_metered_network_hides_multiview_and_collapses_the_session() {
     metered(app, false);
     assert!(more_lists_multiview(app));
 
-    // A network change while More is open removes its stale action list.
+    // A network change while More is open removes its multiview action.
     bar(app);
     step(app.press(MORE));
     step(app.wait_for(MORE_MULTIVIEW));
     metered(app, true);
     assert!(!app.screen().matches(MORE_MULTIVIEW).unwrap());
+    if app.screen().matches("id:chooser-items").unwrap() {
+        step(app.back());
+    }
     assert!(!more_lists_multiview(app));
     step(app.press_key("m"));
     assert!(!app.screen().matches("text:/^Multiview$/").unwrap());

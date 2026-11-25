@@ -17,7 +17,7 @@ pub const HIDE_AFTER_MS: u64 = 3_000;
 
 /// Stable identities shared by pointer buttons and remote focus. Hosts supply
 /// the currently enabled controls; focus never depends on a rendered index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Control {
     Mute,
     Volume,

@@ -33,7 +33,7 @@
 
 use std::cell::Cell;
 
-use iptv_core::capabilities::{FormFactor, Host, Input};
+use iptv_core::capabilities::{FormFactor, Host, Input, Platform};
 use iptv_presentation::capabilities::Device;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
@@ -124,10 +124,16 @@ pub fn host() -> Host {
     host
 }
 
-/// The main window's size class (reactive: the window's size, the
-/// guide's scale and the viewer's text size). A desktop's auxiliary
-/// player windows have their own bounds; a gate that lays them out must
-/// read their window, not this. Before the root mounts, and
+/// The form reported by the Android host, once its observer has attached.
+pub(crate) fn reported_android_form() -> Option<FormFactor> {
+    if built().platform != Platform::Android {
+        return None;
+    }
+    REPORTED.with(Cell::get)?.with(|report| report.form_factor)
+}
+
+/// The current surface's size class (reactive: its size, the guide's
+/// scale and the viewer's text size). Before the root mounts, and
 /// off the UI thread, there is no window: expanded, the class that
 /// leaves nothing out.
 pub fn window_class() -> Class {
@@ -159,7 +165,6 @@ pub fn system_24_hour() -> Option<bool> {
 fn built() -> Host {
     #[cfg(feature = "test-support")]
     if let Some(name) = std::env::var_os("IPTV_TEST_PLATFORM") {
-        use iptv_core::capabilities::Platform;
         let platform = match name.to_str() {
             Some("android") => Platform::Android,
             Some("ipad") => Platform::Ipad,
@@ -229,9 +234,8 @@ fn parse_accessibility(data: &nsh_core::JsonValue, before: Accessibility) -> Acc
 
 /// Keeps the device's reports for [`host`] and [`recommended`]: on
 /// Android and iPadOS, a zero-size native view (`tv.device`, `DeviceComponent.kt`)
-/// that reports the form factor and the input when it attaches and on
-/// every configuration change, and the accessibility settings when it
-/// attaches and whenever they change. Mount once, in the main window's
+/// that reports the form factor, connected input and accessibility
+/// settings on attachment and when the host updates them. Mount once, in the main window's
 /// root.
 pub(crate) fn bridge() -> impl IntoElement {
     crate::capture_limits::init();

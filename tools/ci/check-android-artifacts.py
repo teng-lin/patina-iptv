@@ -2,6 +2,7 @@
 """Require packaged notices and native code for every requested Android ABI."""
 import os
 from pathlib import Path
+import re
 import sys
 import zipfile
 
@@ -9,6 +10,17 @@ import zipfile
 def check(artifact, abis):
     prefix = "base/" if artifact.suffix == ".aab" else ""
     with zipfile.ZipFile(artifact) as package:
+        if artifact.suffix == ".aab":
+            # This metadata survives the isolated signing job and is the map
+            # needed to symbolicate this exact bundle's Java/Kotlin crashes.
+            name = "BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map"
+            try:
+                mapping = package.read(name).decode("utf-8")
+            except KeyError:
+                raise ValueError(f"{artifact}: missing R8 mapping") from None
+            if not mapping.startswith("# compiler: R8\n") or not re.search(
+                    r"(?m)^\S+ -> \S+:$", mapping):
+                raise ValueError(f"{artifact}: invalid R8 mapping")
         for abi in abis:
             library = prefix + "lib/" + abi + "/libnsh.so"
             try:

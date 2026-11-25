@@ -64,7 +64,7 @@ pub enum MenuItem {
 }
 
 /// Section headings (never focused).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Heading {
     Program,
     Channel,
@@ -140,6 +140,32 @@ impl Menu {
         self.action_at(self.focus)
     }
 
+    /// Updates the actions for the same target and keeps focus by action.
+    pub fn replace_rows(&mut self, rows: Vec<Row>) {
+        let focused = self.focused();
+        self.focus = rows
+            .iter()
+            .position(|row| match (*row, focused) {
+                (
+                    Row::Action {
+                        item,
+                        enabled: true,
+                    },
+                    Some(before),
+                ) => item == before || (recording_action(item) && recording_action(before)),
+                _ => false,
+            })
+            .or_else(|| {
+                rows.iter()
+                    .enumerate()
+                    .filter(|(_, row)| row.focusable())
+                    .min_by_key(|(index, _)| index.abs_diff(self.focus))
+                    .map(|(index, _)| index)
+            })
+            .unwrap_or(0);
+        self.rows = rows;
+    }
+
     /// Moves to the next focusable row in `step`'s direction; stays at the
     /// ends (no wrap).
     pub fn move_focus(&mut self, step: isize) {
@@ -173,6 +199,11 @@ impl Menu {
             _ => None,
         }
     }
+}
+
+fn recording_action(item: MenuItem) -> bool {
+    use MenuItem::*;
+    matches!(item, Record | RecordNow | CancelRecording | StopRecording)
 }
 
 /// The program actions that apply, in order (`now`: guide minutes;
@@ -317,12 +348,13 @@ fn standalone(
         .collect()
 }
 
-/// The guide's full context menu for a program. `enabled` says which
-/// actions the app can perform.
+/// The guide's full context menu for a program. `recording` is the current
+/// recording action, and `enabled` says which actions the app can perform.
 pub fn program_menu(
     program: Program,
     catchup_days: u8,
     now: i32,
+    recording: Option<MenuItem>,
     enabled: impl Fn(MenuItem) -> bool,
 ) -> Vec<Row> {
     use MenuItem::*;
@@ -338,6 +370,9 @@ pub fn program_menu(
     rows.extend(
         program_actions(program, catchup_days, now)
             .into_iter()
+            .filter(|item| !matches!(item, Record | Description))
+            .chain(recording)
+            .chain([Description])
             .map(action),
     );
     rows.push(Row::Heading(Heading::Channel));
@@ -436,8 +471,29 @@ mod tests {
     }
 
     #[test]
+    fn focus_follows_a_recording_action_then_skips_non_actions_if_it_leaves() {
+        let make_rows = |recording| program_menu(LIVE, 3, 0, recording, |_| true);
+        let mut menu = Menu::new(
+            make_rows(Some(Record)),
+            Target::Program {
+                channel: "channel-a".into(),
+                start: LIVE.start,
+            },
+            ListId::All,
+        );
+        for _ in 0..3 {
+            menu.move_focus(1);
+        }
+        assert_eq!(menu.focused(), Some(Record));
+        menu.replace_rows(make_rows(Some(StopRecording)));
+        assert_eq!(menu.focused(), Some(StopRecording));
+        menu.replace_rows(make_rows(None));
+        assert_eq!(menu.focused(), Some(Description));
+    }
+
+    #[test]
     fn sections_come_in_order_and_headings_never_take_focus() {
-        let rows = program_menu(LIVE, 3, 0, |_| true);
+        let rows = program_menu(LIVE, 3, 0, Some(Record), |_| true);
         let headings: Vec<usize> = rows
             .iter()
             .enumerate()
@@ -475,7 +531,7 @@ mod tests {
     fn focus_skips_disabled_actions_and_stops_at_the_ends() {
         let only = |i| matches!(i, Description | ToggleFavorite);
         let mut m = Menu::new(
-            program_menu(FUTURE, 0, 0, only),
+            program_menu(FUTURE, 0, 0, None, only),
             Target::Program {
                 channel: "channel-a".into(),
                 start: 60,

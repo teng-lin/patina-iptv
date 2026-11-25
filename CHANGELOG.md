@@ -14,6 +14,8 @@ is below 1.0, a minor release may change behavior.
   playlists, channels and guide links intact (#282).
 - Clarify portal identity transfers in the mobile privacy policy and record
   first-release disclosure evidence and pending store checks (#221).
+- Require an embedded R8 class mapping in Android release bundles and provide
+  a disposable emulator launch check for unmodified signed APKs.
 
 - Cancel a channel swipe when a second finger lands on another player control.
 
@@ -98,6 +100,9 @@ is below 1.0, a minor release may change behavior.
 - A Stalker refresh whose live pages fail keeps the last complete channel
   catalog and reports the failure for retry instead of publishing partial rows.
 - Pin the macOS Android resource compiler used by local Android validation.
+- Keep Android tablets at tablet scale in split screen and refresh hardware
+  keyboard and D-pad controls as devices attach or detach. Open player and
+  guide menus follow available actions and keep Stop recording reachable (#272).
 
 - Keep interrupted and overlapping video touches from leaving a channel-swipe
   preview behind or starting a new swipe before all fingers lift.

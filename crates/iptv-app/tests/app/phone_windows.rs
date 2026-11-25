@@ -329,19 +329,16 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
     step(app.press("label:Close the chooser"));
     step(app.wait_for("id:play-bar-pip"));
 
-    // The overflow remains open across a resize that keeps the same actions.
-    // Once the other actions fit on the bar, dismiss the old list as a
-    // unit; More stays for Multiview.
+    // More keeps the current list open across both resizes. Display moves
+    // back into the bar when it fits, while Multiview stays under More.
     step(app.press("id:play-bar-more"));
     present(app, (371.0, 260.0), 1.0);
     step(app.wait_for("id:chooser-items >> text:Display"));
     present(app, (532.0, 280.0), 1.0);
+    step(app.wait_for_gone("id:chooser-items >> text:Display", WAIT));
+    step(app.wait_for("id:chooser-items >> text:Multiview"));
+    step(app.press("label:Close the chooser"));
     step(app.wait_for("id:play-bar-picture"));
-    assert!(
-        !app.screen()
-            .matches("id:chooser-items >> text:Display")
-            .unwrap()
-    );
     assert!(bounds(app, "play-bar-more").is_some());
 
     // Upright, a phone offers no Multiview: More no longer lists it.

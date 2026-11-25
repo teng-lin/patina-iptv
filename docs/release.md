@@ -12,6 +12,11 @@ serials. For local execution use [disposable AVD validation](android-validation.
 which copies the complete profile and never resets original images. x86_64 debug
 smoke is not proof of signed ARM release playback or physical accessibility.
 
+The [optimized Android evidence record](android-release-220.md) distinguishes
+checks of public signed artifacts from candidate, emulator, physical-device
+and Play Console acceptance. Follow its remaining checklist for the exact
+artifact intended for submission.
+
 ## Packaging and releases
 
 Desktop installer checks run on PRs that change packaging recipes, shipped
