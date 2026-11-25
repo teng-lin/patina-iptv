@@ -39,7 +39,7 @@ fn preferences() -> std::sync::Arc<iptv_settings::Settings> {
     if let Some(settings) = WORDING_SETTINGS.with(|settings| settings.borrow().clone()) {
         return settings;
     }
-    if crate::has_runtime() {
+    if crate::runtime_owner::has_runtime() {
         crate::settings::get()
     } else {
         std::sync::Arc::new(iptv_settings::Settings::new())

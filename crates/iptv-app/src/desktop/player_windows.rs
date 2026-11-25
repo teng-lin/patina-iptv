@@ -16,7 +16,7 @@ pub fn can_open(ui: Ui, channel: usize) -> bool {
     {
         return false;
     }
-    let Some(key) = crate::schedule().channel_key(channel) else {
+    let Some(key) = crate::runtime_owner::schedule().channel_key(channel) else {
         return false;
     };
     if ui
@@ -35,7 +35,7 @@ pub fn open(ui: Ui, channel: usize) {
     if !can_open(ui, channel) {
         return;
     }
-    let Some(key) = crate::schedule().channel_key(channel) else {
+    let Some(key) = crate::runtime_owner::schedule().channel_key(channel) else {
         return;
     };
     if ui
@@ -89,12 +89,12 @@ fn follow_clock(
 }
 
 fn follow_lists(local: Ui) {
-    let catalog = std::cell::RefCell::new(crate::schedule());
+    let catalog = std::cell::RefCell::new(crate::runtime_owner::schedule());
     effect(move || {
         local.app.data_version.get();
         local.app.list_version.get();
         untracked(|| {
-            let next = crate::schedule();
+            let next = crate::runtime_owner::schedule();
             let previous = catalog.replace(next.clone());
             if !std::rc::Rc::ptr_eq(&previous, &next) {
                 let kept = crate::lists::keep_in(local, previous);
@@ -145,7 +145,7 @@ pub fn bind(ui: Ui) {
         ui.app.data_version.get();
         untracked(|| {
             let sessions = ui.player_windows.with(|w| w.sessions().to_vec());
-            let schedule = crate::schedule();
+            let schedule = crate::runtime_owner::schedule();
             for session in sessions {
                 match schedule.find_channel(&session.channel) {
                     Some(channel) => ui.player.stream(session.surface).channel.set(Some(channel)),
@@ -156,16 +156,16 @@ pub fn bind(ui: Ui) {
     });
 }
 
-pub fn windows(ui: Ui) -> impl IntoElement {
+pub fn windows(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
     view().children((1..crate::player::SURFACES).map(move |surface| {
         when(
             move || mounted(ui, surface),
-            move || player_window(ui, surface),
+            move || player_window(ui, surface, back_action),
         )
     }))
 }
 
-fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
+fn player_window(ui: Ui, surface: usize, back_action: fn(Ui) -> bool) -> impl IntoElement {
     let session = ui
         .player_windows
         .with_untracked(|w| w.on_surface(surface).cloned())
@@ -200,7 +200,7 @@ fn player_window(ui: Ui, surface: usize) -> impl IntoElement {
         .default_size(nsh_core::Size::new(px(960.0), px(540.0)))
         .attributes(move || window_attributes(compact()))
         .on_open_change(move |_| close(ui, id))
-        .content(move || player_content(ui, surface, id));
+        .content(move || player_content(ui, surface, id, back_action));
     // A starting position only: resizing/fullscreen/control updates never
     // snap a window back after the viewer moves it.
     #[cfg(target_os = "macos")]
@@ -243,7 +243,13 @@ fn window_attributes(compact: bool) -> nsh_core::desktop::WindowAttributes {
     attributes
 }
 
-fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::desktop::WindowRef) {
+fn bind_pip(
+    parent: Ui,
+    local: Ui,
+    id: SessionId,
+    window: nsh_core::element::desktop::WindowRef,
+    back_action: fn(Ui) -> bool,
+) {
     use nsh_core::desktop::{WindowFrame, WindowMode};
     let saved = std::cell::Cell::new(None);
     let was_compact = std::cell::Cell::new(false);
@@ -253,7 +259,7 @@ fn bind_pip(parent: Ui, local: Ui, id: SessionId, window: nsh_core::element::des
             return;
         }
         if local.top_overlay().is_some() {
-            crate::go_back(local);
+            back_action(local);
             return;
         }
         if key_window
@@ -320,7 +326,12 @@ fn cascade_position(
 
 /// Reuse the app's actual full-screen player views with a window-local
 /// presentation context. Its main stream aliases this auxiliary surface.
-fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement {
+fn player_content(
+    parent: Ui,
+    surface: usize,
+    id: SessionId,
+    back_action: fn(Ui) -> bool,
+) -> impl IntoElement {
     let initial = parent
         .player_windows
         .with_untracked(|w| w.on_surface(surface).cloned())
@@ -376,7 +387,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
     follow_lists(local);
     let input = stored(Some(crate::input::bind(local)));
     crate::pip::bind(local);
-    bind_pip(parent, local, id, window.clone());
+    bind_pip(parent, local, id, window.clone(), back_action);
     let back_window = window.clone();
     effect(move || {
         if local.mode.get() != crate::ViewMode::Fullscreen {
@@ -472,7 +483,7 @@ fn player_content(parent: Ui, surface: usize, id: SessionId) -> impl IntoElement
                     .child(crate::menu_view::layer(local))
                     .child(crate::organization_view::layer(local))
                     .child(crate::chooser::layer(local, false))
-                    .child(crate::play_bar::layer(local))
+                    .child(crate::play_bar::layer(local, back_action))
             },
         ))
 }

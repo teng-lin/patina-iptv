@@ -76,7 +76,6 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
         Arc::new(Cooperative::new(Arc::new(WorkerLoop))),
         iptv_web::adapters::fill_random,
     );
-    ports.startup_mark = |phase, detail| crate::startup::mark_with(phase, detail);
     ports.file_storage = false;
     ports.store_host = Some(Arc::new(store::BrowserStore::default()));
     // One set for the process: the host hands its stored files over once,

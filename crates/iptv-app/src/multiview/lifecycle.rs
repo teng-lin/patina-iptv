@@ -17,7 +17,7 @@ pub fn follow(ui: Ui) -> bool {
     if !session(ui) {
         return false;
     }
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let mut moved = Vec::new();
     let mut gone = Vec::new();
     let mut any = true;

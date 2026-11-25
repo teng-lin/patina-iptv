@@ -170,7 +170,7 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
     virtual_list(
         move || {
             ui.guide_data();
-            entry_count(&*crate::schedule())
+            entry_count(&*crate::runtime_owner::schedule())
         },
         move |at| {
             let current = move || ui.focus.with(|f| f.group) == at.index();

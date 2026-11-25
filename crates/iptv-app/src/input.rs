@@ -25,6 +25,21 @@ pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
 
+impl Ui {
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub fn touched(&self) {
+        // PIN entry continues the choice that opened the prompt. Dismissing
+        // the prompt cancels it in `parental_view::abort`.
+        if self.top_overlay() != Some(crate::overlays::Overlay::Parental) {
+            crate::external_player::cancel_pending(*self);
+        }
+        self.pending_zap.set(None);
+        crate::browse_playback::activity(*self);
+        self.input.set(self.last_press.get_untracked());
+    }
+}
+
 /// A TV remote's profile (Android, a browser TV) distinguishes a tap from
 /// a held key.
 const REMOTE_KEYS: bool = crate::host::REMOTE_KEYS;
@@ -1008,7 +1023,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            let combined = crate::data::combined::active(&crate::runtime());
+            let combined = crate::data::combined::active(&crate::runtime_owner::runtime());
             if (key == RemoteKey::Menu && !combined && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
                     && ui.app.library.shown.get_untracked().is_none()
@@ -1074,8 +1089,10 @@ mod tests {
     #[component]
     fn PendingHandoff() -> impl IntoElement {
         let directory = tempfile::tempdir().unwrap();
-        let runtime = Rc::new(crate::new_runtime(directory.path().to_owned()));
-        let ui = crate::with_runtime(runtime, || {
+        let runtime = Rc::new(crate::runtime_owner::new_runtime(
+            directory.path().to_owned(),
+        ));
+        let ui = crate::runtime_owner::with_runtime(runtime, || {
             Ui::new(crate::SharedUi::new(), crate::player::Player::new())
         });
         crate::external_player::cancel_pending(ui);

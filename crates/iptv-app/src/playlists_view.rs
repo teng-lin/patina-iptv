@@ -82,10 +82,12 @@ pub fn is_open(ui: Ui) -> bool {
 }
 
 fn load() -> Vec<Playlist> {
-    crate::runtime().playlists().unwrap_or_else(|e| {
-        log::warn!("iptv playlists: the store is unavailable: {e}");
-        Vec::new()
-    })
+    crate::runtime_owner::runtime()
+        .playlists()
+        .unwrap_or_else(|e| {
+            log::warn!("iptv playlists: the store is unavailable: {e}");
+            Vec::new()
+        })
 }
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
@@ -158,20 +160,20 @@ fn perform(ui: Ui, effect: Effect) {
             | Effect::SetUserAgent(..)
             | Effect::ToggleOnDemand(_)
             | Effect::CycleStreams(_)
-    ) && crate::runtime().parental_has_pin()
-        && !crate::runtime().parental_settings_allowed()
+    ) && crate::runtime_owner::runtime().parental_has_pin()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
             perform(ui, effect)
         });
         return;
     }
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         log::info!("iptv playlists: {}", effect_name(&effect));
         let result = match effect {
             Effect::AllPlaylists => {
                 close(ui);
-                data::switch_all(&crate::runtime());
+                data::switch_all(&crate::runtime_owner::runtime());
                 Ok(())
             }
             Effect::Add => {
@@ -180,17 +182,19 @@ fn perform(ui: Ui, effect: Effect) {
             }
             Effect::Show(id) => {
                 close(ui);
-                data::switch_to(&crate::runtime(), id);
+                data::switch_to(&crate::runtime_owner::runtime(), id);
                 Ok(())
             }
             Effect::Refresh(id) => {
-                data::refresh(&crate::runtime(), id);
+                data::refresh(&crate::runtime_owner::runtime(), id);
                 Ok(())
             }
-            Effect::Policy(id, policy) => data::set_policy(&crate::runtime(), id, policy).await,
+            Effect::Policy(id, policy) => {
+                data::set_policy(&crate::runtime_owner::runtime(), id, policy).await
+            }
             Effect::ToggleOnDemand(id) => {
                 let on = on_demand(id);
-                if let Err(e) = crate::runtime().set_playlist_setting(
+                if let Err(e) = crate::runtime_owner::runtime().set_playlist_setting(
                     id,
                     iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str(),
                     iptv_settings::Value::Bool(!on),
@@ -201,7 +205,7 @@ fn perform(ui: Ui, effect: Effect) {
             }
             Effect::CycleStreams(id) => {
                 let next = state::next_streams(own_streams(id));
-                if let Err(e) = crate::runtime().set_connection_limit(id, next) {
+                if let Err(e) = crate::runtime_owner::runtime().set_connection_limit(id, next) {
                     crate::settings_view::notify_setting_error(e);
                 }
                 Ok(())
@@ -223,18 +227,20 @@ fn perform(ui: Ui, effect: Effect) {
                 );
                 Ok(())
             }
-            Effect::Rename(id, name) => data::rename(&crate::runtime(), id, &name).await,
+            Effect::Rename(id, name) => {
+                data::rename(&crate::runtime_owner::runtime(), id, &name).await
+            }
             Effect::Guides(id) => {
                 crate::epg_sources_view::open(ui, id);
                 Ok(())
             }
-            Effect::Delete(id) => data::delete(&crate::runtime(), id).await,
+            Effect::Delete(id) => data::delete(&crate::runtime_owner::runtime(), id).await,
             Effect::RefreshAll => {
-                data::refresh_all(&crate::runtime());
+                data::refresh_all(&crate::runtime_owner::runtime());
                 Ok(())
             }
             Effect::OpenDetails(id) => {
-                if let Some(source) = crate::runtime().source_details(id) {
+                if let Some(source) = crate::runtime_owner::runtime().source_details(id) {
                     update(ui, |s| {
                         s.open_details(source);
                         None
@@ -243,11 +249,11 @@ fn perform(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::TryDetails(id, source) => {
-                data::try_details(&crate::runtime(), id, *source);
+                data::try_details(&crate::runtime_owner::runtime(), id, *source);
                 Ok(())
             }
             Effect::SetUserAgent(id, agent) => {
-                data::set_user_agent(&crate::runtime(), id, agent);
+                data::set_user_agent(&crate::runtime_owner::runtime(), id, agent);
                 Ok(())
             }
             Effect::Close => {
@@ -653,7 +659,10 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                 (Act::Streams, Some(_)) => {
                     ui.app.settings.get();
                     ui.app.library.version.get();
-                    words::streams(own_streams(id), crate::runtime().reported_streams(id))
+                    words::streams(
+                        own_streams(id),
+                        crate::runtime_owner::runtime().reported_streams(id),
+                    )
                 }
                 _ => words::act(act, kind, shown, running()).to_owned(),
             }

@@ -23,7 +23,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
     ("host/native/credential_key/android.rs", "KEY"), // Android keystore handle.
     ("custom_groups.rs", "GENERATION"),             // Discard stale dialog replies.
-    ("data.rs", "APP_OWNER"),                       // UI root owner for detached local tasks.
+    ("tasks.rs", "APP_OWNER"),                      // UI root owner for detached local tasks.
     ("desktop.rs", "WINDOW"),                       // Native window handle.
     ("desktop.rs", "POINTER"),                      // Pointer position within the window.
     ("desktop.rs", "LAST_MOVE"),                    // Pointer gesture clock.
@@ -41,10 +41,10 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("i18n/pseudo.rs", "FIXED"),    // test-support-only immutable expanded catalog.
     ("input.rs", "REMOTE_PHASES"),  // test-support-only remote key phase switch.
     ("input.rs", "REPEATS"),        // test-support-only keyboard repeat mirror.
-    ("lib.rs", "RUNTIME"),          // The shell's single application handle.
-    ("lib.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
-    ("lib.rs", "TUI_MODE"),     // Host flag: TUI backend bypasses StickyCells trackball wrapper.
-    ("lib.rs", "LEAVE"), // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
+    ("runtime_owner.rs", "RUNTIME"), // The shell's single application handle.
+    ("runtime_owner.rs", "ROOT_STARTED"), // Guard: the handle is asked for on the application thread only.
+    ("lib.rs", "TUI_MODE"), // Host flag: TUI backend bypasses StickyCells trackball wrapper.
+    ("lib.rs", "LEAVE"),    // Host hook: Back at the top level asks first, and Yes leaves (Tizen).
     ("lists.rs", "HINT_SHOWN"), // Visible navigation hint revision.
     ("host/native/platform_data.rs", "ANDROID_FILES"), // Android files directory handle.
     ("host/native/platform_data.rs", "TEST_DIRECTORY"), // Test-only explicit isolated storage handle.

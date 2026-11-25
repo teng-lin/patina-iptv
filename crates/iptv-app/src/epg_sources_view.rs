@@ -49,13 +49,16 @@ pub fn open(ui: Ui, playlist: SourceId) {
     ui.guide_sources.set(Some(screen(playlist)));
     // Timer failures can occur without publishing a new visible guide.
     // Opening the controls always reads the latest persisted refresh result.
-    crate::runtime::data::refresh_guide_status(&crate::runtime());
+    crate::runtime::data::refresh_guide_status(&crate::runtime_owner::runtime());
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide
 /// to add or download.
 fn screen(playlist: SourceId) -> Screen {
-    let screen = Screen::new(playlist, crate::runtime().source_lines(playlist));
+    let screen = Screen::new(
+        playlist,
+        crate::runtime_owner::runtime().source_lines(playlist),
+    );
     if crate::host::IMPORTS {
         screen
     } else {
@@ -67,7 +70,7 @@ pub fn close(ui: Ui) {
     if ui.guide_sources.with_untracked(Option::is_some) {
         ui.guide_sources.set(None);
         if !crate::settings_view::is_open(ui) {
-            crate::runtime().parental_content_closed();
+            crate::runtime_owner::runtime().parental_content_closed();
         }
         dismiss_keyboard();
     }
@@ -142,7 +145,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
     if matches!(&effect, Effect::Clear | Effect::Edit(_) | Effect::Update)
         && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
             == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::protected_settings(ui, move || perform(ui, playlist, effect));
         return;
@@ -151,18 +154,25 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
         Effect::Inspect => crate::guide_inspect_view::open(ui, playlist),
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
-            crate::data::spawn_in_app(async move {
-                if let Err(e) = crate::data::edit_guides(&crate::runtime(), playlist, &edit).await {
+            crate::tasks::spawn_in_app(async move {
+                if let Err(e) =
+                    crate::data::edit_guides(&crate::runtime_owner::runtime(), playlist, &edit)
+                        .await
+                {
                     log::warn!("iptv guide sources: the store refused it: {e}");
                 }
             });
         }
         Effect::Update => {
-            let started = stored::update_source(&crate::runtime(), playlist, move |completed| {
-                if completed {
-                    crate::settings_view::notify(tr("Guide updated"));
-                }
-            });
+            let started = stored::update_source(
+                &crate::runtime_owner::runtime(),
+                playlist,
+                move |completed| {
+                    if completed {
+                        crate::settings_view::notify(tr("Guide updated"));
+                    }
+                },
+            );
             if started {
                 // Shows tr("Updating…").
                 ui.app.library.version.update(|v| *v += 1);
@@ -171,7 +181,7 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
             }
         }
         Effect::Clear => {
-            stored::clear_source(&crate::runtime(), playlist, move |deleted| {
+            stored::clear_source(&crate::runtime_owner::runtime(), playlist, move |deleted| {
                 crate::settings_view::notify(if deleted {
                     tr("Guide data deleted")
                 } else {
@@ -228,7 +238,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .guide_sources
             .with_untracked(|s| s.as_ref().map(Screen::playlist));
         if let Some(playlist) = playlist {
-            let lines = crate::runtime().source_lines(playlist);
+            let lines = crate::runtime_owner::runtime().source_lines(playlist);
             ui.guide_sources.update(|s| {
                 if let Some(s) = s {
                     s.set_lines(lines);
@@ -293,7 +303,7 @@ fn header(ui: Ui, size: Scale) -> View {
         let playlist = state(ui, Screen::playlist);
         ui.app.library.version.get();
         let name = playlist.and_then(|id| {
-            crate::runtime()
+            crate::runtime_owner::runtime()
                 .playlists()
                 .ok()?
                 .into_iter()
@@ -335,10 +345,10 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
 
 /// The tr("Update the guide now") row's status.
 fn update_status(playlist: SourceId) -> (String, bool) {
-    if crate::runtime().is_updating(playlist) {
+    if crate::runtime_owner::runtime().is_updating(playlist) {
         return (tr("Updating…").to_owned(), false);
     }
-    let state = crate::runtime().cached_guide_state(playlist);
+    let state = crate::runtime_owner::runtime().cached_guide_state(playlist);
     match stored::status_of(state.as_ref()) {
         GuideStatus::Updated { at, channels } => (
             trf(
@@ -622,7 +632,7 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
 fn clear_card(ui: Ui, size: Scale) -> impl IntoElement {
     let name = state(ui, Screen::playlist)
         .and_then(|id| {
-            crate::runtime()
+            crate::runtime_owner::runtime()
                 .playlists()
                 .ok()?
                 .into_iter()

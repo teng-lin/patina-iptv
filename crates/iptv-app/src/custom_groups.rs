@@ -215,7 +215,7 @@ fn request<R: Send + 'static>(
 ) {
     let generation = GENERATION.get();
     let result = operation;
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = result.await;
         if GENERATION.get() == generation && is_open(ui) {
             done(ui, result);
@@ -230,11 +230,11 @@ fn mutate<R: Send + 'static>(
 ) {
     let generation = GENERATION.get();
     let result = operation;
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = result.await;
         // A committed edit affects the guide even if its editor was closed.
         if result.is_ok() {
-            data::organization_changed(&crate::runtime(), source);
+            data::organization_changed(&crate::runtime_owner::runtime(), source);
         }
         if GENERATION.get() == generation && is_open(ui) {
             done(ui, result);
@@ -250,12 +250,15 @@ pub fn open_copy(ui: Ui, source: SourceId, scope: ChannelScope) {
 }
 
 fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
-    if !crate::runtime().parental_settings_allowed()
-        && crate::runtime().parental_blocked_targets().iter().any(|t| {
-            t.source == source.0
-                && t.kind == iptv_core::parental::ContentKind::Group
-                && t.id.starts_with("custom:")
-        })
+    if !crate::runtime_owner::runtime().parental_settings_allowed()
+        && crate::runtime_owner::runtime()
+            .parental_blocked_targets()
+            .iter()
+            .any(|t| {
+                t.source == source.0
+                    && t.kind == iptv_core::parental::ContentKind::Group
+                    && t.id.starts_with("custom:")
+            })
     {
         crate::parental_view::protected_settings(ui, move || open_with(ui, source, members));
         return;
@@ -264,7 +267,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
     ui.custom_groups.set(Some(Open::new(source)));
     request(
         ui,
-        crate::runtime::commands::custom_groups(&crate::runtime(), source),
+        crate::runtime::commands::custom_groups(&crate::runtime_owner::runtime(), source),
         move |ui, result| match result {
             Ok(groups) => {
                 update(ui, |s| s.reload_groups(groups));
@@ -290,7 +293,7 @@ fn reload(ui: Ui) {
     };
     request(
         ui,
-        crate::runtime::commands::group_members(&crate::runtime(), source, scope),
+        crate::runtime::commands::group_members(&crate::runtime_owner::runtime(), source, scope),
         |ui, result| {
             if let Ok((groups, rows)) = result {
                 update(ui, |s| s.reload_members(groups, rows));
@@ -320,7 +323,7 @@ fn show_members(ui: Ui, scope: ChannelScope) {
     let loaded_scope = scope.clone();
     request(
         ui,
-        crate::runtime::commands::members(&crate::runtime(), source, loaded_scope),
+        crate::runtime::commands::members(&crate::runtime_owner::runtime(), source, loaded_scope),
         move |ui, result| match result {
             Ok(rows) => update(ui, |s| s.enter_members(scope, rows)),
             Err(error) => report(ui, Err(error)),
@@ -383,7 +386,7 @@ fn commit_text(ui: Ui) {
         ui,
         s.source,
         crate::runtime::commands::save_custom_group(
-            &crate::runtime(),
+            &crate::runtime_owner::runtime(),
             s.source,
             match kind {
                 Text::Rename(group) => Some(group),
@@ -481,8 +484,8 @@ fn act(ui: Ui, index: usize) {
             kind: iptv_core::parental::ContentKind::Group,
             id: format!("custom:{}", group.0),
         };
-        if crate::runtime().parental_explicitly_blocked(&target)
-            && !crate::runtime().parental_settings_allowed()
+        if crate::runtime_owner::runtime().parental_explicitly_blocked(&target)
+            && !crate::runtime_owner::runtime().parental_settings_allowed()
         {
             crate::parental_view::protected_settings(ui, move || act(ui, index));
             return;
@@ -531,7 +534,11 @@ fn act(ui: Ui, index: usize) {
                 mutate(
                     ui,
                     s.source,
-                    crate::runtime::commands::remove_custom_members(&crate::runtime(), origin, ids),
+                    crate::runtime::commands::remove_custom_members(
+                        &crate::runtime_owner::runtime(),
+                        origin,
+                        ids,
+                    ),
                     report,
                 );
             }
@@ -561,7 +568,7 @@ fn act(ui: Ui, index: usize) {
                 ui,
                 s.source,
                 crate::runtime::commands::transfer_custom_members(
-                    &crate::runtime(),
+                    &crate::runtime_owner::runtime(),
                     s.source,
                     s.origin(),
                     target,
@@ -600,7 +607,10 @@ fn act(ui: Ui, index: usize) {
                 mutate(
                     ui,
                     s.source,
-                    crate::runtime::commands::delete_custom_group(&crate::runtime(), g),
+                    crate::runtime::commands::delete_custom_group(
+                        &crate::runtime_owner::runtime(),
+                        g,
+                    ),
                     |ui, result| {
                         if result.is_ok() {
                             update(ui, |s| s.show_page(Page::Groups, 0));

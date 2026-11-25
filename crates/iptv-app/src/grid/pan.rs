@@ -188,7 +188,7 @@ impl Pan {
         let ui = self.ui;
         let focus = ui.focus.get_untracked();
         let Some(channel) = untracked(|| crate::lists::focused_channel(ui))
-            .and_then(|ch| crate::schedule().channel_key(ch))
+            .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch))
         else {
             return ui.pan_anchor.set(None);
         };
@@ -236,7 +236,7 @@ impl Pan {
         // there when it arrives. The days it passes are asked for as the
         // rows show them.
         let rest = self.model.with(|m| m.rest()).round() as i32;
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         for minute in [
             rest - MARGIN,
             rest + self.ui.focus.with_untracked(|f| f.visible) + MARGIN,

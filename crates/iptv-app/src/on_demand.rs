@@ -97,7 +97,7 @@ pub fn flush(ui: Ui, ended: bool) {
     crate::vod_view::observe(ui, progress.position_ms, progress.duration_ms, ended);
     if let Some((job, source)) = ui.player.recorded.get_untracked() {
         // This method queues the write immediately; disposal cannot lose the last point.
-        crate::runtime().save_recording_progress(job.id, &source, progress);
+        crate::runtime_owner::runtime().save_recording_progress(job.id, &source, progress);
     }
 }
 

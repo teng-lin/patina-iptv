@@ -84,7 +84,7 @@ fn finish_screen(
 }
 fn release(preview: Option<model::Preview>) {
     if let Some(p) = preview {
-        let _ = crate::runtime().release_guide_repair_plan(&p.id, p.digest);
+        let _ = crate::runtime_owner::runtime().release_guide_repair_plan(&p.id, p.digest);
     }
 }
 fn invalidate(ui: Ui) {
@@ -137,8 +137,8 @@ pub fn add(ui: Ui, channel: ChannelRef, target: model::Target, window: TimeWindo
         cancel: cancel.clone(),
         ..Default::default()
     };
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner.inspect_channel(channel.clone(), control).await;
         if cancel.is_canceled()
             || inspection
@@ -194,8 +194,8 @@ pub fn history(ui: Ui, source: SourceId, window: TimeWindow) {
         return;
     };
     let cancel = control.cancel.clone();
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner.recent_guide_repairs(source, 20, control).await;
         finish(ui, generation, &cancel, result.map(Reply::History));
     });
@@ -205,11 +205,11 @@ fn preview(ui: Ui) {
         return;
     };
     let cancel = control.cancel.clone();
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     if let Some(preview) = screen.preview {
         let _ = owner.release_guide_repair_plan(&preview.id, preview.digest);
     }
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         match owner.preview_guide_repair(screen.request, control).await {
             Ok(preview) => {
                 if state(ui, |s| accepts(s, generation, &cancel)).unwrap_or(false) {
@@ -227,7 +227,7 @@ fn preview(ui: Ui) {
 fn request_settings_pin(ui: Ui, retry: fn(Ui)) -> bool {
     let required = crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed();
+        && !crate::runtime_owner::runtime().parental_settings_allowed();
     if required {
         crate::parental_view::protected_settings(ui, move || retry(ui));
     }
@@ -246,8 +246,8 @@ fn apply(ui: Ui) {
         finish(ui, generation, &cancel, Err(model::Error::PlanMissing));
         return;
     };
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner
             .apply_guide_repair(preview.id.clone(), preview.digest, control)
             .await;
@@ -271,8 +271,8 @@ fn status(ui: Ui, id: Option<String>) {
         finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner.guide_repair_operation(id).await;
         finish(ui, generation, &cancel, result.map(Reply::Status));
     });
@@ -286,8 +286,8 @@ fn verify(ui: Ui) {
         finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner
             .verify_guide_repair(id, screen.request.window, control)
             .await;
@@ -306,8 +306,8 @@ fn undo(ui: Ui) {
         finish(ui, generation, &cancel, Err(model::Error::CommitMissing));
         return;
     };
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner.undo_guide_repair(id, control).await;
         finish(ui, generation, &cancel, result.map(Reply::Undone));
     });
@@ -329,7 +329,7 @@ fn page(ui: Ui, indirect: bool) {
     } else {
         screen.indirect_offset
     };
-    match crate::runtime().guide_repair_plan(
+    match crate::runtime_owner::runtime().guide_repair_plan(
         &preview.id,
         preview.digest,
         mapping,
@@ -374,7 +374,7 @@ fn activate(ui: Ui, row: Row) {
         }
         Row::Cancel => {
             if let Some(id) = state(ui, Screen::commit_id).flatten() {
-                let result = crate::runtime().cancel_guide_repair_operation(&id);
+                let result = crate::runtime_owner::runtime().cancel_guide_repair_operation(&id);
                 update(ui, |s| s.report_error(result.err()));
                 status(ui, Some(id));
             }

@@ -4,7 +4,7 @@ pub fn bind(ui: Ui) {
     effect(move || {
         ui.app.library.version.get();
         ui.app.data_version.get();
-        crate::runtime::data::refresh_guide_status(&crate::runtime());
+        crate::runtime::data::refresh_guide_status(&crate::runtime_owner::runtime());
     });
 }
 

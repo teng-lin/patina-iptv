@@ -22,6 +22,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "TestGate",
     // Backup progress, errors and the operation in progress.
     "backup",
+    // The debug fixture setting shared with transport before any UI owner exists.
+    "build_config",
     // Named library operations, each given the owner.
     "commands",
     "inspection",

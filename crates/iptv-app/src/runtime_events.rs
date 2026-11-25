@@ -10,7 +10,7 @@ use std::rc::Rc;
 pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ResumeChannel(channel) => {
-            if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_none() {
+            if ui.playing.get_untracked().is_none() {
                 crate::parental_view::admitted(ui, channel, move || {
                     ui.play(channel, crate::Playback::Live);
                     if ui.playing.get_untracked() == Some(channel) {
@@ -22,12 +22,12 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::SchedulePresented(steps) => crate::startup::shown(&steps),
         RuntimeEvent::CatalogChanged => {
             ui.app.data_version.update(|version| *version += 1);
-            crate::data::spawn_in_app(async move {
-                let _ = crate::runtime().parental_refresh().await;
+            crate::tasks::spawn_in_app(async move {
+                let _ = crate::runtime_owner::runtime().parental_refresh().await;
                 crate::parental_view::enforce(ui);
             });
         }
-        RuntimeEvent::EarlyResume { source, done } => crate::data::spawn_in_app(async move {
+        RuntimeEvent::EarlyResume { source, done } => crate::tasks::spawn_in_app(async move {
             crate::player::resume::early(ui, &source).await;
             let _ = done.send(());
         }),
@@ -79,7 +79,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
         RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
         RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
-        RuntimeEvent::StoreStartupRecovered => crate::data::spawn_in_app(async move {
+        RuntimeEvent::StoreStartupRecovered => crate::tasks::spawn_in_app(async move {
             // A failed initial read left recent searches unloaded. Reload
             // before unblocking input so a new search cannot overwrite them.
             crate::search_view::refresh_saved_history(ui).await;
@@ -90,7 +90,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
-            if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_some() {
+            if ui.playing.get_untracked().is_some() {
                 ui.mode.apply(crate::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }
@@ -149,7 +149,7 @@ fn schedule_changed(
             ui.app.data_version.update(|version| *version += 1);
         }
     });
-    debug_assert!(Rc::ptr_eq(&current, &crate::schedule()));
+    debug_assert!(Rc::ptr_eq(&current, &crate::runtime_owner::schedule()));
 }
 
 /// UI context supplied to the runtime's foreground scheduling hint.
@@ -161,5 +161,5 @@ pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
 /// account's connection limit (`device_wiring.rs`'s test seam).
 #[cfg(feature = "test-support")]
 pub(crate) fn account_streams_reported(limit: Option<u32>) {
-    crate::runtime().emit(RuntimeEvent::AccountStreams(limit));
+    crate::runtime_owner::runtime().emit(RuntimeEvent::AccountStreams(limit));
 }

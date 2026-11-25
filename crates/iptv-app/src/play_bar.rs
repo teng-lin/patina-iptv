@@ -218,7 +218,7 @@ pub(crate) fn hover(ui: Ui, over: bool) {
     update(ui, |b, now| b.hover(over, now));
 }
 
-pub fn layer(ui: Ui) -> impl IntoElement {
+pub fn layer(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
     // Back belongs to the pointer chrome: keys and auto-hide hide both.
     let shown = computed(move || shows(ui));
     when(
@@ -238,7 +238,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     })
                 })
                 .pointer_events(PointerEvents::BoxNone)
-                .child(when(move || ui.back_controls(), move || back(ui)))
+                .child(when(
+                    move || ui.back_controls(),
+                    move || back(ui, back_action),
+                ))
                 .child(bar(ui))
         },
     )
@@ -250,7 +253,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 /// multiview's grid from a tile watched full screen (its
 /// accessibility label says which; a remote's Back and an iPad's swipe
 /// from the left edge hide the bar first).
-fn back(ui: Ui) -> impl IntoElement {
+fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
     let window = nsh_core::element::desktop::current_window();
     let side = target();
     view()
@@ -290,7 +293,7 @@ fn back(ui: Ui) -> impl IntoElement {
                     log::info!("iptv play bar: back");
                     ui.panels.update(|p| p.hide());
                     ui.play_bar.update(PlayBar::hide);
-                    crate::go_back(ui);
+                    back_action(ui);
                 },
             )
             .test_id("play-bar-back"),

@@ -33,6 +33,22 @@ mod words;
 pub use status::status;
 pub(crate) use words::{failure_message, waiting_text};
 
+impl Ui {
+    /// What just started playing over full-screen video: the banner for
+    /// a live channel, the card with its seek bar for a replay.
+    pub fn show_playing(&self) {
+        let live =
+            self.playback.get_untracked() == Playback::Live && !crate::on_demand::active(*self);
+        self.update_panels(|p, now| {
+            if live {
+                p.show_banner(now);
+            } else {
+                p.show_info(now);
+            }
+        });
+    }
+}
+
 const WHITE: u32 = 0xFFFFFF;
 /// Panel fill over video: the theme's panel color, mostly opaque.
 const PANEL_ALPHA: u8 = 0xE0;
@@ -404,7 +420,7 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         .child(
             text(move || {
                 ui.guide_data();
-                let s = crate::schedule();
+                let s = crate::runtime_owner::schedule();
                 let unix = crate::guide::unix_of(&*s, ui.focus.with(|f| f.now));
                 date_time(
                     unix,

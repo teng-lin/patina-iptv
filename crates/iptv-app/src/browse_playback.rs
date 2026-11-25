@@ -42,7 +42,7 @@ fn current(ui: Ui) -> Option<Target> {
             // without leaving the channel: a waiting choice stays, and
             // panning back starts no preview again.
             if !live {
-                let key = crate::schedule().channel_key(ch)?;
+                let key = crate::runtime_owner::schedule().channel_key(ch)?;
                 let held = ui.focus.with(|f| {
                     ui.pan_anchor
                         .with(|a| a.as_ref().is_some_and(|a| a.holds(&key, f)))
@@ -63,7 +63,7 @@ fn current(ui: Ui) -> Option<Target> {
         _ => return None,
     };
     Some(Target {
-        key: crate::schedule().channel_key(ch)?,
+        key: crate::runtime_owner::schedule().channel_key(ch)?,
         source: ui.app.library.shown.get().map(|s| s.0),
         surface,
     })
@@ -104,8 +104,7 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     Policy {
         // Off while its row is not offered (a phone or a tablet with no
         // keyboard or D-pad, #280), whatever is stored.
-        autoplay: !crate::desktop::recorder_only_startup()
-            && surface != Some(Surface::Player)
+        autoplay: surface != Some(Surface::Player)
             && s.bool(keys::AUTOPLAY, at)
             && autoplay_supported(host),
         delay_ms: s.duration_ms(keys::SWITCH_DELAY, at).max(0) as u64,
@@ -255,7 +254,8 @@ fn run(ui: Ui) {
         Some(Effect::Fullscreen) => {
             if let Some(channel) = current(ui).and_then(|t| crate::favorites::channel_of(&t.key))
                 && playing_live(ui, channel)
-                && crate::schedule().channel_block(channel) == iptv_core::organization::Block::None
+                && crate::runtime_owner::schedule().channel_block(channel)
+                    == iptv_core::organization::Block::None
             {
                 full(ui);
             }
@@ -298,7 +298,7 @@ pub fn bind(ui: Ui) {
         let focus = ui.focus.get();
         ui.list.with(|_| ());
         let channel = untracked(|| crate::lists::focused_channel(ui))
-            .and_then(|ch| crate::schedule().channel_key(ch));
+            .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch));
         let stale = ui.pan_anchor.with_untracked(|a| {
             a.as_ref()
                 .is_some_and(|a| channel.as_deref().is_none_or(|c| !a.holds(c, &focus)))
@@ -313,7 +313,7 @@ pub fn bind(ui: Ui) {
         let playing = ui
             .playing
             .get()
-            .and_then(|c| crate::schedule().channel_key(c));
+            .and_then(|c| crate::runtime_owner::schedule().channel_key(c));
         let live = ui.playback.get() == Playback::Live;
         untracked(|| {
             ui.browse_playback.update(|b| {
@@ -355,7 +355,7 @@ pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
         select(ui);
         return;
     }
-    if let Some(key) = crate::schedule().channel_key(channel) {
+    if let Some(key) = crate::runtime_owner::schedule().channel_key(channel) {
         ui.touch_zapped.set(touch);
         ui.pending_zap.set(Some(Target {
             key,

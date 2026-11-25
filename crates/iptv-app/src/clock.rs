@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use iptv_core::guide;
 
-use crate::schedule;
+use crate::runtime_owner::schedule;
 
 thread_local! {
     /// When the current schedule was shown (synthetic now starts there).

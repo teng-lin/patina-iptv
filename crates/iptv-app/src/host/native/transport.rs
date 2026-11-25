@@ -14,6 +14,6 @@ pub(crate) fn policy(public_only: bool) -> iptv_net::playback::PlaybackPolicy {
         #[cfg(debug_assertions)]
         allow_private_fixture: cfg!(test)
             || cfg!(feature = "test-support")
-            || crate::data::DEV_PLAYLIST.is_some(),
+            || crate::runtime::build_config::DEV_PLAYLIST.is_some(),
     }
 }

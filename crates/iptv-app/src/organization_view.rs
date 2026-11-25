@@ -261,7 +261,7 @@ async fn items(
     order: Option<Sort>,
 ) -> Result<OrganizationItems, Error> {
     crate::runtime::commands::organization_editor(
-        &crate::runtime(),
+        &crate::runtime_owner::runtime(),
         source,
         kind.clone(),
         crate::favorites::ordered_keys(),
@@ -313,7 +313,7 @@ pub fn rename_group(ui: Ui, source: SourceId, id: String) {
 pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list: ListId) {
     batch(|| {
         leave_fullscreen_for_reorder(ui);
-        if let Some(entry) = list.resolve(&*crate::schedule()) {
+        if let Some(entry) = list.resolve(&*crate::runtime_owner::schedule()) {
             crate::lists::preview(ui, entry);
         }
         crate::lists::open_groups(ui);
@@ -377,7 +377,7 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
 
 fn guide_reorder_placement(ui: Ui, list: ListId) -> Placement {
     let return_to_groups = ui.focus.with_untracked(|f| f.pane == Pane::Groups);
-    let entry = list.find(&*crate::schedule());
+    let entry = list.find(&*crate::runtime_owner::schedule());
     crate::lists::preview(ui, entry);
     ui.focus.update(|f| {
         f.close_columns();
@@ -413,7 +413,7 @@ fn open_with(
     let generation = next_open(ui);
     ui.organization
         .set(Some(Open::new(source, kind.clone(), mode, placement)));
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
         let loaded = items(source, &kind, custom.then_some(Sort::Manual)).await;
         if !still_open(ui, generation) || !is_open(ui) {
@@ -465,9 +465,9 @@ fn block_state(state: &Open, id: &str) -> Block {
 
 pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked: bool) {
     let generation = ui.organization_generation.get_untracked();
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if save.await.is_err() {
             crate::settings_view::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
@@ -696,8 +696,8 @@ fn save_order(ui: Ui) {
         None => return,
     };
     let generation = ui.organization_generation.get_untracked();
-    let owner = crate::runtime();
-    data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = if kind == Kind::Favorites {
             owner.save_favorite_order(source, original, order).await
         } else {
@@ -827,9 +827,12 @@ fn apply_edit(ui: Ui, edit: Edit) {
     if s.kind == Kind::Favorites && edit == Edit::ResetOrder {
         let keys = crate::favorites::ordered_keys();
         let source = s.source;
-        let ordered =
-            crate::runtime::commands::favorite_provider_order(&crate::runtime(), source, keys);
-        data::spawn_in_app(async move {
+        let ordered = crate::runtime::commands::favorite_provider_order(
+            &crate::runtime_owner::runtime(),
+            source,
+            keys,
+        );
+        crate::tasks::spawn_in_app(async move {
             let ordered = ordered.await;
             if !still_open(ui, generation) {
                 return;
@@ -863,7 +866,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         let id = order.remove(at);
         order.insert(to, id);
         let result = crate::runtime::commands::save_organization_order(
-            &crate::runtime(),
+            &crate::runtime_owner::runtime(),
             s.source,
             s.kind.clone(),
             original,
@@ -872,7 +875,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
             false,
         );
         update(ui, Open::begin_save);
-        data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             finish(ui, &s, generation, result.await);
         });
         return;
@@ -887,7 +890,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
     update(ui, Open::begin_save);
     let finished = s.clone();
     let result = crate::runtime::commands::edit_organization(
-        &crate::runtime(),
+        &crate::runtime_owner::runtime(),
         s.source,
         s.kind,
         s.editor.items,
@@ -895,25 +898,25 @@ fn apply_edit(ui: Ui, edit: Edit) {
         edit,
         s.editor.selected,
     );
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         finish(ui, &finished, generation, result.await);
     });
 }
 fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
     let result = crate::runtime::commands::set_organization_sort(
-        &crate::runtime(),
+        &crate::runtime_owner::runtime(),
         s.source,
         s.kind.clone(),
         sort,
     );
     let expected = s.clone();
     update(ui, Open::begin_save);
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let result = result.await;
         if still_open(ui, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
                 close(ui);
-                data::organization_changed(&crate::runtime(), expected.source);
+                data::organization_changed(&crate::runtime_owner::runtime(), expected.source);
                 return;
             }
             update(ui, |s| s.editor.sort_focus = None);
@@ -937,16 +940,16 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         if still_open(ui, generation) {
             close(ui);
         }
-        data::organization_changed(&crate::runtime(), s.source);
+        data::organization_changed(&crate::runtime_owner::runtime(), s.source);
         return;
     }
     let expected = s.clone();
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let loaded = items(expected.source, &expected.kind, None).await;
         if still_open(ui, generation) {
             update(ui, |s| s.finish_edit(&expected, loaded.ok()));
         }
-        data::organization_changed(&crate::runtime(), expected.source);
+        data::organization_changed(&crate::runtime_owner::runtime(), expected.source);
     });
 }
 
@@ -973,7 +976,7 @@ fn commit(ui: Ui) {
     }
     let target = s.clone();
     let result = crate::runtime::commands::rename_organization_item(
-        &crate::runtime(),
+        &crate::runtime_owner::runtime(),
         target.source,
         target.kind,
         item.id,
@@ -981,7 +984,7 @@ fn commit(ui: Ui) {
     );
     dismiss_keyboard();
     update(ui, Open::begin_save);
-    data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         finish(ui, &s, generation, result.await);
     });
 }
@@ -1504,7 +1507,7 @@ pub(crate) fn guide_order_scope(ui: Ui) -> Option<(SourceId, ListId)> {
 
 pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashMap<String, usize> {
     ui.app.data_version.get();
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     ui.list.with(|channels| {
         if &ListId::of(channels.entry(), &*catalog) != list {
             return HashMap::new();
@@ -1587,7 +1590,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
             if s.kind == Kind::Groups {
                 return String::new();
             }
-            let catalog = crate::schedule();
+            let catalog = crate::runtime_owner::schedule();
             crate::lists::entry_name(list.find(&*catalog), &*catalog)
         })
         .unwrap_or_default()
@@ -1827,7 +1830,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             .flatten()
         }) {
             let generation = ui.organization_generation.get_untracked();
-            data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if let Ok(loaded) = items(source, &kind, None).await
                     && still_open(ui, generation)
                 {
