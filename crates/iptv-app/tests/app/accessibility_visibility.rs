@@ -32,7 +32,13 @@ impl Exposure {
     /// fallback to its child text (which Android may visually ellipsize).
     #[track_caller]
     fn settings_tab(&self, app: &Headless, name: &str, selected: bool) -> NodeId {
+        self.shown(app, "settings-content", true);
         let nodes = app.screen().layout_nodes();
+        let content = nodes
+            .iter()
+            .find(|node| node.test_id.as_deref() == Some("settings-content"))
+            .unwrap()
+            .id;
         let native = self.0.lock().unwrap();
         let text = nodes
             .iter()
@@ -44,6 +50,27 @@ impl Exposure {
                         .views
                         .get(&node.parent)
                         .is_some_and(|props| props.accessibility.role == AccessibilityRole::Tab)
+                    && {
+                        let mut ancestor = node.id;
+                        loop {
+                            let Some(parent) = nodes.iter().find(|parent| parent.id == ancestor)
+                            else {
+                                break false;
+                            };
+                            if parent.hidden
+                                || native
+                                    .views
+                                    .get(&parent.id)
+                                    .is_some_and(|props| props.accessibility.hidden)
+                            {
+                                break false;
+                            }
+                            if parent.id == content {
+                                break true;
+                            }
+                            ancestor = parent.parent;
+                        }
+                    }
             })
             .unwrap_or_else(|| panic!("missing tab text {name}"));
         let props = native
@@ -51,6 +78,7 @@ impl Exposure {
             .get(&text.parent)
             .expect("tab parent's native props");
         assert_eq!(props.accessibility.role, AccessibilityRole::Tab);
+        assert_eq!(props.accessibility.accessible, Some(true));
         assert_eq!(props.accessibility.label.as_deref(), Some(name));
         assert_eq!(props.accessibility.state.selected, selected, "{name}");
         text.parent
@@ -276,12 +304,26 @@ fn settings_tabs_keep_full_native_names_at_largest_text_across_input_and_languag
     step(app.press("id:navigation-rail >> role:tab[Settings]"));
     step(app.wait_for("role:tab[General]"));
     exposure.settings_tab(app, "General", true);
+    exposure.settings_tab(app, "Playlists", false);
     step(app.press_key("down"));
     step(app.press_key("down"));
     let guide = exposure.settings_tab(app, "TV guide data", true);
     step(app.press_key("right"));
     step(app.wait_for("text:Guide sources"));
     step(app.back());
+    assert_eq!(exposure.settings_tab(app, "TV guide data", true), guide);
+    step(app.press_key("down"));
+    exposure.settings_tab(app, "Appearance", true);
+    step(app.press_key("up"));
+    assert_eq!(exposure.settings_tab(app, "TV guide data", true), guide);
+    for _ in 0..3 {
+        step(app.press_key("down"));
+    }
+    exposure.settings_tab(app, "Remote control", true);
+    step(app.press_key("right"));
+    step(app.wait_for("text:Edit remote bindings"));
+    step(app.back());
+    step(app.press("role:tab[TV guide data]"));
     assert_eq!(exposure.settings_tab(app, "TV guide data", true), guide);
 
     // A device/input change updates the keys page without moving the
@@ -315,13 +357,15 @@ fn settings_tabs_keep_full_native_names_at_largest_text_across_input_and_languag
     step(app.wait_for(&format!("role:tab[{translated}]")));
     step(app.wait_for(&format!("text:{translated}")));
     assert_eq!(exposure.settings_tab(app, translated, false), guide);
+    let remote = iptv_presentation::i18n::translate(spanish, "Remote control");
+    assert_eq!(exposure.settings_tab(app, remote, false), keys);
     step(app.press(&format!("role:tab[{translated}]")));
-    exposure.settings_tab(app, translated, true);
+    assert_eq!(exposure.settings_tab(app, translated, true), guide);
     step(app.press_key("right"));
     let sources = iptv_presentation::i18n::translate(spanish, "Guide sources");
     step(app.wait_for(&format!("text:{sources}")));
     step(app.back());
-    exposure.settings_tab(app, translated, true);
+    assert_eq!(exposure.settings_tab(app, translated, true), guide);
     step(app.press_key("down"));
     let appearance = iptv_presentation::i18n::translate(spanish, "Appearance");
     exposure.settings_tab(app, appearance, true);
