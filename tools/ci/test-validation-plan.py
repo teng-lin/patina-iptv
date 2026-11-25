@@ -209,7 +209,13 @@ class Selection(unittest.TestCase):
                          'jobs: {x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}}\n',
                          '{jobs: {x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}}}\n',
                          'jobs:\n  x:\n    <<: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n',
-                         'jobs:\n  x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n'):
+                         'jobs:\n  x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n',
+                         'jobs:\n  x:\n    ?\n      uses\n    :\n      "./.github/\\\n      workflows/ci.yml"\n',
+                         'jobs:\n  x:\n    {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n',
+                         'jobs:\n   x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n',
+                         'jobs:\n    x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n',
+                         'env: &a {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\njobs:\n  j:\n    *a\n',
+                         'jobs:\n  x:\n      uses: "./.github\\u002fworkflows/ci.yml"\n'):
                 (workflows / "validation.yml").write_text(text)
                 self.assertIsNone(v.validation_workflows(root))
                 self.assertTrue(all(v.select([".github/workflows/unrelated.yml"], root=root)[lane] for lane in v.LANES))
@@ -220,16 +226,29 @@ class Selection(unittest.TestCase):
         self.assertTrue(v.select([], "release")["actionlint"])
         self.assertFalse(v.select(["tools/ci/test-validation-plan.py"])["actionlint"])
 
-    def test_rust_embedded_markdown_never_routes_as_documentation(self):
+    def assert_embedded_markdown_classified(self, root):
         found = set()
-        for tree in ("crates", "hosts"):
-            for source in (v.ROOT / tree).rglob("*.rs"):
+        for tree in ("crates", "hosts", "fuzz", "vendor"):
+            for source in (root / tree).rglob("*.rs"):
                 for included in markdown_includes(source):
-                    path = included.relative_to(v.ROOT).as_posix()
+                    path = included.relative_to(root).as_posix()
                     found.add(path)
                     self.assertFalse(v.documentation(path), f"{source}: embedded {path} needs a planner exception")
                     self.assertTrue(v.select([path])["host"], path)
-        self.assertIn("docs/capabilities.md", found)
+        return found
+
+    def test_rust_embedded_markdown_never_routes_as_documentation(self):
+        self.assertIn("docs/capabilities.md", self.assert_embedded_markdown_classified(v.ROOT))
+
+    def test_fuzz_and_vendor_markdown_consumers_cannot_bypass_the_guard(self):
+        for tree in ("fuzz", "vendor"):
+            with self.subTest(tree=tree), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                source = root / tree / "src/synthetic.rs"
+                source.parent.mkdir(parents=True)
+                source.write_text('include_str!("../../docs/synthetic.md");')
+                with self.assertRaisesRegex(AssertionError, "embedded docs/synthetic.md needs a planner exception"):
+                    self.assert_embedded_markdown_classified(root)
 
     def test_packaging_helper_dependency_closure(self):
         for path in ("tools/ci/notices.hbs", "tools/ci/component-inventory.py", "tools/ci/crypto-native-notices.py",

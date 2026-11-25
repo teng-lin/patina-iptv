@@ -113,21 +113,37 @@ def validation_workflows(root=ROOT):
             text = (root / path).read_text()
         except (OSError, UnicodeError):
             return None
-        in_jobs = False
+        seen_jobs = in_jobs = in_job = in_property = False
         for line in text.splitlines():
             stripped = line.lstrip()
-            if stripped.startswith("#"):
+            if not stripped or stripped.startswith("#"):
                 continue
-            if re.match(r"jobs\s*:", line):
-                if re.fullmatch(r"jobs:\s*(?:#.*)?", line) is None:
+            indent = len(line) - len(stripped)
+            if indent == 0:
+                in_jobs = in_job = in_property = False
+                if re.match(r"jobs\s*:", line):
+                    if re.fullmatch(r"jobs:\s*(?:#.*)?", line) is None:
+                        return None
+                    seen_jobs = in_jobs = True
+            elif in_jobs:
+                # This deliberately supports one block style, rather than
+                # guessing how YAML aliases, flow maps or shifted indentation
+                # resolve. Unknown structure must preserve broad validation.
+                if indent == 2:
+                    if re.fullmatch(r"  [\w.-]+:\s*(?:#.*)?", line) is None:
+                        return None
+                    in_job, in_property = True, False
+                elif indent < 4 or not in_job:
                     return None
-                in_jobs = True
-            elif in_jobs and re.match(r"  \S", line):
-                if re.fullmatch(r"  [\w.-]+:\s*(?:#.*)?", line) is None:
+                elif indent == 4:
+                    if re.match(r"    [\w.-]+:(?:\s|$)", line) is None:
+                        return None
+                    in_property = True
+                elif not in_property:
                     return None
             # Quoted/explicit keys can hide `uses`, including through YAML
             # escape sequences. The lightweight parser does not decode them.
-            if re.match(r"\s*(?:- )?['\"].*['\"]\s*:|\s*\?\s|\s*<<\s*:", line):
+            if re.match(r"\s*(?:- )?['\"].*['\"]\s*:|\s*\?(?:\s|$)|\s*<<\s*:", line):
                 return None
             if re.search(r"\buses\s*:", line):
                 # Escaped scalars, YAML aliases/tags, dynamic expressions, and
@@ -140,7 +156,7 @@ def validation_workflows(root=ROOT):
             if match is None:
                 return None
             pending.append(match[1][2:])
-        if not in_jobs:
+        if not seen_jobs:
             return None
     return called
 
