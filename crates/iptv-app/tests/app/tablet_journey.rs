@@ -439,6 +439,10 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     // A movie: the rail item, its poster, Play.
     crate::browse_fixture::open_rail_item(&mut app, "Movies");
     step(app.wait_for("id:vod-screen"));
+    // The container opens before its native catalog read publishes the poster.
+    app.wait_until_fixed_clock("movie poster published", WAIT, |s| {
+        s.matches("label:/^Generated Aurora ·/").unwrap()
+    });
     step(app.press("label:/^Generated Aurora ·/"));
     step(app.wait_for("text:Play"));
     step(app.press("text:Play"));
@@ -571,6 +575,10 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     // An episode: the rail item, the show, the episode.
     crate::browse_fixture::open_rail_item(&mut app, "Shows");
     step(app.wait_for("id:vod-screen"));
+    // The container opens before its native catalog read publishes the poster.
+    app.wait_until_fixed_clock("show poster published", WAIT, |s| {
+        s.matches("label:/^Generated Voyage ·/").unwrap()
+    });
     step(app.press("label:/^Generated Voyage ·/"));
     step(app.wait_for("text:/Generated First/"));
     step(app.press("text:/Generated Second/"));
