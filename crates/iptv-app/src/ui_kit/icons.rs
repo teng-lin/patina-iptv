@@ -1,4 +1,4 @@
-//! The play bar's icons: our own simple drawings on a 24-unit grid in the
+//! Shared control icons: our own simple drawings on a 24-unit grid in the
 //! spirit of Material's (filled media shapes, 2-unit strokes), colored by
 //! the text color.
 

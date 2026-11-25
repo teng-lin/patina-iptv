@@ -1,32 +1,28 @@
 //! Shell entry points for favorite actions; state and persistence live in Runtime.
 use crate::Ui;
-use iptv_core::guide::Schedule;
 use iptv_presentation::favorites::History;
 use std::collections::BTreeSet;
 
-pub fn catalog_changed(_ui: Ui, catalog: &dyn Schedule) {
-    crate::runtime().favorites_catalog_changed(catalog);
-}
 pub fn edit(_ui: Ui, change: impl FnOnce(&mut BTreeSet<usize>)) {
-    crate::runtime().edit_favorites(change);
+    crate::runtime_owner::runtime().edit_favorites(change);
 }
 pub fn toggle(_ui: Ui, channel: usize) {
-    crate::runtime().toggle_favorite(channel);
+    crate::runtime_owner::runtime().toggle_favorite(channel);
 }
 pub fn reorder(_ui: Ui, key: &str, index: usize) {
-    crate::runtime().reorder_favorite(key, index);
+    crate::runtime_owner::runtime().reorder_favorite(key, index);
 }
 /// A new app root must reload persisted favorites, including an applied restore.
 pub fn reset() {
-    crate::runtime().reset_favorites();
+    crate::runtime_owner::runtime().reset_favorites();
 }
 /// The favorites on screen as catalog channels, in their order.
 pub fn favorite_channels() -> Vec<usize> {
-    crate::runtime().favorite_channels()
+    crate::runtime_owner::runtime().favorite_channels()
 }
 /// The recently watched channels on screen, newest first.
 pub fn recent_channels() -> Vec<usize> {
-    crate::runtime().recent_channels()
+    crate::runtime_owner::runtime().recent_channels()
 }
 /// The player's History: the recently watched channels (newest first) and
 /// the row of `playing` among them.
@@ -35,21 +31,21 @@ pub fn history(playing: Option<usize>) -> History {
 }
 /// The catalog channel with `key`.
 pub fn channel_of(key: &str) -> Option<usize> {
-    crate::runtime().favorites_channel_of(key)
+    crate::runtime_owner::runtime().favorites_channel_of(key)
 }
 /// A live channel started playing (by key).
 pub fn played(key: &str) {
-    crate::runtime().record_played(key);
+    crate::runtime_owner::runtime().record_played(key);
 }
 /// Ordered keys of the displayed source.
 pub fn ordered_keys() -> Vec<String> {
-    crate::runtime().ordered_favorite_keys()
+    crate::runtime_owner::runtime().ordered_favorite_keys()
 }
 /// Resolves once the edits made so far are saved; false when they could not be.
 pub fn flush() -> impl std::future::Future<Output = bool> {
-    crate::runtime().flush_favorites()
+    crate::runtime_owner::runtime().flush_favorites()
 }
 /// Root teardown only: queued edits outlive their UI owner and drain first.
 pub fn flush_on_shutdown() -> bool {
-    crate::runtime().flush_favorites_on_shutdown()
+    crate::runtime_owner::runtime().flush_favorites_on_shutdown()
 }

@@ -1,6 +1,6 @@
 //! Primary row actions, inline management and a separate destructive confirmation.
 use super::*;
-use crate::play_bar::icons::{self, Icon};
+use crate::ui_kit::icons::{self, Icon};
 
 fn control(
     ui: Ui,
@@ -60,10 +60,10 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                 let previous = at.index().checked_sub(1).and_then(|n| s.visible().nth(n));
                 previous
                     .is_none_or(|p| {
-                        crate::time::date_only(p.request.start)
-                            != crate::time::date_only(current.request.start)
+                        crate::clock::date_only(p.request.start)
+                            != crate::clock::date_only(current.request.start)
                     })
-                    .then(|| crate::time::date_only(current.request.start))
+                    .then(|| crate::clock::date_only(current.request.start))
             })
             .unwrap_or_default()
     };
@@ -157,8 +157,8 @@ pub(super) fn job_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
                                         format!(
                                             "{} · {} – {} · {}",
                                             status(&j),
-                                            crate::time::time_only(j.request.start),
-                                            crate::time::time_only(j.request.end),
+                                            crate::clock::time_only(j.request.start),
+                                            crate::clock::time_only(j.request.end),
                                             j.request.channel_name
                                         )
                                     })

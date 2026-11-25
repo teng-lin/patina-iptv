@@ -44,6 +44,7 @@ mod pointer;
 
 use iptv_core::multiview::MAX_SURFACES;
 use iptv_nav::Action;
+use iptv_presentation::capabilities::{Availability, Device, MultiviewOffer};
 use iptv_presentation::multiview::{Key, Limits, Multiview, Outcome};
 use iptv_presentation::play_bar::PlayBar;
 use nsh_core::prelude::*;
@@ -57,15 +58,79 @@ pub use pointer::{
 
 pub type State = Multiview<usize>;
 
+/// How multiview is offered in `ui`'s window now (reactive): the device's
+/// signals, whether the window is wider than tall, and the streams the
+/// shown source's account allows (#279).
+pub fn offer(ui: Ui) -> MultiviewOffer {
+    offer_on(ui, crate::device::current())
+}
+
+/// [`offer`] on `device`'s signals.
+pub fn offer_on(ui: Ui, device: Device) -> MultiviewOffer {
+    let w = nsh_core::prelude::window();
+    iptv_presentation::capabilities::multiview_offer(
+        device,
+        w.width.0 > w.height.0,
+        account_streams(ui),
+        crate::capture_limits::now().metered,
+    )
+}
+
+/// The streams the playing channel's account allows at once, when it
+/// says: the shown source's, or in All playlists the playing channel's
+/// own source's (`data::combined::connection_limit`).
+fn account_streams(ui: Ui) -> Option<u32> {
+    ui.app.account_streams.get().or_else(|| {
+        let channel = ui.playing.get()?;
+        let schedule = crate::runtime_owner::schedule();
+        let all = schedule
+            .as_any()?
+            .downcast_ref::<iptv_guide::combined::CombinedSchedule>()?;
+        let (source, _) = all.channel_source(channel)?;
+        crate::data::combined::connection_limit(
+            &crate::runtime_owner::runtime(),
+            crate::runtime::model::SourceId(source.id),
+        )
+    })
+}
+
+/// The reason multiview is drawn disabled in `ui`'s window now (a TV at
+/// the account's limit), for the entry points' accessibility descriptions.
+pub fn disabled_reason(ui: Ui) -> Option<&'static str> {
+    match offer(ui) {
+        MultiviewOffer::Disabled(why) => Some(crate::capabilities::reason(why)),
+        _ => None,
+    }
+}
+
+/// Whether multiview can open (or, on a detour, its grid come back) now.
+/// A session already open is not refused for a reason that disables it
+/// (the account's limit): its streams were admitted.
+pub fn availability(ui: Ui) -> Availability {
+    let mut offer = offer(ui);
+    if let MultiviewOffer::Disabled(_) = offer
+        && session(ui)
+    {
+        offer = MultiviewOffer::Tiles(crate::device::host().decoder_slots());
+    }
+    iptv_presentation::capabilities::multiview(
+        offer,
+        ui.player_surface == 0,
+        ui.playing.get().is_some(),
+        ui.player_windows
+            .with(|windows| !windows.sessions().is_empty()),
+    )
+}
+
 /// The tiles multiview opens with now: a phone's, a tablet's and a TV's
 /// two, a desktop's four, never more than the device decodes at once
-/// (`crate::capabilities::multiview_offer`). Reactive, as it follows the
+/// (`crate::multiview::offer`). Reactive, as it follows the
 /// device's signals: a session collapses when its admitted decoder budget
 /// shrinks or the window no longer holds it
 /// (`lifecycle::collapse`).
 pub fn tiles(ui: Ui) -> usize {
-    match crate::capabilities::multiview_offer(ui) {
-        iptv_presentation::capabilities::MultiviewOffer::Tiles(tiles) => tiles,
+    match crate::multiview::offer(ui) {
+        MultiviewOffer::Tiles(tiles) => tiles,
         _ => 1,
     }
 }
@@ -79,12 +144,12 @@ const HINT_MS: u64 = 5_000;
 /// The streams the shown source's account allows at once, if known: the
 /// failure card names it when the provider refuses a stream.
 pub fn account_limit() -> Option<u32> {
-    crate::runtime().account_limit()
+    crate::runtime_owner::runtime().account_limit()
 }
 
 /// The source on screen changed its account's allowance (`data.rs`).
 pub fn set_account_streams(allowed: Option<u32>) {
-    crate::runtime().update_account_limit(allowed);
+    crate::runtime_owner::runtime().update_account_limit(allowed);
 }
 
 /// A multiview session exists (its grid shows, or it waits for a detour).
@@ -173,7 +238,7 @@ pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
 /// becomes the first tile (live), and adding the next one starts at once.
 /// On a detour it goes back to the grid.
 pub fn open(ui: Ui) {
-    if let Some(reason) = untracked(|| crate::capabilities::multiview(ui)).reason() {
+    if let Some(reason) = untracked(|| crate::multiview::availability(ui)).reason() {
         crate::settings_view::notify(crate::capabilities::reason(reason));
         return;
     }
@@ -195,7 +260,7 @@ pub fn open(ui: Ui) {
     crate::channels_view::close(ui);
     let limits = Limits {
         decoders: untracked(|| tiles(ui)),
-        connections: crate::runtime().account_limit(),
+        connections: crate::runtime_owner::runtime().account_limit(),
     };
     log::info!(
         "iptv multiview: open (device {} streams, account {:?})",
@@ -302,7 +367,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
         return false;
     }
     log::info!("iptv multiview: picked {channel}");
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let all = schedule
         .as_any()
         .and_then(|s| s.downcast_ref::<iptv_guide::combined::CombinedSchedule>());
@@ -310,7 +375,7 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
         let exceeded = all.and_then(|all| {
             let (source, _) = all.channel_source(channel)?;
             let allowed = crate::data::combined::connection_limit(
-                &crate::runtime(),
+                &crate::runtime_owner::runtime(),
                 crate::runtime::model::SourceId(source.id),
             )?;
             let replacing = match m.pick() {
@@ -352,9 +417,7 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
     // focus move, also in a session already open.
     // Not offered on a phone: there a stored value is kept, unused.
     let follows = crate::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE)
-        && iptv_presentation::capabilities::sound_follows_tile(untracked(
-            crate::capabilities::host,
-        ));
+        && iptv_presentation::capabilities::sound_follows_tile(untracked(crate::device::host));
     let mut step = None;
     ui.multiview.update(|m| {
         if let Some(m) = m.as_mut() {

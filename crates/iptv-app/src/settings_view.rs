@@ -8,7 +8,7 @@
 //!
 //! Globally unimplemented settings are hidden consistently on every build; none of
 //! the rows it acts on can be switched off by another setting yet;
-//! device-level features of TV boxes are left out (`settings::offer`). Remote: Up/Down move, Right/OK
+//! device-level features of TV boxes are left out (`settings_offer::offer`). Remote: Up/Down move, Right/OK
 //! enter a page, OK changes a row, Left/Back go back, Back on the pages
 //! closes. Touch and mouse: tap a page, tap a row. Wording is iptv-rs's
 //! own (`words`). Also the short notices of the app (`notify`).
@@ -89,7 +89,7 @@ pub static PAGES: &[Page] = &[
             Part::Section(Section::Catchup),
         ],
     },
-    // Keyboard or Remote settings (`settings::keys`): shown while there
+    // Keyboard or Remote settings (`input::keys_for`): shown while there
     // are keys to set up, named after them (`words::page`).
     Page {
         key: "remote",
@@ -151,7 +151,7 @@ impl Notice {
 pub fn open(ui: Ui) {
     if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
         == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::request(ui, iptv_core::parental::Target::settings(), move || {
             open(ui)
@@ -169,7 +169,7 @@ pub fn open(ui: Ui) {
 }
 
 pub fn close(ui: Ui) {
-    crate::runtime().parental_content_closed();
+    crate::runtime_owner::runtime().parental_content_closed();
     if let Some(page) = ui
         .settings_screen
         .with_untracked(|s| s.as_ref().map(|s| s.page().key))
@@ -247,7 +247,7 @@ fn show_playlist(ui: Ui, id: i64, show: bool) {
         return;
     };
     policy.enabled = show;
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         if let Err(e) = crate::data::set_policy(&crate::runtime(), id, policy).await {
             log::warn!("iptv settings: the store refused a playlist's check box: {e}");
             notify(tr(
@@ -276,7 +276,7 @@ fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
     let settings = crate::settings::get();
     f(&Ctx {
         settings: &settings,
-        offer: &crate::settings::offer_now,
+        offer: &crate::settings_offer::offer_now,
     })
 }
 
@@ -301,12 +301,12 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
             if (key.starts_with("parental.")
                 || crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
                     == "blocked_content_and_settings")
-                && (!crate::runtime().parental_has_pin()
-                    || !crate::runtime().parental_settings_allowed())
+                && (!crate::runtime_owner::runtime().parental_has_pin()
+                    || !crate::runtime_owner::runtime().parental_settings_allowed())
             {
-                crate::parental_view::protected_settings(ui, move || store(ui, key, value));
+                crate::parental_view::protected_settings(ui, move || store(key, value));
             } else {
-                store(ui, key, value);
+                store(key, value);
             }
         }
         // Playlist rows act on the settings as the commands do: behind the
@@ -327,8 +327,8 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
 }
 
 /// Stores `value` for `key`; a new playlist order reaches the lists.
-fn store(ui: Ui, key: &'static str, value: Value) {
-    match crate::settings::set(ui, key, value) {
+fn store(key: &'static str, value: Value) {
+    match crate::settings::set(key, value) {
         Err(e) => notify_setting_error(e),
         Ok(_) if key == iptv_settings::keys::PLAYLIST_SORT.as_str() => {
             crate::data::order_changed(&crate::runtime());
@@ -351,7 +351,7 @@ fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
 }
 
 pub(crate) fn notify_setting_error(error: crate::settings::SaveError) {
-    use crate::runtime::settings::SaveFailure;
+    use crate::runtime::model::SaveFailure;
     match error {
         crate::settings::SaveError::ParentalLocked => {
             notify(tr("Unlock parental controls before changing settings"))
@@ -371,12 +371,12 @@ pub(crate) fn refresh(ui: Ui) {
     ui.app.settings.update(|v| *v += 1);
 }
 
-/// Runs a command (`settings::COMMANDS`).
+/// Runs a command (`settings_offer::COMMANDS`).
 fn run(ui: Ui, key: &'static str) {
     if key != "parental.change_pin"
         && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
             == "blocked_content_and_settings"
-        && !crate::runtime().parental_settings_allowed()
+        && !crate::runtime_owner::runtime().parental_settings_allowed()
     {
         crate::parental_view::protected_settings(ui, move || run(ui, key));
         return;
@@ -384,12 +384,12 @@ fn run(ui: Ui, key: &'static str) {
     match key {
         "history.clear" => {
             crate::player::watch_time::reset(ui);
-            let owner = crate::runtime();
+            let owner = crate::runtime_owner::runtime();
             let saved = owner.clear_watch_history();
             ui.player
                 .history
                 .set(iptv_presentation::playback::ChannelHistory::default());
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if saved.await {
                     crate::lists::favorites_changed(ui);
                     owner.refresh_watch_order();
@@ -402,7 +402,7 @@ fn run(ui: Ui, key: &'static str) {
         "parental.change_pin" => crate::parental_view::change_pin(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
-            crate::data::spawn_in_app(async move {
+            crate::tasks::spawn_in_app(async move {
                 if !opened.await {
                     notify(PRIVACY_POLICY_URL);
                 }
@@ -415,19 +415,21 @@ fn run(ui: Ui, key: &'static str) {
         ),
         "general.restore" => crate::backup::request_restore(ui),
         "epg.update_now" => {
-            if stored::update_now(&crate::runtime(), move || refresh(ui)) {
+            if stored::update_now(&crate::runtime_owner::runtime(), move || refresh(ui)) {
                 refresh(ui);
             } else {
                 notify(tr("This playlist has no guide source switched on"));
             }
         }
         // The combined view chooses a playlist before opening its Guide data.
-        "epg.manage_sources" | "epg.add_source" => match crate::runtime().shown_source() {
-            Some(playlist) => crate::epg_sources_view::open(ui, playlist),
-            None => crate::playlists_view::open(ui),
-        },
+        "epg.manage_sources" | "epg.add_source" => {
+            match crate::runtime_owner::runtime().shown_source() {
+                Some(playlist) => crate::epg_sources_view::open(ui, playlist),
+                None => crate::playlists_view::open(ui),
+            }
+        }
         "epg.clear" => {
-            let cleared = stored::clear(&crate::runtime(), move |deleted| {
+            let cleared = stored::clear(&crate::runtime_owner::runtime(), move |deleted| {
                 notify(if deleted {
                     tr("Guide data deleted")
                 } else {
@@ -477,7 +479,7 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 fn status(settings: &Settings, row: &Row) -> Status {
     Ctx {
         settings,
-        offer: &crate::settings::offer_now,
+        offer: &crate::settings_offer::offer_now,
     }
     .status(row)
 }
@@ -524,10 +526,10 @@ fn lit_page(page: &Page) -> bool {
 /// What a command row shows on its right.
 fn command_value(key: &str) -> String {
     match key {
-        "general.restore" if crate::runtime().restore_is_pending() => {
+        "general.restore" if crate::runtime_owner::runtime().restore_is_pending() => {
             tr("Scheduled for next launch").to_owned()
         }
-        "epg.update_now" => match crate::runtime().guide_status() {
+        "epg.update_now" => match crate::runtime_owner::runtime().guide_status() {
             GuideStatus::NoSource => tr("No playlist").to_owned(),
             GuideStatus::Updating => tr("Updating…").to_owned(),
             GuideStatus::Empty => tr("Not downloaded").to_owned(),
@@ -563,13 +565,13 @@ fn command_value(key: &str) -> String {
 /// The "Guide sources" row's value: how many, switched on, and failed at
 /// their last download.
 fn sources_value() -> String {
-    let sources = crate::runtime().shown_sources();
+    let sources = crate::runtime_owner::runtime().shown_sources();
     if sources.is_empty() {
         return tr("No enabled playlist").to_owned();
     }
     let lines: Vec<_> = sources
         .into_iter()
-        .flat_map(|source| crate::runtime().source_lines(source))
+        .flat_map(|source| crate::runtime_owner::runtime().source_lines(source))
         .collect();
     let on = lines.iter().filter(|l| l.source.enabled).count();
     let failed = lines
@@ -596,12 +598,12 @@ fn sources_value() -> String {
 
 /// A past time as the guide writes it (`14:05`, `Tue 10 · 14:05`).
 fn time_label(unix: i64) -> String {
-    crate::time::label(unix, crate::time::wall_unix())
+    crate::clock::label(unix, crate::clock::wall_unix())
 }
 
 /// The runtime reports publication semantics; the shell chooses the wording
 /// in the current interface language, including changes made since the save.
-pub(crate) fn save_failed(failure: crate::runtime::settings::SaveFailure) {
+pub(crate) fn save_failed(failure: crate::runtime::model::SaveFailure) {
     notify(words::save_failure(failure));
 }
 
@@ -644,7 +646,7 @@ mod tests {
             page,
             &Ctx {
                 settings,
-                offer: &crate::settings::offer_now,
+                offer: &crate::settings_offer::offer_now,
             },
         )
         .into_iter()
@@ -692,7 +694,7 @@ mod tests {
     #[test]
     fn no_wired_setting_is_switched_off_by_another() {
         use iptv_settings::schema::Effect as DependencyEffect;
-        for key in crate::settings::WIRED {
+        for key in crate::settings_offer::WIRED {
             let s = catalog::setting(key).unwrap();
             assert!(
                 s.depends

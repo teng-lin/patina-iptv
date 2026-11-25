@@ -53,7 +53,7 @@ fn state<T>(ui: Ui, f: impl FnOnce(&ChannelPicker) -> T) -> Option<T> {
 }
 
 pub fn open(ui: Ui) {
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     let group = ListId::of(ui.list.with_untracked(|l| l.entry()), &*catalog);
     let channel = crate::multiview::pick_from(ui).and_then(|c| catalog.channel_key(c));
     ui.channel_picker.set(Some(Screen {
@@ -87,7 +87,7 @@ fn refresh(ui: Ui) {
 /// Channel indices remain those of the shared catalog, so selecting a row
 /// still routes playback to its current source and stream.
 fn refresh_catalog(ui: Ui) {
-    let current = crate::schedule();
+    let current = crate::runtime_owner::schedule();
     let previous = catalog(ui);
     let next: Rc<dyn Schedule> = match (combined(&*current), combined(&*previous)) {
         (Some(current), Some(previous)) => {
@@ -112,7 +112,7 @@ fn type_query(ui: Ui, query: &str) {
 
 fn choose(ui: Ui, row: usize) {
     let key = state(ui, |p| p.channels().get(row).map(|c| c.key.clone())).flatten();
-    if let Some(channel) = key.and_then(|key| crate::schedule().find_channel(&key)) {
+    if let Some(channel) = key.and_then(|key| crate::runtime_owner::schedule().find_channel(&key)) {
         update(ui, |p| p.focus_row(row));
         if crate::multiview::picked(ui, channel) {
             close(ui);

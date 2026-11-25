@@ -68,13 +68,13 @@ pub(crate) fn notice_layer() -> impl IntoElement {
 
 fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = computed(move || {
-        let settings = crate::settings::read(ui);
-        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        let settings = crate::settings_wiring::read(ui);
+        // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.pip.with(|p| p.supported);
         state(ui, |s| {
             s.rows(&Ctx {
                 settings: &settings,
-                offer: &crate::settings::offer_now,
+                offer: &crate::settings_offer::offer_now,
             })
         })
         .unwrap_or_default()
@@ -92,10 +92,10 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
     // only when they change, not when keys or touch are used, so a screen
     // reader's place in it holds.
     let shown = computed(move || {
-        let settings = crate::settings::read(ui);
+        let settings = crate::settings_wiring::read(ui);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings::offer_now,
+            offer: &crate::settings_offer::offer_now,
         };
         PAGES
             .iter()
@@ -252,7 +252,7 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
             .child(
                 list_rows::name(size, move || page().map_or("", |p| words::page(p.key)))
                     .text_color(move || {
-                        crate::settings::read(ui);
+                        crate::settings_wiring::read(ui);
                         match mark() {
                             Mark::Focused => Mark::Focused.text(),
                             Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
@@ -310,7 +310,7 @@ pub(super) fn swatch_color(ty: &ValueType, variant: &str) -> Option<u32> {
     let ValueType::Color { palette, .. } = ty else {
         return None;
     };
-    let key = |name: &str| crate::settings::palette_key(name);
+    let key = |name: &str| crate::theme::palette_key(name);
     match palette.family {
         "accent" => crate::theme::ACCENTS
             .iter()
@@ -333,7 +333,7 @@ fn row_view(
     let row = move || rows.with(|r| r.get(at.index()).copied());
     let heading = move || matches!(row(), Some(Row::Heading { .. }));
     let lit = move || {
-        let settings = crate::settings::read(ui);
+        let settings = crate::settings_wiring::read(ui);
         row().is_some_and(|r| matches!(status(&settings, &r), Status::Active | Status::ReadOnly))
     };
     let focused = move || ui.keys_shown() && focused_index.get() == Some(at.index());
@@ -358,12 +358,12 @@ fn row_view(
         Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
             .map(|p| crate::playlists_view::summary(ui, &p).0)
             .unwrap_or_default(),
-        Some(r) => note(&crate::settings::read(ui), &r),
+        Some(r) => note(&crate::settings_wiring::read(ui), &r),
         None => String::new(),
     };
     let note = move || note_of(row());
     let current = move || {
-        let settings = crate::settings::read(ui);
+        let settings = crate::settings_wiring::read(ui);
         match row() {
             Some(Row::Setting(s)) => {
                 let value = settings.get(s.key).unwrap_or_else(|_| s.default_value());
@@ -406,7 +406,7 @@ fn row_view(
         })
         .accessibility_state(move || {
             let checked = |on: bool| Some(if on { Checked::True } else { Checked::False });
-            let settings = crate::settings::read(ui);
+            let settings = crate::settings_wiring::read(ui);
             match row() {
                 None | Some(Row::Heading { .. }) => AccessibilityState::default(),
                 Some(Row::Playlist(p)) => AccessibilityState {
@@ -539,12 +539,12 @@ fn check_box(
 
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {
     let description = move || {
-        let settings = crate::settings::read(ui);
-        // `player.pip_on_leave` follows the host's report (`settings::offer`).
+        let settings = crate::settings_wiring::read(ui);
+        // `player.pip_on_leave` follows the host's report (`settings_offer::offer`).
         ui.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings::offer_now,
+            offer: &crate::settings_offer::offer_now,
         };
         state(ui, |s| match s.focused_row(&ctx) {
             Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),

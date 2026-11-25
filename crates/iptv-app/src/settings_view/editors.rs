@@ -364,7 +364,7 @@ fn text_sheet(ui: Ui) -> View {
 fn question(key: &str) -> &'static str {
     match key {
         // Its review keeps, cancels or (with a picker) replaces it.
-        "general.restore" if crate::runtime().restore_is_pending() => {
+        "general.restore" if crate::runtime_owner::runtime().restore_is_pending() => {
             tr("A restore is already scheduled. Next, choose what happens to it.")
         }
         "general.restore" => tr(

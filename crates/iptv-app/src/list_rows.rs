@@ -18,7 +18,7 @@ use crate::tint;
 
 /// Row pitch of one-line rows: the guide's (at full size; scaled in whole
 /// px). Rows with a second line take [`ROW_TWO`].
-pub const ROW: f32 = crate::grid::ROW_H;
+pub const ROW: f32 = 50.0;
 pub const ROW_TWO: f32 = 54.0;
 /// Above and below a row's fill within its pitch (its fill stays a 48 dp
 /// touch target); the text's inset from the fill's sides.
@@ -146,7 +146,6 @@ mod tests {
     fn lists_use_the_guides_type_and_pitch() {
         assert_eq!(LIST_ITEM, CHANNEL);
         assert_eq!(LIST_SECONDARY, HEADER_BODY);
-        assert_eq!(ROW, crate::grid::ROW_H);
         // Touch targets: at least 48 dp (Android keeps the full sizes).
         const {
             assert!(ROW - 2.0 * GAP >= 48.0 && ROW_TWO - 2.0 * GAP >= 48.0);

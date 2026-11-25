@@ -1877,6 +1877,7 @@ struct Provider {
     failing_movies: bool,
     movies: bool,
     holding: bool,
+    renamed_live: bool,
     requests: usize,
 }
 
@@ -1933,11 +1934,20 @@ fn provider_server(provider: Arc<Mutex<Provider>>) -> String {
                         r#"[{"category_id":"1","category_name":"Generated group","parent_id":0}]"#
                             .to_owned()
                     }
-                    "get_live_streams" => concat!(
-                        r#"[{"num":1,"name":"Generated live","stream_type":"live","#,
-                        r#""stream_id":1,"category_id":"1","tv_archive":0}]"#
-                    )
-                    .to_owned(),
+                    "get_live_streams" => {
+                        let name = if answer.renamed_live {
+                            "Generated refreshed live"
+                        } else {
+                            "Generated live"
+                        };
+                        format!(
+                            concat!(
+                                r#"[{{"num":1,"name":"{name}","stream_type":"live","#,
+                                r#""stream_id":1,"category_id":"1","tv_archive":0}}]"#
+                            ),
+                            name = name,
+                        )
+                    }
                     "get_vod_streams" if answer.movies => concat!(
                         r#"[{"stream_id":10,"name":"Generated Aurora","added":"1700000100","#,
                         r#""container_extension":"mp4"}]"#
@@ -2034,6 +2044,55 @@ fn provider(failing: bool, movies: bool) -> Arc<Mutex<Provider>> {
         movies,
         ..Default::default()
     }))
+}
+
+#[test]
+fn refreshing_the_catalog_keeps_focus_on_the_vod_rail_item() {
+    use crate::cov_data::{IMPORT, act, rail, to_guide, until};
+
+    let Some(home) = isolated!() else { return };
+    let provider = provider(false, true);
+    provider.lock().unwrap().renamed_live = true;
+    let base = provider_server(provider);
+    let (path, source) = provider_playlist(&home, &base, true);
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let live = iptv_providers::m3u::parse_m3u(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"Generated group\",Generated live\nhttps://example.test/live.ts\n",
+    );
+    let movies = iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(
+        r#"[{"stream_id":10,"name":"Generated Aurora","added":"1700000100","container_extension":"mp4"}]"#,
+    ))
+    .unwrap();
+    store
+        .replace_catalog(
+            source,
+            &live.groups,
+            &live.channels.items,
+            &movies.items,
+            &[],
+        )
+        .unwrap();
+    drop(store);
+    let mut app = Headless::start(engine(nsh_core::platform::Idiom::Desktop)).unwrap();
+    step(app.wait_for_within("text:Generated live", IMPORT));
+    step(app.open_guide_groups());
+    step(app.wait_for("id:navigation-rail >> label:Recently added"));
+    iptv_app::hold_reports(true);
+    rail(&mut app, "Playlists");
+    act(&mut app, "Generated provider", "Refresh now");
+    until(&mut app, "refresh report held", IMPORT, |_| {
+        iptv_app::reports_waiting() > 0
+    });
+    to_guide(&mut app);
+    step(app.open_guide_groups());
+    step(app.press_key("left"));
+    for _ in 0..5 {
+        step(app.press_key("down"));
+    }
+    iptv_app::hold_reports(false);
+    step(app.wait_for_within("text:Generated refreshed live", IMPORT));
+    step(app.press_key("enter"));
+    step(app.wait_for_within("text:/^Generated Aurora · Film/", IMPORT));
 }
 
 const EMPTY_MOVIES: &str = "text:No movies found. Refresh the playlist to look for new ones.";

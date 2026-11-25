@@ -28,7 +28,7 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
     if crate::on_demand::active(ui) || ui.playing.get().is_none() {
         return None;
     }
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     // A zap waiting to tune: the channel it goes to, on air now.
     let (channel, program) = match crate::browse_playback::pending_channel(ui) {
         Some(channel) => (
