@@ -104,11 +104,9 @@ impl FormFactor {
 /// counted: these are what keyboard and remote features need.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Input {
-    /// A hardware keyboard is attached and not hidden (Android's
-    /// `Configuration.keyboard`, a desktop's).
+    /// A hardware keyboard is attached and available.
     pub keyboard: bool,
-    /// A D-pad is attached and not hidden: a TV remote or a game pad's
-    /// (Android's `Configuration.navigation`, a browser TV's remote).
+    /// A D-pad, from a remote or game controller, is attached and available.
     pub dpad: bool,
 }
 

@@ -64,9 +64,10 @@ internal class DeviceComponent(
     private val main = Handler(Looper.getMainLooper())
     private val inputs = context.context.getSystemService(InputManager::class.java)
     private val displays = context.context.getSystemService(DisplayManager::class.java)
-    private val refreshDevice = Runnable {
-        if (observer.isAttachedToWindow) report(observer.resources.configuration)
-    }
+    private val refreshDevice =
+        Runnable {
+            if (observer.isAttachedToWindow) report(observer.resources.configuration)
+        }
     private val inputChanges =
         object : InputManager.InputDeviceListener {
             override fun onInputDeviceAdded(id: Int) = refreshDeviceSoon()
@@ -295,7 +296,10 @@ internal object DeviceSignals {
 
     fun phone(displaySmallestDp: Int): Boolean = displaySmallestDp in 1 until PHONE_MAX_DP
 
-    data class Input(val keyboard: Boolean, val dpad: Boolean)
+    data class Input(
+        val keyboard: Boolean,
+        val dpad: Boolean,
+    )
 
     data class KeyDevice(
         val external: Boolean,
@@ -309,19 +313,21 @@ internal object DeviceSignals {
     ): Input {
         // The enumerated devices are current even while Configuration still
         // describes the keyboard or controller that was just disconnected.
-        val devices = manager?.inputDeviceIds?.asIterable()?.mapNotNull { id ->
-            val device = manager.getInputDevice(id) ?: return@mapNotNull null
-            if (device.isVirtual || (Build.VERSION.SDK_INT >= 27 && !device.isEnabled)) {
-                return@mapNotNull null
+        val devices =
+            manager?.inputDeviceIds?.asIterable()?.mapNotNull { id ->
+                val device = manager.getInputDevice(id) ?: return@mapNotNull null
+                if (device.isVirtual || (Build.VERSION.SDK_INT >= 27 && !device.isEnabled)) {
+                    return@mapNotNull null
+                }
+                val hats =
+                    device.getMotionRange(MotionEvent.AXIS_HAT_X) != null &&
+                        device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null
+                KeyDevice(
+                    external = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && device.isExternal,
+                    keyboard = device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC,
+                    dpad = dpadSource(device.sources, hats),
+                )
             }
-            val hats = device.getMotionRange(MotionEvent.AXIS_HAT_X) != null &&
-                device.getMotionRange(MotionEvent.AXIS_HAT_Y) != null
-            KeyDevice(
-                external = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && device.isExternal,
-                keyboard = device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC,
-                dpad = dpadSource(device.sources, hats),
-            )
-        }
         return if (devices == null) {
             Input(
                 keyboard(config.keyboard, config.hardKeyboardHidden),
@@ -332,13 +338,20 @@ internal object DeviceSignals {
         }
     }
 
-    fun dpadSource(sources: Int, hats: Boolean): Boolean {
+    fun dpadSource(
+        sources: Int,
+        hats: Boolean,
+    ): Boolean {
         val supports = { source: Int -> (sources and source) == source }
         return supports(InputDevice.SOURCE_DPAD) ||
             (hats && (supports(InputDevice.SOURCE_GAMEPAD) || supports(InputDevice.SOURCE_JOYSTICK)))
     }
 
-    fun attachedKeys(devices: List<KeyDevice>, keyboardHidden: Int, navigationHidden: Int): Input =
+    fun attachedKeys(
+        devices: List<KeyDevice>,
+        keyboardHidden: Int,
+        navigationHidden: Int,
+    ): Input =
         Input(
             keyboard = devices.any { it.keyboard && (it.external || keyboardHidden != Configuration.HARDKEYBOARDHIDDEN_YES) },
             dpad = devices.any { it.dpad && (it.external || navigationHidden != Configuration.NAVIGATIONHIDDEN_YES) },
