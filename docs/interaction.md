@@ -305,7 +305,16 @@ visible entry point for touch and pointer users.
 - **Show favorites only** filters that group. **Guide time offset** corrects
   the times in a provider group in 15-minute steps. Existing recordings keep
   their accepted capture windows. **Use external player** applies to explicit
-  channel choices on Android and Linux. Android offers installed video apps.
+  channel choices on Android and Linux, including both choosing an archived
+  program and its **Play from the beginning** action. Both entries honor the
+  same group preference: the menu action chooses a starting position, rather
+  than a different player. The captured group, channel and program occurrence
+  are rechecked after PIN entry and before a handoff; changing focus never
+  substitutes another target. A removed or changed target is rejected.
+  A full-screen menu can restart the playing channel even when the guide
+  last browsed another group; that unrelated group cannot authorize an
+  external-player handoff.
+  Android offers installed video apps.
   Linux tries VLC, then mpv. The option appears only while such a player is
   installed, or while it is on, so it can be turned off. A choice made after
   the player was removed plays in Patina and offers **Turn off external

@@ -121,6 +121,9 @@ pub struct Menu {
     pub target: Target,
     pub list: ListId,
     pub group_offset: Option<i32>,
+    /// The program menu was opened for the full-screen player's channel.
+    /// That target can be outside the guide list the viewer last browsed.
+    pub playing_context: bool,
 }
 
 impl Menu {
@@ -133,6 +136,7 @@ impl Menu {
             target,
             list,
             group_offset: None,
+            playing_context: false,
         }
     }
 
