@@ -4,7 +4,7 @@ This pass began on November 24, 2026 from `origin/master` `0c76709d`, with
 NSH pinned to `413cfb65bf87a7bd9937f223fdc56896d8a718c8`. It records partial
 progress on [#222](https://github.com/teng-lin/patina-iptv/issues/222), not
 authorization to submit a first release. The [privacy evidence](store-privacy.md)
-and [optimized Android validation](https://github.com/teng-lin/patina-iptv/issues/220) have
+and [optimized Android validation](android-release-220.md) have
 separate owners. All fixture journeys use generated playlists and EPG, local
 mock servers and authorized demo media. No store account information, signing
 identities, provisioning profiles or provider data belongs in public evidence.
@@ -35,20 +35,64 @@ merged release manifest independently confirmed:
 
 The existing `HostPolicyTest` harness covers the two declarations, matching
 lifecycle attributes, device launcher selection and stale-shortcut redirect
-selection. Notification wiring and lifecycle behavior still need device
-validation. A source/merged
-manifest check does not prove the manifest inside a signed AAB or handheld PiP
-playback. The #220 lane owns those final-artifact and emulator checks against
-the combined candidate. Record its artifact SHA and results here after that run.
+selection. Source and merged-manifest checks do not establish the manifest in
+a signed AAB or prove playback PiP on the changed host.
+
+### Android artifact snapshot — November 25, 2026
+
+The #220 lane keeps these distinct artifacts and results. Later device results
+belong in the PR evidence, with the artifact identity, rather than being inferred
+from this snapshot.
+
+| Artifact | Verified observations and limits |
+| --- | --- |
+| Historical signed v0.1.8 ARM64 APK, source `469f3683505abce9ab50d8aaa651448510a29865`, NSH `fd847c95917edbac95368ae28b7c19fe3ee01470` | APK SHA-256 `8d23cad513d9a4cf68f070eddefcc66d40c3ee9b0b6b1babb24d35681c91428a`. Signature and corresponding R8 mapping were verified by #220. Normal tablet and TV resolved launches passed. Tablet normal file import of a generated one-channel playlist and decoded, advancing authorized demo video passed. Tablet PiP entered through both the native window key and visible control; its visible playback counter advanced, the task was pinned, and normal return retained the process. The emulator had no audio output, so this does not establish audible playback. Remaining optimized checklist items stay in #220's evidence. |
+| Changed host at `ea183cac5b14ee2d23816227383741feb2d65fe1`, NSH `413cfb65bf87a7bd9937f223fdc56896d8a718c8` | The combined validation tree was still building the exact-pin Android native runtime at this snapshot. No finished changed-host APK/AAB or emulator pass is claimed. It must verify normal tablet/TV launch, stale/alternate component redirects, one canonical resumed activity, no extra Rust root, handheld playback PiP and notification return. A local debug-signed optimized test artifact must remain distinct from a distribution-signed AAB. |
+
+The historical AAB SHA-256 is
+`59d127ccc8570a84c606eef1d6f9b9876cbf2d1fcbf13e3845fe813a727400cb`.
+It predates the Leanback change. The authorized synthetic video comes from
+[Apple's streaming examples](https://developer.apple.com/streaming/examples/);
+no provider data is used. Emulator observations do not replace physical-device
+acceptance.
 
 ## iPad build and artifact audit
 
-The machine reports Xcode 27.2 (27B52), iPhoneOS SDK 27.2. Installed tooling alone
-does not prove Apple currently accepts that toolchain for submission. No
-pre-existing `Patina.app` or IPA was found in the repository's `target` or local
-Xcode Archives. A device-target packaging attempt uses the exact NSH pin and
-checksum-verified MPVKit inputs without signing credentials. Its outcome and
-finished-bundle inventory will be recorded below.
+The local unsigned device-target bundle was built on November 25, 2026 through
+`tools/ci/prepare-ios.sh`, from source
+`ea183cac5b14ee2d23816227383741feb2d65fe1`, exact NSH
+`413cfb65bf87a7bd9937f223fdc56896d8a718c8`, Rust 1.99.1 and checksum-verified
+MPVKit inputs. The app and iOS runner builds passed. Its executable SHA-256 is
+`bb593b151088f51ff77c931e6ee9e87f0deee4db5cc1860ed2af8ce15860c052`.
+The coordinator independently reran the redacted inspector and confirmed it.
+No pre-existing Patina iPad bundle/IPA was available locally or among the public
+v0.1.8 release assets.
+
+The installed toolchain is Xcode 27.2 (27B52). The bundle's `DTSDKName` is
+`iphoneos27.2`, its `DTXcode` is `2720`, and Mach-O build metadata reports iOS,
+minimum 15.0, SDK 27.2. Apple's October 30, 2026
+[App Store Connect release notes](https://developer.apple.com/help/app-store-connect/release-notes/)
+confirm acceptance of Xcode 27.2 and iOS/iPadOS 27.2 SDK uploads. This verifies
+public toolchain acceptance; actual signed upload/account validation remains
+unperformed.
+
+| Finished local bundle inventory | Observed result |
+| --- | --- |
+| Identity/version | `com.hantekllc.iptvrs`, version `0.1.8`, build `1`, `iPhoneOS` |
+| Device/layout | iPad only (`UIDeviceFamily: [2]`), four orientations, minimum iOS 15.0 |
+| Signing | Signature absent; strict verification false; no embedded provisioning profile |
+| Export compliance | `ITSAppUsesNonExemptEncryption` absent |
+| Framework/privacy resources | No embedded framework bundles and no `PrivacyInfo.xcprivacy` files; this does not mean statically linked libraries are absent |
+| Privacy link | Exact public privacy-policy URL found in executable bytes; no iPad UI navigation or browser opening was exercised |
+
+The initial normal preparation built the bundle but exited 2 in notices:
+local cargo-deny 0.19.4 rejected the repository's expected argument layout.
+The repository-pinned cargo-deny 0.20.2 was fetched into the ignored tool
+directory with its committed SHA-256 verified. Notices generation, all native
+runner dependency-policy audits, MPVKit notices and bundle notices validation
+then passed. A cached complete normal preparation with the pinned tool also
+passed (exit 0). This preserves the initial failure rather than describing it
+as a straight first-attempt pass.
 
 Run the redacted inventory against a finished bundle:
 
@@ -62,40 +106,60 @@ certificate identities and profile/entitlement contents. Run it again on the
 **signed final** bundle; a local unsigned/ad-hoc result cannot prove distribution
 signing, provisioning, device installation or App Store validation.
 
-The source config targets iPad only (`UIDeviceFamily: [2]`), permits all four
-iPad orientations, and supplies a local-network usage message. It allows HTTP
-loads, including media, for viewer-configured sources. It does not declare
-`ITSAppUsesNonExemptEncryption`. Do not infer a `false` value from the use of
-HTTPS: the shipped inputs include Rust TLS, SQLCipher and MPVKit's OpenSSL and
-GnuTLS libraries. The owner must classify the app and linked dependencies and
-record the matching console answer/documentation. Apple's
+The finished plist supplies a local-network usage message and allows arbitrary
+HTTP and media loads for viewer-configured sources. Do not infer a `false`
+export-compliance answer from HTTPS. The actual executable contains SQLCipher
+key API and Rustls symbols; MPVKit build inputs also include OpenSSL/GnuTLS
+libraries. The input inventory does not establish which entire libraries
+survived linking. The owner must classify the app and linked cryptography and
+record the matching plist/console answer and any required documents. Apple's
 [encryption guidance](https://developer.apple.com/documentation/security/complying-with-encryption-export-regulations)
-explicitly includes linked third-party libraries in that decision.
+includes linked third-party libraries in that decision.
 
-Review required-reason APIs in app and dependency code against the finished
-executable and resource inventory. A missing manifest is a pending audit
-finding, not proof that no declaration is required. Apple's
-[privacy manifest guidance](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)
-and [required-reason rules](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api)
-require accurate declarations for applicable APIs, including SDK use. App
-Privacy console answers are tracked by #221; they do not replace manifests.
+The finished executable imports `stat`, `fstat`, `statvfs`, `statfs` and
+`mach_absolute_time`. It contains `NSUserDefaults`, `standardUserDefaults` and
+`AppleTemperatureUnit` strings. These are binary audit leads, not evidence
+that each path executed in a device journey. The pinned source provides
+specific follow-up work:
 
-The pinned NSH iOS adapter reads the system's `AppleTemperatureUnit` through
-`NSUserDefaults` in `nsh-platform-ios/src/surface.rs`. This needs an API or
-approved-reason review: Apple's `CA92.1` reason for app-private defaults does
-not authorize reading a system-written setting. The recording runtime checks
-available space with `statvfs`, and file storage uses Rust file-metadata APIs.
-These provide concrete disk-space and file-metadata audit leads. None of the
-downloaded MPVKit XCFramework inputs contains `PrivacyInfo.xcprivacy`. Do not
-substitute a blanket app-private-defaults declaration for this dependency
-review. Consult Apple's current
-[API category and reason list](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+- The NSH iOS adapter reads the system-written `AppleTemperatureUnit` through
+  `NSUserDefaults` in `nsh-platform-ios/src/surface.rs`. Classify this use under
+  an applicable approved reason, or remove/replace that dependency behavior.
+  Apple's app-private-defaults reason `CA92.1` does not cover system-written
+  information; do not add a blanket app-container reason.
+- NSH's installed Apple logger uses `fstat(stderr)` and `stat("/dev/null")` in
+  `nsh-platform-apple/src/unified_log.rs` to inspect file mode/device identity
+  for log routing. Review those exact purposes rather than assuming they read
+  file timestamps. The recording runtime uses `statvfs` for available space;
+  storage also uses Rust file metadata. Classify each applicable file/disk
+  API use and dependency declaration against its actual purpose.
+- Trace the finished binary's boot-time API import to its actual callers and
+  purpose. The similarly named iOS synthetic-input code is development-only;
+  it does not establish the shipping call path.
+
+No downloaded MPVKit XCFramework input contains `PrivacyInfo.xcprivacy`, and
+none was found in the finished app. Complete the app/dependency audit and bundle
+accurate privacy declarations before claiming submission readiness. Missing
+manifests are a concrete remediation item; no Apple validation or rejection was
+observed. Use Apple's
+[privacy manifest guidance](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files),
+[required-reason rules](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api)
+and [API category/reason list](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+App Privacy console answers tracked by #221 do not replace these manifests.
+
+Read-only local discovery found zero valid signing identities, zero profiles in
+the standard provisioning directories and zero connected Apple devices. This
+records unavailable local signing/device resources, without inferring Developer
+Program membership from them. The public privacy policy was deployed from
+merged #221 and independently verified HTTP 200 with bytes matching the source;
+the finished iPad executable includes its URL. Actual in-app opening and store
+listing fields remain unverified.
 
 ## Emulator and physical-device evidence
 
 | Evidence class | Result in this lane |
 | --- | --- |
-| Android tablet/TV emulator | Pending the optimized combined-artifact run owned by #220; no pass inferred from host tests. |
+| Android tablet/TV emulator | Historical signed baseline observations are separated above. The changed-host combined-artifact run remains pending; no pass inferred from host tests. |
 | Physical Android tablet/TV | No connected physical device was available in the team inventory. Required changed-host acceptance remains pending before merge. |
 | iPad simulator | No available simulator devices. `simctl` attempted runtime installation and reported authorization required; no playback or privacy-link journey verified. |
 | Signed physical iPad | No signed candidate installation or playback performed. Owner must install the distribution-appropriate candidate and verify normal launch, source import, playback, recording where available, background/return and Settings → About → Privacy policy. |
@@ -135,6 +199,8 @@ integration tests and 2 doctests), and both portable crates built for
 `wasm32-unknown-unknown`. The redacted bundle-inventory and provisioning helper
 suite passed all 8 tests. The pinned native `cargo build -p iptv-app`, Android
 host tests after the final Kotlin formatting changes, pinned ktlint 1.3.1 and
-targeted Ruff 0.11.13 checks also passed. The final bundle audit and review/CI
-results are recorded as they complete; unchecked store/device criteria keep
-this issue open (`Refs #222`).
+targeted Ruff 0.11.13 checks also passed. The local unsigned bundle audit and
+normal preparation passed as described above. Native Codex and Antigravity reviews were reconciled, including launcher
+lifecycle and inventory redaction/error cases. Claude Code CLI review could not
+run because authentication was unavailable. Final-head CI is tracked in the PR;
+unchecked store/device criteria keep this issue open (`Refs #222`).

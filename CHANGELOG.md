@@ -16,7 +16,6 @@ is below 1.0, a minor release may change behavior.
 - Give Android TV its own launcher activity without picture in picture,
   preserving handheld picture in picture and notification return behavior.
 
-
 - Cancel a channel swipe when a second finger lands on another player control.
 
 - Follow iPad hardware keyboard attachment and Switch Control at runtime.

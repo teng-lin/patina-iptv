@@ -16,6 +16,7 @@ The [optimized Android evidence record](android-release-220.md) distinguishes
 checks of public signed artifacts from candidate, emulator, physical-device
 and Play Console acceptance. Follow its remaining checklist for the exact
 artifact intended for submission.
+
 The [first-submission readiness record](release-readiness-222.md) separates
 built-bundle checks from physical-device and store-console acceptance. The
 [mobile privacy worksheet](store-privacy.md) tracks the disclosures and policy.
