@@ -581,15 +581,24 @@ before_refresh=$(resume_identity)
 [ -n "$before_refresh" ] || fail "no persisted channel before refresh"
 mark
 # From the confirmed Guide pane: Tab -> Groups, Left -> rail/Search.
-# Down clamps at Settings; Up is Playlists even when VOD rows are present.
+# Down clamps at Settings, which holds the playlists (#366).
 keys KEYCODE_TAB KEYCODE_DPAD_LEFT
 expect 'key=left .*ctx=Groups' 10
 keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN \
   KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN
-keys KEYCODE_DPAD_UP KEYCODE_DPAD_CENTER
+keys KEYCODE_DPAD_CENTER
+expect 'iptv settings: open' 10
 pause 1
-# The shown playlist is focused. Its first action is Show, then Refresh.
-keys KEYCODE_DPAD_CENTER KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+# The pages: Up clamps at General, Down is Playlists, Right enters its rows
+# on the one playlist; Menu opens that playlist's actions.
+keys KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP \
+  KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP \
+  KEYCODE_DPAD_UP KEYCODE_DPAD_UP
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_RIGHT KEYCODE_MENU
+expect "iptv playlists: Actions of $source_id([^0-9]|$)" 10
+pause 1
+# Its first action is Show, then Refresh (one playlist: no Show all).
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 expect "iptv playlists: refresh $source_id([^0-9]|$)" 10
 expect 'iptv data: refreshed ImportCounts' 180
 assert_resume "$before_refresh" "playback refresh"
@@ -597,10 +606,11 @@ assert_resume "$before_refresh" "playback refresh"
 if applog | grep -E 'iptv player 0 (open:|error)' >/dev/null; then
   fail "refresh reopened or failed the playing stream"
 fi
-# Closing the playlist screen runs as an app task. Later keys must wait
-# for that effect, rather than landing on the screen being closed.
-keys KEYCODE_BACK
-expect 'iptv playlists: close' 10
+# Refresh ends the playlist's sheet. Back leaves the rows, then closes the
+# settings: later keys must wait for that, rather than land on the screen
+# being closed.
+keys KEYCODE_BACK KEYCODE_BACK
+expect 'iptv settings: close' 10
 # Let each movement settle into its pane before sending the next.
 for _ in 1 2; do
   mark

@@ -165,6 +165,7 @@ pub fn open(ui: Ui) {
         let mut screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
         screen.set_playlists(playlist_rows());
         ui.settings_screen.set(Some(screen));
+        log::info!("iptv settings: open");
     }
 }
 
@@ -177,6 +178,9 @@ pub fn close(ui: Ui) {
         LAST.with(|l| l.set(page));
     }
     let typing = editing_text(ui);
+    if ui.settings_screen.with_untracked(Option::is_some) {
+        log::info!("iptv settings: close");
+    }
     ui.settings_screen.set(None);
     if typing {
         dismiss_keyboard();

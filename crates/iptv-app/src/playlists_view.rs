@@ -102,6 +102,7 @@ pub fn open_only(ui: Ui, id: SourceId, only: Only) {
         return;
     }
     if let Some(screen) = Screen::only(load(), id, only) {
+        log::info!("iptv playlists: {only:?} of {}", id.0);
         ui.playlists.set(Some(screen));
     }
 }
