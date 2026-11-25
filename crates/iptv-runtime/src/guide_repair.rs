@@ -482,7 +482,13 @@ impl Runtime {
                 saved,
             )
             .await;
-            canceled.keep_check(&owner, source, owner.browser_generation(), now());
+            crate::data::keep_interrupted_check(
+                &owner,
+                source,
+                owner.browser_generation(),
+                now(),
+                canceled.read,
+            );
             // Once committed, cancellation/reply loss cannot turn durable effects
             // into a reported rollback. A retry uses the same journal receipt.
             let saved = saved?;
@@ -560,7 +566,13 @@ impl Runtime {
                 saved,
             )
             .await;
-            canceled.keep_check(&owner, source, owner.browser_generation(), now());
+            crate::data::keep_interrupted_check(
+                &owner,
+                source,
+                owner.browser_generation(),
+                now(),
+                canceled.read,
+            );
             let saved = saved?;
             Ok(publication::after_commit(&owner, saved, edit, canceled.canceled).await)
         }

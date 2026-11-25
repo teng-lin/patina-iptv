@@ -289,7 +289,7 @@ fn schedule(owner: &Rc<Runtime>, commit: &Commit, after: Option<crate::library::
         owner.repairs.borrow_mut().refreshes.remove(&source);
         let finished = owner.clone();
         let operation = id.clone();
-        if !crate::data::stored::restart_repair_update(&owner, source, after, move |accepted| {
+        if !crate::data::restart_repair_update(&owner, source, after, move |accepted| {
             refresh_observed(&finished, operation, source, expected, undone, accepted);
         }) && let Some(status) = owner.repairs.borrow_mut().operations.get_mut(&id)
         {

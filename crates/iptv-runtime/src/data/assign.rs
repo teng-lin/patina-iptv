@@ -36,7 +36,7 @@ pub fn choose(
                 // The download that applies the choice is an update of its
                 // own, which starts once the canceled work has unwound.
                 Ok(None)
-                    if stored::restart_update(
+                    if super::restart_update(
                         &owner,
                         source,
                         superseded.canceled.clone(),
@@ -49,7 +49,13 @@ pub fn choose(
             };
             // A check the choice stopped comes due again shortly, unless the
             // download answers for it.
-            superseded.keep_check(&owner, source, generation, crate::time::now_unix());
+            super::keep_interrupted_check(
+                &owner,
+                source,
+                generation,
+                crate::time::now_unix(),
+                superseded.read,
+            );
             log::info!("iptv data: a channel's guide was chosen ({applied:?})");
             done(applied);
         }

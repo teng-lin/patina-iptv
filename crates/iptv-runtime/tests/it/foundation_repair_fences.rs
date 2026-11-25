@@ -548,18 +548,14 @@ fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
     );
     assert!(!failed.configuration_effective && !failed.verified_coverage);
     server.fail_guides.store(false, Ordering::SeqCst);
-    data::stored::refresh_status(owner);
+    data::refresh_guide_status(owner);
     host.until(|| !owner.source_lines(source).is_empty());
     let done = Rc::new(Cell::new(false));
     let completed = done.clone();
-    assert!(data::stored::update_source(
-        owner,
-        source,
-        move |accepted| {
-            assert!(accepted);
-            completed.set(true);
-        }
-    ));
+    assert!(data::update_source_guide(owner, source, move |accepted| {
+        assert!(accepted);
+        completed.set(true);
+    }));
     host.until(|| done.get());
     let recovered = host
         .drive(owner.verify_guide_repair(

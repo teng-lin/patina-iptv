@@ -17,8 +17,7 @@ pub use iptv_library::Playlist;
 pub(super) use crate::library::{
     ImportCompletion, Snapshot, cancel_running, import_completion, import_is_current,
     import_revision, import_revision_is_current, install, load, newest, pending_import,
-    replace_import, replace_running, reset_imports, revoke_import_handoff, running,
-    supersede_import, track_added_import, track_import,
+    replace_running, reset_imports, running, track_added_import, track_import,
 };
 pub(super) async fn refresh_cache(owner: &Rc<crate::Runtime>) -> Result<(), StoreError> {
     let snapshot = crate::library::snapshot(owner).await?;
