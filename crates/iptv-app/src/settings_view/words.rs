@@ -161,7 +161,7 @@ pub fn label(key: &str) -> &'static str {
         "playlists.update_on_start" => tr("Refresh when the app starts"),
         "playlists.manage" => tr("Manage playlists"),
         "playlists.add" => tr("Add a playlist"),
-        "playlists.reorder" => tr("Arrange playlists"),
+        "playlists.reorder" => tr("Reorder playlists"),
         "playlists.update_all" => tr("Refresh all playlists now"),
         "channels.group_sort" => tr("Group order"),
         "channels.channel_sort" => tr("Channel order"),

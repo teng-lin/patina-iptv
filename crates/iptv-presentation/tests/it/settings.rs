@@ -985,3 +985,104 @@ fn ok_after_the_focused_row_hides_only_shows_the_focus() {
     assert_eq!(screen.focus(), Some(first));
     assert!(screen.editor().is_none());
 }
+
+static PLAYLIST_PAGES: &[Page] = &[Page {
+    key: "playlists",
+    parts: &[
+        Part::Playlists,
+        Part::Offered(&[
+            "playlists.add",
+            "playlists.update_all",
+            "playlists.sort",
+            "playlists.reorder",
+        ]),
+    ],
+}];
+
+fn listed(id: i64, enabled: bool) -> iptv_presentation::settings::screen::PlaylistRow {
+    iptv_presentation::settings::screen::PlaylistRow { id, enabled }
+}
+
+#[test]
+fn the_playlists_page_lists_each_playlist_before_its_commands() {
+    use iptv_presentation::settings::screen::RowId;
+    let settings = Settings::new();
+    let c = Ctx {
+        settings: &settings,
+        offer: &everything,
+    };
+    let mut screen = Screen::opened(PLAYLIST_PAGES, "playlists", &c);
+    screen.set_playlists(vec![listed(1, true), listed(2, false)]);
+    let ids: Vec<RowId> = screen.rows(&c).iter().filter_map(Row::id).collect();
+    assert_eq!(
+        ids,
+        [
+            RowId::Playlist(1),
+            RowId::Playlist(2),
+            RowId::Key("playlists.add"),
+            RowId::Key("playlists.update_all"),
+            RowId::Key("playlists.sort"),
+            RowId::Key("playlists.reorder"),
+        ]
+    );
+    // The page is shown on its commands alone (no playlist stored yet).
+    assert!(
+        rows(&PLAYLIST_PAGES[0], &c)
+            .iter()
+            .all(|r| !matches!(r, Row::Playlist(_)))
+    );
+
+    // OK flips the check box; Menu asks for the playlist's actions.
+    assert_eq!(screen.key(Key::Right, &c), Effect::None);
+    assert_eq!(screen.focus_id(), Some(RowId::Playlist(1)));
+    assert_eq!(screen.focus(), None);
+    assert_eq!(screen.key(Key::Ok, &c), Effect::ShowPlaylist(1, false));
+    assert_eq!(screen.key(Key::Down, &c), Effect::None);
+    assert_eq!(screen.key(Key::Ok, &c), Effect::ShowPlaylist(2, true));
+    assert_eq!(screen.key(Key::Menu, &c), Effect::PlaylistActions(2));
+    // Menu on a command does nothing.
+    screen.key(Key::Down, &c);
+    assert_eq!(screen.focus(), Some("playlists.add"));
+    assert_eq!(screen.key(Key::Menu, &c), Effect::None);
+    assert_eq!(screen.key(Key::Ok, &c), Effect::Run("playlists.add"));
+
+    // Taps and long presses.
+    assert_eq!(
+        screen.tap(RowId::Playlist(1), &c),
+        Effect::ShowPlaylist(1, false)
+    );
+    assert_eq!(
+        screen.hold_row(RowId::Playlist(2), &c),
+        Effect::PlaylistActions(2)
+    );
+    assert_eq!(screen.focus_id(), Some(RowId::Playlist(2)));
+
+    // The focused playlist deleted: the one in its place takes the focus.
+    screen.set_playlists(vec![listed(1, true), listed(3, true)]);
+    assert_eq!(screen.focus_id(), Some(RowId::Playlist(3)));
+    screen.set_playlists(vec![listed(1, true)]);
+    assert_eq!(screen.focus_id(), Some(RowId::Playlist(1)));
+    screen.set_playlists(Vec::new());
+    screen.refresh(&c);
+    assert_eq!(screen.focus(), Some("playlists.add"));
+}
+
+#[test]
+fn offered_keys_leave_out_what_the_app_hides() {
+    let settings = Settings::new();
+    let hides_reorder = |key: &str| {
+        if key == "playlists.reorder" {
+            Offer::Hidden
+        } else {
+            Offer::Active
+        }
+    };
+    let c = Ctx {
+        settings: &settings,
+        offer: &hides_reorder,
+    };
+    assert_eq!(
+        keys_of(&rows(&PLAYLIST_PAGES[0], &c)),
+        ["playlists.add", "playlists.update_all", "playlists.sort"]
+    );
+}

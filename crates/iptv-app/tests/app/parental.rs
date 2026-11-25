@@ -116,18 +116,6 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     personalization::menu(&mut app, "Manage PIN-protected content…");
     wait(&mut app, "Blocked content");
     step(app.press("text:Lock now"));
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.press("id:playlists-list >> text:Synthetic personalization"));
-    for _ in 0..30 {
-        step(app.press_key("down"));
-    }
-    step(app.press_key("up"));
-    step(app.press_key("up"));
-    step(app.press("id:playlist-actions-list >> text:Guide data"));
-    step(app.wait_for("text:Guide data · Synthetic personalization"));
     let snapshot = || {
         let store = crate::isolated::open_database(&path).unwrap();
         (
@@ -137,31 +125,52 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     };
     let before = snapshot();
     assert_eq!(before.0.as_ref().unwrap().feeds[0].program_count, 1);
-    // Update, editing and confirmed Clear all require the PIN even when
-    // Guide data was reached through Playlists instead of Settings.
+    // Playlists and their guide data are managed in the settings, which
+    // this policy protects: the PIN is asked as they open (the earliest
+    // point), and cancelling keeps them closed and the store as it was.
+    let settings = "id:navigation-rail >> label:Settings";
+    let open_settings = |app: &mut Headless, pin: Option<&str>| {
+        if !app.screen().matches(settings).unwrap() {
+            step(app.open_guide_groups());
+            step(app.wait_for(settings));
+        }
+        step(app.press(settings));
+        wait(app, "Enter parental PIN");
+        match pin {
+            Some(pin) => {
+                digits(app, pin);
+                continue_entry(app);
+                step(app.wait_for("id:settings-screen"));
+            }
+            None => {
+                step(app.press("id:parental-cancel"));
+                step(app.wait_for_gone(
+                    "id:parental-layer >> text:Enter parental PIN",
+                    Duration::from_secs(5),
+                ));
+                assert!(!app.screen().matches("id:settings-screen").unwrap());
+            }
+        }
+    };
+    let guide_data = |app: &mut Headless| {
+        step(app.open_playlist_actions("Synthetic personalization"));
+        for _ in 0..30 {
+            step(app.press_key("down"));
+        }
+        step(app.press_key("up"));
+        step(app.press_key("up"));
+        step(app.press("id:playlist-actions-list >> text:Guide data"));
+        step(app.wait_for("text:Guide data · Synthetic personalization"));
+    };
+    open_settings(&mut app, None);
+    assert_eq!(snapshot(), before);
+    // Unlocked as they open, the settings' grant covers the update and
+    // the source edit made there.
+    open_settings(&mut app, Some("2468"));
+    guide_data(&mut app);
     step(app.press("id:guide-data-list >> text:Update the guide now"));
-    wait(&mut app, "Enter parental PIN");
-    step(app.press("id:parental-cancel"));
-    assert_eq!(snapshot(), before);
-    step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
-    step(app.press("id:guide-source-actions >> text:Switch off"));
-    wait(&mut app, "Enter parental PIN");
-    step(app.press("id:parental-cancel"));
-    assert_eq!(snapshot(), before);
-    step(app.back());
-    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
-    step(app.press_key("down"));
-    step(app.press_key("enter"));
-    wait(&mut app, "Enter parental PIN");
-    step(app.press("id:parental-cancel"));
-    assert_eq!(snapshot(), before);
-    // Unlock resumes the selected update, then editing. Closing the
-    // per-use screen revokes that grant before Clear is attempted.
-    step(app.press("id:guide-data-list >> text:Update the guide now"));
-    wait(&mut app, "Enter parental PIN");
-    digits(&mut app, "2468");
-    continue_entry(&mut app);
     step(app.wait_for("text:Guide updated"));
+    assert!(!app.shows("id:parental-layer >> text:Enter parental PIN"));
     step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
     step(app.press("id:guide-source-actions >> text:No time shift"));
     step(app.wait_until(
@@ -169,17 +178,25 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
         Duration::from_secs(5),
         |_| snapshot().1[0].shift_minutes == 30,
     ));
-    step(app.back());
-    step(app.back());
-    step(app.press("id:playlist-actions-list >> text:Guide data"));
-    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    // Closing the settings revokes that grant (every use asks): opening
+    // them again asks again, and cancelling keeps the stored guide.
+    for _ in 0..4 {
+        if !app.screen().matches("id:guide-sources-screen").unwrap() {
+            break;
+        }
+        step(app.back());
+    }
+    step(app.back()); // the playlist's actions
+    step(app.close_settings());
     let before_clear = snapshot();
     assert_eq!(before_clear.0.as_ref().unwrap().feeds[0].program_count, 1);
+    open_settings(&mut app, None);
+    assert_eq!(snapshot(), before_clear);
+    open_settings(&mut app, Some("2468"));
+    guide_data(&mut app);
+    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    wait(&mut app, "Enter parental PIN");
-    digits(&mut app, "2468");
-    continue_entry(&mut app);
     step(app.wait_for("text:Guide data deleted"));
     assert!(snapshot().0.is_none());
     assert_eq!(
@@ -309,7 +326,8 @@ fn setup_block_remote_unlock_change_and_recovery() {
     continue_entry(&mut app);
     step(app.wait_for("id:wizard-form"));
     step(app.back());
-    step(app.back());
+    step(app.wait_for_gone("id:wizard-form", Duration::from_secs(5)));
+    step(app.close_settings());
     step(app.press_key("tab"));
     step(app.press_key("enter"));
     wait(&mut app, "Enter parental PIN");

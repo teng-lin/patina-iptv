@@ -44,13 +44,13 @@ pub fn open_rail_item(app: &mut crate::Headless, label: &str) {
     step(app.press(&item));
 }
 
-/// Open the playlist form from the guide's navigation rail.
+/// Open the playlist form from Settings → Playlists.
 #[track_caller]
 pub fn open_add_playlist(app: &mut crate::Headless) {
     use crate::personalization::step;
 
-    open_rail_item(app, "Playlists");
-    let add = "id:playlists-screen >> text:+ Add playlist";
+    step(app.open_settings_playlists());
+    let add = "id:settings-content >> text:Add a playlist";
     step(app.wait_for(add));
     step(app.press(add));
 }

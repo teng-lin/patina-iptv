@@ -290,11 +290,12 @@ fn guide_keys(app: &mut Headless) {
     close_search(app);
     // From Search down past TV: with only an M3U playlist, which never
     // carries movies or shows, Movies and Shows are not offered;
-    // Recordings, Playlists and Settings follow.
-    const PLAYLISTS: &str = "text:▲▼ choose   OK actions   Back close";
+    // Recordings and Settings follow (the playlists are in the settings).
     const SETTINGS: &str = "text:▲▼ page   ▶ OK its settings   Back close";
+    const PLAYLIST_ROW: &str = "text:▲▼ move   OK show or hide   Menu its settings   ◀ Back pages";
     assert!(!app.shows("id:navigation-rail >> label:Movies"));
     assert!(!app.shows("id:navigation-rail >> label:Shows"));
+    assert!(!app.shows("id:navigation-rail >> label:Playlists"));
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("down")); // Live TV
@@ -305,30 +306,28 @@ fn guide_keys(app: &mut Headless) {
     gone(app, "id:recordings-screen");
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    step(app.wait_for(PLAYLISTS));
-    // The screen takes the keys: OK opens the playlist's actions (their
-    // rows the kit's), Back closes them, then the screen.
-    const ACTIONS: &str = "text:▲▼ choose   OK do it   Back close the sheet";
+    step(app.wait_for(SETTINGS));
+    // Its Playlists page: the playlist's row first; Menu opens its actions
+    // (their rows the kit's), Back closes them, then the rows, the screen.
     step(app.press_key("down"));
-    step(app.press_key("up"));
-    step(app.press_key("enter"));
+    step(app.press_key("right"));
+    step(app.wait_for(PLAYLIST_ROW));
+    const ACTIONS: &str = "id:playlist-actions-list";
+    step(app.press_key("m"));
     step(app.wait_for(ACTIONS));
     step(app.wait_for("text:Refresh now"));
     step(app.press_key("down"));
     step(app.back());
     gone(app, ACTIONS);
+    step(app.wait_for(PLAYLIST_ROW));
     step(app.back());
-    gone(app, PLAYLISTS);
-    step(app.press_key("down"));
-    step(app.press_key("enter"));
     step(app.wait_for(SETTINGS));
-    step(app.press_key("down"));
     step(app.press_key("up"));
     step(app.back());
     gone(app, SETTINGS);
     // Up to TV, OK: the groups; Up shows All channels, OK takes it (the
     // hint again, which the next key but Back dismisses).
-    for _ in 0..3 {
+    for _ in 0..2 {
         step(app.press_key("up"));
     }
     step(app.press_key("enter"));

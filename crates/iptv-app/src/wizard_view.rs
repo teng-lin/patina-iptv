@@ -209,8 +209,10 @@ fn perform(ui: Ui, effect: WizardEffect) {
             log::info!("iptv wizard: closed ({exit:?})");
             if let WizardExit::Added { .. } = exit {
                 crate::runtime_owner::runtime().finish_wizard_import();
-                // Added from the playlists screen: "Watch" goes to the guide.
+                // Added from the playlists or settings screen: "Watch"
+                // goes to the guide.
                 crate::playlists_view::close(ui);
+                crate::settings_view::close(ui);
             }
             ui.wizard.set(None);
         }

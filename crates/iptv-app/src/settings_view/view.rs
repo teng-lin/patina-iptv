@@ -80,6 +80,13 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         .unwrap_or_default()
     });
     let editing = computed(move || state(ui, |s| s.editor().is_some()).unwrap_or(false));
+    // What is stored changed (a playlist added, renamed, hidden, moved):
+    // the Playlists page follows, after this change has reached the rows
+    // already shown (a row it removes must not be read again).
+    effect(move || {
+        ui.app.library.version.get();
+        let _later = set_timeout(Duration::ZERO, move || playlists_changed(ui));
+    });
     // The pages with rows (reactive: a keyboard or D-pad attached or
     // detached, a setting that shows or hides rows). The list follows
     // only when they change, not when keys or touch are used, so a screen
@@ -168,6 +175,10 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn hint(ui: Ui) -> &'static str {
+    // A playlist's sheet over the page: its own keys.
+    if crate::playlists_view::task_open(ui) {
+        return crate::playlists_view::hint(ui);
+    }
     if !ui.keys_shown() {
         return tr("Tap a page, then a setting to change it");
     }
@@ -178,8 +189,33 @@ fn hint(ui: Ui) -> &'static str {
         (_, Some(Editor::Text { .. })) => tr("Type, then OK to keep   Back cancel"),
         (_, Some(Editor::Confirm { .. })) => tr("OK go ahead   Back cancel"),
         (Pane::Pages, None) => tr("▲▼ page   ▶ OK its settings   Back close"),
+        (Pane::Rows, None) if focused_playlist(ui).is_some() => {
+            tr("▲▼ move   OK show or hide   Menu its settings   ◀ Back pages")
+        }
         (Pane::Rows, None) => tr("▲▼ move   OK change   ◀ Back pages"),
     }
+}
+
+/// The playlist of the focused row, if it is one.
+fn focused_playlist(ui: Ui) -> Option<i64> {
+    match state(ui, |s| {
+        (s.pane() == Pane::Rows).then(|| s.focus_id()).flatten()
+    })
+    .flatten()?
+    {
+        RowId::Playlist(id) => Some(id),
+        RowId::Key(_) => None,
+    }
+}
+
+/// Stored playlist `id` (reactive: the library's version).
+fn stored_playlist(ui: Ui, id: i64) -> Option<crate::data::Playlist> {
+    ui.app.library.version.get();
+    crate::runtime()
+        .playlists()
+        .ok()?
+        .into_iter()
+        .find(|p| p.id.0 == id)
 }
 
 fn pages(ui: Ui, size: Scale) -> impl IntoElement {
@@ -242,11 +278,11 @@ fn pages(ui: Ui, size: Scale) -> impl IntoElement {
 fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
     let list = element_ref();
     let focused_index = computed(move || {
-        let key = state(ui, |s| {
-            (s.pane() == Pane::Rows).then(|| s.focus()).flatten()
+        let id = state(ui, |s| {
+            (s.pane() == Pane::Rows).then(|| s.focus_id()).flatten()
         })
         .flatten()?;
-        rows.with(|r| r.iter().position(|row| row.key() == Some(key)))
+        rows.with(|r| r.iter().position(|row| row.id() == Some(id)))
     });
     effect(move || {
         if let Some(i) = focused_index.get()
@@ -304,18 +340,30 @@ fn row_view(
     };
     let focused = move || ui.keys_shown() && focused_index.get() == Some(at.index());
     let mark = move || Mark::of(focused(), false);
+    let playlist = move || match row() {
+        Some(Row::Playlist(p)) => Some(p),
+        _ => None,
+    };
     let title = move || match row() {
         Some(Row::Heading {
             section,
             subsection,
-        }) => words::heading(section, subsection),
-        Some(r) => r.key().map_or("", words::label),
-        None => "",
+        }) => words::heading(section, subsection).to_owned(),
+        Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
+            .map(|p| p.name)
+            .unwrap_or_default(),
+        Some(r) => r.key().map_or("", words::label).to_owned(),
+        None => String::new(),
     };
-    let note = move || {
-        let settings = crate::settings_wiring::read(ui);
-        row().map(|r| note(&settings, &r)).unwrap_or_default()
+    // Each binding reads the row once: a row that went answers one read.
+    let note_of = move |row: Option<Row>| match row {
+        Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
+            .map(|p| crate::playlists_view::summary(ui, &p).0)
+            .unwrap_or_default(),
+        Some(r) => note(&crate::settings_wiring::read(ui), &r),
+        None => String::new(),
     };
+    let note = move || note_of(row());
     let current = move || {
         let settings = crate::settings_wiring::read(ui);
         match row() {
@@ -336,60 +384,50 @@ fn row_view(
         }
     };
     // A heading's row, a one-line row, or two lines with the note.
-    let pitch = move || match (heading(), note().is_empty()) {
-        (true, _) => HEADING_ROW,
-        (false, true) => ROW,
-        (false, false) => ROW_TWO,
-    };
-    let is_toggle = move || match row() {
-        Some(Row::Setting(s)) => matches!(s.ty, ValueType::Bool { .. }),
-        _ => false,
-    };
-    let bool_val = move || {
-        let settings = crate::settings_wiring::read(ui);
-        match row() {
-            Some(Row::Setting(s)) => match s.ty {
-                ValueType::Bool { .. } => settings.get(s.key) == Ok(Value::Bool(true)),
-                _ => false,
-            },
-            _ => false,
-        }
+    let pitch = move || match row() {
+        Some(Row::Heading { .. }) => HEADING_ROW,
+        r if note_of(r).is_empty() => ROW,
+        _ => ROW_TWO,
     };
     list_rows::row_with(size, pitch, mark)
-        .role(move || {
-            if heading() {
-                AccessibilityRole::Header
-            } else if is_toggle() {
+        .role(move || match row() {
+            Some(Row::Heading { .. }) => AccessibilityRole::Header,
+            Some(Row::Playlist(_)) => AccessibilityRole::Checkbox,
+            Some(Row::Setting(s)) if matches!(s.ty, ValueType::Bool { .. }) => {
                 AccessibilityRole::Switch
-            } else {
-                AccessibilityRole::Button
             }
+            _ => AccessibilityRole::Button,
         })
         .accessible(true)
         .label(move || {
-            [title().to_owned(), current().0, note()]
+            [title(), current().0, note()]
                 .into_iter()
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join(" · ")
         })
         .accessibility_state(move || {
-            if heading() {
-                AccessibilityState::default()
-            } else if is_toggle() {
-                AccessibilityState {
-                    disabled: !lit(),
-                    checked: Some(if bool_val() {
-                        Checked::True
-                    } else {
-                        Checked::False
-                    }),
+            let checked = |on: bool| Some(if on { Checked::True } else { Checked::False });
+            let settings = crate::settings_wiring::read(ui);
+            match row() {
+                None | Some(Row::Heading { .. }) => AccessibilityState::default(),
+                Some(Row::Playlist(p)) => AccessibilityState {
+                    checked: checked(p.enabled),
                     ..Default::default()
-                }
-            } else {
-                AccessibilityState {
-                    disabled: !lit(),
-                    ..Default::default()
+                },
+                Some(r) => {
+                    let lit = matches!(status(&settings, &r), Status::Active | Status::ReadOnly);
+                    let toggle = match r {
+                        Row::Setting(s) if matches!(s.ty, ValueType::Bool { .. }) => {
+                            Some(settings.get(s.key) == Ok(Value::Bool(true)))
+                        }
+                        _ => None,
+                    };
+                    AccessibilityState {
+                        disabled: !lit,
+                        checked: toggle.and_then(checked),
+                        ..Default::default()
+                    }
                 }
             }
         })
@@ -399,10 +437,31 @@ fn row_view(
         .gap(move || size.px(12.0))
         .on_press(move || {
             ui.touched();
-            if let Some(key) = row().and_then(|r| r.key()) {
-                update(ui, |screen, ctx| screen.tap_row(key, ctx));
+            if let Some(id) = row().and_then(|r| r.id()) {
+                update(ui, |screen, ctx| screen.tap(id, ctx));
             }
         })
+        .on_long_press(move || {
+            ui.touched();
+            if let Some(id) = row().and_then(|r| r.id()) {
+                update(ui, |screen, ctx| screen.hold_row(id, ctx));
+            }
+        })
+        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
+            ui.touched();
+            if let Some(id) = row().and_then(|r| r.id()) {
+                update(ui, |screen, ctx| screen.hold_row(id, ctx));
+            }
+        })
+        // A playlist's check box: shown in lists, or hidden. Other rows
+        // keep it at no width (a recycled row changes kind).
+        .child(check_box(
+            ui,
+            size,
+            move || playlist().is_some(),
+            move || playlist().is_some_and(|p| p.enabled),
+            mark,
+        ))
         .child(
             view()
                 .flex_1()
@@ -444,6 +503,39 @@ fn row_view(
                     (_, false) => tint(WHITE, TEXT_DISABLED_ALPHA),
                 }
             }),
+        )
+}
+
+/// A check box, filled with the accent and ticked while `checked`;
+/// nothing (no width) unless `shown`.
+fn check_box(
+    ui: Ui,
+    size: Scale,
+    shown: impl Fn() -> bool + Copy + 'static,
+    checked: impl Fn() -> bool + Copy + 'static,
+    mark: impl Fn() -> Mark + Copy + 'static,
+) -> impl IntoElement {
+    let side = move || size.px(if shown() { 22.0 } else { 0.0 });
+    view()
+        .test_id("settings-playlist-check")
+        .w(side)
+        .h(side)
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .border(move || px(if shown() { 2.0 } else { 0.0 }))
+        .border_color(move || mark().text())
+        .bg(move || {
+            if checked() {
+                rgb(ui.app.theme.with(|t| t.accent.main))
+            } else {
+                tint(WHITE, 0)
+            }
+        })
+        .child(
+            list_rows::second(size, move || if checked() { "✓" } else { "" }, SANS)
+                .text_color(rgb(WHITE)),
         )
 }
 

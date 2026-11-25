@@ -309,11 +309,9 @@ fn the_rail_skips_items_without_a_screen() {
     );
     assert_eq!(s.ok(), Outcome::Open(RailItem::Recordings));
     s.mv(Move::Down);
-    assert_eq!(s.ok(), Outcome::Open(RailItem::Playlists));
-    s.mv(Move::Down);
     assert_eq!(s.focus.rail, RailItem::Settings);
     assert_eq!(s.mv(Move::Down), Outcome::None, "Settings is last");
-    for _ in 0..5 {
+    for _ in 0..4 {
         s.mv(Move::Up);
     }
     assert_eq!(s.focus.rail, RailItem::Tv);
@@ -340,12 +338,12 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     };
     assert_eq!(
         rail_items(none),
-        [Search, Tv, Movies, Shows, Recordings, Playlists, Settings]
+        [Search, Tv, Movies, Shows, Recordings, Settings]
     );
     assert_eq!(
         rail_items(both),
         [
-            Search, Tv, Movies, Shows, Continue, Recent, Recordings, Playlists, Settings
+            Search, Tv, Movies, Shows, Continue, Recent, Recordings, Settings
         ]
     );
     // A live-only playlist on screen while another enabled playlist has
@@ -357,7 +355,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
             live_only: false,
         }),
         [
-            Search, Tv, Movies, Shows, Continue, Recent, Recordings, Playlists, Settings
+            Search, Tv, Movies, Shows, Continue, Recent, Recordings, Settings
         ]
     );
     // Every enabled playlist is M3U: no catalog can fill, so Movies and
@@ -368,7 +366,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
             live_only: true,
             ..none
         }),
-        [Search, Tv, Recordings, Playlists, Settings]
+        [Search, Tv, Recordings, Settings]
     );
     use iptv_providers::model::SourceKind::{M3u, Stalker, Xtream};
     assert!(!live_only([]), "before the first playlist");
@@ -379,7 +377,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
     );
     assert!(!live_only([(M3u, true), (Xtream, true)]));
     assert!(!live_only([(Stalker, true)]));
-    assert!(Settings.at_bottom() && Playlists.at_bottom() && !Search.at_bottom());
+    assert!(Settings.at_bottom() && !Recordings.at_bottom() && !Search.at_bottom());
     assert!(!Continue.at_bottom());
     let mut f = Focus::at(0);
     let items = rail_items(both);
@@ -626,7 +624,7 @@ fn dynamic_shelves_preserve_recordings_and_settings_action_identity() {
         }
         if item == RailItem::Settings {
             assert_eq!(screen.mv(Move::Up), Outcome::Moved);
-            assert_eq!(screen.focus.rail, RailItem::Playlists);
+            assert_eq!(screen.focus.rail, RailItem::Recordings);
             assert_eq!(screen.mv(Move::Down), Outcome::Moved);
             assert_eq!(screen.focus.rail, RailItem::Settings);
         }
