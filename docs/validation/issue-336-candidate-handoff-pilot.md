@@ -126,7 +126,11 @@ PILOT_SAMPLES=/outside/repo/timelines.json \
 
 The helper reports n, successful n, failures, median p50 and nearest-rank p90
 for each actual path and queue/execution segment. It refuses mixed heads,
-duplicate run IDs and mixed fallback decisions. Reports must state cohort
+duplicate run IDs and mixed fallback decisions. It also separates clean
+and retried cohorts, preserves failed/canceled
+earlier attempts, and reports all-attempt execution/queue costs per run and
+job alongside final path endpoints. A successful retry does not erase a
+failed attempt from reliability or runner-cost evidence. Reports must state cohort
 size, runner/tool identity, missing evidence and failures alongside
 percentiles. There is no production integration or whole-Validation gain
 claim in this PR. Any adoption requires a separate coordinated change and

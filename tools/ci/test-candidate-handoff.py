@@ -171,6 +171,32 @@ class Contract(unittest.TestCase):
             self.job[field] = old
             self.assert_closed()
 
+    def test_locked_native_tool_selectors_and_flags_are_refused(self):
+        # cc 1.11.1 documents target suffixes and HOST_/TARGET_ variants;
+        # find-msvc-tools 0.1.15 also selects alternate installations/toolsets.
+        for name in (
+            "TARGET_CFLAGS",
+            "HOST_CC",
+            "CFLAGS_x86_64_pc_windows_msvc",
+            "CFLAGS_x86_64-pc-windows-msvc",
+            "CRATE_CC_NO_DEFAULTS",
+            "TARGET_AR",
+            "HOST_ARFLAGS",
+            "ARFLAGS_x86_64_pc_windows_msvc",
+            "HOST_CXXFLAGS",
+            "TARGET_CXXSTDLIB_STATIC",
+            "CC_MASM_ASM_x86_64_pc_windows_msvc",
+            "TARGET_RANLIBFLAGS",
+            "VCToolsVersion",
+            "VisualStudioVersion",
+            "VSINSTALLDIR",
+            "VSCMD_ARG_TGT_ARCH",
+            "VSCMD_ARG_VCVARS_SPECTRE",
+            "VSTEL_MSBuildProjectFullPath",
+        ):
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "^Unsupported build environment override$"):
+                handoff.validate_environment({name: "synthetic-override"})
+
     def test_original_successful_producer_is_retained_on_consumer_retry(self):
         self.run["run_attempt"] = 2
         self.assertEqual(self.acquire(), "reuse")
@@ -300,8 +326,35 @@ class Contract(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 handoff.summarize([first, other])
 
+    def test_retry_preserves_failed_attempt_and_runner_cost(self):
+        jobs = []
+        for identifier, name, attempt, conclusion, endpoint, cost in (
+            (201, handoff.PRODUCER, 1, "success", 100, 80),
+            (202, "Pilot consumer", 1, "failure", 150, 40),
+            (203, "Cold control", 1, "success", 130, 90),
+            (204, "Pilot consumer", 2, "success", 250, 60),
+        ):
+            jobs.append({"id": identifier, "name": name, "attempt": attempt, "conclusion": conclusion, "trigger_to_completion_seconds": endpoint, "queue_seconds": 10, "execution_seconds": cost})
+        timeline = {"run_id": 101, "attempt": 2, "commit": "a" * 40, "decision": "reuse", "jobs": jobs}
+        summary = handoff.summarize([timeline])
+        self.assertEqual(summary["cohort"], "retried")
+        self.assertEqual(summary["paths"]["whole_pilot"]["p50_seconds"], 250)
+        self.assertEqual(summary["attempts_by_job"]["Pilot consumer"]["failed"], 1)
+        self.assertEqual(summary["attempts_by_job"]["Pilot consumer"]["total_execution_seconds"], 100)
+        self.assertEqual(summary["segments"]["Pilot consumer/execution_seconds"]["n"], 2)
+        self.assertEqual(summary["segments"]["Pilot consumer/execution_seconds"]["failures"], 1)
+        self.assertEqual(summary["runs"][0]["attempts"]["total_execution_seconds"], 270)
+        clean = dict(timeline, run_id=102, attempt=1, jobs=jobs[:3])
+        with self.assertRaisesRegex(ValueError, "clean and retried"):
+            handoff.summarize([timeline, clean])
+        jobs[1]["conclusion"] = "cancelled"
+        canceled = handoff.summarize([timeline])["runs"][0]["attempts"]
+        self.assertEqual(canceled["failed"], 0)
+        self.assertEqual(canceled["canceled"], 1)
+        self.assertEqual(canceled["total_execution_seconds"], 270)
+
     def test_queue_only_cancellation_still_has_timeline_evidence(self):
-        run = {"head_sha": "a" * 40, "created_at": "2026-01-01T00:00:00Z"}
+        run = {"head_sha": "a" * 40, "run_attempt": 1, "created_at": "2026-01-01T00:00:00Z"}
         job = {"id": 201, "name": handoff.PRODUCER, "run_attempt": 1, "conclusion": "cancelled", "created_at": "2026-01-01T00:00:02Z", "started_at": None, "completed_at": "2026-01-01T00:00:12Z"}
 
         def api(endpoint):

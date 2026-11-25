@@ -98,6 +98,10 @@ def validate_environment(environment):
     """Reject build overrides without recording values or unrelated secrets."""
     prefixes = ("CC_", "CXX_", "AR_", "LD_", "OPENSSL_", "DEP_", "BINDGEN_", "PKG_CONFIG", "CMAKE_", "SQLITE", "LIBSQLITE")
     cargo_allowed = {"CARGO_HOME", "CARGO_TERM_COLOR", "CARGO_NET_GIT_FETCH_WITH_CLI"}
+    native_override = re.compile(
+        r"^(?:(?:HOST|TARGET)_)?(?:CC_MASM_ASM|CXXSTDLIB_STATIC|CXXSTDLIB|RANLIBFLAGS|RANLIB|"
+        r"CPPFLAGS|CXXFLAGS|CFLAGS|LDFLAGS|ARFLAGS|NVCC|CC|CXX|AR|LD)(?:_|$)"
+    )
     forbidden = {
         "RUSTFLAGS",
         "RUSTC",
@@ -121,18 +125,25 @@ def validate_environment(environment):
         "INCLUDE",
         "VCINSTALLDIR",
         "VCTOOLSINSTALLDIR",
+        "VCTOOLSVERSION",
+        "VSINSTALLDIR",
+        "VISUALSTUDIOVERSION",
+        "VSCMD_ARG_TGT_ARCH",
+        "VSCMD_ARG_VCVARS_SPECTRE",
+        "VSTEL_MSBUILDPROJECTFULLPATH",
         "WINDOWSSDKDIR",
         "WINDOWSSDKVERSION",
         "SOURCE_DATE_EPOCH",
         "CARGO",
         "MAKEFLAGS",
         "NUM_JOBS",
+        "CRATE_CC_NO_DEFAULTS",
     }
     for name, value in environment.items():
         name = name.upper()
         if name == "CARGO_INCREMENTAL" and value == "0":
             continue  # Exact setting exported by the pinned toolchain action.
-        if value and (name in forbidden or name.startswith(prefixes) or (name.startswith("CARGO_") and name not in cargo_allowed)):
+        if value and (name in forbidden or name.startswith(prefixes) or native_override.match(name) or (name.startswith("CARGO_") and name not in cargo_allowed)):
             raise ValueError("Unsupported build environment override")
 
 
@@ -362,9 +373,32 @@ def summarize(timelines):
         raise ValueError("Measure reuse, cold and fallback as separate cohorts")
     if len({item["run_id"] for item in timelines}) != len(timelines):
         raise ValueError("Duplicate workflow run in measurement cohort")
+
+    def retried(item):
+        names = [job["name"] for job in item["jobs"]]
+        return item.get("attempt", 1) > 1 or any(job["attempt"] > 1 for job in item["jobs"]) or len(names) != len(set(names))
+
+    cohorts = {"retried" if retried(item) else "clean" for item in timelines}
+    if len(cohorts) > 1:
+        raise ValueError("Measure clean and retried runs as separate cohorts")
+
+    def attempt_evidence(jobs):
+        return {
+            "n": len(jobs),
+            "failed": sum(job["conclusion"] not in ("success", "cancelled", "skipped") for job in jobs),
+            "canceled": sum(job["conclusion"] == "cancelled" for job in jobs),
+            "skipped": sum(job["conclusion"] == "skipped" for job in jobs),
+            "total_execution_seconds": sum(job["execution_seconds"] for job in jobs),
+            "total_queue_seconds": sum(job["queue_seconds"] for job in jobs),
+        }
+
+    attempts_by_job = {}
     for item in timelines:
         latest = {}
         for job in item["jobs"]:
+            attempts_by_job.setdefault(job["name"], []).append(job)
+            for field in ("queue_seconds", "execution_seconds"):
+                segments.setdefault(f"{job['name']}/{field}", []).append({"conclusion": job["conclusion"], "seconds": job[field]})
             old = latest.get(job["name"])
             if old is None or (job["attempt"], job["id"]) > (old["attempt"], old["id"]):
                 latest[job["name"]] = job
@@ -372,12 +406,12 @@ def summarize(timelines):
             rows = [latest[member] for member in members if member in latest]
             success = len(rows) == len(members) and all(job["conclusion"] == "success" for job in rows)
             samples[name].append({"conclusion": "success" if success else "failure", "seconds": max((job["trigger_to_completion_seconds"] for job in rows), default=0)})
-        for name, job in latest.items():
-            for field in ("queue_seconds", "execution_seconds"):
-                segments.setdefault(f"{name}/{field}", []).append({"conclusion": job["conclusion"], "seconds": job[field]})
     return {
         "schema": 1,
         "commit": next(iter(commits), None),
+        "cohort": next(iter(cohorts), None),
+        "runs": [{"run_id": item["run_id"], "attempts": attempt_evidence(item["jobs"])} for item in timelines],
+        "attempts_by_job": {name: attempt_evidence(jobs) for name, jobs in attempts_by_job.items()},
         "paths": {name: measurements(rows) for name, rows in samples.items()},
         "segments": {name: measurements(rows) for name, rows in segments.items()},
         "claim": "Contract/overhead experiment; whole-Validation improvement requires separate integrated evidence.",
@@ -413,6 +447,7 @@ def timeline(run_id, api=gh):
     return {
         "schema": 1,
         "run_id": positive(run_id),
+        "attempt": positive(observed["run_attempt"]),
         "commit": observed["head_sha"],
         "created_at": observed["created_at"],
         "decision": os.environ.get("PILOT_DECISION") or "unavailable",
