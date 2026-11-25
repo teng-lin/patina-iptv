@@ -1661,8 +1661,7 @@ fn library_bytes(directory: &Path, active: &[JobId]) -> std::io::Result<u64> {
         .fold(total, |total, bytes| total.saturating_add(*bytes)))
 }
 
-/// Native hosts with statvfs can reject already-exhausted storage. Other hosts
-/// rely on the write result; inability to query capacity is not an empty disk.
+/// Free bytes available to the application's storage user, when queryable.
 #[cfg(unix)]
 fn available_space(directory: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
@@ -1681,7 +1680,36 @@ fn available_space(directory: &Path) -> Option<u64> {
             .min(u128::from(u64::MAX)) as u64,
     )
 }
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn available_space(directory: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(
+            directory: *const u16,
+            available: *mut u64,
+            total: *mut u64,
+            free: *mut u64,
+        ) -> i32;
+    }
+
+    let directory = directory.canonicalize().ok()?;
+    let mut path: Vec<_> = directory.as_os_str().encode_wide().collect();
+    // UNC roots require a trailing separator. This is a directory on every path.
+    if path.last() != Some(&u16::from(b'\\')) {
+        path.push(u16::from(b'\\'));
+    }
+    path.push(0);
+    let mut available = 0;
+    // SAFETY: canonicalize rejected embedded NULs. The path is terminated
+    // and the caller's free-space output is writable. Other outputs are optional.
+    let ok = unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut available, null_mut(), null_mut()) };
+    (ok != 0).then_some(available)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn available_space(_: &Path) -> Option<u64> {
     None
 }

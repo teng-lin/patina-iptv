@@ -365,6 +365,16 @@ fn space_admission_counts_a_library_not_created_yet_as_empty() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn recording_storage_queries_free_space_on_the_windows_data_volume() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("Generated recording library");
+    std::fs::create_dir(&root).unwrap();
+    assert!(available_space(&root).is_some());
+    assert_eq!(available_space(&root.join("missing")), None);
+}
+
 #[tokio::test]
 async fn a_capture_the_host_stops_early_keeps_its_partial_file_and_the_reason() {
     let directory = tempfile::tempdir().unwrap();
