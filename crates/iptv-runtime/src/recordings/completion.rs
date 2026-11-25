@@ -93,7 +93,7 @@ fn publish(services: &Services, completion: &RecordingCompletion) -> std::io::Re
     Ok(())
 }
 
-fn report_failure(
+pub(super) fn report_failure(
     services: &Services,
     result: Transition,
     notify: Option<crate::RecordingFailure>,

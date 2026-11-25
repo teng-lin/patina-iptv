@@ -860,8 +860,18 @@ fn duplicate_accounts_share_connections_and_unknown_limits_are_conservative() {
 
 #[tokio::test]
 async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
+    use std::sync::atomic::AtomicUsize;
+    static NOTICES: AtomicUsize = AtomicUsize::new(0);
     let directory = tempfile::tempdir().unwrap();
-    let owner = owner(&directory.path().join("catalog"));
+    let mut ports = crate::Ports::new(directory.path().join("catalog"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_failed = |reason| {
+        assert_eq!(reason, crate::RecordingFailure::Unexpected);
+        NOTICES.fetch_add(1, Ordering::Relaxed);
+    };
+    let owner = Runtime::new(ports);
+    owner.start_services();
     let mut request = seed(&owner, "https://example.test/generated.ts").await;
     assert!(owner.reserve_viewing(0, SourceId(request.source)));
     request.start = now() + 2;
@@ -871,6 +881,7 @@ async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
     assert!(job.message.contains("connection"));
     assert_eq!(owner.recordings.lock().viewers.len(), 1);
     assert!(owner.drain_services());
+    assert_eq!(NOTICES.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

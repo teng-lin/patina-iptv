@@ -1106,11 +1106,12 @@ async fn finish_unstarted(
     status: Status,
     message: &'static str,
 ) -> completion::Transition {
-    if job.bytes > 0 {
+    let result = if job.bytes > 0 {
         recover_media(services, job).await
     } else {
         transition(services, job, status, 0, message).await
-    }
+    };
+    completion::report_failure(services, result, Some(crate::RecordingFailure::Unexpected))
 }
 
 async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
