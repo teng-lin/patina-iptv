@@ -230,9 +230,10 @@ Both Tizen hosts currently retain the handler at their roots and ask "Close
 Patina?" with No focused, following Samsung's termination guide. The NSH host
 includes recovery with details closed. Back dismisses the question and Yes
 leaves. The bridge toggles its answers with Up/Down; the NSH chooser clamps:
-Up or Left selects No, Down or Right selects Yes. Samsung checklist CO-US-05
-instead describes immediate Return exit at the home page; the owner decision
-between these policies remains pending.
+Up or Left selects No, Down or Right selects Yes. Patina follows the
+termination guide for both hosts. Samsung checklist CO-US-05 describes an
+immediate Return exit at the home page, so Seller Office acceptance of the
+confirmation remains an open question.
 
 Neither Tizen host registers Exit. A system IME/popup is separate from the
 app-rendered exit question. App termination over Patina's question is an
