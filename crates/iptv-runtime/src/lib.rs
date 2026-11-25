@@ -130,11 +130,6 @@ pub struct Runtime {
     backup_progress: Cell<model::BackupProgress>,
     search: search::State,
     favorites: Slot<RefCell<favorites::State>>,
-    favorite_writer: Slot<RefCell<Option<std::sync::mpsc::Sender<favorites::Write>>>>,
-    favorite_unsaved: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-    /// A favorites write queued on the store's writer lane failed since the
-    /// last barrier (hosts without workers, `favorites::send`).
-    favorite_failed: RefCell<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     activity: RefCell<BTreeMap<SourceId, model::Activity>>,
     all: Cell<bool>,
     generation: Slot<Cell<u64>>,
@@ -206,9 +201,6 @@ impl Runtime {
             backup_progress: Cell::new(model::BackupProgress::Idle),
             search: search::State::default(),
             favorites: Slot(RefCell::new(favorites::State::with_catalog(&*schedule))),
-            favorite_writer: Slot::default(),
-            favorite_unsaved: Default::default(),
-            favorite_failed: Default::default(),
             activity: RefCell::default(),
             all: Cell::new(false),
             generation: Slot::default(),
