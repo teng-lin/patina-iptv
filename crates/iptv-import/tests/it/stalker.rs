@@ -112,20 +112,106 @@ fn token_expiry_mid_crawl_reauthenticates_once() {
 }
 
 #[test]
-fn a_failing_page_keeps_earlier_pages_with_a_warning() {
+fn an_exhausted_live_page_fails_instead_of_returning_a_partial_catalog() {
     let (fetch, _) = fake(StalkerSim {
         failing_pages: vec![2],
         ..Default::default()
     });
+    let mut sink = SeriesSink::default();
+    let error = block_on(iptv_import::import_source_into(
+        &fetch,
+        &config(),
+        &ImportOptions::new(synth::NOW),
+        &mut NoProgress,
+        &CancelToken::new(),
+        &mut sink,
+    ))
+    .unwrap_err();
+    assert_eq!(
+        error,
+        ImportError::HttpStatus {
+            step: Step::Items(ContentKind::Live),
+            status: 500,
+        }
+    );
+    assert!(error.is_transient(), "the refresh remains retryable");
+    assert_eq!(
+        fetch
+            .requests()
+            .iter()
+            .filter(|r| r.url.contains("p=2"))
+            .count(),
+        2
+    );
+    assert_eq!(sink.rows.len(), 14, "the earlier page stays private");
+    assert!(!sink.finished, "a failed live crawl cannot seal its stage");
+    assert!(sink.boundary.is_none());
+}
+
+#[test]
+fn a_retried_live_page_can_recover_and_complete_the_catalog() {
+    let sim = StalkerSim::default();
+    let attempts = std::cell::Cell::new(0);
+    let fetch = FakeFetch::new(move |_, req| {
+        if req.param("action") == Some("get_ordered_list") && req.param("p") == Some("2") {
+            let attempt = attempts.get();
+            attempts.set(attempt + 1);
+            if attempt == 0 {
+                return SimResponse::status(503).into();
+            }
+        }
+        sim.handle(req).into()
+    });
     let catalog = run(&fetch).unwrap();
-    assert_eq!(catalog.channels.len(), 14);
-    let w = catalog
-        .warnings
-        .iter()
-        .find(|w| w.page == Some(2))
-        .expect("warning for the stopped crawl");
-    assert_eq!(w.step, Step::Items(ContentKind::Live));
-    assert!(w.message.contains("500"), "{}", w.message);
+    assert_eq!(catalog.channels.len(), 35);
+    assert!(catalog.warnings.is_empty());
+}
+
+#[test]
+fn optional_movie_and_series_page_failures_keep_earlier_rows_and_live_channels() {
+    for kind in [ContentKind::Movie, ContentKind::Series] {
+        let sim = StalkerSim {
+            vod: 30,
+            ..Default::default()
+        };
+        let fetch = FakeFetch::new(move |_, req| {
+            if req.param("type")
+                == Some(if kind == ContentKind::Movie {
+                    "vod"
+                } else {
+                    "series"
+                })
+                && req.param("action") == Some("get_ordered_list")
+            {
+                if req.param("p") == Some("2") {
+                    return SimResponse::status(503).into();
+                }
+                return SimResponse::ok(r#"{"js":{"data":[{"id":901,"name":"Generated optional title","cmd":"/media/generated.mp4"}],"total_items":2,"max_page_items":1}}"#).into();
+            }
+            sim.handle(req).into()
+        });
+        let catalog = run_with(
+            &fetch,
+            ImportOptions::new(synth::NOW)
+                .with_vod(kind == ContentKind::Movie, kind == ContentKind::Series),
+        )
+        .unwrap();
+        assert_eq!(catalog.channels.len(), 35);
+        assert_eq!(
+            if kind == ContentKind::Movie {
+                catalog.vod.len()
+            } else {
+                catalog.series.len()
+            },
+            1
+        );
+        assert!(
+            catalog
+                .warnings
+                .iter()
+                .any(|warning| warning.step == Step::Items(kind) && warning.page == Some(2))
+        );
+    }
 }
 
 #[test]
