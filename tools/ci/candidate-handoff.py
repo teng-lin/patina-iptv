@@ -79,20 +79,65 @@ def checksum(value):
     return value
 
 
-def tree_digest(directory):
+def file_inventory(directory):
     directory = Path(directory)
     if not directory.is_dir() or directory.is_symlink():
         raise ValueError("Native input directory missing or linked")
-    value, count = hashlib.sha256(), 0
+    files = {}
     for path in sorted(directory.rglob("*")):
         if path.is_symlink():
             raise ValueError("Native toolchain links are unsupported in this pilot")
         if path.is_file():
-            value.update(encoded([path.relative_to(directory).as_posix(), digest(path)]))
-            count += 1
-    if not count:
+            files[path.relative_to(directory).as_posix()] = digest(path)
+    if not files:
         raise ValueError("Empty native input tree")
-    return {"sha256": value.hexdigest(), "files": count}
+    return files
+
+
+def tree_digest(directory):
+    files = file_inventory(directory)
+    value = hashlib.sha256()
+    for name, checksum in files.items():
+        value.update(encoded([name, checksum]))
+    return {"sha256": value.hexdigest(), "files": len(files)}
+
+
+def rust_diagnostics(sysroot):
+    """Non-promotable file-level evidence; never relax the compatibility hash."""
+    files = {}
+    for folder in ("lib", "bin"):
+        for name, checksum in file_inventory(sysroot / folder).items():
+            path = sysroot / folder / name
+            files[f"{folder}/{name}"] = {"sha256": checksum, "size": path.stat().st_size}
+    # Rustup's own fixed receipts contain tool/component bookkeeping. Do not
+    # capture arbitrary files as text, user configs, paths or environment values.
+    receipts = {"components", "multirust-config.toml", "multirust-channel-manifest.toml", "rust-installer-version"}
+    receipts.update(
+        f"manifest-{name}"
+        for name in (
+            "cargo-x86_64-pc-windows-msvc",
+            "rustc-x86_64-pc-windows-msvc",
+            "rust-std-x86_64-pc-windows-msvc",
+            "rust-std-wasm32-unknown-unknown",
+            "clippy-preview-x86_64-pc-windows-msvc",
+            "rustfmt-preview-x86_64-pc-windows-msvc",
+        )
+    )
+    text = {}
+    limit = 2 * 1024 * 1024
+    for name in sorted(receipts):
+        path = sysroot / "lib/rustlib" / name
+        if path.is_file():
+            with path.open("rb") as source:
+                raw = source.read(limit + 1)
+            if len(raw) > limit:
+                text[name] = {"omitted": "exceeds bounded receipt size"}
+            else:
+                try:
+                    text[name] = {"utf8": raw.decode("utf-8")}
+                except UnicodeDecodeError:
+                    text[name] = {"omitted": "not UTF-8"}
+    return {"schema": 1, "files": files, "known_installer_receipts": text, "contract": "Diagnostic only. Full Rust library tree remains a required exact input."}
 
 
 def validate_environment(environment):
@@ -506,6 +551,7 @@ def main():
             raise ValueError("Pilot is restricted to the exact trusted repository and branch")
     if args.command == "inputs":
         write_json(args.output, inputs())
+        write_json(args.output.with_name("pilot-rust-files.json"), rust_diagnostics(Path(run(["rustc", "--print", "sysroot"]))))
     elif args.command == "seal":
         proof = seal(json.loads(Path("target/pilot-inputs.json").read_text()), args.output, os.environ["GITHUB_RUN_ID"], os.environ["GITHUB_RUN_ATTEMPT"])
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:

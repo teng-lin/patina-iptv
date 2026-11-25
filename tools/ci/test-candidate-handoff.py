@@ -451,6 +451,25 @@ class Contract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "links"):
             handoff.tree_digest(directory)
 
+    def test_rust_diagnostics_preserve_hashes_and_only_bounded_known_receipt_text(self):
+        sysroot = self.root / "synthetic-rust"
+        receipts = sysroot / "lib/rustlib"
+        receipts.mkdir(parents=True)
+        (sysroot / "bin").mkdir()
+        (sysroot / "bin/rustc.exe").write_bytes(b"synthetic compiler bytes")
+        (receipts / "components").write_text("rustc\nrust-std\n")
+        (receipts / "unrelated.txt").write_text("synthetic text must not be captured")
+        (receipts / "multirust-config.toml").write_bytes(b"\xff")
+        (receipts / "multirust-channel-manifest.toml").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
+        identity = handoff.tree_digest(sysroot / "lib")
+        report = handoff.rust_diagnostics(sysroot)
+        self.assertEqual(handoff.tree_digest(sysroot / "lib"), identity)
+        self.assertEqual(report["files"]["bin/rustc.exe"]["sha256"], handoff.digest(sysroot / "bin/rustc.exe"))
+        self.assertEqual(report["known_installer_receipts"]["components"]["utf8"], "rustc\nrust-std\n")
+        self.assertNotIn("unrelated.txt", report["known_installer_receipts"])
+        self.assertEqual(report["known_installer_receipts"]["multirust-config.toml"]["omitted"], "not UTF-8")
+        self.assertEqual(report["known_installer_receipts"]["multirust-channel-manifest.toml"]["omitted"], "exceeds bounded receipt size")
+
     def test_cli_refuses_wrong_repository_branch_head_and_run_before_acquisition(self):
         (self.root / "target").mkdir()
         handoff.write_json(self.root / "target/pilot-inputs.json", self.expected)
@@ -480,6 +499,23 @@ class Contract(unittest.TestCase):
             self.assertNotIn(forbidden, workflow)
         for check in ("package-windows.ps1 -SkipBuild", "check-windows-package.ps1", "sbom.py", "build-inventory.py"):
             self.assertIn(check, package)
+
+    def test_inputs_only_probe_cannot_build_consume_or_measure_a_candidate(self):
+        workflow = (Path(__file__).resolve().parents[2] / handoff.WORKFLOW).read_text()
+        producer, other = workflow.split("  consumer:\n", 1)
+        consumer, other = other.split("  control:\n", 1)
+        control, measurement = other.split("  measurements:\n", 1)
+        for name in ("Set package metadata", "Cold candidate-grade release build"):
+            for block in (producer, control):
+                self.assertIn(f"- name: {name}\n        if: ${{{{ !inputs.inputs_only }}}}", block)
+        self.assertIn("id: seal\n        if: ${{ !inputs.inputs_only }}", producer)
+        self.assertIn("id: upload\n        if: ${{ !inputs.inputs_only }}", producer)
+        self.assertIn("if: ${{ !inputs.inputs_only &&", consumer)
+        self.assertIn("if: always() && !inputs.inputs_only", measurement)
+        self.assertIn("- uses: ./.github/actions/cargo-tool\n        if: ${{ !inputs.inputs_only }}", control)
+        self.assertIn("- name: Installer, locked notices, SBOM, inventory and smoke checks\n        if: ${{ !inputs.inputs_only }}", control)
+        self.assertIn("target/pilot-rust-files.json", producer)
+        self.assertIn("target/pilot-rust-files.json", control)
 
 
 if __name__ == "__main__":

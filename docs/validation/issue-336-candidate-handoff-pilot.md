@@ -34,6 +34,16 @@ callers. All artifacts start `pilot336-` and expire quickly. The bootstrap
 can be removed after hosted validation; manual dispatch still remains
 restricted to the pilot branch while this infrastructure is experimental.
 
+Manual `inputs_only: true` is a diagnostic mode: two fresh Windows jobs run
+the same setup and strict fingerprint, then upload input evidence without
+building, sealing, consuming, packaging or measuring a candidate. Normal
+push, cold and reuse recipes retain their checks. Rust diagnostics contain
+relative file names, sizes and SHA-256 for `lib` and `bin`; bounded UTF-8 text
+is captured only for an explicit allowlist of Rustup installer receipts.
+These are diagnostic artifacts, not compatibility exceptions. The full
+Rust library tree must still match, and a mismatch remains fail-closed until
+file-level evidence establishes the affected files and their role.
+
 The producer and independent cold control start on fresh Windows runners.
 `setup-windows` restores no Rust cache. The producer requires an absent
 `target/release`, fingerprints its inputs, stamps the usual package metadata,

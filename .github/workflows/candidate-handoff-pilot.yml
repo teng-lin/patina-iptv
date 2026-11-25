@@ -5,6 +5,10 @@ on:
     branches: [ci/candidate-artifact-handoff-336]
   workflow_dispatch:
     inputs:
+      inputs_only:
+        description: Diagnose two fresh input identities without building or consuming an executable
+        type: boolean
+        default: false
       cold:
         description: Force the consumer to build locally without reading artifacts
         type: boolean
@@ -45,13 +49,16 @@ jobs:
           python tools/ci/candidate-handoff.py inputs target/pilot-inputs.json
           if ($LASTEXITCODE -ne 0) { throw 'Producer input fingerprint failed.' }
       - name: Set package metadata
+        if: ${{ !inputs.inputs_only }}
         shell: pwsh
         run: python tools/ci/version.py
       - name: Cold candidate-grade release build
+        if: ${{ !inputs.inputs_only }}
         shell: pwsh
         run: ./tools/build-windows.ps1 -Release
       - name: Seal exact executable and manifest
         id: seal
+        if: ${{ !inputs.inputs_only }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,15 +67,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Producer sealing failed.' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         id: upload
+        if: ${{ !inputs.inputs_only }}
         with:
           name: pilot336-exe-${{ github.run_id }}-${{ github.run_attempt }}
           path: target/pilot-payload/*
           if-no-files-found: error
           retention-days: 3
+      - name: Preserve producer input diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pilot336-producer-inputs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            target/pilot-inputs.json
+            target/pilot-rust-files.json
+          if-no-files-found: warn
+          retention-days: 7
   consumer:
     name: Pilot consumer
     needs: producer
-    if: github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
+    if: ${{ !inputs.inputs_only && github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336' }}
     runs-on: windows-2025
     timeout-minutes: 120
     outputs:
@@ -121,6 +139,7 @@ jobs:
           name: pilot336-consumer-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             target/pilot-inputs.json
+            target/pilot-rust-files.json
             target/pilot-decision.json
             target/media-sbom/*
             target/cargo-timings/*.html
@@ -146,18 +165,22 @@ jobs:
           python tools/ci/candidate-handoff.py inputs target/pilot-inputs.json
           if ($LASTEXITCODE -ne 0) { throw 'Control input fingerprint failed.' }
       - name: Set package metadata
+        if: ${{ !inputs.inputs_only }}
         shell: pwsh
         run: python tools/ci/version.py
       - name: Cold candidate-grade release build
+        if: ${{ !inputs.inputs_only }}
         shell: pwsh
         run: ./tools/build-windows.ps1 -Release
       - uses: ./.github/actions/cargo-tool
+        if: ${{ !inputs.inputs_only }}
         with:
           name: cargo-about
           cache: 'false'
           version: 0.9.3
           features: cli
       - name: Installer, locked notices, SBOM, inventory and smoke checks
+        if: ${{ !inputs.inputs_only }}
         shell: pwsh
         run: ./tools/ci/candidate-handoff.ps1 -Phase Package
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -166,12 +189,13 @@ jobs:
           name: pilot336-control-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             target/pilot-inputs.json
+            target/pilot-rust-files.json
             target/media-sbom/*
             target/cargo-timings/*.html
           if-no-files-found: warn
           retention-days: 7
   measurements:
-    if: always() && github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
+    if: always() && !inputs.inputs_only && github.repository == 'teng-lin/patina-iptv' && github.ref == 'refs/heads/ci/candidate-artifact-handoff-336'
     needs: [producer, consumer, control]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
