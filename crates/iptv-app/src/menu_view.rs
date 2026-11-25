@@ -816,7 +816,8 @@ fn show_group_options(ui: Ui, list: ListId) -> bool {
     let rows = group_options(|item| match item {
         // A playlist's heading (the combined view): its own name, and the
         // order of the playlists, which it shows with another one.
-        RenamePlaylist | ReorderPlaylists => playlist,
+        RenamePlaylist => playlist,
+        ReorderPlaylists => playlist && crate::settings::playlists_by_hand(),
         RenameGroup | BlockGroup | HideGroup | ShowFavoritesOnly => named,
         ResetGroupName | GroupEpgOffset => matches!(kind, Kind::GroupChannels(_)),
         // Hidden without a player to hand streams to, unless it is on:

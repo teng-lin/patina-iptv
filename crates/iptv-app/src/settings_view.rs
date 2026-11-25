@@ -304,25 +304,49 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                 && (!crate::runtime().parental_has_pin()
                     || !crate::runtime().parental_settings_allowed())
             {
-                crate::parental_view::protected_settings(ui, move || {
-                    if let Err(e) = crate::settings::set(ui, key, value) {
-                        notify_setting_error(e);
-                    }
-                });
-            } else if let Err(e) = crate::settings::set(ui, key, value) {
-                notify_setting_error(e);
-            } else if key == iptv_settings::keys::PLAYLIST_SORT.as_str() {
-                crate::data::order_changed(&crate::runtime());
+                crate::parental_view::protected_settings(ui, move || store(ui, key, value));
+            } else {
+                store(ui, key, value);
             }
         }
-        Effect::ShowPlaylist(id, show) => show_playlist(ui, id, show),
-        Effect::PlaylistActions(id) => crate::playlists_view::open_only(
-            ui,
-            crate::runtime::model::SourceId(id),
-            crate::playlists_view::Only::Actions,
-        ),
+        // Playlist rows act on the settings as the commands do: behind the
+        // PIN while the settings are protected and locked.
+        Effect::ShowPlaylist(id, show) => {
+            settings_guarded(ui, move || show_playlist(ui, id, show));
+        }
+        Effect::PlaylistActions(id) => settings_guarded(ui, move || {
+            crate::playlists_view::open_only(
+                ui,
+                crate::runtime::model::SourceId(id),
+                crate::playlists_view::Only::Actions,
+            );
+        }),
         Effect::Run(key) => run(ui, key),
         Effect::Close => close(ui),
+    }
+}
+
+/// Stores `value` for `key`; a new playlist order reaches the lists.
+fn store(ui: Ui, key: &'static str, value: Value) {
+    match crate::settings::set(ui, key, value) {
+        Err(e) => notify_setting_error(e),
+        Ok(_) if key == iptv_settings::keys::PLAYLIST_SORT.as_str() => {
+            crate::data::order_changed(&crate::runtime());
+        }
+        Ok(_) => {}
+    }
+}
+
+/// Runs `then` now, or after the PIN while the settings are protected
+/// and locked (as [`run`] does for commands).
+fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
+    if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+        == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::protected_settings(ui, then);
+    } else {
+        then();
     }
 }
 

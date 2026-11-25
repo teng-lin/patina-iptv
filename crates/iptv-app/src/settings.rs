@@ -339,6 +339,10 @@ pub fn offer(device: Device, key: &str) -> Offer {
     {
         return Offer::Hidden;
     }
+    // Sorted by name, there is no hand order to arrange.
+    if key == "playlists.reorder" && !playlists_by_hand() {
+        return Offer::Hidden;
+    }
     // Leaving the app into a picture-in-picture window: Android phones and
     // tablets only, once the host says it has the window.
     let pip = host.automatic_pip() && PIP.get();
@@ -429,6 +433,12 @@ pub fn choice(key: iptv_settings::keys::EnumKey) -> &'static str {
 /// `remote.long_press`, in ms.
 pub fn long_press_ms() -> u64 {
     crate::runtime::settings::long_press_ms(&get())
+}
+
+/// Playlists are listed in their hand order (`playlists.sort`), which
+/// "Reorder playlists" arranges; sorted by name, it is not offered.
+pub fn playlists_by_hand() -> bool {
+    choice(keys::PLAYLIST_SORT) == "manual"
 }
 
 /// `general.user_agent`, when set.
