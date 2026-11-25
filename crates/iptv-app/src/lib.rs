@@ -747,36 +747,6 @@ pub fn schedule() -> Rc<dyn Schedule> {
     runtime().schedule()
 }
 
-/// Swaps the guide data (after an import) and tells the views to re-read.
-/// The guide keeps its list and focused channel by identity, at the new
-/// schedule's now; channel indices into the old data (open menus) that no
-/// longer exist are dropped, the playing channel and favorites are found
-/// again by key.
-pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
-    let kept = lists::keep(*ui);
-    let previous = crate::schedule();
-    player::stop_archive_after_clock_edit(*ui, &*previous, &*schedule);
-    menu_view::invalidate_shifted_context(*ui, &*previous, &*schedule);
-    runtime().set_schedule(schedule.clone());
-    time::mark_shown();
-    let n = schedule.channel_count();
-    if ui.playing.get_untracked().is_some_and(|ch| ch >= n) {
-        player::row_dropped(*ui);
-    }
-    favorites::catalog_changed(*ui, &*schedule);
-    lists::restore(*ui, kept);
-    let n = ui.list.with_untracked(|l| l.len());
-    let rows = ui.visible_rows.get_untracked();
-    let clamped = rows.and_then(|(a, b)| (n > 0).then(|| (a.min(n - 1), b.min(n - 1))));
-    if clamped != rows {
-        ui.visible_rows.set(clamped);
-    }
-    ui.menu.set(None);
-    ui.description.set(None);
-    ui.editor.set(None);
-    ui.app.data_version.update(|v| *v += 1);
-}
-
 /// Whether `program` on `channel` is inside the channel's catch-up window
 /// at guide minute `now`.
 pub fn in_archive(channel: usize, program: Program, now: i32) -> bool {
@@ -921,7 +891,6 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         }
     });
     favorites::reset();
-    favorites::catalog_changed(ui, &*schedule());
     input.replace(Some(input::bind(ui)));
     #[cfg(feature = "test-support")]
     performance_probe::bind(ui);

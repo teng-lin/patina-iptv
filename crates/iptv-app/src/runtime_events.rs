@@ -1,5 +1,11 @@
 //! The shell's single application-event entry point.
-use crate::{Ui, runtime::RuntimeEvent};
+use crate::{
+    Ui,
+    runtime::{RuntimeEvent, ScheduleCause},
+};
+use iptv_core::guide::Schedule;
+use nsh_core::prelude::batch;
+use std::rc::Rc;
 
 pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
@@ -56,42 +62,11 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::BrowsingAll(all) => ui.app.library.all.set(all),
         RuntimeEvent::ShownSource(source) => ui.app.library.shown.set(source),
-        RuntimeEvent::ScheduleReady(schedule) => {
-            crate::set_schedule(&ui, schedule);
-            crate::player::enforce_guide_blocks(ui);
-            crate::external_player::enforce(ui);
-        }
-        RuntimeEvent::OrganizationReady {
-            source,
-            ticket,
-            schedule,
-            replacement,
-        } => {
-            let current = crate::schedule();
-            let same_catalog = schedule
-                .as_any()
-                .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>())
-                .zip(
-                    current
-                        .as_any()
-                        .and_then(|s| s.downcast_ref::<iptv_guide::EpgSchedule>()),
-                )
-                .is_some_and(|(before, now)| before.same_catalog(now));
-            if same_catalog && crate::runtime().organization_edit_current(source, ticket) {
-                let kept = crate::lists::keep(ui);
-                crate::player::stop_archive_after_clock_edit(ui, &*current, &*replacement);
-                crate::menu_view::invalidate_shifted_context(ui, &*current, &*replacement);
-                crate::data::combined::remember_single(
-                    &crate::runtime(),
-                    source,
-                    replacement.clone(),
-                );
-                crate::runtime().set_schedule(replacement);
-                crate::lists::restore(ui, kept);
-                crate::player::enforce_guide_blocks(ui);
-                ui.app.data_version.update(|version| *version += 1);
-            }
-        }
+        RuntimeEvent::ScheduleChanged {
+            previous,
+            current,
+            cause,
+        } => schedule_changed(ui, previous, current, cause),
         RuntimeEvent::SourceReady(resume) => crate::player::source_ready(ui, resume),
         RuntimeEvent::SourceChanged => crate::player::source_changed(ui),
         RuntimeEvent::AccountStreams(limit) => {
@@ -127,6 +102,54 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::SettingsChanged => ui.app.settings.update(|version| *version += 1),
     }
+}
+
+fn schedule_changed(
+    ui: Ui,
+    previous: Rc<dyn Schedule>,
+    current: Rc<dyn Schedule>,
+    cause: ScheduleCause,
+) {
+    let catalog_changed = matches!(cause, ScheduleCause::Catalog { .. });
+    // Effects such as preview autoplay must see the new schedule together
+    // with the list and focus built from it.
+    batch(|| {
+        let kept = crate::lists::keep_in(ui, previous.clone());
+        crate::player::stop_archive_after_clock_edit(ui, &*previous, &*current);
+        crate::menu_view::invalidate_shifted_context(ui, &*previous, &*current);
+        if let ScheduleCause::Catalog { has_vod, any_vod } = cause {
+            crate::time::mark_shown();
+            if ui
+                .playing
+                .get_untracked()
+                .is_some_and(|ch| ch >= current.channel_count())
+            {
+                crate::player::row_dropped(ui, &*current);
+            }
+            ui.app.has_vod.set(has_vod);
+            ui.app.any_vod.set(any_vod);
+        }
+        crate::lists::restore(ui, kept, current.clone());
+        if catalog_changed {
+            let n = ui.list.with_untracked(|l| l.len());
+            let rows = ui.visible_rows.get_untracked();
+            let clamped = rows.and_then(|(a, b)| (n > 0).then(|| (a.min(n - 1), b.min(n - 1))));
+            if clamped != rows {
+                ui.visible_rows.set(clamped);
+            }
+            ui.menu.set(None);
+            ui.description.set(None);
+            ui.editor.set(None);
+            ui.app.data_version.update(|version| *version += 1);
+        }
+        crate::player::enforce_guide_blocks(ui, &*current);
+        if catalog_changed {
+            crate::external_player::enforce(ui);
+        } else {
+            ui.app.data_version.update(|version| *version += 1);
+        }
+    });
+    debug_assert!(Rc::ptr_eq(&current, &crate::schedule()));
 }
 
 /// UI context supplied to the runtime's foreground scheduling hint.

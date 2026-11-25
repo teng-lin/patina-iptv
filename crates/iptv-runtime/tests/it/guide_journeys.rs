@@ -165,13 +165,18 @@ fn cached_startup_pages_descriptions_and_manual_choices_preserve_channel_identit
         let resumes = Rc::new(Cell::new(0));
         let count = resumes.clone();
         let weak = Rc::downgrade(&owner);
+        let last = std::cell::RefCell::new(owner.schedule());
         owner.bind(move |event| match event {
             RuntimeEvent::EarlyResume { done, .. } => { count.set(count.get() + 1); let _ = done.send(()); },
-            RuntimeEvent::ScheduleReady(schedule) => {
+            RuntimeEvent::ScheduleChanged { previous, current, .. } => {
                 let owner = weak.upgrade().unwrap();
-                let channels = schedule.channel_count();
-                owner.set_schedule(schedule.clone());
-                owner.favorites_catalog_changed(schedule.as_ref());
+                let channels = current.channel_count();
+                assert!(Rc::ptr_eq(&last.replace(current.clone()), &previous));
+                assert!(Rc::ptr_eq(&owner.schedule(), &current));
+                if channels == 0 {
+                    assert!(owner.favorite_channels().is_empty());
+                    assert!(owner.recent_channels().is_empty());
+                }
                 tx.send(Event::Schedule(channels)).unwrap();
             },
             RuntimeEvent::GuideChanged => { tx.send(Event::Guide).unwrap(); },

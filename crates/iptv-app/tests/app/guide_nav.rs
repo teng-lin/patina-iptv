@@ -51,9 +51,7 @@ fn guide(now: i64) -> String {
     xml + "</tv>"
 }
 
-#[test]
-fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
-    let Some(home) = isolated!() else { return };
+fn launch_generated_guide(home: &crate::isolated::Home, streams: &str) -> Headless {
     browse_fixture::two_step_preview(home.path());
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -63,9 +61,9 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     std::fs::write(&guide_path, guide(now)).unwrap();
     let playlist = format!(
         "#EXTM3U url-tvg=\"{}\"\n\
-         #EXTINF:-1 tvg-id=\"one\" group-title=\"News\" catchup=\"shift\" catchup-days=\"1\",Test Channel One\nhttp://stream.example.test/one.m3u8\n\
-         #EXTINF:-1 tvg-id=\"two\" group-title=\"News\",Test Channel Two\nhttp://stream.example.test/two.m3u8\n\
-         #EXTINF:-1 tvg-id=\"unmapped\" group-title=\"No listings\",Unmapped channel\nhttp://stream.example.test/unmapped.m3u8\n",
+         #EXTINF:-1 tvg-id=\"one\" group-title=\"News\" catchup=\"shift\" catchup-days=\"1\",Test Channel One\n{streams}/one.m3u8\n\
+         #EXTINF:-1 tvg-id=\"two\" group-title=\"News\",Test Channel Two\n{streams}/two.m3u8\n\
+         #EXTINF:-1 tvg-id=\"unmapped\" group-title=\"No listings\",Unmapped channel\n{streams}/unmapped.m3u8\n",
         guide_path.display()
     );
 
@@ -82,7 +80,6 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
             ImageData::new(playlist.as_bytes().to_vec()),
         )]
     });
-    let gone = |app: &mut Headless, s: &str| app.wait_for_gone(s, Duration::from_secs(3));
     step(app.wait_for("id:wizard-welcome"));
     step(app.press("id:wizard-welcome-add"));
     step(app.press("id:wizard-source-type"));
@@ -95,6 +92,14 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press("text:Watch"));
     step(app.wait_for_within("text:Show 0", IMPORT));
+    app
+}
+
+#[test]
+fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
+    let Some(home) = isolated!() else { return };
+    let mut app = launch_generated_guide(&home, "http://stream.example.test");
+    let gone = |app: &mut Headless, s: &str| app.wait_for_gone(s, Duration::from_secs(3));
     assert!(
         !app.screen().matches("text:Now").unwrap(),
         "at now: no Now button"
@@ -262,6 +267,55 @@ fn step(result: Result<(), String>) {
     if let Err(error) = result {
         panic!("{error}");
     }
+}
+
+#[test]
+fn correcting_the_guide_clock_cancels_an_archive_open_in_progress() {
+    let Some(home) = isolated!() else { return };
+    let streams = crate::support::Server::start(&[]);
+    let mut app = launch_generated_guide(&home, &streams.base);
+    let player = crate::vod_library::player(&app);
+    step(app.press_key("home"));
+    step(app.press_key("left"));
+    assert!(focused(&app, "Show -1"));
+    let before = iptv_app::player_opens(0);
+    let preparing = iptv_app::hold_source_preparation();
+    step(app.press_key("enter"));
+    step(app.wait_for("text:CATCH-UP"));
+    step(crate::isolated::wait_outside(
+        &mut app,
+        "archive source preparation",
+        IMPORT,
+        || preparing.wait_entered(Duration::ZERO),
+    ));
+    assert_eq!(iptv_app::player_opens(0), before);
+
+    step(app.press_key("g"));
+    step(app.open_guide_groups());
+    step(app.long_press("id:guide-groups >> text:News"));
+    step(app.press("id:menu-panel >> text:Guide time offset"));
+    step(app.press_key("right"));
+    step(app.press_key("right"));
+    step(app.wait_for("id:menu-panel >> text:Guide time offset · +0:30"));
+    step(app.press("id:menu-panel >> text:Save"));
+    step(app.press_key("right"));
+    step(app.press_key("home"));
+    // The shifted guide now calls the previous program current. Verify the
+    // published schedule before releasing the held archive preparation.
+    step(app.wait_until("corrected guide clock", IMPORT, |screen| {
+        screen
+            .texts()
+            .iter()
+            .filter(|text| **text == "Show -1")
+            .count()
+            >= 2
+    }));
+    step(app.wait_for("text:Nothing playing"));
+    drop(preparing);
+    step(app.wait(Duration::from_millis(250)));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(iptv_app::player_opens(0), before);
+    assert_eq!(crate::vod_library::player(&app), player);
 }
 
 /// Whether the program titled `title` has the focus: its title shows in

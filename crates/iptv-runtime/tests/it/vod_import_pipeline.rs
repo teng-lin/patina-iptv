@@ -180,18 +180,24 @@ impl Host {
         let any_vod = Rc::new(Cell::new(None));
         let shelves = any_vod.clone();
         let weak = Rc::downgrade(&owner);
+        let reconciled = Cell::new(None);
         owner.bind(move |event| match event {
-            RuntimeEvent::ScheduleReady(schedule) => {
+            RuntimeEvent::ScheduleChanged {
+                current,
+                cause: iptv_runtime::ScheduleCause::Catalog { has_vod, any_vod },
+                ..
+            } => {
                 let owner = weak.upgrade().unwrap();
-                owner.set_schedule(schedule.clone());
-                // The real shell reports the presented catalog through this
-                // public port; that publishes its live/VOD navigation state.
-                owner.favorites_catalog_changed(schedule.as_ref());
+                assert!(Rc::ptr_eq(&owner.schedule(), &current));
+                assert_eq!(reconciled.replace(Some((has_vod, any_vod))), None);
                 presented.set(presented.get() + 1);
             }
             RuntimeEvent::FavoritesChanged {
                 has_vod, any_vod, ..
             } => {
+                if let Some(availability) = reconciled.take() {
+                    assert_eq!(availability, (has_vod, any_vod));
+                }
                 discovery.set(Some(has_vod));
                 shelves.set(Some(any_vod));
             }

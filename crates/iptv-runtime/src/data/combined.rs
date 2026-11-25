@@ -1,6 +1,9 @@
 //! Aggregated mode owns one cached schedule per enabled playlist. A failed
 //! refresh retains that playlist's last good schedule and cannot clear others.
-use super::{Imported, Purpose, Streams, library, opening, organization, pages, stored};
+use super::{
+    CommitOutcome, Imported, Purpose, ScheduleUpdate, Streams, commit_schedule, library, opening,
+    organization, pages, stored,
+};
 use crate::model::SourceId;
 use iptv_guide::{
     EpgSchedule,
@@ -27,7 +30,11 @@ pub(super) fn ready_single(owner: &Rc<crate::Runtime>) -> Option<SingleSchedule>
             s
         })
 }
-pub fn remember_single(owner: &Rc<crate::Runtime>, source: SourceId, schedule: Rc<EpgSchedule>) {
+pub(super) fn remember_single(
+    owner: &Rc<crate::Runtime>,
+    source: SourceId,
+    schedule: Rc<EpgSchedule>,
+) {
     owner.single.with(|s| {
         *s.borrow_mut() = Some(SingleSchedule {
             source,
@@ -388,20 +395,16 @@ async fn rebuild_ready(owner: &Rc<crate::Runtime>) -> bool {
         return false;
     }
     let collapsed = crate::library::collapsed(owner).await.unwrap_or_default();
-    if !active(owner)
-        || owner.generation.with(Cell::get) != generation
-        || owner.rebuild.with(Cell::get) != revision
-    {
-        return false;
-    }
-    install_favorites();
-    let replacement: Rc<dyn iptv_core::guide::Schedule> = Rc::new(
-        CombinedSchedule::new(sources, owner.epoch.with(Cell::get))
-            .with_collapsed_sources(collapsed),
-    );
-    owner.emit(crate::RuntimeEvent::ScheduleReady(replacement.clone()));
-    pages::replaced(owner);
-    Rc::ptr_eq(&owner.schedule(), &replacement)
+    commit_schedule(
+        owner,
+        ScheduleUpdate::Combined {
+            generation,
+            revision,
+            sources,
+            collapsed,
+        },
+        install_favorites,
+    ) == CommitOutcome::Installed
 }
 
 pub fn connection_limit(owner: &Rc<crate::Runtime>, source: SourceId) -> Option<u32> {
@@ -489,7 +492,7 @@ pub fn toggle_playlist(owner: &Rc<crate::Runtime>, group: usize) -> bool {
     // A following key must see the new rows, even while persistence waits.
     // Invalidate assemblies that began before this projection was chosen.
     owner.rebuild.set(owner.rebuild.get().wrapping_add(1));
-    owner.emit(crate::RuntimeEvent::ScheduleReady(projection));
+    commit_schedule(owner, ScheduleUpdate::Catalog(projection), || {});
     owner.spawn({
         let owner = owner.clone();
         async move {

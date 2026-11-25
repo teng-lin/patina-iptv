@@ -247,13 +247,14 @@ fn repair_during_old_work(hold_report: bool) {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let captured = seen.clone();
     owner.bind(move |event| {
-        if let RuntimeEvent::ScheduleReady(schedule) = event {
-            if schedule.channel_count() == 1 && after.get() {
-                let minute = ((now - schedule.epoch_unix()) / 60) as i32;
-                let program = schedule.program_at(0, minute);
-                captured.borrow_mut().push(schedule.listing(0, program));
+        if let RuntimeEvent::ScheduleChanged { current, .. } = event {
+            let owner = weak.upgrade().unwrap();
+            assert!(Rc::ptr_eq(&owner.schedule(), &current));
+            if current.channel_count() == 1 && after.get() {
+                let minute = ((now - current.epoch_unix()) / 60) as i32;
+                let program = current.program_at(0, minute);
+                captured.borrow_mut().push(current.listing(0, program));
             }
-            weak.upgrade().unwrap().set_schedule(schedule);
         }
     });
     let (source, channel) = import_fixture(&host, &server, now);
@@ -390,6 +391,98 @@ fn import_fixture(host: &Host, server: &Server, now: i64) -> (Source, ChannelRef
 }
 
 #[test]
+fn an_unbound_runtime_updates_its_catalog_organization_and_favorites() {
+    use iptv_core::organization::GroupPreference;
+    use iptv_guide::combined::{epg_channel, qualified_key};
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let server = Server::new(now);
+    let host = Host::new();
+    let owner = &host.owner;
+    let (_, channel) = import_fixture(&host, &server, now);
+    let source = channel.source;
+    let before = owner.schedule();
+    let key = before.channel_key(0).unwrap();
+    owner.toggle_favorite(0);
+    owner.record_played(&key);
+    assert_eq!(owner.favorite_channels(), [0]);
+    assert_eq!(owner.recent_channels(), [0]);
+
+    host.drive(iptv_runtime::commands::set_group_preference(
+        owner,
+        source,
+        "__other__".into(),
+        GroupPreference::EpgOffsetMinutes(15),
+    ))
+    .unwrap();
+    data::organization::changed(owner, source);
+    let offset = |row| {
+        let schedule = owner.schedule();
+        epg_channel(&*schedule, row).map(|(epg, local)| epg.epg_offset_minutes(local))
+    };
+    host.until(|| offset(0) == Some(15));
+    assert!(!Rc::ptr_eq(&owner.schedule(), &before));
+    assert_eq!(owner.favorites_channel_of(&key), Some(0));
+    assert_eq!(owner.favorite_channels(), [0]);
+    assert_eq!(owner.recent_channels(), [0]);
+
+    // Adding a second playlist takes the already prepared single-source
+    // schedule into combined mode. Its edit and key-based lists carry over.
+    data::start_import(
+        owner,
+        data::Job {
+            source: Source {
+                name: "Synthetic second catalog".into(),
+                config: SourceConfig::M3u(M3uSourceConfig {
+                    location: server.url("/second.m3u"),
+                    user_agent: None,
+                    referrer: None,
+                }),
+            },
+            epg_url: None,
+            stored: None,
+            purpose: data::Purpose::Add,
+            edit: false,
+        },
+        |_| {},
+    );
+    host.until(|| data::combined::active(owner) && owner.schedule().channel_count() == 2);
+    let combined_key = qualified_key(source.0, &key);
+    let row = owner.schedule().find_channel(&combined_key).unwrap();
+    assert_eq!(offset(row), Some(15));
+    assert_eq!(owner.favorites_channel_of(&combined_key), Some(row));
+    assert_eq!(owner.favorite_channels(), [row]);
+    assert_eq!(owner.recent_channels(), [row]);
+}
+
+#[test]
+fn last_single_source_deletion_installs_an_empty_guide_without_a_subscriber() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let server = Server::new(now);
+    let host = Host::new();
+    let owner = &host.owner;
+    let (_, channel) = import_fixture(&host, &server, now);
+    let key = owner.schedule().channel_key(0).unwrap();
+    owner.toggle_favorite(0);
+    owner.record_played(&key);
+    host.drive(owner.flush_favorites());
+
+    host.drive(data::library::delete(owner, channel.source))
+        .unwrap();
+    assert!(owner.shown_source().is_none());
+    assert_eq!(owner.schedule().channel_count(), 0);
+    assert!(owner.favorites_channel_of(&key).is_none());
+    assert!(owner.favorite_channels().is_empty());
+    assert!(owner.recent_channels().is_empty());
+}
+
+#[test]
 fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -398,12 +491,6 @@ fn a_failed_postcommit_refresh_recovers_without_repeating_the_saved_mutation() {
     let server = Server::new(now);
     let host = Host::new();
     let owner = &host.owner;
-    let weak = Rc::downgrade(owner);
-    owner.bind(move |event| {
-        if let RuntimeEvent::ScheduleReady(schedule) = event {
-            weak.upgrade().unwrap().set_schedule(schedule);
-        }
-    });
     let (_, channel) = import_fixture(&host, &server, now);
     let source = channel.source;
     let initial = TimeWindow {

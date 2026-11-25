@@ -1,12 +1,8 @@
 //! Shell entry points for favorite actions; state and persistence live in Runtime.
 use crate::Ui;
-use iptv_core::guide::Schedule;
 use iptv_presentation::favorites::History;
 use std::collections::BTreeSet;
 
-pub fn catalog_changed(_ui: Ui, catalog: &dyn Schedule) {
-    crate::runtime().favorites_catalog_changed(catalog);
-}
 pub fn edit(_ui: Ui, change: impl FnOnce(&mut BTreeSet<usize>)) {
     crate::runtime().edit_favorites(change);
 }

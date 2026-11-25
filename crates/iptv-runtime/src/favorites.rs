@@ -44,6 +44,15 @@ pub(crate) struct State {
     vod_applied: u64,
 }
 
+impl State {
+    pub(crate) fn with_catalog(catalog: &dyn Schedule) -> Self {
+        Self {
+            index: KeyIndex::build(catalog),
+            ..Self::default()
+        }
+    }
+}
+
 /// Whether `source` has movies or shows by its last import's counts.
 fn source_has_vod(store: &Store, source: SourceId) -> Result<bool, StoreError> {
     let counts = store.import_status(source)?.counts;
@@ -206,13 +215,20 @@ pub fn reset(owner: &super::Runtime) {
         .favorite_writer
         .with(|writer| writer.borrow_mut().take());
     *owner.favorite_failed.borrow_mut() = Default::default();
-    owner
-        .favorites
-        .with(|state| *state.borrow_mut() = State::default());
+    owner.favorites.with(|state| {
+        let mut state = state.borrow_mut();
+        // A root reset keeps the installed catalog. Its index was built at
+        // initialization or at the last catalog commit.
+        let index = std::mem::take(&mut state.index);
+        *state = State {
+            index,
+            ..State::default()
+        };
+    });
 }
 
-/// The source whose catalog is about to be shown (`data.rs`, before
-/// `set_schedule`): its saved favorites and recent channels. The same
+/// The source whose catalog is about to be shown: its saved favorites
+/// and recent channels. The same
 /// source keeps its in-memory lists (writes may still be on their way).
 pub async fn prepare_source(
     owner: &std::rc::Rc<super::Runtime>,
@@ -376,12 +392,17 @@ fn write_owner(state: &State, key: &str) -> Option<(SourceId, String)> {
     }
 }
 
-/// A new catalog is on screen (`set_schedule`): index its keys and show
-/// its favorites.
-pub fn catalog_changed(owner: &super::Runtime, catalog: &dyn Schedule) {
+/// Index the installed catalog before the shell restores its lists.
+pub(crate) fn rebuild_index(owner: &super::Runtime, catalog: &dyn Schedule) {
     let index = KeyIndex::build(catalog);
     owner.favorites.with(|s| s.borrow_mut().index = index);
-    publish(owner);
+}
+
+pub(crate) fn vod_availability(owner: &super::Runtime) -> (bool, bool) {
+    owner.favorites.with(|s| {
+        let state = s.borrow();
+        (state.has_vod, state.any_vod)
+    })
 }
 
 pub fn publish(owner: &super::Runtime) {
