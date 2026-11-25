@@ -271,22 +271,18 @@ fn failed_guide_source_actions_follow_focus_inside_large_text_tv() {
             nodes.iter().find(|n| n.id == id).unwrap().bounds
         };
         let card = bounds("id:guide-source-actions");
+        let viewport = bounds("id:guide-source-actions-scroll");
         let row = bounds(selector);
         card.origin.y.0 >= 0.0
             && card.origin.y.0 + card.size.height.0 <= 540.0
-            && row.origin.y.0 >= card.origin.y.0
-            && row.origin.y.0 + row.size.height.0 <= card.origin.y.0 + card.size.height.0
+            && row.origin.x.0 >= viewport.origin.x.0 - 1.0
+            && row.origin.x.0 + row.size.width.0
+                <= viewport.origin.x.0 + viewport.size.width.0 + 1.0
+            && row.origin.y.0 >= viewport.origin.y.0 - 1.0
+            && row.origin.y.0 + row.size.height.0
+                <= viewport.origin.y.0 + viewport.size.height.0 + 1.0
     };
-    for label in [
-        "Retry",
-        "Switch off",
-        "Move up (used first)",
-        "Move down",
-        "No time shift",
-        "Name",
-        "Change the link",
-        "Remove",
-    ] {
+    let check_focus = |app: &mut Headless, label: &str| {
         let selector = format!("id:guide-source-actions >> label:{label}");
         step(app.wait_until(
             "focused action is visible",
@@ -301,15 +297,32 @@ fn failed_guide_source_actions_follow_focus_inside_large_text_tv() {
             nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
             "D-pad focus reached {label}"
         );
+    };
+    let labels = [
+        "Retry",
+        "Switch off",
+        "Move up (used first)",
+        "Move down",
+        "No time shift",
+        "Name",
+        "Change the link",
+        "Remove",
+    ];
+    for label in labels {
+        check_focus(&mut app, label);
         if label != "Remove" {
             step(app.press_key("down"));
         }
     }
     step(app.press_key("enter"));
     step(app.wait_for("text:Remove “Generated guide actions guide”?"));
-    step(app.press("text:Keep it"));
-    for _ in 0..7 {
+    // Keep it is the default remote action; returning rebuilds the scroll
+    // at its initial offset while logical focus remains on Remove.
+    step(app.press_key("enter"));
+    check_focus(&mut app, "Remove");
+    for label in labels[..7].iter().rev() {
         step(app.press_key("up"));
+        check_focus(&mut app, label);
     }
     std::fs::write(&guide, xml).unwrap();
     step(app.press_key("enter"));
@@ -317,11 +330,7 @@ fn failed_guide_source_actions_follow_focus_inside_large_text_tv() {
         "id:guide-source-actions >> text:Retry",
         Duration::from_secs(5),
     ));
-    step(app.wait_until(
-        "replacement focus is visible",
-        Duration::from_secs(5),
-        |screen| inside(screen, "id:guide-source-actions >> label:Switch off"),
-    ));
+    check_focus(&mut app, "Switch off");
 }
 
 fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
