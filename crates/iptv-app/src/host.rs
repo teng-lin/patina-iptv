@@ -22,7 +22,13 @@ mod web;
 #[cfg(target_family = "wasm")]
 pub(crate) use web::*;
 
-use iptv_core::capabilities::Platform;
+use iptv_core::capabilities::{Host, Platform};
+
+/// The host as its build describes it, before the device reports its form
+/// factor and input: for the facilities that follow the operating system
+/// alone (background recording, login registration, the alarm
+/// permission), and for work off the UI thread or before the root mounts.
+pub(crate) const BUILT: Host = Host::of(PLATFORM);
 
 /// What an image's header says about its size, before anything decodes it.
 pub(crate) enum Extent {

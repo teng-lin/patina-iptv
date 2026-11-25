@@ -51,6 +51,7 @@ mod custom_groups;
 mod data;
 mod desktop;
 mod device;
+mod device_wiring;
 mod epg_sources_view;
 mod external_player;
 mod fav_editor;
@@ -879,7 +880,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
     // Establish host-report signals before eager feature bindings subscribe.
-    let device_bridge = device::bridge();
+    let device_bridge = device_wiring::bridge();
     let ui = Ui::new(SharedUi::new(), player::Player::new());
     settings::bind(ui);
     browse_playback::bind(ui);

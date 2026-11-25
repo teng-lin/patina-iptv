@@ -565,7 +565,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         // Why a control drawn disabled cannot act, said on focus (#279).
         .optional_accessibility_description(move || {
             (control == Control::Multiview)
-                .then(|| crate::capabilities::multiview_disabled(ui))
+                .then(|| crate::multiview::disabled_reason(ui))
                 .flatten()
                 .map(SharedString::from)
         })
@@ -650,7 +650,7 @@ fn tracks(ui: Ui) -> Option<Track> {
 }
 /// The device is a phone (its form factor, not its window's size).
 fn phone_form() -> bool {
-    crate::capabilities::host().form_factor == iptv_core::capabilities::FormFactor::Phone
+    crate::device::host().form_factor == iptv_core::capabilities::FormFactor::Phone
 }
 
 /// A control drawn disabled that still takes the focus and a press, to
@@ -660,7 +660,7 @@ fn explains(ui: Ui, control: Control) -> bool {
     control == Control::Multiview
         && !enabled(ui, control)
         && matches!(
-            crate::capabilities::multiview_offer(ui),
+            crate::multiview::offer(ui),
             iptv_presentation::capabilities::MultiviewOffer::Disabled(_)
         )
 }
@@ -680,7 +680,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
-        Control::Multiview => crate::capabilities::multiview(ui).available(),
+        Control::Multiview => crate::multiview::availability(ui).available(),
         Control::Pip => crate::pip::can_enter(ui),
         Control::Volume | Control::Fullscreen => desktop_controls(),
         Control::Listen => crate::listen::choice(ui) && !crate::listen::heard(ui),
@@ -695,7 +695,7 @@ pub(super) fn activate(
     used(ui);
     if !enabled(ui, control) {
         if explains(ui, control)
-            && let Some(reason) = untracked(|| crate::capabilities::multiview(ui)).reason()
+            && let Some(reason) = untracked(|| crate::multiview::availability(ui)).reason()
         {
             crate::settings_view::notify(crate::capabilities::reason(reason));
         }

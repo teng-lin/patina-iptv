@@ -588,7 +588,7 @@ mod tests {
                         host: Host {
                             form_factor,
                             input: Input { keyboard, dpad },
-                            ..crate::capabilities::BUILT
+                            ..crate::host::BUILT
                         },
                         window,
                     });

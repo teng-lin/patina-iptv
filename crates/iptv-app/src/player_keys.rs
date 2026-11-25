@@ -217,7 +217,7 @@ pub fn press_control(ui: Ui, control: Control) {
         // Multiview drawn disabled says why (a TV at the account's limit).
         if control == Control::Multiview
             && let Some(reason) =
-                nsh_core::prelude::untracked(|| crate::capabilities::multiview(ui)).reason()
+                nsh_core::prelude::untracked(|| crate::multiview::availability(ui)).reason()
         {
             crate::settings_view::notify(crate::capabilities::reason(reason));
         }

@@ -65,7 +65,7 @@ fn label(ui: Ui, control: Control) -> String {
         // Disabled with its reason (a TV at the account's limit, #279).
         Multiview => with(
             tr("Multiview"),
-            match crate::capabilities::multiview_offer(ui) {
+            match crate::multiview::offer(ui) {
                 iptv_presentation::capabilities::MultiviewOffer::Disabled(reason) => {
                     Some(crate::capabilities::reason(reason).to_owned())
                 }
@@ -158,7 +158,7 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
         Control::Search => main,
         // As the device and its window offer it (#279): a phone upright, a
         // tablet in split screen, an iPad and a browser TV leave it out.
-        Control::Multiview => main && crate::capabilities::multiview_offer_on(ui, device).shown(),
+        Control::Multiview => main && crate::multiview::offer_on(ui, device).shown(),
         // Shown until the host reports, then only where it can: never a TV
         // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
         Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
@@ -170,7 +170,7 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
 pub fn enabled(ui: Ui, control: Control) -> bool {
     let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
     match control {
-        Control::Multiview => crate::capabilities::multiview(ui).available(),
+        Control::Multiview => crate::multiview::availability(ui).available(),
         Control::Record => {
             ui.player_surface == 0
                 && ui.playback.get() == crate::Playback::Live
@@ -488,7 +488,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
             words::quick_label(action, is_favorite(ui), detour).to_owned()
         },
         focused,
-        move || action == QuickAction::Multiview && !crate::capabilities::multiview(ui).available(),
+        move || action == QuickAction::Multiview && !crate::multiview::availability(ui).available(),
         move || {
             ui.panels.update(|p| p.quick = Some(i));
             crate::player_keys::press_quick(ui, action);
@@ -497,7 +497,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
     // Why a dimmed Multiview cannot open, said on focus (#279).
     .optional_accessibility_description(move || {
         (action == QuickAction::Multiview)
-            .then(|| crate::capabilities::multiview_disabled(ui))
+            .then(|| crate::multiview::disabled_reason(ui))
             .flatten()
             .map(SharedString::from)
     })
