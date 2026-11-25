@@ -3,14 +3,18 @@
 import argparse
 from collections import Counter
 from datetime import datetime
+import hashlib
 import json
 import math
 from pathlib import Path
+import re
 import statistics
 
-SCHEMA = 1
+SCHEMA = 2
 GATES = {"validation", "test (ubuntu-24.04)", "test (macos-15)", "android"}
 FORMS = ("tablet", "tv")
+AVDS = {"tablet": ("google_apis", "pixel_tablet"), "tv": ("android-tv", "tv_1080p")}
+SAMPLING = ("complete-capture", "fixed-candidates")
 
 
 def timestamp(value):
@@ -32,7 +36,25 @@ def load(path):
     return json.loads(Path(path).read_text())
 
 
-def phases(text, began=None, ended=None):
+def capture(source, strategy):
+    runs, total = source["workflow_runs"], source["total_count"]
+    if type(total) is not int or total < len(runs):
+        raise ValueError("run capture total_count is inconsistent")
+    if strategy not in SAMPLING:
+        raise ValueError("unknown sampling strategy")
+    if strategy == "complete-capture" and total != len(runs):
+        raise ValueError("run capture is truncated: paginate all runs or explicitly select fixed-candidates sampling")
+    ids = [run["id"] for run in runs]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate run IDs in candidate capture")
+    digest = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return runs, {"strategy": strategy, "api_total_count": total, "retrieved_count": len(runs),
+                  "capture_complete": total == len(runs), "candidate_run_ids": ids,
+                  "canonical_snapshot_sha256": digest,
+                  "digest_encoding": "UTF-8 compact JSON with sorted keys"}
+
+
+def phases(text, began=None, ended=None, form=None):
     """Use the first actual launcher invocation, not earlier helper-test output."""
     markers = ("##[group]Run python3 tools/ci/android/ci-emulator.py", "Emulator booted in ",
                "== install and first start")
@@ -50,14 +72,32 @@ def phases(text, began=None, ended=None):
         raise ValueError("smoke log lacks a complete launcher/boot/first-install sequence")
     if (began is not None and found[0] < began) or (ended is not None and found[-1] > ended):
         raise ValueError("smoke phase evidence is outside the identified job")
-    return {"prepare_boot_seconds": found[1] - found[0],
+    if form is not None:
+        observed = {"AVD_TARGET": set(), "AVD_PROFILE": set()}
+        for line in text.splitlines():
+            date, separator, message = line.partition(" ")
+            match = re.fullmatch(r"\s*(AVD_TARGET|AVD_PROFILE): (\S+)\s*", message)
+            if separator and match and (began is None or timestamp(date) >= began) and (ended is None or timestamp(date) <= ended):
+                observed[match[1]].add(match[2])
+        target, profile = AVDS[form]
+        if observed != {"AVD_TARGET": {target}, "AVD_PROFILE": {profile}}:
+            raise ValueError(f"smoke log AVD identity does not match {form}")
+    return {"launcher_timestamp": found[0], "first_install_timestamp": found[2],
+            "prepare_boot_seconds": found[1] - found[0],
             "postboot_to_install_seconds": found[2] - found[1],
             "preinstall_seconds": found[2] - found[0]}
 
 
 def summarize(rows):
+    heads = Counter(row["head_sha"] for row in rows)
+    branches = Counter(row["head_branch"] for row in rows if row["head_branch"] is not None)
+    prs = Counter(number for row in rows for number in row["pull_request_numbers"])
     keys = sorted({key for row in rows for key in row["actual"]})
-    return {"n": len(rows),
+    return {"n": len(rows), "distinct_api_head_shas": len(heads),
+            "repeated_api_head_runs": sum(n - 1 for n in heads.values()),
+            "distinct_known_pr_numbers": len(prs), "repeated_known_pr_occurrences": sum(n - 1 for n in prs.values()),
+            "runs_without_pr_number": sum(not row["pull_request_numbers"] for row in rows),
+            "distinct_head_branches": len(branches), "repeated_head_branch_runs": sum(n - 1 for n in branches.values()),
             "actual": {key: distribution([row["actual"][key] for row in rows if key in row["actual"]])
                        for key in keys},
             "last_selected_lane": dict(Counter(row["last_selected_lane"] for row in rows)),
@@ -65,7 +105,9 @@ def summarize(rows):
             "separate_streams_job": dict(Counter(row["separate_streams_job"] for row in rows))}
 
 
-def report(runs, jobs_directory, logs_directory=None, since=None, until=None, phase_runs=20, latest=None):
+def report(source, jobs_directory, logs_directory=None, since=None, until=None, phase_runs=20, latest=None,
+           sampling="complete-capture"):
+    runs, sampling_info = capture(source, sampling)
     if phase_runs < 0:
         raise ValueError("phase-runs must not be negative")
     if latest is not None and latest < 1:
@@ -92,7 +134,9 @@ def report(runs, jobs_directory, logs_directory=None, since=None, until=None, ph
         if run["run_attempt"] != 1:
             excluded["retried_run"] += 1
             continue
-        snapshot = load(Path(jobs_directory) / f"jobs-{identity}-attempt1.json")
+        job_path = Path(jobs_directory) / f"jobs-{identity}-attempt1.json"
+        job_bytes = job_path.read_bytes()
+        snapshot = json.loads(job_bytes)
         jobs = snapshot["jobs"]
         if snapshot["total_count"] != len(jobs):
             raise ValueError(f"run {identity}: incomplete job pagination")
@@ -137,11 +181,15 @@ def report(runs, jobs_directory, logs_directory=None, since=None, until=None, ph
         smoke_ends = {form: timestamp(job["completed_at"]) for form, job in smoke.items()}
         selected = [job for job in successful if job["name"] not in GATES]
         last = max(selected, key=lambda job: timestamp(job["completed_at"]))
-        tools = named.get("tools")
+        tool_jobs = [job for job in jobs if job["name"] == "tools" or job["name"].startswith("tools / ")]
+        executed_tools = [job for job in tool_jobs if job["conclusion"] != "skipped"]
+        tool_result = "success" if executed_tools else ("skipped" if tool_jobs else "absent")
+        tool_end = max(timestamp(job["completed_at"]) for job in (executed_tools or tool_jobs)) if tool_jobs else None
         actual = {
             "whole_minutes": (max(timestamp(job["completed_at"]) for job in successful) - start) / 60,
             "plan_end_minutes": (plan_end - start) / 60,
             "build_start_minutes": (build_start - start) / 60,
+            "plan_to_build_created_seconds": timestamp(build["created_at"]) - plan_end,
             "plan_to_build_start_minutes": (build_start - plan_end) / 60,
             "build_runner_queue_minutes": (build_start - timestamp(build["created_at"])) / 60,
             "build_minutes": (build_end - build_start) / 60,
@@ -150,16 +198,21 @@ def report(runs, jobs_directory, logs_directory=None, since=None, until=None, ph
                                      for job in smoke.values()),
             "smoke_end_minutes": (max(smoke_ends.values()) - start) / 60,
         }
+        if tool_end is not None:
+            actual["tools_to_build_created_seconds"] = timestamp(build["created_at"]) - tool_end
+            if tool_result == "skipped":
+                actual["skipped_tools_vs_plan_seconds"] = tool_end - plan_end
         if min(actual.values()) < 0:
             raise ValueError(f"run {identity}: negative dependency or queue interval")
-        if tools and tools["conclusion"] == "skipped":
-            actual["skipped_tools_vs_plan_seconds"] = timestamp(tools["completed_at"]) - plan_end
         row = {"run_id": identity, "head_sha": run["head_sha"], "created_at": run["created_at"],
-               "url": run["html_url"], "actual": actual, "last_selected_lane": last["name"],
-               "tools_result": tools["conclusion"] if tools else "absent",
+               "url": run["html_url"], "head_branch": run.get("head_branch"),
+               "pull_request_numbers": sorted({pr["number"] for pr in run.get("pull_requests", [])}),
+               "jobs_snapshot_sha256": hashlib.sha256(job_bytes).hexdigest(),
+               "actual": actual, "last_selected_lane": last["name"],
+               "tools_result": tool_result, "tools_job_names": [job["name"] for job in tool_jobs],
                "separate_streams_job": "present" if streams else "absent"}
         if logs_directory and len(rows) < phase_runs:
-            pair, gaps = {}, []
+            pair, gaps, log_digests = {}, [], {}
             for form, job in smoke.items():
                 checkout = next(step for step in job["steps"] if step["name"].startswith("Run actions/checkout@"))
                 driver = next(step for step in job["steps"] if step["name"].startswith("Smoke test on the "))
@@ -167,39 +220,47 @@ def report(runs, jobs_directory, logs_directory=None, since=None, until=None, ph
                 checkout_end = timestamp(checkout["completed_at"])
                 if not timestamp(job["started_at"]) <= checkout_end <= driver_lower <= driver_upper <= timestamp(job["completed_at"]):
                     raise ValueError(f"run {identity}: checkout/launcher chronology is inconsistent for {form}")
-                pair[form] = phases((Path(logs_directory) / f"smoke-{identity}-{form}.log").read_text(),
-                                    driver_lower, driver_upper)
+                log_bytes = (Path(logs_directory) / f"smoke-{identity}-{form}.log").read_bytes()
+                log_digests[form] = hashlib.sha256(log_bytes).hexdigest()
+                pair[form] = phases(log_bytes.decode(), driver_lower, driver_upper, form)
                 gaps.append(driver_lower - checkout_end)
             others = [timestamp(job["completed_at"]) for job in selected
                       if not job["name"].startswith("smoke / smoke (")]
             old_end = max(*smoke_ends.values(), *others)
-            build_duration = build_end - build_start
-            hidden = {form: min(build_duration, pair[form]["preinstall_seconds"]) for form in FORMS}
-            ideal_end = max(*(smoke_ends[form] - hidden[form] for form in FORMS), *others)
-            row["optimistic_model"] = {
-                "phases": pair, "hidden_preinstall_seconds": hidden,
-                # Subtract within each run BEFORE computing distribution quantiles.
+            ideal_installs = {form: max(ready, build_start + pair[form]["preinstall_seconds"]) for form in FORMS}
+            ideal_finishes = {form: ideal_installs[form] + smoke_ends[form] - pair[form]["first_install_timestamp"]
+                              for form in FORMS}
+            ideal_end = max(*ideal_finishes.values(), *others)
+            row["conditional_eager_model"] = {
+                "phases": pair, "log_sha256": log_digests,
+                "assumed_input_window_seconds": ready - build_start,
+                "ideal_install_timestamps": ideal_installs, "ideal_finish_timestamps": ideal_finishes,
+                # Both savings and idle use the SAME conditional eager schedule.
                 "critical_saving_seconds": old_end - ideal_end,
-                "added_idle_runner_minutes": sum(max(0, build_end - build_start - pair[form]["preinstall_seconds"])
+                "added_idle_runner_minutes": sum(max(0, ready - build_start - pair[form]["preinstall_seconds"])
                                                  for form in FORMS) / 60,
+                "same_job_setup_overlap_upper_bound_seconds": gaps,
             }
-            row["optimistic_model"]["same_job_setup_overlap_upper_bound_seconds"] = gaps
         rows.append(row)
         if latest is not None and len(rows) == latest:
             break
-    result = {"schema_version": SCHEMA, "kind": "actual_pr_observations", "selector": {
+    result = {"schema_version": SCHEMA, "kind": "actual_pr_observations",
+        "analyzer_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), "selector": {
         "since_inclusive": since, "until_exclusive": until, "latest_eligible": latest, "attempt": 1,
         "event": "pull_request", "conclusion": "success", "both_emulators_required": True,
-        "all_jobs_success_or_skipped": True},
+        "all_jobs_success_or_skipped": True}, "sampling": sampling_info,
         "quantiles": "p50 conventional median; p90 nearest rank ceil(0.9*n)",
         "summary": summarize(rows), "excluded": dict(excluded), "runs": rows}
-    models = [row["optimistic_model"] for row in rows if "optimistic_model" in row]
+    result["sampling"]["selected_run_ids"] = [row["run_id"] for row in rows]
+    models = [row["conditional_eager_model"] for row in rows if "conditional_eager_model" in row]
     if models:
-        result["optimistic_model"] = {
+        result["conditional_eager_model"] = {
             "n_pr_runs": len(models), "n_emulator_lanes": len(models) * 2,
-            "assumptions": "Preinstall work is hidden up to the producer build duration; "
-                           "assertion durations and other lane finishes are unchanged. "
-                           "No queue/cancellation/resource-contention effects modeled. Not an after measurement.",
+            "assumptions": "Conditional scenario, not an observed gain or implementation bound: both emulator runners "
+                           "start at APK build execution with zero new queue/prelaunch/handoff cost; all observed preinstall "
+                           "work is assumed reorderable; install cannot precede actual APK/streams readiness; "
+                           "observed post-install tails and other lane finishes stay fixed. "
+                           "Runner contention, cancellation and implementation overhead are not modeled.",
             "critical_saving_seconds": distribution([model["critical_saving_seconds"] for model in models]),
             "added_idle_runner_minutes": distribution([model["added_idle_runner_minutes"] for model in models]),
             "same_job_setup_overlap_upper_bound_seconds": distribution([
@@ -220,12 +281,28 @@ def compare(before, after, comparable=False):
         if any(not math.isfinite(row["actual"]["whole_minutes"]) or row["actual"]["whole_minutes"] < 0
                for row in rows):
             raise ValueError("comparison requires actual nonnegative finite durations")
+    for item in (before, after):
+        sample = item["sampling"]
+        candidates = sample["candidate_run_ids"]
+        if (sample["strategy"] not in SAMPLING or sample["retrieved_count"] != len(candidates)
+                or sample["api_total_count"] < sample["retrieved_count"] or len(set(candidates)) != len(candidates)):
+            raise ValueError("comparison requires an explicit consistent sampling contract")
+        if sample["selected_run_ids"] != [row["run_id"] for row in item["runs"]] or not set(sample["selected_run_ids"]) <= set(candidates):
+            raise ValueError("comparison rows do not match the captured candidate/selection manifest")
+        if sample["strategy"] == "complete-capture" and sample["api_total_count"] != sample["retrieved_count"]:
+            raise ValueError("complete-capture comparison cannot use truncated run lists")
     required = {"attempt": 1, "event": "pull_request", "conclusion": "success",
                 "both_emulators_required": True, "all_jobs_success_or_skipped": True}
     reason = None
     if any(type(item["selector"][key]) is not type(value) or item["selector"][key] != value
            for item in (before, after) for key, value in required.items()):
         reason = "Both cohorts must use successful first-attempt PR runs with both emulator lanes"
+    elif before["analyzer_sha256"] != after["analyzer_sha256"]:
+        reason = "Analyzer versions differ; re-analyze both cohorts with the same tool"
+    elif before["sampling"]["strategy"] != after["sampling"]["strategy"]:
+        reason = "Sampling strategies differ"
+    elif before["sampling"]["strategy"] == "fixed-candidates" and before["sampling"]["retrieved_count"] != after["sampling"]["retrieved_count"]:
+        reason = "Fixed candidate capture widths differ"
     elif not comparable:
         reason = "Owner has not established cohort/intervention comparability"
     elif len(left) < 20 or len(right) < 20:
@@ -241,8 +318,11 @@ def compare(before, after, comparable=False):
                 "after": summarize(right)["actual"].get("whole_minutes", {"n": 0})}
     return {"status": "pending" if reason else "measured", "reason": reason, "actual_whole_minutes": observed,
             "after_median_at_most_18_minutes": None if reason else observed["after"]["p50"] <= 18,
-            "note": "Descriptive evidence only; owner must assess comparable lane mix, runner conditions and intervention. "
-                    "Optimistic models never count as post-change samples."}
+            "cohort_repetition": {"before": {key: summarize(left)[key] for key in ("distinct_api_head_shas", "repeated_api_head_runs", "distinct_known_pr_numbers", "runs_without_pr_number")},
+                                  "after": {key: summarize(right)[key] for key in ("distinct_api_head_shas", "repeated_api_head_runs", "distinct_known_pr_numbers", "runs_without_pr_number")}},
+            "note": "Descriptive PR-run evidence, not statistically independent PRs. Owner comparability assessment must consider "
+                    "repeat/clustered revisions, lane mix, runner/cache conditions and intervention; do not manufacture runs. "
+                    "Conditional models never count as post-change samples."}
 
 
 def main():
@@ -256,6 +336,8 @@ def main():
     analyze.add_argument("--until")
     analyze.add_argument("--phase-runs", type=int, default=20)
     analyze.add_argument("--latest", type=int, help="Use only the latest N eligible observations")
+    analyze.add_argument("--sampling", choices=SAMPLING, default="complete-capture",
+                         help="Default requires all run pages; fixed-candidates explicitly declares a bounded sample")
     comparison = commands.add_parser("compare")
     comparison.add_argument("--before", type=Path, required=True)
     comparison.add_argument("--after", type=Path, required=True)
@@ -264,9 +346,12 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == "report":
-            source = load(args.runs)
-            result = report(source["workflow_runs"], args.jobs_directory, args.logs_directory,
-                            args.since, args.until, args.phase_runs, args.latest)
+            source_bytes = args.runs.read_bytes()
+            source = json.loads(source_bytes)
+            result = report(source, args.jobs_directory, args.logs_directory,
+                            args.since, args.until, args.phase_runs, args.latest, args.sampling)
+            result["sampling"].update(source_file=str(args.runs.resolve()),
+                                      source_file_sha256=hashlib.sha256(source_bytes).hexdigest())
         else:
             result = compare(load(args.before), load(args.after), args.comparable)
     except (ValueError, KeyError, OSError, StopIteration) as error:
