@@ -124,9 +124,9 @@ pub fn send(ui: Ui, event: WizardEvent) {
 }
 
 /// The M3U link form starts with the development playlist's URL, when the
-/// build has one ([`data::DEV_PLAYLIST`]).
+/// build has one ([`crate::runtime::build_config::DEV_PLAYLIST`]).
 fn prefill(ui: Ui) {
-    let Some(url) = data::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
+    let Some(url) = crate::runtime::build_config::DEV_PLAYLIST.filter(|u| !u.is_empty()) else {
         return;
     };
     let due = read(ui, |w| {

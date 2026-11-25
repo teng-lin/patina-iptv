@@ -23,14 +23,6 @@ pub(crate) mod quit_confirm;
 /// Linux, macOS and Windows.
 pub const DESKTOP: bool = crate::host::LINUX || crate::host::MACOS || crate::host::WINDOWS;
 
-/// A launch by an earlier version's login item or task. Scheduled recording
-/// is retired: such a launch removes those registrations and exits before
-/// the app starts (`exit_background_recorder_launch`), so the flag stays
-/// recognized while no running app sees it set.
-pub(crate) fn recorder_only_startup() -> bool {
-    DESKTOP && std::env::args().any(|arg| arg == "--background-recordings")
-}
-
 thread_local! {
     static WINDOW: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
     /// Where the mouse last was (window points).
@@ -104,7 +96,7 @@ pub fn bind(ui: Ui) {
             quit(ui);
         }
     });
-    if recorder_only_startup() {
+    if crate::host::recorder_only_startup() {
         window.hide();
     }
 }

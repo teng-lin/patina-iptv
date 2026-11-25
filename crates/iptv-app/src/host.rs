@@ -76,13 +76,18 @@ pub(crate) fn video_under_page() -> bool {
 /// keyboard whose bindings NSH's keymap fires.
 pub(crate) const REMOTE_KEYS: bool = ANDROID || REMOTE_ONLY;
 
+/// A launch by an earlier version's login item or task. Scheduled recording
+/// is retired: such a launch removes those registrations and exits before
+/// the app starts (`exit_background_recorder_launch`), so the flag stays
+/// recognized while no running app sees it set.
+pub(crate) fn recorder_only_startup() -> bool {
+    (LINUX || MACOS || WINDOWS) && std::env::args().any(|arg| arg == "--background-recordings")
+}
+
 /// Ask for Android's optional notification permission after accepting a capture.
-pub(crate) fn request_recording_notification_permission() {
-    // The system prompt must not delay the viewer's Start or Stop action.
+pub(crate) async fn request_recording_notification_permission() {
     #[cfg(target_os = "android")]
-    crate::data::spawn_in_app(async {
-        let _ = nsh_core::prelude::request_notification_permission().await;
-    });
+    let _ = nsh_core::prelude::request_notification_permission().await;
 }
 
 /// The font files the app registers itself, WOFF2. A browser package's

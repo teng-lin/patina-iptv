@@ -463,7 +463,12 @@ fn start(ui: Ui, mut request: Request) {
             // What can stop it, said as it starts (#275).
             Ok(_) => {
                 crate::settings_view::notify(&crate::capture_limits::start_notice());
-                crate::host::request_recording_notification_permission();
+                if crate::host::ANDROID {
+                    // The system prompt must not delay Start or Stop.
+                    crate::data::spawn_in_app(
+                        crate::host::request_recording_notification_permission(),
+                    );
+                }
             }
             Err(error) => crate::settings_view::notify(translated_reason(
                 error

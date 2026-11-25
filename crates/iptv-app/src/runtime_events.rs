@@ -10,7 +10,7 @@ use std::rc::Rc;
 pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ResumeChannel(channel) => {
-            if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_none() {
+            if !crate::host::recorder_only_startup() && ui.playing.get_untracked().is_none() {
                 crate::parental_view::admitted(ui, channel, move || {
                     ui.play(channel, crate::Playback::Live);
                     if ui.playing.get_untracked() == Some(channel) {
@@ -90,7 +90,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
         }
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
-            if !crate::desktop::recorder_only_startup() && ui.playing.get_untracked().is_some() {
+            if !crate::host::recorder_only_startup() && ui.playing.get_untracked().is_some() {
                 ui.mode.apply(crate::mode::Action::EnterFullscreen);
                 ui.show_playing();
             }

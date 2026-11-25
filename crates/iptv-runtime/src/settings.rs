@@ -445,8 +445,8 @@ pub fn base_network_config() -> NetworkConfig {
     let mut config = NetworkConfig::default();
     #[cfg(debug_assertions)]
     {
-        config.allow_private_fixture =
-            cfg!(any(test, feature = "test-support")) || super::imports::DEV_PLAYLIST.is_some();
+        config.allow_private_fixture = cfg!(any(test, feature = "test-support"))
+            || crate::build_config::DEV_PLAYLIST.is_some();
     }
     config
 }

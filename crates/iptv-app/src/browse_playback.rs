@@ -104,7 +104,7 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
     Policy {
         // Off while its row is not offered (a phone or a tablet with no
         // keyboard or D-pad, #280), whatever is stored.
-        autoplay: !crate::desktop::recorder_only_startup()
+        autoplay: !crate::host::recorder_only_startup()
             && surface != Some(Surface::Player)
             && s.bool(keys::AUTOPLAY, at)
             && autoplay_supported(host),

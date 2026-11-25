@@ -48,12 +48,6 @@ pub use library::{
 };
 pub use wizard_map::source_from_draft;
 
-/// A development playlist the wizard's M3U form starts with, set when the
-/// app is built (`IPTV_RS_DEV_PLAYLIST=http://10.0.2.2:8089/iptv/playlist.m3u`
-/// for the mock server, `tools/mock-server.py`, from an emulator). Without
-/// it, as in every release build, the link field starts empty.
-pub use crate::imports::DEV_PLAYLIST;
-
 /// The shortest time between two progress reports shown while an import
 /// runs. Reports wake the UI themselves (an awaited channel, no polling);
 /// a fast local import would otherwise repaint for each.

@@ -102,7 +102,7 @@ fn config() -> crate::runtime::network::NetworkConfig {
         allow_files: false,
         #[cfg(debug_assertions)]
         allow_private_fixture: cfg!(feature = "test-support")
-            || crate::data::DEV_PLAYLIST.is_some(),
+            || crate::runtime::build_config::DEV_PLAYLIST.is_some(),
         ..Default::default()
     }
 }

@@ -30,6 +30,7 @@
 //! ```compile_fail
 //! use iptv_runtime::stored::configs_from_sources;
 //! ```
+pub mod build_config;
 pub mod data;
 mod error;
 mod events;
