@@ -4,7 +4,8 @@
 use crate::personalization::{self, Fixture, step};
 use iptv_settings::{Settings, Value};
 use nsh_core::{
-    MountBatch, MountItem, NodeId, Size, ViewKind, ViewProps, platform::Idiom, prelude::px,
+    AccessibilityRole, MountBatch, MountItem, NodeId, Size, ViewKind, ViewProps, platform::Idiom,
+    prelude::px,
 };
 use nsh_testing::Headless;
 use std::{
@@ -27,12 +28,48 @@ struct NativeProps {
 pub(super) struct Exposure(Arc<Mutex<NativeProps>>);
 
 impl Exposure {
+    /// Read the Tab parent's own native name, rather than a selector's
+    /// fallback to its child text (which Android may visually ellipsize).
+    #[track_caller]
+    fn settings_tab(&self, app: &Headless, name: &str, selected: bool) -> NodeId {
+        let nodes = app.screen().layout_nodes();
+        let native = self.0.lock().unwrap();
+        let text = nodes
+            .iter()
+            .find(|node| {
+                node.text
+                    .as_ref()
+                    .is_some_and(|text| text.text.text == name)
+                    && native
+                        .views
+                        .get(&node.parent)
+                        .is_some_and(|props| props.accessibility.role == AccessibilityRole::Tab)
+            })
+            .unwrap_or_else(|| panic!("missing tab text {name}"));
+        let props = native
+            .views
+            .get(&text.parent)
+            .expect("tab parent's native props");
+        assert_eq!(props.accessibility.role, AccessibilityRole::Tab);
+        assert_eq!(props.accessibility.label.as_deref(), Some(name));
+        assert_eq!(props.accessibility.state.selected, selected, "{name}");
+        text.parent
+    }
+
     pub(super) fn record(&self, batch: &MountBatch) {
         let mut native = self.0.lock().unwrap();
         for item in &batch.items {
             match item {
                 MountItem::ViewProps { id, props } => {
                     native.views.insert(*id, (**props).clone());
+                }
+                MountItem::AccessibilityLabel { id, label } => {
+                    native
+                        .views
+                        .get_mut(id)
+                        .expect("label update follows initial native props")
+                        .accessibility
+                        .label = label.clone();
                 }
                 MountItem::Component { id, name } if name.as_ref() == "tv.player" => {
                     native.players.push(*id)
@@ -216,6 +253,78 @@ fn inside(screen: &nsh_testing::Screen, control: &str, container: &str) -> bool 
         && c.origin.y.0 >= v.origin.y.0 - 1.0
         && c.origin.x.0 + c.size.width.0 <= v.origin.x.0 + v.size.width.0 + 1.0
         && c.origin.y.0 + c.size.height.0 <= v.origin.y.0 + v.size.height.0 + 1.0
+}
+
+#[test]
+fn settings_tabs_keep_full_native_names_at_largest_text_across_input_and_language() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
+    let (mut fixture, exposure) = fixture_with_settings(home, large_text());
+    let app = &mut fixture.app;
+    step(app.set_environment("largest TV text", |env| {
+        env.idiom = Idiom::Tv;
+        env.font_scale = 1.3;
+    }));
+    step(app.set_viewport(Size::new(px(960.0), px(540.0))));
+    crate::device_signals::report(app, "tv", false, true);
+    step(app.open_guide_groups());
+    step(app.press("id:navigation-rail >> role:tab[Settings]"));
+    step(app.wait_for("role:tab[General]"));
+    exposure.settings_tab(app, "General", true);
+    step(app.press_key("down"));
+    step(app.press_key("down"));
+    let guide = exposure.settings_tab(app, "TV guide data", true);
+    step(app.press_key("right"));
+    step(app.wait_for("text:Guide sources"));
+    step(app.back());
+    assert_eq!(exposure.settings_tab(app, "TV guide data", true), guide);
+
+    // A device/input change updates the keys page without moving the
+    // selected guide page or replacing its native tab identity.
+    step(app.set_environment("largest tablet text", |env| env.idiom = Idiom::Pad));
+    step(app.set_viewport(Size::new(px(1280.0), px(800.0))));
+    crate::device_signals::report(app, "tablet", true, false);
+    assert_eq!(exposure.settings_tab(app, "TV guide data", true), guide);
+    step(app.press("role:tab[Keyboard]"));
+    let keys = exposure.settings_tab(app, "Keyboard", true);
+    step(app.wait_for("text:Edit keyboard shortcuts"));
+    crate::device_signals::report(app, "tablet", false, true);
+    step(app.wait_for("text:Edit remote bindings"));
+    assert_eq!(exposure.settings_tab(app, "Remote control", true), keys);
+
+    // Change the real interface preference with its editor while the
+    // sidebar remains mounted; existing parent names must translate too.
+    step(app.press("role:tab[General]"));
+    let guide = exposure.settings_tab(app, "TV guide data", false);
+    step(app.press_key("right"));
+    for _ in 0..15 {
+        if app.screen().matches("text:Language").unwrap() && app.press("text:Language").is_ok() {
+            break;
+        }
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("text:/Español/"));
+    step(app.press("text:/Español/"));
+    let spanish = iptv_presentation::i18n::resolve("es", None);
+    let translated = iptv_presentation::i18n::translate(spanish, "TV guide data");
+    step(app.wait_for(&format!("role:tab[{translated}]")));
+    step(app.wait_for(&format!("text:{translated}")));
+    assert_eq!(exposure.settings_tab(app, translated, false), guide);
+    step(app.press(&format!("role:tab[{translated}]")));
+    exposure.settings_tab(app, translated, true);
+    step(app.press_key("right"));
+    let sources = iptv_presentation::i18n::translate(spanish, "Guide sources");
+    step(app.wait_for(&format!("text:{sources}")));
+    step(app.back());
+    exposure.settings_tab(app, translated, true);
+    step(app.press_key("down"));
+    let appearance = iptv_presentation::i18n::translate(spanish, "Appearance");
+    exposure.settings_tab(app, appearance, true);
 }
 
 #[test]
