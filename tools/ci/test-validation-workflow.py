@@ -40,6 +40,20 @@ class Workflows(unittest.TestCase):
         for path in (ROOT / "tools/ci").glob("test-*.py"):
             self.assertIn(path.relative_to(ROOT).as_posix(), wrapper)
 
+    def test_helpers_lint_workflows_with_a_checksum_pinned_actionlint(self):
+        text = (ROOT / ".github/workflows/validation.yml").read_text()
+        self.assertIn("actionlint: ${{ steps.select.outputs.actionlint }}", text)
+        helpers = text.split("  helpers:\n", 1)[1].split("  host:\n", 1)[0]
+        lint = helpers.split("      - name: Lint workflows and action consumers\n", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("if: needs.plan.outputs.actionlint == 'true'", lint)
+        self.assertIn("timeout-minutes: 3", lint)
+        self.assertIn("v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz", lint)
+        self.assertIn("8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8", lint)
+        self.assertLess(lint.index("sha256sum --check"), lint.index("tar -xzf"))
+        self.assertIn('"$RUNNER_TEMP/actionlint/actionlint" -shellcheck= -pyflakes=', lint)
+        # Workflow lint precedes the expensive compiler/NSH helper setup.
+        self.assertLess(helpers.index("Lint workflows and action consumers"), helpers.index("Read the compiler and NSH pins"))
+
     def test_standalone_lanes_do_not_emit_legacy_required_names(self):
         host = (ROOT / ".github/workflows/ci.yml").read_text()
         android = (ROOT / ".github/workflows/android.yml").read_text()

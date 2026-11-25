@@ -8,6 +8,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -21,8 +22,8 @@ CI = (".github/workflows/**", ".github/actions/**", "tools/ci/validation-plan.py
       "tools/ci/pins.py", "tools/ci/apt-install.sh", "tools/ci/locked-build-env.sh", "tools/ci/locked-cargo.py", "tools/check.sh",
       "tools/ci/build-inventory.py", "tools/ci/build-provenance.py", "tools/ci/release-plan.py", "tools/ci/signing-config.py",
       "tools/ci/signing-policy.json", "tools/ci/publish-release.py", "tools/ci/native-candidates.json", "tools/ci/native_candidates.py", "tools/ci/run-xvfb.py")
-# Leaf workflows have their own coverage. Shared or newly added workflows
-# continue to exercise every lane until their dependencies are classified.
+# Called leaf workflows have their own coverage. Other called/shared workflows
+# exercise every lane; workflows outside the call graph receive helper checks.
 LANE_WORKFLOWS = {
     ".github/workflows/ci.yml": "host",
     ".github/workflows/android-smoke.yml": "smoke",
@@ -79,6 +80,8 @@ CREDENTIALS = (*BUILD, "crates/iptv-app/src/host/native/credential_key*", "crate
                "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",
                "tools/ci/isolated-credentials.py")
 DOCS = ("docs/**", ".gitignore", ".editorconfig")
+SHIPPED_MARKDOWN = ("tools/mpv-runtime*/**", "crates/iptv-app/fonts/**", "vendor/**", *HOST_INPUTS)
+METADATA = (".github/ISSUE_TEMPLATE/**", ".github/pull_request_template.md", ".github/CODEOWNERS", ".github/dependabot.yml")
 
 
 def matches(paths, patterns):
@@ -86,8 +89,46 @@ def matches(paths, patterns):
 
 
 def documentation(path):
-    # fnmatch's * crosses /, so '*.md' would hide embedded crate assets.
-    return matches([path], DOCS) or ("/" not in path and path.lower().endswith(".md"))
+    # Test the suffix explicitly: fnmatch's * also crosses directory boundaries.
+    if matches([path], SHIPPED_MARKDOWN):
+        return False
+    return matches([path], DOCS) or path.lower().endswith(".md")
+
+
+def validation_workflows(root=ROOT):
+    """Follow local reusable calls without a YAML dependency in the plan job.
+
+    Accept the repository's block-style job `uses` syntax, including quotes.
+    If a local reference uses an unfamiliar form or a called file is missing,
+    return unknown so workflow changes keep broad validation rather than skip it.
+    """
+    pending = [".github/workflows/validation.yml"]
+    called = set()
+    while pending:
+        path = pending.pop()
+        if path in called:
+            continue
+        called.add(path)
+        try:
+            text = (root / path).read_text()
+        except (OSError, UnicodeError):
+            return None
+        for line in text.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            if re.search(r"\buses\s*:", line):
+                # Escaped scalars, YAML aliases/tags, dynamic expressions, and
+                # flow-style jobs cannot prove a local workflow is unrelated.
+                if re.fullmatch(r"\s*(?:- )?uses: (?:['\"][\w./@-]+['\"]|[\w./@-]+)\s*(?:#.*)?", line) is None:
+                    return None
+            if ".github/workflows/" not in line:
+                continue
+            match = re.fullmatch(r"    uses: ['\"]?(\./\.github/workflows/[\w.-]+\.ya?ml)['\"]?\s*(?:#.*)?", line)
+            if match is None:
+                return None
+            pending.append(match[1][2:])
+    return called
 
 
 def fuzz_targets(paths, full=False, root=ROOT):
@@ -134,15 +175,21 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False, draft=False):
     if type(candidate_build) is not bool or (candidate_build and tier != "release"):
         raise ValueError("unsigned candidate builds require the release validation tier")
     full = tier != "pr"
-    requested = {LANE_WORKFLOWS[path] for path in paths if path in LANE_WORKFLOWS}
-    inputs = [path for path in paths if path not in LANE_WORKFLOWS]
+    called = validation_workflows(root)
+    unrelated = {path for path in paths if path.startswith(".github/workflows/")
+                 and called is not None and path not in called}
+    lane_workflows = set(LANE_WORKFLOWS) & called if called is not None else set()
+    requested = {LANE_WORKFLOWS[path] for path in paths if path in lane_workflows}
+    # Remove prose before lane patterns: hosts/** and crates/** also match README.md.
+    inputs = [path for path in paths if path not in lane_workflows and path not in unrelated
+              and not documentation(path)]
     ci = matches(inputs, CI)
     production = [path for path in inputs if not matches([path], ("crates/iptv-app/tests/**",))]
     rust = matches(inputs, (*BUILD, "crates/**/*.rs"))
     native_rust = matches(production, (*BUILD, "crates/**/*.rs"))
     # Unknown code/build inputs still receive host validation. A documentation
     # change alone never installs GTK, Rust targets, media runtimes, or Android.
-    helper_paths = ("tools/ci/**", "tools/mpv-runtime*/**", "tools/*windows*.ps1", "tools/sync-host.sh",
+    helper_paths = (*METADATA, "tools/ci/**", "tools/mpv-runtime*/**", "tools/*windows*.ps1", "tools/sync-host.sh",
                     "tools/package-*", "tools/bundle-*.py", "tools/mock-server.py", "tools/make-*fixtures*")
     host = (full or ci or "host" in requested or matches(inputs, HOST_INPUTS)
             or any(not documentation(path) and not matches([path], helper_paths) for path in inputs))
@@ -159,7 +206,8 @@ def select(paths, tier="pr", root=ROOT, candidate_build=False, draft=False):
         "ios": full or ci or "ios" in requested or matches(production, IOS),
         "credentials": full or ci or "credentials" in requested or matches(inputs, CREDENTIALS),
         "host": host,
-        "helpers_full": full or matches(paths, (*HOST_INPUTS, *HELPER_INPUTS)) or any(not documentation(path) for path in paths),
+        "helpers_full": full or matches(paths, (*HOST_INPUTS, *HELPER_INPUTS, *METADATA)) or any(not documentation(path) for path in paths),
+        "actionlint": full or matches(paths, (".github/workflows/**", ".github/actions/**")),
         "windows": (full or ci or rust or "windows" in requested
                     or matches(inputs, (*WINDOWS_RESOURCES, "hosts/windows/**", "tools/*windows*.ps1"))),
         "android": full or ci or native_rust or android_package_inputs,

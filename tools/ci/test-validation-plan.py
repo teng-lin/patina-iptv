@@ -2,11 +2,71 @@
 """PR selection and aggregate failures use the same explicit validation plan."""
 import importlib.util
 from pathlib import Path
+import re
+import tempfile
 import unittest
 
 SPEC = importlib.util.spec_from_file_location("validation", Path(__file__).with_name("validation-plan.py"))
 v = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(v)
+
+
+# The test is deliberately conservative about computed include paths: new forms
+# need an explicit scanner case before they can silently embed documentation.
+RUST_STRING = re.compile(r'r(?P<hash>\#{0,255})"(?P<raw>.*?)"(?P=hash)|"(?:\\.|[^"\\])*"', re.S)
+
+
+def markdown_includes(source):
+    text = source.read_text()
+    for macro in re.finditer(r"\binclude_(?:str|bytes)\s*!\s*([({\[])", text):
+        start, index = macro.end(), macro.end()
+        closing = {"(": ")", "[": "]", "{": "}"}
+        stack = [closing[macro[1]]]
+        while stack and index < len(text):
+            literal = RUST_STRING.match(text, index)
+            if literal:
+                index = literal.end()
+                continue
+            char = text[index]
+            if char in closing:
+                stack.append(closing[char])
+            elif char in closing.values():
+                if char != stack.pop():
+                    raise AssertionError(f"{source}: mismatched include delimiter")
+            index += 1
+        if stack:
+            raise AssertionError(f"{source}: unterminated include macro")
+        expression = text[start:index - 1].strip().rstrip(",").strip()
+        literal = RUST_STRING.fullmatch(expression)
+        if literal:
+            value = literal["raw"] if literal["raw"] is not None else expression[1:-1]
+            if "\\" in value:
+                raise AssertionError(f"{source}: escaped include path needs scanner support")
+            if value.lower().endswith(".md"):
+                yield (source.parent / value).resolve()
+        elif re.search(r',\s*"[^"\\]*\.[A-Za-z0-9]+"\s*\)\s*$', expression) and not re.search(r"\.md\b", expression, re.I):
+            # A computed prefix with a known non-Markdown suffix (e.g. OUT_DIR
+            # simulator.entitlements) cannot embed a Markdown file.
+            continue
+        else:
+            raise AssertionError(f"{source}: computed include path needs scanner support: {expression}")
+
+
+class EmbeddedMarkdownScanner(unittest.TestCase):
+    def test_literal_raw_and_deleted_markdown_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.rs"
+            source.write_text('include_str ! ("deleted.md"); include_bytes! {r#"bytes.MD"#}; include_str!["square.md"]; include_str!("other.sql");')
+            self.assertEqual(list(markdown_includes(source)), [(Path(directory) / name).resolve()
+                                                              for name in ("deleted.md", "bytes.MD", "square.md")])
+
+    def test_unknown_computed_paths_fail_instead_of_hiding_consumers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.rs"
+            for expression in ('include_str!(DOC)', 'include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/help.md"))'):
+                source.write_text(expression)
+                with self.assertRaisesRegex(AssertionError, "computed include path needs scanner support"):
+                    list(markdown_includes(source))
 
 
 class Selection(unittest.TestCase):
@@ -35,11 +95,89 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["ios"], path)
         self.assertFalse(v.select(["docs/architecture.md"])["ios"])
 
-    def test_embedded_markdown_assets_are_code_inputs_even_when_deleted(self):
-        for path in ("crates/iptv-app/assets/help.md", "crates/iptv-core/src/schema.md"):
-            plan = v.select([path])
-            self.assertTrue(plan["host"], path)
-            self.assertTrue(plan["helpers_full"], path)
+    def test_markdown_and_repository_metadata_use_light_checks(self):
+        docs = ("hosts/tizen/README.md", "hosts/tizen-nsh/README.md", "crates/iptv-tui/README.md",
+                "art/icon/README.md", "tools/README.md", "hosts/android/README.md", "crates/iptv-core/README.md",
+                "docs/privacy-policy/index.html", "docs/screenshots/synthetic.png", "nested/NOTES.MD")
+        metadata = (".github/pull_request_template.md", ".github/ISSUE_TEMPLATE/bug.yml",
+                    ".github/ISSUE_TEMPLATE/config.yml", ".github/CODEOWNERS", ".github/dependabot.yml")
+        for path in (*docs, *metadata):
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertFalse(any(plan[lane] for lane in v.LANES), plan)
+                self.assertEqual(plan["macos_host"], "skip")
+                self.assertEqual(plan["helpers_full"], path in metadata)
+                self.assertFalse(plan["actionlint"])
+
+    def test_packaged_markdown_and_unknown_inputs_keep_consumers(self):
+        for path in ("tools/mpv-runtime/README.md", "tools/mpv-runtime-unix/build/README.md",
+                     "crates/iptv-app/fonts/README.md", "LICENSE", "about.toml"):
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertTrue(plan["packages"])
+                self.assertEqual(plan["windows-package"], not path.startswith("tools/mpv-runtime-unix/"))
+                self.assertTrue(plan["android"])
+        self.assertTrue(v.select(["tools/mpv-runtime-ios/README.md"])["ios"])
+        for path in ("vendor/nsh-tv/README.md", "vendor/synthetic/README.md", ".gitattributes", "unknown.input"):
+            self.assertTrue(v.select([path])["host"], path)
+        # The explicit embedded-doc exception survives removal of the asset.
+        self.assertTrue(v.select(["docs/capabilities.md"])["host"])
+
+    def test_unrelated_workflows_select_helpers_and_actionlint_only(self):
+        for name in ("prune-caches", "privacy-policy", "nsh-cli-releases", "release", "promote-native",
+                     "mpv-runtime", "dependency-candidate", "new-standalone"):
+            path = f".github/workflows/{name}.yml"
+            with self.subTest(path=path):
+                plan = v.select([path])
+                self.assertFalse(any(plan[lane] for lane in v.LANES), plan)
+                self.assertTrue(plan["helpers_full"])
+                self.assertTrue(plan["actionlint"])
+        # Light inputs cannot suppress selection from unrelated production edits.
+        mixed = v.select([".github/workflows/prune-caches.yml", "crates/iptv-core/src/guide.rs"])
+        self.assertTrue(mixed["host"])
+        self.assertTrue(mixed["fuzz"])
+        self.assertTrue(mixed["stress"])
+
+    def test_workflow_graph_is_transitive_and_unknown_forms_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflows = root / ".github/workflows"
+            workflows.mkdir(parents=True)
+            (root / "fuzz").mkdir()
+            (root / "fuzz/Cargo.toml").write_text((v.ROOT / "fuzz/Cargo.toml").read_text())
+            (workflows / "validation.yml").write_text("jobs:\n  first:\n    uses: './.github/workflows/shared.yml' # comment\n")
+            (workflows / "shared.yml").write_text('jobs:\n  second:\n    uses: "./.github/workflows/child.yaml"\n')
+            (workflows / "child.yaml").write_text("jobs:\n  cycle:\n    uses: ./.github/workflows/shared.yml\n")
+            self.assertEqual(v.validation_workflows(root), {f".github/workflows/{name}" for name in
+                                                           ("validation.yml", "shared.yml", "child.yaml")})
+            self.assertTrue(all(v.select([".github/workflows/child.yaml"], root=root)[lane] for lane in v.LANES))
+            # Even a formerly classified lane becomes light when it is no longer called.
+            self.assertFalse(any(v.select([".github/workflows/ci.yml"], root=root)[lane] for lane in v.LANES))
+            for text in ("jobs:\n  x:\n    uses: ./.github/workflows/missing.yml\n",
+                         'jobs: {x: {uses: "./.github/workflows/shared.yml"}}\n',
+                         "jobs:\n  x:\n    uses: ${{ inputs.workflow }}\n",
+                         'jobs:\n  x:\n    uses: "./.github\\u002fworkflows/ci.yml"\n',
+                         "jobs:\n  x:\n    uses: *workflow-alias\n"):
+                (workflows / "validation.yml").write_text(text)
+                self.assertIsNone(v.validation_workflows(root))
+                self.assertTrue(all(v.select([".github/workflows/unrelated.yml"], root=root)[lane] for lane in v.LANES))
+
+    def test_workflow_lint_is_selected_for_actions_and_full_tiers(self):
+        self.assertTrue(v.select([".github/actions/setup/action.yml"])["actionlint"])
+        self.assertTrue(v.select([], "full")["actionlint"])
+        self.assertTrue(v.select([], "release")["actionlint"])
+        self.assertFalse(v.select(["tools/ci/test-validation-plan.py"])["actionlint"])
+
+    def test_rust_embedded_markdown_never_routes_as_documentation(self):
+        found = set()
+        for tree in ("crates", "hosts"):
+            for source in (v.ROOT / tree).rglob("*.rs"):
+                for included in markdown_includes(source):
+                    path = included.relative_to(v.ROOT).as_posix()
+                    found.add(path)
+                    self.assertFalse(v.documentation(path), f"{source}: embedded {path} needs a planner exception")
+                    self.assertTrue(v.select([path])["host"], path)
+        self.assertIn("docs/capabilities.md", found)
 
     def test_packaging_helper_dependency_closure(self):
         for path in ("tools/ci/notices.hbs", "tools/ci/component-inventory.py", "tools/ci/crypto-native-notices.py",

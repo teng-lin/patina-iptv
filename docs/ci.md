@@ -117,7 +117,18 @@ either standalone workflow run that workflow even when host tests also run.
 
 Changes confined to the Rust app's test directory run host correctness and
 Windows test compilation. Edits to a leaf validation workflow select its
-own lane. Shared workflow and shipping dependency changes use broad validation.
+own lane. Validation's transitive local reusable-workflow call graph determines
+which workflows participate; workflows outside that graph run only helper checks.
+Unrecognised or missing local workflow references keep broad validation. Composite
+actions remain shared CI inputs. Workflow/action edits also run pinned actionlint over all workflow consumers.
+
+Markdown at any depth is documentation unless it is embedded or packaged.
+`docs/capabilities.md` keeps host checks; font provenance, vendored Markdown and
+`tools/mpv-runtime*/**` keep their build/package consumers. Repository issue/PR
+templates, CODEOWNERS and Dependabot configuration run helper checks. Unknown
+non-documentation inputs and `.gitattributes` retain native validation. A scanner
+regression checks Rust `include_str!`/`include_bytes!` Markdown consumers so adding
+an embedded document requires an explicit planner exception.
 
 ## Required checks and migration
 
@@ -135,11 +146,49 @@ mirrors the whole aggregate. Reusable host jobs have distinct prefixed check
 names; the old independent event subscriptions are removed to avoid ambiguous
 or duplicate protected checks.
 
-Verify the aggregate check on PRs and merge-queue runs, then add `validation`
-as a required check with the existing GitHub Actions app binding. Once that
-requirement is effective, remove the three alias requirements and set the
-repository variable `PATINA_REQUIRE_AGGREGATE_ONLY` to `true` to skip the alias
-jobs. Master pushes and scheduled runs use the aggregate directly.
+Issue [#338](https://github.com/teng-lin/patina-iptv/issues/338) tracks a separate
+admin cutover and follow-up measurements. The routing PR implements tasks 2–5;
+it does not authorize or perform settings changes. Live branch protection and
+repository-variable writes require explicit repository-owner approval.
+
+The read-only preflight on November 25, 2026 found the three legacy requirements,
+all bound to GitHub Actions (`app_id: 15368`), `strict: false`, and no
+`PATINA_REQUIRE_AGGREGATE_ONLY` variable. Re-read those settings at execution time
+and preserve the current configuration, including unrelated protection rules.
+With owner approval, execute in this safe order:
+
+1. Retain all aliases and leave the variable absent/false. Verify `validation`
+   reports the exact PR head and merge-queue revision, including a documentation
+   selection and a selected-lane failure that makes the aggregate fail.
+2. Add `validation` as a required check with the existing GitHub Actions app
+   binding **while all three legacy checks remain required**. Read branch
+   protection back and verify the new requirement is effective.
+3. Remove only the three legacy required contexts, preserving `validation`, its
+   app binding, strictness, and all unrelated protection settings. Read back and
+   verify `validation` remains required before proceeding.
+4. Only then set `PATINA_REQUIRE_AGGREGATE_ONLY=true`. Confirm a new exact-head PR
+   run reports `validation`, skips the aliases, and satisfies required checks.
+   Master pushes and scheduled runs already use the aggregate directly.
+
+Never set the variable before removing legacy requirements: skipped aliases
+cannot satisfy those required checks. The operations are ordered, not atomic;
+stop and inspect after any failed write/readback, keeping a required aggregate
+or the still-running legacy aliases throughout.
+
+For rollback, first remove or set the variable false, start a fresh PR validation
+run, and verify all three aggregate-mirroring aliases report. Restore the saved
+legacy requirements and verify them before optionally removing the aggregate
+requirement. Restoring legacy requirements while aliases are disabled blocks PRs.
+
+After the owner cutover, collect at least 20 successful docs-only PR runs and
+at least 20 successful PR runs for the gate-to-end comparison. Record run IDs,
+head SHAs, attempts, UTC cutover time, routing plans, queue-inclusive wall time
+(`created_at` to completion), and elapsed time from the `validation` job's
+start to run completion. Keep reruns and non-doc plans identifiable. Report the
+nearest-rank p90 for each cohort against the issue's 26-minute docs-only and
+9.7-minute gate-to-end baselines. The routing change alone is not evidence that
+queue delays improved; retain `Refs #338` until the settings step and measured
+cohorts are complete.
 
 ## Release artifacts
 
