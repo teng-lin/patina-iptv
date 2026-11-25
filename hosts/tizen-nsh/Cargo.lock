@@ -2693,7 +2693,7 @@ dependencies = [
 [[package]]
 name = "nsh-platform-tizen"
 version = "0.0.1"
-source = "git+https://github.com/teng-lin/nsh-platform-tizen?rev=c2257cbbb3876f343e6ee0f4dea12b185009b9a6#c2257cbbb3876f343e6ee0f4dea12b185009b9a6"
+source = "git+https://github.com/teng-lin/nsh-platform-tizen?rev=7570f3322b8c0a8ecda9a315c7d488894b90bfd5#7570f3322b8c0a8ecda9a315c7d488894b90bfd5"
 dependencies = [
  "log",
  "nsh-core",

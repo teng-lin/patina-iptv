@@ -34,6 +34,10 @@
 //!   bitrate}], audio: [{id, label, language, channels, codec}], text:
 //!   [{id, label, language}], selected: {video, audio, text}} whenever they
 //!   change; `format` {fps?, channels?} for what plays.
+//! - events `firstRender` {token} and `pictureLost` {token}: evidence that the
+//!   current source drew a frame or released its picture. AVPlay can reopen
+//!   with the same token after releasing the plane on hide. Rebuffering can
+//!   leave an existing picture on the plane.
 //! - picture in picture (surface 0): prop `pip` {auto, enter, window},
 //!   events `pip` {supported, tv, active} and `pipAction` {action}
 //!   (`pip.rs`; Android's host; the desktops' players read `window`).
@@ -170,12 +174,12 @@ fn count_open(surface: usize, last: &RefCell<Option<(String, u64)>>, source: Opt
 /// Whether the backdrops under the video layer leave its rectangle
 /// transparent (`panels::backdrop`): on a platform whose video plane is
 /// under the page, while surface 0 shows a picture (reactive). That is
-/// while it plays a source whose first frame its player drew
-/// ([`Stream::rendered`](crate::player::Stream::rendered), for the open
-/// token): a source the host refused, one that failed, one being replaced
-/// and the time before the first frame show the backdrop, not a black plane.
+/// while it plays a source whose first frame its player drew and whose
+/// picture is still on the plane ([`Stream::rendered`](crate::player::Stream::rendered),
+/// for the open token). The backdrop covers the plane until the next frame
+/// after the player releases the picture.
 pub(crate) fn backdrop_clear(ui: Ui) -> bool {
-    if !crate::host::VIDEO_UNDER_PAGE {
+    if !crate::host::video_under_page() {
         return false;
     }
     let stream = ui.player.main();
@@ -338,17 +342,17 @@ fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
 /// One event from surface `surface`'s player.
 fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
     let stream = ui.player.stream(surface);
-    let token = match &event {
+    let accepts = match &event {
+        // Replacement preparation withdraws callback admission while the old
+        // source stays mounted. It can still lose its picture in that window.
+        PlayerEvent::PictureLost { token } => *token == stream.token.get_untracked(),
         PlayerEvent::Reauthorize { token, .. }
         | PlayerEvent::Timeline { token, .. }
-        | PlayerEvent::FirstRender { token } => Some(*token),
-        _ => None,
+        | PlayerEvent::FirstRender { token } => stream.accepts_native(Some(*token)),
+        PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_) | PlayerEvent::Audio(_) => true,
+        _ => stream.accepts_native(None),
     };
-    if !matches!(
-        &event,
-        PlayerEvent::Pip { .. } | PlayerEvent::PipAction(_) | PlayerEvent::Audio(_)
-    ) && !stream.accepts_native(token)
-    {
+    if !accepts {
         return;
     }
     let kind = event.kind();
@@ -391,9 +395,15 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
                 if surface == 0 {
                     crate::startup::mark("video rendered");
                 }
-                if crate::host::VIDEO_UNDER_PAGE {
+                if crate::host::video_under_page() {
                     stream.rendered.set(Some(token));
                 }
+            }
+            return;
+        }
+        PlayerEvent::PictureLost { token } => {
+            if stream.rendered.get_untracked() == Some(token) {
+                stream.rendered.set(None);
             }
             return;
         }
@@ -411,7 +421,7 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
         PlayerEvent::Error { code, http } => {
             // A refused source (`headersUnsupported`) or a failed one: no
             // picture until a new open draws its first frame.
-            if crate::host::VIDEO_UNDER_PAGE {
+            if crate::host::video_under_page() {
                 stream.rendered.set(None);
             }
             crate::player::on_error(ui, surface, &code, http);

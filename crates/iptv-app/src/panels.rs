@@ -59,7 +59,7 @@ pub fn preview_rect() -> (f32, f32, f32, f32) {
 /// The foreground stays clear in guide mode, so the video shows wherever it is
 /// laid out: today the preview rectangle.
 ///
-/// Where the video plane is under the whole page (`host::VIDEO_UNDER_PAGE`)
+/// Where the video plane is under the whole page (`host::video_under_page`)
 /// the backdrop cannot be under the video, so while a picture shows
 /// (`video::backdrop_clear`) it leaves the video's rectangle clear and
 /// keeps its colors everywhere else, as the native layers look: the
@@ -69,12 +69,14 @@ pub fn backdrop(ui: Ui) -> impl IntoElement {
     let panel = move || rgb(ui.app.theme.with(|t| t.background.panel));
     let window_color = move || rgb(ui.app.theme.with(|t| t.background.window));
     let clear = move || crate::video::backdrop_clear(ui);
+    let video_under_page = crate::host::video_under_page();
     let mut backdrop = view()
+        .test_id("video-backdrop")
         .absolute()
         .inset_0()
         .pointer_events(PointerEvents::None)
         .bg(move || if clear() { rgba(0) } else { window_color() });
-    if crate::host::VIDEO_UNDER_PAGE {
+    if video_under_page {
         let strips = computed(move || {
             if clear() {
                 let w = window();
@@ -96,7 +98,7 @@ pub fn backdrop(ui: Ui) -> impl IntoElement {
     }
     let rail_width = move || {
         let width = crate::rail::width(ui);
-        if crate::host::VIDEO_UNDER_PAGE && clear() {
+        if video_under_page && clear() {
             let w = window();
             let top = safe_area().top.0 + header_now().0;
             let strip = (0.0, top, width, w.height.0 - top);

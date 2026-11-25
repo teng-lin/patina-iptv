@@ -53,8 +53,17 @@ pub(crate) const WINDOWS: bool = on(Platform::Windows);
 /// AVPlay), not a view among the app's layers: everything over a playing
 /// video, the backdrops below the video layer included, must stay
 /// transparent for the picture to show.
-pub(crate) const VIDEO_UNDER_PAGE: bool =
-    cfg!(all(target_family = "wasm", feature = "browser-package"));
+pub(crate) fn video_under_page() -> bool {
+    #[cfg(all(not(target_family = "wasm"), feature = "test-support"))]
+    {
+        // Let an isolated native test render the browser host's backdrop.
+        std::env::var_os("IPTV_TEST_VIDEO_UNDER_PAGE").as_deref() == Some("1".as_ref())
+    }
+    #[cfg(not(all(not(target_family = "wasm"), feature = "test-support")))]
+    {
+        cfg!(all(target_family = "wasm", feature = "browser-package"))
+    }
+}
 
 /// Keys come from a TV remote that reports each key's press and release
 /// (Android's, and a browser TV's through its NSH platform), not from a

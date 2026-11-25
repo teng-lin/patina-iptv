@@ -6,12 +6,11 @@
  *
  * `tv.player` is the platform's AVPlay component (NshTizen.avplay), which
  * plays a source's URL with its token, pause and seek, and reports state,
- * size, first render, position and timeline, behind one rule of Patina's
- * player contract it cannot keep: AVPlay sends no request headers of the
- * app's, so a source that needs them reports an error instead of playing
- * without them (iptv-player-mpv's `source.headers`). The User-Agent is the
- * exception: no page can set it (a forbidden header), so AVPlay's own is
- * sent, as for every request the app makes on this TV.
+ * size, picture loss, first render, position and timeline, behind one rule
+ * of Patina's player contract it cannot keep: AVPlay sends no request
+ * headers of the app's, so a source that needs them reports an error
+ * instead of playing without them (iptv-player-mpv's `source.headers`).
+ * User-Agent is a forbidden page header, so AVPlay sends its own.
  *
  * Plain ES2017 (Chromium 69).
  */

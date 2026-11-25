@@ -50,6 +50,29 @@ const CARD: &str = "id:player-card";
 /// The props the app last sent each native component.
 type Props = Arc<Mutex<HashMap<NodeId, HashMap<String, Value>>>>;
 
+fn observe_player_props(app: &mut Headless) -> Props {
+    let props: Props = Arc::default();
+    let observed = props.clone();
+    app.observe(move |_, batch| {
+        let mut props = observed.lock().unwrap();
+        for item in &batch.items {
+            if let MountItem::ComponentProps { id, props: changed } = item {
+                let entry = props.entry(*id).or_default();
+                for (name, value) in changed {
+                    let value = value.clone().unwrap_or(Value::Null);
+                    let value = if name.as_ref() == "source" {
+                        crate::support::upstream_source(&value)
+                    } else {
+                        value
+                    };
+                    entry.insert(name.to_string(), value);
+                }
+            }
+        }
+    });
+    props
+}
+
 fn guide(now: i64) -> String {
     let mut xml = String::from(
         "<?xml version=\"1.0\"?><tv>\
@@ -341,6 +364,135 @@ fn run_published_retries(app: &mut Headless, props: &Props, clock: &Clock, time:
 }
 
 #[test]
+fn avplay_picture_loss_covers_the_backdrop_until_the_same_source_renders_again() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_VIDEO_UNDER_PAGE", "1")],
+    ) else {
+        return;
+    };
+    browse_fixture::two_step_preview(home.path());
+    let streams = crate::support::Server::start(&[]);
+    let one = streams.url("/one.m3u8");
+    let two = streams.url("/two.m3u8");
+    let playlist =
+        format!("#EXTM3U\n#EXTINF:-1,Generated One\n{one}\n#EXTINF:-1,Generated Two\n{two}\n");
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(960.0), px(540.0)),
+        clock: Clock::manual(SystemTime::now()),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    let props = observe_player_props(&mut app);
+    app.on_pick(move |_| crate::support::picked(playlist.clone()));
+    step(app.wait_for("id:wizard-welcome"));
+    step(app.press("id:wizard-welcome-add"));
+    step(app.press("id:wizard-source-type"));
+    step(app.wait_for("text:Playlist file"));
+    step(app.press("text:Playlist file"));
+    step(app.wait_for("text:Choose a file…"));
+    step(app.press("text:Choose a file…"));
+    step(app.wait_for("text:synthetic.m3u"));
+    step(app.press("text:Add playlist"));
+    step(app.wait_for_within("text:Playlist added", IMPORT));
+    step(app.press("text:Watch"));
+    step(app.wait_for_within("text:Generated One", IMPORT));
+    step(app.set_environment("a TV", |e| e.idiom = Idiom::Tv));
+
+    let id = player(&app);
+    let root = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.id == id)
+        .unwrap()
+        .parent;
+    let root = format!("view:{root}");
+    let backgrounds = |app: &Headless| {
+        [root.as_str(), "id:video-backdrop"].map(|selector| {
+            app.screen()
+                .view_style(selector)
+                .unwrap()
+                .unwrap()
+                .background_color
+        })
+    };
+    let opaque = backgrounds(&app);
+    assert!(
+        opaque
+            .iter()
+            .all(|color| color.is_some_and(|c| c & 0xff == 0xff))
+    );
+
+    browse_fixture::choose_fullscreen(&mut app);
+    wait_live_source(&mut app, &props, &one);
+    state(&mut app, "ready");
+    let old_token = prop(&app, &props, "source")["token"].as_u64().unwrap();
+    send(&mut app, "firstRender", json!({ "token": old_token }));
+    assert_eq!(backgrounds(&app), [None, None]);
+
+    let preparing = iptv_app::hold_source_preparation();
+    step(app.press_key("down"));
+    step(crate::isolated::wait_outside(
+        &mut app,
+        "replacement source preparation",
+        Duration::from_secs(5),
+        || preparing.wait_entered(Duration::ZERO),
+    ));
+    assert_eq!(prop(&app, &props, "source")["token"], json!(old_token));
+    assert_eq!(backgrounds(&app), [None, None]);
+    send(&mut app, "pictureLost", json!({ "token": old_token }));
+    assert_eq!(
+        backgrounds(&app),
+        opaque,
+        "the mounted picture released during preparation"
+    );
+    send(&mut app, "firstRender", json!({ "token": old_token }));
+    assert_eq!(
+        backgrounds(&app),
+        opaque,
+        "the prior source no longer accepts render evidence"
+    );
+    drop(preparing);
+
+    wait_live_source(&mut app, &props, &two);
+    state(&mut app, "ready");
+    let source = prop(&app, &props, "source");
+    let token = source["token"].as_u64().unwrap();
+    let opened = opens();
+    send(&mut app, "firstRender", json!({ "token": old_token }));
+    assert_eq!(backgrounds(&app), opaque, "stale first render");
+    send(&mut app, "firstRender", json!({ "token": token }));
+    assert_eq!(backgrounds(&app), [None, None]);
+    send(&mut app, "pictureLost", json!({ "token": old_token }));
+    assert_eq!(backgrounds(&app), [None, None], "stale picture loss");
+
+    state(&mut app, "buffering");
+    assert_eq!(backgrounds(&app), [None, None], "midstream rebuffering");
+    state(&mut app, "ready");
+    assert_eq!(backgrounds(&app), [None, None]);
+
+    step(app.press_key("space"));
+    assert_eq!(prop(&app, &props, "paused"), json!(true));
+    send(&mut app, "pictureLost", json!({ "token": token }));
+    assert_eq!(backgrounds(&app), opaque, "AVPlay released this picture");
+    state(&mut app, "buffering");
+    state(&mut app, "ready");
+    assert_eq!(backgrounds(&app), opaque, "reopened while still paused");
+    assert_eq!(prop(&app, &props, "paused"), json!(true));
+
+    step(app.press_key("space"));
+    assert_eq!(prop(&app, &props, "paused"), json!(false));
+    assert_eq!(backgrounds(&app), opaque, "resume is not render evidence");
+    send(&mut app, "firstRender", json!({ "token": token }));
+    assert_eq!(backgrounds(&app), [None, None]);
+    assert_eq!(player(&app), id, "the player surface stayed mounted");
+    assert_eq!(prop(&app, &props, "source"), source);
+    assert_eq!(opens(), opened, "Patina kept the source and token");
+}
+
+#[test]
 fn the_player_follows_its_host_through_waits_failures_and_replays() {
     let Some(home) = isolated!() else { return };
     browse_fixture::two_step_preview_with(home.path(), browse_fixture::bind_ok_to_info_card);
@@ -380,27 +532,7 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     // The window full screen video fills.
     config.environment.window = size;
     let mut app = Headless::start(config).unwrap();
-    let props: Props = Arc::default();
-    {
-        let props = props.clone();
-        app.observe(move |_, batch| {
-            let mut props = props.lock().unwrap();
-            for item in &batch.items {
-                if let MountItem::ComponentProps { id, props: changed } = item {
-                    let entry = props.entry(*id).or_default();
-                    for (name, value) in changed {
-                        let value = value.clone().unwrap_or(Value::Null);
-                        let value = if name.as_ref() == "source" {
-                            crate::support::upstream_source(&value)
-                        } else {
-                            value
-                        };
-                        entry.insert(name.to_string(), value);
-                    }
-                }
-            }
-        });
-    }
+    let props = observe_player_props(&mut app);
     app.on_pick(move |_| {
         vec![PickedFile::new(
             "synthetic.m3u",
