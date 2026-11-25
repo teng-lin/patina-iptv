@@ -694,6 +694,50 @@ fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore()
         }),
         Rejection::Damaged,
     ));
+
+    // These are valid versioned documents whose values this build cannot
+    // restore faithfully. An older release may allow another enum, range or
+    // override scope, so refusal must not call the archive damaged.
+    for version in [1, iptv_settings::backup::VERSION] {
+        for (label, global, playlists) in [
+            (
+                "unsupported enum",
+                json!({"appearance.font_size": "generated_larger"}),
+                json!({}),
+            ),
+            (
+                "unsupported numeric range",
+                json!({"player.info_panel_timeout": 120_000}),
+                json!({}),
+            ),
+            (
+                "unsupported override scope",
+                json!({}),
+                json!({"generated-playlist": {"appearance.accent": "red"}}),
+            ),
+        ] {
+            cases.push((
+                label,
+                rewrite_generated_archive(&accepted, |header, payloads| {
+                    let index = header["files"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .position(|entry| entry["name"] == "settings.json")
+                        .unwrap();
+                    payloads[index] = serde_json::to_vec(&json!({
+                        "format": iptv_settings::backup::FORMAT, "version": version,
+                        "global": global, "playlists": playlists
+                    }))
+                    .unwrap();
+                }),
+                Rejection::Settings {
+                    found: Some(u64::from(version)),
+                    supported: u64::from(iptv_settings::backup::VERSION),
+                },
+            ));
+        }
+    }
     for (label, bytes, expected) in cases {
         let error =
             block_on(busy.worker(move |archive| archive.stage(&mut bytes.as_slice()))).unwrap_err();

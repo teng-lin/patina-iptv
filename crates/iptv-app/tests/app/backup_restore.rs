@@ -830,6 +830,34 @@ fn exercise_compatibility_failures(
         word("This backup format is not supported."),
         word("Choose another backup, or use a Patina version that supports this backup."),
     ));
+
+    let compatible =
+        word("Choose another backup, or use a Patina version that supports this backup.");
+    cases.push((
+        rewrite_generated_archive(&baseline, |_, payloads| {
+            payloads[1] = serde_json::to_vec(&serde_json::json!({
+                "format": iptv_settings::backup::FORMAT,
+                "version": iptv_settings::backup::VERSION,
+                "global": {"appearance.font_size": "generated_larger"}
+            })).unwrap();
+        }),
+        version_message(
+            "This Patina cannot restore these backup settings (version {found}; supported version {supported}).",
+            u64::from(iptv_settings::backup::VERSION),
+            u64::from(iptv_settings::backup::VERSION),
+        ),
+        compatible.clone(),
+    ));
+    cases.push((
+        rewrite_generated_archive(&baseline, |_, payloads| {
+            payloads[1] = serde_json::to_vec(&serde_json::json!({
+                "format": "generated-private-format-token", "version": 1
+            }))
+            .unwrap();
+        }),
+        word("This backup contains settings in an unsupported format."),
+        compatible,
+    ));
     let damaged = word(
         "This backup is damaged or incomplete. Choose another backup, or create a new backup on the original device.",
     );
@@ -871,7 +899,9 @@ fn exercise_compatibility_failures(
         ));
         let (description, buttons) = observed.lock().unwrap()[index].clone();
         assert!(description.contains(&explanation), "{description}");
-        assert!(description.contains(&next_step), "{description}");
+        if !next_step.is_empty() {
+            assert!(description.contains(&next_step), "{description}");
+        }
         assert!(
             description.contains(&word(
                 "Your current data and any previously scheduled restore have been kept."

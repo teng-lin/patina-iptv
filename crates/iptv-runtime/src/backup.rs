@@ -652,9 +652,6 @@ fn validate_settings(text: &str) -> Result<()> {
         migrations: Vec::new(),
         ..report
     };
-    if !migrated.clamped.is_empty() || !migrated.rejected.is_empty() {
-        return Err(Error::from("Backup settings are invalid or from a newer version").damaged());
-    }
     if !migrated.is_clean() {
         return Err(Error::rejected(
             "Backup settings are not supported by this version",
