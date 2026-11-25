@@ -57,10 +57,7 @@ pub(crate) fn video_under_page() -> bool {
     #[cfg(all(not(target_family = "wasm"), feature = "test-support"))]
     {
         // Let an isolated native test render the browser host's backdrop.
-        static TEST_VIDEO_UNDER_PAGE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        *TEST_VIDEO_UNDER_PAGE.get_or_init(|| {
-            std::env::var_os("IPTV_TEST_VIDEO_UNDER_PAGE").as_deref() == Some("1".as_ref())
-        })
+        std::env::var_os("IPTV_TEST_VIDEO_UNDER_PAGE").as_deref() == Some("1".as_ref())
     }
     #[cfg(not(all(not(target_family = "wasm"), feature = "test-support")))]
     {
