@@ -36,7 +36,9 @@ pub(crate) fn original_player_source(directory: &Path, url: &str) -> Option<Play
     state.original_player_source(url)
 }
 
-/// Synthetic diagnostics only: fixed phase names and job identities, no media or provider data.
+/// Synthetic diagnostics for a registered native background recording host only.
+/// Returns no entries for an unregistered/non-background owner. Native plus
+/// `test-support` only: fixed phase names and job identities, no provider data.
 #[cfg(feature = "test-support")]
 pub fn operation_history(directory: &Path) -> Vec<OperationObservation> {
     let state = hosts()
@@ -48,7 +50,7 @@ pub fn operation_history(directory: &Path) -> Vec<OperationObservation> {
         state
             .operation_history
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .entries
             .iter()
             .cloned()
@@ -57,7 +59,12 @@ pub fn operation_history(directory: &Path) -> Vec<OperationObservation> {
 }
 
 #[cfg(feature = "test-support")]
-pub(super) fn observe_operation(directory: &Path, job: JobId, phase: &'static str) {
+pub(super) fn observe_operation(services: &Services, job: JobId, phase: &'static str) {
+    // A foreground-only State is not the host registered under this directory.
+    if !services.ports().background_recordings {
+        return;
+    }
+    let directory = services.directory();
     if let Some(state) = hosts()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)

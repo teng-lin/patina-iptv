@@ -119,6 +119,12 @@ async fn reconcile(
             .await,
         Ok(Ok(()))
     ) {
+        #[cfg(feature = "test-support")]
+        host::observe_operation(
+            services,
+            completion.job,
+            "completion media publication failed",
+        );
         // A failed rename is a different failure from a lost catalog write. Keep
         // the verified spool playable as Partial, but never expose/overwrite an
         // unrelated regular file at the final path.
@@ -138,16 +144,38 @@ async fn reconcile(
             .await
             .unwrap_or(false);
         if retained {
+            #[cfg(feature = "test-support")]
+            let completion_job = completion.job;
             let result = retry(services, move |store| {
                 store.retain_partial_recording_completion(&completion)
             })
             .await;
+            #[cfg(feature = "test-support")]
+            host::observe_operation(
+                services,
+                completion_job,
+                match result {
+                    Transition::Applied => "completion retained Partial",
+                    Transition::Superseded => "completion retention superseded",
+                    Transition::Failed => "completion retention failed",
+                },
+            );
             return report_failure(services, result, notify_failure);
         }
+        #[cfg(feature = "test-support")]
+        host::observe_operation(
+            services,
+            completion.job,
+            "completion media retention unavailable",
+        );
         log::error!("recording media could not be finalized; recovery required");
         return Transition::Failed;
     }
+    #[cfg(feature = "test-support")]
+    host::observe_operation(services, completion.job, "completion media published");
     let incomplete = completion.status != Status::Completed;
+    #[cfg(feature = "test-support")]
+    let completion_status = completion.status;
     #[cfg(feature = "test-support")]
     let completion_job = completion.job;
     let result = retry(services, move |store| {
@@ -156,10 +184,15 @@ async fn reconcile(
     .await;
     #[cfg(feature = "test-support")]
     host::observe_operation(
-        services.directory(),
+        services,
         completion_job,
         match result {
-            Transition::Applied => "completion committed",
+            Transition::Applied => match completion_status {
+                Status::Completed => "completion committed Completed",
+                Status::Partial => "completion committed Partial",
+                Status::Failed => "completion committed Failed",
+                _ => "completion committed another status",
+            },
             Transition::Superseded => "completion commit superseded",
             Transition::Failed => "completion commit failed",
         },
@@ -188,6 +221,8 @@ pub(super) async fn finish(
     let (bytes, digest) = match evidence {
         Ok(Ok(evidence)) => evidence,
         _ => {
+            #[cfg(feature = "test-support")]
+            host::observe_operation(services, job.id, "completion media inspection failed");
             let result = super::transition(
                 services,
                 job,
@@ -196,11 +231,21 @@ pub(super) async fn finish(
                 "Recording storage unavailable; retained media needs recovery",
             )
             .await;
+            #[cfg(feature = "test-support")]
+            host::observe_operation(
+                services,
+                job.id,
+                match result {
+                    Transition::Applied => "inspection failure committed Failed",
+                    Transition::Superseded => "inspection failure superseded",
+                    Transition::Failed => "inspection failure save failed",
+                },
+            );
             return report_failure(services, result, notify_failure);
         }
     };
     #[cfg(feature = "test-support")]
-    host::observe_operation(services.directory(), job.id, "completion media inspected");
+    host::observe_operation(services, job.id, "completion media inspected");
     let status = if bytes == 0 {
         Status::Failed
     } else if outcome.is_ok() {
@@ -228,10 +273,22 @@ pub(super) async fn finish(
     {
         Transition::Applied => {
             #[cfg(feature = "test-support")]
-            host::observe_operation(services.directory(), job.id, "completion intent prepared");
+            host::observe_operation(services, job.id, "completion intent prepared");
             reconcile(services, completion, notify_failure).await
         }
-        other => other,
+        other => {
+            #[cfg(feature = "test-support")]
+            host::observe_operation(
+                services,
+                job.id,
+                match other {
+                    Transition::Superseded => "completion preparation superseded",
+                    Transition::Failed => "completion preparation failed",
+                    Transition::Applied => unreachable!("handled applied completion"),
+                },
+            );
+            other
+        }
     }
 }
 

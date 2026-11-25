@@ -680,7 +680,9 @@ impl RecordNowObservation {
             .ok()
             .map(|state| (state.pressed, state.disabled));
         let value = format!("{phase}: toggle {toggle:?}");
-        let mut phases = self.phases.borrow_mut();
+        let Ok(mut phases) = self.phases.try_borrow_mut() else {
+            return;
+        };
         if phases.back().is_some_and(|(last, _)| last == &value) {
             return;
         }
@@ -697,18 +699,25 @@ impl RecordNowObservation {
                     .map(|job| (job.id, job.status, job.bytes, job.message))
                     .collect::<Vec<_>>()
             });
-        let operations =
-            iptv_runtime::recordings::host::operation_history(self.path.parent().unwrap());
+        let operations = self
+            .path
+            .parent()
+            .map(iptv_runtime::recordings::host::operation_history);
         format!(
-            "persisted={persisted:?}; UI phases={:?}; runtime phases={operations:?}",
-            self.phases.borrow()
+            "subsequent persisted snapshot={persisted:?}; UI phases={:?}; native background-host phases={operations:?}",
+            self.phases.try_borrow().ok()
         )
     }
 }
 impl Drop for RecordNowObservation {
     fn drop(&mut self) {
         if std::thread::panicking() {
-            eprintln!("Record now failure observation: {}", self.report());
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
+                "Record now unwind observation: {}",
+                self.report()
+            );
         }
     }
 }
@@ -733,7 +742,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
         .unwrap()
         .id;
     let opens = iptv_app::player_opens(0);
-    observation.observe("start requested", app.screen());
+    observation.observe("before start press", app.screen());
     step(app.press("label:Record"));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     step(
@@ -752,7 +761,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             .iter()
             .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
     );
-    observation.observe("stop requested", app.screen());
+    observation.observe("before stop press", app.screen());
     step(app.press("id:play-bar-record"));
     step(
         app.wait_until("idle record toggle", Duration::from_secs(15), |screen| {
@@ -773,13 +782,12 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             jobs[0].status,
             iptv_core::recording::Status::Completed | iptv_core::recording::Status::Canceled
         ),
-        "actual persisted status={:?}, bytes={}, message={:?}; {}",
+        "assertion persisted snapshot: status={:?}, bytes={}, message={:?}; {}",
         jobs[0].status,
         jobs[0].bytes,
         jobs[0].message,
         observation.report()
     );
-    eprintln!("Record now observation: {}", observation.report());
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
     assert_eq!(iptv_app::player_opens(0), opens);
     server.join().unwrap();

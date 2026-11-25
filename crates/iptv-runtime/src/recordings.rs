@@ -310,7 +310,10 @@ pub(crate) struct State {
 impl State {
     #[cfg(feature = "test-support")]
     fn observe_operation(&self, job: JobId, phase: &'static str) {
-        let mut history = self.operation_history.lock().unwrap();
+        let mut history = self
+            .operation_history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = history.started.elapsed();
         if history.entries.len() == 64 {
             history.entries.pop_front();
@@ -799,7 +802,8 @@ impl Runtime {
             })
             .await?;
         #[cfg(feature = "test-support")]
-        self.recordings.observe_operation(id, "stop acknowledged");
+        self.recordings
+            .observe_operation(id, "stop request processed");
         Ok(())
     }
     pub async fn recording_jobs(&self) -> Result<Vec<Job>, Error> {
@@ -1647,21 +1651,35 @@ async fn record(
         result = result => result.map(|_| "Recording finished"),
     };
     #[cfg(feature = "test-support")]
-    state.observe_operation(job.id, "capture ended");
+    state.observe_operation(
+        job.id,
+        match outcome {
+            Ok("Stopped by you") => "capture stopped by viewer",
+            Ok(_) => "capture reached its end",
+            Err("Interrupted when the app closed") => "capture interrupted by shutdown",
+            Err(_) => "capture ended with failure",
+        },
+    );
     // The canceled receive future no longer owns file writes. Keep the active
     // reservation until its worker acknowledges drain, sync and descriptor close.
     let outcome = match file {
         Some(file) => {
             if file.finish().await.is_ok() {
+                #[cfg(feature = "test-support")]
+                state.observe_operation(job.id, "capture worker drained");
                 outcome
             } else {
+                #[cfg(feature = "test-support")]
+                state.observe_operation(job.id, "capture worker drain failed");
                 Err("Recording storage unavailable")
             }
         }
-        None => Err("Recording storage unavailable"),
+        None => {
+            #[cfg(feature = "test-support")]
+            state.observe_operation(job.id, "capture file unavailable");
+            Err("Recording storage unavailable")
+        }
     };
-    #[cfg(feature = "test-support")]
-    state.observe_operation(job.id, "worker drained");
     // The host stopped it early (`host::stop_captures`): kept as partial with
     // the reason, also when the recorder's shutdown followed, which would
     // otherwise keep it to resume.
