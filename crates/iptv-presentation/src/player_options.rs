@@ -159,7 +159,8 @@ impl Chooser {
         }
     }
 
-    /// Replaces action entries, keeping the focused action when it remains.
+    /// Replaces an action list with no marked choice, keeping the focused
+    /// action when it remains.
     pub fn replace_actions<T: PartialEq>(&mut self, before: &[T], after: &[T]) {
         let focus = before
             .get(self.focus)

@@ -172,7 +172,7 @@ internal class DeviceComponent(
         val leanback = host.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         val tv = DeviceSignals.tv(config.uiMode, leanback)
         val display = DeviceSignals.displaySmallestDp(host, config)
-        val keys = DeviceSignals.inputs(inputs, config)
+        val keys = DeviceSignals.inputs(inputs, config, tv)
         val form = DeviceSignals.form(tv, display)
         val next =
             buildMap {
@@ -307,9 +307,17 @@ internal object DeviceSignals {
         val dpad: Boolean,
     )
 
+    data class ConfiguredKeys(
+        val keyboard: Int,
+        val keyboardHidden: Int,
+        val navigation: Int,
+        val navigationHidden: Int,
+    )
+
     fun inputs(
         manager: InputManager?,
         config: Configuration,
+        tv: Boolean,
     ): Input {
         // The enumerated devices are current even while Configuration still
         // describes the keyboard or controller that was just disconnected.
@@ -328,14 +336,11 @@ internal object DeviceSignals {
                     dpad = dpadSource(device.sources, hats),
                 )
             }
-        return if (devices == null) {
-            Input(
-                keyboard(config.keyboard, config.hardKeyboardHidden),
-                dpad(config.navigation, config.navigationHidden),
-            )
-        } else {
-            attachedKeys(devices, config.hardKeyboardHidden, config.navigationHidden)
-        }
+        return connectedKeys(
+            devices,
+            ConfiguredKeys(config.keyboard, config.hardKeyboardHidden, config.navigation, config.navigationHidden),
+            tv,
+        )
     }
 
     fun dpadSource(
@@ -347,15 +352,26 @@ internal object DeviceSignals {
             (hats && (supports(InputDevice.SOURCE_GAMEPAD) || supports(InputDevice.SOURCE_JOYSTICK)))
     }
 
-    fun attachedKeys(
-        devices: List<KeyDevice>,
-        keyboardHidden: Int,
-        navigationHidden: Int,
-    ): Input =
-        Input(
-            keyboard = devices.any { it.keyboard && (it.external || keyboardHidden != Configuration.HARDKEYBOARDHIDDEN_YES) },
-            dpad = devices.any { it.dpad && (it.external || navigationHidden != Configuration.NAVIGATIONHIDDEN_YES) },
+    fun connectedKeys(
+        devices: List<KeyDevice>?,
+        config: ConfiguredKeys,
+        tv: Boolean,
+    ): Input {
+        val configuredKeyboard = keyboard(config.keyboard, config.keyboardHidden)
+        val configuredDpad = dpad(config.navigation, config.navigationHidden)
+        if (devices == null) return Input(configuredKeyboard, configuredDpad)
+
+        // Android also sets the hidden flags when it has classified a class
+        // of devices as absent. Ignore those flags for a newly connected
+        // device whose type has yet to reach Configuration or is a hat-only pad.
+        val keyboardHidden = config.keyboard == Configuration.KEYBOARD_QWERTY && !configuredKeyboard
+        val navigationHidden = config.navigation == Configuration.NAVIGATION_DPAD && !configuredDpad
+        return Input(
+            keyboard = devices.any { it.keyboard && (it.external || !keyboardHidden) },
+            // Some TVs expose a permanent D-pad through Configuration.
+            dpad = devices.any { it.dpad && (it.external || !navigationHidden) } || (tv && configuredDpad),
         )
+    }
 
     /** What the decoder probe reads of one codec. */
     data class Decoder(

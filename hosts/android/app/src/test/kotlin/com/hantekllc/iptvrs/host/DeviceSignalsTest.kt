@@ -65,13 +65,42 @@ class DeviceSignalsTest {
     fun connectedDevicesCanReportBothKeyboardAndDpad() {
         val keyboard = DeviceSignals.KeyDevice(external = false, keyboard = true, dpad = false)
         val pad = DeviceSignals.KeyDevice(external = true, keyboard = false, dpad = true)
-        val visible = Configuration.HARDKEYBOARDHIDDEN_NO
-        val hidden = Configuration.HARDKEYBOARDHIDDEN_YES
-        val navigation = Configuration.NAVIGATIONHIDDEN_YES
-        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.attachedKeys(listOf(keyboard, pad), visible, navigation))
-        assertEquals(DeviceSignals.Input(false, true), DeviceSignals.attachedKeys(listOf(keyboard, pad), hidden, navigation))
-        assertEquals(DeviceSignals.Input(true, false), DeviceSignals.attachedKeys(listOf(keyboard), visible, navigation))
-        assertEquals(DeviceSignals.Input(false, false), DeviceSignals.attachedKeys(emptyList(), visible, navigation))
+        val config =
+            DeviceSignals.ConfiguredKeys(
+                Configuration.KEYBOARD_QWERTY,
+                Configuration.HARDKEYBOARDHIDDEN_NO,
+                Configuration.NAVIGATION_DPAD,
+                Configuration.NAVIGATIONHIDDEN_YES,
+            )
+        val hidden = config.copy(keyboardHidden = Configuration.HARDKEYBOARDHIDDEN_YES)
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.connectedKeys(listOf(keyboard, pad), config, tv = false))
+        assertEquals(DeviceSignals.Input(false, true), DeviceSignals.connectedKeys(listOf(keyboard, pad), hidden, tv = false))
+        assertEquals(DeviceSignals.Input(true, false), DeviceSignals.connectedKeys(listOf(keyboard), config, tv = false))
+        assertEquals(DeviceSignals.Input(false, false), DeviceSignals.connectedKeys(emptyList(), config, tv = false))
+    }
+
+    @Test
+    fun staleConfigurationDoesNotMaskNewlyConnectedKeysOnOlderAndroid() {
+        val keyboard = DeviceSignals.KeyDevice(external = false, keyboard = true, dpad = false)
+        val pad = DeviceSignals.KeyDevice(external = false, keyboard = false, dpad = true)
+        val absent =
+            DeviceSignals.ConfiguredKeys(
+                Configuration.KEYBOARD_NOKEYS,
+                Configuration.HARDKEYBOARDHIDDEN_YES,
+                Configuration.NAVIGATION_NONAV,
+                Configuration.NAVIGATIONHIDDEN_YES,
+            )
+        val present =
+            DeviceSignals.ConfiguredKeys(
+                Configuration.KEYBOARD_QWERTY,
+                Configuration.HARDKEYBOARDHIDDEN_NO,
+                Configuration.NAVIGATION_DPAD,
+                Configuration.NAVIGATIONHIDDEN_NO,
+            )
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.connectedKeys(listOf(keyboard, pad), absent, tv = false))
+        assertEquals(DeviceSignals.Input(false, false), DeviceSignals.connectedKeys(emptyList(), present, tv = false))
+        assertEquals(DeviceSignals.Input(false, true), DeviceSignals.connectedKeys(emptyList(), present, tv = true))
+        assertEquals(DeviceSignals.Input(true, true), DeviceSignals.connectedKeys(null, present, tv = false))
     }
 
     @Test
