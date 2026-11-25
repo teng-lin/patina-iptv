@@ -22,6 +22,7 @@ pub enum Item {
     Add,
     Update,
     Inspect,
+    Clear,
 }
 
 /// What can be done to one source.
@@ -29,6 +30,8 @@ pub enum Item {
 pub enum Act {
     /// Switch it on or off.
     Switch,
+    /// Retry this playlist’s enabled guide sources.
+    Retry,
     Up,
     Down,
     /// Left/Right (or −/+) change it.
@@ -43,6 +46,10 @@ pub enum Act {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Layer {
     List,
+    /// Clear this playlist’s stored programs, keeping its sources.
+    Clear {
+        confirm: bool,
+    },
     Actions {
         feed: Feed,
         focus: Act,
@@ -98,6 +105,7 @@ pub enum Effect {
     Inspect,
     /// Download the playlist's guide now.
     Update,
+    Clear,
     Close,
 }
 
@@ -187,6 +195,9 @@ impl Screen {
             items.extend([Item::Add, Item::Update]);
         }
         items.push(Item::Inspect);
+        if self.downloads {
+            items.push(Item::Clear);
+        }
         items
     }
 
@@ -196,6 +207,12 @@ impl Screen {
             return Vec::new();
         };
         let mut acts = vec![Act::Switch, Act::Up, Act::Down, Act::Shift, Act::Rename];
+        if self.downloads
+            && line.source.enabled
+            && line.result.as_ref().is_some_and(|r| r.error.is_some())
+        {
+            acts.insert(0, Act::Retry);
+        }
         if !line.source.is_provider() {
             acts.extend([Act::Relink, Act::Remove]);
         }
@@ -211,6 +228,15 @@ impl Screen {
             self.focus = match self.lines.len() {
                 0 => self.first_action(),
                 n => Item::Source(self.lines[at.unwrap_or(0).min(n - 1)].source.feed),
+            };
+        }
+        if let Layer::Actions { feed, focus } = self.layer
+            && self.line(feed).is_some()
+            && !self.acts(feed).contains(&focus)
+        {
+            self.layer = Layer::Actions {
+                feed,
+                focus: Act::Switch,
             };
         }
         match self.layer {
@@ -252,6 +278,15 @@ impl Screen {
         }
         match self.layer {
             Layer::List => self.list_key(key),
+            Layer::Clear { confirm } => match key {
+                Key::Up | Key::Down => {
+                    self.layer = Layer::Clear { confirm: !confirm };
+                    None
+                }
+                Key::Ok => self.confirm_clear(confirm),
+                Key::Back | Key::Menu => self.confirm_clear(false),
+                _ => None,
+            },
             Layer::Actions { feed, focus } => self.actions_key(feed, focus, key),
             Layer::Confirm { feed, remove } => match key {
                 Key::Up | Key::Down => {
@@ -277,10 +312,11 @@ impl Screen {
             (Key::Ok, Item::Add) => self.start_add(),
             (Key::Ok, Item::Update) => return Some(Effect::Update),
             (Key::Ok, Item::Inspect) => return Some(Effect::Inspect),
+            (Key::Ok, Item::Clear) => self.layer = Layer::Clear { confirm: false },
             (Key::Ok | Key::Menu, Item::Source(feed)) => {
                 self.layer = Layer::Actions {
                     feed,
-                    focus: Act::Switch,
+                    focus: self.acts(feed).first().copied().unwrap_or(Act::Switch),
                 };
             }
             (Key::Back, _) => return Some(Effect::Close),
@@ -322,10 +358,14 @@ impl Screen {
 
     /// OK (or a tap) on `act` of source `feed`.
     pub fn act(&mut self, feed: Feed, act: Act) -> Option<Effect> {
+        if !self.acts(feed).contains(&act) {
+            return None;
+        }
         let line = self.line(feed)?.clone();
         self.notice = None;
         self.layer = Layer::Actions { feed, focus: act };
         match act {
+            Act::Retry => Some(Effect::Update),
             Act::Switch => Some(Effect::Edit(Edit::SetEnabled(feed, !line.source.enabled))),
             Act::Up => Some(Effect::Edit(Edit::Move(feed, -1))),
             Act::Down => Some(Effect::Edit(Edit::Move(feed, 1))),
@@ -370,6 +410,13 @@ impl Screen {
             focus: Act::Remove,
         };
         None
+    }
+
+    /// Clear only after an explicit confirmation. Back and outside taps keep it.
+    pub fn confirm_clear(&mut self, confirm: bool) -> Option<Effect> {
+        self.layer = Layer::List;
+        self.focus = Item::Clear;
+        confirm.then_some(Effect::Clear)
     }
 
     /// A tap on a list row: focus it and OK.

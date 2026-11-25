@@ -331,17 +331,10 @@ fn run(ui: Ui, key: &'static str) {
                 notify(tr("This playlist has no guide source switched on"));
             }
         }
-        // The playlist on screen's guide sources, over the settings screen.
+        // The combined view chooses a playlist before opening its Guide data.
         "epg.manage_sources" | "epg.add_source" => match crate::runtime().shown_source() {
-            Some(playlist) if key == "epg.add_source" => {
-                crate::epg_sources_view::open_add(ui, playlist);
-            }
             Some(playlist) => crate::epg_sources_view::open(ui, playlist),
-            None if crate::data::combined::active(&crate::runtime()) => {
-                crate::playlists_view::open(ui);
-                notify(tr("Choose a playlist to manage its guide sources"));
-            }
-            None => notify(tr("No playlist on screen")),
+            None => crate::playlists_view::open(ui),
         },
         "epg.clear" => {
             let cleared = stored::clear(&crate::runtime(), move |deleted| {

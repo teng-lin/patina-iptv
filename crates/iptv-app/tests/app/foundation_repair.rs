@@ -255,8 +255,8 @@ fn inspected_candidate_applies_verifies_and_undoes_during_uninterrupted_viewer_p
     t.key("left");
     t.press("text:Playlists >> nth=0");
     t.press("text:Synthetic inspection");
-    t.press("text:Guide sources");
-    t.wait("text:Guide sources · Synthetic inspection", 5);
+    t.press("text:Guide data");
+    t.wait("text:Guide data · Synthetic inspection", 5);
     t.press("text:Update the guide now");
     t.wait("text:Guide updated", 15);
     t.press("text:Inspect guide coverage");

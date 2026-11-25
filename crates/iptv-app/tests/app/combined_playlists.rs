@@ -1306,6 +1306,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.press("text:Settings >> nth=0"));
         step(app.wait_for("text:TV guide data"));
         step(app.press("text:TV guide data"));
+        step(app.press("text:Guide sources"));
         step(app.wait_for("text:Update the guide now"));
         step(app.press("text:Update the guide now"));
         wait_for_requests(
@@ -1315,6 +1316,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
             &feed_requests,
             2,
         );
+        step(app.back());
         step(app.back());
         step(app.back());
     } else {
@@ -1357,17 +1359,13 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
     );
     let deleted = matches!(action, PreviousGuideAction::DeletePending);
     if deleted {
-        step(app.open_guide_groups());
-        step(app.press_key("left"));
-        step(app.press_key("left"));
-        step(app.wait_for("text:Settings >> nth=0"));
-        step(app.press("text:Settings >> nth=0"));
-        step(app.wait_for("text:TV guide data"));
-        step(app.press("text:TV guide data"));
+        playlists(&mut app);
+        step(app.press("text:Previous"));
+        step(app.press("text:Guide data"));
         step(app.wait_for("text:Delete stored guide data"));
         step(app.press("text:Delete stored guide data"));
-        step(app.wait_for("text:Delete stored guide data?"));
-        step(app.press("text:Delete stored guide data >> nth=1"));
+        step(app.wait_for("text:/^Delete guide data for /"));
+        step(app.press("text:Delete"));
         step(app.wait_for_gone("text:Previous original guide", Duration::from_secs(5)));
     }
     *release.0.lock().unwrap() = true;

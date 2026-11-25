@@ -113,6 +113,7 @@ pub fn status(line: &SourceLine, when: impl Fn(i64) -> String) -> (String, bool)
 
 pub fn act(act: Act, s: &GuideSource) -> String {
     match act {
+        Act::Retry => tr("Retry").to_owned(),
         Act::Switch if s.enabled => tr("Switch off").to_owned(),
         Act::Switch => tr("Switch on").to_owned(),
         Act::Up => tr("Move up (used first)").to_owned(),

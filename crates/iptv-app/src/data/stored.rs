@@ -8,5 +8,5 @@ pub fn bind(ui: Ui) {
     });
 }
 
-pub use crate::runtime::data::stored::{clear, update_now, update_source};
+pub use crate::runtime::data::stored::{clear, clear_source, update_now, update_source};
 pub use crate::runtime::stored::{GuideStatus, SourceLine, status_of, stored_past_days};

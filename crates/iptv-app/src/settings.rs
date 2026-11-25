@@ -301,6 +301,10 @@ pub fn text_factor() -> f32 {
 /// (Android), and picture in picture on leaving only on an Android phone
 /// or tablet whose host reported the window ([`offer_pip`]): never on a TV.
 pub fn offer(device: Device, key: &str) -> Offer {
+    // Commands belong to each playlist’s Guide data screen.
+    if matches!(key, "epg.add_source" | "epg.update_now" | "epg.clear") {
+        return Offer::Hidden;
+    }
     let host = device.host;
     // Recording and backups run on blocking workers; a host without them
     // offers neither. A backup action also needs its document picker
@@ -670,9 +674,9 @@ mod tests {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
             assert_eq!(offer("general.user_agent"), Offer::Active);
-            assert_eq!(offer("epg.update_now"), Offer::Active);
+            assert_eq!(offer("epg.update_now"), Offer::Hidden);
             assert_eq!(offer("epg.manage_sources"), Offer::Active);
-            assert_eq!(offer("epg.add_source"), Offer::Active);
+            assert_eq!(offer("epg.add_source"), Offer::Hidden);
             assert_eq!(offer("playback.afr"), Offer::Hidden);
             assert_eq!(offer("parental.live_enabled"), Offer::Active);
             assert_eq!(offer("parental.change_pin"), Offer::Active);

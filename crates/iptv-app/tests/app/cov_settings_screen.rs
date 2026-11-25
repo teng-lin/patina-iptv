@@ -515,10 +515,11 @@ fn appearance(app: &mut Headless, home: &Path) {
 
 fn guide_data(app: &mut Headless, home: &Path) {
     step(app.press("text:TV guide data >> nth=0"));
-    step(app.wait_for("text:Update the guide now"));
-    // One choice for when the guide updates; the retired rows are gone (#282).
     row_value(app, "Update guide", "Every day");
     for retired in [
+        "Update the guide now",
+        "Delete stored guide data",
+        "Add a guide source",
         "Download the guide every",
         "Update when the app starts",
         "Update after a playlist changes",
@@ -530,47 +531,33 @@ fn guide_data(app: &mut Headless, home: &Path) {
             "{retired}"
         );
     }
-    row_value(app, "Guide sources", "1 source");
-    // Update now: the guide is downloaded again (with the User-Agent set).
+    step(app.press("text:Guide sources"));
+    let sources = "text:/^Guide data · /";
+    step(app.wait_for(sources));
     step(app.press("text:Update the guide now"));
     step(app.wait_until("the guide updated", IMPORT, |s| {
-        s.texts()
-            .iter()
-            .any(|t| t.starts_with("Updated ") && t.ends_with(" · 2 channels"))
+        s.texts().iter().any(|t| t.starts_with("Last update "))
     }));
-    // The guide file gone: the update fails, and the source says so.
     let guide_path = home.join("guide.xml");
     let kept = std::fs::read(&guide_path).unwrap();
     std::fs::remove_file(&guide_path).unwrap();
     step(app.press("text:Update the guide now"));
-    step(app.wait_until("the guide update failed", IMPORT, |s| {
-        s.texts().iter().any(|t| t.starts_with("Failed "))
-    }));
-    row_value(app, "Guide sources", "1 source · 1 failed");
+    step(app.wait_for_within("text:Retry", IMPORT));
     std::fs::write(&guide_path, kept).unwrap();
-    // The playlist's guide sources, over the settings; Back returns.
-    let sources = "text:/^Guide sources · /";
-    step(app.press("text:Guide sources"));
-    step(app.wait_for(sources));
-    back_until(app, |s| s.matches(sources) == Ok(false));
-    step(app.press("text:Add a guide source"));
-    step(app.wait_for(sources));
-    back_until(app, |s| s.matches(sources) == Ok(false));
-    step(app.wait_for("text:Update the guide now"));
-    // Delete: asked first; Cancel does nothing, the button deletes.
+    step(app.press("text:Retry"));
+    step(app.wait_for_gone("text:Retry", IMPORT));
     step(app.press("text:Delete stored guide data"));
-    step(app.wait_for("text:Delete stored guide data?"));
-    step(app.wait_for(
-        "text:The stored programs are deleted. The guide stays empty until it is downloaded again.",
-    ));
+    let confirm = "text:/^Delete guide data for /";
+    step(app.wait_for(confirm));
+    step(app.wait_for("text:The stored programs from every guide source of this playlist are deleted. Channels, guide sources and other playlists are kept. The guide stays empty until it is downloaded again."));
     step(app.press("text:Cancel"));
-    step(app.wait_for_gone("text:Delete stored guide data?", GONE));
+    step(app.wait_for_gone(confirm, GONE));
     step(app.press("text:Delete stored guide data"));
     step(app.press_key("down"));
-    step(app.wait_for("text:OK go ahead   Back cancel"));
     step(app.press_key("enter"));
     step(app.wait_for_within("text:Guide data deleted", IMPORT));
     step(app.wait_for_gone("text:Guide data deleted", Duration::from_secs(6)));
+    back_until(app, |s| s.matches(sources) == Ok(false));
 }
 
 fn other_pages(app: &mut Headless) {

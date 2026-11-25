@@ -62,7 +62,8 @@ fn the_list_moves_by_identity_and_exposes_update_and_inspection() {
             Item::Source(PROVIDER),
             Item::Add,
             Item::Update,
-            Item::Inspect
+            Item::Inspect,
+            Item::Clear
         ]
     );
     s.key(Key::Down);
@@ -72,7 +73,7 @@ fn the_list_moves_by_identity_and_exposes_update_and_inspection() {
     s.key(Key::Down);
     assert_eq!(s.key(Key::Ok), Some(Effect::Inspect));
     s.key(Key::Down);
-    assert_eq!(s.focus(), Item::Inspect, "no wrap");
+    assert_eq!(s.focus(), Item::Clear, "no wrap");
     assert_eq!(s.key(Key::Back), Some(Effect::Close));
     assert_eq!(Screen::new(P, vec![]).focus(), Item::Add);
 }
@@ -274,4 +275,56 @@ fn without_downloads_no_guide_is_added_or_updated() {
     assert_ne!(s.focus(), Item::Add);
     let empty = Screen::new(P, Vec::new()).without_downloads();
     assert_eq!(empty.focus(), Item::Inspect);
+}
+
+#[test]
+fn clear_requires_explicit_confirmation_and_keeps_playlist_identity() {
+    let mut s = screen();
+    assert_eq!(s.tap(Item::Clear), None);
+    assert_eq!(s.layer(), Layer::Clear { confirm: false });
+    assert_eq!(s.key(Key::Ok), None);
+    s.tap(Item::Clear);
+    s.key(Key::Down);
+    assert_eq!(s.dismiss(), None);
+    assert_eq!(s.layer(), Layer::List);
+    s.tap(Item::Clear);
+    s.key(Key::Down);
+    assert_eq!(s.key(Key::Ok), Some(Effect::Clear));
+    assert_eq!(s.playlist(), P);
+    assert!(!screen().without_downloads().items().contains(&Item::Clear));
+}
+
+#[test]
+fn failed_enabled_sources_offer_retry_beside_the_source_to_change() {
+    let mut s = screen();
+    s.lines[0].result.as_mut().unwrap().error = Some(iptv_library::ImportErrorKind::Network);
+    assert!(s.acts(USER).contains(&Act::Retry));
+    assert_eq!(s.act(USER, Act::Retry), Some(Effect::Update));
+    s.lines[0].source.enabled = false;
+    assert!(!s.acts(USER).contains(&Act::Retry));
+}
+
+#[test]
+fn retry_focus_follows_the_offered_actions_after_success_or_disable() {
+    let mut s = screen();
+    s.lines[0].result.as_mut().unwrap().error = Some(iptv_library::ImportErrorKind::Network);
+    s.tap(Item::Source(USER));
+    assert_eq!(
+        s.layer(),
+        Layer::Actions {
+            feed: USER,
+            focus: Act::Retry
+        }
+    );
+    let mut updated = s.lines.clone();
+    updated[0].result.as_mut().unwrap().error = None;
+    s.set_lines(updated);
+    assert_eq!(
+        s.layer(),
+        Layer::Actions {
+            feed: USER,
+            focus: Act::Switch
+        }
+    );
+    assert_eq!(s.act(USER, Act::Retry), None);
 }
