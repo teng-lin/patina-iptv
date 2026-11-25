@@ -178,6 +178,72 @@ fn a_phone_offers_multiview_under_more_on_its_side_only() {
     assert_eq!(app.screen().count(BAR_MULTIVIEW).unwrap(), 0);
 }
 
+/// The real host's limits event, emitted when the default network changes.
+fn metered(app: &mut Headless, metered: bool) {
+    app.engine().control().dispatch_event(
+        crate::device_signals::node(app, "device-signals"),
+        nsh_core::EventKind::NativeEvent,
+        nsh_core::EventPayload::Native {
+            name: "limits".into(),
+            data: serde_json::json!({ "metered": metered }),
+        },
+    );
+    app.settle();
+}
+
+#[test]
+fn a_phone_metered_network_hides_multiview_and_collapses_the_session() {
+    fn here() {}
+    let Some(mut fixture) = fixture(std::any::type_name_of_val(&here)) else {
+        return;
+    };
+    let app = &mut fixture.app;
+    let seen = fixture.seen.clone();
+    report(app, "phone", false, false);
+    resize(app, (915.0, 412.0));
+    full_screen(app);
+    metered(app, false);
+    assert!(more_lists_multiview(app));
+
+    // A network change while More is open removes its stale action list.
+    bar(app);
+    step(app.press(MORE));
+    step(app.wait_for(MORE_MULTIVIEW));
+    metered(app, true);
+    assert!(!app.screen().matches(MORE_MULTIVIEW).unwrap());
+    assert!(!more_lists_multiview(app));
+    step(app.press_key("m"));
+    assert!(!app.screen().matches("text:/^Multiview$/").unwrap());
+    step(app.press_key("m"));
+
+    metered(app, false);
+    bar(app);
+    step(app.press(MORE));
+    step(app.wait_for(MORE_MULTIVIEW));
+    step(app.press(MORE_MULTIVIEW));
+    let row = format!("{PICKER} >> text:/  {}$/", channel(5));
+    step(app.wait_for(&row));
+    step(app.press(&row));
+    step(
+        app.wait_until("two tiles play", Duration::from_secs(5), |_| {
+            (0..2).all(iptv_app::player_has_source)
+        }),
+    );
+    let main = seen.player(0).expect("main player");
+    let opens = iptv_app::player_opens(0);
+    metered(app, true);
+    step(app.wait_for_gone(TILE, Duration::from_secs(2)));
+    assert!(iptv_app::player_has_source(0));
+    assert!(!iptv_app::player_has_source(1));
+    assert_eq!(iptv_app::player_opens(0), opens);
+    assert!(app.screen().layout_nodes().iter().any(|n| n.id == main));
+    assert!(!more_lists_multiview(app));
+
+    metered(app, false);
+    assert!(more_lists_multiview(app));
+    assert_eq!(app.screen().count(TILE).unwrap(), 0, "no automatic reopen");
+}
+
 #[test]
 fn a_tv_at_the_accounts_limit_shows_multiview_disabled_with_its_reason() {
     fn here() {}

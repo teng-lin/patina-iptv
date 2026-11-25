@@ -78,6 +78,8 @@ pub enum Reason {
     WindowTooSmall,
     /// The account allows no second stream at once.
     ConnectionLimit,
+    /// A phone avoids the additional stream on a metered network.
+    MeteredNetwork,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,11 +160,11 @@ pub fn sound_follows_tile(host: Host) -> bool {
 
 /// How multiview is offered on `device` now: `landscape` says whether its
 /// window is wider than tall, `account_streams` the streams the shown
-/// source's account allows at once, when it says.
+/// source's account allows at once, when it says; `metered` is the host's
+/// report of the active network (`None` when unknown).
 ///
 /// - A phone: two tiles, on its side only, and left out at the account's
-///   connection limit. A metered network should also leave it out; no
-///   host reports one yet.
+///   connection limit or on a reported metered network.
 /// - A tablet: two tiles in an expanded window; left out in a smaller one
 ///   (split screen, a compact window).
 /// - A TV: two tiles; disabled with its reason at the account's limit.
@@ -176,6 +178,7 @@ pub fn multiview_offer(
     device: Device,
     landscape: bool,
     account_streams: Option<u32>,
+    metered: Option<bool>,
 ) -> MultiviewOffer {
     use MultiviewOffer::{Disabled, Omitted, Tiles};
     let host = device.host;
@@ -184,6 +187,9 @@ pub fn multiview_offer(
     }
     if !multiview_exists(host) {
         return Omitted(Reason::DecoderLimit);
+    }
+    if host.form_factor == FormFactor::Phone && metered == Some(true) {
+        return Omitted(Reason::MeteredNetwork);
     }
     let at_limit = account_streams.is_some_and(|allowed| allowed <= 1);
     match device.form_factor() {
@@ -543,7 +549,7 @@ mod tests {
             window: Class::Expanded,
         };
         assert_eq!(
-            multiview(multiview_offer(tizen, true, None), true, true, false).reason(),
+            multiview(multiview_offer(tizen, true, None, None), true, true, false).reason(),
             Some(Reason::DecoderLimit)
         );
         // A disabled offer names its reason once the rest allows it; an
@@ -631,10 +637,25 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                multiview_offer(device(platform, form, window), landscape, streams),
+                multiview_offer(device(platform, form, window), landscape, streams, None),
                 offer,
                 "{platform:?} {form:?} {window:?} landscape={landscape} streams={streams:?}"
             );
+        }
+    }
+
+    #[test]
+    fn only_phones_omit_multiview_on_a_reported_metered_network() {
+        for form in [FormFactor::Phone, FormFactor::Tablet, FormFactor::Tv] {
+            let device = device(Platform::Android, form, Class::Expanded);
+            for metered in [None, Some(false), Some(true)] {
+                let expected = if form == FormFactor::Phone && metered == Some(true) {
+                    MultiviewOffer::Omitted(Reason::MeteredNetwork)
+                } else {
+                    MultiviewOffer::Tiles(2)
+                };
+                assert_eq!(multiview_offer(device, true, Some(2), metered), expected);
+            }
         }
     }
 
@@ -643,12 +664,15 @@ mod tests {
         let mut tv = device(Platform::Android, FormFactor::Tv, Class::Expanded);
         tv.host.decoders = Some(1);
         assert_eq!(
-            multiview_offer(tv, true, None),
+            multiview_offer(tv, true, None, None),
             MultiviewOffer::Omitted(Reason::DecoderLimit)
         );
         assert!(!sound_follows_tile(tv.host));
         tv.host.decoders = Some(8);
-        assert_eq!(multiview_offer(tv, true, None), MultiviewOffer::Tiles(2));
+        assert_eq!(
+            multiview_offer(tv, true, None, None),
+            MultiviewOffer::Tiles(2)
+        );
     }
 
     #[test]

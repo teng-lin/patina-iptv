@@ -436,6 +436,14 @@ They issue no playback command of their own.
 
 ## Which player is heard
 
+On Android phones, Multiview appears under More in landscape when the
+account allows another stream and the host does not report a metered network.
+The play bar, control strip and program action card share this policy. A network
+change removes the action immediately; if two tiles are already playing, the
+session closes and the heard tile plays full screen. Returning to an unmetered
+network makes the action available again without reopening a session. An unknown
+network report leaves the existing device and connection limits in effect.
+
 Exactly one player is heard at a time, and the viewer chooses it; focus
 never moves the sound (#135). The state is the core's
 (`iptv_presentation::heard`, kept by `iptv_presentation::multiview` and
