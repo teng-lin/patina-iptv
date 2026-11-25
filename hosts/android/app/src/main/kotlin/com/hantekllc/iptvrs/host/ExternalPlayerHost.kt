@@ -163,7 +163,7 @@ class ExternalPlaybackService : Service() {
             PendingIntent.getActivity(
                 this,
                 0,
-                Intent(this, TvActivity::class.java),
+                appLaunchIntent(this),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
         val builder = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL) else Notification.Builder(this)

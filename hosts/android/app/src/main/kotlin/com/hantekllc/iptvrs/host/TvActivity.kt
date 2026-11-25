@@ -40,7 +40,7 @@ import dev.nshtv.RemoteKeys
  * and portrait waits for its own design. Tablets, an unfolded phone, TVs
  * and windows of 600 dp and wider rotate freely ([landscapeOnPhones]).
  */
-class TvActivity : Activity() {
+open class TvActivity : Activity() {
     private lateinit var nsh: NshView
 
     /** The mounted players (multiview mounts more than one). */
