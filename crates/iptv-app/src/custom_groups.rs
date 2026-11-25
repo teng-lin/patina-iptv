@@ -125,7 +125,7 @@ fn mutate<R: Send + 'static>(
         let result = result.await;
         // A committed edit affects the guide even if its editor was closed.
         if result.is_ok() {
-            data::organization::changed(&crate::runtime(), source);
+            data::organization_changed(&crate::runtime(), source);
         }
         if GENERATION.get() == generation && is_open(ui) {
             done(ui, result);

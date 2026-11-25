@@ -123,7 +123,7 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         assert_eq!(streams(&kept), Some(Value::Int(4)), "its own value stays");
         assert_eq!(streams(&other), Some(Value::Int(3)), "the shared value");
         assert_eq!(streams(&iptv_settings::Target::Global), None);
-        assert!(data::combined::has_multiple_enabled(&owner));
+        assert!(data::has_multiple_enabled(&owner));
         let keys: Vec<_> = (0..8)
             .map(|i| owner.schedule().channel_key(i).unwrap())
             .collect();
@@ -159,10 +159,10 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         .await
         .unwrap();
         displayed(&owner, &mut events, 4).await;
-        assert!(!data::combined::includes(&owner, sources[0]));
+        assert!(!data::combined_includes(&owner, sources[0]));
         assert!(owner.schedule().find_channel(&a).is_none());
         assert!(owner.schedule().find_channel(&b).is_some());
-        assert!(!data::combined::has_multiple_enabled(&owner));
+        assert!(!data::has_multiple_enabled(&owner));
         data::set_policy(
             &owner,
             sources[0],

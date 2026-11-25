@@ -396,7 +396,7 @@ impl Runtime {
             match sources {
                 Ok(sources) => {
                     for source in sources {
-                        crate::data::organization::watch_changed(&owner, source);
+                        crate::data::watch_order_changed(&owner, source);
                     }
                 }
                 Err(_) => owner.watch_sort_dirty.borrow_mut().extend(dirty),

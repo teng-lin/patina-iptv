@@ -501,7 +501,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                     crate::runtime::commands::hide_channel(&crate::runtime(), source, target.id);
                 crate::data::spawn_in_app(async move {
                     match saved.await {
-                        Ok(()) => crate::data::organization::changed(&crate::runtime(), source),
+                        Ok(()) => crate::data::organization_changed(&crate::runtime(), source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -575,7 +575,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 );
                 crate::data::spawn_in_app(async move {
                     match save.await {
-                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Ok(()) => crate::data::organization_changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -604,7 +604,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
                 let save = crate::runtime::commands::hide_group(&owner, source, target.id);
                 crate::data::spawn_in_app(async move {
                     match save.await {
-                        Ok(()) => crate::data::organization::changed(&owner, source),
+                        Ok(()) => crate::data::organization_changed(&owner, source),
                         Err(_) => crate::settings_view::notify(tr(
                             "The change could not be saved. Reopen the list and try again.",
                         )),
@@ -849,7 +849,7 @@ fn set_group_preference(target: iptv_core::parental::Target, preference: GroupPr
         crate::runtime::commands::set_group_preference(&owner, source, target.id, preference);
     crate::data::spawn_in_app(async move {
         match save.await {
-            Ok(()) => crate::data::organization::changed(&owner, source),
+            Ok(()) => crate::data::organization_changed(&owner, source),
             Err(_) => crate::settings_view::notify(tr(
                 "The change could not be saved. Reopen the list and try again.",
             )),

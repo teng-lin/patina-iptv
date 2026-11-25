@@ -8,16 +8,10 @@ use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::imports::Msg;
 use crate::model::{SourceId, StoredGuide};
-use crate::stored::download_now;
+use crate::stored::{configs, download_now, with_storage};
 use crate::{Error, GuideWork, Runtime};
 use iptv_epg::{ChannelKey, UnixTime};
 use iptv_import::{CancelToken, EpgSourceConfig};
-
-pub(super) use crate::stored::RETRY_DUE;
-pub use crate::stored::{
-    begin_update, configs, end_update, guide_edit_is_current, next_guide_edit, note_shown,
-    shown_sources, stored_past_days, unwinding_updates, update_current, updating, with_storage,
-};
 
 /// Refresh the stored status and report whether the library snapshot changed.
 pub(super) fn load_status(owner: &Rc<Runtime>) -> impl Future<Output = Option<bool>> + use<> {

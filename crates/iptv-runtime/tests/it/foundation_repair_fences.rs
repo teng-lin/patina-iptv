@@ -418,7 +418,7 @@ fn an_unbound_runtime_updates_its_catalog_organization_and_favorites() {
         GroupPreference::EpgOffsetMinutes(15),
     ))
     .unwrap();
-    data::organization::changed(owner, source);
+    data::organization_changed(owner, source);
     let offset = |row| {
         let schedule = owner.schedule();
         epg_channel(&*schedule, row).map(|(epg, local)| epg.epg_offset_minutes(local))

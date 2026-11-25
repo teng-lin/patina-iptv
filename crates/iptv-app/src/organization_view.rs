@@ -325,7 +325,7 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
         } else {
             tr("Content unblocked")
         });
-        data::organization::changed(&owner, source);
+        data::organization_changed(&owner, source);
         if !still_open(ui, generation) || !is_open(ui) {
             return;
         }
@@ -591,7 +591,7 @@ fn save_order(ui: Ui) {
             )
             .await;
             if result.is_ok() {
-                data::organization::changed(&owner, source);
+                data::organization_changed(&owner, source);
             }
             result
         };
@@ -799,7 +799,7 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
         if still_open(ui, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
                 close(ui);
-                data::organization::changed(&crate::runtime(), expected.source);
+                data::organization_changed(&crate::runtime(), expected.source);
                 return;
             }
             update(ui, |s| s.editor.sort_focus = None);
@@ -823,7 +823,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         if still_open(ui, generation) {
             close(ui);
         }
-        data::organization::changed(&crate::runtime(), s.source);
+        data::organization_changed(&crate::runtime(), s.source);
         return;
     }
     let expected = s.clone();
@@ -845,7 +845,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
                 }
             });
         }
-        data::organization::changed(&crate::runtime(), expected.source);
+        data::organization_changed(&crate::runtime(), expected.source);
     });
 }
 
