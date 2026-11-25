@@ -141,6 +141,8 @@ impl Finger {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Swipe {
     finger: Option<Finger>,
+    /// All touches still down, including fingers that cancelled the swipe.
+    down: Vec<u32>,
 }
 
 impl Swipe {
@@ -152,12 +154,16 @@ impl Swipe {
     /// Finger `id` went down at `(x, y)` at `t` ms, on a screen `size`
     /// dp across. A second finger cancels a swipe under way.
     pub fn down(&mut self, id: u32, (x, y): (f32, f32), t: f64, size: (f32, f32)) -> Outcome {
+        let was = self.swiping();
+        let overlapping = self.down.iter().any(|other| *other != id);
+        if !self.down.contains(&id) {
+            self.down.push(id);
+        }
         if let Some(finger) = &mut self.finger {
             if finger.id == id {
                 // A finger the platform reports down again: start over.
                 self.finger = None;
             } else {
-                let was = finger.swiping();
                 finger.ignored = true;
                 return if was { Outcome::Cancel } else { Outcome::None };
             }
@@ -169,10 +175,10 @@ impl Swipe {
             from: (x, y),
             height,
             lock: Lock::Undecided,
-            ignored: edge,
+            ignored: edge || overlapping,
             samples: vec![(t, y)],
         });
-        Outcome::None
+        if was { Outcome::Cancel } else { Outcome::None }
     }
 
     /// Finger `id` moved to `(x, y)` at `t` ms.
@@ -203,6 +209,7 @@ impl Swipe {
     /// Finger `id` lifted at `(x, y)` at `t` ms: the swipe commits or is
     /// cancelled.
     pub fn up(&mut self, id: u32, at: (f32, f32), t: f64) -> Outcome {
+        self.down.retain(|other| *other != id);
         if self.finger.as_ref().is_none_or(|f| f.id != id) {
             return Outcome::None;
         }
@@ -232,6 +239,7 @@ impl Swipe {
     /// The system took finger `id`'s touches (a dialog, the notification
     /// shade): a swipe under way is cancelled.
     pub fn cancel(&mut self, id: u32) -> Outcome {
+        self.down.retain(|other| *other != id);
         if self.finger.as_ref().is_none_or(|f| f.id != id) {
             return Outcome::None;
         }
@@ -243,6 +251,7 @@ impl Swipe {
     /// Video stopped taking swipes (it left full screen, a replay began):
     /// whatever was under way ends without a change.
     pub fn reset(&mut self) -> Outcome {
+        self.down.clear();
         let was = self.swiping();
         self.finger = None;
         if was { Outcome::Cancel } else { Outcome::None }
@@ -386,6 +395,35 @@ mod tests {
         let mut s = Swipe::default();
         let out = swipe(&mut s, (640.0, 400.0), (-400.0, 150.0));
         assert!(out.iter().all(|o| *o == Outcome::None), "sideways: {out:?}");
+    }
+
+    #[test]
+    fn overlapping_fingers_stay_ignored_until_they_all_lift() {
+        let mut s = Swipe::default();
+        s.down(1, (640.0, 500.0), 0.0, SCREEN);
+        s.moved(1, (640.0, 300.0), 50.0);
+        assert_eq!(s.down(2, (300.0, 300.0), 60.0, SCREEN), Outcome::Cancel);
+        assert_eq!(s.up(1, (640.0, 100.0), 90.0), Outcome::None);
+        // The original finger lifted first, but another still touches video.
+        s.down(3, (640.0, 500.0), 100.0, SCREEN);
+        assert_eq!(s.moved(3, (640.0, 200.0), 150.0), Outcome::None);
+        assert_eq!(s.up(3, (640.0, 100.0), 180.0), Outcome::None);
+        assert_eq!(s.cancel(2), Outcome::None);
+        assert_eq!(
+            swipe(&mut s, (640.0, 500.0), (0.0, -300.0)).last(),
+            Some(&Outcome::Commit(Direction::Next)),
+            "a new single-finger swipe works after all previous touches end"
+        );
+    }
+
+    #[test]
+    fn a_repeated_down_cancels_the_old_preview_before_starting_over() {
+        let mut s = Swipe::default();
+        s.down(1, (640.0, 500.0), 0.0, SCREEN);
+        s.moved(1, (640.0, 300.0), 50.0);
+        assert_eq!(s.down(1, (640.0, 500.0), 60.0, SCREEN), Outcome::Cancel);
+        assert_eq!(s.up(1, (640.0, 500.0), 90.0), Outcome::None);
+        assert!(!s.swiping());
     }
 
     #[test]

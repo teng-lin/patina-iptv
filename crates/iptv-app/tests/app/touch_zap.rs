@@ -493,6 +493,30 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     quiet(&mut app);
     assert_eq!(streams(&tuned).len(), opened, "none of them tuned");
 
+    // A chooser takes delivery mid-swipe without leaving full screen:
+    // no End/Cancel need reach video. Dismissing it must not resurrect a
+    // banner with no finger down.
+    press_video(&mut app, 0);
+    step(app.wait_for("id:play-bar-next-channel"));
+    finger(&mut app, mid, &[(mid.0, 350.0)], true);
+    step(app.wait_for("id:swipe-preview"));
+    step(app.play_bar_option("Display"));
+    step(app.wait_for("id:chooser-panel >> text:Picture size"));
+    step(app.back());
+    step(app.wait_for_gone(
+        "id:chooser-panel >> text:Picture size",
+        Duration::from_secs(2),
+    ));
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    press_video(&mut app, 0);
+    app.settle();
+    quiet(&mut app);
+    assert_eq!(
+        streams(&tuned).len(),
+        opened,
+        "interrupted swipe never tunes"
+    );
+
     // A burst of swipes up: only the last channel's stream opens, after
     // the delay. Three up from three wraps to five.
     for _ in 0..3 {
