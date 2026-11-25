@@ -99,6 +99,12 @@ are separate artifacts; none substitutes for App Privacy answers.
   exercises navigation and browser failure. It does not prove an Android/iPad
   release browser opened or that either store listing links correctly.
 
+Local validation on the assessment date used pinned Rust 1.99.1 and NSH at the
+revision above. Core/presentation tests, both `wasm32-unknown-unknown` builds
+and `cargo build -p iptv-app` passed. The existing headless scenario passed via
+`cargo test -p iptv-app --features test-support --test app privacy_policy`
+(one test). These results do not replace release-device or console evidence.
+
 ## Candidate, device and console status
 
 | Evidence class | Verified result / remaining work |
