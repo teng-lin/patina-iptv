@@ -1028,8 +1028,10 @@ pub(crate) fn guide_chrome_pointer_events(ui: Ui) -> PointerEvents {
 fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
+    let gesture = touch_zap::Gesture::new();
     view()
         .test_id("app-ui")
+        .on_touch(move |event: &nsh_core::TouchEvent| gesture.observe(ui, event))
         .absolute()
         .inset_0()
         .accessibility_elements_hidden(move || !shown())
@@ -1076,9 +1078,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
             // live video has the channel actions (`touch_zap.rs`).
             when(
                 move || touch_zap::changes_channel(ui),
-                move || video_catcher(ui, true),
+                move || video_catcher(ui, true, gesture),
             )
-            .otherwise(move || video_catcher(ui, false)),
+            .otherwise(move || video_catcher(ui, false, gesture)),
         )
         .child(touch_zap::layer(ui))
         // Where the video was while the desktops' picture-in-picture
@@ -1128,9 +1130,9 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
 /// pointer); over live video a vertical swipe and the accessibility
 /// actions change channel (`touch_zap.rs`). It lies above the video, which
 /// it never wraps.
-fn video_catcher(ui: Ui, live: bool) -> View {
+fn video_catcher(ui: Ui, live: bool, gesture: touch_zap::Gesture) -> View {
     let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
-    let swiped = stored(false);
+    let swiped = gesture.swiped;
     let catcher = view()
         .test_id("video")
         .accessibility_elements_hidden(move || {
@@ -1164,7 +1166,7 @@ fn video_catcher(ui: Ui, live: bool) -> View {
     if !live {
         return catcher;
     }
-    touch_zap::watch(catcher, ui, swiped)
+    touch_zap::watch(catcher, ui, gesture)
         .accessibility_actions(touch_zap::actions())
         .on_accessibility_action(move |action: &str| touch_zap::act(ui, action))
 }

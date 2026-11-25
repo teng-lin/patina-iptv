@@ -9,6 +9,8 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Cancel a channel swipe when a second finger lands on another player control.
+
 - Follow iPad hardware keyboard attachment and Switch Control at runtime.
   Refresh these signals when returning to the app, keep panels open for
   assistive navigation, collapse multiview to the heard tile when its decoder

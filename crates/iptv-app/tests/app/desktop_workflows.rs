@@ -944,9 +944,15 @@ fn closing_the_main_window_during_a_capture_asks_whether_to_stop_and_quit() {
     }
     step(app.press_window_close("main"));
     step(app.wait_for("id:quit-confirm"));
+    assert!(app.screen().matches("id:app-ui").unwrap());
     step(app.press("id:quit-confirm-stop"));
-    step(app.wait_until("Patina quits", Duration::from_secs(15), |_| active() == 0));
-    app.idle(Duration::from_millis(500)).unwrap();
+    // The database changes before the recorder's snapshot observes the stop.
+    // Wait for the window to close too, within the original quit budget.
+    step(
+        app.wait_until("Patina quits", Duration::from_secs(15), |screen| {
+            active() == 0 && !screen.matches("id:app-ui").unwrap()
+        }),
+    );
     assert!(
         app.window_state("main")
             .ok()

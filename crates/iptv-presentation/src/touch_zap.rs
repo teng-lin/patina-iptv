@@ -146,6 +146,13 @@ pub struct Swipe {
 }
 
 impl Swipe {
+    /// The pointer this gesture follows, including before it passes the slop.
+    /// A common ancestor can use it to report a second finger that starts on
+    /// a sibling control rather than on the video itself.
+    pub fn pointer(&self) -> Option<u32> {
+        self.finger.as_ref().map(|finger| finger.id)
+    }
+
     /// Whether a swipe is under way (past the slop, vertical).
     pub fn swiping(&self) -> bool {
         self.finger.as_ref().is_some_and(Finger::swiping)

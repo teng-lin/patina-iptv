@@ -92,10 +92,14 @@ fn playlist(guide: &str) -> String {
 /// stream is not a new one).
 type Tuned = Arc<Mutex<Vec<String>>>;
 
-fn watch_tunes(app: &mut Headless) -> Tuned {
+fn watch_tunes(
+    app: &mut Headless,
+    mut observe: impl FnMut(&nsh_core::MountBatch) + Send + 'static,
+) -> Tuned {
     let tuned: Tuned = Arc::default();
     let seen = tuned.clone();
     app.observe(move |_, batch| {
+        observe(batch);
         for item in &batch.items {
             if let MountItem::ComponentProps { props, .. } = item {
                 for (key, value) in props {
@@ -122,6 +126,14 @@ fn streams(t: &Tuned) -> Vec<String> {
 /// The tablet with the generated playlist imported, the switch delay at
 /// [`DELAY`] and `extra` settings.
 fn start(home: &crate::isolated::Home, extra: &[(&str, Value)]) -> (Headless, Tuned) {
+    start_with(home, extra, |_| {})
+}
+
+fn start_with(
+    home: &crate::isolated::Home,
+    extra: &[(&str, Value)],
+    observe: impl FnMut(&nsh_core::MountBatch) + Send + 'static,
+) -> (Headless, Tuned) {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -152,7 +164,7 @@ fn start(home: &crate::isolated::Home, extra: &[(&str, Value)]) -> (Headless, Tu
     // The switch delay runs on the app's clock: the test moves it.
     config.clock = nsh_core::time::Clock::manual(SystemTime::now());
     let mut app = Headless::start(config).unwrap();
-    let tuned = watch_tunes(&mut app);
+    let tuned = watch_tunes(&mut app, observe);
     app.on_pick(move |_| {
         vec![PickedFile::new(
             "synthetic.m3u",
@@ -214,8 +226,12 @@ fn quiet(app: &mut Headless) {
 /// The full-screen tap catcher and the views around it, innermost first:
 /// the path a platform reports a finger with.
 fn video_path(app: &Headless) -> (NodeId, Vec<NodeId>) {
+    element_path(app, "id:video")
+}
+
+fn element_path(app: &Headless, selector: &str) -> (NodeId, Vec<NodeId>) {
     let screen = app.screen();
-    let video = screen.id("id:video").expect("the video's tap catcher");
+    let video = screen.id(selector).expect("the touch target");
     let nodes = screen.layout_nodes();
     let parent: std::collections::HashMap<_, _> = nodes.iter().map(|n| (n.id, n.parent)).collect();
     let mut path = vec![video];
@@ -241,12 +257,34 @@ fn touch(
     at: (f32, f32),
     t: f64,
 ) {
+    touch_pointer(app, (1, target), phase, path, at, t);
+}
+
+fn touch_pointer(
+    app: &mut Headless,
+    pointer: (u32, NodeId),
+    phase: TouchPhase,
+    path: &[NodeId],
+    at: (f32, f32),
+    t: f64,
+) {
+    touch_packet(app, pointer, phase, path, (at, t), None);
+}
+
+fn touch_packet(
+    app: &mut Headless,
+    pointer: (u32, NodeId),
+    phase: TouchPhase,
+    path: &[NodeId],
+    (at, t): ((f32, f32), f64),
+    held: Option<(u32, (f32, f32))>,
+) {
     let event = TouchEvent {
         phase,
         timestamp: t,
         points: vec![TouchPoint {
-            id: 1,
-            target,
+            id: pointer.0,
+            target: pointer.1,
             path: if phase == TouchPhase::Start {
                 path.to_vec()
             } else {
@@ -263,6 +301,17 @@ fn touch(
         modifiers: Default::default(),
         activated: None,
     };
+    let mut event = event;
+    if let Some((id, at)) = held {
+        // Native includes stationary contacts, with changed=false.
+        let mut stationary = event.points[0].clone();
+        stationary.id = id;
+        stationary.changed = false;
+        stationary.path.clear();
+        stationary.page = Point::new(px(at.0), px(at.1));
+        stationary.location = stationary.page;
+        event.points.push(stationary);
+    }
     app.engine().control().dispatch_event(
         ROOT_ID,
         EventKind::Touch,
@@ -296,9 +345,13 @@ fn press_video(app: &mut Headless, clicks: u32) {
 /// Android does ([`lift_press`]); the app's clock does not move
 /// meanwhile. `hold`: it stays down at the last point.
 fn finger(app: &mut Headless, from: (f32, f32), through: &[(f32, f32)], hold: bool) {
+    finger_id(app, 1, from, through, hold);
+}
+
+fn finger_id(app: &mut Headless, id: u32, from: (f32, f32), through: &[(f32, f32)], hold: bool) {
     let (target, path) = video_path(app);
     let mut t = 1_000.0;
-    touch(app, TouchPhase::Start, target, &path, from, t);
+    touch_pointer(app, (id, target), TouchPhase::Start, &path, from, t);
     let mut at = from;
     for &to in through {
         let steps = ((to.0 - at.0).abs().max((to.1 - at.1).abs()) / 10.0)
@@ -308,12 +361,12 @@ fn finger(app: &mut Headless, from: (f32, f32), through: &[(f32, f32)], hold: bo
             let f = i as f32 / steps as f32;
             t += 16.0;
             let p = (at.0 + (to.0 - at.0) * f, at.1 + (to.1 - at.1) * f);
-            touch(app, TouchPhase::Move, target, &path, p, t);
+            touch_pointer(app, (id, target), TouchPhase::Move, &path, p, t);
         }
         at = to;
     }
     if !hold {
-        touch(app, TouchPhase::End, target, &path, at, t);
+        touch_pointer(app, (id, target), TouchPhase::End, &path, at, t);
         lift_press(app);
     }
     app.settle();
@@ -517,8 +570,21 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
         "interrupted swipe never tunes"
     );
 
+    // Neither video nor its ancestor saw the interrupted finger's lift.
+    // iOS gives the next contact a fresh ID, not the old helper's ID 1.
+    finger_id(&mut app, 3, mid, &[(mid.0, mid.1 - 300.0)], false);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a new pointer recovers after the chooser",
+    );
+    finger_id(&mut app, 4, mid, &[(mid.0, mid.1 + 300.0)], false);
+    tunes(&mut app, &tuned, 3, "return before the burst");
+
     // A burst of swipes up: only the last channel's stream opens, after
     // the delay. Three up from three wraps to five.
+    let opened = streams(&tuned).len();
     for _ in 0..3 {
         swipe(&mut app, -300.0);
     }
@@ -630,4 +696,271 @@ fn with_swiping_off_the_buttons_and_accessibility_actions_still_zap() {
     assert!(banner_names(&app, 2), "and again as it tunes");
     act(&mut app, "previous_channel");
     tunes(&mut app, &tuned, 3, "the previous channel action");
+}
+
+#[test]
+fn a_second_finger_on_the_play_bar_cancels_the_video_swipe() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned) = start(&home, &[]);
+    full_screen(&mut app, &tuned, 3);
+    step(app.press("id:video"));
+    step(app.wait_for("id:play-bar-play-pause"));
+    let opened = streams(&tuned).len();
+    let (video, path) = video_path(&app);
+    touch(
+        &mut app,
+        TouchPhase::Start,
+        video,
+        &path,
+        (640.0, 500.0),
+        1_000.0,
+    );
+    touch(
+        &mut app,
+        TouchPhase::Move,
+        video,
+        &path,
+        (640.0, 200.0),
+        1_500.0,
+    );
+    app.settle();
+    assert!(app.screen().matches("id:swipe-preview").unwrap());
+
+    // This touch bubbles through app-ui, but not through the sibling video.
+    let (button, button_path) = element_path(&app, "id:play-bar-play-pause");
+    touch_packet(
+        &mut app,
+        (2, button),
+        TouchPhase::Start,
+        &button_path,
+        ((640.0, 740.0), 1_550.0),
+        Some((1, (640.0, 200.0))),
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch(
+        &mut app,
+        TouchPhase::End,
+        video,
+        &path,
+        (640.0, 100.0),
+        1_600.0,
+    );
+    lift_press(&mut app);
+    touch_pointer(
+        &mut app,
+        (2, button),
+        TouchPhase::End,
+        &button_path,
+        (640.0, 740.0),
+        1_650.0,
+    );
+    quiet(&mut app);
+    assert_eq!(streams(&tuned).len(), opened, "two fingers never tune");
+    swipe(&mut app, -300.0);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a fresh single-finger swipe still works",
+    );
+
+    // Reverse the order: a finger already held on a sibling control
+    // prevents a second finger from starting a video swipe at all.
+    step(app.wait_for("id:play-bar-play-pause"));
+    let opened = streams(&tuned).len();
+    let (button, button_path) = element_path(&app, "id:play-bar-play-pause");
+    touch_pointer(
+        &mut app,
+        (2, button),
+        TouchPhase::Start,
+        &button_path,
+        (640.0, 740.0),
+        2_000.0,
+    );
+    let (video, path) = video_path(&app);
+    touch_packet(
+        &mut app,
+        (1, video),
+        TouchPhase::Start,
+        &path,
+        ((640.0, 500.0), 2_050.0),
+        Some((2, (640.0, 740.0))),
+    );
+    touch(
+        &mut app,
+        TouchPhase::Move,
+        video,
+        &path,
+        (640.0, 100.0),
+        2_550.0,
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch(
+        &mut app,
+        TouchPhase::End,
+        video,
+        &path,
+        (640.0, 100.0),
+        2_600.0,
+    );
+    touch_pointer(
+        &mut app,
+        (2, button),
+        TouchPhase::End,
+        &button_path,
+        (640.0, 740.0),
+        2_650.0,
+    );
+    quiet(&mut app);
+    assert_eq!(
+        streams(&tuned).len(),
+        opened,
+        "a held control also blocks a second finger's swipe"
+    );
+}
+
+#[test]
+fn a_reused_pointer_recovers_after_both_multitouch_lifts_are_lost() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned) = start(&home, &[]);
+    full_screen(&mut app, &tuned, 3);
+    let opened = streams(&tuned).len();
+    finger_id(&mut app, 1, (640.0, 600.0), &[(640.0, 200.0)], true);
+    assert!(app.screen().matches("id:swipe-preview").unwrap());
+    let (video, path) = video_path(&app);
+    touch_packet(
+        &mut app,
+        (2, video),
+        TouchPhase::Start,
+        &path,
+        ((800.0, 500.0), 1_800.0),
+        Some((1, (640.0, 200.0))),
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    assert_eq!(streams(&tuned).len(), opened, "the second finger canceled");
+
+    // Both End/Cancel packets are lost, without changing any app overlay or
+    // swipe-admission state. Exercise ID reuse at the event boundary as a
+    // robustness case: current NSH adapters normally allocate fresh IDs.
+    // This one-contact snapshot says neither old finger is still down.
+    touch(
+        &mut app,
+        TouchPhase::Start,
+        video,
+        &path,
+        (640.0, 600.0),
+        2_000.0,
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch(
+        &mut app,
+        TouchPhase::Move,
+        video,
+        &path,
+        (640.0, 200.0),
+        2_500.0,
+    );
+    touch(
+        &mut app,
+        TouchPhase::End,
+        video,
+        &path,
+        (640.0, 200.0),
+        2_600.0,
+    );
+    lift_press(&mut app);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a reused primary pointer recovers after lost lifts",
+    );
+}
+
+#[test]
+fn a_new_pointer_tap_clears_a_swipe_whose_lift_was_lost() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned) = start(&home, &[]);
+    full_screen(&mut app, &tuned, 3);
+    step(app.run_for(Duration::from_secs(15)));
+    assert!(!app.screen().matches("id:play-bar-layer").unwrap());
+    let opened = streams(&tuned).len();
+    finger_id(&mut app, 1, (640.0, 600.0), &[(640.0, 200.0)], true);
+    assert!(app.screen().matches("id:swipe-preview").unwrap());
+
+    // No End/Cancel arrives. NSH gives the new contact a fresh ID. Its
+    // one-contact Start clears the old preview and its lift is a video tap.
+    let (video, path) = video_path(&app);
+    touch_pointer(
+        &mut app,
+        (3, video),
+        TouchPhase::Start,
+        &path,
+        (640.0, 600.0),
+        2_000.0,
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch_pointer(
+        &mut app,
+        (3, video),
+        TouchPhase::End,
+        &path,
+        (640.0, 600.0),
+        2_100.0,
+    );
+    lift_press(&mut app);
+    step(app.wait_for("id:play-bar-layer"));
+    assert_eq!(streams(&tuned).len(), opened, "the fresh tap never tunes");
+    finger_id(&mut app, 4, (640.0, 600.0), &[(640.0, 200.0)], false);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a fresh swipe still follows the recovered tap",
+    );
+}
+
+#[test]
+fn a_screen_reader_keeps_channel_buttons_reachable_and_its_actions_zap() {
+    let Some(home) = isolated!() else { return };
+    let exposure = crate::accessibility_visibility::Exposure::default();
+    let observed = exposure.clone();
+    let (mut app, tuned) = start_with(
+        &home,
+        &[("playback.swipe_to_zap", Value::Bool(false))],
+        move |batch| observed.record(batch),
+    );
+    full_screen(&mut app, &tuned, 3);
+    step(app.set_environment("TalkBack on", |env| env.screen_reader = true));
+    assert_eq!(
+        exposure
+            .action_label(&app, "video", "next_channel")
+            .as_deref(),
+        Some("Next channel")
+    );
+    assert_eq!(
+        exposure
+            .action_label(&app, "video", "previous_channel")
+            .as_deref(),
+        Some("Previous channel")
+    );
+    press_video(&mut app, 0);
+    app.settle();
+    step(app.wait_for("id:play-bar-next-channel"));
+    step(app.run_for(Duration::from_secs(30)));
+    exposure.shown(&app, "play-bar-next-channel", true);
+    exposure.shown(&app, "play-bar-previous-channel", true);
+    step(app.press("id:play-bar-next-channel"));
+    tunes(&mut app, &tuned, 2, "TalkBack next button");
+    step(app.press("id:play-bar-previous-channel"));
+    tunes(&mut app, &tuned, 3, "TalkBack previous button");
+    act(&mut app, "next_channel");
+    tunes(&mut app, &tuned, 2, "TalkBack custom next action");
+    act(&mut app, "previous_channel");
+    tunes(&mut app, &tuned, 3, "TalkBack custom previous action");
 }
