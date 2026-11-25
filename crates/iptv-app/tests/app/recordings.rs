@@ -232,7 +232,7 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     use iptv_core::recording::Status;
     let (mut app, path, source, _) =
         fixture(&home, idiom, "https://example.test/generated.ts", None);
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.wait_for("text:Manage favorites…"));
     assert!(!app.shows("text:Schedule a recording…"));
     assert!(!app.shows("text:Schedule recording"));
@@ -383,7 +383,7 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixtu
     step(app.back());
     step(app.wait_for_gone(favorite, Duration::from_secs(2)));
     // Nor does its program menu.
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     let details = "id:menu-panel >> text:Details";
     step(app.wait_for(details));
     for item in ["Schedule recording", "Schedule a recording…", "Record"] {
@@ -504,7 +504,7 @@ fn details_record_on_a_current_program_records_now_without_a_form() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.press("id:menu-panel >> text:Details"));
     let record = "id:description-layer >> text:Record";
     step(app.wait_for(record));

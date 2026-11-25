@@ -516,14 +516,16 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
 
     // Cross-playlist favorite management belongs to the guide's program menu.
     step(app.long_press("id:guide-ui >> role:cell[Alpha bulletin]"));
+    step(app.press("id:menu-panel >> text:More options"));
     step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+    step(app.back());
     step(app.back());
     // Copying from either News group stays in its owning source.
     step(app.open_guide_groups());
     step(app.press("id:guide-groups >> text:    News >> nth=1"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[News]"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.press("id:menu-panel >> text:Copy channels to a group…"));
     step(app.wait_for("text:0 selected · 2 matching · 2 total"));
     step(app.wait_for("id:custom-groups-screen >> text:Only Beta"));

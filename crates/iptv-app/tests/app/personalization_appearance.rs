@@ -4,7 +4,7 @@ use iptv_settings::Settings;
 use personalization::*;
 use std::time::Duration;
 fn settings(app: &mut Headless) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for("text:Manage favorites…"));
     step(app.press("text:Settings >> nth=0"));
     step(app.wait_for("text:Appearance >> nth=0"));

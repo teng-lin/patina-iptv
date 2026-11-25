@@ -145,21 +145,21 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     }
     step(app.wait_for("text:Show -31"));
     assert!(focused(&app, "Show -31"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(&mut app);
     step(app.wait_for("text:Play from the beginning"));
-    step(app.back());
+    step(app.press_key("m"));
 
     step(app.press_key("left"));
     step(app.wait_for("text:Show -32"));
     assert!(focused(&app, "Show -32"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(&mut app);
     step(app.wait_for("text:Details"));
     assert!(
         !app.screen()
             .matches("id:menu-panel >> text:Play from the beginning")
             .unwrap()
     );
-    step(app.back());
+    step(app.press_key("m"));
     step(app.press_key("enter"));
     step(app.wait_for("id:description-layer >> text:Generated details for Show -32"));
     assert_eq!(iptv_app::player_opens(0), 0);

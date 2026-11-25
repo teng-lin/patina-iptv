@@ -41,7 +41,7 @@ fn overlay_choosing_a_channel_watches_it_full_screen_by_default() {
     step(app.back());
     step(app.back());
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     assert_eq!(player(app).id, id);
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }
@@ -57,7 +57,7 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
     // The guide menu confirms it stayed in browsing.
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     step(app.back());
     step(app.back());
     step(app.press_key("enter"));
@@ -66,7 +66,7 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     step(app.back());
     // Re-entering the guide keeps its configured overlay layout and surface identity.
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     assert_eq!(player(app).id, id);
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }

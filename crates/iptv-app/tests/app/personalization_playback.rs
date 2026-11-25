@@ -180,13 +180,19 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     opened.lock().unwrap().clear();
     step(app.press_key("up"));
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     step(app.run_for(Duration::from_secs(1)));
     assert!(
         opened.lock().unwrap().is_empty(),
         "menu cancels a pending tune"
     );
     step(app.back());
+    step(app.run_for(Duration::from_millis(500)));
+    assert!(
+        opened.lock().unwrap().is_empty(),
+        "closing context actions keeps autoplay held, like a touch hold"
+    );
+    step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
     loaded_stream(app, &opened, "http://example.test/b");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/b"]);

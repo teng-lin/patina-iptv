@@ -131,10 +131,10 @@ fn back_until(app: &mut Headless, done: impl Fn(&Screen) -> bool) {
     assert!(done(app.screen()), "still open: {:?}", app.screen().texts());
 }
 
-/// Menu (`M`) on the focused program.
+/// The full menu on the focused program's header.
 #[track_caller]
 fn open_menu(app: &mut Headless) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for("text:Manage favorites…"));
 }
 

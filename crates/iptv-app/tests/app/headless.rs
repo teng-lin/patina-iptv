@@ -137,9 +137,21 @@ impl Headless {
             RemoteKey::Previous => "MediaTrackPrevious",
             RemoteKey::Back => "GoBack",
             RemoteKey::Digit(d) => ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"][d as usize],
-            _ => return Err(format!("missing raw phase event for {key:?}")),
+            _ => nsh_tv::transport::TABLE
+                .iter()
+                .find(|entry| entry.key == key)
+                .map(|entry| entry.dom_code)
+                .ok_or_else(|| format!("missing raw phase event for {key:?}"))?,
         };
-        event.key = name.into();
+        event.key = if nsh_tv::transport::TABLE
+            .iter()
+            .any(|entry| entry.key == key)
+        {
+            "Unidentified"
+        } else {
+            name
+        }
+        .into();
         event.code = match key {
             RemoteKey::Digit(d) => format!("Digit{d}").into(),
             _ => name.into(),

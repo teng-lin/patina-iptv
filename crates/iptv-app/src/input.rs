@@ -756,10 +756,10 @@ fn keep_controls_until(ui: Ui, at: u64) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
-    // A held key must not reopen a menu or turn a guide preview into
-    // fullscreen. A remapped remote button can repeat Select.
+    // A held key must not reopen a menu, toggle a favorite repeatedly or
+    // turn a guide preview into fullscreen. Remapped keys can repeat too.
     if repeat
-        && (action == Action::ShowMenu
+        && (matches!(action, Action::ShowMenu | Action::ToggleFavorite)
             || (action == Action::Select
                 && ui.mode.get_untracked() == ViewMode::Guide
                 && context(&ui) == Context::Guide))
@@ -904,7 +904,8 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         match action {
             Action::MoveUp => crate::menu_view::scroll_description(ui, -1.0),
             Action::MoveDown => crate::menu_view::scroll_description(ui, 1.0),
-            Action::Back | Action::ShowMenu => crate::menu_view::close(ui),
+            Action::Back => crate::menu_view::back(ui),
+            Action::ShowMenu => crate::menu_view::close(ui),
             _ => {}
         }
         return;
@@ -927,7 +928,8 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
                     crate::menu_view::perform(ui, item);
                 }
             }
-            Action::Back | Action::ShowMenu => crate::menu_view::close(ui),
+            Action::Back => crate::menu_view::back(ui),
+            Action::ShowMenu => crate::menu_view::close(ui),
             _ => {}
         }
         return;
@@ -937,7 +939,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::ChannelList) {
-        crate::channels_view::key(ui, key, action);
+        crate::channels_view::key(ui, action);
         return;
     }
     if top == Some(Overlay::Search) {
@@ -1001,6 +1003,12 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             }
         }
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Rail => {}
+        Action::ShowMenu
+            if ui.mode.get() != ViewMode::Fullscreen
+                && ui.focus.with(|f| f.pane) == Pane::Guide =>
+        {
+            crate::menu_view::open_timeline_context(ui);
+        }
         Action::ShowMenu => crate::menu_view::open(ui),
         Action::MoveUp => mv(Move::Up),
         Action::MoveDown => mv(Move::Down),

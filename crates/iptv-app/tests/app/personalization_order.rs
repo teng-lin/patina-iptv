@@ -338,6 +338,7 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
     );
     step(app.wait_for("id:channel-list >> text:/^1  Local A/"));
     step(app.press_key("m"));
+    step(app.press("id:menu-panel >> text:More options"));
     step(app.wait_for("id:menu-panel >> text:Channel order"));
     step(app.press("id:menu-panel >> text:Channel order"));
     step(app.wait_for("text:Name (Z–A)"));
@@ -361,7 +362,11 @@ fn fullscreen_channel_order_preserves_the_focused_channel() {
         |screen| list_is_hidden(screen) == Some(false),
     ));
     step(app.press_key("up"));
-    open_inline_order(app);
+    step(app.press_key("m"));
+    step(app.press("id:menu-panel >> text:Reorder channel"));
+    step(app.wait_for("id:organization-screen"));
+    step(app.wait_for("id:guide-reorder-handle"));
+    assert!(!app.shows("id:organization-row-0"));
     step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
     step(app.press("id:organization-screen >> text:Cancel"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));

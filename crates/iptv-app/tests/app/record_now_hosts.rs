@@ -237,10 +237,10 @@ fn the_program_menu_keeps_stop_available_after_a_form_change() {
     );
     report(&mut app, "tv");
     step(app.wait_for("text:Generated live program"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.press("id:menu-panel >> label:Record"));
     step(app.wait_until("a capture runs", WAIT, |_| active(&path) > 0));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     let stop = "id:menu-panel >> label:Stop recording";
     step(app.wait_for(stop));
     report(&mut app, "tablet");
@@ -266,7 +266,7 @@ fn an_ipad_offers_no_record_now_and_no_empty_library() {
     report(&mut app, "tablet");
     assert!(!rail_offers(&mut app, "Recordings"));
     step(app.wait_for("text:Generated live program"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.wait_for("id:menu-panel >> label:Details"));
     assert!(!shown(&app, "id:menu-panel >> label:Record"));
     step(app.back());

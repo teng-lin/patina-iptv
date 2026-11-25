@@ -47,7 +47,7 @@ fn wait(app: &mut Headless, text: &str) {
     ));
 }
 fn settings_menu(app: &mut Headless) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for("id:menu-panel"));
     step(app.press("id:menu-panel >> text:Settings"));
 }

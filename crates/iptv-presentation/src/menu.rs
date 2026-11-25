@@ -33,6 +33,7 @@ pub enum MenuItem {
     AssignEpg,
     ChannelOptions,
     ChannelActions,
+    ProgramActions,
     ProtectChannel,
     // Group.
     ManageFavorites,
@@ -121,6 +122,8 @@ pub struct Menu {
     pub target: Target,
     pub list: ListId,
     pub group_offset: Option<i32>,
+    /// The compact context to return to after inspecting its full options.
+    pub parent: Option<Box<Menu>>,
 }
 
 impl Menu {
@@ -133,6 +136,7 @@ impl Menu {
             target,
             list,
             group_offset: None,
+            parent: None,
         }
     }
 
@@ -278,6 +282,7 @@ pub fn channel_menu(
             BlockChannel,
             HideChannel,
             ProtectChannel,
+            ProgramActions,
         ]
         .map(action),
     );

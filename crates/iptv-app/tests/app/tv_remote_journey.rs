@@ -170,10 +170,9 @@ fn list_open(app: &crate::Headless) -> bool {
         })
 }
 
-/// Whether the program and channel menu is open (its items exist only
-/// while it is).
+/// Menu rows exist only while a context is open; the empty panel stays mounted.
 fn menu_open(app: &crate::Headless) -> bool {
-    shows(app, "id:menu-panel >> text:Manage favorites…")
+    shows(app, "id:menu-panel >> role:menuitem")
 }
 
 /// The last source the player was given.
@@ -227,6 +226,220 @@ fn repeat_hold(app: &mut crate::Headless, key: RemoteKey) {
     step(app.remote_phase(key, KeyPhase::Repeat));
     step(app.run_for(Duration::from_millis(450)));
     step(app.remote_phase(key, KeyPhase::Repeat));
+}
+
+#[track_caller]
+fn compact_menu_for(app: &mut crate::Headless, channel: &str, favorite: bool) {
+    step(app.wait_for(&format!("id:menu-panel >> role:header[{channel}]")));
+    step(app.wait_for(if favorite {
+        "id:menu-panel >> text:Remove from favorites"
+    } else {
+        "id:menu-panel >> text:Add to favorites"
+    }));
+    assert!(shows(app, "id:menu-panel >> text:Channel options…"));
+    assert!(!shows(app, "id:menu-panel >> text:Search"));
+    assert!(!shows(app, "id:menu-panel >> text:Manage favorites…"));
+}
+
+#[track_caller]
+fn pick_menu_item(app: &mut crate::Headless, label: &str) {
+    let selector = format!("id:menu-panel >> role:menuitem[{label}]");
+    step(app.wait_for(&selector));
+    for _ in 0..40 {
+        if app
+            .screen()
+            .accessibility_state(&selector)
+            .unwrap()
+            .selected
+        {
+            step(app.remote_tap(RemoteKey::Ok));
+            return;
+        }
+        step(app.remote_tap(RemoteKey::Down));
+    }
+    panic!("the D-pad did not reach {label}");
+}
+
+#[test]
+fn guide_context_gestures_share_channel_actions_without_tuning() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    // A short OK still tunes the preview. Browse B while A keeps playing:
+    // the menu and its favorite action must target focus, not playback.
+    step(app.remote_tap(RemoteKey::Ok));
+    plays(app, &lifetime, "http://example.test/a", 1);
+    step(app.remote_tap(RemoteKey::Down));
+    for repeats in [false, true] {
+        hold_open(app, RemoteKey::Ok, 700, repeats);
+        compact_menu_for(app, "Local B", true);
+        step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+        assert!(menu_open(app), "the hold's release leaves its menu open");
+        step(app.back());
+        assert!(!menu_open(app));
+    }
+    step(app.remote_tap(RemoteKey::Menu));
+    pick_menu_item(app, "More options");
+    step(app.wait_for("id:menu-panel >> text:Manage favorites…"));
+    assert!(shows(app, "id:menu-panel >> role:header[Local B]"));
+    step(app.back());
+    compact_menu_for(app, "Local B", true);
+    assert!(
+        app.screen()
+            .accessibility_state("id:menu-panel >> role:menuitem[More options]")
+            .unwrap()
+            .selected,
+        "Back restores the compact menu's focused entry"
+    );
+    step(app.remote_tap(RemoteKey::Ok));
+    pick_menu_item(app, "Details");
+    step(app.wait_for("id:description-layer >> text:/^Local B · /"));
+    step(app.back());
+    step(app.remote_tap(RemoteKey::Menu));
+    pick_menu_item(app, "More options");
+    pick_menu_item(app, "Manage favorites…");
+    step(app.wait_for("id:favorites-editor >> text:/^Favorites · /"));
+    assert!(
+        !menu_open(app),
+        "favorite management replaces the full menu"
+    );
+    step(app.back());
+    step(app.remote_tap(RemoteKey::Menu));
+    compact_menu_for(app, "Local B", true);
+    step(app.remote_tap(RemoteKey::Ok));
+    assert!(
+        !menu_open(app),
+        "the first compact action toggles the favorite"
+    );
+    hold(app, RemoteKey::Ok, 700, false);
+    compact_menu_for(app, "Local B", false);
+    step(app.back());
+    step(app.remote_tap(RemoteKey::Up));
+    step(app.remote_tap(RemoteKey::Menu));
+    compact_menu_for(app, "Local A", true);
+    step(app.back());
+    assert_eq!(iptv_app::player_opens(0), 1, "context actions never retune");
+    assert_eq!(source(&lifetime).as_deref(), Some("http://example.test/a"));
+    persistent(app, &lifetime, player);
+}
+
+#[test]
+fn a_custom_long_ok_action_is_not_replaced_by_the_guide_context_menu() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv(home, |settings| {
+        settings
+            .set(
+                keys::KEY_OVERRIDES.as_str(),
+                Value::KeyBindings(vec![
+                    KeyBinding::new(Some("guide"), "ok", PressKind::Long, "toggle_favorite"),
+                    KeyBinding::new(Some("guide"), "red", PressKind::Short, "show_menu"),
+                ]),
+            )
+            .unwrap();
+    });
+    let app = &mut fixture.app;
+    hold(app, RemoteKey::Ok, 700, true);
+    assert!(
+        !menu_open(app),
+        "the custom action runs instead of ShowMenu"
+    );
+    hold(app, RemoteKey::Red, 700, true);
+    compact_menu_for(app, "Local A", false);
+    assert_eq!(iptv_app::player_opens(0), 0);
+}
+
+#[test]
+fn player_list_menu_and_long_ok_share_the_focused_channel_actions() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, lifetime, player) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    first_channel_fullscreen(app, &lifetime);
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.remote_tap(RemoteKey::Down));
+    for menu_key in [true, false] {
+        if menu_key {
+            hold(app, RemoteKey::Menu, 700, true);
+        } else {
+            hold(app, RemoteKey::Ok, 700, false);
+        }
+        compact_menu_for(app, "Local B", true);
+        step(app.back());
+        assert!(!menu_open(app), "Back closes the row's compact menu");
+        assert!(list_open(app), "Back restores the focused player-list row");
+        assert_eq!(
+            app.screen()
+                .span_style("id:channel-list >> role:row >> text:2  Local B")
+                .unwrap()
+                .color,
+            nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
+            "the focused row is still B while A plays"
+        );
+    }
+    assert_eq!(
+        iptv_app::player_opens(0),
+        1,
+        "menus never tune the focused B"
+    );
+    assert_eq!(source(&lifetime).as_deref(), Some("http://example.test/a"));
+    persistent(app, &lifetime, player);
+}
+
+#[test]
+fn timeline_pointer_context_is_compact_on_desktop_tablet_and_tv() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv(home, |_| {});
+    let app = &mut fixture.app;
+    let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
+    for (device, idiom, os) in [
+        ("desktop", Idiom::Desktop, Os::Linux),
+        ("tablet", Idiom::Pad, Os::Android),
+        ("tv", Idiom::Tv, Os::Android),
+    ] {
+        step(app.set_environment(device, |env| {
+            env.idiom = idiom;
+            env.os = os;
+        }));
+        crate::device_signals::report(app, device, true, true);
+        step(app.long_press(cell));
+        compact_menu_for(app, "Local A", true);
+        step(app.back());
+        if idiom == Idiom::Desktop {
+            step(app.right_click(cell));
+            compact_menu_for(app, "Local A", true);
+            step(app.back());
+        }
+    }
+    assert_eq!(iptv_app::player_opens(0), 0, "context gestures never tune");
+}
+
+#[test]
+fn favorite_actions_run_once_per_remote_hold_for_default_and_custom_keys() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv(home, |settings| {
+        settings
+            .set(
+                keys::KEY_OVERRIDES.as_str(),
+                Value::KeyBindings(vec![
+                    KeyBinding::new(Some("guide"), "green", PressKind::Short, "toggle_favorite"),
+                    KeyBinding::new(Some("guide"), "ok", PressKind::Long, "toggle_favorite"),
+                ]),
+            )
+            .unwrap();
+    });
+    let app = &mut fixture.app;
+    for (key, favorite) in [(RemoteKey::Red, false), (RemoteKey::Green, true)] {
+        step(app.remote_phase(key, KeyPhase::Down));
+        step(app.run_for(Duration::from_millis(50)));
+        step(app.remote_phase(key, KeyPhase::Repeat));
+        step(app.remote_phase(key, KeyPhase::Up));
+        step(app.remote_tap(RemoteKey::Menu));
+        compact_menu_for(app, "Local A", favorite);
+        step(app.back());
+    }
+    hold(app, RemoteKey::Ok, 700, true);
+    step(app.remote_tap(RemoteKey::Menu));
+    compact_menu_for(app, "Local A", false);
+    assert_eq!(iptv_app::player_opens(0), 0);
 }
 
 /// PIN 2468 (generated, as `recordings_transport`) protecting Local C.
@@ -466,7 +679,7 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     hold(app, RemoteKey::Ok, 600, true);
     step(app.wait_for("id:menu-panel >> role:header[Local B]"));
     step(app.wait_for("id:menu-panel >> text:Channel options…"));
-    assert!(!menu_open(app), "the list opens channel actions");
+    assert!(!shows(app, "id:menu-panel >> text:Manage favorites…"));
     step(app.back());
     assert!(list_open(app), "Back closes only the channel menu");
     let row = "id:channel-list >> role:row >> text:2  Local B";
