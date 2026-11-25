@@ -12,6 +12,8 @@ is below 1.0, a minor release may change behavior.
 - Group guide refresh, failed-source Retry, source editing and confirmed Clear
   under each playlist’s Guide data. Clear names the playlist and keeps other
   playlists, channels and guide links intact (#282).
+- Cancel a channel swipe when a second finger lands on another player control.
+
 - Follow iPad hardware keyboard attachment and Switch Control at runtime.
   Refresh these signals when returning to the app, keep panels open for
   assistive navigation, collapse multiview to the heard tile when its decoder
@@ -63,8 +65,8 @@ is below 1.0, a minor release may change behavior.
   rows. "Show info on a channel change" is hidden on an Android phone or tablet
   without a keyboard or D-pad. Back in the guide always returns to the programs
   on air first.
-- Move the rewind and fast-forward jumps to the Advanced page on desktops and
-  TVs. The player's
+- Move the rewind and fast-forward jumps to the Advanced page on every device.
+  The player's
   panels and play bar now wait at least Android's recommended accessibility
   timeout, and stay until hidden while a screen reader or Switch Access runs.
 - Android TV no longer offers picture in picture: Home during playback returns

@@ -944,23 +944,22 @@ fn closing_the_main_window_during_a_capture_asks_whether_to_stop_and_quit() {
     }
     step(app.press_window_close("main"));
     step(app.wait_for("id:quit-confirm"));
+    assert!(app.screen().matches("id:app-ui").unwrap());
     step(app.press("id:quit-confirm-stop"));
-    step(app.wait_until("Patina quits", Duration::from_secs(15), |_| active() == 0));
-    let deadline =
-        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(15));
-    while app
-        .window_state("main")
-        .ok()
-        .flatten()
-        .is_some_and(|window| window.visible)
-    {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the window closes after stopping captures"
-        );
-        app.idle(Duration::from_millis(100)).unwrap();
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    // The database changes before the recorder's snapshot observes the stop.
+    // Wait for the window to close too, within the original quit budget.
+    step(
+        app.wait_until("Patina quits", Duration::from_secs(15), |screen| {
+            active() == 0 && !screen.matches("id:app-ui").unwrap()
+        }),
+    );
+    assert!(
+        app.window_state("main")
+            .ok()
+            .flatten()
+            .is_none_or(|window| !window.visible),
+        "the window closed"
+    );
 }
 
 #[test]

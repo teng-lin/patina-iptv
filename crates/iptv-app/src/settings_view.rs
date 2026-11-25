@@ -606,7 +606,7 @@ mod tests {
         // the selected tile, the time-bar step and swiping to change
         // channel; the seek keys are with the keyboard or remote settings
         // (#280), and the rewind and fast-forward jumps on the Advanced
-        // page off a phone or a tablet (#281).
+        // page on every host (#281).
         assert_eq!(active, 4);
         let parental = PAGES.iter().find(|p| p.key == "parental").unwrap();
         // Only the two enable switches and PIN command are visible by default;

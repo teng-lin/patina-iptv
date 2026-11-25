@@ -947,6 +947,14 @@ fn a_backup_with_retired_and_hidden_rows_restores_and_carries_the_stay_choice() 
         );
         assert_eq!(restored.choice(iptv_settings::keys::CLOCK, at), "h24");
         assert_eq!(
+            restored.duration_ms(iptv_settings::keys::INFO_PANEL_TIMEOUT, at),
+            9_000
+        );
+        assert_eq!(
+            restored.duration_ms(iptv_settings::keys::CONTROLS_PANEL_TIMEOUT, at),
+            20_000
+        );
+        assert_eq!(
             restored.get("appearance.ui_transparency").unwrap(),
             iptv_settings::Value::Int(40)
         );
