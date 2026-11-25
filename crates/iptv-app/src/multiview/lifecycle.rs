@@ -17,7 +17,7 @@ pub fn follow(ui: Ui) -> bool {
     if !session(ui) {
         return false;
     }
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let mut moved = Vec::new();
     let mut gone = Vec::new();
     let mut any = true;
@@ -56,7 +56,7 @@ pub fn follow(ui: Ui) -> bool {
     }
     if !any {
         ui.multiview.set(None);
-        ui.mode.set(ViewMode::Guide);
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     true
 }
@@ -95,7 +95,7 @@ pub fn bind(ui: Ui) {
     // switching to a metered network: the
     // device no longer offers multiview here (#279), so the session
     // collapses to the tile being heard.
-    let omitted = computed(move || !crate::capabilities::multiview_offer(ui).shown());
+    let omitted = computed(move || !crate::multiview::offer(ui).shown());
     // A smaller decoder/form-factor budget can still offer multiview. An
     // existing session must discard its old admission limit before adding
     // another tile. Account limits do not revoke already admitted streams;

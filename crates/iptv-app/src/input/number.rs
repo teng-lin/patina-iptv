@@ -25,7 +25,7 @@ fn timeout() -> u64 {
         .max(0) as u64
 }
 fn resolve(ui: Ui, number: u32) -> Option<iptv_search::ChannelId> {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let list = ui.list.get_untracked();
     let mut matching = (0..list.len())
         .filter_map(|row| list.channel(row))
@@ -36,14 +36,16 @@ fn resolve(ui: Ui, number: u32) -> Option<iptv_search::ChannelId> {
     if matching.next().is_some() {
         return None;
     }
-    crate::runtime().search_channel_identity(&*schedule, channel)
+    crate::runtime_owner::runtime().search_channel_identity(&*schedule, channel)
 }
 fn commit(ui: Ui, identity: Option<iptv_search::ChannelId>) {
     let Some(identity) = identity else {
         return;
     };
-    let schedule = crate::schedule();
-    let Some(channel) = crate::runtime().resolve_search_channel(&identity, &*schedule) else {
+    let schedule = crate::runtime_owner::schedule();
+    let Some(channel) =
+        crate::runtime_owner::runtime().resolve_search_channel(&identity, &*schedule)
+    else {
         return;
     };
     if schedule.channel_hidden(channel)
@@ -55,7 +57,7 @@ fn commit(ui: Ui, identity: Option<iptv_search::ChannelId>) {
     }
     crate::lists::show_channel(ui, channel);
     ui.play(channel, crate::Playback::Live);
-    ui.mode.set(crate::ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {

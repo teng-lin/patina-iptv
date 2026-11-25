@@ -21,7 +21,7 @@ const FIXTURE_SPAN: i64 = 7200;
 /// ago, so a fixed epoch expires. Each [`Fixture`] reads it once, so all of its
 /// times agree even across an hour boundary.
 fn current_hour() -> i64 {
-    let now = crate::imports::now_unix();
+    let now = crate::time::now_unix();
     now - now.rem_euclid(3600)
 }
 struct Unpark(std::thread::Thread);

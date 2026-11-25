@@ -620,7 +620,7 @@ fn clear_guides_native(
                     channels,
                     playback: super::imports::Streams::Current,
                     guide: iptv_epg::GuideStore::default(),
-                    now: super::imports::now_unix(),
+                    now: crate::time::now_unix(),
                     source,
                     resume: false,
                 });

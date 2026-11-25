@@ -18,7 +18,6 @@
 
 use crate::i18n::tr;
 
-pub(crate) mod icons;
 mod info;
 mod progress;
 
@@ -36,8 +35,8 @@ use nsh_core::prelude::*;
 use nsh_core::{Checked, TouchEvent};
 
 use crate::theme::{RADIUS_LARGE, RESTING_ALPHA, TEXT_DISABLED_ALPHA};
+use crate::ui_kit::icons::{self, Icon};
 use crate::{Playback, Ui, ViewMode, tint};
-use icons::Icon;
 
 const WHITE: u32 = 0xFFFFFF;
 const PANEL_ALPHA: u8 = 0xE0;
@@ -219,7 +218,7 @@ pub(crate) fn hover(ui: Ui, over: bool) {
     update(ui, |b, now| b.hover(over, now));
 }
 
-pub fn layer(ui: Ui) -> impl IntoElement {
+pub fn layer(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
     // Back belongs to the pointer chrome: keys and auto-hide hide both.
     let shown = computed(move || shows(ui));
     when(
@@ -239,7 +238,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     })
                 })
                 .pointer_events(PointerEvents::BoxNone)
-                .child(when(move || ui.back_controls(), move || back(ui)))
+                .child(when(
+                    move || ui.back_controls(),
+                    move || back(ui, back_action),
+                ))
                 .child(bar(ui))
         },
     )
@@ -251,7 +253,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 /// multiview's grid from a tile watched full screen (its
 /// accessibility label says which; a remote's Back and an iPad's swipe
 /// from the left edge hide the bar first).
-fn back(ui: Ui) -> impl IntoElement {
+fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
     let window = nsh_core::element::desktop::current_window();
     let side = target();
     view()
@@ -291,7 +293,7 @@ fn back(ui: Ui) -> impl IntoElement {
                     log::info!("iptv play bar: back");
                     ui.panels.update(|p| p.hide());
                     ui.play_bar.update(PlayBar::hide);
-                    crate::go_back(ui);
+                    back_action(ui);
                 },
             )
             .test_id("play-bar-back"),
@@ -566,7 +568,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         // Why a control drawn disabled cannot act, said on focus (#279).
         .optional_accessibility_description(move || {
             (control == Control::Multiview)
-                .then(|| crate::capabilities::multiview_disabled(ui))
+                .then(|| crate::multiview::disabled_reason(ui))
                 .flatten()
                 .map(SharedString::from)
         })
@@ -651,7 +653,7 @@ fn tracks(ui: Ui) -> Option<Track> {
 }
 /// The device is a phone (its form factor, not its window's size).
 fn phone_form() -> bool {
-    crate::capabilities::host().form_factor == iptv_core::capabilities::FormFactor::Phone
+    crate::device::host().form_factor == iptv_core::capabilities::FormFactor::Phone
 }
 
 /// A control drawn disabled that still takes the focus and a press, to
@@ -661,7 +663,7 @@ fn explains(ui: Ui, control: Control) -> bool {
     control == Control::Multiview
         && !enabled(ui, control)
         && matches!(
-            crate::capabilities::multiview_offer(ui),
+            crate::multiview::offer(ui),
             iptv_presentation::capabilities::MultiviewOffer::Disabled(_)
         )
 }
@@ -681,7 +683,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
-        Control::Multiview => crate::capabilities::multiview(ui).available(),
+        Control::Multiview => crate::multiview::availability(ui).available(),
         Control::Pip => crate::pip::can_enter(ui),
         Control::Volume | Control::Fullscreen => desktop_controls(),
         Control::Listen => crate::listen::choice(ui) && !crate::listen::heard(ui),
@@ -696,7 +698,7 @@ pub(super) fn activate(
     used(ui);
     if !enabled(ui, control) {
         if explains(ui, control)
-            && let Some(reason) = untracked(|| crate::capabilities::multiview(ui)).reason()
+            && let Some(reason) = untracked(|| crate::multiview::availability(ui)).reason()
         {
             crate::settings_view::notify(crate::capabilities::reason(reason));
         }

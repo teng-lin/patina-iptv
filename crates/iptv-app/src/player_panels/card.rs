@@ -23,7 +23,7 @@ fn secondary() -> Rgba {
 
 /// The group the playing channel is in (groups start in ascending order).
 pub(super) fn group_of(channel: usize) -> String {
-    let s = crate::schedule();
+    let s = crate::runtime_owner::schedule();
     iptv_core::lists::group_of(&*s, channel).map_or_else(String::new, |g| {
         crate::listing_labels::group(s.group_label(g))
     })
@@ -31,7 +31,7 @@ pub(super) fn group_of(channel: usize) -> String {
 
 /// The channel's logo address (imported channels with an http(s) logo).
 fn logo(channel: usize) -> Option<String> {
-    logo_in(&*crate::schedule(), channel)
+    logo_in(&*crate::runtime_owner::schedule(), channel)
 }
 
 /// Read through the trait, so a combined ("All playlists") schedule finds
@@ -49,14 +49,20 @@ fn program(ui: Ui) -> (usize, Program) {
     // A zap waiting to tune: the channel it goes to, on air now.
     if let Some(channel) = crate::browse_playback::pending_channel(ui) {
         let now = ui.focus.with(|f| f.now);
-        return (channel, crate::schedule().program_at(channel, now));
+        return (
+            channel,
+            crate::runtime_owner::schedule().program_at(channel, now),
+        );
     }
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
         Playback::Live => ui.focus.with(|f| f.now),
         Playback::CatchUp { start, .. } => start,
     };
-    (channel, crate::schedule().program_at(channel, minute))
+    (
+        channel,
+        crate::runtime_owner::schedule().program_at(channel, minute),
+    )
 }
 
 /// How far the program on screen is, 0–1: where the archive plays (or
@@ -184,7 +190,7 @@ fn number_and_name(ui: Ui, channel: usize) -> String {
 pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElement {
     let channel = move || program(ui).0;
     let now = move || program(ui).1;
-    let next = move || crate::schedule().program_at(channel(), now().end);
+    let next = move || crate::runtime_owner::schedule().program_at(channel(), now().end);
     let format = move || {
         let main = ui.player.main();
         let (width, height) = main.size.get().unwrap_or((0, 0));
@@ -245,7 +251,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                             .with(|r| r.as_ref().map(|(j, _)| j.request.title.clone()))
                             .unwrap_or_else(|| {
                                 crate::listing_labels::listing(
-                                    crate::schedule().listing(channel(), now()),
+                                    crate::runtime_owner::schedule().listing(channel(), now()),
                                 )
                             })
                     })
@@ -268,7 +274,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                                 (
                                     "title",
                                     (&crate::listing_labels::listing(
-                                        crate::schedule().listing(channel(), p),
+                                        crate::runtime_owner::schedule().listing(channel(), p),
                                     ))
                                         .into(),
                                 ),
@@ -308,7 +314,7 @@ pub(super) fn banner(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl 
                 .child(
                     text(move || {
                         crate::listing_labels::listing(
-                            crate::schedule().listing(channel(), program(ui).1),
+                            crate::runtime_owner::schedule().listing(channel(), program(ui).1),
                         )
                     })
                     .flex_1()

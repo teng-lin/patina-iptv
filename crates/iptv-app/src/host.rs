@@ -22,7 +22,13 @@ mod web;
 #[cfg(target_family = "wasm")]
 pub(crate) use web::*;
 
-use iptv_core::capabilities::Platform;
+use iptv_core::capabilities::{Host, Platform};
+
+/// The host as its build describes it, before the device reports its form
+/// factor and input: for the facilities that follow the operating system
+/// alone (background recording, login registration, the alarm
+/// permission), and for work off the UI thread or before the root mounts.
+pub(crate) const BUILT: Host = Host::of(PLATFORM);
 
 /// What an image's header says about its size, before anything decodes it.
 pub(crate) enum Extent {
@@ -71,12 +77,9 @@ pub(crate) fn video_under_page() -> bool {
 pub(crate) const REMOTE_KEYS: bool = ANDROID || REMOTE_ONLY;
 
 /// Ask for Android's optional notification permission after accepting a capture.
-pub(crate) fn request_recording_notification_permission() {
-    // The system prompt must not delay the viewer's Start or Stop action.
+pub(crate) async fn request_recording_notification_permission() {
     #[cfg(target_os = "android")]
-    crate::data::spawn_in_app(async {
-        let _ = nsh_core::prelude::request_notification_permission().await;
-    });
+    let _ = nsh_core::prelude::request_notification_permission().await;
 }
 
 /// The font files the app registers itself, WOFF2. A browser package's

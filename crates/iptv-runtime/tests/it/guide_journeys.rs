@@ -165,13 +165,18 @@ fn cached_startup_pages_descriptions_and_manual_choices_preserve_channel_identit
         let resumes = Rc::new(Cell::new(0));
         let count = resumes.clone();
         let weak = Rc::downgrade(&owner);
+        let last = std::cell::RefCell::new(owner.schedule());
         owner.bind(move |event| match event {
             RuntimeEvent::EarlyResume { done, .. } => { count.set(count.get() + 1); let _ = done.send(()); },
-            RuntimeEvent::ScheduleReady(schedule) => {
+            RuntimeEvent::ScheduleChanged { previous, current, .. } => {
                 let owner = weak.upgrade().unwrap();
-                let channels = schedule.channel_count();
-                owner.set_schedule(schedule.clone());
-                owner.favorites_catalog_changed(schedule.as_ref());
+                let channels = current.channel_count();
+                assert!(Rc::ptr_eq(&last.replace(current.clone()), &previous));
+                assert!(Rc::ptr_eq(&owner.schedule(), &current));
+                if channels == 0 {
+                    assert!(owner.favorite_channels().is_empty());
+                    assert!(owner.recent_channels().is_empty());
+                }
                 tx.send(Event::Schedule(channels)).unwrap();
             },
             RuntimeEvent::GuideChanged => { tx.send(Event::Guide).unwrap(); },
@@ -186,7 +191,7 @@ fn cached_startup_pages_descriptions_and_manual_choices_preserve_channel_identit
         if let Some(finished) = owner.pending_import_completion(source) { tokio::time::timeout(Duration::from_secs(5), finished).await.unwrap(); }
         assert_eq!(resumes.get(), 1);
         assert_eq!(owner.shown_source(), Some(source));
-        data::stored::refresh_status(&owner);
+        data::refresh_guide_status(&owner);
         event(&mut rx, |event| matches!(event, Event::Settings) && !owner.source_lines(source).is_empty()).await;
         assert_eq!(owner.schedule().channel_key(0).as_deref(), Some(key.as_str()));
         let current = data::assign::current(&owner, source, &key).await;
@@ -225,11 +230,11 @@ fn cached_startup_pages_descriptions_and_manual_choices_preserve_channel_identit
         if let Some(finished) = owner.pending_import_completion(source) { tokio::time::timeout(Duration::from_secs(5), finished).await.unwrap(); }
         assert_eq!(data::assign::current(&owner, source, &key).await.choice, Some(data::assign::Choice::Automatic));
         let (done, cleared) = futures_channel::oneshot::channel();
-        assert!(data::stored::clear(&owner, move |result| { let _ = done.send(result); }));
+        assert!(data::clear_guide(&owner, move |result| { let _ = done.send(result); }));
         assert!(tokio::time::timeout(Duration::from_secs(5), cleared).await.unwrap().unwrap());
         assert_eq!(owner.schedule().channel_count(), 2);
         assert!(data::assign::current(&owner, source, &key).await.bound.is_none());
-        data::stored::refresh_status(&owner);
+        data::refresh_guide_status(&owner);
         event(&mut rx, |event| matches!(event, Event::Settings)).await;
         assert!(owner.drain_services());
         assert_eq!(data::assign::current(&owner, source, &key).await, Default::default(), "retired reads are a failed observation, not a resurrected binding");
@@ -262,7 +267,7 @@ fn clearing_one_playlists_guide_keeps_other_playlists_and_source_links() {
         iptv_runtime::stored::note_shown(&owner, Some(second));
         let before = owner.schedule();
         let (done, cleared) = futures_channel::oneshot::channel();
-        assert!(data::stored::clear_source(&owner, first, move |result| {
+        assert!(data::clear_source_guide(&owner, first, move |result| {
             let _ = done.send(result);
         }));
         assert!(

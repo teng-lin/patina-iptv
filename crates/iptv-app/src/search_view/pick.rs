@@ -40,8 +40,10 @@ pub(super) fn choose(ui: Ui, id: &ResultId) -> bool {
     if !untracked(|| picking(ui)) {
         return false;
     }
-    let schedule = crate::schedule();
-    let Some(channel) = resolve_result_channel(&crate::runtime(), id.channel(), &*schedule) else {
+    let schedule = crate::runtime_owner::schedule();
+    let Some(channel) =
+        resolve_result_channel(&crate::runtime_owner::runtime(), id.channel(), &*schedule)
+    else {
         return true;
     };
     if crate::multiview::picked(ui, channel) {

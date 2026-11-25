@@ -15,12 +15,15 @@ const SHELL_MAY_NAME: &[&str] = &[
     "Ports",
     "Runtime",
     "RuntimeEvent",
+    "ScheduleCause",
     // Incomplete-capture reason passed to the Android recording host.
     "RecordingFailure",
     // Acknowledged worker gate, only named by synthetic test-support helpers.
     "TestGate",
     // Backup progress, errors and the operation in progress.
     "backup",
+    // The debug fixture setting shared with transport before any UI owner exists.
+    "build_config",
     // Named library operations, each given the owner.
     "commands",
     "inspection",
@@ -33,6 +36,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     // The network port: the configuration of a client and the client a
     // host's adapter makes.
     "network",
+    // Converts the portable network policy for the native player transport.
+    "adapter_config",
     // The execution port, named only by the browser host, which supplies
     // the cooperative executor in its Ports.
     "execution",
@@ -43,7 +48,7 @@ const SHELL_MAY_NAME: &[&str] = &[
     "parental",
     "recordings",
     "vod",
-    // Effective setting values and the save error.
+    // Effective setting values.
     "settings",
     // Private-directory protection, before any owner exists.
     "storage",

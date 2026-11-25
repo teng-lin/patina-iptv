@@ -153,7 +153,7 @@ fn stop_to_guide(ui: Ui, stop: impl FnOnce(Ui)) {
     crate::multiview::close(ui);
     ui.playing.set(None);
     stop(ui);
-    ui.mode.set(crate::settings::browse_mode());
+    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
 }
 
 /// Channel up/down: switches playback and keeps the focus on it. Wraps
@@ -184,7 +184,7 @@ pub(crate) fn zap_target(ui: Ui, step: isize) -> Option<usize> {
         |channel| list.row_of(channel),
         || ui.focus.with(|f| f.channel),
     );
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     zap_from_list(&*catalog, &list, from, step, |channel| {
         catalog.channel_block(channel) == iptv_core::organization::Block::None
     })
@@ -198,7 +198,7 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
             if let Some(ch) = ui.playing.get() {
                 crate::lists::show_channel(ui, ch);
             }
-            ui.mode.set(crate::settings::browse_mode());
+            ui.mode.apply(crate::mode::Action::ReturnToBrowse);
         }
         QuickAction::History => crate::chooser::open(ui, crate::chooser::Kind::History),
         QuickAction::Channels => crate::channels_view::open(ui, ListMode::Overlay),
@@ -217,7 +217,7 @@ pub fn press_control(ui: Ui, control: Control) {
         // Multiview drawn disabled says why (a TV at the account's limit).
         if control == Control::Multiview
             && let Some(reason) =
-                nsh_core::prelude::untracked(|| crate::capabilities::multiview(ui)).reason()
+                nsh_core::prelude::untracked(|| crate::multiview::availability(ui)).reason()
         {
             crate::settings_view::notify(crate::capabilities::reason(reason));
         }

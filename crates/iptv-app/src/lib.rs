@@ -36,6 +36,7 @@ pub mod guide {
 mod guide_window_walkthrough;
 pub mod theme;
 
+mod archive_playback;
 mod backup;
 /// The document pickers a device has, and the ones headless apps get.
 #[cfg(feature = "test-support")]
@@ -45,11 +46,13 @@ mod capabilities;
 mod capture_limits;
 mod channels_view;
 mod chooser;
+mod clock;
 mod content_image;
 mod custom_groups;
 mod data;
 mod desktop;
 mod device;
+mod device_wiring;
 mod epg_sources_view;
 mod external_player;
 mod fav_editor;
@@ -57,11 +60,13 @@ mod favorites;
 mod fonts;
 mod grid;
 mod guide_assign_view;
+mod guide_clock;
 mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
 mod host;
 pub mod layout;
+mod tasks;
 pub mod timeline;
 // A browser host exports nothing: the glob is empty there.
 #[allow(unused_imports)]
@@ -85,6 +90,7 @@ mod listing_labels;
 mod lists;
 mod media;
 mod menu_view;
+mod mode;
 pub(crate) mod parental_view;
 #[cfg(feature = "test-support")]
 mod performance_probe;
@@ -108,14 +114,25 @@ mod playlists_view;
 mod rail;
 mod remote_editor;
 mod runtime_events;
+mod runtime_owner;
+mod runtime_wiring;
+use runtime_owner::runtime;
+pub use runtime_owner::schedule;
 mod scale;
 mod search_view;
 mod seek;
 mod settings;
+mod settings_offer;
 mod settings_view;
+mod settings_wiring;
 mod setup_view;
 pub mod startup;
-pub mod time;
+mod startup_view;
+/// The app's guide clock and its UI tick.
+pub mod time {
+    pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
+    pub use crate::guide_clock::{start, tick};
+}
 mod touch_zap;
 mod ui_kit;
 mod video;
@@ -134,8 +151,7 @@ pub(crate) const IOS: bool = crate::host::IPAD;
 use nsh_core::time::Instant;
 use std::time::Duration;
 
-use guide::{Focus, Pane, Program, ProgramSelection, Schedule};
-use std::cell::RefCell;
+use guide::{Focus, Pane, Program};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 
@@ -224,7 +240,7 @@ pub struct SharedUi {
     pub picture: Signal<PictureSettings>,
     /// The stored playlists: which one is shown, their refreshes (`data.rs`).
     pub library: data::Library,
-    /// Bumped when a setting changes; read values with `settings::read`.
+    /// Bumped when a setting changes; read values with `settings_wiring::read`.
     pub settings: Signal<u64>,
     /// The streams the shown source's account allows at once, when it
     /// says (the runtime's, `multiview::account_limit`, as a signal for
@@ -269,7 +285,7 @@ pub struct Ui {
     pub input: Signal<Input>,
     /// What the last pointer press was made with ([`Ui::touched`] reads it).
     pub last_press: Signal<Input>,
-    pub mode: Signal<ViewMode>,
+    pub mode: mode::Mode,
     pub stats: Signal<Stats>,
     #[cfg(feature = "test-support")]
     pub(crate) performance: Signal<Option<performance_probe::Probe>>,
@@ -316,7 +332,7 @@ pub struct Ui {
     /// The question before quitting during a capture, with its focused
     /// answer (`desktop::quit_confirm`).
     quit_confirm: Signal<Option<desktop::quit_confirm::Choice>>,
-    store_startup_failure: Signal<Option<startup::StoreFailure>>,
+    store_startup_failure: Signal<Option<startup_view::StoreFailure>>,
     store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
     pub playlists: Signal<Option<playlists_view::Open>>,
@@ -418,7 +434,7 @@ impl Ui {
                     Input::Keys
                 },
             ),
-            mode: signal(ViewMode::Guide),
+            mode: mode::Mode::new(app.settings),
             stats: signal(Stats::default()),
             #[cfg(feature = "test-support")]
             performance: signal(None),
@@ -485,119 +501,6 @@ impl Ui {
         self.app.data_version.get() << 32 | (self.app.guide_pages.get() & 0xFFFF_FFFF)
     }
 
-    /// OK or a tap on the focused program: a live one plays (OK on the
-    /// channel already playing goes full screen). An available replay plays
-    /// from the archive. Other listings open their details.
-    pub fn watch(&self) {
-        let view = lists::view(*self);
-        let (row, program, now) = self.focus.with(|f| (f.channel, f.program(&view), f.now));
-        let Some(channel) = view.channel(row) else {
-            return;
-        };
-        let live = (self.playback.get() == Playback::Live)
-            .then(|| self.playing.get())
-            .flatten();
-        let selection =
-            ProgramSelection::for_program(&program, now, view.catchup_days(row), channel, live);
-        match selection {
-            ProgramSelection::AlreadyLive if external_player::maybe_open(*self, channel, None) => {}
-            ProgramSelection::AlreadyLive => {
-                self.mode.set(ViewMode::Fullscreen);
-                self.show_playing();
-            }
-            ProgramSelection::Live => browse_playback::select(*self),
-            ProgramSelection::Replay
-                if external_player::maybe_open(*self, channel, Some(program)) => {}
-            ProgramSelection::Replay => {
-                if !player::allow_guide_channel(channel) {
-                    return;
-                }
-                self.play(
-                    channel,
-                    Playback::CatchUp {
-                        start: program.start,
-                        offset: 0,
-                    },
-                );
-                self.mode.set(ViewMode::Fullscreen);
-                self.show_playing();
-            }
-            ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
-                let origin = Origin {
-                    channel,
-                    program_start: program.start,
-                };
-                if selection == ProgramSelection::Upcoming {
-                    recordings_view::remember(*self, origin);
-                }
-                self.description.set(Some(origin));
-            }
-        }
-    }
-
-    /// Starts `channel` live or from the archive.
-    pub fn play(&self, channel: usize, playback: Playback) {
-        external_player::cancel_pending(*self);
-        if !player::allow_guide_channel(channel) {
-            return;
-        }
-        if self.player_surface == 0
-            && self
-                .playing
-                .get_untracked()
-                .is_some_and(|old| old != channel)
-            && let Some(old) = self
-                .playing
-                .get_untracked()
-                .and_then(|old| parental_view::live_target(*self, old))
-        {
-            crate::runtime().parental_content_left(&old);
-        }
-        if !parental_view::allow_play(*self, channel, playback) {
-            return;
-        }
-        if self.player_surface != 0 {
-            self.pending_zap.set(None);
-            if player::start_surface(*self, self.player_surface, channel) {
-                // Accepted: the viewer's playback now (`interruption.rs`).
-                crate::interruption::viewer_acted(*self);
-                self.playback.set(Playback::Live);
-                self.paused.set(false);
-            }
-            return;
-        }
-        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
-        {
-            return;
-        }
-        // Accepted: the viewer's playback now (`interruption.rs`).
-        crate::interruption::viewer_acted(*self);
-        seek::cancel(*self);
-        crate::on_demand::flush(*self, false);
-        self.player.vod.set(None);
-        self.player.recorded.set(None);
-        crate::runtime().close_recording_playback();
-        self.pending_zap.set(None);
-        self.browse_playback.set(Default::default());
-        self.playback.set(playback);
-        self.playing.set(Some(channel));
-        self.paused.set(false);
-        player::start(self, channel);
-    }
-
-    /// A touch or a click on any control: touch or pointer mode, whichever
-    /// made the press.
-    pub fn touched(&self) {
-        // PIN entry continues the choice that opened the prompt. Dismissing
-        // the prompt cancels it in `parental_view::abort`.
-        if self.top_overlay() != Some(overlays::Overlay::Parental) {
-            external_player::cancel_pending(*self);
-        }
-        self.pending_zap.set(None);
-        browse_playback::activity(*self);
-        self.input.set(self.last_press.get_untracked());
-    }
-
     pub fn keys_shown(&self) -> bool {
         self.input.get().key_hints()
     }
@@ -631,7 +534,7 @@ impl Ui {
     pub fn surface(&self, rgb_hex: u32) -> Rgba {
         let alpha = match self.mode.get() {
             // `appearance.ui_transparency`
-            ViewMode::Overlay => settings::overlay_alpha(&settings::read(*self)),
+            ViewMode::Overlay => theme::overlay_alpha(&settings_wiring::read(*self)),
             ViewMode::Guide | ViewMode::Fullscreen => 0x00,
         };
         tint(rgb_hex, alpha)
@@ -645,136 +548,11 @@ impl Ui {
             .as_millis() as u64
     }
 
-    /// What just started playing over full-screen video: the banner for
-    /// a live channel, the card with its seek bar for a replay.
-    pub fn show_playing(&self) {
-        let live =
-            self.playback.get_untracked() == Playback::Live && !crate::on_demand::active(*self);
-        self.update_panels(|p, now| {
-            if live {
-                p.show_banner(now);
-            } else {
-                p.show_info(now);
-            }
-        });
-    }
-
     /// Changes the panels at the current point in the app's clock.
     pub fn update_panels(&self, f: impl FnOnce(&mut Panels, u64)) {
         let now = self.now_ms();
         self.panels.update(|p| f(p, now));
     }
-
-    pub(crate) fn toggle(&self, mode: ViewMode) {
-        self.mode
-            .update(|m| *m = if *m == mode { ViewMode::Guide } else { mode });
-    }
-}
-
-thread_local! {
-    /// The application owner this thread's shell code is working for: the
-    /// root's, or, while a task accepted by an earlier root is polled, that
-    /// task's ([`in_runtime`]). The runtime crate keeps no such handle of its
-    /// own; every call into it is given this one.
-    static RUNTIME: RefCell<Option<Rc<runtime::Runtime>>> = const { RefCell::new(None) };
-}
-
-/// The shell owns one application handle; all library state belongs to it.
-///
-/// Application-thread code only. A player, JNI or worker thread holds no
-/// handle and must be given what it needs; once a root exists, asking for
-/// the handle elsewhere is a bug, not a reason to build a second owner.
-pub(crate) fn runtime() -> Rc<runtime::Runtime> {
-    RUNTIME.with(|runtime| {
-        runtime
-            .borrow_mut()
-            .get_or_insert_with(|| {
-                // Pre-root shell tests may construct an owner. Once a root
-                // exists, callbacks must dispatch to its shell thread; a second
-                // dormant owner would silently fork state in release builds.
-                assert!(
-                    !ROOT_STARTED.load(std::sync::atomic::Ordering::Acquire),
-                    "the application handle was requested off the application thread"
-                );
-                let directory = host::resolve_data_dir()
-                    .expect("private storage must be resolved before using runtime services");
-                Rc::new(new_runtime(directory))
-            })
-            .clone()
-    })
-}
-
-/// An application root installed its owner in this process. Only a guard
-/// against asking for the handle on another thread; it selects no owner.
-static ROOT_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Whether an application owner exists (none before storage is resolved).
-pub(crate) fn has_runtime() -> bool {
-    RUNTIME.with(|runtime| runtime.borrow().is_some())
-}
-
-/// Runs `run` with `owner` as the shell's handle, then puts the previous
-/// one back (also when `run` unwinds).
-pub(crate) fn with_runtime<R>(owner: Rc<runtime::Runtime>, run: impl FnOnce() -> R) -> R {
-    struct Restore(Option<Rc<runtime::Runtime>>);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            RUNTIME.set(self.0.take());
-        }
-    }
-    let _restore = Restore(RUNTIME.replace(Some(owner)));
-    run()
-}
-
-pub(crate) fn new_runtime(directory: std::path::PathBuf) -> runtime::Runtime {
-    runtime::Runtime::new(host::ports(directory))
-}
-
-/// A local task always polls with the owner that accepted it, also after
-/// the root (and with it the shell's handle) was recreated.
-pub(crate) fn in_runtime(
-    future: impl std::future::Future<Output = ()> + 'static,
-) -> impl std::future::Future<Output = ()> {
-    let owner = runtime();
-    let mut future = Box::pin(future);
-    std::future::poll_fn(move |context| {
-        with_runtime(owner.clone(), || future.as_mut().poll(context))
-    })
-}
-
-/// The guide data in use (synthetic until a playlist is imported).
-pub fn schedule() -> Rc<dyn Schedule> {
-    runtime().schedule()
-}
-
-/// Swaps the guide data (after an import) and tells the views to re-read.
-/// The guide keeps its list and focused channel by identity, at the new
-/// schedule's now; channel indices into the old data (open menus) that no
-/// longer exist are dropped, the playing channel and favorites are found
-/// again by key.
-pub fn set_schedule(ui: &Ui, schedule: Rc<dyn Schedule>) {
-    let kept = lists::keep(*ui);
-    let previous = crate::schedule();
-    player::stop_archive_after_clock_edit(*ui, &*previous, &*schedule);
-    menu_view::invalidate_shifted_context(*ui, &*previous, &*schedule);
-    runtime().set_schedule(schedule.clone());
-    time::mark_shown();
-    let n = schedule.channel_count();
-    if ui.playing.get_untracked().is_some_and(|ch| ch >= n) {
-        player::row_dropped(*ui);
-    }
-    favorites::catalog_changed(*ui, &*schedule);
-    lists::restore(*ui, kept);
-    let n = ui.list.with_untracked(|l| l.len());
-    let rows = ui.visible_rows.get_untracked();
-    let clamped = rows.and_then(|(a, b)| (n > 0).then(|| (a.min(n - 1), b.min(n - 1))));
-    if clamped != rows {
-        ui.visible_rows.set(clamped);
-    }
-    ui.menu.set(None);
-    ui.description.set(None);
-    ui.editor.set(None);
-    ui.app.data_version.update(|v| *v += 1);
 }
 
 /// Whether `program` on `channel` is inside the channel's catch-up window
@@ -814,10 +592,9 @@ pub fn App() -> impl IntoElement {
     // This root's owner becomes the shell's handle, and the one the host's
     // stop callback flushes. Only a root does this: constructing a runtime
     // elsewhere changes neither.
-    let owner = Rc::new(new_runtime(directory));
+    let owner = Rc::new(runtime_owner::new_runtime(directory));
     host::flush_on_host_stop(owner.host_handle());
-    RUNTIME.set(Some(owner));
-    ROOT_STARTED.store(true, std::sync::atomic::Ordering::Release);
+    runtime_owner::install_root(owner);
     if let Err(error) = runtime().lock_storage() {
         let message = error.message();
         return view()
@@ -898,7 +675,7 @@ pub fn App() -> impl IntoElement {
                     })
                 })),
         )
-        .child(when(splash, startup::splash))
+        .child(when(splash, startup_view::splash))
 }
 
 /// Constructed once after recovery; all player surfaces belong to this owner.
@@ -906,9 +683,9 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
     // Establish host-report signals before eager feature bindings subscribe.
-    let device_bridge = device::bridge();
+    let device_bridge = device_wiring::bridge();
     let ui = Ui::new(SharedUi::new(), player::Player::new());
-    settings::bind(ui);
+    settings_wiring::bind(ui);
     browse_playback::bind(ui);
     interruption::bind(ui);
     desktop::bind(ui);
@@ -921,12 +698,11 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         }
     });
     favorites::reset();
-    favorites::catalog_changed(ui, &*schedule());
     input.replace(Some(input::bind(ui)));
     #[cfg(feature = "test-support")]
     performance_probe::bind(ui);
-    data::start(ui);
-    time::start(ui);
+    runtime_wiring::start(ui);
+    guide_clock::start(ui);
     player::bind(ui);
     player::watch_time::bind(ui);
     data::pages::bind(ui);
@@ -1011,7 +787,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         .child(ui_layers(ui, groups, rows))
         // The desktops' picture-in-picture window, while it is open.
         .child(desktop::pip_window::window(ui))
-        .child(desktop::player_windows::windows(ui))
+        .child(desktop::player_windows::windows(ui, go_back))
 }
 
 /// Everything over the video: the guide, the full-screen tap catcher,
@@ -1096,7 +872,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(chooser::layer(ui, false))
         // Over the popups it opens (choosers, program details), so its
         // buttons stay usable and toggle them.
-        .child(play_bar::layer(ui))
+        .child(play_bar::layer(ui, go_back))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
         .child(vod_view::layer(ui))
@@ -1114,7 +890,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(wizard_view::layer(ui))
         .child(backup::layer(ui))
         .child(parental_view::layer(ui))
-        .child(startup::store_failure_layer(ui))
+        .child(startup_view::store_failure_layer(ui))
         .child(desktop::quit_confirm::layer(ui))
         // The question before leaving, over every screen it can be asked
         // from (the first run's welcome screen too); mounted only while it
@@ -1304,7 +1080,9 @@ fn bind_back(ui: Ui) {
         // being typed and a pending Long Back release are handled first.
         let leaves = match ui.top_overlay() {
             Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
-            Some(overlays::Overlay::StoreStartupFailure) => startup::store_failure_back_leaves(ui),
+            Some(overlays::Overlay::StoreStartupFailure) => {
+                startup_view::store_failure_back_leaves(ui)
+            }
             None if !desktop::fullscreen() => match back_target.get() {
                 (ViewMode::Guide, Pane::Rail, false) => true,
                 (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
@@ -1349,7 +1127,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 chooser::close(ui);
                 true
             }
-            _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
+            _ if top == Some(Overlay::StoreStartupFailure) => startup_view::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
                 true
@@ -1415,12 +1193,12 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             }
             // Hint, past program → now, guide → groups → rail → leave.
             (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
-                ui.mode.set(ViewMode::Fullscreen);
+                ui.mode.apply(mode::Action::Back);
                 true
             }
             (ViewMode::Guide | ViewMode::Overlay, _, _) => lists::back(ui),
             _ => {
-                ui.mode.set(crate::settings::browse_mode());
+                ui.mode.apply(mode::Action::Back);
                 true
             }
         }

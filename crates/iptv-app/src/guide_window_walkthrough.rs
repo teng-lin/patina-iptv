@@ -1,5 +1,5 @@
 //! Explicit synthetic walkthrough of the real App. Absent from release builds.
-use crate::{Ui, ViewMode};
+use crate::Ui;
 use nsh_core::prelude::*;
 use std::time::Duration;
 pub fn bind(ui: Ui) {
@@ -7,12 +7,14 @@ pub fn bind(ui: Ui) {
         return;
     }
     let _guide = set_timeout(Duration::from_secs(2), move || {
-        ui.mode.set(ViewMode::Guide);
+        ui.mode
+            .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
         println!("DEMO: the actual guide; the main channel continues in its preview");
     });
     let _menu = set_timeout(Duration::from_secs(4), move || {
-        ui.mode.set(ViewMode::Guide);
-        let schedule = crate::schedule();
+        ui.mode
+            .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
+        let schedule = crate::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_SECOND_KEY")
             .ok()
             .and_then(|key| schedule.find_channel(&key))
@@ -26,8 +28,9 @@ pub fn bind(ui: Ui) {
         println!("DEMO: channel two plays in a new window; main playback unchanged");
     });
     let _next_menu = set_timeout(Duration::from_secs(14), move || {
-        ui.mode.set(ViewMode::Guide);
-        let schedule = crate::schedule();
+        ui.mode
+            .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
+        let schedule = crate::runtime_owner::schedule();
         if let Some(channel) = std::env::var("PATINA_GUIDE_THIRD_KEY")
             .ok()
             .and_then(|key| schedule.find_channel(&key))

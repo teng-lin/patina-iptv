@@ -29,6 +29,7 @@ use iptv_core::playback::{ErrorKind, PlaySource};
 use iptv_core::tracks::Tracks;
 use iptv_guide::EpgSchedule;
 use iptv_guide::playback::{Clock, Resolution, StalkerLink, Unavailable};
+use iptv_presentation::menu::Origin;
 use iptv_presentation::playback::ChannelHistory;
 use iptv_presentation::playback_health::Health;
 use iptv_presentation::playback_health::Retry;
@@ -37,8 +38,10 @@ use iptv_presentation::tracks::Choice;
 use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
-use crate::guide::Schedule;
-use crate::{Playback, Ui, ViewMode};
+use crate::guide::{ProgramSelection, Schedule};
+use crate::runtime_owner::runtime;
+use crate::{Playback, Ui, ViewMode, browse_playback, external_player, lists, parental_view};
+use crate::{recordings_view, seek};
 
 mod recover;
 pub(crate) mod resume;
@@ -46,6 +49,101 @@ pub(crate) mod watch_time;
 
 use recover::{fail, watch_stall};
 pub use recover::{failed, on_error, on_state, retry, retry_surface, surface_failed};
+
+impl Ui {
+    /// OK or a tap on the focused program: a live one plays (OK on the
+    /// channel already playing goes full screen). An available replay plays
+    /// from the archive. Other listings open their details.
+    pub fn watch(&self) {
+        let view = lists::view(*self);
+        let (row, program, now) = self.focus.with(|f| (f.channel, f.program(&view), f.now));
+        let Some(channel) = view.channel(row) else {
+            return;
+        };
+        let live = (self.playback.get() == Playback::Live)
+            .then(|| self.playing.get())
+            .flatten();
+        let selection =
+            ProgramSelection::for_program(&program, now, view.catchup_days(row), channel, live);
+        match selection {
+            ProgramSelection::AlreadyLive if external_player::maybe_open(*self, channel, None) => {}
+            ProgramSelection::AlreadyLive => {
+                self.mode.apply(crate::mode::Action::EnterFullscreen);
+                self.show_playing();
+            }
+            ProgramSelection::Live => browse_playback::select(*self),
+            ProgramSelection::Replay => {
+                let list = self.list.with_untracked(|list| {
+                    iptv_presentation::lists::ListId::of(
+                        list.entry(),
+                        &*crate::runtime_owner::schedule(),
+                    )
+                });
+                crate::archive_playback::select(*self, list, channel, program, false);
+            }
+            ProgramSelection::Upcoming | ProgramSelection::Unavailable => {
+                let origin = Origin {
+                    channel,
+                    program_start: program.start,
+                };
+                if selection == ProgramSelection::Upcoming {
+                    recordings_view::remember(*self, origin);
+                }
+                self.description.set(Some(origin));
+            }
+        }
+    }
+
+    /// Starts `channel` live or from the archive.
+    pub fn play(&self, channel: usize, playback: Playback) {
+        external_player::cancel_pending(*self);
+        if !allow_guide_channel(channel) {
+            return;
+        }
+        if self.player_surface == 0
+            && self
+                .playing
+                .get_untracked()
+                .is_some_and(|old| old != channel)
+            && let Some(old) = self
+                .playing
+                .get_untracked()
+                .and_then(|old| parental_view::live_target(*self, old))
+        {
+            runtime().parental_content_left(&old);
+        }
+        if !parental_view::allow_play(*self, channel, playback) {
+            return;
+        }
+        if self.player_surface != 0 {
+            self.pending_zap.set(None);
+            if start_surface(*self, self.player_surface, channel) {
+                // Accepted: the viewer's playback now (`interruption.rs`).
+                crate::interruption::viewer_acted(*self);
+                self.playback.set(Playback::Live);
+                self.paused.set(false);
+            }
+            return;
+        }
+        if !recordings_view::reserve_viewing(*self, 0, channel, matches!(playback, Playback::Live))
+        {
+            return;
+        }
+        // Accepted: the viewer's playback now (`interruption.rs`).
+        crate::interruption::viewer_acted(*self);
+        seek::cancel(*self);
+        crate::on_demand::flush(*self, false);
+        self.player.vod.set(None);
+        self.player.recorded.set(None);
+        runtime().close_recording_playback();
+        self.pending_zap.set(None);
+        self.browse_playback.set(Default::default());
+        self.playback.set(playback);
+        self.playing.set(Some(channel));
+        self.paused.set(false);
+        start(self, channel);
+    }
+}
 
 /// Player surfaces: the full-screen one and multiview's others.
 pub const SURFACES: usize = iptv_core::multiview::MAX_SURFACES;
@@ -215,7 +313,7 @@ fn later(ui: Ui, delay: Duration, f: impl FnOnce() + 'static) {
 /// The viewer's clock, with the local UTC offset at `at` (the program's
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
-    let now = crate::time::wall_unix();
+    let now = crate::clock::wall_unix();
     crate::runtime::playback::clock(now, at)
 }
 
@@ -306,7 +404,7 @@ pub fn start(ui: &Ui, channel: usize) {
     let main = ui.player.main();
     main.health.update(|h| session = h.start(live, now));
     ui.player.resume.set(false);
-    let key = crate::schedule().channel_key(channel);
+    let key = crate::runtime_owner::schedule().channel_key(channel);
     main.key.set(key.clone());
     if live && let Some(key) = key {
         let changed = ui
@@ -315,12 +413,13 @@ pub fn start(ui: &Ui, channel: usize) {
             .with_untracked(|h| h.current() != Some(&key));
         ui.player.history.update(|h| h.played(&key));
         if changed {
-            if crate::data::combined::active(&crate::runtime()) {
-                if let Some((source, local)) = crate::data::combined::owner(&crate::runtime(), &key)
+            if crate::data::combined::active(&crate::runtime_owner::runtime()) {
+                if let Some((source, local)) =
+                    crate::data::combined::owner(&crate::runtime_owner::runtime(), &key)
                 {
                     save_last_channel(Some(source), &local);
                 }
-                crate::runtime().save_combined_channel(&key);
+                crate::runtime_owner::runtime().save_combined_channel(&key);
             } else {
                 save_last_channel(ui.app.library.shown.get_untracked(), &key);
             }
@@ -348,7 +447,7 @@ pub fn toggle_pause(ui: Ui) {
 /// Applies the guide's user-controlled playback block before any PIN check.
 pub fn allow_guide_channel(channel: usize) -> bool {
     use iptv_core::organization::Block;
-    match crate::schedule().channel_block(channel) {
+    match crate::runtime_owner::schedule().channel_block(channel) {
         Block::None => true,
         Block::Channel => {
             crate::settings_view::notify(crate::i18n::tr("Unblock this channel to play it."));
@@ -364,13 +463,12 @@ pub fn allow_guide_channel(channel: usize) -> bool {
 }
 
 /// Applies newly published guide blocks to live and catch-up sessions.
-pub fn enforce_guide_blocks(ui: Ui) {
-    let schedule = crate::schedule();
+pub(crate) fn enforce_guide_blocks(ui: Ui, schedule: &dyn Schedule) {
     if let Some(early) = resume::source(ui)
         && early_guide_blocked(&early)
     {
         stop_surface(ui, 0);
-        ui.mode.set(crate::settings::browse_mode());
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     let mut stopped = false;
     for surface in 0..SURFACES {
@@ -393,8 +491,8 @@ pub fn enforce_guide_blocks(ui: Ui) {
 }
 
 fn early_guide_blocked(early: &resume::Early) -> bool {
-    let owner = crate::runtime();
-    let schedule = crate::schedule();
+    let owner = crate::runtime_owner::runtime();
+    let schedule = crate::runtime_owner::schedule();
     let key = if crate::data::combined::active(&owner) {
         iptv_guide::combined::qualified_key(early.source_id, &early.key)
     } else if owner
@@ -448,7 +546,9 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
     let mut session = 0;
     stream.health.update(|h| session = h.start(true, now));
     stream.channel.set(Some(channel));
-    stream.key.set(crate::schedule().channel_key(channel));
+    stream
+        .key
+        .set(crate::runtime_owner::schedule().channel_key(channel));
     log::info!("iptv player {surface}: starting");
     open(ui, surface, session);
     true
@@ -471,13 +571,13 @@ fn stop_current(ui: Ui, handoff: Option<&iptv_core::parental::Target>) {
     ui.browse_playback.set(Default::default());
     crate::on_demand::flush(ui, false);
     if let Some(target) = handoff {
-        crate::runtime().parental_content_transferred(target);
+        crate::runtime_owner::runtime().parental_content_transferred(target);
     } else {
-        crate::runtime().parental_content_closed();
+        crate::runtime_owner::runtime().parental_content_closed();
     }
     ui.player.vod.set(None);
     ui.player.recorded.set(None);
-    crate::runtime().close_recording_playback();
+    crate::runtime_owner::runtime().close_recording_playback();
     close(ui, 0);
 }
 
@@ -496,14 +596,14 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
     ui.playback.set(Playback::Live);
     ui.player.recorded.set(Some((job, source.clone())));
     ui.paused.set(false);
-    crate::runtime().release_viewing(0);
+    crate::runtime_owner::runtime().release_viewing(0);
     let mut session = 0;
     ui.player
         .main()
         .health
         .update(|h| session = h.start(false, ui.now_ms()));
     load(ui, 0, session, source);
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
 }
 
 /// Plays a movie or an episode on surface 0: full screen, or (`full_screen`
@@ -521,7 +621,7 @@ pub fn play_vod(
     let resume = playing.progress.resume_ms();
     crate::multiview::close(ui);
     cancel_resolve(0);
-    crate::runtime().close_recording_playback();
+    crate::runtime_owner::runtime().close_recording_playback();
     ui.pending_zap.set(None);
     ui.browse_playback.set(Default::default());
     ui.player.resume.set(false);
@@ -542,7 +642,7 @@ pub fn play_vod(
         ui.player.main().resume_ms.set(Some(resume));
     }
     if full_screen {
-        ui.mode.set(ViewMode::Fullscreen);
+        ui.mode.apply(crate::mode::Action::EnterFullscreen);
     }
 }
 
@@ -561,7 +661,7 @@ pub fn stop_surface(ui: Ui, surface: usize) {
 }
 
 fn close(ui: Ui, surface: usize) {
-    crate::runtime().release_viewing(surface);
+    crate::runtime_owner::runtime().release_viewing(surface);
     cancel_resolve(surface);
     let stream = ui.player.stream(surface);
     stream.publication.update(|publication| publication.clear());
@@ -620,8 +720,8 @@ fn open(ui: Ui, surface: usize, session: u64) {
                 .unwrap_or_else(|| ui.player.main().timeline.get_untracked().position_ms)
         };
         let key = playing.key.clone();
-        crate::data::spawn_in_app(async move {
-            let owner = crate::runtime();
+        crate::tasks::spawn_in_app(async move {
+            let owner = crate::runtime_owner::runtime();
             let resolved = owner.vod_play(playing.details, key.clone(), false).await;
             if ui.player.main().health.with_untracked(|h| h.session()) != session
                 || !ui
@@ -678,8 +778,8 @@ fn open(ui: Ui, surface: usize, session: u64) {
     if let Some((channel, _)) = target(ui, surface)
         && let Some(target) = crate::parental_view::live_target(ui, channel)
     {
-        crate::data::spawn_in_app(async move {
-            let owner = crate::runtime();
+        crate::tasks::spawn_in_app(async move {
+            let owner = crate::runtime_owner::runtime();
             let allowed = owner
                 .live_channel_allowed(iptv_library::SourceId(target.source), target.id)
                 .await
@@ -716,8 +816,8 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                 .get_untracked()
                 .unwrap_or_else(|| ui.player.main().timeline.get_untracked().position_ms)
         };
-        let owner = crate::runtime();
-        crate::data::spawn_in_app(async move {
+        let owner = crate::runtime_owner::runtime();
+        crate::tasks::spawn_in_app(async move {
             let target = iptv_core::parental::Target::live(job.request.source, job.request.channel);
             let allowed = owner.parental_check(&target).await.is_ok();
             if ui.player.main().health.with_untracked(|h| h.session()) != session {
@@ -737,8 +837,8 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
     let Some((channel, playback)) = target(ui, surface) else {
         // A retry of the last channel started before the guide arrived.
         match resume::source(ui).filter(|_| surface == 0) {
-            Some(early) => crate::data::spawn_in_app(async move {
-                let owner = crate::runtime();
+            Some(early) => crate::tasks::spawn_in_app(async move {
+                let owner = crate::runtime_owner::runtime();
                 let source = iptv_library::SourceId(early.source_id);
                 let channel = iptv_providers::ContentId::from_stored(early.key.clone());
                 let allowed = crate::runtime::commands::channel(&owner, source, channel)
@@ -781,14 +881,14 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         );
         return;
     }
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     // An older day's program: capture semantic identity and UTC before
-    // waiting. ScheduleReady can synchronously complete this waiter before
+    // waiting. A catalog replacement can synchronously complete this waiter before
     // the deferred follow_playing effect has remapped the numeric row.
     if let Playback::CatchUp { start, offset } = playback {
         let pending = PendingArchive::capture(&*schedule, channel, start, offset);
         if !crate::data::pages::ready(
-            &crate::runtime(),
+            &crate::runtime_owner::runtime(),
             &schedule,
             channel,
             crate::guide::unix_of(&*schedule, start),
@@ -803,9 +903,9 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
                 {
                     return;
                 }
-                let target = result
-                    .ok()
-                    .and_then(|()| pending.and_then(|pending| pending.remap(&*crate::schedule())));
+                let target = result.ok().and_then(|()| {
+                    pending.and_then(|pending| pending.remap(&*crate::runtime_owner::schedule()))
+                });
                 if let Some((channel, playback)) = target {
                     batch(|| {
                         if surface == 0 {
@@ -879,7 +979,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
 }
 
 fn source_allowed(ui: Ui, surface: usize) -> bool {
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     if surface == 0
         && let Some((playing, _)) = ui.player.vod.get_untracked()
     {
@@ -896,7 +996,8 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
             job.request.channel,
         ))
     } else if let Some((channel, _)) = target(ui, surface) {
-        crate::schedule().channel_block(channel) == iptv_core::organization::Block::None
+        crate::runtime_owner::schedule().channel_block(channel)
+            == iptv_core::organization::Block::None
             && crate::parental_view::live_target(ui, channel)
                 .is_none_or(|t| owner.parental_allowed(&t))
     } else if let Some(early) = resume::source(ui) {
@@ -937,7 +1038,7 @@ fn resolution_authority(
 
 fn load(ui: Ui, surface: usize, session: u64, source: PlaySource) {
     let authority = target(ui, surface)
-        .and_then(|(channel, _)| resolution_authority(&*crate::schedule(), channel))
+        .and_then(|(channel, _)| resolution_authority(&*crate::runtime_owner::schedule(), channel))
         .or_else(|| resume::source(ui).map(|early| early.authority));
     load_authorized(ui, surface, session, source, authority);
 }
@@ -959,7 +1060,7 @@ fn load_authorized(
     stream.publication.update(|publication| publication.clear());
     // Recheck timed grants after asynchronous resolution, before the decoder
     // sees a stream. The runtime already checked current durable membership.
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     let allowed = source_allowed(ui, surface);
     if !allowed {
         stop_surface(ui, surface);
@@ -973,7 +1074,7 @@ fn load_authorized(
     let identity = if stream.health.with_untracked(|h| h.live()) {
         target(ui, surface)
             .and_then(|(channel, _)| {
-                crate::schedule()
+                crate::runtime_owner::schedule()
                     .channel_key(channel)
                     .and_then(|key| crate::data::combined::owner(&owner, &key))
             })
@@ -995,7 +1096,7 @@ fn load_authorized(
             return;
         };
         let prepared = owner.prepare_live_source(surface, source_id, channel, source, authority);
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             match prepared.await {
                 Ok(source) => publish_source(ui, surface, session, source),
                 Err(error) => {
@@ -1035,14 +1136,14 @@ fn load_authorized(
                 ))
             } else if ui.player.recorded.with_untracked(Option::is_none) {
                 target(ui, surface)
-                    .and_then(|(channel, _)| crate::schedule().channel_key(channel))
+                    .and_then(|(channel, _)| crate::runtime_owner::schedule().channel_key(channel))
                     .and_then(|key| crate::data::combined::owner(&owner, &key))
             } else {
                 None
             }
         });
         let prepared = owner.prepare_independent_source(surface, provider, source, authority);
-        crate::data::spawn_in_app(async move {
+        crate::tasks::spawn_in_app(async move {
             let source = match prepared.await {
                 Ok(source) => source,
                 Err(error) => {
@@ -1091,7 +1192,7 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
     );
     let ownership = if surface == 0 && ui.player.recorded.with_untracked(Option::is_some) {
         iptv_core::playback::SourceOwnership::Local
-    } else if crate::runtime().owns_viewing_source(surface, &source) {
+    } else if crate::runtime_owner::runtime().owns_viewing_source(surface, &source) {
         iptv_core::playback::SourceOwnership::RuntimeProvider
     } else {
         iptv_core::playback::SourceOwnership::NativeProvider
@@ -1123,7 +1224,7 @@ fn publish_source(ui: Ui, surface: usize, session: u64, source: PlaySource) {
 /// Cancels `surface`'s link request in flight, if any: the viewer zapped,
 /// the surface reopens or plays nothing.
 fn cancel_resolve(surface: usize) {
-    crate::runtime().cancel_link_resolution(surface);
+    crate::runtime_owner::runtime().cancel_link_resolution(surface);
 }
 
 /// A Stalker `create_link` on the shared network runtime (`executor.rs`);
@@ -1145,9 +1246,9 @@ fn resolve_link(
         cmd,
         channel_headers,
     } = *link;
-    let cancel = crate::runtime().begin_link_resolution(surface, session);
-    let client = crate::runtime().link_client(crate::settings::network_config());
-    let request = crate::runtime().spawn_network(async move {
+    let cancel = crate::runtime_owner::runtime().begin_link_resolution(surface, session);
+    let client = crate::runtime_owner::runtime().link_client(crate::settings::network_config());
+    let request = crate::runtime_owner::runtime().spawn_network(async move {
         let result = match client.await {
             Ok(net) => iptv_import::stalker_link(&net, &mut portal, &cmd, false, &cancel)
                 .await
@@ -1157,9 +1258,9 @@ fn resolve_link(
         (result, portal)
     });
     let _task = ui.player.owner.run(|| {
-        spawn(crate::in_runtime(async move {
+        spawn(crate::runtime_owner::in_runtime(async move {
             let answered = request.await;
-            crate::runtime().finish_link_resolution(surface, session);
+            crate::runtime_owner::runtime().finish_link_resolution(surface, session);
             let Ok((result, portal)) = answered else {
                 return;
             };
@@ -1200,7 +1301,7 @@ pub fn previous_channel(ui: Ui) {
     else {
         return;
     };
-    let Some(channel) = crate::schedule().find_channel(&key) else {
+    let Some(channel) = crate::runtime_owner::schedule().find_channel(&key) else {
         return;
     };
     show_channel(ui, channel);
@@ -1231,16 +1332,16 @@ fn show_channel(ui: Ui, channel: usize) {
 /// Playlist `source` was deleted: its last channel goes too (after any
 /// write still queued for it).
 pub fn forget_source(source: crate::runtime::model::SourceId) {
-    crate::runtime().forget_last_channel(source);
+    crate::runtime_owner::runtime().forget_last_channel(source);
 }
 /// The last channel of playlist `source` (the shared one of older builds
 /// for none), a write still queued included.
 fn load_last_channel(source: Option<crate::runtime::model::SourceId>) -> Option<String> {
-    crate::runtime().load_last_channel(source)
+    crate::runtime_owner::runtime().load_last_channel(source)
 }
 /// Queues the write: a zap never waits for the disk.
 fn save_last_channel(source: Option<crate::runtime::model::SourceId>, key: &str) {
-    crate::runtime().save_last_channel(source, key);
+    crate::runtime_owner::runtime().save_last_channel(source, key);
 }
 
 /// Another playlist is about to be shown (`data.rs`): what plays and the
@@ -1253,9 +1354,7 @@ pub fn source_changed(ui: Ui) {
         log::info!("iptv player: another playlist is shown; stopping");
         ui.playing.set(None);
         stop(ui);
-        if ui.mode.get_untracked() != ViewMode::Guide {
-            ui.mode.set(ViewMode::Guide);
-        }
+        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     ui.player.main().key.set(None);
     ui.player.history.set(ChannelHistory::default());
@@ -1317,7 +1416,7 @@ fn follow_playing(ui: Ui) {
         return;
     };
     let key = ui.player.main().key.get_untracked();
-    match key.and_then(|k| crate::schedule().find_channel(&k)) {
+    match key.and_then(|k| crate::runtime_owner::schedule().find_channel(&k)) {
         // The guide keeps its own focus by identity (`lists::restore`).
         Some(row) => {
             if row != playing {
@@ -1337,17 +1436,15 @@ fn gone(ui: Ui) {
     ui.playing.set(None);
     ui.player.main().key.set(None);
     stop(ui);
-    if ui.mode.get_untracked() != ViewMode::Guide {
-        ui.mode.set(ViewMode::Guide);
-    }
+    ui.mode.apply(crate::mode::Action::ReturnToBrowse);
 }
 
-/// `set_schedule` swapped in a guide with fewer rows than the playing
+/// The replacement guide has fewer rows than the playing
 /// channel's: it is found again by key, as [`follow_playing`] finds it,
 /// else nothing plays (multiview follows its tiles itself).
-pub fn row_dropped(ui: Ui) {
+pub(crate) fn row_dropped(ui: Ui, schedule: &dyn Schedule) {
     let key = ui.player.main().key.get_untracked();
-    match key.and_then(|k| crate::schedule().find_channel(&k)) {
+    match key.and_then(|k| schedule.find_channel(&k)) {
         Some(row) => ui.playing.set(Some(row)),
         None if crate::multiview::session(ui) => ui.playing.set(None),
         None => gone(ui),
@@ -1359,8 +1456,7 @@ pub fn row_dropped(ui: Ui) {
 /// the last channel starts once (`general.resume_last_channel`), unless
 /// something already plays.
 pub fn source_ready(ui: Ui, refresh: bool) {
-    if crate::desktop::recorder_only_startup()
-        || ui.player.recorded.with_untracked(Option::is_some)
+    if ui.player.recorded.with_untracked(Option::is_some)
         || ui.player.vod.with_untracked(Option::is_some)
     {
         return;
@@ -1377,10 +1473,12 @@ pub fn source_ready(ui: Ui, refresh: bool) {
         return;
     }
     let last = load_last_channel(ui.app.library.shown.get_untracked());
-    let Some(channel) = last.and_then(|k| crate::schedule().find_channel(&k)) else {
+    let Some(channel) = last.and_then(|k| crate::runtime_owner::schedule().find_channel(&k)) else {
         return;
     };
-    if crate::schedule().channel_block(channel) != iptv_core::organization::Block::None {
+    if crate::runtime_owner::schedule().channel_block(channel)
+        != iptv_core::organization::Block::None
+    {
         return;
     }
     log::info!("iptv player: resuming the last channel");
@@ -1394,7 +1492,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
             return;
         }
         crate::lists::show_resumed(ui, channel);
-        ui.mode.set(ViewMode::Fullscreen);
+        ui.mode.apply(crate::mode::Action::EnterFullscreen);
         ui.show_playing();
     });
 }
@@ -1441,8 +1539,8 @@ mod pending_archive_regressions {
     fn pending_catchup_remaps_identity_and_utc_before_replacement_retry() {
         let before = guide(false, 1_800_000_000, "generated-original");
         let pending = PendingArchive::capture(&before, 0, -1800, 73).unwrap();
-        // Simulate the successful waiter running synchronously on ScheduleReady,
-        // while the UI still holds old row 0 and minute -1800.
+        // Simulate a successful replacement wakeup for a request captured
+        // against old row 0 and minute -1800.
         let after = guide(true, before.epoch_unix() + 86400, "generated-original");
         assert_eq!(before.channel_count(), after.channel_count());
         assert_ne!(before.channel_key(0), after.channel_key(0));

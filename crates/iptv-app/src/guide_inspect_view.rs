@@ -10,7 +10,7 @@ use crate::{
 };
 use iptv_library::{SourceId, inspection::*};
 use iptv_nav::Action;
-use iptv_presentation::library::guide_inspect::{Mode, Row, Screen};
+use iptv_presentation::library::guide_inspect::{Mode, Reply, Row, Screen};
 use nsh_core::{element::input, prelude::*};
 use std::time::Duration;
 
@@ -46,12 +46,9 @@ fn begin(ui: Ui) -> Option<(Screen, u64, InspectionControl)> {
         .with(|token| *token = Some(control.cancel.clone()));
     request
 }
-fn finish(ui: Ui, id: u64, result: InspectionResult<()>) {
+fn finish(ui: Ui, id: u64, result: InspectionResult<Reply>) {
     update(ui, |s| {
-        if s.finish(id) {
-            s.error = result.err();
-            s.restore_focus();
-        }
+        s.finish(id, result);
     });
 }
 fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
@@ -59,7 +56,7 @@ fn current(ui: Ui, id: u64, control: &InspectionControl) -> bool {
 }
 
 pub fn open(ui: Ui, source: SourceId) {
-    let from = crate::time::wall_unix();
+    let from = crate::clock::wall_unix();
     let screen = Screen::new(
         source,
         TimeWindow {
@@ -119,42 +116,32 @@ fn audit(ui: Ui, next: bool) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let mut query = Query::source(screen.source);
         query.text = screen.query;
         if next {
             query.cursor = screen.next;
         }
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .epg_audit(query, screen.window, control.clone())
             .await;
         if !current(ui, id, &control) {
             return;
         }
-        match result {
-            Ok(page) => {
-                update(ui, |s| {
-                    s.mode = Mode::Audit;
-                    s.audit = page.items;
-                    s.next = page.next;
-                });
-                finish(ui, id, Ok(()));
-            }
-            Err(error) => finish(ui, id, Err(error)),
-        }
+        finish(ui, id, result.map(Reply::Audit));
     });
 }
 fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let mut query = Query::source(screen.source);
         query.text = screen.query;
         if next {
             query.cursor = screen.next;
         }
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .epg_candidates(subject.clone(), query, control.clone())
             .await;
         if !current(ui, id, &control) {
@@ -164,23 +151,21 @@ fn candidates(ui: Ui, subject: ChannelRef, next: bool) {
             Ok(page) => {
                 let mut query = Query::source(screen.source);
                 query.limit = 5;
-                let programs = crate::runtime()
+                let programs = crate::runtime_owner::runtime()
                     .query_programs(query, screen.window, Some(subject.clone()), control.clone())
                     .await;
                 if !current(ui, id, &control) {
                     return;
                 }
-                update(ui, |s| {
-                    s.mode = Mode::Candidates;
-                    s.subject = Some(subject);
-                    s.candidates = page.items;
-                    s.next = page.next;
-                    s.current = programs
-                        .as_ref()
-                        .map(|p| p.items.clone())
-                        .unwrap_or_default();
-                });
-                finish(ui, id, programs.map(|_| ()));
+                finish(
+                    ui,
+                    id,
+                    Ok(Reply::Candidates {
+                        subject,
+                        page,
+                        current: programs,
+                    }),
+                );
             }
             Err(error) => finish(ui, id, Err(error)),
         }
@@ -192,18 +177,20 @@ fn inspect_link(ui: Ui) {
         return;
     };
     dismiss_keyboard();
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let request = ProbeRequest {
             source: screen.source,
             target: ProbeTarget::Supplied(iptv_providers::SecretUrl::new(screen.link)),
         };
-        let result = crate::runtime().probe_feed(request, control.clone()).await;
+        let result = crate::runtime_owner::runtime()
+            .probe_feed(request, control.clone())
+            .await;
         if !current(ui, id, &control) {
             return;
         }
         match result {
             Ok(stage) => {
-                let page = crate::runtime()
+                let page = crate::runtime_owner::runtime()
                     .probe_candidates(
                         stage.evidence.clone(),
                         String::new(),
@@ -215,19 +202,7 @@ fn inspect_link(ui: Ui) {
                 if !current(ui, id, &control) {
                     return;
                 }
-                match page {
-                    Ok(page) => {
-                        update(ui, |s| {
-                            s.retained_stage = Some(stage.clone());
-                            s.stage = Some(stage);
-                            s.enter(Mode::ProbeCandidates);
-                            s.candidates = page.items;
-                            s.next = page.next;
-                        });
-                        finish(ui, id, Ok(()));
-                    }
-                    Err(error) => finish(ui, id, Err(error)),
-                }
+                finish(ui, id, page.map(|page| Reply::StagedProbe { stage, page }));
             }
             Err(error) => finish(ui, id, Err(error)),
         }
@@ -240,38 +215,29 @@ fn staged_candidates(ui: Ui) {
     let Some(stage) = screen.stage else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let after = screen.next;
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .probe_candidates(stage.evidence, screen.query, after, 50, control.clone())
             .await;
         if !current(ui, id, &control) {
             return;
         }
-        match result {
-            Ok(page) => {
-                update(ui, |s| {
-                    s.candidates = page.items;
-                    s.next = page.next;
-                });
-                finish(ui, id, Ok(()));
-            }
-            Err(error) => finish(ui, id, Err(error)),
-        }
+        finish(ui, id, result.map(Reply::ProbeCandidates));
     });
 }
 fn samples(ui: Ui, candidate: CandidateRef) {
     let Some((screen, id, control)) = begin(ui) else {
         return;
     };
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         let stage = if let Some(stage) = screen.stage.filter(|s| {
             s.evidence.feed.unwrap_or(iptv_epg::FeedId(0)) == candidate.feed
                 && s.evidence.incarnation == candidate.incarnation
         }) {
             Ok(stage)
         } else {
-            crate::runtime()
+            crate::runtime_owner::runtime()
                 .probe_feed(
                     ProbeRequest {
                         source: screen.source,
@@ -292,7 +258,7 @@ fn samples(ui: Ui, candidate: CandidateRef) {
             }
         };
         let selected = candidate.clone();
-        let result = crate::runtime()
+        let result = crate::runtime_owner::runtime()
             .probe_schedule(
                 stage.evidence.clone(),
                 candidate,
@@ -303,56 +269,34 @@ fn samples(ui: Ui, candidate: CandidateRef) {
         if !current(ui, id, &control) {
             return;
         }
-        match result {
-            Ok(programs) => {
-                update(ui, |s| {
-                    s.retained_stage = Some(stage.clone());
-                    s.stage = Some(stage);
-                    s.samples_back = screen.mode;
-                    s.enter(Mode::Samples);
-                    s.samples = programs;
-                    s.selected = Some(selected);
-                    s.next = None;
-                });
-                finish(ui, id, Ok(()));
-            }
-            Err(error) => finish(ui, id, Err(error)),
-        }
+        finish(
+            ui,
+            id,
+            result.map(|programs| Reply::Samples {
+                stage,
+                previous_mode: screen.mode,
+                selected,
+                programs,
+            }),
+        );
     });
 }
 fn activate(ui: Ui, row: Row) {
     if state(ui, |s| s.busy).unwrap_or(true) && row != Row::Back {
         return;
     }
-    update(ui, |s| {
-        s.focus = row.clone();
-        if row != Row::Search {
-            s.typing = false;
-        }
-    });
+    update(ui, |s| s.activate_row(row.clone()));
     if row != Row::Search {
         dismiss_keyboard();
     }
     match row {
         Row::Channel(subject) => {
-            update(ui, |s| {
-                s.enter(Mode::Candidates);
-                s.query.clear();
-                s.candidates.clear();
-                s.subject = Some(subject.clone());
-                s.stage = None;
-            });
+            update(ui, |s| s.inspect_channel(subject.clone()));
             candidates(ui, subject, false);
         }
         Row::Candidate(candidate) => samples(ui, candidate),
         Row::ReuseInspected => {
-            update(ui, |s| {
-                s.enter(Mode::ProbeCandidates);
-                s.stage = s.retained_stage.clone();
-                s.candidates.clear();
-                s.query.clear();
-                s.next = None;
-            });
+            update(ui, Screen::reuse_probe);
             staged_candidates(ui);
         }
         Row::UseCandidate => {
@@ -393,13 +337,7 @@ fn activate(ui: Ui, row: Row) {
         }
         Row::Search => update(ui, |s| s.typing = true),
         Row::InspectLink => inspect_link(ui),
-        Row::NewLink => update(ui, |s| {
-            s.enter(Mode::Link);
-            s.query.clear();
-            s.stage = None;
-            s.typing = true;
-            s.restore_focus();
-        }),
+        Row::NewLink => update(ui, Screen::new_link),
         Row::Back => {
             back(ui);
         }
@@ -548,8 +486,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     state(ui, |s| {
                         format!(
                             "{} — {}",
-                            crate::time::label(s.window.from, crate::time::wall_unix()),
-                            crate::time::label(s.window.to, crate::time::wall_unix())
+                            crate::clock::label(s.window.from, crate::clock::wall_unix()),
+                            crate::clock::label(s.window.to, crate::clock::wall_unix())
                         )
                     })
                     .unwrap_or_default()
@@ -590,10 +528,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                             })
                             .on_focus(move || update(ui, |s| s.typing = true))
                             .on_submit(move |_: &str| {
-                                update(ui, |s| {
-                                    s.typing = false;
-                                    s.next = None;
-                                });
+                                update(ui, Screen::submit_search);
                                 dismiss_keyboard();
                                 match state(ui, |s| (s.mode, s.subject.clone())) {
                                     Some((Mode::Audit, _)) => audit(ui, false),
@@ -660,13 +595,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                         s.samples.get(at.index()).map(|p| {
                                             format!(
                                                 "{} — {} · {}",
-                                                crate::time::label(
+                                                crate::clock::label(
                                                     p.start,
-                                                    crate::time::wall_unix()
+                                                    crate::clock::wall_unix()
                                                 ),
-                                                crate::time::label(
+                                                crate::clock::label(
                                                     p.stop,
-                                                    crate::time::wall_unix()
+                                                    crate::clock::wall_unix()
                                                 ),
                                                 p.title
                                             )

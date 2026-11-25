@@ -19,7 +19,10 @@ pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
         Playback::Live => ui.focus.with(|f| f.now),
         Playback::CatchUp { start, .. } => start,
     };
-    (channel, crate::schedule().program_at(channel, minute))
+    (
+        channel,
+        crate::runtime_owner::schedule().program_at(channel, minute),
+    )
 }
 
 /// The progress line with its times; in catch-up a press or a drag on it

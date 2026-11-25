@@ -1,10 +1,11 @@
 //! Adapter for the core's cancelable live-preview policy.
 use crate::{Playback, Ui, ViewMode};
+use iptv_core::capabilities::{FormFactor, Host};
 use iptv_core::guide::Airing;
 use iptv_nav::Context;
 use iptv_presentation::browse_playback::{BrowsePlayback, Effect, Policy, Surface, Target};
 use iptv_presentation::channel_list::ListPane;
-use iptv_settings::keys;
+use iptv_settings::{Settings, keys};
 use nsh_core::prelude::*;
 use std::time::Duration;
 
@@ -41,7 +42,7 @@ fn current(ui: Ui) -> Option<Target> {
             // without leaving the channel: a waiting choice stays, and
             // panning back starts no preview again.
             if !live {
-                let key = crate::schedule().channel_key(ch)?;
+                let key = crate::runtime_owner::schedule().channel_key(ch)?;
                 let held = ui.focus.with(|f| {
                     ui.pan_anchor
                         .with(|a| a.as_ref().is_some_and(|a| a.holds(&key, f)))
@@ -62,29 +63,55 @@ fn current(ui: Ui) -> Option<Target> {
         _ => return None,
     };
     Some(Target {
-        key: crate::schedule().channel_key(ch)?,
+        key: crate::runtime_owner::schedule().channel_key(ch)?,
         source: ui.app.library.shown.get().map(|s| s.0),
         surface,
     })
 }
+/// Handhelds need connected keys before guide autoplay and its delay
+/// apply. Desktops and TVs keep them regardless of the input report.
+pub(crate) fn autoplay_supported(host: Host) -> bool {
+    !crate::device::handheld(host.form_factor) || crate::input::keys_for(host).is_some()
+}
+
+/// Whether choosing a channel in the guide over the video or in the
+/// channel list keeps it open (`guide.after_choosing`) on a device of
+/// `form_factor`. A phone or a tablet always goes full screen. The guide's
+/// preview layout does not ask: there the first choice tunes the preview,
+/// and choosing the playing channel goes full screen (`browse_playback`).
+fn stays_after_choosing(s: &Settings, form_factor: FormFactor) -> bool {
+    !crate::device::handheld(form_factor)
+        && s.choice(keys::GUIDE_AFTER_CHOOSING, &iptv_settings::Target::Global) == "stay"
+}
+
+/// `guide.fullscreen_timeout` on a device of `form_factor`, in ms: a
+/// TV's only; elsewhere 0 (never).
+fn fullscreen_timeout_ms(s: &Settings, form_factor: FormFactor) -> u64 {
+    if form_factor == FormFactor::Tv {
+        u64::try_from(s.duration_ms(keys::FULLSCREEN_TIMEOUT, &iptv_settings::Target::Global))
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
+
 fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
-    let s = crate::settings::read(ui);
+    let s = crate::settings_wiring::read(ui);
     let at = &iptv_settings::Target::Global;
     // The form factor only: a resized window changes nothing here.
-    let form_factor = crate::device::host().form_factor;
+    let host = crate::device::host();
+    let form_factor = host.form_factor;
     Policy {
         // Off while its row is not offered (a phone or a tablet with no
         // keyboard or D-pad, #280), whatever is stored.
-        autoplay: !crate::desktop::recorder_only_startup()
-            && surface != Some(Surface::Player)
+        autoplay: surface != Some(Surface::Player)
             && s.bool(keys::AUTOPLAY, at)
-            && crate::settings::offer_now(keys::AUTOPLAY.as_str())
-                != iptv_presentation::settings::screen::Offer::Hidden,
+            && autoplay_supported(host),
         delay_ms: s.duration_ms(keys::SWITCH_DELAY, at).max(0) as u64,
         fullscreen_ms: if surface == Some(Surface::Player) {
             0
         } else {
-            crate::settings::fullscreen_timeout_ms(&s, form_factor)
+            fullscreen_timeout_ms(&s, form_factor)
         },
         // The preview layout decides on every device (d77033af): the first
         // choice tunes the preview, choosing the playing channel again goes
@@ -92,7 +119,7 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         // follow `guide.after_choosing`.
         stay: match surface {
             Some(Surface::Guide | Surface::Player) => true,
-            _ => crate::settings::stays_after_choosing(&s, form_factor),
+            _ => stays_after_choosing(&s, form_factor),
         },
     }
 }
@@ -227,7 +254,8 @@ fn run(ui: Ui) {
         Some(Effect::Fullscreen) => {
             if let Some(channel) = current(ui).and_then(|t| crate::favorites::channel_of(&t.key))
                 && playing_live(ui, channel)
-                && crate::schedule().channel_block(channel) == iptv_core::organization::Block::None
+                && crate::runtime_owner::schedule().channel_block(channel)
+                    == iptv_core::organization::Block::None
             {
                 full(ui);
             }
@@ -244,7 +272,7 @@ fn full(ui: Ui) {
     if crate::channels_view::is_open(ui) {
         crate::channels_view::close(ui);
     }
-    ui.mode.set(ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     ui.show_playing();
 }
 fn arm(ui: Ui) {
@@ -270,7 +298,7 @@ pub fn bind(ui: Ui) {
         let focus = ui.focus.get();
         ui.list.with(|_| ());
         let channel = untracked(|| crate::lists::focused_channel(ui))
-            .and_then(|ch| crate::schedule().channel_key(ch));
+            .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch));
         let stale = ui.pan_anchor.with_untracked(|a| {
             a.as_ref()
                 .is_some_and(|a| channel.as_deref().is_none_or(|c| !a.holds(c, &focus)))
@@ -285,7 +313,7 @@ pub fn bind(ui: Ui) {
         let playing = ui
             .playing
             .get()
-            .and_then(|c| crate::schedule().channel_key(c));
+            .and_then(|c| crate::runtime_owner::schedule().channel_key(c));
         let live = ui.playback.get() == Playback::Live;
         untracked(|| {
             ui.browse_playback.update(|b| {
@@ -327,7 +355,7 @@ pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
         select(ui);
         return;
     }
-    if let Some(key) = crate::schedule().channel_key(channel) {
+    if let Some(key) = crate::runtime_owner::schedule().channel_key(channel) {
         ui.touch_zapped.set(touch);
         ui.pending_zap.set(Some(Target {
             key,
@@ -335,5 +363,32 @@ pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
             surface: Surface::Player,
         }));
         select(ui);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iptv_settings::Value;
+
+    #[test]
+    fn the_stay_choice_and_the_full_screen_timeout_follow_the_device() {
+        let mut s = Settings::new();
+        s.set("guide.after_choosing", Value::choice("stay"))
+            .unwrap();
+        s.set("guide.fullscreen_timeout", Value::secs(5)).unwrap();
+        for (form, stays, timeout) in [
+            (FormFactor::Phone, false, 0),
+            (FormFactor::Tablet, false, 0),
+            (FormFactor::Desktop, true, 0),
+            (FormFactor::Tv, true, 5_000),
+        ] {
+            assert_eq!(stays_after_choosing(&s, form), stays, "{form:?}");
+            assert_eq!(fullscreen_timeout_ms(&s, form), timeout, "{form:?}");
+        }
+        // The default goes full screen everywhere.
+        let s = Settings::new();
+        assert!(!stays_after_choosing(&s, FormFactor::Tv));
+        assert!(!stays_after_choosing(&s, FormFactor::Desktop));
     }
 }

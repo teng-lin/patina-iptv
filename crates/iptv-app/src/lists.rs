@@ -2,7 +2,7 @@
 //! keys across the rail, the groups column and the grid
 //! (`iptv_presentation::browse`).
 //!
-//! `crate::schedule()` stays the full catalog: `Ui::playing`, `Ui::play`,
+//! `crate::runtime_owner::schedule()` stays the full catalog: `Ui::playing`, `Ui::play`,
 //! search and the player use catalog channels. The focus works on rows of
 //! [`Ui::list`] through [`view`]; [`focused_channel`] maps back. The list
 //! is rebuilt when the selection, the catalog or the favorites change,
@@ -34,7 +34,7 @@ thread_local! {
 
 /// The list on screen as a schedule of rows.
 pub fn view(ui: Ui) -> ListView {
-    ListView::new(crate::schedule(), ui.list.with(Rc::clone))
+    ListView::new(crate::runtime_owner::schedule(), ui.list.with(Rc::clone))
 }
 
 /// The catalog channel on the focused row.
@@ -46,7 +46,7 @@ pub fn focused_channel(ui: Ui) -> Option<usize> {
 /// The number catalog `channel` shows (the player card, History): its
 /// place in the list on screen, as in the guide, else the catalog's.
 pub fn number(ui: Ui, channel: usize) -> u32 {
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     ui.list.with(|l| l.number_of(channel, &*catalog))
 }
 
@@ -89,7 +89,9 @@ fn rail_of(vod: VodAvailability, recordings: bool) -> Vec<RailItem> {
 /// as the library last loaded them (none while it loads). Callers that
 /// follow it track `Library::version`.
 pub fn live_only() -> bool {
-    let playlists = crate::runtime().playlists().unwrap_or_default();
+    let playlists = crate::runtime_owner::runtime()
+        .playlists()
+        .unwrap_or_default();
     iptv_presentation::browse::live_only(playlists.iter().map(|p| (p.kind, p.policy.enabled)))
 }
 
@@ -102,7 +104,7 @@ pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> String {
 pub fn list_name(ui: Ui) -> String {
     ui.app.data_version.get();
     let entry = ui.list.with(|l| l.entry());
-    entry_name(entry, &*crate::schedule())
+    entry_name(entry, &*crate::runtime_owner::schedule())
 }
 
 /// Builds the list of the selected entry. With `keep`, the focus stays on
@@ -115,7 +117,7 @@ pub fn rebuild(ui: Ui, keep: bool) {
     } else {
         None
     };
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     let player = keep_player_list(ui, &*catalog);
     let entry = ui.focus.with(|f| f.group);
     let list = ChannelList::build(
@@ -138,7 +140,7 @@ pub fn rebuild(ui: Ui, keep: bool) {
 pub fn favorites_changed(ui: Ui) {
     let entry = Entry::at(ui.focus.with_untracked(|f| f.group));
     if matches!(entry, Entry::Favorites | Entry::Recent)
-        || matches!(entry, Entry::Group(group) if crate::schedule().group_preferences(group).favorites_only)
+        || matches!(entry, Entry::Group(group) if crate::runtime_owner::schedule().group_preferences(group).favorites_only)
     {
         rebuild(ui, true);
     }
@@ -152,13 +154,8 @@ pub struct Kept {
     player: Option<KeptPlayerList>,
 }
 
-/// Before a catalog swap (`set_schedule`).
-pub fn keep(ui: Ui) -> Kept {
-    keep_in(ui, crate::schedule())
-}
-
-/// A window can observe a catalog replacement after the runtime installed it.
-/// Resolve its old row identities against the catalog that built its list.
+/// Resolve old rows against the catalog that built the list, which the
+/// runtime may have replaced already.
 pub(super) fn keep_in(ui: Ui, catalog: Rc<dyn Schedule>) -> Kept {
     let player = keep_player_list(ui, &*catalog);
     let mut kept = keep_list(ui.focus.get_untracked(), ui.list.get_untracked(), catalog);
@@ -178,20 +175,22 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
 
 /// After a catalog swap: the same list and channel by identity, at the new
 /// catalog's now, with the same column focused.
-pub fn restore(ui: Ui, mut kept: Kept) {
+pub(super) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     let player = kept.player.take();
+    let now = crate::clock::now_minute_in(&*catalog);
     let (mut focus, list) = restored_list(
         kept,
-        crate::schedule(),
+        catalog.clone(),
         &crate::favorites::favorite_channels(),
         &crate::favorites::recent_channels(),
-        crate::time::now_minute(),
+        now,
     );
     focus.retain_rail(&rail_untracked(ui));
+    let view = ListView::new(catalog, list.clone());
     batch(|| {
         ui.list.set(list);
         ui.focus.set(focus);
-        restore_player_list(ui, player, &view(ui));
+        restore_player_list(ui, player, &view);
     });
 }
 
@@ -258,7 +257,7 @@ fn listed(ui: Ui, channel: usize) -> usize {
     if let Some(row) = ui.list.with_untracked(|l| l.row_of(channel)) {
         return row;
     }
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     let entry = group_of(&*catalog, channel).map_or(ALL, |g| Entry::Group(g).index());
     ui.focus.update(|f| f.group = entry);
     rebuild(ui, false);
@@ -295,7 +294,7 @@ pub fn resumed(ui: Ui, channel: usize) {
 /// channel when that list has its row. False when the core leaves the
 /// usual place.
 fn into_resume_list(ui: Ui, channel: usize) -> bool {
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     let Some(entry) = resume_entry(
         channel,
         &*catalog,
@@ -455,7 +454,7 @@ fn follow(ui: Ui, outcome: Outcome) {
         Outcome::ReturnToPlayer
             if ui.playing.get_untracked().is_some() || crate::on_demand::active(ui) =>
         {
-            ui.mode.set(crate::ViewMode::Fullscreen);
+            ui.mode.apply(crate::mode::Action::EnterFullscreen);
             ui.show_playing();
         }
         Outcome::Open(item) => open(ui, item),
@@ -499,13 +498,15 @@ pub fn columns_shown(ui: Ui) -> bool {
 
 fn toggle_playlist(entry: usize) -> bool {
     match Entry::at(entry) {
-        Entry::Group(group) => crate::data::combined::toggle_playlist(&crate::runtime(), group),
+        Entry::Group(group) => {
+            crate::data::toggle_playlist(&crate::runtime_owner::runtime(), group)
+        }
         _ => false,
     }
 }
 
 pub fn browser_entry_name(entry: usize) -> String {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let name = entry_name(entry, &*schedule);
     if let Entry::Group(g) = Entry::at(entry) {
         if schedule.group_is_playlist(g) {

@@ -11,10 +11,10 @@ use crate::Ui;
 use crate::fonts::MEDIUM;
 use crate::i18n::tr;
 use crate::overlays::Overlay;
-use crate::play_bar::icons::{self, Icon};
 use crate::scale::Scale;
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS};
+use crate::ui_kit::icons::{self, Icon};
 use crate::ui_kit::{self, FocusScroll};
 
 #[derive(Clone, Copy, PartialEq, Eq)]

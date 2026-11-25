@@ -36,6 +36,45 @@ pub(crate) fn original_player_source(directory: &Path, url: &str) -> Option<Play
     state.original_player_source(url)
 }
 
+/// Synthetic diagnostics for a registered native background recording host only.
+/// Returns no entries for an unregistered/non-background owner. Native plus
+/// `test-support` only: fixed phase names and job identities, no provider data.
+#[cfg(feature = "test-support")]
+pub fn operation_history(directory: &Path) -> Vec<OperationObservation> {
+    let state = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned();
+    state.map_or_else(Vec::new, |state| {
+        state
+            .operation_history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .iter()
+            .cloned()
+            .collect()
+    })
+}
+
+#[cfg(feature = "test-support")]
+pub(super) fn observe_operation(services: &Services, job: JobId, phase: &'static str) {
+    // A foreground-only State is not the host registered under this directory.
+    if !services.ports().background_recordings {
+        return;
+    }
+    let directory = services.directory();
+    if let Some(state) = hosts()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(directory)
+        .cloned()
+    {
+        state.observe_operation(job, phase);
+    }
+}
+
 pub(crate) fn acquire(ports: &crate::Ports) -> Arc<State> {
     if !ports.background_recordings {
         return Arc::default();

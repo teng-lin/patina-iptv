@@ -32,12 +32,12 @@ pub fn enforce(ui: Ui) {
     if !active.session.is_open() {
         return;
     }
-    if !crate::runtime().parental_allowed(&active.target) {
+    if !crate::runtime_owner::runtime().parental_allowed(&active.target) {
         active.session.close();
         return;
     }
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let allowed = owner
             .external_playback_allowed(active.authority, active.group)
             .await;
@@ -56,12 +56,12 @@ fn clear_retired(ui: Ui, active: &Active) {
     if active_ticket(ui, active.ticket) {
         ui.external_playback.set(None);
         if pending_target(ui).as_ref() != Some(&active.target) {
-            crate::runtime().parental_end_transfer(&active.target);
+            crate::runtime_owner::runtime().parental_end_transfer(&active.target);
         }
     }
 }
 
-fn pending_target(ui: Ui) -> Option<Target> {
+pub(crate) fn pending_target(ui: Ui) -> Option<Target> {
     let (ticket, target) = ui.external_handoff_target.get_untracked()?;
     (ui.external_request.get_untracked() == ticket).then_some(target)
 }
@@ -92,7 +92,7 @@ pub(crate) fn stop(ui: Ui) {
     cancel_pending(ui);
     if let Some(active) = ui.external_playback.get_untracked() {
         active.session.close();
-        crate::runtime().parental_end_transfer(&active.target);
+        crate::runtime_owner::runtime().parental_end_transfer(&active.target);
     }
 }
 
@@ -107,7 +107,7 @@ fn clear_pending_target(ui: Ui, ticket: Option<u64>) {
             .flatten()
             .is_some_and(|active| active.target == target && active.session.is_open())
         {
-            crate::runtime().parental_end_transfer(&target);
+            crate::runtime_owner::runtime().parental_end_transfer(&target);
         }
     }
 }
@@ -140,7 +140,7 @@ impl PendingHandoff {
 
 impl Drop for PendingHandoff {
     fn drop(&mut self) {
-        crate::with_runtime(self.owner.clone(), || {
+        crate::runtime_owner::with_runtime(self.owner.clone(), || {
             clear_pending_target(self.ui, Some(self.ticket))
         });
     }
@@ -156,7 +156,7 @@ struct PreviousPlayback {
 impl PreviousPlayback {
     fn capture(ui: Ui) -> Option<Self> {
         let channel = ui.playing.get_untracked()?;
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         let (epg, local) = iptv_guide::combined::epg_channel(&*schedule, channel)?;
         let archive = match ui.playback.get_untracked() {
             Playback::Live => None,
@@ -204,7 +204,7 @@ impl PreviousPlayback {
         {
             return;
         }
-        let Some((channel, playback)) = self.remap(&*crate::schedule()) else {
+        let Some((channel, playback)) = self.remap(&*crate::runtime_owner::schedule()) else {
             return;
         };
         if !crate::player::allow_guide_channel(channel) {
@@ -219,7 +219,7 @@ impl PreviousPlayback {
         pending.return_to_internal(&target);
         ui.play(channel, playback);
         if ui.playing.get_untracked() == Some(channel) {
-            ui.mode.set(self.mode);
+            ui.mode.apply(crate::mode::Action::Restore(self.mode));
         } else {
             pending.owner.parental_end_transfer(&target);
         }
@@ -227,7 +227,7 @@ impl PreviousPlayback {
 }
 
 fn group(ui: Ui) -> Option<(ListId, usize)> {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let entry = ui.list.with_untracked(|list| list.entry());
     let Entry::Group(group) = Entry::at(entry) else {
         return None;
@@ -250,54 +250,114 @@ pub fn cancel_pending(ui: Ui) {
 }
 
 pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
+    matches!(open_from(ui, channel, archive, None), Outcome::Handled)
+}
+
+pub(crate) enum Outcome {
+    Handled,
+    Internal,
+    MissingHandler(ListId),
+}
+
+pub(crate) fn open_archive(ui: Ui, choice: Rc<crate::archive_playback::Choice>) -> Outcome {
+    let Some((channel, program)) = choice.resolve(ui) else {
+        return Outcome::Handled;
+    };
+    if !choice.external_context(ui) {
+        return Outcome::Internal;
+    }
+    open_from(ui, channel, Some(program), Some(choice))
+}
+
+/// Archive fallback calls this only after authorization starts playback.
+pub(crate) fn missing_handler(ui: Ui, list: ListId) {
+    crate::menu_view::offer_external_player_reset(ui, list);
+    crate::settings_view::notify(tr(
+        "No external player is installed, so this channel plays here.",
+    ));
+}
+
+fn open_from(
+    ui: Ui,
+    channel: usize,
+    archive: Option<Program>,
+    choice: Option<Rc<crate::archive_playback::Choice>>,
+) -> Outcome {
     if !host::EXTERNAL_PLAYER || ui.player_surface != 0 {
-        return false;
+        return Outcome::Internal;
     }
     let Some((list, group_index)) = group(ui) else {
-        return false;
+        return Outcome::Internal;
     };
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     if !schedule.group_channels(group_index).contains(&channel) {
-        return false;
+        return if choice.is_some() {
+            Outcome::Handled
+        } else {
+            Outcome::Internal
+        };
     }
     // The player chosen for this group may have been removed since: the
     // caller plays the channel here instead, and the viewer may turn the
     // group's preference off.
-    if !host::external_player_available() {
-        crate::menu_view::offer_external_player_reset(ui, list);
-        crate::settings_view::notify(tr(
-            "No external player is installed, so this channel plays here.",
-        ));
-        return false;
+    let available = host::external_player_available();
+    if !available && choice.is_none() {
+        missing_handler(ui, list);
+        return Outcome::Internal;
     }
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     let Some(target) = crate::parental_view::live_target(ui, channel) else {
-        return false;
+        return if choice.is_some() {
+            Outcome::Handled
+        } else {
+            Outcome::Internal
+        };
     };
     let Some((epg, local)) = iptv_guide::combined::epg_channel(&*schedule, channel) else {
-        return false;
+        return if choice.is_some() {
+            Outcome::Handled
+        } else {
+            Outcome::Internal
+        };
     };
     let Some(authority) = epg.resolution_authority(local) else {
-        return false;
+        return if choice.is_some() {
+            Outcome::Handled
+        } else {
+            Outcome::Internal
+        };
     };
     let Some((_, group_id)) =
         crate::data::combined::owner(&owner, &schedule.group_key(group_index))
     else {
-        return false;
+        return if choice.is_some() {
+            Outcome::Handled
+        } else {
+            Outcome::Internal
+        };
     };
     let Some(channel_key) = schedule.channel_key(channel) else {
-        return false;
+        return if choice.is_some() {
+            Outcome::Handled
+        } else {
+            Outcome::Internal
+        };
     };
+    if !available {
+        return Outcome::MissingHandler(list);
+    }
     if !crate::player::allow_guide_channel(channel) {
-        return true;
+        return Outcome::Handled;
     }
     let at = archive.map(|p| crate::guide::unix_of(&*schedule, p.start));
-    let clock = crate::runtime::playback::clock(crate::time::wall_unix(), at);
+    let clock = crate::runtime::playback::clock(crate::clock::wall_unix(), at);
     let epoch = schedule.epoch_unix();
     let epg_offset = epg.epg_offset_minutes(local);
     let expected = authority.clone();
+    let guarded = choice.clone();
+    let archive_choice = choice.is_some();
     let resolve = move || {
-        let schedule = crate::schedule();
+        let schedule = crate::runtime_owner::schedule();
         let channel = schedule.find_channel(&channel_key)?;
         let (epg, local) = iptv_guide::combined::epg_channel(&*schedule, channel)?;
         if epg.resolution_authority(local).as_ref() != Some(&authority)
@@ -305,13 +365,35 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
         {
             return None;
         }
-        let archive = archive.map(|p| {
-            let offset = epg.minute(epoch);
-            Program {
-                start: p.start + offset,
-                end: p.end + offset,
+        let (archive, clock) = if let Some(choice) = &choice {
+            let (selected, program) = choice.resolve_handoff(ui)?;
+            if selected != channel {
+                return None;
             }
-        });
+            let clock = crate::runtime::playback::clock(
+                crate::time::wall_unix(),
+                Some(crate::guide::unix_of(&*schedule, program.start)),
+            );
+            let offset = epg.minute(schedule.epoch_unix());
+            (
+                Some(Program {
+                    start: program.start + offset,
+                    end: program.end + offset,
+                }),
+                clock,
+            )
+        } else {
+            (
+                archive.map(|p| {
+                    let offset = epg.minute(epoch);
+                    Program {
+                        start: p.start + offset,
+                        end: p.end + offset,
+                    }
+                }),
+                clock,
+            )
+        };
         Some((epg.resolve(local, archive, clock), epg.shared_playback()))
     };
     cancel_pending(ui);
@@ -320,8 +402,13 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
     let current = move || {
         ui.external_request.get_untracked() == ticket
             && group(ui).is_some_and(|(now, _)| now == list)
+            && guarded
+                .as_ref()
+                .is_none_or(|choice| choice.resolve_handoff(ui).is_some())
     };
-    crate::parental_view::request(ui, target.clone(), move || {
+    let before_prompt = current.clone();
+    let protected = target.clone();
+    let admitted = move || {
         if !current() {
             return;
         }
@@ -330,8 +417,8 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
             return;
         };
         let config = crate::settings::network_config();
-        let owner = crate::runtime();
-        crate::data::spawn_in_app(async move {
+        let owner = crate::runtime_owner::runtime();
+        crate::tasks::spawn_in_app(async move {
             let source = if let Resolution::StalkerLink(link) = resolution {
                 let StalkerLink {
                     session: mut portal,
@@ -452,7 +539,7 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                     session,
                 };
                 ui.external_playback.set(Some(active.clone()));
-                crate::data::spawn_in_app(async move {
+                crate::tasks::spawn_in_app(async move {
                     active.session.wait_retired().await;
                     clear_retired(ui, &active);
                 });
@@ -463,8 +550,14 @@ pub fn maybe_open(ui: Ui, channel: usize, archive: Option<Program>) -> bool {
                 }
             }
         });
-    });
-    true
+    };
+    crate::parental_view::request_if(
+        ui,
+        protected,
+        move || !archive_choice || before_prompt(),
+        admitted,
+    );
+    Outcome::Handled
 }
 
 fn unavailable() {

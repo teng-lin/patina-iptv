@@ -35,8 +35,8 @@ use nsh_core::geometry::point;
 use nsh_core::prelude::*;
 
 use crate::Ui;
-use crate::play_bar::icons::{self, Icon};
 use crate::tint;
+use crate::ui_kit::icons::{self, Icon};
 
 /// The window's video view, a native component of the desktop players
 /// (`mpv/pip.rs`).

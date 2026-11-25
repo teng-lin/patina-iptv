@@ -14,7 +14,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};
 use std::rc::{Rc, Weak};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use iptv_core::favorites::{Favorites, KeyIndex, RECENT_LIMIT, Recent, diff};
@@ -42,6 +43,60 @@ pub(crate) struct State {
     vod_epoch: Rc<()>,
     vod_requested: u64,
     vod_applied: u64,
+    writer: Option<mpsc::Sender<Write>>,
+    unsaved: Arc<AtomicUsize>,
+    /// A write queued on the store's writer lane failed since the last barrier
+    /// (hosts without workers).
+    failed: Arc<AtomicBool>,
+}
+
+impl State {
+    fn reset(&mut self) {
+        // A previous root's epoch-bound writer must not accept more writes.
+        // Keep tracking its outstanding writes until they finish.
+        *self = Self {
+            index: std::mem::take(&mut self.index),
+            unsaved: self.unsaved.clone(),
+            ..Self::default()
+        };
+    }
+
+    fn send(&mut self, services: crate::store_service::Services, write: Write) {
+        if self.writer.is_none() {
+            let (tx, rx) = mpsc::channel();
+            let unsaved = self.unsaved.clone();
+            // The writer belongs to this owner's application epoch.
+            let execution = services.ports().execution.clone();
+            if let Err(error) = execution.worker(
+                "iptv-favorites".into(),
+                Box::new(move || write_all(&services, rx, unsaved)),
+            ) {
+                // Nothing is cached or counted: the next change tries again,
+                // and reads do not wait for a write no writer has.
+                log::error!("iptv favorites: cannot start the writer: {error}");
+                return;
+            }
+            self.writer = Some(tx);
+        }
+        let tx = self.writer.as_ref().expect("the writer was started");
+        if !matches!(write, Write::Barrier(_) | Write::Shutdown(_)) {
+            self.unsaved.fetch_add(1, Ordering::AcqRel);
+        }
+        if tx.send(write).is_err() {
+            log::warn!("iptv favorites: the writer stopped");
+        }
+        // A write that never reached the thread is never saved; it stays
+        // counted, so reads keep going behind the writer's queue.
+    }
+}
+
+impl State {
+    pub(crate) fn with_catalog(catalog: &dyn Schedule) -> Self {
+        Self {
+            index: KeyIndex::build(catalog),
+            ..Self::default()
+        }
+    }
 }
 
 /// Whether `source` has movies or shows by its last import's counts.
@@ -122,7 +177,7 @@ pub(crate) fn refresh_vod_availability(
 }
 
 /// A store write, in the order made.
-pub(crate) enum Write {
+enum Write {
     ClearHistory,
     SaveOrder(Box<dyn FnOnce(bool) + Send>),
     Barrier(futures_channel::oneshot::Sender<bool>),
@@ -176,8 +231,12 @@ enum PendingWrite {
 
 /// Writes sent to the writer thread and not yet committed (or dropped with
 /// their deleted playlist).
-fn unsaved(owner: &super::Runtime) -> std::sync::Arc<AtomicUsize> {
-    owner.favorite_unsaved.clone()
+fn unsaved(owner: &super::Runtime) -> Arc<AtomicUsize> {
+    owner.favorites.borrow().unsaved.clone()
+}
+
+fn cooperative_failure(owner: &super::Runtime) -> Arc<AtomicBool> {
+    owner.favorites.borrow().failed.clone()
 }
 
 /// Reads saved favorites. The store's reader does not wait for a long
@@ -201,18 +260,11 @@ async fn load<R: Send + 'static>(
 
 /// A new app root must reload persisted favorites, including an applied restore.
 pub fn reset(owner: &super::Runtime) {
-    // Never reuse a previous root's epoch-bound writer when restoring a library.
-    owner
-        .favorite_writer
-        .with(|writer| writer.borrow_mut().take());
-    *owner.favorite_failed.borrow_mut() = Default::default();
-    owner
-        .favorites
-        .with(|state| *state.borrow_mut() = State::default());
+    owner.favorites.borrow_mut().reset();
 }
 
-/// The source whose catalog is about to be shown (`data.rs`, before
-/// `set_schedule`): its saved favorites and recent channels. The same
+/// The source whose catalog is about to be shown: its saved favorites
+/// and recent channels. The same
 /// source keeps its in-memory lists (writes may still be on their way).
 pub async fn prepare_source(
     owner: &std::rc::Rc<super::Runtime>,
@@ -376,12 +428,17 @@ fn write_owner(state: &State, key: &str) -> Option<(SourceId, String)> {
     }
 }
 
-/// A new catalog is on screen (`set_schedule`): index its keys and show
-/// its favorites.
-pub fn catalog_changed(owner: &super::Runtime, catalog: &dyn Schedule) {
+/// Index the installed catalog before the shell restores its lists.
+pub(crate) fn rebuild_index(owner: &super::Runtime, catalog: &dyn Schedule) {
     let index = KeyIndex::build(catalog);
     owner.favorites.with(|s| s.borrow_mut().index = index);
-    publish(owner);
+}
+
+pub(crate) fn vod_availability(owner: &super::Runtime) -> (bool, bool) {
+    owner.favorites.with(|s| {
+        let state = s.borrow();
+        (state.has_vod, state.any_vod)
+    })
 }
 
 pub fn publish(owner: &super::Runtime) {
@@ -512,7 +569,7 @@ pub fn played(owner: &super::Runtime, key: &str) {
             Write::Watched {
                 source,
                 key,
-                at: super::imports::now_unix(),
+                at: crate::time::now_unix(),
             },
         );
     }
@@ -531,40 +588,12 @@ pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, 
 }
 
 fn send(owner: &super::Runtime, write: Write) {
-    let counted = !matches!(write, Write::Barrier(_) | Write::Shutdown(_));
-    if !owner.services().has_workers() {
+    let services = owner.services();
+    if !services.has_workers() {
         queue_on_writer(owner, write);
         return;
     }
-    owner.favorite_writer.with(|w| {
-        let mut w = w.borrow_mut();
-        if w.is_none() {
-            let (tx, rx) = mpsc::channel();
-            let unsaved = unsaved(owner);
-            // The writer belongs to this owner's application epoch.
-            let services = owner.services();
-            let execution = services.ports().execution.clone();
-            if let Err(error) = execution.worker(
-                "iptv-favorites".into(),
-                Box::new(move || write_all(&services, rx, unsaved)),
-            ) {
-                // Nothing is cached or counted: the next change tries again,
-                // and reads do not wait for a write no writer has.
-                log::error!("iptv favorites: cannot start the writer: {error}");
-                return;
-            }
-            *w = Some(tx);
-        }
-        let tx = w.as_ref().expect("the writer was started");
-        if counted {
-            unsaved(owner).fetch_add(1, Ordering::AcqRel);
-        }
-        if tx.send(write).is_err() {
-            log::warn!("iptv favorites: the writer stopped");
-        }
-        // A write that never reached the thread is never saved; it stays
-        // counted, so reads keep going behind the writer's queue.
-    });
+    owner.favorites.borrow_mut().send(services, write);
 }
 
 /// Keeps a write counted in [`unsaved`] until it ran or was dropped.
@@ -604,7 +633,7 @@ impl Drop for ReportFailure {
 /// answers false, as the thread's would while it retries.
 fn queue_on_writer(owner: &super::Runtime, write: Write) {
     let services = owner.services();
-    let failed = owner.favorite_failed.borrow().clone();
+    let failed = cooperative_failure(owner);
     let barrier = |done: Box<dyn FnOnce(bool) + Send>| {
         let failed = failed.clone();
         // A barrier that cannot be queued is dropped, and its waiter hears
@@ -714,9 +743,7 @@ pub async fn flush(owner: &super::Runtime) -> bool {
 
 /// Root teardown only: queued edits outlive their UI owner and drain first.
 pub fn flush_on_shutdown(owner: &super::Runtime) -> bool {
-    let writer = owner
-        .favorite_writer
-        .with(|writer| writer.borrow_mut().take());
+    let writer = owner.favorites.borrow_mut().writer.take();
     let Some(writer) = writer else { return true };
     let deadline = crate::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
@@ -927,7 +954,7 @@ pub(crate) async fn save_order(
         // No writer thread: the order is saved on the store's writer lane,
         // after the writes queued before it (`queue_on_writer`), unless
         // one of them failed.
-        let failed = owner.favorite_failed.borrow().clone();
+        let failed = cooperative_failure(owner);
         let counted = Counted::new(owner);
         owner
             .services()
@@ -1043,8 +1070,8 @@ mod reorder_tests {
         use std::task::{Context, Poll, Waker};
         let runtime = std::rc::Rc::new(super::super::Runtime::default());
         let (writer, inbox) = mpsc::channel();
-        *runtime.favorite_writer.borrow_mut() = Some(writer);
-        runtime.favorite_unsaved.store(1, Ordering::Release);
+        runtime.favorites.borrow_mut().writer = Some(writer);
+        unsaved(&runtime).store(1, Ordering::Release);
         let task = {
             let runtime = runtime.clone();
             async move {
@@ -1323,8 +1350,8 @@ mod vod_availability_tests {
         owner.favorites.with(|s| s.borrow_mut().any_vod = true);
         let valid = refresh_vod_availability(&owner); // reads the empty library
         let (writer, inbox) = mpsc::channel();
-        *owner.favorite_writer.borrow_mut() = Some(writer);
-        owner.favorite_unsaved.store(1, Ordering::Release);
+        owner.favorites.borrow_mut().writer = Some(writer);
+        unsaved(&owner).store(1, Ordering::Release);
         // A newer guide preparation reserves, but a failed persistence barrier
         // prevents its read/install. Its reservation carries no new authority.
         let mut failed = std::pin::pin!(prepare_source(&owner, Some(SourceId(74))));
@@ -1340,8 +1367,8 @@ mod vod_availability_tests {
         assert!(owner.services().block_on(failed).is_none());
         owner.services().block_on(valid);
         assert!(!owner.favorites.with(|s| s.borrow().any_vod));
-        owner.favorite_writer.borrow_mut().take();
-        owner.favorite_unsaved.store(0, Ordering::Release);
+        owner.favorites.borrow_mut().writer.take();
+        unsaved(&owner).store(0, Ordering::Release);
         assert!(owner.drain_services());
     }
 
@@ -1488,6 +1515,7 @@ mod start_tests {
             std::sync::Arc::new(crate::execution::Cooperative::new(std::sync::Arc::new(
                 Unpolled,
             ))),
+            crate::native::entropy,
         );
         let owner = crate::Runtime::new(ports);
         owner.start_services();
@@ -1595,10 +1623,7 @@ mod start_tests {
         assert_eq!(poll(first.as_mut()), None, "queued");
         owner.services().blocking(|_| Ok(())).unwrap();
         assert_eq!(poll(first.as_mut()), Some(true));
-        owner
-            .favorite_failed
-            .borrow()
-            .store(true, Ordering::Release);
+        cooperative_failure(&owner).store(true, Ordering::Release);
         let failed = flush(&owner);
         let mut failed = std::pin::pin!(failed);
         assert_eq!(poll(failed.as_mut()), None, "queued");
@@ -1650,6 +1675,27 @@ mod start_tests {
     }
 
     #[test]
+    fn reset_retires_the_writer_and_keeps_counting_previous_writes() {
+        let owner = crate::Runtime::default();
+        let (writer, inbox) = mpsc::channel();
+        owner.favorites.borrow_mut().writer = Some(writer);
+        let pending = Counted::new(&owner);
+        let previous_failure = cooperative_failure(&owner);
+
+        reset(&owner);
+
+        assert!(matches!(
+            inbox.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 1);
+        previous_failure.store(true, Ordering::Release);
+        assert!(!cooperative_failure(&owner).load(Ordering::Acquire));
+        drop(pending);
+        assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
+    }
+
+    #[test]
     fn a_writer_that_cannot_start_is_not_kept_and_its_writes_are_not_owed() {
         let mut ports = crate::Ports::for_tests();
         ports.execution = std::sync::Arc::new(NoThreads);
@@ -1658,7 +1704,7 @@ mod start_tests {
         watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
         watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
         assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
-        assert!(owner.favorite_writer.with(|w| w.borrow().is_none()));
+        assert!(owner.favorites.borrow().writer.is_none());
         assert!(owner.drain_services());
     }
 }

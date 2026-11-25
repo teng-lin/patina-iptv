@@ -5,9 +5,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use iptv_core::capabilities::Host;
 use iptv_nav::{
     Action, BackGuard, Context, Decision, HeldPresses, Keymap, Phase, Press, Profile, RemoteKey,
 };
+use iptv_presentation::capabilities::Keys;
 use nsh_core::keymap::Keystroke;
 use nsh_core::prelude::*;
 use nsh_core::{KeyCapture, KeyEvent};
@@ -22,6 +24,21 @@ mod number;
 pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
 use keys::{DIGITS, KEYS, RawKeys};
+
+impl Ui {
+    /// A touch or a click on any control: touch or pointer mode, whichever
+    /// made the press.
+    pub fn touched(&self) {
+        // PIN entry continues the choice that opened the prompt. Dismissing
+        // the prompt cancels it in `parental_view::abort`.
+        if self.top_overlay() != Some(crate::overlays::Overlay::Parental) {
+            crate::external_player::cancel_pending(*self);
+        }
+        self.pending_zap.set(None);
+        crate::browse_playback::activity(*self);
+        self.input.set(self.last_press.get_untracked());
+    }
+}
 
 /// A TV remote's profile (Android, a browser TV) distinguishes a tap from
 /// a held key.
@@ -64,6 +81,17 @@ mod keyboard_repeats {
         let repeats = REPEATS.lock().unwrap_or_else(|e| e.into_inner());
         repeats.as_ref()?.get(name).copied()
     }
+}
+
+/// What the connected keys are set up as. iPadOS reports changes through
+/// GCKeyboard, so keyboard settings follow attachment without a rebuild.
+pub(crate) fn keys_for(host: Host) -> Option<Keys> {
+    iptv_presentation::capabilities::keys(host)
+}
+
+/// [`keys_for`] now (reactive).
+pub(crate) fn keys_now() -> Option<Keys> {
+    keys_for(crate::device::host())
 }
 
 /// Whether keys arrive as a remote's raw phases and tell a tap from a hold.
@@ -455,8 +483,12 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     }
     // Spike shortcuts for the view modes.
     if ui.player_surface == 0 {
-        on_key("o", move |_| ui.toggle(crate::settings::guide_over_video()));
-        on_key("f", move |_| ui.toggle(ViewMode::Fullscreen));
+        on_key("o", move |_| {
+            ui.mode.apply(crate::mode::Action::ToggleOverlay)
+        });
+        on_key("f", move |_| {
+            ui.mode.apply(crate::mode::Action::ToggleFullscreen)
+        });
     }
     input
 }
@@ -778,7 +810,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             // The guide is in the main window; dismissing this player lets
             // its owner stop the correct surface. Search has no local screen.
             Action::Stop | Action::ShowGuide => {
-                ui.mode.set(crate::settings::browse_mode());
+                ui.mode.apply(crate::mode::Action::ReturnToBrowse);
                 return;
             }
             Action::OpenSearch | Action::Record => return,
@@ -806,7 +838,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::StoreStartupFailure) {
-        crate::startup::store_failure_key(ui, action);
+        crate::startup_view::store_failure_key(ui, action);
         return;
     }
     if top == Some(Overlay::Vod) {
@@ -963,7 +995,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             Action::ShowMenu | Action::ShowControls
                 if ui.playing.get().is_some() || crate::on_demand::active(ui) =>
             {
-                ui.mode.set(ViewMode::Fullscreen);
+                ui.mode.apply(crate::mode::Action::EnterFullscreen);
                 crate::play_bar::remote(ui);
             }
             Action::Back => {
@@ -991,7 +1023,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::Record => crate::recordings_view::current(ui),
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
             let entry = ui.focus.with_untracked(|f| f.group);
-            let combined = crate::data::combined::active(&crate::runtime());
+            let combined = crate::data::combined::active(&crate::runtime_owner::runtime());
             if (key == RemoteKey::Menu && !combined && entry == iptv_presentation::lists::ALL)
                 || (!crate::menu_view::open_group_options(ui, entry)
                     && ui.app.library.shown.get_untracked().is_none()
@@ -1007,10 +1039,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::MoveLeft => mv(Move::Left),
         Action::MoveRight => mv(Move::Right),
         Action::Select => crate::lists::ok(ui),
-        Action::ShowGuide => ui.mode.set(match ui.mode.get() {
-            ViewMode::Fullscreen => crate::settings::guide_over_video(),
-            _ => crate::settings::browse_mode(),
-        }),
+        Action::ShowGuide => ui.mode.apply(crate::mode::Action::ShowGuide),
         Action::ShowGroups => crate::lists::open_groups(ui),
         Action::OpenSearch => crate::search_view::open(ui),
         a @ (Action::JumpToNow
@@ -1019,7 +1048,9 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         | Action::DayBack
         | Action::DayForward
         | Action::ToggleGroups) => crate::grid::keys::apply(ui, a),
-        Action::ReturnToPlayer if ui.playing.get().is_some() => ui.mode.set(ViewMode::Fullscreen),
+        Action::ReturnToPlayer if ui.playing.get().is_some() => {
+            ui.mode.apply(crate::mode::Action::ReturnToPlayer);
+        }
         Action::ToggleFavorite => {
             if let Some(channel) = if ui.mode.get() == ViewMode::Fullscreen {
                 ui.playing.get()
@@ -1058,8 +1089,10 @@ mod tests {
     #[component]
     fn PendingHandoff() -> impl IntoElement {
         let directory = tempfile::tempdir().unwrap();
-        let runtime = Rc::new(crate::new_runtime(directory.path().to_owned()));
-        let ui = crate::with_runtime(runtime, || {
+        let runtime = Rc::new(crate::runtime_owner::new_runtime(
+            directory.path().to_owned(),
+        ));
+        let ui = crate::runtime_owner::with_runtime(runtime, || {
             Ui::new(crate::SharedUi::new(), crate::player::Player::new())
         });
         crate::external_player::cancel_pending(ui);

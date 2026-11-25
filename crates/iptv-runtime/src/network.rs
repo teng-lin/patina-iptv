@@ -27,7 +27,7 @@ use std::time::Duration;
 use iptv_import::{BodyStream, Fetch, FetchError, FetchErrorKind, StreamingResponse};
 use iptv_providers::{HttpRequest, HttpResponse};
 
-use crate::ports::MaybeSend;
+use crate::threading::MaybeSend;
 
 /// A boxed future of an adapter: `Send` when the runtime is threaded.
 #[cfg(feature = "native")]

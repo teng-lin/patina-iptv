@@ -7,6 +7,17 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+### Changed
+
+- Returning to the guide when a channel or multiview session ends follows the
+  selected guide layout. Opening Playlists or Organization from the player
+  also uses the selected layout.
+
+### Fixed
+
+- Archive programs' **Play from the beginning** action follows the same
+  group external-player preference as choosing the program directly.
+
 ## [0.1.9] - 2026-11-25
 
 ### Added

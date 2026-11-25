@@ -51,7 +51,7 @@ pub async fn paged(
     source: SourceId,
     now: UnixTime,
 ) -> EpgSchedule {
-    let keep = super::stored::stored_past_days();
+    let keep = crate::stored::stored_past_days();
     let window = window(now, keep);
     let starts = match crate::commands::guide_listing_starts(owner, source, window.oldest).await {
         Ok(starts) => starts,
@@ -276,6 +276,123 @@ mod tests {
     fn install_single(owner: &Rc<crate::Runtime>, source: SourceId, schedule: &Rc<EpgSchedule>) {
         owner.shown.set(Some(source));
         owner.set_schedule(schedule.clone());
+    }
+
+    #[test]
+    fn nested_expansion_supersedes_a_rebuild_but_keeps_its_page_wakeup() {
+        use crate::data::{CommitOutcome, ScheduleUpdate, commit_schedule, toggle_playlist};
+        use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
+
+        let owner = Rc::new(crate::Runtime::default());
+        owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
+        owner.all.set(true);
+        owner.epoch.set(NOW);
+        let source = SourceSchedule {
+            id: 1,
+            name: "Generated".into(),
+            schedule: paged_schedule(&Rc::default()),
+        };
+        let before: Rc<dyn Schedule> = Rc::new(CombinedSchedule::new(vec![source.clone()], NOW));
+        assert_eq!(
+            commit_schedule(&owner, ScheduleUpdate::Catalog(before.clone()), || {}),
+            CommitOutcome::Installed
+        );
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let waiter = events.clone();
+        assert!(!ready(&owner, &before, 0, NOW - 2 * DAY, move |result| {
+            assert_eq!(result, Ok(()));
+            waiter.borrow_mut().push("page waiter");
+        }));
+        let recorded = events.clone();
+        let weak = Rc::downgrade(&owner);
+        owner.bind(move |event| {
+            let owner = weak.upgrade().unwrap();
+            match event {
+                crate::RuntimeEvent::ScheduleChanged {
+                    previous, current, ..
+                } => {
+                    assert!(Rc::ptr_eq(&owner.schedule(), &current));
+                    assert_eq!(owner.page_waiters.borrow().len(), 1);
+                    if Rc::ptr_eq(&previous, &before) {
+                        recorded.borrow_mut().push("rebuild");
+                        assert!(toggle_playlist(&owner, 0));
+                    } else {
+                        recorded.borrow_mut().push("toggle");
+                    }
+                }
+                crate::RuntimeEvent::FavoritesChanged { .. } => {
+                    recorded.borrow_mut().push("favorites");
+                }
+                _ => {}
+            }
+        });
+        let outcome = commit_schedule(
+            &owner,
+            ScheduleUpdate::Combined {
+                generation: owner.generation.get(),
+                revision: owner.rebuild.get(),
+                sources: vec![source],
+                collapsed: Vec::new(),
+            },
+            || {},
+        );
+        assert_eq!(outcome, CommitOutcome::Superseded);
+        assert_eq!(
+            *events.borrow(),
+            ["rebuild", "toggle", "favorites", "page waiter"]
+        );
+        assert!(owner.page_waiters.borrow().is_empty());
+        let after = owner.schedule();
+        let after = after
+            .as_any()
+            .unwrap()
+            .downcast_ref::<CombinedSchedule>()
+            .unwrap();
+        assert_eq!(after.collapsed_sources().collect::<Vec<_>>(), [1]);
+    }
+
+    #[test]
+    fn a_commit_with_a_revoked_ticket_or_collapsed_combined_mode_does_nothing() {
+        use crate::data::{CommitOutcome, ScheduleUpdate, commit_schedule};
+
+        let owner = Rc::new(crate::Runtime::default());
+        let source = SourceId(1);
+        let schedule = paged_schedule(&Rc::default());
+        let before: Rc<dyn Schedule> = schedule.clone();
+        install_single(&owner, source, &schedule);
+        owner.bind(|_| panic!("refused installs must not emit"));
+        let ticket = owner.begin_organization_edit(source);
+        owner.begin_organization_edit(source);
+        assert_eq!(
+            commit_schedule(
+                &owner,
+                ScheduleUpdate::Organization {
+                    source,
+                    ticket,
+                    expected: &schedule,
+                    schedule: schedule.clone(),
+                },
+                || panic!("a stale edit must not modify favorites"),
+            ),
+            CommitOutcome::Refused
+        );
+        // A rebuild has prepared its inputs, but the browser left combined
+        // mode while it waited for the expansion state.
+        assert_eq!(
+            commit_schedule(
+                &owner,
+                ScheduleUpdate::Combined {
+                    generation: owner.generation.get(),
+                    revision: owner.rebuild.get(),
+                    sources: Vec::new(),
+                    collapsed: Vec::new(),
+                },
+                || panic!("a collapsed rebuild must not modify favorites"),
+            ),
+            CommitOutcome::Refused
+        );
+        assert!(Rc::ptr_eq(&owner.schedule(), &before));
+        assert!(crate::data::combined::single(&owner).is_none());
     }
 
     #[test]
@@ -705,7 +822,7 @@ mod tests {
             .with_description_lookup(lookup);
         // The owner keeps the schedule on screen and its source's part.
         let schedule = Rc::new(schedule);
-        crate::data::combined::remember_single(&owner, source, schedule.clone());
+        crate::data::remember_single(&owner, source, schedule.clone());
         owner.set_schedule(schedule);
         drop(owner);
         assert!(weak.upgrade().is_none());

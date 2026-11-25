@@ -19,7 +19,7 @@ use crate::theme::LIST_TEXT;
 
 /// Opens the editor on the list that owns the action, at its selected channel.
 pub fn open(ui: Ui, list: &ListId, channel: Option<usize>) {
-    let catalog = crate::schedule();
+    let catalog = crate::runtime_owner::schedule();
     let Some(group) = list.resolve(&*catalog) else {
         return;
     };
@@ -152,7 +152,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         ui.editor.with(|e| {
             e.as_ref().map_or(String::new(), |e| {
                 let starred = ui.app.favorites.with(|f| e.starred(f));
-                let group = crate::lists::entry_name(e.group, &*crate::schedule());
+                let group = crate::lists::entry_name(e.group, &*crate::runtime_owner::schedule());
                 trf(
                     "Favorites · {group} · {starred} of {total}",
                     &[
@@ -235,7 +235,9 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             )
             .child(
                 list_rows::name(size, move || {
-                    channel().map_or(String::new(), |ch| crate::schedule().channel_name(ch))
+                    channel().map_or(String::new(), |ch| {
+                        crate::runtime_owner::schedule().channel_name(ch)
+                    })
                 })
                 .text_color(move || mark().text()),
             )

@@ -102,7 +102,7 @@ fn config() -> crate::runtime::network::NetworkConfig {
         allow_files: false,
         #[cfg(debug_assertions)]
         allow_private_fixture: cfg!(feature = "test-support")
-            || crate::data::DEV_PLAYLIST.is_some(),
+            || crate::runtime::build_config::DEV_PLAYLIST.is_some(),
         ..Default::default()
     }
 }
@@ -176,7 +176,7 @@ pub(crate) fn source(url: impl Fn() -> String + 'static) -> impl Fn() -> String 
         // Detached: the download fills the cache even if this view moves
         // on meanwhile; dropping `rx` (the effect's next run ends this
         // task) only skips a download that has not started.
-        let owner = crate::runtime();
+        let owner = crate::runtime_owner::runtime();
         drop(owner.spawn_network(fetch(owner.network(), url, tx)));
         drop(spawn(async move {
             if let Ok(value) = rx.await

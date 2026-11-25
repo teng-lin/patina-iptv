@@ -4,7 +4,7 @@ use crate::{Ui, i18n::tr, scale::Scale, ui_kit};
 use iptv_core::recording::{Job, JobId, Request, Status};
 use iptv_nav::Action;
 use iptv_presentation::menu::{MenuItem, Origin};
-use iptv_presentation::recording::status_label;
+use iptv_presentation::recording::{ActionOutcome, Screen, status_label};
 use nsh_core::prelude::*;
 use std::time::Duration;
 
@@ -20,46 +20,21 @@ pub fn open(ui: Ui) {
     if !crate::capabilities::recordings_library_untracked(ui) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.open = true;
-        s.error = None;
-        s.actions = false;
-        s.confirm_delete = false;
-    });
+    ui.recordings.update(Screen::open);
     reload(ui);
 }
 pub fn close(ui: Ui) {
-    ui.recordings.update(|s| {
-        if !s.busy {
-            s.open = false;
-            s.confirm_delete = false;
-        }
-    });
+    ui.recordings.update(Screen::close);
 }
 pub fn back(ui: Ui) -> bool {
-    ui.recordings.update(|s| {
-        if s.busy {
-            return;
-        }
-        s.error = None;
-        if s.confirm_delete {
-            s.confirm_delete = false;
-        } else if s.actions {
-            s.actions = false;
-        } else {
-            s.open = false;
-        }
-    });
+    ui.recordings.update(Screen::back);
     true
 }
 fn reload(ui: Ui) {
-    let owner = crate::runtime();
+    let owner = crate::runtime_owner::runtime();
     let mut generation = 0;
-    ui.recordings.update(|s| {
-        s.read_generation += 1;
-        generation = s.read_generation;
-    });
-    crate::data::spawn_in_app(async move {
+    ui.recordings.update(|s| generation = s.begin_reload());
+    crate::tasks::spawn_in_app(async move {
         let result = owner.recording_jobs().await;
         let points = owner.recording_progress_points().await.unwrap_or_default();
         let retired = owner
@@ -67,17 +42,12 @@ fn reload(ui: Ui) {
             .await
             .unwrap_or_default();
         ui.recordings.update(|s| {
-            if s.read_generation != generation {
-                return;
-            }
-            s.retired = retired;
-            match result {
-                Ok(jobs) => {
-                    s.progress = points;
-                    s.reload(jobs);
-                }
-                Err(_) => s.error = Some("Recordings could not be loaded".into()),
-            }
+            s.finish_reload(
+                generation,
+                result.map_err(|_| "Recordings could not be loaded"),
+                points,
+                retired,
+            );
         });
     });
 }
@@ -85,8 +55,8 @@ fn reload(ui: Ui) {
 /// canceled what an earlier version had scheduled; Recordings lists it until
 /// the viewer has opened and closed that screen.
 fn announce_retired(ui: Ui) {
-    crate::data::spawn_in_app(async move {
-        if crate::runtime()
+    crate::tasks::spawn_in_app(async move {
+        if crate::runtime_owner::runtime()
             .announce_retired_recordings()
             .await
             .unwrap_or(false)
@@ -104,10 +74,13 @@ fn announce_retired(ui: Ui) {
             if ui.recordings.with(|s| s.retired.is_empty()) {
                 return;
             }
-            ui.recordings.update(|s| s.retired.clear());
-            crate::data::spawn_in_app(async move {
+            ui.recordings.update(Screen::dismiss_retired);
+            crate::tasks::spawn_in_app(async move {
                 // On failure the list stays stored and shows again next time.
-                if let Err(error) = crate::runtime().dismiss_retired_recording_schedules().await {
+                if let Err(error) = crate::runtime_owner::runtime()
+                    .dismiss_retired_recording_schedules()
+                    .await
+                {
                     log::warn!("iptv recordings: keeping the retired schedule list: {error:?}");
                 }
             });
@@ -116,7 +89,7 @@ fn announce_retired(ui: Ui) {
 }
 
 pub fn bind(ui: Ui) {
-    crate::runtime().start_recordings();
+    crate::runtime_owner::runtime().start_recordings();
     announce_retired(ui);
     // This one-second UI reload is unrelated to a guide/player action. Keep
     // the real native recorder running in explicitly opted-in work-counter runs.
@@ -124,10 +97,10 @@ pub fn bind(ui: Ui) {
     if crate::performance_probe::enabled() {
         return;
     }
-    crate::data::spawn_in_app(async move {
+    crate::tasks::spawn_in_app(async move {
         loop {
             timer(Duration::from_secs(1)).await;
-            crate::runtime().sync_recording_contexts();
+            crate::runtime_owner::runtime().sync_recording_contexts();
             reload(ui);
         }
     });
@@ -137,20 +110,20 @@ pub fn bind(ui: Ui) {
 /// browser TV has none, `host::HAS_WORKERS`), from a playlist that owns it.
 pub fn available(channel: usize) -> bool {
     crate::host::HAS_WORKERS
-        && crate::schedule()
+        && crate::runtime_owner::schedule()
             .channel_key(channel)
-            .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
+            .and_then(|key| crate::data::combined::owner(&crate::runtime_owner::runtime(), &key))
             .is_some()
 }
 pub fn try_reserve_viewing(surface: usize, channel: usize, live: bool) -> bool {
-    let source = crate::schedule()
+    let source = crate::runtime_owner::schedule()
         .channel_key(channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key));
+        .and_then(|key| crate::data::combined::owner(&crate::runtime_owner::runtime(), &key));
     source.is_none_or(|(source, channel)| {
         if live {
-            crate::runtime().reserve_live_viewing(surface, source, &channel)
+            crate::runtime_owner::runtime().reserve_live_viewing(surface, source, &channel)
         } else {
-            crate::runtime().reserve_viewing(surface, source)
+            crate::runtime_owner::runtime().reserve_viewing(surface, source)
         }
     })
 }
@@ -169,10 +142,10 @@ pub fn badge(ui: Ui, channel: usize, program: crate::guide::Program) -> &'static
     if ui.recordings.with(|s| s.jobs.is_empty()) {
         return "";
     }
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let Some((source, key)) = schedule
         .channel_key(channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
+        .and_then(|key| crate::data::combined::owner(&crate::runtime_owner::runtime(), &key))
     else {
         return "";
     };
@@ -212,7 +185,7 @@ pub fn current(ui: Ui) {
     };
     // Record starts recording a program on now. A future or ended one is not
     // scheduled: recording future programs is retired (#273).
-    if !can_record_now(origin, crate::time::now_minute()) {
+    if !can_record_now(origin, crate::clock::now_minute()) {
         crate::settings_view::notify(tr("Only a program on now can be recorded"));
         return;
     }
@@ -224,7 +197,7 @@ pub fn current(ui: Ui) {
 /// that can be recorded, so Record can start recording it now.
 pub fn can_record_now(origin: Origin, now: i32) -> bool {
     available(origin.channel)
-        && crate::schedule()
+        && crate::runtime_owner::schedule()
             .program_at(origin.channel, origin.program_start)
             .airing(now)
             == crate::guide::Airing::Live
@@ -237,7 +210,7 @@ pub fn can_record_now(origin: Origin, now: i32) -> bool {
 pub fn record_details(ui: Ui, origin: Origin) {
     if ui.player_surface != 0
         || !details_button()
-        || !can_record_now(origin, crate::time::now_minute())
+        || !can_record_now(origin, crate::clock::now_minute())
     {
         return;
     }
@@ -257,9 +230,9 @@ fn playing_channel(ui: Ui) -> Option<(i64, String)> {
         return None;
     }
     let channel = ui.playing.get()?;
-    crate::schedule()
+    crate::runtime_owner::schedule()
         .channel_key(channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))
+        .and_then(|key| crate::data::combined::owner(&crate::runtime_owner::runtime(), &key))
         .map(|(source, channel)| (source.0, channel))
 }
 
@@ -271,7 +244,7 @@ pub fn recording_active(ui: Ui) -> bool {
         s.starting
             .as_ref()
             .is_some_and(|r| r.source == source && r.channel == channel)
-            || s.active_on(source, &channel, crate::time::wall_unix())
+            || s.active_on(source, &channel, crate::clock::wall_unix())
                 .is_some()
     })
 }
@@ -287,7 +260,7 @@ pub fn toggle_current(ui: Ui) {
         return;
     };
     let job = ui.recordings.with_untracked(|s| {
-        s.active_on(source, &channel, crate::time::wall_unix())
+        s.active_on(source, &channel, crate::clock::wall_unix())
             .cloned()
     });
     if let Some(job) = job {
@@ -310,7 +283,7 @@ pub fn record_now(ui: Ui) {
         ui,
         Origin {
             channel,
-            program_start: crate::time::now_minute(),
+            program_start: crate::clock::now_minute(),
         },
         false,
     );
@@ -339,16 +312,20 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
         crate::settings_view::notify(tr("Choose an available channel"));
         return;
     };
-    let now = crate::time::wall_unix();
+    let now = crate::clock::wall_unix();
     // Repeated taps are idempotent, including before the next UI status poll.
-    if crate::runtime().recording_snapshot().iter().any(|job| {
-        job.source_current
-            && job.status.active()
-            && job.request.source == request.source
-            && job.request.channel == request.channel
-            && job.request.start <= now
-            && job.request.end > now
-    }) {
+    if crate::runtime_owner::runtime()
+        .recording_snapshot()
+        .iter()
+        .any(|job| {
+            job.source_current
+                && job.status.active()
+                && job.request.source == request.source
+                && job.request.channel == request.channel
+                && job.request.start <= now
+                && job.request.end > now
+        })
+    {
         crate::settings_view::notify(tr("Recording started"));
         return;
     }
@@ -360,17 +337,17 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
     crate::parental_view::request(ui, target, move || start(ui, request));
 }
 fn request(origin: Origin) -> Option<Request> {
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let (source, channel) = schedule
         .channel_key(origin.channel)
-        .and_then(|key| crate::data::combined::owner(&crate::runtime(), &key))?;
+        .and_then(|key| crate::data::combined::owner(&crate::runtime_owner::runtime(), &key))?;
     let program = schedule.program_at(origin.channel, origin.program_start);
     Some(Request {
         source: source.0,
         channel,
         channel_name: crate::channel_name(origin.channel),
         title: crate::listing_labels::listing(schedule.listing(origin.channel, program)),
-        start: crate::guide::unix_of(&*schedule, program.start).max(crate::time::wall_unix()),
+        start: crate::guide::unix_of(&*schedule, program.start).max(crate::clock::wall_unix()),
         end: crate::guide::unix_of(&*schedule, program.end),
     })
 }
@@ -396,11 +373,14 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
     if ui.player_surface != 0 || !available(origin.channel) {
         return None;
     }
-    let schedule = crate::schedule();
+    let schedule = crate::runtime_owner::schedule();
     let program = schedule.program_at(origin.channel, origin.program_start);
     let mut request = request(origin)?;
     request.start = crate::guide::unix_of(&*schedule, program.start);
-    if let Some(job) = occurrence_job(&request, crate::runtime().recording_snapshot()) {
+    if let Some(job) = occurrence_job(
+        &request,
+        crate::runtime_owner::runtime().recording_snapshot(),
+    ) {
         let item = if job.status == Status::Recording {
             MenuItem::StopRecording
         } else {
@@ -411,7 +391,7 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
     // Only a program on now records, where the device offers Record now. A
     // recording already running or carried over can still be stopped or
     // canceled above.
-    (program.airing(crate::time::now_minute()) == crate::guide::Airing::Live
+    (program.airing(crate::clock::now_minute()) == crate::guide::Airing::Live
         && crate::capabilities::record_now().offered())
     .then_some((MenuItem::RecordNow, None))
 }
@@ -437,33 +417,35 @@ pub fn perform_channel_action(ui: Ui, origin: Origin, item: MenuItem) -> bool {
 }
 
 pub fn remember(ui: Ui, origin: Origin) {
-    let context = request(origin).map(|request| (origin, request));
-    ui.recordings.update(|s| s.context = context);
+    let request = request(origin);
+    ui.recordings
+        .update(|s| s.remember_context(origin, request));
 }
 /// Starts recording `request` now, once the parental check has passed.
 fn start(ui: Ui, mut request: Request) {
     // A parental PIN may have been entered since the request was made: the
     // capture starts now, or the runtime would count the wait as a gap.
-    let now = crate::time::wall_unix();
+    let now = crate::clock::wall_unix();
     request.start = request.start.max(now);
     if let Err(message) = request.validate(now) {
         crate::settings_view::notify(tr(message));
-        ui.recordings.update(|s| s.error = Some(message.into()));
+        ui.recordings.update(|s| s.show_error(message));
         return;
     }
-    ui.recordings.update(|s| {
-        s.busy = true;
-        s.error = None;
-        s.starting = Some(request.clone());
-    });
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
+    ui.recordings.update(|s| s.begin_start(request.clone()));
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
         let result = owner.schedule_recording(request).await;
         match &result {
             // What can stop it, said as it starts (#275).
             Ok(_) => {
                 crate::settings_view::notify(&crate::capture_limits::start_notice());
-                crate::host::request_recording_notification_permission();
+                if crate::host::ANDROID {
+                    // The system prompt must not delay Start or Stop.
+                    crate::tasks::spawn_in_app(
+                        crate::host::request_recording_notification_permission(),
+                    );
+                }
             }
             Err(error) => crate::settings_view::notify(translated_reason(
                 error
@@ -476,24 +458,13 @@ fn start(ui: Ui, mut request: Request) {
         } else {
             None
         };
-        ui.recordings.update(|s| {
-            s.busy = false;
-            s.starting = None;
-            if let Some(jobs) = jobs {
-                s.reload(jobs);
-            }
-            // A play-bar action owns no library presentation: a row or
-            // confirmation the viewer opened meanwhile stays.
-            if let Err(error) = result {
-                s.error = Some(
-                    error
-                        .unavailable_reason()
-                        .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-                        .unwrap_or("Recording action failed")
-                        .into(),
-                )
-            }
+        let error = result.as_ref().err().map(|error| {
+            error
+                .unavailable_reason()
+                .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
+                .unwrap_or("Recording action failed")
         });
+        ui.recordings.update(|s| s.finish_start(jobs, error));
         reload(ui);
     });
 }
@@ -501,20 +472,14 @@ fn select_job(ui: Ui, id: JobId) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.focus = Some(id);
-        s.actions = true;
-        s.confirm_delete = false;
-        s.action = 0;
-        s.error = None;
-    });
+    ui.recordings.update(|s| s.select_job(id));
 }
 pub(super) fn return_to_player(ui: Ui) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
     close(ui);
-    ui.mode.set(crate::ViewMode::Fullscreen);
+    ui.mode.apply(crate::mode::Action::EnterFullscreen);
     crate::play_bar::tapped(ui);
 }
 
@@ -533,10 +498,7 @@ fn activate_job(ui: Ui, id: JobId) {
     {
         return_to_player(ui);
     } else if matches!(job.status, Status::Completed | Status::Partial) && job.bytes > 0 {
-        ui.recordings.update(|s| {
-            s.focus = Some(id);
-            s.confirm_delete = false;
-        });
+        ui.recordings.update(|s| s.focus_for_action(id));
         perform(ui, 0);
     } else {
         select_job(ui, id);
@@ -551,10 +513,7 @@ fn row_action(ui: Ui, id: JobId, action: &'static str) {
         .recordings
         .with_untracked(|s| s.jobs.iter().find(|j| j.id == id).cloned());
     if let Some(job) = job {
-        ui.recordings.update(|s| {
-            s.focus = Some(id);
-            s.confirm_delete = false;
-        });
+        ui.recordings.update(|s| s.focus_for_action(id));
         execute(ui, job, false, action);
     }
 }
@@ -563,13 +522,7 @@ fn request_delete(ui: Ui, id: JobId) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.focus = Some(id);
-        s.actions = false;
-        s.confirm_delete = true;
-        s.delete_selected = false;
-        s.error = None;
-    });
+    ui.recordings.update(|s| s.request_delete(id));
 }
 
 fn confirm_delete(ui: Ui) {
@@ -647,16 +600,14 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
     if ui.recordings.with_untracked(|s| s.busy) {
         return;
     }
-    ui.recordings.update(|s| {
-        s.busy = true;
-        s.error = None;
-    });
-    let owner = crate::runtime();
-    crate::data::spawn_in_app(async move {
-        let result = if matches!(
+    ui.recordings.update(Screen::begin_action);
+    let owner = crate::runtime_owner::runtime();
+    crate::tasks::spawn_in_app(async move {
+        let plays = matches!(
             action,
             "Play recording" | "Resume recording" | "Play from beginning"
-        ) {
+        );
+        let result = if plays {
             crate::on_demand::flush(ui, false);
             let progress = owner.recording_progress(job.id).await.unwrap_or_default();
             match owner.open_recording(job.id).await {
@@ -692,41 +643,21 @@ fn execute(ui: Ui, job: Job, confirm: bool, action: &'static str) {
         } else {
             None
         };
-        let mut failure_notice = None;
-        ui.recordings.update(|s| {
-            s.busy = false;
-            if let Some(jobs) = jobs {
-                s.reload(jobs);
+        let outcome = match result {
+            Ok(()) if plays => ActionOutcome::Playing,
+            Ok(()) => ActionOutcome::Changed,
+            Err(_) if action == "Delete recording" => {
+                ActionOutcome::Failed("Recording could not be deleted")
             }
-            s.confirm_delete = false;
-            match result {
-                Ok(()) => {
-                    s.actions = false;
-                    if matches!(
-                        action,
-                        "Play recording" | "Resume recording" | "Play from beginning"
-                    ) {
-                        s.open = false;
-                    }
-                }
-                Err(_) => {
-                    if s.open {
-                        s.error = Some(
-                            if action == "Delete recording" {
-                                "Recording could not be deleted"
-                            } else {
-                                "Recording action failed; check whether its file is available"
-                            }
-                            .into(),
-                        );
-                    } else {
-                        failure_notice = Some(tr("Recording action failed"));
-                    }
-                }
-            }
-        });
-        if let Some(message) = failure_notice {
-            crate::settings_view::notify(message);
+            Err(_) => ActionOutcome::Failed(
+                "Recording action failed; check whether its file is available",
+            ),
+        };
+        let mut failure_notice = false;
+        ui.recordings
+            .update(|s| failure_notice = s.finish_action(jobs, outcome));
+        if failure_notice {
+            crate::settings_view::notify(tr("Recording action failed"));
         }
         reload(ui);
     });
@@ -742,8 +673,7 @@ pub fn key(ui: Ui, action: Action) {
     if ui.recordings.with_untracked(|s| s.confirm_delete) {
         match action {
             Action::MoveLeft | Action::MoveRight | Action::MoveUp | Action::MoveDown => {
-                ui.recordings
-                    .update(|s| s.delete_selected = !s.delete_selected);
+                ui.recordings.update(Screen::toggle_delete_choice);
             }
             Action::Select => {
                 if ui.recordings.with_untracked(|s| s.delete_selected) {
@@ -761,12 +691,8 @@ pub fn key(ui: Ui, action: Action) {
             .recordings
             .with_untracked(|s| s.focused().map(|j| actions(ui, j)).map_or(0, |a| a.len()));
         match action {
-            Action::MoveUp => ui
-                .recordings
-                .update(|s| s.action = s.action.saturating_sub(1)),
-            Action::MoveDown => ui
-                .recordings
-                .update(|s| s.action = (s.action + 1).min(length.saturating_sub(1))),
+            Action::MoveUp => ui.recordings.update(Screen::previous_action),
+            Action::MoveDown => ui.recordings.update(|s| s.next_action(length)),
             Action::Select => perform(ui, ui.recordings.with_untracked(|s| s.action)),
             _ => {}
         }
@@ -789,7 +715,7 @@ pub fn key(ui: Ui, action: Action) {
     }
 }
 fn date(unix: i64) -> String {
-    crate::time::label(unix, crate::time::wall_unix())
+    crate::clock::label(unix, crate::clock::wall_unix())
 }
 
 fn status(job: &Job) -> &'static str {
@@ -825,7 +751,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
                                 tr(status_label(j.status)),
                                 j.request.channel_name,
                                 date(j.request.start),
-                                crate::time::time_only(j.request.end),
+                                crate::clock::time_only(j.request.end),
                                 media,
                                 translated_reason(&j.message)
                             )
@@ -968,8 +894,8 @@ fn retired_line(schedule: &iptv_core::recording::RetiredSchedule) -> String {
         "{} · {} · {} {} · {}",
         schedule.title,
         schedule.channel_name,
-        crate::time::date_only(schedule.start),
-        crate::time::time_only(schedule.start),
+        crate::clock::date_only(schedule.start),
+        crate::clock::time_only(schedule.start),
         match schedule.repeat {
             Repeat::Once => tr("Once"),
             Repeat::Daily => tr("Every day"),
