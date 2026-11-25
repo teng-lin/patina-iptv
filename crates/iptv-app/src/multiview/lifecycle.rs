@@ -98,13 +98,15 @@ pub fn bind(ui: Ui) {
     let omitted = computed(move || !crate::capabilities::multiview_offer(ui).shown());
     // A smaller decoder/form-factor budget can still offer multiview. An
     // existing session must discard its old admission limit before adding
-    // another tile. Account limits do not revoke already admitted streams.
+    // another tile. Account limits do not revoke already admitted streams;
+    // the actual offer above separately handles metered-network gating.
     let capacity = computed(move || {
         let device = crate::device::current();
         let bounds = window();
         match iptv_presentation::capabilities::multiview_offer(
             device,
             bounds.width.0 > bounds.height.0,
+            None,
             None,
         ) {
             iptv_presentation::capabilities::MultiviewOffer::Tiles(tiles) => tiles,
