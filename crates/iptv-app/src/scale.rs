@@ -14,7 +14,7 @@
 //! [`MAX`]: 1920 × 1080 and 2560 × 1440 → 1.0, 1440 × 900 → 0.95,
 //! 1280 × 720 → 0.875, 960 × 540 → 0.8.
 
-use iptv_core::capabilities::{FormFactor, Platform};
+use iptv_core::capabilities::FormFactor;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::prelude::*;
 
@@ -32,15 +32,11 @@ pub const STEP: f32 = 0.025;
 /// Whether this build scales the guide with its window (desktops).
 const SCALES: bool = !(crate::host::ANDROID || crate::host::IPAD);
 
-fn android_form() -> Option<FormFactor> {
-    let host = crate::device::host();
-    (host.platform == Platform::Android).then_some(host.form_factor)
-}
-
 /// Android uses the device report, so a tablet in a narrow window keeps
 /// the tablet scale while a foldable can change scale with its display.
 pub(crate) fn phone() -> bool {
-    android_form().map_or_else(idiom_phone, |form| form == FormFactor::Phone)
+    crate::device::reported_android_form()
+        .map_or_else(idiom_phone, |form| form == FormFactor::Phone)
 }
 
 fn idiom_phone() -> bool {
@@ -76,7 +72,7 @@ pub fn scale_for(width: f32, height: f32, scales: bool) -> f32 {
 /// so a foldable phone unfolded takes the tablet's).
 pub fn now() -> f32 {
     let w = window();
-    if let Some(form) = android_form() {
+    if let Some(form) = crate::device::reported_android_form() {
         return match form {
             FormFactor::Tv => TV,
             FormFactor::Phone => PHONE,

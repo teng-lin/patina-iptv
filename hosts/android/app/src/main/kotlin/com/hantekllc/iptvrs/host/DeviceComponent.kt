@@ -59,6 +59,7 @@ internal class DeviceComponent(
     }
 
     private var reported: Map<String, Any>? = null
+    private var lastDimensions: Pair<Int, Int>? = null
     private var reportedAccessibility: Map<String, Any>? = null
     private var limits: Map<String, Any>? = null
     private val main = Handler(Looper.getMainLooper())
@@ -181,7 +182,11 @@ internal class DeviceComponent(
                 put("dpad", keys.dpad)
                 decoders?.let { put("decoders", it) }
             }
-        Log.i("nsh", "iptv device: $next (display ${display}dp, window ${config.smallestScreenWidthDp}dp)")
+        val dimensions = display to config.smallestScreenWidthDp
+        if (next != reported || dimensions != lastDimensions) {
+            Log.i("nsh", "iptv device: $next (display ${display}dp, window ${config.smallestScreenWidthDp}dp)")
+            lastDimensions = dimensions
+        }
         if (next != reported) {
             val formChanged = reported?.get("form") != form
             reported = next

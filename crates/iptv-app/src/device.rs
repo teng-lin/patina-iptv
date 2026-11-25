@@ -33,7 +33,7 @@
 
 use std::cell::Cell;
 
-use iptv_core::capabilities::{FormFactor, Host, Input};
+use iptv_core::capabilities::{FormFactor, Host, Input, Platform};
 use iptv_presentation::capabilities::Device;
 use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
@@ -124,6 +124,14 @@ pub fn host() -> Host {
     host
 }
 
+/// The form reported by the Android host, once its observer has attached.
+pub(crate) fn reported_android_form() -> Option<FormFactor> {
+    if built().platform != Platform::Android {
+        return None;
+    }
+    REPORTED.with(Cell::get)?.with(|report| report.form_factor)
+}
+
 /// The current surface's size class (reactive: its size, the guide's
 /// scale and the viewer's text size). Before the root mounts, and
 /// off the UI thread, there is no window: expanded, the class that
@@ -157,7 +165,6 @@ pub fn system_24_hour() -> Option<bool> {
 fn built() -> Host {
     #[cfg(feature = "test-support")]
     if let Some(name) = std::env::var_os("IPTV_TEST_PLATFORM") {
-        use iptv_core::capabilities::Platform;
         let platform = match name.to_str() {
             Some("android") => Platform::Android,
             Some("ipad") => Platform::Ipad,

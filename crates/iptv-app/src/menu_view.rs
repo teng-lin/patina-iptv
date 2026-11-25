@@ -955,6 +955,7 @@ fn bind_live_rows(ui: Ui) {
         };
         ui.guide_data();
         let Some(origin) = program_origin(&target) else {
+            ui.menu.set(None);
             return;
         };
         // The runtime's recording snapshot is published to the UI when it
@@ -977,7 +978,13 @@ fn bind_live_rows(ui: Ui) {
                 opened == program
                     && offset == crate::player::guide_offset(&*schedule, origin.channel),
             ),
-            Target::Program { .. } | Target::Group => return,
+            Target::Program { .. } => {
+                // The catalog no longer has this occurrence. Leave the
+                // guide's current focus in place.
+                ui.menu.set(None);
+                return;
+            }
+            Target::Group => return,
         };
         if ui
             .menu
