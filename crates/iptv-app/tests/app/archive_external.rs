@@ -376,7 +376,7 @@ finally:
         self.pids(event).len()
     }
     #[track_caller]
-    fn wait_until(&self, app: &mut Headless, label: &str, mut ready: impl FnMut() -> bool) {
+    fn wait_until(&self, app: &mut Headless, label: &str, ready: impl Fn() -> bool) {
         if let Err(error) = app.wait_until(label, WAIT, |_| ready()) {
             panic!(
                 "{error}; generated player events: {:?}",
