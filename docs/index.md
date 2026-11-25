@@ -11,6 +11,7 @@ link to them instead of duplicating release or validation instructions.
 | CI selection and required-check migration | [Validation tiers](ci.md) |
 | Publishing, signing, provenance and recovery | [Release runbook](release.md#release-contract-and-recovery) |
 | Disposable emulator operation and evidence | [Android validation](android-validation.md) |
+| Optimized Android release artifact checks | [Android release evidence](android-release-220.md) |
 | iOS simulator build, entitlements and synthetic run | [iOS simulator validation](ios-validation.md) |
 | Platform capability/support limits | [Capabilities](capabilities.md) |
 | Platform feature, operation and settings review | [Platform feature audit](platform-feature-audit.md) |
