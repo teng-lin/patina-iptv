@@ -46,6 +46,8 @@
 -keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.RecordingHost {
     static void setLanguage(java.lang.String);
     static void schedule(boolean);
+    static void notifyFailed(int);
+    static boolean standbyBlocksRecording();
 }
 -keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.ExternalPlayerHost {
     static boolean open(java.lang.String);

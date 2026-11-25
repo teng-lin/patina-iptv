@@ -15,6 +15,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     "Ports",
     "Runtime",
     "RuntimeEvent",
+    // Incomplete-capture reason passed to the Android recording host.
+    "RecordingFailure",
     // Acknowledged worker gate, only named by synthetic test-support helpers.
     "TestGate",
     // Backup progress, errors and the operation in progress.

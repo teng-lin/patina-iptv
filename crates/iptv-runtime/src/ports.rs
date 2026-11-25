@@ -37,6 +37,15 @@ pub trait MaybeSync {}
 #[cfg(not(feature = "native"))]
 impl<T: ?Sized> MaybeSync for T {}
 
+/// Why the recording host should post an incomplete-capture alert.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecordingFailure {
+    /// The capture failed or ended with incomplete media.
+    Unexpected,
+    /// The TV was already in standby when the capture worker took the job.
+    TvStandby,
+}
+
 #[derive(Clone)]
 pub struct Ports {
     pub directory: PathBuf,
@@ -47,6 +56,12 @@ pub struct Ports {
     /// idle-sleep hold) or lets go. Runs on a native worker; returns once
     /// the host has applied it.
     pub recording_schedule: fn(bool),
+    /// An active capture failed or ended with incomplete media. The host
+    /// may notify a viewer in the background. No recording metadata crosses.
+    pub recording_failed: fn(RecordingFailure),
+    /// Read whether TV standby currently prevents a capture from opening
+    /// or resuming. Runs on a native blocking worker.
+    pub recording_standby: Option<fn() -> bool>,
     pub database_key: Arc<KeyBroker>,
     pub exclude_from_backup: fn(&Path) -> io::Result<()>,
     pub startup_mark: fn(&'static str, String),
@@ -100,6 +115,8 @@ impl Ports {
             directory,
             background_recordings: false,
             recording_schedule: |_| {},
+            recording_failed: |_| {},
+            recording_standby: None,
             database_key: Arc::new(database_key),
             exclude_from_backup: |_| Ok(()),
             startup_mark: |_, _| {},

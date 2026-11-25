@@ -5,6 +5,7 @@
     <string name="recording_background">录制正在后台继续</string>
     <string name="recording_stopped_channel">提前停止的录制</string>
     <string name="recording_stopped_title">录制已停止</string>
-    <string name="recording_stopped_tv_off">电视已关闭。此前录制的内容在“录制”中。</string>
+    <string name="recording_stopped_tv_off">电视已关闭。请在“录制”中查看详情。</string>
     <string name="recording_stopped_background_limit">已达到 Android 的后台时间限制。此前录制的内容在“录制”中。</string>
+    <string name="recording_failed_background">后台录制已中断。</string>
 </resources>

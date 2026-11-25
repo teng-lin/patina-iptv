@@ -365,6 +365,18 @@ fn space_admission_counts_a_library_not_created_yet_as_empty() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn recording_storage_queries_free_space_on_the_windows_data_volume() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("Generated recording library");
+    std::fs::create_dir(&root).unwrap();
+    assert!(available_space(&root).is_some());
+    assert_eq!(available_space(&root.join("missing")), None);
+    let truncated = directory.path().join("Generated recording library\0suffix");
+    assert_eq!(available_space(&truncated), None);
+}
+
 #[tokio::test]
 async fn a_capture_the_host_stops_early_keeps_its_partial_file_and_the_reason() {
     let directory = tempfile::tempdir().unwrap();
@@ -383,6 +395,165 @@ async fn a_capture_the_host_stops_early_keeps_its_partial_file_and_the_reason() 
     assert_eq!(job.message, host::EarlyStop::TvOff.reason());
     assert!(owner.recordings.lock().stop_reasons.is_empty());
     assert!(owner.drain_services());
+}
+
+#[test]
+fn repeated_host_stops_skip_captures_already_closing() {
+    let state = State::default();
+    let stopped_by_viewer = JobId(41);
+    let stopped_by_host = JobId(42);
+    {
+        let mut data = state.lock();
+        let viewer_stop = CancelToken::new();
+        viewer_stop.cancel();
+        let lease = data.lease(1);
+        data.active
+            .insert(stopped_by_viewer, (lease.clone(), viewer_stop));
+        data.active
+            .insert(stopped_by_host, (lease, CancelToken::new()));
+    }
+    assert_eq!(state.stop_captures(host::EarlyStop::TvOff), 1);
+    assert_eq!(state.stop_captures(host::EarlyStop::TvOff), 0);
+    assert_eq!(state.stop_captures(host::EarlyStop::BackgroundLimit), 0);
+    let data = state.lock();
+    assert!(data.active.values().all(|(_, stop)| stop.is_canceled()));
+    assert!(!data.stop_reasons.contains_key(&stopped_by_viewer));
+    assert_eq!(
+        data.stop_reasons.get(&stopped_by_host),
+        Some(&host::EarlyStop::TvOff.reason())
+    );
+}
+
+#[tokio::test]
+async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool() {
+    static STANDBY_NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
+    for recovering in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("generated-app");
+        let mut ports = crate::Ports::new(root.clone(), |_| {
+            Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+        });
+        ports.recording_standby = Some(|| true);
+        ports.recording_failed = |reason| STANDBY_NOTICES.lock().unwrap().push(reason);
+        let owner = Runtime::new(ports);
+        owner.start_services();
+        let mut request = seed(&owner, "https://example.test/generated.ts").await;
+        request.start = now();
+        request.end = request.start + 60;
+        let id = if recovering {
+            let id = JobId(909);
+            std::fs::create_dir_all(media_directory(&root)).unwrap();
+            std::fs::write(path(&owner.services(), id, true), [0x47; 188]).unwrap();
+            owner
+                .services()
+                .call(move |store| {
+                    store.schedule_recording(id, &request, request.start)?;
+                    let recording = store.recording_job(id)?.expect("generated job");
+                    assert!(store.claim_recording(&recording)?);
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            owner.start_recordings();
+            id
+        } else {
+            owner.schedule_recording(request).await.unwrap()
+        };
+
+        let job = until(&owner, id, |job| !job.status.active()).await;
+        assert_eq!(job.message, host::EarlyStop::TvOff.reason());
+        if recovering {
+            assert_eq!((job.status, job.bytes), (Status::Partial, 188));
+            assert_eq!(
+                std::fs::read(owner.recording_file(id).await.unwrap()).unwrap(),
+                [0x47; 188]
+            );
+        } else {
+            assert_eq!((job.status, job.bytes), (Status::Failed, 0));
+        }
+        assert!(!path(&owner.services(), id, true).exists());
+        assert!(owner.drain_services());
+        assert_eq!(
+            std::mem::take(&mut *STANDBY_NOTICES.lock().unwrap()),
+            [crate::RecordingFailure::TvStandby]
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_capture_that_fails_to_open_notifies_the_host_once() {
+    static OPEN_FAILURE_NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    let mut ports = crate::Ports::new(root.clone(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_failed = |reason| OPEN_FAILURE_NOTICES.lock().unwrap().push(reason);
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    // The accepted job cannot open a spool if a file blocks its media directory.
+    std::fs::write(media_directory(&root), b"generated obstructing file").unwrap();
+    request.start = now();
+    request.end = request.start + 60;
+    let id = JobId(910);
+    owner
+        .services()
+        .call(move |store| store.schedule_recording(id, &request, request.start))
+        .await
+        .unwrap();
+    owner.start_recordings();
+    let job = until(&owner, id, |job| job.status == Status::Failed).await;
+    assert!(job.message.contains("storage unavailable"));
+    assert!(owner.drain_services());
+    assert_eq!(
+        *OPEN_FAILURE_NOTICES.lock().unwrap(),
+        [crate::RecordingFailure::Unexpected]
+    );
+}
+
+#[tokio::test]
+async fn an_expired_active_capture_keeps_its_media_and_reports_recovery_once() {
+    use std::sync::atomic::AtomicUsize;
+    static EXPIRED_CAPTURE_NOTICES: AtomicUsize = AtomicUsize::new(0);
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("generated-app");
+    let mut ports = crate::Ports::new(root.clone(), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_failed = |reason| {
+        assert_eq!(reason, crate::RecordingFailure::Unexpected);
+        EXPIRED_CAPTURE_NOTICES.fetch_add(1, Ordering::Relaxed);
+    };
+    let owner = Runtime::new(ports);
+    owner.start_services();
+    let mut request = seed(&owner, "https://example.test/generated.ts").await;
+    request.start = now() - 120;
+    request.end = now() - 60;
+    let id = JobId(911);
+    std::fs::create_dir_all(media_directory(&root)).unwrap();
+    std::fs::write(path(&owner.services(), id, true), [0x47; 188]).unwrap();
+    owner
+        .services()
+        .call(move |store| {
+            store.schedule_recording(id, &request, request.start)?;
+            let recording = store.recording_job(id)?.expect("generated job");
+            assert!(store.claim_recording(&recording)?);
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // Startup recovery is idempotent even if it sees the same terminal row again.
+    recover(&owner.services()).await.unwrap();
+    recover(&owner.services()).await.unwrap();
+    let job = until(&owner, id, |job| job.status == Status::Partial).await;
+    assert_eq!(job.bytes, 188);
+    assert_eq!(job.message, "Interrupted when the app closed");
+    let media = owner.recording_file(id).await.unwrap();
+    assert_eq!(std::fs::read(media).unwrap(), [0x47; 188]);
+    assert!(owner.drain_services());
+    assert_eq!(EXPIRED_CAPTURE_NOTICES.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test]
@@ -735,8 +906,18 @@ fn duplicate_accounts_share_connections_and_unknown_limits_are_conservative() {
 
 #[tokio::test]
 async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
+    use std::sync::atomic::AtomicUsize;
+    static CAPACITY_FAILURE_NOTICES: AtomicUsize = AtomicUsize::new(0);
     let directory = tempfile::tempdir().unwrap();
-    let owner = owner(&directory.path().join("catalog"));
+    let mut ports = crate::Ports::new(directory.path().join("catalog"), |_| {
+        Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
+    });
+    ports.recording_failed = |reason| {
+        assert_eq!(reason, crate::RecordingFailure::Unexpected);
+        CAPACITY_FAILURE_NOTICES.fetch_add(1, Ordering::Relaxed);
+    };
+    let owner = Runtime::new(ports);
+    owner.start_services();
     let mut request = seed(&owner, "https://example.test/generated.ts").await;
     assert!(owner.reserve_viewing(0, SourceId(request.source)));
     request.start = now() + 2;
@@ -746,6 +927,7 @@ async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
     assert!(job.message.contains("connection"));
     assert_eq!(owner.recordings.lock().viewers.len(), 1);
     assert!(owner.drain_services());
+    assert_eq!(CAPACITY_FAILURE_NOTICES.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

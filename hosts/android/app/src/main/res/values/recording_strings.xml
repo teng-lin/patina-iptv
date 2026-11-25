@@ -5,6 +5,7 @@
     <string name="recording_background">Your recording continues in the background</string>
     <string name="recording_stopped_channel">Recordings stopped early</string>
     <string name="recording_stopped_title">Recording stopped</string>
-    <string name="recording_stopped_tv_off">The TV was turned off. What was recorded until then is in Recordings.</string>
+    <string name="recording_stopped_tv_off">The TV was turned off. Check Recordings for details.</string>
     <string name="recording_stopped_background_limit">Android\'s background time limit was reached. What was recorded until then is in Recordings.</string>
+    <string name="recording_failed_background">A background recording was interrupted.</string>
 </resources>

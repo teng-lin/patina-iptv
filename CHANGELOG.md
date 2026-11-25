@@ -93,6 +93,9 @@ is below 1.0, a minor release may change behavior.
 
 - A Stalker refresh whose live pages fail keeps the last complete channel
   catalog and reports the failure for retry instead of publishing partial rows.
+- Android TV recordings use the TV foreground-service type, and captures keep
+  partial media when Low Power Standby prevents a restart. Android can notify
+  when a background capture fails. Windows checks free space before recording.
 - Pin the macOS Android resource compiler used by local Android validation.
 - Keep Android tablets at tablet scale in split screen and refresh hardware
   keyboard and D-pad controls as devices attach or detach. Open player and

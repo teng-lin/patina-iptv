@@ -230,7 +230,7 @@ impl EarlyStop {
 
 /// Stops every capture running for the data directory `directory`, for
 /// `why`: each closes its file and is kept as a partial recording that
-/// gives the reason. Returns how many were running.
+/// gives the reason. Returns how many newly started closing.
 pub fn stop_captures(directory: &Path, why: EarlyStop) -> usize {
     let state = hosts()
         .lock()
@@ -246,6 +246,7 @@ impl State {
         let running: Vec<_> = data
             .active
             .iter()
+            .filter(|(_, (_, stop))| !stop.is_canceled())
             .map(|(id, (_, stop))| (*id, stop.clone()))
             .collect();
         for (id, stop) in &running {

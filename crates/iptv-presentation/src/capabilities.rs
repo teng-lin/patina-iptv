@@ -315,7 +315,7 @@ pub struct CaptureLimits {
 /// Message IDs for what the viewer must know as Record now starts on
 /// `host` with `limits`, most important first: on a TV, that turning it
 /// off stops the recording; on a phone or a tablet, a metered network; on
-/// Android 15 and later, the background limit; on a desktop, sleep it
+/// an Android handheld, the background limit; on a desktop, sleep it
 /// could not prevent.
 pub fn record_now_notices(host: Host, limits: CaptureLimits) -> Vec<&'static str> {
     use iptv_core::capabilities::FormFactor;
@@ -327,11 +327,6 @@ pub fn record_now_notices(host: Host, limits: CaptureLimits) -> Vec<&'static str
                 notices.push(key(
                     "Recording stops when the TV is turned off; what was recorded until then is kept.",
                 ));
-            }
-            // A TV turned off without Low Power Standby, or left on another
-            // app, records in the background too.
-            if limits.background_hours {
-                notices.push(background);
             }
         }
         FormFactor::Phone | FormFactor::Tablet => {
@@ -455,16 +450,14 @@ mod tests {
             sleep_allowed: true,
             ..none
         };
-        // A TV is limited in the background too, after its standby notice.
         let tv_both = CaptureLimits {
             standby_stops: true,
             background_hours: true,
             ..none
         };
         let notices = record_now_notices(tv, tv_both);
-        assert_eq!(notices.len(), 2);
+        assert_eq!(notices.len(), 1);
         assert!(notices[0].contains("TV is turned off"));
-        assert!(notices[1].contains("six hours"));
         assert!(record_now_notices(desktop, sleep)[0].contains("awake"));
         assert!(record_now_notices(tv, sleep).is_empty());
     }

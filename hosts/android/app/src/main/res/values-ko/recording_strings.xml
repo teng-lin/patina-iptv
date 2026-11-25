@@ -5,6 +5,7 @@
     <string name="recording_background">녹화가 백그라운드에서 계속됩니다</string>
     <string name="recording_stopped_channel">중간에 중지된 녹화</string>
     <string name="recording_stopped_title">녹화 중지됨</string>
-    <string name="recording_stopped_tv_off">TV가 꺼졌습니다. 그때까지 녹화된 내용은 녹화에 있습니다.</string>
+    <string name="recording_stopped_tv_off">TV가 꺼졌습니다. 자세한 내용은 녹화에서 확인하세요.</string>
     <string name="recording_stopped_background_limit">Android 백그라운드 시간 제한에 도달했습니다. 그때까지 녹화된 내용은 녹화에 있습니다.</string>
+    <string name="recording_failed_background">백그라운드 녹화가 중단되었습니다.</string>
 </resources>
