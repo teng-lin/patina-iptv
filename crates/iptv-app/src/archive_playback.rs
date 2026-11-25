@@ -135,9 +135,14 @@ pub(crate) fn select(
     program: Program,
     playing_context: bool,
 ) {
-    let Some(choice) =
-        Choice::capture(&*crate::runtime_owner::schedule(), list, channel, program, playing_context).map(Rc::new)
-    else {
+    let Some(choice) = Choice::capture(
+        &*crate::runtime_owner::schedule(),
+        list,
+        channel,
+        program,
+        playing_context,
+    )
+    .map(Rc::new) else {
         return;
     };
     let Some((channel, _)) = choice.resolve(ui) else {

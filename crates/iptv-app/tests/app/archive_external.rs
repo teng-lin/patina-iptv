@@ -198,7 +198,7 @@ fn both_archive_entries_fall_back_once_without_an_external_handler() {
         assert_eq!(iptv_app::player_opens(0), before + 1);
         // The missing-handler reset offer can stay over the guide. Dismiss it
         // before returning from full screen, without changing the preference.
-        if app.shows("id:menu-panel") {
+        if app.screen().matches("id:menu-panel").unwrap() {
             step(app.back());
         }
         back_to_guide(app);
@@ -232,11 +232,23 @@ fn a_menu_archive_waits_for_parental_pin_and_cancel_opens_nothing() {
     menu_replay(app);
     step(app.wait_for("id:parental-layer >> text:Enter parental PIN"));
     assert_eq!(iptv_app::player_opens(0), before);
-    assert!(!app.shows("id:menu-panel >> text:Turn off external player"));
-    assert!(!app.shows("text:No external player is installed, so this channel plays here."));
+    assert!(
+        !app.screen()
+            .matches("id:menu-panel >> text:Turn off external player")
+            .unwrap()
+    );
+    assert!(
+        !app.screen()
+            .matches("text:No external player is installed, so this channel plays here.")
+            .unwrap()
+    );
     step(app.press("id:parental-cancel"));
     assert_eq!(iptv_app::player_opens(0), before);
-    assert!(!app.shows("id:menu-panel >> text:Turn off external player"));
+    assert!(
+        !app.screen()
+            .matches("id:menu-panel >> text:Turn off external player")
+            .unwrap()
+    );
     menu_replay(app);
     step(app.wait_for("id:parental-layer >> text:Enter parental PIN"));
     pin(app);
@@ -260,7 +272,7 @@ fn fullscreen_restart_keeps_the_playing_channel_outside_the_browse_group() {
     step(app.wait_until("first captured archive playing", WAIT, |_| {
         !sources.lock().unwrap().is_empty()
     }));
-    if app.shows("id:menu-panel") {
+    if app.screen().matches("id:menu-panel").unwrap() {
         step(app.back());
     }
     back_to_guide(app);
@@ -279,7 +291,11 @@ fn fullscreen_restart_keeps_the_playing_channel_outside_the_browse_group() {
     );
     exact_archive(sources.lock().unwrap().last().unwrap(), at + 3600);
     assert_eq!(iptv_app::player_opens(0), before + 1);
-    assert!(!app.shows("id:menu-panel >> text:Turn off external player"));
+    assert!(
+        !app.screen()
+            .matches("id:menu-panel >> text:Turn off external player")
+            .unwrap()
+    );
 }
 
 #[cfg(target_os = "linux")]
@@ -317,6 +333,7 @@ while not release.exists():
     time.sleep(0.01)
 try:
     url = pathlib.Path(sys.argv[-1]).read_text().splitlines()[-1]
+    record('requested')
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
             response.read(1)
@@ -358,6 +375,15 @@ finally:
     fn count(&self, event: &str) -> usize {
         self.pids(event).len()
     }
+    #[track_caller]
+    fn wait_until(&self, app: &mut Headless, label: &str, mut ready: impl FnMut() -> bool) {
+        if let Err(error) = app.wait_until(label, WAIT, |_| ready()) {
+            panic!(
+                "{error}; generated player events: {:?}",
+                std::fs::read_to_string(&self.log).unwrap_or_default()
+            );
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -385,7 +411,7 @@ fn fullscreen_same_group_restart_transfers_the_captured_player_once() {
             !sources.lock().unwrap().is_empty()
         }),
     );
-    if app.shows("id:menu-panel") {
+    if app.screen().matches("id:menu-panel").unwrap() {
         step(app.back());
     }
     iptv_app::set_external_player_handler(Some(true));
@@ -394,11 +420,11 @@ fn fullscreen_same_group_restart_transfers_the_captured_player_once() {
     step(app.press_key("shift+f10"));
     step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
     step(app.press("id:menu-panel >> text:Play from the beginning"));
-    step(app.wait_until(
+    player.wait_until(
+        app,
         "same-group full-screen choice admitted externally",
-        WAIT,
-        |_| player.count("admitted") == 1,
-    ));
+        || player.count("admitted") == 1,
+    );
     step(
         app.wait_until("native source retired for the handoff", WAIT, |_| {
             !iptv_app::player_has_source(0)
@@ -431,11 +457,9 @@ fn both_archive_entries_handoff_once_and_a_superseded_group_never_reaches_upstre
         } else {
             step(app.press_key("enter"));
         }
-        step(
-            app.wait_until("one admitted synthetic external player", WAIT, |_| {
-                player.count("admitted") == index + 1
-            }),
-        );
+        player.wait_until(app, "one admitted synthetic external player", || {
+            player.count("admitted") == index + 1
+        });
         assert_eq!(player.count("launched"), index + 1);
         assert_eq!(
             iptv_app::player_opens(0),

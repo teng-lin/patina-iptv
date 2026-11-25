@@ -74,7 +74,10 @@ impl Ui {
             ProgramSelection::Live => browse_playback::select(*self),
             ProgramSelection::Replay => {
                 let list = self.list.with_untracked(|list| {
-                    iptv_presentation::lists::ListId::of(list.entry(), &*crate::runtime_owner::schedule())
+                    iptv_presentation::lists::ListId::of(
+                        list.entry(),
+                        &*crate::runtime_owner::schedule(),
+                    )
                 });
                 crate::archive_playback::select(*self, list, channel, program, false);
             }

@@ -57,7 +57,7 @@ covers a same-group full-screen transfer across native source retirement.
 Private app tests check channel/UTC remapping and rejection after occurrence-end, source,
 channel authority, guide-offset or archive-window changes.
 
-After rebasing onto `6bff0438`, the final local macOS checks passed all
+After rebasing onto `eca70e68`, the final local macOS checks passed all
 three private archive-choice tests and all three app scenarios: both
 entry-point fallbacks, PIN cancellation/approval, and full-screen restart
 outside the browse group with both groups' external preferences enabled.
