@@ -134,8 +134,8 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stop(
 
 /// Stops every running capture early (#275), each kept as a partial
 /// recording with the reason: `why` 1, the TV was turned off under Low
-/// Power Standby; 2, Android's background time limit. Returns how many were
-/// running.
+/// Power Standby; 2, Android's background time limit. Returns how many
+/// newly started closing.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stopCaptures(
     mut env: jni::JNIEnv,

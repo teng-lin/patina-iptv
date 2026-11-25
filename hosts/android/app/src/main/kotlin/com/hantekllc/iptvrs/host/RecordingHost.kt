@@ -59,7 +59,7 @@ object RecordingHost {
 
     /** Stops running captures early, each kept as a partial recording with
      * the reason: [STOP_TV_OFF] or [STOP_BACKGROUND_LIMIT]. Returns how many
-     * were running. */
+     * newly started closing. */
     @JvmStatic external fun stopCaptures(
         path: String,
         why: Int,

@@ -1425,10 +1425,18 @@ async fn record(
 ) {
     // A cold sticky service can recover a pending job while the TV is
     // already off. There will be no new screen-off broadcast for that job.
-    let standby_on_claim = !stop.is_canceled() && (services.ports().recording_standby)();
-    if standby_on_claim {
-        stop.cancel();
-    }
+    let standby_on_claim = if !stop.is_canceled() && (services.ports().recording_standby)() {
+        // The platform query ran outside the lock. Recheck the token here
+        // to serialize the cancellation with a viewer's Stop or a host stop.
+        let _data = state.lock();
+        let cancel = !stop.is_canceled();
+        if cancel {
+            stop.cancel();
+        }
+        cancel
+    } else {
+        false
+    };
     let partial = path(services, job.id, true);
     let directory = media_directory(services.directory());
     let exclude = services.ports().exclude_from_backup;

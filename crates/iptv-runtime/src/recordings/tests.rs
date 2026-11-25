@@ -395,6 +395,33 @@ async fn a_capture_the_host_stops_early_keeps_its_partial_file_and_the_reason() 
     assert!(owner.drain_services());
 }
 
+#[test]
+fn repeated_host_stops_skip_captures_already_closing() {
+    let state = State::default();
+    let stopped_by_viewer = JobId(41);
+    let stopped_by_host = JobId(42);
+    {
+        let mut data = state.lock();
+        let viewer_stop = CancelToken::new();
+        viewer_stop.cancel();
+        let lease = data.lease(1);
+        data.active
+            .insert(stopped_by_viewer, (lease.clone(), viewer_stop));
+        data.active
+            .insert(stopped_by_host, (lease, CancelToken::new()));
+    }
+    assert_eq!(state.stop_captures(host::EarlyStop::TvOff), 1);
+    assert_eq!(state.stop_captures(host::EarlyStop::TvOff), 0);
+    assert_eq!(state.stop_captures(host::EarlyStop::BackgroundLimit), 0);
+    let data = state.lock();
+    assert!(data.active.values().all(|(_, stop)| stop.is_canceled()));
+    assert!(!data.stop_reasons.contains_key(&stopped_by_viewer));
+    assert_eq!(
+        data.stop_reasons.get(&stopped_by_host),
+        Some(&host::EarlyStop::TvOff.reason())
+    );
+}
+
 #[tokio::test]
 async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool() {
     static NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
