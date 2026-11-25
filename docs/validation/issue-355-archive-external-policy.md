@@ -46,6 +46,46 @@ issue-355 evidence directory: `baseline-apk-proof.json`,
 `baseline-comparison-proof.json` and `tv-baseline/manual` phases 07–13.
 The APK, native trees, screenshots and runtime logs are retained there.
 
+## Corrected native acceptance
+
+The installed Android TV artifact was built from
+`d19edd45e38e6b02f286cbeac3849e2f58f53f36`, using the same NSH pin:
+
+```text
+SHA-256 1d564ebb4d33e24d82561e7a2dcdfaf42a47182ca199fc8a84e3d2e399fa4b09
+Bytes   86546528
+```
+
+A fresh owned Android TV API 36 ARM64 emulator used the same generated
+News/channel/program occurrence and exact archive request as the baseline.
+The News preference remained enabled. Each case had independent activity,
+runtime-log and mock-server before/after windows:
+
+| Ordinary input | External handoffs | Internal opens | Observed media | Manifest fetches |
+|---|---:|---:|---|---:|
+| Replay | 1 | 0 | TestPlayer prepared, video rendering started, position 8→18 seconds while playing | 2 |
+| More options → Play from the beginning | 1 | 0 | TestPlayer prepared, video rendering started, position 8→18 seconds while playing | 2 |
+| Same menu action after removing only the synthetic TestPlayer | 0 | 1 | Native 1280×720, tracks and ready; visible timecode 00:00:03.440→00:00:31.200 | 1 |
+
+Every manifest request matched the channel/UTC/duration above. Repeated
+HLS fetches are counted separately from app handoffs. Each external return
+restored the exact News/channel/occurrence selection. The no-handler case
+also displayed the existing internal-playback guidance and reset offer.
+No playback retries were used.
+
+The retained evidence includes `candidate-d19-apk-proof.json`,
+`candidate-d19-native-comparison-proof.json` and its Markdown report,
+`tv-candidate-d19/manual` phases 00–22, and the independent per-case raw
+windows in `tv-candidate-d19/cases`.
+
+The later `879acd93cad8f9bd57f5054f8c4281a42f211d55` commit changes only the
+existing app test fixture: it serves supported generated HLS content and
+adds bounded HTTP failure diagnostics. Every other tracked file and mode
+matches the installed `d19edd45` source. The final validation-document
+update changes only this report. `fixture-hls-test-only-equivalence.json`
+records the comparison. The installed APK retains its original commit
+identity; these later commits are not relabeled as installed artifacts.
+
 ## Regression and acceptance boundaries
 
 The existing app harness contains generated catch-up scenarios for both
@@ -75,6 +115,20 @@ The final local checks also passed:
   and `-D warnings`; scoped formatting and `git diff --check`.
 - The 32-test CI-plan suite, including the test-executable budget.
 
-Corrected Android behavior and execution of the Linux relay scenarios
-remain required before completion is claimed. The macOS host cannot run
-the Linux generated-handler process tests.
+After the supported-HLS fixture correction, all three Mac archive
+scenarios and affected app Clippy passed again. The generated Linux
+handler probes relay HTTP admission; it makes no decoder claim.
+
+On `879acd93`, hosted Linux app validation passed all five archive
+scenarios, including both entry-point handoffs, the superseded-group
+rejection and same-group full-screen transfer. The full ordinary app suite
+passed 359 tests with four existing ignores. Validation run
+[45703804221](https://github.com/teng-lin/patina-iptv/actions/runs/45703804221),
+Linux app job
+[139520592081](https://github.com/teng-lin/patina-iptv/actions/runs/45703804221/job/139520592081),
+also passed its performance journeys and native lifecycle check. The
+retained raw log is `draft-368-879-linux-app-139520592081.log`.
+
+All selected draft jobs passed. The draft gate intentionally deferred
+coverage and smoke checks; complete validation of the final PR head is
+still required before merge.
