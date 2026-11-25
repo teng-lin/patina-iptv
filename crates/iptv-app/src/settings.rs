@@ -29,7 +29,7 @@
 
 use std::sync::Arc;
 
-use iptv_core::capabilities::{FormFactor, Platform};
+use iptv_core::capabilities::FormFactor;
 use iptv_presentation::capabilities::{Device, Keys};
 use iptv_presentation::layout::Class;
 use iptv_presentation::panels::Timeouts;
@@ -109,15 +109,9 @@ const SUMMED_UP: &[&str] = &["remote.key_overrides"];
 /// with the advanced settings.
 const ZAPPING: &[&str] = &["guide.autoplay", "guide.switch_delay"];
 
-/// What the keys connected to `device` are set up as, if anything
-/// (`iptv_presentation::capabilities::keys`). An iPad does not report its
-/// keyboard yet (`device::ipad_input_unreported`), and keyboard shortcuts
-/// work there: it keeps the keyboard settings, so a keyboard user can
-/// always remap or turn off a single-key shortcut (WCAG 2.1.4).
+/// What the connected keys are set up as. iPadOS reports changes through
+/// GCKeyboard, so keyboard settings follow attachment without a rebuild.
 pub fn keys(device: Device) -> Option<Keys> {
-    if crate::host::IPAD && device.form_factor() != FormFactor::Tv {
-        return Some(Keys::Keyboard);
-    }
     iptv_presentation::capabilities::keys(device.host)
 }
 
@@ -220,13 +214,21 @@ pub fn handheld(form_factor: FormFactor) -> bool {
 /// - `guide.after_choosing`: a phone or a tablet always goes full screen
 ///   ([`stays_after_choosing`]).
 /// - `player.info_on_switch`: it applies to zapping with keys, which a
-///   phone or a tablet has only with a keyboard or a D-pad connected. An
-///   iPad keeps it: its connected input is not reported yet
-///   (`device::ipad_input_unreported`), so a keyboard there would not
-///   bring the row back.
+///   phone or a tablet has only with a keyboard or a D-pad connected. A
+///   connected iPad keyboard brings the row back immediately.
 fn by_device(device: Device, key: &str) -> Option<Offer> {
     let input = device.input();
     // Advanced settings: on the Advanced page (#281).
+    if matches!(
+        key,
+        "player.info_panel_timeout" | "player.controls_panel_timeout"
+    ) {
+        return Some(if device.form_factor() == FormFactor::Tv {
+            Offer::Advanced
+        } else {
+            Offer::Hidden
+        });
+    }
     match key {
         "catchup.forward_step" | "catchup.rewind_step" if !handheld(device.form_factor()) => {
             return Some(Offer::Advanced);
@@ -242,12 +244,7 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
             device.window == Class::Compact
         }
         "guide.fullscreen_timeout" => device.form_factor() != FormFactor::Tv,
-        "player.info_on_switch" => {
-            handheld(device.form_factor())
-                && device.host.platform != Platform::Ipad
-                && !input.keyboard
-                && !input.dpad
-        }
+        "player.info_on_switch" => handheld(device.form_factor()) && !input.keyboard && !input.dpad,
         _ => return None,
     };
     hidden.then_some(Offer::Hidden)
@@ -489,18 +486,28 @@ pub fn theme_of(s: &Settings) -> Theme {
     }
 }
 
-/// The player panels' auto-hide delays: the panel timeouts under
-/// Accessibility, never shorter than the system recommends to this viewer
+/// The player panels' auto-hide delays: fixed defaults except for TV
+/// Advanced settings, never shorter than the system recommends to this viewer
 /// ([`Recommended`], Android's accessibility timeout): the banner and the
 /// info card by its time to read, the card's actions, the control strip
 /// and the mouse's card by its time to act.
-pub fn timeouts_of(s: &Settings, recommended: Recommended) -> Timeouts {
+pub fn timeouts_of(s: &Settings, recommended: Recommended, form: FormFactor) -> Timeouts {
     let ms = |key| u64::try_from(s.duration_ms(key, &Target::Global)).unwrap_or(0);
     let fixed = Timeouts::default();
     Timeouts {
         banner_ms: fixed.banner_ms.max(recommended.text_ms),
-        info_ms: ms(keys::INFO_PANEL_TIMEOUT).max(recommended.text_ms),
-        controls_ms: ms(keys::CONTROLS_PANEL_TIMEOUT).max(recommended.controls_ms),
+        info_ms: (if form == FormFactor::Tv {
+            ms(keys::INFO_PANEL_TIMEOUT)
+        } else {
+            fixed.info_ms
+        })
+        .max(recommended.text_ms),
+        controls_ms: (if form == FormFactor::Tv {
+            ms(keys::CONTROLS_PANEL_TIMEOUT)
+        } else {
+            fixed.controls_ms
+        })
+        .max(recommended.controls_ms),
         // Not a setting: the desktop's controls hide soon after the mouse rests.
         pointer_ms: fixed.pointer_ms.max(recommended.controls_ms),
     }
@@ -550,7 +557,11 @@ pub fn bind(ui: Ui) {
     effect(move || {
         let s = read(ui);
         let theme = theme_of(&s);
-        let timeouts = timeouts_of(&s, crate::device::recommended());
+        let timeouts = timeouts_of(
+            &s,
+            crate::device::recommended(),
+            crate::device::host().form_factor,
+        );
         let span = s.int(iptv_settings::keys::GUIDE_VISIBLE_MINUTES, &Target::Global) as i32;
         untracked(|| {
             ui.app.theme.set(theme);
@@ -697,14 +708,17 @@ mod tests {
             ] {
                 assert_eq!(offer(key), Offer::Hidden, "{key}");
             }
-            // Kept on every device, the timeouts under Accessibility
-            // (#281).
-            for key in [
-                "player.info_panel_timeout",
-                "player.controls_panel_timeout",
-                "catchup.timebar_step",
-                "guide.visible_minutes",
-            ] {
+            for key in ["player.info_panel_timeout", "player.controls_panel_timeout"] {
+                assert_eq!(
+                    offer(key),
+                    if device.form_factor() == FormFactor::Tv {
+                        Offer::Advanced
+                    } else {
+                        Offer::Hidden
+                    }
+                );
+            }
+            for key in ["catchup.timebar_step", "guide.visible_minutes"] {
                 assert_eq!(offer(key), Offer::Active, "{key}");
             }
             // On the Advanced page on a desktop or a TV; a phone or a
@@ -765,12 +779,15 @@ mod tests {
             assert_eq!(shown("guide.after_choosing"), !held, "{what}");
             assert_eq!(shown("player.info_on_switch"), !held || keys, "{what}");
         }
-        // An iPad's keyboard is not reported yet: it keeps the row.
+        // An iPad follows the live connected-keyboard report.
         let ipad = Device {
-            host: iptv_core::capabilities::Host::of(Platform::Ipad),
+            host: iptv_core::capabilities::Host::of(iptv_core::capabilities::Platform::Ipad),
             window: Class::Expanded,
         };
-        assert_eq!(offer(ipad, "player.info_on_switch"), Offer::Active);
+        assert_eq!(offer(ipad, "player.info_on_switch"), Offer::Hidden);
+        let mut attached = ipad;
+        attached.host.input.keyboard = true;
+        assert_eq!(offer(attached, "player.info_on_switch"), Offer::Active);
     }
 
     #[test]
@@ -819,11 +836,10 @@ mod tests {
         for device in devices() {
             let offer = |key| offer(device, key);
             let input = device.input();
-            let has_keys = crate::host::IPAD
-                || match device.form_factor() {
-                    FormFactor::Tv | FormFactor::Desktop => true,
-                    FormFactor::Phone | FormFactor::Tablet => input.keyboard || input.dpad,
-                };
+            let has_keys = match device.form_factor() {
+                FormFactor::Tv | FormFactor::Desktop => true,
+                FormFactor::Phone | FormFactor::Tablet => input.keyboard || input.dpad,
+            };
             let page = if has_keys {
                 Offer::Active
             } else {
@@ -871,12 +887,12 @@ mod tests {
     fn panel_timeouts_follow_the_player_settings() {
         let none = Recommended::default();
         let mut s = Settings::new();
-        assert_eq!(timeouts_of(&s, none), Timeouts::default());
+        assert_eq!(timeouts_of(&s, none, FormFactor::Tv), Timeouts::default());
         s.set("player.info_panel_timeout", Value::secs(9)).unwrap();
         s.set("player.controls_panel_timeout", Value::secs(20))
             .unwrap();
         assert_eq!(
-            timeouts_of(&s, none),
+            timeouts_of(&s, none, FormFactor::Tv),
             Timeouts {
                 info_ms: 9_000,
                 controls_ms: 20_000,
@@ -894,7 +910,7 @@ mod tests {
         };
         let mut s = Settings::new();
         assert_eq!(
-            timeouts_of(&s, recommended),
+            timeouts_of(&s, recommended, FormFactor::Tv),
             Timeouts {
                 banner_ms: 10_000,
                 info_ms: 10_000,
@@ -905,9 +921,32 @@ mod tests {
         // A longer timeout of the viewer's own still wins.
         s.set("player.controls_panel_timeout", Value::secs(60))
             .unwrap();
-        assert_eq!(timeouts_of(&s, recommended).controls_ms, 60_000);
+        assert_eq!(
+            timeouts_of(&s, recommended, FormFactor::Tv).controls_ms,
+            60_000
+        );
     }
 
+    #[test]
+    fn hidden_panel_timeout_values_are_ignored_after_loading_or_restoring() {
+        let mut s = Settings::new();
+        s.set("player.info_panel_timeout", Value::secs(9)).unwrap();
+        s.set("player.controls_panel_timeout", Value::secs(60))
+            .unwrap();
+        for form in [FormFactor::Phone, FormFactor::Tablet, FormFactor::Desktop] {
+            assert_eq!(
+                timeouts_of(&s, Recommended::default(), form),
+                Timeouts::default()
+            );
+            let recommended = Recommended {
+                controls_ms: 30_000,
+                text_ms: 10_000,
+            };
+            let actual = timeouts_of(&s, recommended, form);
+            assert_eq!(actual.controls_ms, 30_000);
+            assert_eq!(actual.info_ms, 10_000);
+        }
+    }
     #[test]
     fn transparency_sets_the_overlay_alpha() {
         let mut s = Settings::new();

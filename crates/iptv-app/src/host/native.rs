@@ -2,6 +2,9 @@
 //! private directory, the database key comes from the OS key store, the
 //! network is `iptv-net`, work runs on threads, and recordings register
 //! with the OS scheduler.
+#[cfg(target_os = "ios")]
+mod ios_device;
+
 #[cfg(target_os = "android")]
 mod android_transport;
 mod clock;
@@ -146,6 +149,7 @@ pub mod exports {
     #[cfg(target_os = "ios")]
     #[native_components(ios)]
     pub fn components(components: &nsh_platform_ios::Components) {
+        super::ios_device::register(components);
         mpv::register(components, super::transport::policy);
     }
 }

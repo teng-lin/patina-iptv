@@ -60,8 +60,8 @@ pub type State = Multiview<usize>;
 /// The tiles multiview opens with now: a phone's, a tablet's and a TV's
 /// two, a desktop's four, never more than the device decodes at once
 /// (`crate::capabilities::multiview_offer`). Reactive, as it follows the
-/// device's signals: a session opened before a change keeps the limits it
-/// opened with, until the window no longer holds it
+/// device's signals: a session collapses when its admitted decoder budget
+/// shrinks or the window no longer holds it
 /// (`lifecycle::collapse`).
 pub fn tiles(ui: Ui) -> usize {
     match crate::capabilities::multiview_offer(ui) {
