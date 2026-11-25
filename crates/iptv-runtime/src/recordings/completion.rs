@@ -93,7 +93,24 @@ fn publish(services: &Services, completion: &RecordingCompletion) -> std::io::Re
     Ok(())
 }
 
-pub(super) async fn reconcile(services: &Services, completion: RecordingCompletion) -> Transition {
+fn report_failure(
+    services: &Services,
+    result: Transition,
+    notify: Option<crate::RecordingFailure>,
+) -> Transition {
+    if matches!(result, Transition::Applied)
+        && let Some(reason) = notify
+    {
+        (services.ports().recording_failed)(reason);
+    }
+    result
+}
+
+async fn reconcile(
+    services: &Services,
+    completion: RecordingCompletion,
+    notify_failure: Option<crate::RecordingFailure>,
+) -> Transition {
     let files = services.clone();
     let receipt = completion.clone();
     if !matches!(
@@ -121,24 +138,28 @@ pub(super) async fn reconcile(services: &Services, completion: RecordingCompleti
             .await
             .unwrap_or(false);
         if retained {
-            return retry(services, move |store| {
+            let result = retry(services, move |store| {
                 store.retain_partial_recording_completion(&completion)
             })
             .await;
+            return report_failure(services, result, notify_failure);
         }
         log::error!("recording media could not be finalized; recovery required");
         return Transition::Failed;
     }
-    retry(services, move |store| {
+    let incomplete = completion.status != Status::Completed;
+    let result = retry(services, move |store| {
         store.commit_recording_completion(&completion)
     })
-    .await
+    .await;
+    report_failure(services, result, notify_failure.filter(|_| incomplete))
 }
 
 pub(super) async fn finish(
     services: &Services,
     job: &Job,
     outcome: Result<&'static str, &'static str>,
+    notify_failure: Option<crate::RecordingFailure>,
 ) -> Transition {
     let partial = path(services, job.id, true);
     let evidence = services
@@ -155,7 +176,7 @@ pub(super) async fn finish(
     let (bytes, digest) = match evidence {
         Ok(Ok(evidence)) => evidence,
         _ => {
-            return super::transition(
+            let result = super::transition(
                 services,
                 job,
                 Status::Failed,
@@ -163,6 +184,7 @@ pub(super) async fn finish(
                 "Recording storage unavailable; retained media needs recovery",
             )
             .await;
+            return report_failure(services, result, notify_failure);
         }
     };
     let status = if bytes == 0 {
@@ -177,10 +199,9 @@ pub(super) async fn finish(
         status,
         bytes,
         digest,
-        message: if bytes == 0 {
-            "No media was recorded"
-        } else {
-            outcome.unwrap_or_else(|m| m)
+        message: match outcome {
+            Ok(_) if bytes == 0 => "No media was recorded",
+            Ok(message) | Err(message) => message,
         }
         .into(),
     };
@@ -191,7 +212,7 @@ pub(super) async fn finish(
     })
     .await
     {
-        Transition::Applied => reconcile(services, completion).await,
+        Transition::Applied => reconcile(services, completion, notify_failure).await,
         other => other,
     }
 }
@@ -202,7 +223,7 @@ pub(super) async fn recover(services: &Services, id: JobId) -> Option<Transition
         .read(move |store| store.recording_completion(id))
         .await
     {
-        Ok(Some(receipt)) => Some(reconcile(services, receipt).await),
+        Ok(Some(receipt)) => Some(reconcile(services, receipt, None).await),
         Ok(None) => None,
         Err(_) => Some(Transition::Failed),
     }
@@ -384,7 +405,7 @@ mod tests {
         let destination = path(&owner.services(), job.id, false);
         std::fs::write(&destination, [0x48; 188]).unwrap();
         assert!(matches!(
-            reconcile(&owner.services(), receipt.clone()).await,
+            reconcile(&owner.services(), receipt.clone(), None).await,
             Transition::Failed
         ));
         assert_eq!(std::fs::read(destination).unwrap(), [0x48; 188]);

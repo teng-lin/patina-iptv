@@ -65,6 +65,11 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
     ports.background_recordings = crate::capabilities::BUILT.background_recordings();
     ports.recording_schedule = recording_host::schedule;
+    #[cfg(target_os = "android")]
+    {
+        ports.recording_failed = recording_host::notify_failed;
+        ports.recording_standby = recording_host::standby_blocks_recording;
+    }
     ports.exclude_from_backup = platform_data::exclude_from_backup;
     ports.startup_mark = |phase, detail| crate::startup::mark_with(phase, detail);
     ports

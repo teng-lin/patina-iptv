@@ -1,6 +1,7 @@
 package com.hantekllc.iptvrs.host
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
@@ -20,7 +21,8 @@ import android.os.PowerManager
  * credentials stay in Rust. */
 object RecordingHost {
     @Volatile private var desiredActive = false
-    private lateinit var context: Context
+
+    @Volatile private lateinit var context: Context
 
     @JvmStatic fun setLanguage(tag: String) {
         main.post {
@@ -34,6 +36,20 @@ object RecordingHost {
     }
 
     private val main = Handler(Looper.getMainLooper())
+
+    @JvmStatic fun notifyFailed(reason: Int) {
+        main.post {
+            if (!::context.isInitialized) return@post
+            val process = ActivityManager.RunningAppProcessInfo()
+            ActivityManager.getMyMemoryState(process)
+            if (reason == STOP_TV_OFF || process.importance != ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                val message = if (reason == STOP_TV_OFF) R.string.recording_stopped_tv_off else R.string.recording_failed_background
+                CaptureLimits.notifyStopped(CaptureLimits.localized(context), message)
+            }
+        }
+    }
+
+    @JvmStatic fun standbyBlocksRecording(): Boolean = ::context.isInitialized && CaptureLimits.standbyBlocksRecording(context)
 
     @JvmStatic private external fun initialize()
 
@@ -221,14 +237,7 @@ class RecordingService : Service() {
                 intent: Intent,
             ) {
                 if (!CaptureLimits.tv(context) || !CaptureLimits.standbyStops(context)) return
-                val path = filesDir.absolutePath
-                worker.execute {
-                    val stopped = RecordingHost.stopCaptures(path, RecordingHost.STOP_TV_OFF)
-                    android.util.Log.i("nsh", "iptv recordings: TV off under Low Power Standby; stopped $stopped")
-                    if (stopped > 0) {
-                        CaptureLimits.notifyStopped(localized(), R.string.recording_stopped_tv_off)
-                    }
-                }
+                worker.execute { stopForStandby() }
             }
         }
     private var wakeLease: RecordingWakeLease? = null
@@ -238,16 +247,22 @@ class RecordingService : Service() {
 
     override fun onBind(intent: Intent?) = null
 
-    /** This service in the app's interface language. */
-    private fun localized(): Context {
-        val tag = getSharedPreferences("recording-host", Context.MODE_PRIVATE).getString("language", "")
-        val configuration = android.content.res.Configuration(resources.configuration)
-        if (!tag.isNullOrEmpty()) configuration.setLocale(java.util.Locale.forLanguageTag(tag))
-        return createConfigurationContext(configuration)
+    private fun stopForStandby() {
+        // The receiver can fire before the first service start command.
+        try {
+            System.loadLibrary("nsh")
+        } catch (_: UnsatisfiedLinkError) {
+            return
+        }
+        val stopped = RecordingHost.stopCaptures(filesDir.absolutePath, RecordingHost.STOP_TV_OFF)
+        android.util.Log.i("nsh", "iptv recordings: TV off under Low Power Standby; stopped $stopped")
+        if (stopped > 0) {
+            CaptureLimits.notifyStopped(CaptureLimits.localized(this), R.string.recording_stopped_tv_off)
+        }
     }
 
     fun refreshNotification() {
-        val localized = localized()
+        val localized = CaptureLimits.localized(this)
         val notifications = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) {
             notifications.createNotificationChannel(
@@ -318,6 +333,8 @@ class RecordingService : Service() {
                     return@execute
                 }
                 RecordingHost.attach(this)
+                // Catch a screen-off transition before the receiver attached.
+                if (CaptureLimits.standbyBlocksRecording(this)) stopForStandby()
                 if (RecordingHost.start(filesDir.absolutePath) == 0L) stopSelf()
             } catch (_: Exception) {
                 stopSelf()
@@ -338,7 +355,7 @@ class RecordingService : Service() {
             val stopped = RecordingHost.stopCaptures(path, RecordingHost.STOP_BACKGROUND_LIMIT)
             android.util.Log.i("nsh", "iptv recordings: background time limit; stopped $stopped")
             if (stopped > 0) {
-                CaptureLimits.notifyStopped(localized(), R.string.recording_stopped_background_limit)
+                CaptureLimits.notifyStopped(CaptureLimits.localized(this), R.string.recording_stopped_background_limit)
             }
             RecordingHost.stop(path)
         }

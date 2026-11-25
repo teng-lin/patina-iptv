@@ -7,4 +7,5 @@
     <string name="recording_stopped_title">Запись остановлена</string>
     <string name="recording_stopped_tv_off">Телевизор был выключен. Записанное до этого момента находится в разделе «Записи».</string>
     <string name="recording_stopped_background_limit">Достигнут лимит фоновой работы Android. Записанное до этого момента находится в разделе «Записи».</string>
+    <string name="recording_failed_background">Фоновая запись завершилась досрочно.</string>
 </resources>

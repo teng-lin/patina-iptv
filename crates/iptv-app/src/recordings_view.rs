@@ -461,7 +461,15 @@ fn start(ui: Ui, mut request: Request) {
         let result = owner.schedule_recording(request).await;
         match &result {
             // What can stop it, said as it starts (#275).
-            Ok(_) => crate::settings_view::notify(&crate::capture_limits::start_notice()),
+            Ok(_) => {
+                crate::settings_view::notify(&crate::capture_limits::start_notice());
+                // Permission is optional. A system prompt must not hold the
+                // recording action busy or delay either Start or Stop.
+                #[cfg(target_os = "android")]
+                crate::data::spawn_in_app(async {
+                    let _ = nsh_core::prelude::request_notification_permission().await;
+                });
+            }
             Err(error) => crate::settings_view::notify(translated_reason(
                 error
                     .unavailable_reason()

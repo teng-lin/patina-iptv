@@ -1423,6 +1423,12 @@ async fn record(
     stop: &CancelToken,
     shutdown: &CancelToken,
 ) {
+    // A cold sticky service can recover a pending job while the TV is
+    // already off. There will be no new screen-off broadcast for that job.
+    let standby_on_claim = !stop.is_canceled() && (services.ports().recording_standby)();
+    if standby_on_claim {
+        stop.cancel();
+    }
     let partial = path(services, job.id, true);
     let directory = media_directory(services.directory());
     let exclude = services.ports().exclude_from_backup;
@@ -1575,7 +1581,8 @@ async fn record(
     // The host stopped it early (`host::stop_captures`): kept as partial with
     // the reason, also when the recorder's shutdown followed, which would
     // otherwise keep it to resume.
-    let early = state.lock().stop_reasons.remove(&job.id);
+    let host_stop = state.lock().stop_reasons.remove(&job.id);
+    let early = host_stop.or(standby_on_claim.then(|| host::EarlyStop::TvOff.reason()));
     let outcome = early.map_or(outcome, Err);
     if early.is_none() && shutdown.is_canceled() && state.background() && job.request.end > now() {
         let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
@@ -1599,8 +1606,17 @@ async fn record(
     } else {
         outcome
     };
+    // The native host already notifies for each standby/timeout broadcast
+    // stop. A viewer's own Stop also requires no background alert.
+    let notify = if host_stop.is_some() {
+        None
+    } else if standby_on_claim {
+        Some(crate::RecordingFailure::TvStandby)
+    } else {
+        (!stop.is_canceled()).then_some(crate::RecordingFailure::Unexpected)
+    };
     if matches!(
-        completion::finish(services, job, outcome).await,
+        completion::finish(services, job, outcome, notify).await,
         completion::Transition::Failed
     ) {
         state.lock().finalization_errors.insert(job.id);

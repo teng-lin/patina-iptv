@@ -7,4 +7,5 @@
     <string name="recording_stopped_title">录制已停止</string>
     <string name="recording_stopped_tv_off">电视已关闭。此前录制的内容在“录制”中。</string>
     <string name="recording_stopped_background_limit">已达到 Android 的后台时间限制。此前录制的内容在“录制”中。</string>
+    <string name="recording_failed_background">后台录制提前结束。</string>
 </resources>

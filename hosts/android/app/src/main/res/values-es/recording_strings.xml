@@ -7,4 +7,5 @@
     <string name="recording_stopped_title">Grabación detenida</string>
     <string name="recording_stopped_tv_off">Se apagó el televisor. Lo grabado hasta entonces está en Grabaciones.</string>
     <string name="recording_stopped_background_limit">Se alcanzó el límite de tiempo en segundo plano de Android. Lo grabado hasta entonces está en Grabaciones.</string>
+    <string name="recording_failed_background">Una grabación en segundo plano terminó antes de tiempo.</string>
 </resources>

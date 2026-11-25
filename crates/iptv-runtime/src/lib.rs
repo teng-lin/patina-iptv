@@ -767,7 +767,7 @@ pub mod network;
 mod ports;
 mod publish;
 pub mod store_host;
-pub use ports::{MaybeSend, MaybeSync, Ports};
+pub use ports::{MaybeSend, MaybeSync, Ports, RecordingFailure};
 pub mod storage;
 pub mod time;
 

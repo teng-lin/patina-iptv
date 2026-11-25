@@ -171,9 +171,16 @@ file. Play Console declarations cover each type used by the release.
 [Android foreground-service types](https://developer.android.com/develop/background-work/services/fgs/service-types#media)
 · [Play Console foreground-service declarations](https://support.google.com/googleplay/android-developer/answer/13392821).
 
+On Android, the first accepted Record now can ask for notification
+permission. Recording can continue if the viewer declines. With notifications
+enabled, an unexpected interruption in the background posts a local alert.
+Recordings keeps the reason and any playable partial media.
+
 While a capture runs on Android, its foreground service is sticky: if
 Android kills the process, it restarts the service, which resumes the capture
-from what was written. Before Android 12 a 120-second exact watchdog alarm
+from what was written. A TV already off under Low Power Standby finalizes
+retained media and gives the standby reason without reopening the stream.
+Before Android 12 a 120-second exact watchdog alarm
 also restarts it. Patina does not ask for exact alarms, and from Android 12 an
 inexact alarm may neither come on time nor start a foreground service from
 the background, so none is armed there. Nothing restarts a capture after a

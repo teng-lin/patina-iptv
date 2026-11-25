@@ -7,4 +7,5 @@
     <string name="recording_stopped_title">Enregistrement arrêté</string>
     <string name="recording_stopped_tv_off">Le téléviseur a été éteint. Ce qui a été enregistré jusque-là se trouve dans Enregistrements.</string>
     <string name="recording_stopped_background_limit">La limite de temps en arrière-plan d\'Android a été atteinte. Ce qui a été enregistré jusque-là se trouve dans Enregistrements.</string>
+    <string name="recording_failed_background">Un enregistrement en arrière-plan s’est terminé prématurément.</string>
 </resources>
