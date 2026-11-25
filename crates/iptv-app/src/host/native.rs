@@ -63,7 +63,7 @@ pub(crate) const IMPORTS: bool = true;
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
-    ports.background_recordings = crate::capabilities::BUILT.background_recordings();
+    ports.background_recordings = crate::host::BUILT.background_recordings();
     ports.recording_schedule = recording_host::schedule;
     #[cfg(target_os = "android")]
     {

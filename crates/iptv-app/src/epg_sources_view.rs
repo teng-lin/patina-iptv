@@ -211,7 +211,7 @@ fn mark(ui: Ui, focused: bool) -> Mark {
 }
 
 fn time_label(at: i64) -> String {
-    crate::time::label(at, crate::time::wall_unix())
+    crate::clock::label(at, crate::clock::wall_unix())
 }
 
 fn contents_hidden(ui: Ui) -> bool {

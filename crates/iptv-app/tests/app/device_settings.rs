@@ -1,5 +1,5 @@
 //! Guide, player and display settings the device decides (#281), run
-//! headless with Android's observer simulated (`device.rs`,
+//! headless with Android's observer simulated (`device_wiring.rs`,
 //! `DeviceComponent.kt`):
 //!
 //! - the rows offered on a phone, a tablet, a TV and a desktop, with and

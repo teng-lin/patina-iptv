@@ -171,7 +171,7 @@ fn date_time(ui: Ui, size: Scale, pan: Pan) -> Text {
             "{}  {}",
             iptv_presentation::clock::date(
                 unix,
-                crate::time::offset_minutes(unix),
+                crate::clock::offset_minutes(unix),
                 crate::i18n::clock_style()
             ),
             clock(now)

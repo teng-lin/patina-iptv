@@ -24,10 +24,10 @@ use nsh_core::prelude::*;
 
 use crate::data::{self, Job, Purpose, Update};
 use crate::list_rows::Mark;
-use crate::play_bar::icons::{self, Icon};
 use crate::scale::Scale;
 use crate::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
+use crate::ui_kit::icons::{self, Icon};
 use crate::ui_kit::{self, ERROR};
 use crate::{Ui, tint};
 

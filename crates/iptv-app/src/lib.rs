@@ -45,11 +45,13 @@ mod capabilities;
 mod capture_limits;
 mod channels_view;
 mod chooser;
+mod clock;
 mod content_image;
 mod custom_groups;
 mod data;
 mod desktop;
 mod device;
+mod device_wiring;
 mod epg_sources_view;
 mod external_player;
 mod fav_editor;
@@ -57,6 +59,7 @@ mod favorites;
 mod fonts;
 mod grid;
 mod guide_assign_view;
+mod guide_clock;
 mod guide_inspect_view;
 mod guide_repair_view;
 mod header;
@@ -113,10 +116,17 @@ mod scale;
 mod search_view;
 mod seek;
 mod settings;
+mod settings_offer;
 mod settings_view;
+mod settings_wiring;
 mod setup_view;
 pub mod startup;
-pub mod time;
+mod startup_view;
+/// The app's guide clock and its UI tick.
+pub mod time {
+    pub use crate::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
+    pub use crate::guide_clock::{start, tick};
+}
 mod touch_zap;
 mod ui_kit;
 mod video;
@@ -225,7 +235,7 @@ pub struct SharedUi {
     pub picture: Signal<PictureSettings>,
     /// The stored playlists: which one is shown, their refreshes (`data.rs`).
     pub library: data::Library,
-    /// Bumped when a setting changes; read values with `settings::read`.
+    /// Bumped when a setting changes; read values with `settings_wiring::read`.
     pub settings: Signal<u64>,
     /// The streams the shown source's account allows at once, when it
     /// says (the runtime's, `multiview::account_limit`, as a signal for
@@ -317,7 +327,7 @@ pub struct Ui {
     /// The question before quitting during a capture, with its focused
     /// answer (`desktop::quit_confirm`).
     quit_confirm: Signal<Option<desktop::quit_confirm::Choice>>,
-    store_startup_failure: Signal<Option<startup::StoreFailure>>,
+    store_startup_failure: Signal<Option<startup_view::StoreFailure>>,
     store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
     pub playlists: Signal<Option<playlists_view::Open>>,
@@ -632,7 +642,7 @@ impl Ui {
     pub fn surface(&self, rgb_hex: u32) -> Rgba {
         let alpha = match self.mode.get() {
             // `appearance.ui_transparency`
-            ViewMode::Overlay => settings::overlay_alpha(&settings::read(*self)),
+            ViewMode::Overlay => theme::overlay_alpha(&settings_wiring::read(*self)),
             ViewMode::Guide | ViewMode::Fullscreen => 0x00,
         };
         tint(rgb_hex, alpha)
@@ -864,7 +874,7 @@ pub fn App() -> impl IntoElement {
                     })
                 })),
         )
-        .child(when(splash, startup::splash))
+        .child(when(splash, startup_view::splash))
 }
 
 /// Constructed once after recovery; all player surfaces belong to this owner.
@@ -872,9 +882,9 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     settings::load();
     startup::mark("settings loaded");
     // Establish host-report signals before eager feature bindings subscribe.
-    let device_bridge = device::bridge();
+    let device_bridge = device_wiring::bridge();
     let ui = Ui::new(SharedUi::new(), player::Player::new());
-    settings::bind(ui);
+    settings_wiring::bind(ui);
     browse_playback::bind(ui);
     interruption::bind(ui);
     desktop::bind(ui);
@@ -891,7 +901,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     #[cfg(feature = "test-support")]
     performance_probe::bind(ui);
     data::start(ui);
-    time::start(ui);
+    guide_clock::start(ui);
     player::bind(ui);
     player::watch_time::bind(ui);
     data::pages::bind(ui);
@@ -1079,7 +1089,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(wizard_view::layer(ui))
         .child(backup::layer(ui))
         .child(parental_view::layer(ui))
-        .child(startup::store_failure_layer(ui))
+        .child(startup_view::store_failure_layer(ui))
         .child(desktop::quit_confirm::layer(ui))
         // The question before leaving, over every screen it can be asked
         // from (the first run's welcome screen too); mounted only while it
@@ -1269,7 +1279,9 @@ fn bind_back(ui: Ui) {
         // being typed and a pending Long Back release are handled first.
         let leaves = match ui.top_overlay() {
             Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
-            Some(overlays::Overlay::StoreStartupFailure) => startup::store_failure_back_leaves(ui),
+            Some(overlays::Overlay::StoreStartupFailure) => {
+                startup_view::store_failure_back_leaves(ui)
+            }
             None if !desktop::fullscreen() => match back_target.get() {
                 (ViewMode::Guide, Pane::Rail, false) => true,
                 (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
@@ -1314,7 +1326,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 chooser::close(ui);
                 true
             }
-            _ if top == Some(Overlay::StoreStartupFailure) => startup::store_failure_back(ui),
+            _ if top == Some(Overlay::StoreStartupFailure) => startup_view::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
                 true

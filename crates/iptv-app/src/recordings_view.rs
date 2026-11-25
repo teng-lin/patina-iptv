@@ -182,7 +182,7 @@ pub fn current(ui: Ui) {
     };
     // Record starts recording a program on now. A future or ended one is not
     // scheduled: recording future programs is retired (#273).
-    if !can_record_now(origin, crate::time::now_minute()) {
+    if !can_record_now(origin, crate::clock::now_minute()) {
         crate::settings_view::notify(tr("Only a program on now can be recorded"));
         return;
     }
@@ -207,7 +207,7 @@ pub fn can_record_now(origin: Origin, now: i32) -> bool {
 pub fn record_details(ui: Ui, origin: Origin) {
     if ui.player_surface != 0
         || !details_button()
-        || !can_record_now(origin, crate::time::now_minute())
+        || !can_record_now(origin, crate::clock::now_minute())
     {
         return;
     }
@@ -241,7 +241,7 @@ pub fn recording_active(ui: Ui) -> bool {
         s.starting
             .as_ref()
             .is_some_and(|r| r.source == source && r.channel == channel)
-            || s.active_on(source, &channel, crate::time::wall_unix())
+            || s.active_on(source, &channel, crate::clock::wall_unix())
                 .is_some()
     })
 }
@@ -257,7 +257,7 @@ pub fn toggle_current(ui: Ui) {
         return;
     };
     let job = ui.recordings.with_untracked(|s| {
-        s.active_on(source, &channel, crate::time::wall_unix())
+        s.active_on(source, &channel, crate::clock::wall_unix())
             .cloned()
     });
     if let Some(job) = job {
@@ -280,7 +280,7 @@ pub fn record_now(ui: Ui) {
         ui,
         Origin {
             channel,
-            program_start: crate::time::now_minute(),
+            program_start: crate::clock::now_minute(),
         },
         false,
     );
@@ -309,7 +309,7 @@ fn start_origin(ui: Ui, origin: Origin, remembered: bool) {
         crate::settings_view::notify(tr("Choose an available channel"));
         return;
     };
-    let now = crate::time::wall_unix();
+    let now = crate::clock::wall_unix();
     // Repeated taps are idempotent, including before the next UI status poll.
     if crate::runtime().recording_snapshot().iter().any(|job| {
         job.source_current
@@ -340,7 +340,7 @@ fn request(origin: Origin) -> Option<Request> {
         channel,
         channel_name: crate::channel_name(origin.channel),
         title: crate::listing_labels::listing(schedule.listing(origin.channel, program)),
-        start: crate::guide::unix_of(&*schedule, program.start).max(crate::time::wall_unix()),
+        start: crate::guide::unix_of(&*schedule, program.start).max(crate::clock::wall_unix()),
         end: crate::guide::unix_of(&*schedule, program.end),
     })
 }
@@ -381,7 +381,7 @@ fn channel_action(ui: Ui, origin: Origin) -> Option<(MenuItem, Option<Job>)> {
     // Only a program on now records, where the device offers Record now. A
     // recording already running or carried over can still be stopped or
     // canceled above.
-    (program.airing(crate::time::now_minute()) == crate::guide::Airing::Live
+    (program.airing(crate::clock::now_minute()) == crate::guide::Airing::Live
         && crate::capabilities::record_now().offered())
     .then_some((MenuItem::RecordNow, None))
 }
@@ -415,7 +415,7 @@ pub fn remember(ui: Ui, origin: Origin) {
 fn start(ui: Ui, mut request: Request) {
     // A parental PIN may have been entered since the request was made: the
     // capture starts now, or the runtime would count the wait as a gap.
-    let now = crate::time::wall_unix();
+    let now = crate::clock::wall_unix();
     request.start = request.start.max(now);
     if let Err(message) = request.validate(now) {
         crate::settings_view::notify(tr(message));
@@ -700,7 +700,7 @@ pub fn key(ui: Ui, action: Action) {
     }
 }
 fn date(unix: i64) -> String {
-    crate::time::label(unix, crate::time::wall_unix())
+    crate::clock::label(unix, crate::clock::wall_unix())
 }
 
 fn status(job: &Job) -> &'static str {
@@ -736,7 +736,7 @@ fn action_view(ui: Ui, size: Scale) -> impl IntoElement {
                                 tr(status_label(j.status)),
                                 j.request.channel_name,
                                 date(j.request.start),
-                                crate::time::time_only(j.request.end),
+                                crate::clock::time_only(j.request.end),
                                 media,
                                 translated_reason(&j.message)
                             )
@@ -879,8 +879,8 @@ fn retired_line(schedule: &iptv_core::recording::RetiredSchedule) -> String {
         "{} · {} · {} {} · {}",
         schedule.title,
         schedule.channel_name,
-        crate::time::date_only(schedule.start),
-        crate::time::time_only(schedule.start),
+        crate::clock::date_only(schedule.start),
+        crate::clock::time_only(schedule.start),
         match schedule.repeat {
             Repeat::Once => tr("Once"),
             Repeat::Daily => tr("Every day"),

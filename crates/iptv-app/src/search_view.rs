@@ -375,7 +375,7 @@ fn run_search(ui: Ui, query: &str) {
         ..Default::default()
     };
     let mut programs =
-        crate::runtime().search_programs(query, crate::time::wall_unix(), &*schedule, opts);
+        crate::runtime().search_programs(query, crate::clock::wall_unix(), &*schedule, opts);
     channels.retain_mut(|hit| {
         let Some(channel) = resolve_result_channel(&crate::runtime(), &hit.identity, &*schedule)
         else {

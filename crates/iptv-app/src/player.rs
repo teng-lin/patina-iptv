@@ -215,7 +215,7 @@ fn later(ui: Ui, delay: Duration, f: impl FnOnce() + 'static) {
 /// The viewer's clock, with the local UTC offset at `at` (the program's
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
-    let now = crate::time::wall_unix();
+    let now = crate::clock::wall_unix();
     crate::runtime::playback::clock(now, at)
 }
 

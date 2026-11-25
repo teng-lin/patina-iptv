@@ -175,7 +175,7 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
 /// catalog's now, with the same column focused.
 pub(super) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     let player = kept.player.take();
-    let now = crate::time::now_minute_in(&*catalog);
+    let now = crate::clock::now_minute_in(&*catalog);
     let (mut focus, list) = restored_list(
         kept,
         catalog.clone(),

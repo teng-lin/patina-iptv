@@ -5,9 +5,11 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use iptv_core::capabilities::Host;
 use iptv_nav::{
     Action, BackGuard, Context, Decision, HeldPresses, Keymap, Phase, Press, Profile, RemoteKey,
 };
+use iptv_presentation::capabilities::Keys;
 use nsh_core::keymap::Keystroke;
 use nsh_core::prelude::*;
 use nsh_core::{KeyCapture, KeyEvent};
@@ -64,6 +66,17 @@ mod keyboard_repeats {
         let repeats = REPEATS.lock().unwrap_or_else(|e| e.into_inner());
         repeats.as_ref()?.get(name).copied()
     }
+}
+
+/// What the connected keys are set up as. iPadOS reports changes through
+/// GCKeyboard, so keyboard settings follow attachment without a rebuild.
+pub(crate) fn keys_for(host: Host) -> Option<Keys> {
+    iptv_presentation::capabilities::keys(host)
+}
+
+/// [`keys_for`] now (reactive).
+pub(crate) fn keys_now() -> Option<Keys> {
+    keys_for(crate::device::host())
 }
 
 /// Whether keys arrive as a remote's raw phases and tell a tap from a hold.
@@ -810,7 +823,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::StoreStartupFailure) {
-        crate::startup::store_failure_key(ui, action);
+        crate::startup_view::store_failure_key(ui, action);
         return;
     }
     if top == Some(Overlay::Vod) {

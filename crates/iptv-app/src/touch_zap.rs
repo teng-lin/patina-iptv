@@ -27,6 +27,12 @@ const PANEL_ALPHA: u8 = 0xE0;
 /// The preview banner's height, about: it is centered on the finger.
 const PREVIEW_HEIGHT: f32 = 76.0;
 
+/// Swiping over video needs a touch-capable layout. Outside a running
+/// app, where no device is known, offer the setting.
+pub(crate) fn swipe_offered() -> bool {
+    try_os().is_none() || crate::play_bar::pointer_available()
+}
+
 /// Shared by the video and its UI ancestor, so a second finger on a
 /// sibling control cancels the video's gesture too.
 #[derive(Clone, Copy)]
@@ -317,11 +323,11 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
     let (id, icon) = match direction {
         Direction::Next => (
             "play-bar-next-channel",
-            crate::play_bar::icons::Icon::ChannelNext,
+            crate::ui_kit::icons::Icon::ChannelNext,
         ),
         Direction::Previous => (
             "play-bar-previous-channel",
-            crate::play_bar::icons::Icon::ChannelPrevious,
+            crate::ui_kit::icons::Icon::ChannelPrevious,
         ),
     };
     let label = move || match direction {
@@ -347,7 +353,7 @@ pub(crate) fn button(ui: Ui, direction: Direction) -> impl IntoElement {
             zap(ui, direction);
         })
         .child(
-            svg(move || crate::play_bar::icons::src(icon))
+            svg(move || crate::ui_kit::icons::src(icon))
                 .size(px(18.0))
                 .text_color(rgb(WHITE)),
         )

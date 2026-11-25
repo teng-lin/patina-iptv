@@ -227,7 +227,7 @@ fn history(ui: Ui, size: Scale) -> impl IntoElement {
         .flex_1()
         .gap(move || size.px(8.0))
         .child(ui_kit::heading(size, move || {
-            if !options(&crate::settings::read(ui)).show_history {
+            if !options(&crate::settings_wiring::read(ui)).show_history {
                 ""
             } else if count() == 0 {
                 tr("No recent searches yet")

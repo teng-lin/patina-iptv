@@ -1,6 +1,6 @@
 //! The app's clock: the guide's "now" (from the wall clock for real data,
 //! from when the schedule was shown for synthetic data), local-time labels
-//! and the minute tick that advances [`iptv_presentation::guide::Focus::now`].
+//! and the next minute boundary.
 //!
 //! Local time comes from the host (`crate::host::offset_minutes`); natively
 //! from the C library's `localtime_r` (`tm_gmtoff`), per
@@ -12,15 +12,13 @@
 //! Other non-Unix targets fall back to UTC.
 
 pub(crate) use crate::host::offset_minutes;
-use crate::host::reload_time_zone;
 use nsh_core::time::Instant;
 use std::cell::Cell;
 use std::time::Duration;
 
 use iptv_core::guide;
-use nsh_core::prelude::*;
 
-use crate::{Ui, schedule};
+use crate::schedule;
 
 thread_local! {
     /// When the current schedule was shown (synthetic now starts there).
@@ -83,29 +81,8 @@ pub fn time_only(unix: i64) -> String {
     iptv_presentation::clock::time_at(unix, offset_minutes(unix), crate::i18n::clock_style())
 }
 
-/// Moves the guide's now when the minute changed.
-pub fn tick(ui: Ui) {
-    reload_time_zone();
-    let now = now_minute();
-    if ui.focus.with(|f| f.now) != now {
-        // The focus is on a row of the list on screen.
-        let view = crate::lists::view(ui);
-        ui.focus.update(|f| {
-            f.tick(now, &view);
-        });
-    }
-}
-
-/// Ticks at every minute boundary of the current schedule's clock.
-pub fn start(ui: Ui) {
-    // Synthetic work-counter journeys exclude unrelated minute-boundary work.
-    #[cfg(feature = "test-support")]
-    if crate::performance_probe::enabled() {
-        return;
-    }
+/// Time until just after the next guide minute boundary.
+pub(crate) fn next_tick() -> Duration {
     let secs = guide::secs_to_next_minute(&*schedule(), wall_unix(), shown_secs());
-    let _task = set_timeout(Duration::from_millis(secs * 1000 + 20), move || {
-        tick(ui);
-        start(ui);
-    });
+    Duration::from_millis(secs * 1000 + 20)
 }

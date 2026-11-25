@@ -460,7 +460,7 @@ fn title(ui: Ui, row: &Row) -> String {
                 format!(
                     "{} · {}",
                     tr("History"),
-                    crate::time::label(h.created_at, crate::time::wall_unix())
+                    crate::clock::label(h.created_at, crate::clock::wall_unix())
                 )
             })
         })
@@ -756,8 +756,8 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     state(ui, |s| {
                         format!(
                             "{} — {}",
-                            crate::time::label(s.request.window.from, crate::time::wall_unix()),
-                            crate::time::label(s.request.window.to, crate::time::wall_unix())
+                            crate::clock::label(s.request.window.from, crate::clock::wall_unix()),
+                            crate::clock::label(s.request.window.to, crate::clock::wall_unix())
                         )
                     })
                     .unwrap_or_default()

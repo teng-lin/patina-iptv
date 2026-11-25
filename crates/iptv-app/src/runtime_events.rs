@@ -86,7 +86,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             ui.store_startup_failure.set(None);
         }),
         RuntimeEvent::StoreStartupFailed { path, error } => {
-            crate::startup::store_failed(ui, path, error)
+            crate::startup_view::store_failed(ui, path, error)
         }
         RuntimeEvent::Notify(message) => crate::settings_view::notify(crate::i18n::tr(message)),
         RuntimeEvent::ResumeFullscreen => {
@@ -118,7 +118,7 @@ fn schedule_changed(
         crate::player::stop_archive_after_clock_edit(ui, &*previous, &*current);
         crate::menu_view::invalidate_shifted_context(ui, &*previous, &*current);
         if let ScheduleCause::Catalog { has_vod, any_vod } = cause {
-            crate::time::mark_shown();
+            crate::clock::mark_shown();
             if ui
                 .playing
                 .get_untracked()
@@ -158,7 +158,7 @@ pub(crate) fn focused_channel(ui: Ui) -> Option<usize> {
 }
 
 /// The headless scenarios' stand-in for an import reporting the shown
-/// account's connection limit (`device.rs`'s test seam).
+/// account's connection limit (`device_wiring.rs`'s test seam).
 #[cfg(feature = "test-support")]
 pub(crate) fn account_streams_reported(limit: Option<u32>) {
     crate::runtime().emit(RuntimeEvent::AccountStreams(limit));
