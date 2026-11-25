@@ -246,8 +246,8 @@ fn restore_ui(ui: crate::Ui) {
                 offer_restart().await;
             }
             Err(error) => {
-                let message = report("scheduling a restore", error);
                 if error.rejection().is_some() {
+                    report("scheduling a restore", error);
                     let _ = nsh_base::alert_dialog()
                         .title(tr("Backup could not be restored"))
                         .description(rejection_description(error))
@@ -255,7 +255,7 @@ fn restore_ui(ui: crate::Ui) {
                         .show()
                         .await;
                 } else {
-                    crate::settings_view::notify(tr(message));
+                    crate::settings_view::notify(tr(report("scheduling a restore", error)));
                 }
             }
         }
