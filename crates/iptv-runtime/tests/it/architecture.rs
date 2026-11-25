@@ -72,7 +72,7 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     // The sliced publish where the host keeps the store, and that host's
     // port (opening, persistence, the publish copy).
     "publish.rs",
-    "publish/tests/catalog_import.rs", // Encrypted fixture for the cooperative publication driver.
+    "publish/tests/catalog_import_tests.rs", // Encrypted fixture for the cooperative publication driver.
     "store_host.rs",
     "recordings.rs",
     "recordings/completion.rs",

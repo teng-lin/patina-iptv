@@ -750,5 +750,5 @@ mod tests {
         assert!(service.drain_on_shutdown_with(|| {}));
     }
 
-    mod catalog_import;
+    mod catalog_import_tests;
 }
