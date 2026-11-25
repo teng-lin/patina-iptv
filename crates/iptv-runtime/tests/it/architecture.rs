@@ -119,6 +119,12 @@ const STATICS: &[(&str, &str)] = &[
     ("recordings/tests.rs", "CALLS"),
     ("recordings/tests.rs", "GATE"),
     ("recordings/tests.rs", "PUBLISHED"),
+    // Separate fixtures for the function-pointer notification port, each
+    // scoped to the recording test that writes and checks it.
+    ("recordings/tests.rs", "STANDBY_NOTICES"),
+    ("recordings/tests.rs", "OPEN_FAILURE_NOTICES"),
+    ("recordings/tests.rs", "EXPIRED_CAPTURE_NOTICES"),
+    ("recordings/tests.rs", "CAPACITY_FAILURE_NOTICES"),
 ];
 
 fn sources(directory: &Path, files: &mut Vec<PathBuf>) {

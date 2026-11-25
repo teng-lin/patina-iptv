@@ -426,7 +426,7 @@ fn repeated_host_stops_skip_captures_already_closing() {
 
 #[tokio::test]
 async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool() {
-    static NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
+    static STANDBY_NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
     for recovering in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("generated-app");
@@ -434,7 +434,7 @@ async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool(
             Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
         });
         ports.recording_standby = Some(|| true);
-        ports.recording_failed = |reason| NOTICES.lock().unwrap().push(reason);
+        ports.recording_failed = |reason| STANDBY_NOTICES.lock().unwrap().push(reason);
         let owner = Runtime::new(ports);
         owner.start_services();
         let mut request = seed(&owner, "https://example.test/generated.ts").await;
@@ -474,7 +474,7 @@ async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool(
         assert!(!path(&owner.services(), id, true).exists());
         assert!(owner.drain_services());
         assert_eq!(
-            std::mem::take(&mut *NOTICES.lock().unwrap()),
+            std::mem::take(&mut *STANDBY_NOTICES.lock().unwrap()),
             [crate::RecordingFailure::TvStandby]
         );
     }
@@ -482,13 +482,13 @@ async fn tv_standby_rejects_new_and_recovered_captures_without_losing_the_spool(
 
 #[tokio::test]
 async fn a_capture_that_fails_to_open_notifies_the_host_once() {
-    static NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
+    static OPEN_FAILURE_NOTICES: Mutex<Vec<crate::RecordingFailure>> = Mutex::new(Vec::new());
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("generated-app");
     let mut ports = crate::Ports::new(root.clone(), |_| {
         Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
     });
-    ports.recording_failed = |reason| NOTICES.lock().unwrap().push(reason);
+    ports.recording_failed = |reason| OPEN_FAILURE_NOTICES.lock().unwrap().push(reason);
     let owner = Runtime::new(ports);
     owner.start_services();
     let mut request = seed(&owner, "https://example.test/generated.ts").await;
@@ -507,7 +507,7 @@ async fn a_capture_that_fails_to_open_notifies_the_host_once() {
     assert!(job.message.contains("storage unavailable"));
     assert!(owner.drain_services());
     assert_eq!(
-        *NOTICES.lock().unwrap(),
+        *OPEN_FAILURE_NOTICES.lock().unwrap(),
         [crate::RecordingFailure::Unexpected]
     );
 }
@@ -515,7 +515,7 @@ async fn a_capture_that_fails_to_open_notifies_the_host_once() {
 #[tokio::test]
 async fn an_expired_active_capture_keeps_its_media_and_reports_recovery_once() {
     use std::sync::atomic::AtomicUsize;
-    static NOTICES: AtomicUsize = AtomicUsize::new(0);
+    static EXPIRED_CAPTURE_NOTICES: AtomicUsize = AtomicUsize::new(0);
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("generated-app");
     let mut ports = crate::Ports::new(root.clone(), |_| {
@@ -523,7 +523,7 @@ async fn an_expired_active_capture_keeps_its_media_and_reports_recovery_once() {
     });
     ports.recording_failed = |reason| {
         assert_eq!(reason, crate::RecordingFailure::Unexpected);
-        NOTICES.fetch_add(1, Ordering::Relaxed);
+        EXPIRED_CAPTURE_NOTICES.fetch_add(1, Ordering::Relaxed);
     };
     let owner = Runtime::new(ports);
     owner.start_services();
@@ -553,7 +553,7 @@ async fn an_expired_active_capture_keeps_its_media_and_reports_recovery_once() {
     let media = owner.recording_file(id).await.unwrap();
     assert_eq!(std::fs::read(media).unwrap(), [0x47; 188]);
     assert!(owner.drain_services());
-    assert_eq!(NOTICES.load(Ordering::Relaxed), 1);
+    assert_eq!(EXPIRED_CAPTURE_NOTICES.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test]
@@ -907,14 +907,14 @@ fn duplicate_accounts_share_connections_and_unknown_limits_are_conservative() {
 #[tokio::test]
 async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
     use std::sync::atomic::AtomicUsize;
-    static NOTICES: AtomicUsize = AtomicUsize::new(0);
+    static CAPACITY_FAILURE_NOTICES: AtomicUsize = AtomicUsize::new(0);
     let directory = tempfile::tempdir().unwrap();
     let mut ports = crate::Ports::new(directory.path().join("catalog"), |_| {
         Ok(iptv_store_sqlite::DatabaseKey::from_bytes([17; 32]))
     });
     ports.recording_failed = |reason| {
         assert_eq!(reason, crate::RecordingFailure::Unexpected);
-        NOTICES.fetch_add(1, Ordering::Relaxed);
+        CAPACITY_FAILURE_NOTICES.fetch_add(1, Ordering::Relaxed);
     };
     let owner = Runtime::new(ports);
     owner.start_services();
@@ -927,7 +927,7 @@ async fn a_connection_conflict_fails_recording_without_stopping_the_viewer() {
     assert!(job.message.contains("connection"));
     assert_eq!(owner.recordings.lock().viewers.len(), 1);
     assert!(owner.drain_services());
-    assert_eq!(NOTICES.load(Ordering::Relaxed), 1);
+    assert_eq!(CAPACITY_FAILURE_NOTICES.load(Ordering::Relaxed), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
