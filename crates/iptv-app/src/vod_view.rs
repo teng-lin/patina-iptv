@@ -64,7 +64,6 @@ fn cycle_sort(ui: Ui) {
     });
     reload(ui, false);
     if let Err(error) = crate::settings::set(
-        ui,
         iptv_settings::keys::VOD_SORT.as_str(),
         iptv_settings::Value::choice(choice_of(sort)),
     ) {

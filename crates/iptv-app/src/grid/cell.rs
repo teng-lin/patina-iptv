@@ -131,7 +131,9 @@ pub(super) fn cell(
     });
     let colors = computed(move || {
         let overlay = match ui.mode.get() {
-            ViewMode::Overlay => Some(crate::settings::overlay_alpha(&crate::settings::read(ui))),
+            ViewMode::Overlay => Some(crate::theme::overlay_alpha(&crate::settings_wiring::read(
+                ui,
+            ))),
             ViewMode::Guide | ViewMode::Fullscreen => None,
         };
         let (g, window) = ui.app.theme.with(|t| (t.guide(), t.background.window));

@@ -1,11 +1,11 @@
 //! Adapter for the core's cancelable live-preview policy.
 use crate::{Playback, Ui, ViewMode};
-use iptv_core::capabilities::Host;
+use iptv_core::capabilities::{FormFactor, Host};
 use iptv_core::guide::Airing;
 use iptv_nav::Context;
 use iptv_presentation::browse_playback::{BrowsePlayback, Effect, Policy, Surface, Target};
 use iptv_presentation::channel_list::ListPane;
-use iptv_settings::keys;
+use iptv_settings::{Settings, keys};
 use nsh_core::prelude::*;
 use std::time::Duration;
 
@@ -74,8 +74,29 @@ pub(crate) fn autoplay_supported(host: Host) -> bool {
     !crate::device::handheld(host.form_factor) || crate::input::keys_for(host).is_some()
 }
 
+/// Whether choosing a channel in the guide over the video or in the
+/// channel list keeps it open (`guide.after_choosing`) on a device of
+/// `form_factor`. A phone or a tablet always goes full screen. The guide's
+/// preview layout does not ask: there the first choice tunes the preview,
+/// and choosing the playing channel goes full screen (`browse_playback`).
+fn stays_after_choosing(s: &Settings, form_factor: FormFactor) -> bool {
+    !crate::device::handheld(form_factor)
+        && s.choice(keys::GUIDE_AFTER_CHOOSING, &iptv_settings::Target::Global) == "stay"
+}
+
+/// `guide.fullscreen_timeout` on a device of `form_factor`, in ms: a
+/// TV's only; elsewhere 0 (never).
+fn fullscreen_timeout_ms(s: &Settings, form_factor: FormFactor) -> u64 {
+    if form_factor == FormFactor::Tv {
+        u64::try_from(s.duration_ms(keys::FULLSCREEN_TIMEOUT, &iptv_settings::Target::Global))
+            .unwrap_or(0)
+    } else {
+        0
+    }
+}
+
 fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
-    let s = crate::settings::read(ui);
+    let s = crate::settings_wiring::read(ui);
     let at = &iptv_settings::Target::Global;
     // The form factor only: a resized window changes nothing here.
     let host = crate::device::host();
@@ -91,7 +112,7 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         fullscreen_ms: if surface == Some(Surface::Player) {
             0
         } else {
-            crate::settings::fullscreen_timeout_ms(&s, form_factor)
+            fullscreen_timeout_ms(&s, form_factor)
         },
         // The preview layout decides on every device (d77033af): the first
         // choice tunes the preview, choosing the playing channel again goes
@@ -99,7 +120,7 @@ fn policy(ui: Ui, surface: Option<Surface>) -> Policy {
         // follow `guide.after_choosing`.
         stay: match surface {
             Some(Surface::Guide | Surface::Player) => true,
-            _ => crate::settings::stays_after_choosing(&s, form_factor),
+            _ => stays_after_choosing(&s, form_factor),
         },
     }
 }
@@ -342,5 +363,32 @@ pub fn zap_by(ui: Ui, channel: usize, touch: bool) {
             surface: Surface::Player,
         }));
         select(ui);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iptv_settings::Value;
+
+    #[test]
+    fn the_stay_choice_and_the_full_screen_timeout_follow_the_device() {
+        let mut s = Settings::new();
+        s.set("guide.after_choosing", Value::choice("stay"))
+            .unwrap();
+        s.set("guide.fullscreen_timeout", Value::secs(5)).unwrap();
+        for (form, stays, timeout) in [
+            (FormFactor::Phone, false, 0),
+            (FormFactor::Tablet, false, 0),
+            (FormFactor::Desktop, true, 0),
+            (FormFactor::Tv, true, 5_000),
+        ] {
+            assert_eq!(stays_after_choosing(&s, form), stays, "{form:?}");
+            assert_eq!(fullscreen_timeout_ms(&s, form), timeout, "{form:?}");
+        }
+        // The default goes full screen everywhere.
+        let s = Settings::new();
+        assert!(!stays_after_choosing(&s, FormFactor::Tv));
+        assert!(!stays_after_choosing(&s, FormFactor::Desktop));
     }
 }

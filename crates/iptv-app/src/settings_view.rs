@@ -247,11 +247,11 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                     || !crate::runtime().parental_settings_allowed())
             {
                 crate::parental_view::protected_settings(ui, move || {
-                    if let Err(e) = crate::settings::set(ui, key, value) {
+                    if let Err(e) = crate::settings::set(key, value) {
                         notify_setting_error(e);
                     }
                 });
-            } else if let Err(e) = crate::settings::set(ui, key, value) {
+            } else if let Err(e) = crate::settings::set(key, value) {
                 notify_setting_error(e);
             }
         }

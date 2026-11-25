@@ -118,6 +118,7 @@ mod seek;
 mod settings;
 mod settings_offer;
 mod settings_view;
+mod settings_wiring;
 mod setup_view;
 pub mod startup;
 mod startup_view;
@@ -234,7 +235,7 @@ pub struct SharedUi {
     pub picture: Signal<PictureSettings>,
     /// The stored playlists: which one is shown, their refreshes (`data.rs`).
     pub library: data::Library,
-    /// Bumped when a setting changes; read values with `settings::read`.
+    /// Bumped when a setting changes; read values with `settings_wiring::read`.
     pub settings: Signal<u64>,
     /// The streams the shown source's account allows at once, when it
     /// says (the runtime's, `multiview::account_limit`, as a signal for
@@ -641,7 +642,7 @@ impl Ui {
     pub fn surface(&self, rgb_hex: u32) -> Rgba {
         let alpha = match self.mode.get() {
             // `appearance.ui_transparency`
-            ViewMode::Overlay => settings::overlay_alpha(&settings::read(*self)),
+            ViewMode::Overlay => theme::overlay_alpha(&settings_wiring::read(*self)),
             ViewMode::Guide | ViewMode::Fullscreen => 0x00,
         };
         tint(rgb_hex, alpha)
@@ -883,7 +884,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     // Establish host-report signals before eager feature bindings subscribe.
     let device_bridge = device_wiring::bridge();
     let ui = Ui::new(SharedUi::new(), player::Player::new());
-    settings::bind(ui);
+    settings_wiring::bind(ui);
     browse_playback::bind(ui);
     interruption::bind(ui);
     desktop::bind(ui);

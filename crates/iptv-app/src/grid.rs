@@ -71,7 +71,7 @@ pub fn channel_width() -> f32 {
 /// overlay's alpha (`appearance.ui_transparency`).
 pub(crate) fn fill(ui: Ui, rgb_hex: u32) -> Rgba {
     let alpha = match ui.mode.get() {
-        ViewMode::Overlay => crate::settings::overlay_alpha(&crate::settings::read(ui)),
+        ViewMode::Overlay => crate::theme::overlay_alpha(&crate::settings_wiring::read(ui)),
         ViewMode::Guide | ViewMode::Fullscreen => 0xFF,
     };
     tint(rgb_hex, alpha)
@@ -121,7 +121,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
     let column: fn() -> f32 = channel_width;
     // Rows are numbered by place: the list's length is its widest number.
     let number_w = computed(move || {
-        crate::settings::read(ui);
+        crate::settings_wiring::read(ui);
         if crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_CHANNEL_NUMBERS) {
             crate::numbers::column_width(
                 ui.list.with(|l| l.len()),

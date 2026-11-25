@@ -189,12 +189,8 @@ fn same(s: &Editor, b: &KeyBinding) -> bool {
         && b.key == s.key.name()
         && (b.press == PressKind::Long) == (s.press == Press::Long)
 }
-fn store(ui: Ui, bindings: Vec<KeyBinding>) {
-    if let Err(e) = settings::set(
-        ui,
-        keys::KEY_OVERRIDES.as_str(),
-        Value::KeyBindings(bindings),
-    ) {
+fn store(bindings: Vec<KeyBinding>) {
+    if let Err(e) = settings::set(keys::KEY_OVERRIDES.as_str(), Value::KeyBindings(bindings)) {
         log::warn!("iptv remote: {e}");
     }
 }
@@ -215,7 +211,7 @@ fn save(ui: Ui) {
         },
         b.action.token(),
     ));
-    store(ui, bindings);
+    store(bindings);
     update(ui, |s| s.confirm = None);
 }
 fn activate(ui: Ui, field: Field) {
@@ -227,7 +223,7 @@ fn activate(ui: Ui, field: Field) {
         if s.accept {
             match confirm {
                 Confirm::Replace => save(ui),
-                Confirm::Reset => store(ui, Vec::new()),
+                Confirm::Reset => store(Vec::new()),
             }
         }
         update(ui, |s| s.confirm = None);
@@ -251,7 +247,7 @@ fn activate(ui: Ui, field: Field) {
         Field::Clear => {
             let mut b = saved();
             b.retain(|b| !same(&s, b));
-            store(ui, b);
+            store(b);
         }
         Field::Reset => update(ui, |s| {
             s.confirm = Some(Confirm::Reset);
