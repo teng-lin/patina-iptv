@@ -264,7 +264,7 @@ pub(crate) fn saved_follows(app: &mut Headless, path: &std::path::Path, on: bool
 /// presses "right" or "down" by the input under test.
 pub(crate) fn to_follows_row(app: &mut Headless, key: impl Fn(&mut Headless, &str)) {
     key(app, "right");
-    step(app.wait_for("text:Hide the info panel after"));
+    step(app.wait_for("text:Show info on a channel change"));
     let help = "text:In multiview, hear the tile you select instead of choosing Listen to this.";
     for _ in 0..40 {
         if app.screen().matches(help).unwrap() {
