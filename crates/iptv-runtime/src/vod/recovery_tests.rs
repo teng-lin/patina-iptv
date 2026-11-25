@@ -1,4 +1,4 @@
-//! Native portal episode coordinates, bounded discovery and stale detail admission.
+//! Native playback policy, episode coordinates and stale detail admission.
 use super::*;
 use iptv_providers::{
     ContentId,
@@ -69,6 +69,211 @@ impl Provider {
             .expect("provider fixture did not finish");
         self.task.take().unwrap().join().unwrap();
         self.requests.lock().unwrap().clone()
+    }
+}
+
+#[test]
+fn xtream_movie_and_episode_resolution_checks_public_accounts_and_keeps_lan_origins() {
+    use iptv_providers::{Secret, model::XtreamCredentials};
+    for (server, public_only) in [
+        ("https://panel.example.test", true),
+        ("http://127.0.0.1:8080", false),
+        ("http://10.0.0.2:8080", false),
+    ] {
+        for episode in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let database_key = crate::model::DatabaseKey::from_bytes([0x56; 32]);
+            let config = SourceConfig::Xtream(XtreamCredentials {
+                server_url: server.into(),
+                username: Secret::new("generated-viewer"),
+                password: Secret::new("generated-password"),
+                user_agent: Some("Generated-Player/1.0".into()),
+            });
+            let mut store = iptv_store_sqlite::Store::open_encrypted(
+                directory.path().join("iptv.sqlite"),
+                &database_key,
+            )
+            .unwrap();
+            let source = store
+                .add_source(&Source {
+                    name: "Generated playback policy".into(),
+                    config: config.clone(),
+                })
+                .unwrap();
+            let movie = iptv_providers::xtream::parse_vod_streams(
+                &iptv_providers::HttpResponse::ok(r#"[{"stream_id":56,"name":"Generated movie"}]"#),
+            )
+            .unwrap();
+            let series =
+                iptv_providers::xtream::parse_series_list(&iptv_providers::HttpResponse::ok(
+                    r#"[{"series_id":56,"name":"Generated series"}]"#,
+                ))
+                .unwrap();
+            store
+                .replace_catalog(source, &[], &[], &movie.items, &series.items)
+                .unwrap();
+            let parent = Key {
+                source: source.0,
+                kind: if episode { Kind::Series } else { Kind::Movie },
+                id: if episode {
+                    &series.items[0].id
+                } else {
+                    &movie.items[0].id
+                }
+                .to_string(),
+            };
+            // Seed only metadata and the locator: no HTTP connection or playback
+            // URL is cached, including for the public example.test account.
+            let details = Details {
+                incarnation: store.source_incarnation(source).unwrap(),
+                item: store.vod_card(&parent).unwrap().unwrap(),
+                episodes: vec![],
+                resume_episode: None,
+            };
+            drop(store);
+            let owner = Runtime::new(crate::Ports::new(directory.path().into(), move |_| {
+                Ok(database_key.clone())
+            }));
+            owner.start_services();
+            let key = if episode {
+                Key {
+                    kind: Kind::Episode,
+                    id: "generated-episode".into(),
+                    ..parent.clone()
+                }
+            } else {
+                parent.clone()
+            };
+            for extension in ["mp4", "mkv"] {
+                owner.vod.entries.lock().unwrap().insert(
+                    key.clone(),
+                    Entry {
+                        incarnation: details.incarnation.clone(),
+                        config: config.clone(),
+                        locator: StreamLocator::Xtream {
+                            stream_id: 56,
+                            container_extension: Some(extension.into()),
+                        },
+                        parent: episode.then(|| parent.clone()),
+                        episode: None,
+                    },
+                );
+                let (_, stream) = owner
+                    .services()
+                    .block_on(owner.vod_play(details.clone(), key.clone(), false))
+                    .unwrap();
+                let kind = if episode { "series" } else { "movie" };
+                assert_eq!(
+                    stream.url,
+                    format!("{server}/{kind}/generated-viewer/generated-password/56.{extension}")
+                );
+                assert_eq!(stream.public_only, public_only);
+                assert_eq!(stream.header("User-Agent"), Some("Generated-Player/1.0"));
+            }
+            assert!(owner.drain_services());
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+#[test]
+fn xtream_retries_refresh_movie_and_episode_locators_and_keep_the_lan_policy() {
+    use iptv_providers::{HttpResponse, Secret, model::XtreamCredentials};
+    for episode in [false, true] {
+        let mut provider = Provider::new(if episode {
+            vec![
+                r#"{"episodes":{"1":[{"id":56,"episode_num":1,"container_extension":"mp4"}]}}"#,
+                r#"{"episodes":{"1":[{"id":56,"episode_num":1,"container_extension":"mkv"}]}}"#,
+            ]
+        } else {
+            vec![
+                r#"{"movie_data":{"stream_id":56,"container_extension":"mp4"}}"#,
+                r#"{"movie_data":{"stream_id":56,"container_extension":"mkv"}}"#,
+            ]
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let database_key = crate::model::DatabaseKey::from_bytes([0x57; 32]);
+        let mut store = iptv_store_sqlite::Store::open_encrypted(
+            directory.path().join("iptv.sqlite"),
+            &database_key,
+        )
+        .unwrap();
+        let source = store
+            .add_source(&Source {
+                name: "Generated retry policy".into(),
+                config: SourceConfig::Xtream(XtreamCredentials {
+                    server_url: provider.url.clone(),
+                    username: Secret::new("generated-viewer"),
+                    password: Secret::new("generated-password"),
+                    user_agent: None,
+                }),
+            })
+            .unwrap();
+        let movies = iptv_providers::xtream::parse_vod_streams(&HttpResponse::ok(
+            r#"[{"stream_id":56,"name":"Generated movie"}]"#,
+        ))
+        .unwrap();
+        let series = iptv_providers::xtream::parse_series_list(&HttpResponse::ok(
+            r#"[{"series_id":56,"name":"Generated series"}]"#,
+        ))
+        .unwrap();
+        store
+            .replace_catalog(source, &[], &[], &movies.items, &series.items)
+            .unwrap();
+        let key = Key {
+            source: source.0,
+            kind: if episode { Kind::Series } else { Kind::Movie },
+            id: if episode {
+                &series.items[0].id
+            } else {
+                &movies.items[0].id
+            }
+            .to_string(),
+        };
+        drop(store);
+        let owner = Runtime::new(crate::Ports::new(directory.path().into(), move |_| {
+            Ok(database_key.clone())
+        }));
+        owner.start_services();
+        let mut incarnation = None;
+        for extension in ["mp4", "mkv"] {
+            let details = if let Some(previous) = incarnation {
+                owner
+                    .services()
+                    .block_on(owner.vod_retry_details(key.clone(), previous))
+            } else {
+                owner.services().block_on(owner.vod_details(key.clone()))
+            }
+            .unwrap();
+            incarnation = Some(details.incarnation.clone());
+            let selected = if episode {
+                details.episodes[0].key.clone()
+            } else {
+                key.clone()
+            };
+            let (_, stream) = owner
+                .services()
+                .block_on(owner.vod_play(details, selected, false))
+                .unwrap();
+            assert!(!stream.public_only);
+            let kind = if episode { "series" } else { "movie" };
+            assert_eq!(
+                stream.url,
+                format!(
+                    "{}/{kind}/generated-viewer/generated-password/56.{extension}",
+                    provider.url,
+                )
+            );
+        }
+        let requests = provider.finish();
+        let action = if episode {
+            "action=get_series_info"
+        } else {
+            "action=get_vod_info"
+        };
+        assert_eq!(requests.len(), 2);
+        assert!(requests.iter().all(|request| request.contains(action)));
+        assert!(owner.drain_services());
     }
 }
 
