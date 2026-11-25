@@ -1110,9 +1110,7 @@ impl crate::publish::Publish for CatalogPublish {
             let Some(GuidePhase::Writing(mut guide)) = self.guide.take() else {
                 unreachable!("the guide completed its last slice");
             };
-            let mut copy = guide
-                .take_copy()
-                .ok_or(StoreError::Unavailable("the guide publish copy is gone"))?;
+            let mut copy = guide.take_copy().ok_or(crate::publish::MISSING_COPY)?;
             // Feed results and pruning also belong to the provisional add.
             guide.finish(&mut copy)?;
             self.guide = Some(GuidePhase::Ready(copy));
@@ -1140,7 +1138,7 @@ impl crate::publish::Publish for CatalogPublish {
         let copy = self
             .running
             .take_copy()
-            .ok_or(StoreError::Unavailable("the catalog publish copy is gone"))?;
+            .ok_or(crate::publish::MISSING_COPY)?;
         let mut guide = Box::new(stored::GuidePublish::new(
             id,
             required.download,

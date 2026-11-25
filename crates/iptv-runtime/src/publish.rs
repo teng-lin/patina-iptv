@@ -72,6 +72,9 @@ pub(crate) trait Publish: Send + 'static {
 /// What a canceled publish replies (the one-shot forms' refusal).
 const CANCELED: StoreError = StoreError::Unavailable("the publish was canceled");
 
+/// A completed publish did not return the copy it owns.
+pub(crate) const MISSING_COPY: StoreError = StoreError::Unavailable("the publish copy is gone");
+
 /// A replacement job as [`Publish::step`] drives it: the store's
 /// `CatalogReplacement` and `EpgReplacement`.
 pub(crate) trait Replacement: Send {
@@ -278,9 +281,7 @@ impl<P: Publish> Job<P> {
                 if publish.canceled() {
                     return Err(CANCELED);
                 }
-                let copy = publish
-                    .take_copy()
-                    .ok_or(StoreError::Unavailable("the publish copy is gone"))?;
+                let copy = publish.take_copy().ok_or(MISSING_COPY)?;
                 self.host.finish_publish(live, copy)?;
                 let publish = self.publish.take().expect("a running publish");
                 let output = publish.finish(live);
