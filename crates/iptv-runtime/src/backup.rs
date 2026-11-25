@@ -26,7 +26,7 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub fn next_document_request() -> String {
     SEQUENCE.fetch_add(1, Ordering::Relaxed).to_string()
 }
-use error::{Context, Error, Result};
+use error::{Context, Error, Rejection, Result};
 type Started = Arc<OnceLock<std::result::Result<(), StartupError>>>;
 /// The first activation outcome of each storage root in this process. A
 /// process-lifetime fact about a directory, not owner state: every owner of
@@ -596,16 +596,56 @@ fn read_small_file(path: &Path, name: &str) -> Result<String> {
     let mut text = String::new();
     file.take(maximum + 1)
         .read_to_string(&mut text)
-        .context("Could not read backup settings")?;
-    entry_limit(name, text.len() as u64).context("Backup structured entry is too large")?;
+        .context("Could not read backup settings")
+        .map_err(Error::damaged)?;
+    entry_limit(name, text.len() as u64)
+        .context("Backup structured entry is too large")
+        .map_err(Error::damaged)?;
     Ok(text)
 }
 
 fn validate_settings(text: &str) -> Result<()> {
     entry_limit("settings.json", text.len() as u64)
         .context("Backup structured entry is too large")?;
-    let (_, report) =
-        Settings::from_json(text).context("Backup settings are invalid or from a newer version")?;
+    // Inspect the recognized header before interpreting current settings layers:
+    // a future version may have changed their shape entirely.
+    let document: serde_json::Value = serde_json::from_str(text)
+        .context("Backup settings are invalid or from a newer version")
+        .map_err(Error::damaged)?;
+    let format = document
+        .get("format")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| {
+            Error::from("Backup settings are invalid or from a newer version").damaged()
+        })?;
+    if format != iptv_settings::backup::FORMAT {
+        return Err(Error::rejected(
+            "Backup settings are not supported by this version",
+            Rejection::Settings {
+                found: None,
+                supported: iptv_settings::backup::VERSION.into(),
+            },
+        ));
+    }
+    let version = document
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|version| *version > 0)
+        .ok_or_else(|| {
+            Error::from("Backup settings are invalid or from a newer version").damaged()
+        })?;
+    if version > u64::from(iptv_settings::backup::VERSION) {
+        return Err(Error::rejected(
+            "Backup settings are not supported by this version",
+            Rejection::Settings {
+                found: Some(version),
+                supported: iptv_settings::backup::VERSION.into(),
+            },
+        ));
+    }
+    let (_, report) = Settings::from_json_value(document)
+        .context("Backup settings are invalid or from a newer version")
+        .map_err(Error::damaged)?;
     // An older document is migrated like the live settings file at startup,
     // so a backup made before a settings version bump still restores.
     let migrated = iptv_settings::LoadReport {
@@ -613,7 +653,13 @@ fn validate_settings(text: &str) -> Result<()> {
         ..report
     };
     if !migrated.is_clean() {
-        return Err("Backup settings are not supported by this version".into());
+        return Err(Error::rejected(
+            "Backup settings are not supported by this version",
+            Rejection::Settings {
+                found: Some(version),
+                supported: iptv_settings::backup::VERSION.into(),
+            },
+        ));
     }
     Ok(())
 }
@@ -626,23 +672,75 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     let mut magic = [0; 9];
     input
         .read_exact(&mut magic)
-        .context("This is not a complete Patina backup")?;
-    if &magic != MAGIC {
-        return Err("This is not a supported Patina backup".into());
+        .context("This is not a complete Patina backup")
+        .map_err(Error::damaged)?;
+    if magic[..8] != MAGIC[..8] {
+        return Err(Error::rejected(
+            "This is not a supported Patina backup",
+            Rejection::Format {
+                found: None,
+                supported: 1,
+            },
+        ));
+    }
+    if magic[8] == 0 {
+        return Err(Error::from("Backup header is invalid").damaged());
+    }
+    if magic[8] != MAGIC[8] {
+        return Err(Error::rejected(
+            "This is not a supported Patina backup",
+            Rejection::Format {
+                found: Some(magic[8].into()),
+                supported: 1,
+            },
+        ));
     }
     let mut size = [0; 8];
     input
         .read_exact(&mut size)
-        .context("Backup header is incomplete")?;
+        .context("Backup header is incomplete")
+        .map_err(Error::damaged)?;
     let size = u64::from_le_bytes(size);
     if size > MAX_MANIFEST {
-        return Err("Backup header is too large".into());
+        return Err(Error::from("Backup header is too large").damaged());
     }
     let mut bytes = vec![0; size as usize];
     input
         .read_exact(&mut bytes)
-        .context("Backup header is incomplete")?;
-    let manifest = backup_manifest::parse(&bytes)?;
+        .context("Backup header is incomplete")
+        .map_err(Error::damaged)?;
+    let header: serde_json::Value = serde_json::from_slice(&bytes)
+        .context("Backup header is invalid")
+        .map_err(Error::damaged)?;
+    let format = header
+        .get("format")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| Error::from("Backup header is invalid").damaged())?;
+    if format != "patina-whole-app" {
+        return Err(Error::rejected(
+            "Backup format is not supported by this version",
+            Rejection::Format {
+                found: None,
+                supported: 1,
+            },
+        ));
+    }
+    let version = header
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|version| *version > 0)
+        .ok_or_else(|| Error::from("Backup header is invalid").damaged())?;
+    if version != 1 {
+        return Err(Error::rejected(
+            "Backup format is not supported by this version",
+            Rejection::Format {
+                found: Some(version),
+                supported: 1,
+            },
+        ));
+    }
+    let manifest =
+        backup_manifest::parse(&bytes).map_err(|message| Error::from(message).damaged())?;
     let old_root = Path::new(&manifest.root);
     for entry in &manifest.files {
         let name = &entry.name;
@@ -652,10 +750,12 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
             fs::create_dir_all(parent).context("Could not stage backup files")?;
         }
         let mut output = private_file(&path).context("Could not stage backup files")?;
-        if io::copy(&mut input.take(len), &mut output).context("Could not read backup files")?
+        if io::copy(&mut input.take(len), &mut output)
+            .context("Could not read backup files")
+            .map_err(Error::damaged)?
             != len
         {
-            return Err("Backup is incomplete".into());
+            return Err(Error::from("Backup is incomplete").damaged());
         }
         output
             .sync_all()
@@ -663,18 +763,32 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     }
     let mut extra = [0];
     if input.read(&mut extra).context("Could not read backup")? != 0 {
-        return Err("Backup has unexpected trailing data".into());
+        return Err(Error::from("Backup has unexpected trailing data").damaged());
     }
     let settings = read_small_file(&work.0.join("settings.json"), "settings.json")?;
     validate_settings(&settings)?;
-    Store::validate_snapshot(&work.0.join("iptv.sqlite"))
-        .context("Backup library is invalid or from a newer version")?;
+    Store::validate_snapshot(&work.0.join("iptv.sqlite")).map_err(|error| {
+        if let iptv_store_sqlite::StoreError::SchemaTooNew { found, supported } = error {
+            Error::rejected(
+                "Backup library is invalid or from a newer version",
+                Rejection::Database { found, supported },
+            )
+        } else {
+            let content = error.is_snapshot_content_error();
+            let error = Error::new("Could not check backup library", error);
+            if content { error.damaged() } else { error }
+        }
+    })?;
     {
         let mut store =
             Store::open(work.0.join("iptv.sqlite")).context("Could not open backup library")?;
         store
             .rebase_local_playlists(old_root, root)
-            .context("Backup contains unavailable local playlist files")?;
+            .map_err(|error| {
+                let invalid = matches!(error, iptv_store_sqlite::StoreError::InvalidData(_));
+                let error = Error::new("Backup contains unavailable local playlist files", error);
+                if invalid { error.damaged() } else { error }
+            })?;
         store
             .invalidate_guide_repair_authority()
             .context("Could not check backup library")?;
@@ -685,7 +799,8 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
     // Check rewritten local references point to files included in this archive.
     let store =
         Store::open(work.0.join("iptv.sqlite")).context("Could not check backup library")?;
-    referenced_documents(root, &work.0, &store, DocumentCheck::Restore)?;
+    referenced_documents(root, &work.0, &store, DocumentCheck::Restore)
+        .map_err(Error::invalid_reference)?;
     drop(store);
     // All archive validation and reference rewriting succeeded. Encrypt the
     // persistent pending tree before its rename can make it survive restart.

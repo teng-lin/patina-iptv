@@ -84,6 +84,27 @@ impl StoreError {
         matches!(self, Self::Sqlite(rusqlite::Error::SqliteFailure(error, _))
             if error.code == rusqlite::ErrorCode::NotADatabase)
     }
+
+    /// Positive content-error classification for [`crate::Store::validate_snapshot`]
+    /// results only. Its fixed queries decode untrusted schema versions and text,
+    /// so type, integer-range and UTF-8 failures establish invalid snapshot data.
+    /// Device, migration, arbitrary conversion and unknown errors do not establish
+    /// corruption and deliberately remain unclassified.
+    pub fn is_snapshot_content_error(&self) -> bool {
+        match self {
+            Self::SchemaCorrupt(_) | Self::InvalidData(_) => true,
+            Self::Sqlite(rusqlite::Error::SqliteFailure(error, _)) => matches!(
+                error.code,
+                rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt
+            ),
+            Self::Sqlite(
+                rusqlite::Error::InvalidColumnType(..)
+                | rusqlite::Error::IntegralValueOutOfRange(..)
+                | rusqlite::Error::Utf8Error(..),
+            ) => true,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for StoreError {
@@ -133,5 +154,76 @@ impl From<serde_json::Error> for StoreError {
             err.line(),
             err.column()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sqlite(code: i32) -> StoreError {
+        StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(code),
+            None,
+        ))
+    }
+
+    #[test]
+    fn snapshot_content_errors_do_not_include_device_or_unknown_sqlite_failures() {
+        use rusqlite::ffi::*;
+        for (code, content) in [
+            (SQLITE_NOTADB, true),
+            (SQLITE_CORRUPT, true),
+            (SQLITE_CORRUPT | (1 << 8), true),
+            (SQLITE_NOMEM, false),
+            (SQLITE_BUSY, false),
+            (SQLITE_LOCKED, false),
+            (SQLITE_IOERR, false),
+            (SQLITE_IOERR | (1 << 8), false),
+            (SQLITE_FULL, false),
+            (SQLITE_CANTOPEN, false),
+            (SQLITE_PERM, false),
+            (SQLITE_READONLY, false),
+            (SQLITE_INTERRUPT, false),
+            (SQLITE_ERROR, false),
+            (SQLITE_INTERNAL, false),
+            (SQLITE_MISUSE, false),
+        ] {
+            assert_eq!(sqlite(code).is_snapshot_content_error(), content, "{code}");
+        }
+    }
+
+    #[test]
+    fn snapshot_content_findings_are_separate_from_versions_and_operational_errors() {
+        assert!(
+            StoreError::InvalidData("generated invalid schema".into()).is_snapshot_content_error()
+        );
+        assert!(
+            StoreError::SchemaCorrupt("generated migration hole".into())
+                .is_snapshot_content_error()
+        );
+        for error in [
+            StoreError::Unavailable("generated unavailable storage"),
+            StoreError::RestartRequired("generated restart requirement"),
+            StoreError::SchemaTooNew {
+                found: 2,
+                supported: 1,
+            },
+            StoreError::Migration {
+                version: 1,
+                source: rusqlite::Error::SqliteFailure(
+                    rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+                    None,
+                ),
+            },
+            StoreError::Sqlite(rusqlite::Error::InvalidQuery),
+            StoreError::Sqlite(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::other("generated conversion failure")),
+            )),
+        ] {
+            assert!(!error.is_snapshot_content_error(), "{error:?}");
+        }
     }
 }

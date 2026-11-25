@@ -1,6 +1,6 @@
 //! Platform dialogs and document transport for runtime-owned backups.
-use crate::i18n::tr;
-use crate::runtime::backup::error::{Context, Result};
+use crate::i18n::{tr, trf};
+use crate::runtime::backup::error::{Context, Error, Rejection, Result};
 #[cfg(target_os = "android")]
 use crate::runtime::backup::next_document_request;
 use crate::runtime::backup::{Busy, report};
@@ -236,14 +236,73 @@ fn restore_ui(ui: crate::Ui) {
             })
             .await;
         crate::settings_view::refresh(ui);
-        crate::settings_view::notify(tr(match result {
-            Ok(()) => "Restore scheduled. Close and reopen Patina to apply it",
-            Err(error) => report("scheduling a restore", error),
-        }));
-        if result.is_ok() {
-            offer_restart().await;
+        // Release operation ownership before presenting a dismissible failure.
+        drop(busy);
+        match result {
+            Ok(()) => {
+                crate::settings_view::notify(tr(
+                    "Restore scheduled. Close and reopen Patina to apply it",
+                ));
+                offer_restart().await;
+            }
+            Err(error) => {
+                if error.rejection().is_some() {
+                    report("scheduling a restore", error);
+                    let _ = nsh_base::alert_dialog()
+                        .title(tr("Backup could not be restored"))
+                        .description(rejection_description(error))
+                        .cancel("close", tr("Close"))
+                        .show()
+                        .await;
+                } else {
+                    crate::settings_view::notify(tr(report("scheduling a restore", error)));
+                }
+            }
         }
     });
+}
+
+/// Independent facts are paragraphs so recovery guidance remains readable in
+/// native dialogs at enlarged text sizes. No archive-provided text is shown.
+fn rejection_description(error: Error) -> String {
+    let (detail, newer) = match error.rejection() {
+        Some(Rejection::Format { found: Some(found), supported }) => (
+            trf("Backup format version {found} is not supported; this Patina supports version {supported}.",
+                &[("found", found.into()), ("supported", supported.into())]),
+            found > supported,
+        ),
+        Some(Rejection::Format { found: None, .. }) => (
+            tr("This backup format is not supported.").to_owned(), false,
+        ),
+        Some(Rejection::Settings { found: Some(found), supported }) => (
+            trf("This Patina cannot restore these backup settings (version {found}; supported version {supported}).",
+                &[("found", found.into()), ("supported", supported.into())]),
+            found > supported,
+        ),
+        Some(Rejection::Settings { found: None, .. }) => (
+            tr("This backup contains settings in an unsupported format.").to_owned(), false,
+        ),
+        Some(Rejection::Database { found, supported }) => (
+            trf("Backup database schema {found} is not supported; this Patina supports schema {supported}.",
+                &[("found", found.into()), ("supported", supported.into())]),
+            found > supported,
+        ),
+        _ => return [
+            tr("This backup is damaged or incomplete. Choose another backup, or create a new backup on the original device."),
+            tr("Your current data and any previously scheduled restore have been kept."),
+        ].join("\n\n"),
+    };
+    let next = if newer {
+        tr("Use a newer Patina version that supports this backup, or choose another backup.")
+    } else {
+        tr("Choose another backup, or use a Patina version that supports this backup.")
+    };
+    [
+        detail.as_str(),
+        next,
+        tr("Your current data and any previously scheduled restore have been kept."),
+    ]
+    .join("\n\n")
 }
 
 #[cfg(not(target_os = "android"))]

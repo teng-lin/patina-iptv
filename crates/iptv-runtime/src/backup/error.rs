@@ -16,6 +16,17 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Error {
     message: &'static str,
     cause: Cause,
+    rejection: Option<Rejection>,
+}
+
+/// Archive validation refused the restore before changing current or pending data.
+/// Versions are trusted only as numbers; archive-provided labels never escape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rejection {
+    Format { found: Option<u64>, supported: u64 },
+    Settings { found: Option<u64>, supported: u64 },
+    Database { found: u32, supported: u32 },
+    Damaged,
 }
 
 /// Why, as far as it may be logged.
@@ -35,7 +46,45 @@ impl Error {
         Self {
             message,
             cause: cause.into(),
+            rejection: None,
         }
+    }
+
+    pub(crate) fn rejected(message: &'static str, rejection: Rejection) -> Self {
+        Self {
+            rejection: Some(rejection),
+            ..Self::from(message)
+        }
+    }
+
+    /// Structured, non-sensitive compatibility information for recovery UI.
+    pub fn rejection(&self) -> Option<Rejection> {
+        self.rejection
+    }
+
+    pub(crate) fn damaged(mut self) -> Self {
+        // Device failures must not accuse a valid archive of corruption.
+        if !matches!(self.cause, Cause::Io(kind)
+            if !matches!(kind, io::ErrorKind::UnexpectedEof | io::ErrorKind::InvalidData))
+        {
+            self.rejection = Some(Rejection::Damaged);
+        }
+        self
+    }
+
+    /// Local references are checked in the disposable archive tree. A missing
+    /// entry or invalid reference is damaged content; other device/store failures
+    /// must retain their operational diagnosis.
+    pub(crate) fn invalid_reference(mut self) -> Self {
+        if matches!(
+            self.cause,
+            Cause::Rule
+                | Cause::Step(_)
+                | Cause::Io(io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
+        ) {
+            self.rejection = Some(Rejection::Damaged);
+        }
+        self
     }
 
     /// The text for the user.
@@ -158,6 +207,52 @@ impl<T> From<std::sync::PoisonError<T>> for Cause {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_content_failures_keep_device_errors_distinct() {
+        for kind in [io::ErrorKind::UnexpectedEof, io::ErrorKind::InvalidData] {
+            let error = Error::new("Backup is incomplete", io::Error::from(kind));
+            assert_eq!(error.damaged().rejection(), Some(Rejection::Damaged));
+        }
+        for kind in [io::ErrorKind::PermissionDenied, io::ErrorKind::Other] {
+            let error = Error::new("Could not read backup files", io::Error::from(kind));
+            assert_eq!(error.damaged().rejection(), None);
+            assert_eq!(error.invalid_reference().rejection(), None);
+            assert_eq!(error.cause(), Cause::Io(kind));
+        }
+        let absent = Error::new(
+            "Backup is missing a local playlist file",
+            io::Error::from(io::ErrorKind::NotFound),
+        );
+        assert_eq!(absent.damaged().rejection(), None);
+        assert_eq!(
+            absent.invalid_reference().rejection(),
+            Some(Rejection::Damaged)
+        );
+        let device = Error::new(
+            "Could not check backup sources",
+            StoreError::Unavailable("store worker stopped"),
+        );
+        assert_eq!(device.invalid_reference().rejection(), None);
+        let future = Error::rejected(
+            "Backup format is not supported by this version",
+            Rejection::Format {
+                found: Some(u64::MAX),
+                supported: 1,
+            },
+        );
+        assert_eq!(
+            future.rejection(),
+            Some(Rejection::Format {
+                found: Some(u64::MAX),
+                supported: 1
+            })
+        );
+        assert_eq!(
+            future.to_string(),
+            "Backup format is not supported by this version"
+        );
+    }
 
     #[test]
     fn the_log_line_names_the_class_of_the_cause_and_no_path() {
