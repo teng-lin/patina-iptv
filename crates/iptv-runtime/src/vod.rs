@@ -715,7 +715,7 @@ url,
                         }
                         .ok_or_else(unavailable)?;
                         let mut source = PlaySource::new(url);
-                        source.public_only = false;
+                        source.public_only = xt.stream_must_be_public(&source.url);
                         source
                     }
                     (SourceConfig::Stalker(c), StreamLocator::Stalker { cmd, .. }) => {

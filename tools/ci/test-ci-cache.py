@@ -552,10 +552,19 @@ class AptInstall(unittest.TestCase):
 
 
 class CachePruning(unittest.TestCase):
-    def test_retired_linux_package_cache_keeps_recent_accesses_and_other_refs(self):
+    def setUp(self):
         spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
-        prune = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(prune)
+        self.prune = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.prune)
+        self.environment = {"GITHUB_REPOSITORY": self.prune.REPOSITORY, "GITHUB_REF": self.prune.MASTER}
+        self.successful_run = {
+            "head_sha": "a" * 40, "event": "push", "head_branch": "master", "path": self.prune.VALIDATION_PATH,
+            "head_repository": {"full_name": self.prune.REPOSITORY}, "conclusion": "success",
+            "run_started_at": "2026-01-01T02:00:00Z", "updated_at": "2026-01-01T03:00:00Z",
+        }
+
+    def test_retired_linux_package_cache_keeps_recent_accesses_and_other_refs(self):
+        prune = self.prune
         old = {"id": 1, "key": "v0-rust-desktop-package-v2-linux-0123456789abcdef-app-Linux-x64",
                "ref": prune.MASTER, "created_at": "2026-01-01T01:00:00Z", "last_accessed_at": "2026-01-01T01:10:00Z"}
         entries = [old, {**old, "id": 2, "last_accessed_at": "2026-01-01T02:20:00Z"},
@@ -566,9 +575,7 @@ class CachePruning(unittest.TestCase):
         self.assertEqual([row["id"] for row in prune.superseded(entries, start, end)], [1])
 
     def test_keep_the_replacement_recently_used_caches_tools_and_other_refs(self):
-        spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
-        prune = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(prune)
+        prune = self.prune
 
         def entry(number, key, created, accessed, ref=prune.MASTER):
             return {"id": number, "key": key, "ref": ref,
@@ -606,22 +613,65 @@ class CachePruning(unittest.TestCase):
                          ("rust", "windows-native-v1", windows_compiler, "Windows_NT-x64"))
 
     def test_old_successful_master_attempt_cannot_prune_the_current_generation(self):
-        spec = importlib.util.spec_from_file_location("prune", ROOT / "tools/ci/prune-caches.py")
-        prune = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(prune)
+        prune = self.prune
         with tempfile.TemporaryDirectory() as directory:
             event = Path(directory) / "event.json"
-            event.write_text(json.dumps({"workflow_run": {
-                "head_sha": "a" * 40,
-            }}))
-            with (patch.dict(os.environ, GITHUB_EVENT_PATH=str(event)),
-                  patch.object(prune, "trusted_window", return_value=(None, None)),
+            event.write_text(json.dumps({"workflow_run": self.successful_run}))
+            with (patch.dict(os.environ, self.environment | {"GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "workflow_run"}),
                   patch.object(prune.subprocess, "check_output", return_value="b" * 40 + "\n") as gh,
                   patch.object(prune.subprocess, "run") as mutate,
                   patch.object(sys, "argv", ["prune-caches.py", "--apply"])):
                 prune.main()
             gh.assert_called_once()
             mutate.assert_not_called()
+
+    def test_schedule_uses_the_last_success_and_leaves_unvalidated_replacements(self):
+        prune = self.prune
+
+        def entry(number, platform, created, accessed):
+            return {
+                "id": number, "key": f"v0-rust-host-v2-test-{platform}-a-{number}", "ref": prune.MASTER,
+                "created_at": f"2026-01-01T{created}:00Z", "last_accessed_at": f"2026-01-01T{accessed}:00Z",
+            }
+
+        entries = [
+            entry(1, "Darwin-arm64", "01:00", "02:05"),
+            entry(2, "Darwin-arm64", "02:10", "02:10"),
+            entry(3, "Darwin-arm64", "01:30", "03:15"),
+            entry(4, "Linux-x64", "01:00", "01:15"),
+            entry(5, "Linux-x64", "03:30", "03:30"),
+        ]
+        replies = [json.dumps({"workflow_runs": [self.successful_run]}), json.dumps([{"actions_caches": entries}])]
+        with (patch.dict(os.environ, self.environment | {"GITHUB_EVENT_NAME": "schedule"}),
+              patch.object(prune.subprocess, "check_output", side_effect=replies) as gh,
+              patch.object(prune.subprocess, "run") as mutate,
+              patch.object(sys, "argv", ["prune-caches.py", "--apply"])):
+            prune.main()
+        request = gh.call_args_list[0].args[0]
+        self.assertIn("branch=master", request)
+        self.assertIn("event=push", request)
+        self.assertIn("status=success", request)
+        self.assertEqual(gh.call_count, 2)
+        mutate.assert_called_once_with(
+            ["gh", "api", "--method", "DELETE", f"repos/{prune.REPOSITORY}/actions/caches/1"], check=True, timeout=30,
+        )
+
+    def test_manual_pruning_waits_for_a_successful_run(self):
+        prune = self.prune
+        with (patch.dict(os.environ, self.environment | {"GITHUB_EVENT_NAME": "workflow_dispatch"}),
+              patch.object(prune.subprocess, "check_output", return_value='{"workflow_runs": []}') as gh,
+              patch.object(prune.subprocess, "run") as mutate,
+              patch.object(sys, "argv", ["prune-caches.py", "--apply"])):
+            prune.main()
+        gh.assert_called_once()
+        mutate.assert_not_called()
+
+    def test_manual_pruning_rejects_a_non_master_dispatch(self):
+        prune = self.prune
+        environment = self.environment | {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/feature"}
+        with patch.object(prune.subprocess, "check_output") as gh, self.assertRaises(ValueError):
+            prune.pruning_window(environment)
+        gh.assert_not_called()
 
 
 def steps(text):

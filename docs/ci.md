@@ -69,6 +69,13 @@ relevant PR changes or scheduled/full validation, and its large cache competes
 with the frequently used host and tool caches. Master candidates do not seed
 it, and successful master pruning retires unused entries from its old namespace.
 
+The cache pruner runs after successful master validation and every four hours.
+The scheduled run uses the latest successful master push validation's time
+window, so it can remove superseded entries when master has advanced.
+It skips families whose newest cache was saved after that run, and uses the
+same last-access checks as completion-triggered pruning. Run
+**Prune superseded CI caches** on `master` to use the same cleanup on demand.
+
 The macOS package setup uses the runner's pkg-config and the pinned libmpv
 verified by the package script. Host player tests still have FFmpeg for media
 fixtures. On a macOS tool cache miss, packaging tries a 30-day build artifact
