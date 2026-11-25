@@ -175,7 +175,7 @@ def observe(client=api, environment=None):
                   'retry': 'not eligible', 'jobs': [
                       {k: job[k] for k in ('id', 'name', 'conclusion')}
                       for job in jobs if job['conclusion'] not in ('success', 'skipped')]}
-        eligible = (run['id'] == event['id'] == newest['id'] and run['run_attempt'] == 1
+        eligible = (run['id'] == newest['id'] and run['run_attempt'] == 1
                     and run['conclusion'] == 'failure' and classify(jobs, annotations))
         if eligible:
             record['retry'] = 'claimed once (API outcome may be unknown)'

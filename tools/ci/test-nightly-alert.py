@@ -183,6 +183,21 @@ class ObserverTests(unittest.TestCase):
             self.observe()
         self.assertFalse(self.client.retries())
 
+    def test_older_event_reconciles_and_retries_newest_eligible_run_once(self):
+        self.client.runs = [run(101), run()]
+        self.observe(event=run())
+        self.assertEqual([call[0] for call in self.client.retries()],
+                         ['actions/runs/101/rerun-failed-jobs'])
+        self.assertIn('Latest scheduled run: [101]', self.client.issue['body'])
+        self.observe(event=run(101))
+        self.assertEqual(len(self.client.retries()), 1)
+
+    def test_older_failure_never_retries_while_newer_schedule_is_running(self):
+        self.client.runs = [run(101, status='in_progress', conclusion=None), run()]
+        self.observe(event=run())
+        self.assertFalse(self.client.retries())
+        self.assertIn('Latest scheduled run: [100]', self.client.issue['body'])
+
     def test_healthy_latest_run_never_creates_tracker_for_historical_failure(self):
         self.client.runs = [run(101, conclusion='success'), run()]
         self.client.jobs = [dict(item, conclusion='success') for item in jobs()]
