@@ -208,6 +208,18 @@ class ObserverTests(unittest.TestCase):
         self.observe(event=run())
         self.assertFalse(any(call[1] in ('PATCH', 'POST') for call in self.client.calls))
 
+    def test_failure_while_gathering_history_never_publishes_intermediate_result(self):
+        for existing in (None, {'number': 5, 'body': nightly.MARKER +
+                               '\n<!-- patina-nightly-state:{} -->', 'state': 'closed'}):
+            with self.subTest(existing=existing):
+                self.client = MockAPI()
+                self.client.issue = existing
+                self.client.runs = [run(101, conclusion='success'), run()]
+                self.client.fail = 'actions/runs/101/attempts/'
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.observe(event=run())
+                self.assertFalse(any(call[1] in ('PATCH', 'POST') for call in self.client.calls))
+
     def test_trust_boundaries(self):
         for change in ({'event': 'pull_request'}, {'head_branch': 'feature'},
                        {'head_repository': {'full_name': 'example/fork'}},
