@@ -21,7 +21,7 @@ use crate::personalization::{self, Fixture, step};
 use crate::tv_shared_controls::{Lifetime, persistent, record_players, selected};
 use iptv_settings::{KeyBinding, PressKind, Settings, Value, keys};
 use nsh_core::platform::{Idiom, Os};
-use nsh_core::{NodeId, Size, ViewKind, prelude::px};
+use nsh_core::{NodeId, Size, prelude::px};
 use nsh_tv::RemoteKey;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -117,14 +117,12 @@ fn tv_with(
     // guide's channels, focus on Local A.
     step(fixture.app.open_guide_groups());
     step(fixture.app.remote_tap(RemoteKey::Right));
-    let player = fixture
-        .app
-        .screen()
-        .layout_nodes()
-        .iter()
-        .find(|n| n.kind == ViewKind::Native)
-        .expect("one tv.player")
-        .id;
+    let player = *lifetime
+        .lock()
+        .unwrap()
+        .players
+        .first()
+        .expect("one tv.player");
     (fixture, lifetime, player)
 }
 
