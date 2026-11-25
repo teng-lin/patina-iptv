@@ -201,12 +201,13 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, gesture: Gesture) -> E {
                         point.pointer_type != nsh_core::PointerType::Touch || point.id == id
                     });
                     let admitted = finger && alone && untracked(|| takes_swipes(ui));
+                    if admitted {
+                        // A one-contact Start is authoritative, even when its
+                        // ID is reused. Retire any interrupted sequence and its
+                        // preview before admitting the new touch.
+                        apply(ui, swipe.with(Swipe::reset), at.1);
+                    }
                     swipe.with(|s| {
-                        if admitted && s.pointer() != Some(id) {
-                            // A new one-contact sequence is authoritative:
-                            // no old finger is still physically held.
-                            s.reset();
-                        }
                         if !s.swiping() {
                             swiped.with(|w| *w = false);
                         }

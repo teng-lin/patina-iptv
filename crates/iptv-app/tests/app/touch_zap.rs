@@ -822,6 +822,110 @@ fn a_second_finger_on_the_play_bar_cancels_the_video_swipe() {
 }
 
 #[test]
+fn a_reused_pointer_recovers_after_both_multitouch_lifts_are_lost() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned) = start(&home, &[]);
+    full_screen(&mut app, &tuned, 3);
+    let opened = streams(&tuned).len();
+    finger_id(&mut app, 1, (640.0, 600.0), &[(640.0, 200.0)], true);
+    assert!(app.screen().matches("id:swipe-preview").unwrap());
+    let (video, path) = video_path(&app);
+    touch_packet(
+        &mut app,
+        (2, video),
+        TouchPhase::Start,
+        &path,
+        ((800.0, 500.0), 1_800.0),
+        Some((1, (640.0, 200.0))),
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    assert_eq!(streams(&tuned).len(), opened, "the second finger canceled");
+
+    // Both End/Cancel packets are lost, without changing any app overlay or
+    // swipe-admission state. Exercise ID reuse at the event boundary as a
+    // robustness case: current NSH adapters normally allocate fresh IDs.
+    // This one-contact snapshot says neither old finger is still down.
+    touch(
+        &mut app,
+        TouchPhase::Start,
+        video,
+        &path,
+        (640.0, 600.0),
+        2_000.0,
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch(
+        &mut app,
+        TouchPhase::Move,
+        video,
+        &path,
+        (640.0, 200.0),
+        2_500.0,
+    );
+    touch(
+        &mut app,
+        TouchPhase::End,
+        video,
+        &path,
+        (640.0, 200.0),
+        2_600.0,
+    );
+    lift_press(&mut app);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a reused primary pointer recovers after lost lifts",
+    );
+}
+
+#[test]
+fn a_new_pointer_tap_clears_a_swipe_whose_lift_was_lost() {
+    let Some(home) = isolated!() else { return };
+    let (mut app, tuned) = start(&home, &[]);
+    full_screen(&mut app, &tuned, 3);
+    step(app.run_for(Duration::from_secs(15)));
+    assert!(!app.screen().matches("id:play-bar-layer").unwrap());
+    let opened = streams(&tuned).len();
+    finger_id(&mut app, 1, (640.0, 600.0), &[(640.0, 200.0)], true);
+    assert!(app.screen().matches("id:swipe-preview").unwrap());
+
+    // No End/Cancel arrives. NSH gives the new contact a fresh ID. Its
+    // one-contact Start clears the old preview and its lift is a video tap.
+    let (video, path) = video_path(&app);
+    touch_pointer(
+        &mut app,
+        (3, video),
+        TouchPhase::Start,
+        &path,
+        (640.0, 600.0),
+        2_000.0,
+    );
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch_pointer(
+        &mut app,
+        (3, video),
+        TouchPhase::End,
+        &path,
+        (640.0, 600.0),
+        2_100.0,
+    );
+    lift_press(&mut app);
+    step(app.wait_for("id:play-bar-layer"));
+    assert_eq!(streams(&tuned).len(), opened, "the fresh tap never tunes");
+    finger_id(&mut app, 4, (640.0, 600.0), &[(640.0, 200.0)], false);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a fresh swipe still follows the recovered tap",
+    );
+}
+
+#[test]
 fn a_screen_reader_keeps_channel_buttons_reachable_and_its_actions_zap() {
     let Some(home) = isolated!() else { return };
     let exposure = crate::accessibility_visibility::Exposure::default();
