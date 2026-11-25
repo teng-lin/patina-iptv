@@ -268,6 +268,17 @@ fn touch_pointer(
     at: (f32, f32),
     t: f64,
 ) {
+    touch_packet(app, pointer, phase, path, (at, t), None);
+}
+
+fn touch_packet(
+    app: &mut Headless,
+    pointer: (u32, NodeId),
+    phase: TouchPhase,
+    path: &[NodeId],
+    (at, t): ((f32, f32), f64),
+    held: Option<(u32, (f32, f32))>,
+) {
     let event = TouchEvent {
         phase,
         timestamp: t,
@@ -290,6 +301,17 @@ fn touch_pointer(
         modifiers: Default::default(),
         activated: None,
     };
+    let mut event = event;
+    if let Some((id, at)) = held {
+        // Native includes stationary contacts, with changed=false.
+        let mut stationary = event.points[0].clone();
+        stationary.id = id;
+        stationary.changed = false;
+        stationary.path.clear();
+        stationary.page = Point::new(px(at.0), px(at.1));
+        stationary.location = stationary.page;
+        event.points.push(stationary);
+    }
     app.engine().control().dispatch_event(
         ROOT_ID,
         EventKind::Touch,
@@ -323,9 +345,13 @@ fn press_video(app: &mut Headless, clicks: u32) {
 /// Android does ([`lift_press`]); the app's clock does not move
 /// meanwhile. `hold`: it stays down at the last point.
 fn finger(app: &mut Headless, from: (f32, f32), through: &[(f32, f32)], hold: bool) {
+    finger_id(app, 1, from, through, hold);
+}
+
+fn finger_id(app: &mut Headless, id: u32, from: (f32, f32), through: &[(f32, f32)], hold: bool) {
     let (target, path) = video_path(app);
     let mut t = 1_000.0;
-    touch(app, TouchPhase::Start, target, &path, from, t);
+    touch_pointer(app, (id, target), TouchPhase::Start, &path, from, t);
     let mut at = from;
     for &to in through {
         let steps = ((to.0 - at.0).abs().max((to.1 - at.1).abs()) / 10.0)
@@ -335,12 +361,12 @@ fn finger(app: &mut Headless, from: (f32, f32), through: &[(f32, f32)], hold: bo
             let f = i as f32 / steps as f32;
             t += 16.0;
             let p = (at.0 + (to.0 - at.0) * f, at.1 + (to.1 - at.1) * f);
-            touch(app, TouchPhase::Move, target, &path, p, t);
+            touch_pointer(app, (id, target), TouchPhase::Move, &path, p, t);
         }
         at = to;
     }
     if !hold {
-        touch(app, TouchPhase::End, target, &path, at, t);
+        touch_pointer(app, (id, target), TouchPhase::End, &path, at, t);
         lift_press(app);
     }
     app.settle();
@@ -544,8 +570,21 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
         "interrupted swipe never tunes"
     );
 
+    // Neither video nor its ancestor saw the interrupted finger's lift.
+    // iOS gives the next contact a fresh ID, not the old helper's ID 1.
+    finger_id(&mut app, 3, mid, &[(mid.0, mid.1 - 300.0)], false);
+    tunes(
+        &mut app,
+        &tuned,
+        2,
+        "a new pointer recovers after the chooser",
+    );
+    finger_id(&mut app, 4, mid, &[(mid.0, mid.1 + 300.0)], false);
+    tunes(&mut app, &tuned, 3, "return before the burst");
+
     // A burst of swipes up: only the last channel's stream opens, after
     // the delay. Three up from three wraps to five.
+    let opened = streams(&tuned).len();
     for _ in 0..3 {
         swipe(&mut app, -300.0);
     }
@@ -689,13 +728,13 @@ fn a_second_finger_on_the_play_bar_cancels_the_video_swipe() {
 
     // This touch bubbles through app-ui, but not through the sibling video.
     let (button, button_path) = element_path(&app, "id:play-bar-play-pause");
-    touch_pointer(
+    touch_packet(
         &mut app,
         (2, button),
         TouchPhase::Start,
         &button_path,
-        (640.0, 740.0),
-        1_550.0,
+        ((640.0, 740.0), 1_550.0),
+        Some((1, (640.0, 200.0))),
     );
     app.settle();
     assert!(!app.screen().matches("id:swipe-preview").unwrap());
@@ -740,13 +779,13 @@ fn a_second_finger_on_the_play_bar_cancels_the_video_swipe() {
         2_000.0,
     );
     let (video, path) = video_path(&app);
-    touch(
+    touch_packet(
         &mut app,
+        (1, video),
         TouchPhase::Start,
-        video,
         &path,
-        (640.0, 500.0),
-        2_050.0,
+        ((640.0, 500.0), 2_050.0),
+        Some((2, (640.0, 740.0))),
     );
     touch(
         &mut app,

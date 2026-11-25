@@ -32,7 +32,6 @@ const PREVIEW_HEIGHT: f32 = 76.0;
 #[derive(Clone, Copy)]
 pub(crate) struct Gesture {
     swipe: Stored<Swipe>,
-    touches: Stored<Vec<u32>>,
     pub swiped: Stored<bool>,
 }
 
@@ -40,7 +39,6 @@ impl Gesture {
     pub(crate) fn new() -> Self {
         Self {
             swipe: stored(Swipe::default()),
-            touches: stored(Vec::new()),
             swiped: stored(false),
         }
     }
@@ -54,15 +52,6 @@ impl Gesture {
             .iter()
             .filter(|point| point.changed && point.pointer_type == nsh_core::PointerType::Touch)
         {
-            self.touches.with(|touches| match event.phase {
-                nsh_core::TouchPhase::Start if !touches.contains(&point.id) => {
-                    touches.push(point.id)
-                }
-                nsh_core::TouchPhase::End | nsh_core::TouchPhase::Cancel => {
-                    touches.retain(|id| *id != point.id);
-                }
-                _ => {}
-            });
             if event.phase != nsh_core::TouchPhase::Start {
                 if matches!(
                     event.phase,
@@ -205,11 +194,19 @@ pub(crate) fn watch<E: Interactive>(video: E, ui: Ui, gesture: Gesture) -> E {
             let outcome = match e.phase {
                 nsh_core::TouchPhase::Start => {
                     let finger = p.pointer_type == nsh_core::PointerType::Touch;
-                    let alone = gesture
-                        .touches
-                        .with(|touches| touches.iter().all(|id| *id == p.id));
+                    // Native reports include unchanged contacts too. Unlike
+                    // cached IDs, this snapshot cannot retain a lift lost
+                    // when a modal interrupts delivery.
+                    let alone = e.points.iter().all(|point| {
+                        point.pointer_type != nsh_core::PointerType::Touch || point.id == id
+                    });
                     let admitted = finger && alone && untracked(|| takes_swipes(ui));
                     swipe.with(|s| {
+                        if admitted && s.pointer() != Some(id) {
+                            // A new one-contact sequence is authoritative:
+                            // no old finger is still physically held.
+                            s.reset();
+                        }
                         if !s.swiping() {
                             swiped.with(|w| *w = false);
                         }
