@@ -110,7 +110,7 @@ jobs:
           persist-credentials: false
       - name: Test tier selection and failure propagation
         run: python3 tools/ci/test-validation-plan.py
-      - name: Lint workflows and action consumers
+      - name: Lint workflow definitions
         if: needs.plan.outputs.actionlint == 'true'
         timeout-minutes: 3
         run: |

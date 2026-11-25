@@ -14,10 +14,45 @@ SPEC.loader.exec_module(v)
 # The test is deliberately conservative about computed include paths: new forms
 # need an explicit scanner case before they can silently embed documentation.
 RUST_STRING = re.compile(r'r(?P<hash>\#{0,255})"(?P<raw>.*?)"(?P=hash)|"(?:\\.|[^"\\])*"', re.S)
+RUST_CHAR = re.compile(r"'(?:\\(?:[nrt0\\'\"]|x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\})|[^'\\\n])'")
+
+
+def rust_without_comments(text):
+    """Erase Rust trivia while retaining literals and offsets (nested blocks too)."""
+    chunks, index = [], 0
+    while index < len(text):
+        literal = RUST_STRING.match(text, index) or RUST_CHAR.match(text, index)
+        if literal:
+            chunks.append(literal[0])
+            index = literal.end()
+        elif text.startswith("//", index):
+            end = text.find("\n", index)
+            end = len(text) if end < 0 else end
+            chunks.append(" " * (end - index))
+            index = end
+        elif text.startswith("/*", index):
+            start, depth = index, 1
+            index += 2
+            while depth and index < len(text):
+                if text.startswith("/*", index):
+                    depth += 1
+                    index += 2
+                elif text.startswith("*/", index):
+                    depth -= 1
+                    index += 2
+                else:
+                    index += 1
+            if depth:
+                raise AssertionError("unterminated Rust block comment")
+            chunks.append(re.sub(r"[^\n]", " ", text[start:index]))
+        else:
+            chunks.append(text[index])
+            index += 1
+    return "".join(chunks)
 
 
 def markdown_includes(source):
-    text = source.read_text()
+    text = rust_without_comments(source.read_text())
     for macro in re.finditer(r"\binclude_(?:str|bytes)\s*!\s*([({\[])", text):
         start, index = macro.end(), macro.end()
         closing = {"(": ")", "[": "]", "{": "}"}
@@ -59,6 +94,17 @@ class EmbeddedMarkdownScanner(unittest.TestCase):
             source.write_text('include_str ! ("deleted.md"); include_bytes! {r#"bytes.MD"#}; include_str!["square.md"]; include_str!("other.sql");')
             self.assertEqual(list(markdown_includes(source)), [(Path(directory) / name).resolve()
                                                               for name in ("deleted.md", "bytes.MD", "square.md")])
+
+    def test_comments_are_rust_trivia_and_commented_macros_are_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.rs"
+            source.write_text("let quote = '\"'; "
+                              'include_str /* nested /* comment */ end */ ! ("help.md"); '
+                              'include_bytes! /* comment */ ["bytes.md"]; '
+                              'include_str! // comment\n {"line.md"}; '
+                              '// include_str!("ignored.md");\n'
+                              '/* include_str!("also-ignored.md"); */')
+            self.assertEqual([path.name for path in markdown_includes(source)], ["help.md", "bytes.md", "line.md"])
 
     def test_unknown_computed_paths_fail_instead_of_hiding_consumers(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -157,7 +203,13 @@ class Selection(unittest.TestCase):
                          'jobs: {x: {uses: "./.github/workflows/shared.yml"}}\n',
                          "jobs:\n  x:\n    uses: ${{ inputs.workflow }}\n",
                          'jobs:\n  x:\n    uses: "./.github\\u002fworkflows/ci.yml"\n',
-                         "jobs:\n  x:\n    uses: *workflow-alias\n"):
+                         "jobs:\n  x:\n    uses: *workflow-alias\n",
+                         'jobs:\n  x:\n    "uses": "./.github\\u002fworkflows/ci.yml"\n',
+                         'jobs:\n  x:\n    "us\\u0065s": "./.github\\u002fworkflows/ci.yml"\n',
+                         'jobs: {x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}}\n',
+                         '{jobs: {x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}}}\n',
+                         'jobs:\n  x:\n    <<: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n',
+                         'jobs:\n  x: {"us\\u0065s": "./.github\\u002fworkflows/ci.yml"}\n'):
                 (workflows / "validation.yml").write_text(text)
                 self.assertIsNone(v.validation_workflows(root))
                 self.assertTrue(all(v.select([".github/workflows/unrelated.yml"], root=root)[lane] for lane in v.LANES))
