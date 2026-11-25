@@ -74,6 +74,7 @@ class Health(unittest.TestCase):
                 (HEALTHY.replace("### exit: 0", "### exit: 101"), "exit is 101"),
                 (HEALTHY.replace("Generating SCIP finished 1s", ""), "did not finish"),
                 ("", "missing or empty"),
+                ("### argv: 'unterminated\n", "malformed"),
                 ("### argv: --version\n### exit: 0\n", "found 0"),
                 (HEALTHY + HEALTHY, "found 2")):
             with self.subTest(expected=expected):
@@ -257,7 +258,7 @@ class Measurement(unittest.TestCase):
         executable(tools / "rustup", f"print({str(real)!r})\n")
         executable(tools / "rustc", 'print("synthetic_cfg")\n')
         executable(tools / "deslop-please", f'''\
-            import json, subprocess, sys
+            import json, os, subprocess, sys
             from pathlib import Path
             if sys.argv[1:] == ["--version"]:
                 print("deslop-please synthetic")
@@ -265,8 +266,12 @@ class Measurement(unittest.TestCase):
                 assert sys.argv[1:] == ["--json", "--target", {deslop.TARGET!r}]
                 assert not Path({str(index / 'index.stamp')!r}).exists()
                 assert Path({str(index / 'index.scip')!r}).read_text() == "keep index file"
-                subprocess.run(["rust-analyzer", "--version"], stdout=subprocess.DEVNULL, check=True)
-                subprocess.run(["rust-analyzer", "scip", "/synthetic"], check=True)
+                if not os.environ.get("SYNTHETIC_CACHE_HIT"):
+                    subprocess.run(["rust-analyzer", "--version"], stdout=subprocess.DEVNULL, check=True)
+                    subprocess.run(["rust-analyzer", "scip", "/synthetic"], check=True)
+                if os.environ.get("SYNTHETIC_TOOL_ERROR"):
+                    print("synthetic indexing failure", file=sys.stderr)
+                    sys.exit(2)
                 print(json.dumps({{"count": 1, "diagnostics": {record()['diagnostics'][:1]!r}}}))
                 sys.exit(1)
             ''')
@@ -312,6 +317,17 @@ class Measurement(unittest.TestCase):
         self.assertEqual(result["seconds"]["index"], 0)
         self.assertTrue((self.target / "deslop-please/hash/index.stamp").exists())
 
+    def test_missing_log_and_tool_error_are_invalid_measurements(self):
+        environment = self.fake_tooling()
+        for variable, problem in (("SYNTHETIC_CACHE_HIT", "log is missing or empty"),
+                                  ("SYNTHETIC_TOOL_ERROR", "synthetic indexing failure")):
+            with self.subTest(variable=variable), \
+                    patch.dict(os.environ, {**environment, variable: "1"}, clear=True), \
+                    redirect_stdout(io.StringIO()):
+                result = deslop.measure(self.tree, self.nsh)
+                self.assertFalse(result["valid"])
+                self.assertIn(problem, "\n".join(result["problems"]))
+
     def test_untracked_does_not_mark_tree_dirty_but_tracked_edit_does(self):
         environment = self.fake_tooling()
         (self.tree / "untracked").write_text("synthetic")
@@ -344,6 +360,34 @@ class Measurement(unittest.TestCase):
             self.assertTrue(any(call.args[0][:3] == ["git", "worktree", "prune"] for call in commands.call_args_list))
         listing = git(self.tree, "worktree", "list", "--porcelain")
         self.assertEqual(listing.count("worktree "), 1)
+
+    def test_base_pin_mismatch_prints_preparation_and_removes_worktree(self):
+        base = git(self.tree, "rev-parse", "HEAD")
+        (self.tree / "nsh.rev").write_text("f" * 40 + "\n")
+        git(self.tree, "commit", "-qam", "Synthetic changed pin")
+        with patch.object(deslop, "target_directory", return_value=self.root / "target"), \
+                patch.object(deslop, "measure") as measure, redirect_stdout(io.StringIO()) as output:
+            self.assertIsNone(deslop.base_reference(self.tree, self.nsh, base))
+        self.assertIn("--base cannot continue", output.getvalue())
+        self.assertIn("git clone https://github.com/teng-lin/nsh.git", output.getvalue())
+        self.assertIn("checkout --detach", output.getvalue())
+        measure.assert_not_called()
+        self.assertEqual(git(self.tree, "worktree", "list", "--porcelain").count("worktree "), 1)
+
+    def test_missing_base_analyzer_uses_base_toolchain_and_cleans_up(self):
+        actual_run = deslop.run
+        def dispatch(arguments, tree, environment=None):
+            if arguments[:3] == ["rustup", "which", "rust-analyzer"]:
+                self.assertEqual(environment["RUSTUP_TOOLCHAIN"], "0.0.0")
+                raise RuntimeError("synthetic missing component")
+            return actual_run(arguments, tree, environment)
+        with patch.object(deslop, "target_directory", return_value=self.root / "target"), \
+                patch.object(deslop, "run", side_effect=dispatch), \
+                patch.object(deslop, "measure") as measure, redirect_stdout(io.StringIO()) as output:
+            self.assertIsNone(deslop.base_reference(self.tree, self.nsh, git(self.tree, "rev-parse", "HEAD")))
+        self.assertIn("rustup component add rust-analyzer --toolchain 0.0.0", output.getvalue())
+        measure.assert_not_called()
+        self.assertEqual(git(self.tree, "worktree", "list", "--porcelain").count("worktree "), 1)
 
 
 class Commands(unittest.TestCase):

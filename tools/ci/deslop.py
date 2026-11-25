@@ -92,7 +92,10 @@ def index_health(log_text):
     current = None
     for line in log_text.splitlines():
         if line.startswith("### argv: "):
-            arguments = shlex.split(line.removeprefix("### argv: "))
+            try:
+                arguments = shlex.split(line.removeprefix("### argv: "))
+            except ValueError:
+                return ["malformed rust-analyzer invocation header"]
             current = {"arguments": arguments, "stderr": [], "exit": None}
             invocations.append(current)
         elif current is not None:
@@ -388,6 +391,7 @@ def downloaded_reference(tree, merge_base, directory):
 
 def base_reference(tree, nsh_checkout, merge_base):
     environment = clean_environment()
+    environment["RUSTUP_TOOLCHAIN"] = pins.toolchain(tree)
     target = target_directory(tree, environment) / "deslop-base"
     with tempfile.TemporaryDirectory(prefix="patina-deslop-base-") as directory:
         worktree = Path(directory) / "wt"

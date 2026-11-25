@@ -21,7 +21,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup
-        timeout-minutes: 20
+        timeout-minutes: 25
         with:
           prerequisites: host
           cargo-cache-save: 'false'
