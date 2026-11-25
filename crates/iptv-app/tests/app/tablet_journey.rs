@@ -116,6 +116,15 @@ fn tablet(size: (f32, f32)) -> EngineConfig {
     config
 }
 
+/// These long touch journeys own their clock: host scheduling cannot expire
+/// chrome between a visibility check and its following touch. Pending guide
+/// frames still run as input settles, before the next selector is resolved.
+fn manual_tablet(size: (f32, f32)) -> EngineConfig {
+    let mut config = tablet(size);
+    config.clock = nsh_core::time::Clock::manual(SystemTime::now());
+    config
+}
+
 fn player(app: &Headless) -> NodeId {
     let players: Vec<_> = app
         .screen()
@@ -291,7 +300,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
 
-    let mut app = Headless::start(tablet(LANDSCAPE)).unwrap();
+    let mut app = Headless::start(manual_tablet(LANDSCAPE)).unwrap();
     let seen = observe(&mut app);
     app.on_pick(move |_| {
         vec![PickedFile::new(
@@ -333,6 +342,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     step(app.drag_and_hold("id:guide-row >> nth=0", Point::new(px(600.0), px(0.0))));
     step(app.wait_for("text:Recital Replay"));
     step(app.drop_held());
+    assert!(app.settle(), "the released guide reaches frame/engine idle");
     step(app.press("text:Recital Replay"));
     full_screen(&mut app, LANDSCAPE.0);
     let replay = sources(&seen);
@@ -355,6 +365,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     step(app.drag_and_hold("id:guide-row >> nth=0", Point::new(px(-600.0), px(0.0))));
     step(app.wait_for("text:Gala Evening"));
     step(app.drop_held());
+    assert!(app.settle(), "the released guide reaches frame/engine idle");
     step(app.press("text:Gala Evening"));
     step(app.wait_for("id:description-layer >> text:Gala Evening"));
     assert_eq!(sources(&seen).len(), 2, "details never play");
@@ -367,7 +378,7 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
 fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_large_text() {
     let Some(home) = isolated!() else { return };
     let _server = crate::pane_collapse::library(&home);
-    let mut app = Headless::start(tablet(LANDSCAPE)).unwrap();
+    let mut app = Headless::start(manual_tablet(LANDSCAPE)).unwrap();
     let seen = observe(&mut app);
     step(app.wait_for_within("text:Generated group", IMPORT));
     let surface = player(&app);
@@ -379,6 +390,11 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.wait_for("text:Play"));
     step(app.press("text:Play"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
+    // Closing details precedes the runtime's asynchronous source publication.
+    // Wait for that result without consuming the chrome's idle deadline.
+    app.wait_until_fixed_clock("movie source published", WAIT, |_| {
+        sources(&seen).len() == 1
+    });
     let movie = sources(&seen);
     assert_eq!(movie.len(), 1);
     assert!(movie[0].ends_with("/movie/generated-user/generated-pass/10.mp4"));
@@ -414,13 +430,42 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     }
     present(&mut app, LANDSCAPE, 1.0);
 
-    // Pause and play by the visible button: the same stream.
+    // Pause and play by the visible button: the same stream. Exercise real
+    // auto-hide first, then a touch just before the next idle deadline.
+    let idle = Duration::from_millis(iptv_presentation::play_bar::HIDE_AFTER_MS);
+    step(app.run_for(idle));
+    assert!(
+        bounds(&app, "play-bar-back").is_none(),
+        "idle hides the bar"
+    );
+    let shown_at = app.clock().now();
+    show_bar(&mut app);
+    let before_deadline = shown_at + idle - Duration::from_millis(1);
+    assert!(app.clock().now() < before_deadline);
+    let remaining = before_deadline.saturating_duration_since(app.clock().now());
+    step(app.run_for(remaining));
+    assert!(bounds(&app, "play-bar-back").is_some());
+    // Model a delayed host between the visibility check and the normal touch:
+    // wall time does not spend the app's explicitly driven idle deadline.
+    let checked_at = app.clock().now();
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(app.clock().now(), checked_at);
     show_bar(&mut app);
     step(app.press("id:play-bar-play-pause"));
     assert_eq!(seen.lock().unwrap().props["paused"], true);
+    step(app.run_for(Duration::from_millis(2)));
+    assert!(
+        bounds(&app, "play-bar-back").is_some(),
+        "the touch resets the old deadline"
+    );
     step(app.press("id:play-bar-play-pause"));
     assert_eq!(seen.lock().unwrap().props["paused"], false);
     assert_eq!(sources(&seen), movie);
+    step(app.run_for(idle));
+    assert!(
+        bounds(&app, "play-bar-back").is_none(),
+        "fresh idle still hides the bar"
+    );
 
     // The visible ‹ (Movies) returns to the movie's details over the
     // same player, Resume chosen at its progress (#147); Close then
@@ -467,6 +512,9 @@ fn touch_alone_plays_a_movie_and_an_episode_through_rotation_split_screen_and_la
     step(app.press("text:/Generated Second/"));
     step(app.wait_for_gone("id:vod-screen", WAIT));
     full_screen(&mut app, LANDSCAPE.0);
+    app.wait_until_fixed_clock("episode source published", WAIT, |_| {
+        sources(&seen).len() == 2
+    });
     let episode = sources(&seen);
     assert_eq!(episode.len(), 2, "{episode:?}");
     assert!(episode[1].ends_with("/series/generated-user/generated-pass/102.mp4"));
