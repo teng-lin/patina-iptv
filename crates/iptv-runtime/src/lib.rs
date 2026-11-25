@@ -764,12 +764,16 @@ pub mod settings;
 
 #[cfg(feature = "native")]
 mod native;
+#[cfg(feature = "native")]
+pub use native::network::adapter_config;
 pub mod network;
 mod ports;
 mod publish;
 pub mod store_host;
-pub use ports::{MaybeSend, MaybeSync, Ports, RecordingFailure};
+pub use ports::{Entropy, Ports, RecordingFailure};
 pub mod storage;
+mod threading;
+pub use threading::{MaybeSend, MaybeSync};
 pub mod time;
 
 #[cfg(all(test, feature = "native"))]

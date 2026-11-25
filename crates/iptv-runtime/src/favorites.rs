@@ -1509,6 +1509,7 @@ mod start_tests {
             std::sync::Arc::new(crate::execution::Cooperative::new(std::sync::Arc::new(
                 Unpolled,
             ))),
+            crate::native::entropy,
         );
         let owner = crate::Runtime::new(ports);
         owner.start_services();

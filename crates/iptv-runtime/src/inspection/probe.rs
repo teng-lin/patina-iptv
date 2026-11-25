@@ -1476,6 +1476,7 @@ mod host_tests {
             |_| Ok(DatabaseKey::from_bytes([0x75; 32])),
             Arc::new(crate::native::network::NativeNetwork),
             Arc::new(crate::execution::Cooperative::new(Arc::new(Unpolled))),
+            crate::native::entropy,
         );
         let owner = Runtime::new(ports);
         owner.start_services();

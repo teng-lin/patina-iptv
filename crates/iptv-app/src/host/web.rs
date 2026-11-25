@@ -74,10 +74,10 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
         },
         Arc::new(PageNetwork),
         Arc::new(Cooperative::new(Arc::new(WorkerLoop))),
+        iptv_web::adapters::fill_random,
     );
     ports.startup_mark = |phase, detail| crate::startup::mark_with(phase, detail);
     ports.file_storage = false;
-    ports.entropy = iptv_web::adapters::fill_random;
     ports.store_host = Some(Arc::new(store::BrowserStore::default()));
     // One set for the process: the host hands its stored files over once,
     // and every owner after the first sees the writes of those before it.

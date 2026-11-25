@@ -34,6 +34,8 @@ const SHELL_MAY_NAME: &[&str] = &[
     // The network port: the configuration of a client and the client a
     // host's adapter makes.
     "network",
+    // Converts the portable network policy for the native player transport.
+    "adapter_config",
     // The execution port, named only by the browser host, which supplies
     // the cooperative executor in its Ports.
     "execution",

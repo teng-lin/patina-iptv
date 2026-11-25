@@ -461,9 +461,6 @@ pub fn network_config(settings: &Settings) -> NetworkConfig {
     config
 }
 
-#[cfg(feature = "native")]
-pub use crate::native::network::{base_net_config, net_config};
-
 /// Adds `general.user_agent` to a stream's headers unless the stream
 /// names its own (a playlist's per-channel agent wins).
 pub fn add_user_agent(headers: &mut Vec<(String, String)>, ua: Option<String>) {
