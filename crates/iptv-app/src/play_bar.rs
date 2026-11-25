@@ -923,6 +923,13 @@ fn group(ui: Ui, controls: Memo<Layout>, candidates: &'static [Control]) -> View
     }))
 }
 
+/// The center action reopens a completed on-demand title from the beginning.
+fn play_again(ui: Ui) -> bool {
+    crate::on_demand::active(ui)
+        && ui.player.main().finished.get()
+        && ui.player.main().native_published()
+}
+
 fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRef>) -> Icon {
     match c {
         Control::Mute if crate::media::muted(ui) || ui.media.volume.with(|v| v.level == 0) => {
@@ -933,7 +940,7 @@ fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRe
         Control::Channels => Icon::ChannelList,
         Control::Guide => Icon::Guide,
         Control::Rewind => Icon::Rewind,
-        Control::PlayPause if ui.paused.get() => Icon::Play,
+        Control::PlayPause if ui.paused.get() || play_again(ui) => Icon::Play,
         Control::PlayPause => Icon::Pause,
         Control::Forward => Icon::Forward,
         Control::Favorite
@@ -968,6 +975,7 @@ pub(super) fn label(ui: Ui, c: Control) -> &'static str {
     match c {
         Control::Record if crate::recordings_view::recording_active(ui) => tr("Stop recording"),
         Control::Multiview if crate::multiview::detour(ui) => tr("Back to multiview"),
+        Control::PlayPause if play_again(ui) => tr("Play again"),
         _ => tr(control_label(c)),
     }
 }
