@@ -9,6 +9,11 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Follow iPad hardware keyboard attachment and Switch Control at runtime.
+  Refresh these signals when returning to the app, keep panels open for
+  assistive navigation, and offer panel timeout settings only on TV under
+  Advanced; handhelds and desktop use defaults with system accessibility timing.
+
 - Simplify the TV Guide header and groups column by removing overflow buttons,
   the duplicate group selector and time-step arrows. Remove the unfinished
   Watchlist destination from the navigation rail.
