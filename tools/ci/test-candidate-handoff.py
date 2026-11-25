@@ -114,7 +114,7 @@ class Contract(unittest.TestCase):
 
     def write_receipts(self, sysroot, records, version="1"):
         directory = sysroot / "lib/rustlib"
-        (directory / "components").write_text("".join(item["pkg"] + "-" + item["target"] + "\n" for item in records))
+        (directory / "components").write_bytes("".join(item["pkg"] + "-" + item["target"] + "\n" for item in records).encode())
         text = f"config_version = {json.dumps(version)}\n"
         for item in records:
             text += "\n[[components]]\n" + "".join(f"{name} = {json.dumps(value)}\n" for name, value in item.items())
@@ -476,7 +476,7 @@ class Contract(unittest.TestCase):
         receipts.mkdir(parents=True)
         (sysroot / "bin").mkdir()
         (sysroot / "bin/rustc.exe").write_bytes(b"synthetic compiler bytes")
-        (receipts / "components").write_text("rustc\nrust-std\n")
+        (receipts / "components").write_bytes(b"rustc\nrust-std\n")
         (receipts / "unrelated.txt").write_text("synthetic text must not be captured")
         (receipts / "multirust-config.toml").write_bytes(b"\xff")
         (receipts / "multirust-channel-manifest.toml").write_bytes(b"x" * (2 * 1024 * 1024 + 1))
@@ -496,7 +496,7 @@ class Contract(unittest.TestCase):
         self.expected["rust_toolchain"] = original
         self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
         components = sysroot / "lib/rustlib/components"
-        components.write_text("".join(reversed(components.read_text().splitlines(keepends=True))))
+        components.write_bytes(b"\n".join(reversed(components.read_bytes()[:-1].split(b"\n"))) + b"\n")
         current = handoff.rust_toolchain(sysroot)
         self.assertEqual(current, original)
         self.assertNotEqual(handoff.rust_diagnostics(sysroot)["files"], diagnostic["files"])
@@ -519,11 +519,11 @@ class Contract(unittest.TestCase):
         self.expected["rust_toolchain"] = handoff.rust_toolchain(sysroot)
         self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
         components = sysroot / "lib/rustlib/components"
-        original = components.read_text().splitlines(keepends=True)
+        original = components.read_bytes()[:-1].split(b"\n")
         config = sysroot / "lib/rustlib/multirust-config.toml"
         config_before = config.read_bytes()
-        for members in (original + ["synthetic-tools-x86_64-pc-windows-msvc\n"], original[:-1], ["rustc-next-x86_64-pc-windows-msvc\n", *original[1:]]):
-            components.write_text("".join(members))
+        for members in (original + [b"synthetic-tools-x86_64-pc-windows-msvc"], original[:-1], [b"rustc-next-x86_64-pc-windows-msvc", *original[1:]]):
+            components.write_bytes(b"\n".join(members) + b"\n")
             self.assertEqual(config.read_bytes(), config_before)
             with self.subTest(members=members), self.assertRaisesRegex(ValueError, "Independent consumer inputs"):
                 handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=handoff.rust_toolchain(sysroot)), self.api)
@@ -550,6 +550,17 @@ class Contract(unittest.TestCase):
         (sysroot / "lib/rustlib/components").unlink()
         with self.assertRaisesRegex(ValueError, "receipt is missing"):
             handoff.rust_toolchain(sysroot)
+
+    def test_component_receipt_accepts_only_lf_terminated_lines(self):
+        expected = handoff.rustup_components(b"cargo\nrustc\n")
+        self.assertEqual(handoff.rustup_components(b"rustc\ncargo\n"), expected)
+        for separator in ("\r", "\r\n", "\v", "\f", "\u0085", "\u2028", "\u2029"):
+            raw = ("cargo" + separator + "rustc\n").encode()
+            with self.subTest(separator=repr(separator)), self.assertRaises(ValueError):
+                handoff.rustup_components(raw)
+        for raw in (b"cargo\nrustc", b"cargo\n\nrustc\n"):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                handoff.rustup_components(raw)
 
     def test_compiler_driver_and_standard_library_bytes_remain_required_inputs(self):
         sysroot, _ = self.rust_fixture()

@@ -109,7 +109,12 @@ def rustup_components(raw):
     """Installed component membership is meaningful; its line order is not."""
     if len(raw) > 64 * 1024:
         raise ValueError("Rustup component receipt exceeds policy size")
-    members = raw.decode("utf-8").splitlines()
+    text = raw.decode("utf-8")
+    # Evidence covers LF-terminated receipt lines only. Other separators must
+    # remain unsupported, rather than silently expanding the canonical grammar.
+    if not text.endswith("\n"):
+        raise ValueError("Unsupported Rustup component list")
+    members = text[:-1].split("\n")
     if not members or len(set(members)) != len(members) or any(not re.fullmatch(r"[A-Za-z0-9_-]+", member) for member in members):
         raise ValueError("Unsupported Rustup component list")
     return encoded({"format": "rustup-components-v1", "members": sorted(members)})

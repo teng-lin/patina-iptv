@@ -78,7 +78,12 @@ raw Rust `lib` aggregate. Two subsequent input-only runs,
 [45677564001](https://github.com/teng-lin/patina-iptv/actions/runs/45677564001)
 and [45678310839](https://github.com/teng-lin/patina-iptv/actions/runs/45678310839),
 retained file-level evidence. The retrieved fresh maps contain 131 `lib`
-files and 21 `bin` files; the compared maps and raw receipts matched.
+files and 21 `bin` files. The first three fresh maps matched. The second
+run’s control [job 139431754023](https://github.com/teng-lin/patina-iptv/actions/runs/45678310839/job/139431754023)
+differed only in `lib/rustlib/components`: the same six component names
+appeared in a different line order. All other 151 file entries, including
+raw `multirust-config.toml`, matched. This is a directly retrieved comparison,
+independent of the historical reconstruction below.
 
 To attribute the earlier aggregates without pretending to have retrieved
 historical receipt bytes, an independent reconstruction fixed all observed
@@ -100,8 +105,9 @@ artifact verification:
 
 The compatibility policy therefore canonicalizes **only** the exact
 `lib/rustlib/components` receipt as validated, unique installed component
-names in sorted order. It binds the complete membership; empty, duplicate,
-malformed, non-UTF-8 or oversized lists fail visibly. Every other `lib`
+names in sorted order, using the observed LF-terminated line grammar. It
+binds the complete membership; empty, duplicate, malformed, non-UTF-8,
+unsupported line separators or oversized lists fail visibly. Every other `lib`
 file and every `bin` file remains bound to its raw bytes. In particular,
 `multirust-config.toml` is not normalized: its field, version and ordering
 changes still differ. A policy marker is part of the fingerprint, and raw
