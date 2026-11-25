@@ -774,14 +774,9 @@ fn stage(services: &Services, input: &mut impl Read) -> Result<()> {
                 Rejection::Database { found, supported },
             )
         } else {
-            let unavailable = error.retryable_open()
-                || matches!(
-                    error,
-                    iptv_store_sqlite::StoreError::Unavailable(_)
-                        | iptv_store_sqlite::StoreError::RestartRequired(_)
-                );
-            let error = Error::new("Backup library is invalid or from a newer version", error);
-            if unavailable { error } else { error.damaged() }
+            let content = error.is_snapshot_content_error();
+            let error = Error::new("Could not check backup library", error);
+            if content { error.damaged() } else { error }
         }
     })?;
     {

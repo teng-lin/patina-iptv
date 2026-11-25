@@ -353,6 +353,58 @@ impl Store {
 #[cfg(test)]
 mod path_tests {
     use super::*;
+
+    #[test]
+    fn malformed_snapshot_metadata_produces_known_content_decode_errors() {
+        crate::initialize_sqlite().unwrap();
+        let malformed = Connection::open_in_memory().unwrap();
+        malformed
+            .execute_batch(
+                "CREATE TABLE schema_migrations(version TEXT, name TEXT, applied_at INTEGER);
+             INSERT INTO schema_migrations VALUES ('generated', 'generated', 0);",
+            )
+            .unwrap();
+        let error = Store::validate_snapshot_connection(&malformed).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                StoreError::Sqlite(rusqlite::Error::InvalidColumnType(..))
+            ),
+            "{error:?}"
+        );
+        assert!(error.is_snapshot_content_error());
+
+        let negative_version = Store::open_in_memory().unwrap();
+        negative_version
+            .conn
+            .pragma_update(None, "user_version", -1)
+            .unwrap();
+        let error = Store::validate_snapshot_connection(&negative_version.conn).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                StoreError::Sqlite(rusqlite::Error::IntegralValueOutOfRange(..))
+            ),
+            "{error:?}"
+        );
+        assert!(error.is_snapshot_content_error());
+
+        let invalid_text = Store::open_in_memory().unwrap();
+        invalid_text
+            .conn
+            .execute(
+                "UPDATE schema_migrations SET name=CAST(X'ff' AS TEXT) WHERE version=1",
+                [],
+            )
+            .unwrap();
+        let error = Store::validate_snapshot_connection(&invalid_text.conn).unwrap_err();
+        assert!(
+            matches!(error, StoreError::Sqlite(rusqlite::Error::Utf8Error(..))),
+            "{error:?}"
+        );
+        assert!(error.is_snapshot_content_error());
+    }
+
     #[test]
     fn restores_windows_paths_on_any_host_without_allowing_escape() {
         let root = Path::new(r"C:\Users\Synthetic\Patina");
