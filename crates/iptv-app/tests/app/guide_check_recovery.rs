@@ -249,10 +249,11 @@ impl Scenario {
     fn delete_guide_data(&mut self) {
         rail(&mut self.app, "Settings");
         step(self.app.press("text:TV guide data"));
+        step(self.app.press("text:Guide sources"));
         step(self.app.wait_for("text:Delete stored guide data"));
         step(self.app.press("text:Delete stored guide data"));
-        step(self.app.wait_for("text:Delete stored guide data?"));
-        step(self.app.press("text:Delete stored guide data >> nth=1"));
+        step(self.app.wait_for("text:/^Delete guide data for /"));
+        step(self.app.press("text:Delete"));
         step(self.app.wait_for_within("text:Guide data deleted", IMPORT));
         to_guide(&mut self.app);
         step(self.app.wait_for_gone("text:/ Now$/", IMPORT));
@@ -262,13 +263,19 @@ impl Scenario {
     fn guide_settings(&mut self) {
         rail(&mut self.app, "Settings");
         step(self.app.press("text:TV guide data"));
-        step(self.app.wait_for("text:Update the guide now"));
+        step(self.app.press("text:Guide sources"));
+        step(self.app.wait_for("id:guide-sources-screen"));
     }
 
     /// From the guide: the settings' "Update the guide now".
     fn update_now(&mut self) {
         self.guide_settings();
-        step(self.app.press("text:Update the guide now"));
+        let action = if self.app.screen().matches("text:Retry").unwrap() {
+            "text:Retry"
+        } else {
+            "text:Update the guide now"
+        };
+        step(self.app.press(action));
     }
 
     /// From the guide: the first channel's "Choose guide data…", `row`.
@@ -279,7 +286,9 @@ impl Scenario {
         step(self.app.press_key("m"));
         step(self.app.wait_for("text:Choose guide data…"));
         step(self.app.press("text:Choose guide data…"));
-        step(self.app.wait_for("text:/^Guide data for /"));
+        step(self.app.wait_for("text:Guide data for Alpha One"));
+        // The initial shell precedes its asynchronous stored channel/current read.
+        step(self.app.wait_for("text:a1"));
         step(self.app.press(&format!("text:{row}")));
     }
 
@@ -415,16 +424,22 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
     let asked = s.server.requests();
     rail(&mut s.app, "Settings");
     step(s.app.press("text:TV guide data"));
+    step(s.app.press("text:Guide sources"));
     step(s.app.wait_for("text:Update the guide now"));
-    step(s.app.press("text:Update the guide now"));
+    let action = if s.app.screen().matches("text:Retry").unwrap() {
+        "text:Retry"
+    } else {
+        "text:Update the guide now"
+    };
+    step(s.app.press(action));
     s.until_asked(asked);
     assert!(
         !s.pending(),
         "the update owns the guide: no timer meanwhile"
     );
     step(s.app.press("text:Delete stored guide data"));
-    step(s.app.wait_for("text:Delete stored guide data?"));
-    step(s.app.press("text:Delete stored guide data >> nth=1"));
+    step(s.app.wait_for("text:/^Delete guide data for /"));
+    step(s.app.press("text:Delete"));
     step(s.app.wait_for_within("text:Guide data deleted", IMPORT));
     s.until_pending("the revoked update kept a guide check");
     // The check the update asked for, hours away, comes due.
@@ -718,10 +733,7 @@ fn a_guide_chosen_during_an_update_is_downloaded_after_it() {
     to_guide(&mut s.app);
     // Automatic again needs the guide's full channel lists: a download.
     s.choose_guide("Automatic");
-    step(
-        s.app
-            .wait_for_within("text:Saved; the guide is downloading to show it", IMPORT),
-    );
+    // The replacement request proves the canceled download was superseded.
     s.until_asked(asked + 1);
     s.server.serve(guide("Chosen", &["a1", "a2"]));
     step(s.app.wait_for_gone("text:/^Guide data for /", IMPORT));
@@ -751,7 +763,7 @@ fn an_update_without_guide_sources_ends() {
     s.update_now();
     step(
         s.app
-            .wait_for_within("text:No guide sources are configured", IMPORT),
+            .wait_for_within("text:No guide source is switched on", IMPORT),
     );
     step(s.app.wait_for_gone("text:Updating…", IMPORT));
     s.until_pending("the update that could not run kept a guide check");
@@ -907,7 +919,12 @@ fn manual_guide_updates_keep_the_backoff_when_work_ends_under_an_older_generatio
     // The update waits for the store; the workers refuse the Add, then it.
     iptv_app::occupy_writer(Duration::from_secs(3));
     iptv_app::refuse_work(2);
-    step(s.app.press("text:Update the guide now"));
+    let action = if s.app.screen().matches("text:Retry").unwrap() {
+        "text:Retry"
+    } else {
+        "text:Update the guide now"
+    };
+    step(s.app.press(action));
     to_guide(&mut s.app);
     let second = Server::start("second.m3u", "audio/x-mpegurl", String::new());
     s.add_playlist(&second.link);

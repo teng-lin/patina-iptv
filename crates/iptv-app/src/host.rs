@@ -61,6 +61,15 @@ pub(crate) const VIDEO_UNDER_PAGE: bool =
 /// keyboard whose bindings NSH's keymap fires.
 pub(crate) const REMOTE_KEYS: bool = ANDROID || REMOTE_ONLY;
 
+/// Ask for Android's optional notification permission after accepting a capture.
+pub(crate) fn request_recording_notification_permission() {
+    // The system prompt must not delay the viewer's Start or Stop action.
+    #[cfg(target_os = "android")]
+    crate::data::spawn_in_app(async {
+        let _ = nsh_core::prelude::request_notification_permission().await;
+    });
+}
+
 /// The font files the app registers itself, WOFF2. A browser package's
 /// page loads them instead (feature `browser-package`, `hosts/tizen-nsh`),
 /// which keeps them out of the module.

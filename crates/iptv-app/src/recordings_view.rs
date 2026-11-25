@@ -461,7 +461,10 @@ fn start(ui: Ui, mut request: Request) {
         let result = owner.schedule_recording(request).await;
         match &result {
             // What can stop it, said as it starts (#275).
-            Ok(_) => crate::settings_view::notify(&crate::capture_limits::start_notice()),
+            Ok(_) => {
+                crate::settings_view::notify(&crate::capture_limits::start_notice());
+                crate::host::request_recording_notification_permission();
+            }
             Err(error) => crate::settings_view::notify(translated_reason(
                 error
                     .unavailable_reason()

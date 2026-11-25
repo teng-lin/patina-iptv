@@ -508,12 +508,24 @@ fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_z
 #[test]
 fn live_play_bar_expires_and_back_dismisses_without_stopping() {
     let Some(home) = isolated!() else { return };
+    let _ = env_logger::Builder::new()
+        .filter_module(
+            "iptv_runtime::recordings::shared::source_preparation",
+            log::LevelFilter::Debug,
+        )
+        .filter_module("iptv_app::source_publication", log::LevelFilter::Debug)
+        .format_timestamp_millis()
+        .is_test(true)
+        .try_init();
     let mut settings = Settings::new();
     settings
         .set("guide.stay_on_guide", Value::Bool(false))
         .unwrap();
     settings.set("guide.switch_delay", Value::ms(500)).unwrap();
-    let mut fixture = personalization::start(home, settings, true);
+    // The local 404 drives the shared-input probe to its fallback without DNS.
+    let server = crate::support::Server::start(&[]);
+    let playlist = personalization::M3U.replace("http://example.test/", &server.url("/"));
+    let mut fixture = personalization::start_with_playlist(home, settings, true, &playlist);
     let app = &mut fixture.app;
     step(app.set_environment("TV remote", |env| env.idiom = Idiom::Tv));
     choose_fullscreen(app);

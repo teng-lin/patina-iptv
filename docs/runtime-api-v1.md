@@ -15,6 +15,10 @@ start its services, supply task/event ports where orchestration requires them,
 and drain/retire that owner on shutdown. The credential port's opaque redacting
 `DatabaseKey` is an explicit construction input; it is not a query record.
 
+The Android recorder installs a callback through `Ports::recording_failed`.
+It receives only the `RecordingFailure` category for a capture belonging to
+that runtime.
+
 Keep the owner on its application thread. Local futures and `Rc` state have no
 general `Send` guarantee. Work that leaves the thread carries captured services
 for its accepting owner/epoch. A new owner cannot redirect old work to its

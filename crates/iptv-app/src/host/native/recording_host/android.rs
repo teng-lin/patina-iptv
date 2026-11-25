@@ -54,6 +54,44 @@ pub(crate) fn schedule(active: bool) {
         let _ = env.exception_clear();
     }
 }
+
+/// Reports an incomplete capture to the Android host without its metadata.
+pub(crate) fn notify_failed(reason: crate::runtime::RecordingFailure) {
+    let Some((vm, class)) = HOST.get() else {
+        return;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return;
+    };
+    let class: &JClass = class.as_obj().into();
+    let code = match reason {
+        crate::runtime::RecordingFailure::Unexpected => 0,
+        crate::runtime::RecordingFailure::TvStandby => 1,
+    };
+    let _ = env.call_static_method(class, "notifyFailed", "(I)V", &[JValue::Int(code)]);
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+}
+
+/// Checks TV standby even on a cold restart, before opening any input.
+pub(crate) fn standby_blocks_recording() -> bool {
+    let Some((vm, class)) = HOST.get() else {
+        return false;
+    };
+    let Ok(mut env) = vm.attach_current_thread() else {
+        return false;
+    };
+    let class: &JClass = class.as_obj().into();
+    let result = env
+        .call_static_method(class, "standbyBlocksRecording", "()Z", &[])
+        .and_then(|value| value.z());
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+    result.unwrap_or(false)
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_start(
     mut env: jni::JNIEnv,
@@ -71,6 +109,8 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_start(
         );
         ports.background_recordings = true;
         ports.recording_schedule = schedule;
+        ports.recording_failed = notify_failed;
+        ports.recording_standby = Some(standby_blocks_recording);
         ports.exclude_from_backup = crate::host::native::platform_data::exclude_from_backup;
         crate::runtime::recordings::host::start_background_host(ports).ok()?;
         Some(1)
@@ -94,8 +134,8 @@ pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stop(
 
 /// Stops every running capture early (#275), each kept as a partial
 /// recording with the reason: `why` 1, the TV was turned off under Low
-/// Power Standby; 2, Android's background time limit. Returns how many were
-/// running.
+/// Power Standby; 2, Android's background time limit. Returns how many
+/// newly started closing.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_hantekllc_iptvrs_host_RecordingHost_stopCaptures(
     mut env: jni::JNIEnv,

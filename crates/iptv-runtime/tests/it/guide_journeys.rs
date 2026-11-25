@@ -235,3 +235,60 @@ fn cached_startup_pages_descriptions_and_manual_choices_preserve_channel_identit
         assert_eq!(data::assign::current(&owner, source, &key).await, Default::default(), "retired reads are a failed observation, not a resurrected binding");
     });
 }
+
+#[test]
+fn clearing_one_playlists_guide_keeps_other_playlists_and_source_links() {
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&executor, async {
+        let directory = tempfile::tempdir().unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let (first, _, _) = seed(directory.path(), now);
+        let (second, _, _) = seed(directory.path(), now);
+        assert_ne!(first, second);
+        let owner = Rc::new(Runtime::new(Ports::new(directory.path().into(), |_| {
+            Ok(DatabaseKey::from_bytes(KEY))
+        })));
+        owner.bind_tasks(
+            |task| drop(tokio::task::spawn_local(task)),
+            |duration| Box::pin(tokio::time::sleep(duration)),
+        );
+        owner.start_services();
+        iptv_runtime::stored::note_shown(&owner, Some(second));
+        let before = owner.schedule();
+        let (done, cleared) = futures_channel::oneshot::channel();
+        assert!(data::stored::clear_source(&owner, first, move |result| {
+            let _ = done.send(result);
+        }));
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), cleared)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert_eq!(
+            owner.shown_source(),
+            Some(second),
+            "clearing must not switch the viewed playlist"
+        );
+        assert!(
+            Rc::ptr_eq(&before, &owner.schedule()),
+            "the visible schedule is untouched"
+        );
+        assert!(owner.drain_services());
+        let store = Store::open_encrypted(
+            directory.path().join("iptv.sqlite"),
+            &DatabaseKey::from_bytes(KEY),
+        )
+        .unwrap();
+        assert!(store.epg_guide(first).unwrap().is_none());
+        assert!(store.epg_guide(second).unwrap().is_some());
+        assert_eq!(store.guide_sources(first).unwrap().len(), 1);
+        assert_eq!(store.guide_sources(second).unwrap().len(), 1);
+    });
+}

@@ -5,6 +5,7 @@
     <string name="recording_background">錄影正在背景繼續</string>
     <string name="recording_stopped_channel">提前停止的錄影</string>
     <string name="recording_stopped_title">錄影已停止</string>
-    <string name="recording_stopped_tv_off">電視已關閉。此前錄下的內容在「錄影」中。</string>
+    <string name="recording_stopped_tv_off">電視已關閉。請在「錄影」中查看詳細資訊。</string>
     <string name="recording_stopped_background_limit">已達到 Android 的背景時間限制。此前錄下的內容在「錄影」中。</string>
+    <string name="recording_failed_background">背景錄影已中斷。</string>
 </resources>

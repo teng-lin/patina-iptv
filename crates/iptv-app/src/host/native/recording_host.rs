@@ -2,7 +2,7 @@
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
-pub(crate) use android::{schedule, set_language};
+pub(crate) use android::{notify_failed, schedule, set_language, standby_blocks_recording};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]

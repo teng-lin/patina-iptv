@@ -76,6 +76,13 @@ events. It predates this audit and the follow-up idle-overlay-rail fix in that
 PR; it is not a new run or evidence from an Android phone. Keep any later runs
 separate, with their own commit, artifact hash and operation manifest.
 
+The final integration includes master
+`fade0783421934c08ae1def1e5a0026b7a166a3a`, after #313 merged and #282
+closed automatically. Both changelog entries are retained. The Back predicates
+and fixed No/Yes selection are unchanged by that integration. Final-head checks
+and APK operation manifests must name their own exact source revision; the
+pre-integration device results below remain scoped to `cc494298`.
+
 ## Owned emulator follow-up on 2026-11-25 UTC
 
 These runs used application `cc494298c8ff3cc0fed9d68699f273ae1a848c61`,

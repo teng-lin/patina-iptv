@@ -1,10 +1,8 @@
-//! The guide sources screen of one playlist (playlists screen → a
-//! playlist → tr("Guide sources"), or Settings → TV guide data → "Guide
-//! sources" / "Add a guide source" for the playlist on screen): its
-//! sources in priority order (the first one that has a channel wins), each
-//! with where it comes from, whether it is on, its time shift and how its
-//! last download went; "Add a guide source" (a link, then an optional
-//! name; a duplicate is refused) and tr("Update the guide now").
+//! One playlist’s Guide data screen (Playlists → playlist → Guide data,
+//! or Settings → TV guide data → Guide sources for the playlist on screen).
+//! Sources appear in priority order with their last refresh result and
+//! actions to change or retry them. Update and Clear affect this playlist
+//! only; Clear confirms its name and the programs that will be removed.
 //!
 //! OK (or a tap) on a source opens its actions: switch it on or off, move
 //! it up or down, shift its times (Left/Right, or − and +), name it, and
@@ -49,6 +47,9 @@ const CARD_W: f32 = 660.0;
 /// Opens the screen for `playlist`.
 pub fn open(ui: Ui, playlist: SourceId) {
     ui.guide_sources.set(Some(screen(playlist)));
+    // Timer failures can occur without publishing a new visible guide.
+    // Opening the controls always reads the latest persisted refresh result.
+    crate::runtime::data::stored::refresh_status(&crate::runtime());
 }
 
 /// The screen for `playlist`; a host that cannot import offers no guide
@@ -62,16 +63,12 @@ fn screen(playlist: SourceId) -> Screen {
     }
 }
 
-/// Opens it on entering a new source's link.
-pub fn open_add(ui: Ui, playlist: SourceId) {
-    let mut screen = screen(playlist);
-    screen.start_add();
-    ui.guide_sources.set(Some(screen));
-}
-
 pub fn close(ui: Ui) {
     if ui.guide_sources.with_untracked(Option::is_some) {
         ui.guide_sources.set(None);
+        if !crate::settings_view::is_open(ui) {
+            crate::runtime().parental_content_closed();
+        }
         dismiss_keyboard();
     }
 }
@@ -142,6 +139,14 @@ fn cancel(ui: Ui) {
 
 /// Carries out `effect` of the screen of `playlist`.
 fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
+    if matches!(&effect, Effect::Clear | Effect::Edit(_) | Effect::Update)
+        && crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+            == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::protected_settings(ui, move || perform(ui, playlist, effect));
+        return;
+    }
     match effect {
         Effect::Inspect => crate::guide_inspect_view::open(ui, playlist),
         Effect::Edit(edit) => {
@@ -164,6 +169,16 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
             } else {
                 crate::settings_view::notify(tr("No guide source is switched on"));
             }
+        }
+        Effect::Clear => {
+            stored::clear_source(&crate::runtime(), playlist, move |deleted| {
+                crate::settings_view::notify(if deleted {
+                    tr("Guide data deleted")
+                } else {
+                    tr("The guide data could not be deleted")
+                });
+                ui.app.library.version.update(|v| *v += 1);
+            });
         }
         Effect::Close => close(ui),
     }
@@ -264,7 +279,9 @@ fn hint(ui: Ui) -> &'static str {
         (true, Layer::Actions { .. }) => {
             tr("▲▼ choose   OK do it   ◀▶ shift times   Back close the sheet")
         }
-        (true, Layer::Confirm { .. }) => tr("▲▼ choose   OK confirm   Back keep it"),
+        (true, Layer::Confirm { .. } | Layer::Clear { .. }) => {
+            tr("▲▼ choose   OK confirm   Back keep it")
+        }
         (false, _) => {
             tr("Tap a source for what you can do with it. The first source with a channel wins")
         }
@@ -284,8 +301,8 @@ fn header(ui: Ui, size: Scale) -> View {
                 .map(|p| p.name)
         });
         name.map_or_else(
-            || tr("Guide sources").to_owned(),
-            |n| trf("Guide sources · {playlist}", &[("playlist", (&n).into())]),
+            || tr("Guide data").to_owned(),
+            |n| trf("Guide data · {playlist}", &[("playlist", (&n).into())]),
         )
     };
     ui_kit::header(ui, size, name, close)
@@ -303,11 +320,17 @@ fn list(ui: Ui, size: Scale) -> impl IntoElement {
             rows.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
-    virtual_list(count, move |at| row(ui, size, at.index(), focused_index))
-        .accessibility_elements_hidden(move || contents_hidden(ui))
-        .estimated_item_size(list_rows::pitch(size, ROW_THREE))
-        .element_ref(&rows)
-        .flex_1()
+    virtual_list(count, move |at| {
+        dynamic(move || {
+            let index = at.index();
+            untracked(move || row(ui, size, index, focused_index))
+        })
+    })
+    .test_id("guide-data-list")
+    .accessibility_elements_hidden(move || contents_hidden(ui))
+    .estimated_item_size(list_rows::pitch(size, ROW_THREE))
+    .element_ref(&rows)
+    .flex_1()
 }
 
 /// The tr("Update the guide now") row's status.
@@ -352,7 +375,14 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
     let title = move || match (line(), item()) {
         (Some(l), _) => format!("{}.  {}", index + 1, words::title(&l.source)),
         (None, Some(Item::Add)) => tr("+ Add a guide source").to_owned(),
-        (None, Some(Item::Update)) => tr("Update the guide now").to_owned(),
+        (None, Some(Item::Update)) => {
+            if playlist().is_some_and(|p| update_status(p).1) {
+                tr("Retry").to_owned()
+            } else {
+                tr("Update the guide now").to_owned()
+            }
+        }
+        (None, Some(Item::Clear)) => tr("Delete stored guide data").to_owned(),
         (None, Some(Item::Inspect)) => tr("Inspect guide coverage").to_owned(),
         _ => String::new(),
     };
@@ -361,6 +391,10 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
         (None, Some(Item::Add)) => tr("An XMLTV link (.xml or .xml.gz)").to_owned(),
         (None, Some(Item::Update)) => tr("Downloads every source switched on").to_owned(),
         (None, Some(Item::Inspect)) => tr("Compare guide channels and program samples").to_owned(),
+        (None, Some(Item::Clear)) => {
+            tr("Delete this playlist’s stored programs; keep its channels and guide sources")
+                .to_owned()
+        }
         _ => String::new(),
     };
     let status = move || match (line(), item(), playlist()) {
@@ -444,6 +478,7 @@ fn row(ui: Ui, size: Scale, index: usize, focused_index: Memo<Option<usize>>) ->
 enum Sheet2 {
     Actions,
     Confirm,
+    Clear,
 }
 
 /// The open sheet over the list; rebuilt only when another one opens.
@@ -451,6 +486,7 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
     let open = computed(move || match state(ui, Screen::layer) {
         Some(Layer::Actions { feed, .. }) => Some((Sheet2::Actions, feed)),
         Some(Layer::Confirm { feed, .. }) => Some((Sheet2::Confirm, feed)),
+        Some(Layer::Clear { .. }) => Some((Sheet2::Clear, iptv_epg::FeedId(0))),
         Some(Layer::List) | None => None,
     });
     dynamic(move || {
@@ -462,6 +498,7 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
             Some((Sheet2::Confirm, feed)) => {
                 backdrop(ui, confirm_card(ui, size, feed).into_element())
             }
+            Some((Sheet2::Clear, _)) => backdrop(ui, clear_card(ui, size).into_element()),
             None => view(),
         })
     })
@@ -518,7 +555,8 @@ fn step(
 
 fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement {
     let line = move || state(ui, |s| s.line(feed).cloned()).flatten();
-    let acts = state(ui, |s| s.acts(feed)).unwrap_or_default();
+    let acts = computed(move || state(ui, |s| s.acts(feed)).unwrap_or_default());
+    let scrolling = ui_kit::FocusScroll::new();
     let act_row = move |act: Act| {
         let focused = move || {
             state(ui, |s| s.layer() == Layer::Actions { feed, focus: act }).unwrap_or(false)
@@ -532,7 +570,7 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
         let row = ui_kit::action(ui, size, label, focused, color, move || {
             update(ui, |s| s.act(feed, act));
         });
-        if act == Act::Shift {
+        let row = if act == Act::Shift {
             row.flex_row()
                 .items_center()
                 .justify_start()
@@ -542,9 +580,16 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
                 .child(step(ui, size, "+", feed, 1))
         } else {
             row
-        }
+        };
+        scrolling.control(row, focused)
     };
     card(ui, size)
+        .test_id("guide-source-actions")
+        .max_h(percentage(0.95))
+        .h(move || {
+            px((window().height.0 * 0.95)
+                .min(size.of(600.0) * crate::settings::text_factor().max(1.0)))
+        })
         .child(ui_kit::title(size, move || {
             line().map(|l| words::title(&l.source)).unwrap_or_default()
         }))
@@ -563,7 +608,48 @@ fn actions_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement
             .number_of_lines(1),
         )
         .child(view().h(move || size.px(6.0)))
-        .children(acts.into_iter().map(act_row))
+        .child(
+            scrolling
+                .view()
+                .test_id("guide-source-actions-scroll")
+                .flex_1()
+                .child(dynamic(move || {
+                    view().children(acts.get().into_iter().map(act_row))
+                })),
+        )
+}
+
+fn clear_card(ui: Ui, size: Scale) -> impl IntoElement {
+    let name = state(ui, Screen::playlist)
+        .and_then(|id| {
+            crate::runtime()
+                .playlists()
+                .ok()?
+                .into_iter()
+                .find(|p| p.id == id)
+                .map(|p| p.name)
+        })
+        .unwrap_or_default();
+    let focused = move |confirm| {
+        move || state(ui, |s| s.layer() == Layer::Clear { confirm }).unwrap_or(false)
+    };
+    card(ui, size)
+        .child(ui_kit::title(
+            size,
+            trf("Delete guide data for “{playlist}”?", &[("playlist", (&name).into())]),
+        ))
+        .child(ui_kit::body(
+            size,
+            tr("The stored programs from every guide source of this playlist are deleted. Channels, guide sources and other playlists are kept. The guide stays empty until it is downloaded again."),
+        ))
+        .child(ui_kit::action(
+            ui, size, tr("Cancel"), focused(false), WHITE,
+            move || update(ui, |s| s.confirm_clear(false)),
+        ))
+        .child(ui_kit::action(
+            ui, size, tr("Delete"), focused(true), ERROR,
+            move || update(ui, |s| s.confirm_clear(true)),
+        ))
 }
 
 fn confirm_card(ui: Ui, size: Scale, feed: iptv_epg::FeedId) -> impl IntoElement {

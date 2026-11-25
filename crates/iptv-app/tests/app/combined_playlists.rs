@@ -119,6 +119,220 @@ fn playlists(app: &mut Headless) {
     step(app.wait_for("text:Tap a playlist for what you can do with it"));
 }
 
+#[test]
+fn recycled_playlist_and_guide_rows_keep_their_content_and_actions() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[("IPTV_TEST_DEVICE_SIGNALS", "1")],
+    ) else {
+        return;
+    };
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let mut last = SourceId(0);
+    for index in 0..36 {
+        last = seed(&mut store, home.path(), &format!("Playlist {index:02}"));
+        store.set_guide_sources(last, &[]).unwrap();
+    }
+    let guide = std::fs::read(home.path().join("Playlist 35.xml")).unwrap();
+    let feeds: Vec<_> = (0..20)
+        .map(|index| {
+            let file = home.path().join(format!("feed-{index:02}.xml"));
+            std::fs::write(&file, &guide).unwrap();
+            GuideSource {
+                feed: iptv_epg::FeedId(2000 + index),
+                provider_index: None,
+                url: SecretUrl::new(file.to_string_lossy()),
+                name: Some(format!("Feed {index:02}")),
+                enabled: true,
+                shift_minutes: 0,
+            }
+        })
+        .collect();
+    store.set_guide_sources(last, &feeds).unwrap();
+    store.set_all_playlists(false).unwrap();
+    drop(store);
+    let mut settings = Settings::new();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    settings
+        .set("general.resume_last_channel", Value::Bool(false))
+        .unwrap();
+    std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(960.0), px(540.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-timeline"));
+    crate::device_settings::report(&mut app, "tv", false, true);
+    playlists(&mut app);
+    for _ in 0..35 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("id:playlists-list >> text:Playlist 35"));
+    step(app.press("id:playlists-list >> text:Playlist 35"));
+    // Reach the last action after cells have represented earlier actions.
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("id:playlist-actions-list >> text:Delete"));
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.wait_for("text:Delete “Playlist 35”?"));
+    step(app.press("text:Keep it"));
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.press("id:playlist-actions-list >> text:Guide data"));
+    step(app.wait_for("text:Guide data · Playlist 35"));
+    for _ in 0..19 {
+        step(app.press_key("down"));
+    }
+    step(app.wait_for("id:guide-data-list >> text:20.  Feed 19"));
+    step(app.press("id:guide-data-list >> text:20.  Feed 19"));
+    step(app.wait_for("id:guide-source-actions >> text:Feed 19"));
+    step(app.press("id:guide-source-actions >> text:Switch off"));
+    step(app.wait_until(
+        "only the selected feed is switched off",
+        Duration::from_secs(5),
+        |_| {
+            let feeds = crate::isolated::open_database(&path)
+                .unwrap()
+                .guide_sources(last)
+                .unwrap();
+            feeds.len() == 20
+                && feeds
+                    .iter()
+                    .all(|feed| feed.enabled == (feed.feed != iptv_epg::FeedId(2019)))
+        },
+    ));
+    step(app.back());
+    for _ in 0..10 {
+        step(app.press_key("down"));
+    }
+    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    step(app.wait_for("text:Delete guide data for “Playlist 35”?"));
+    step(app.press("text:Cancel"));
+}
+
+#[test]
+fn failed_guide_source_actions_follow_focus_inside_large_text_tv() {
+    let Some(home) = isolated!() else { return };
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    seed(&mut store, home.path(), "Generated guide actions");
+    drop(store);
+    let guide = home.path().join("Generated guide actions.xml");
+    let xml = std::fs::read(&guide).unwrap();
+    std::fs::remove_file(&guide).unwrap();
+    let mut settings = Settings::new();
+    settings
+        .set("epg.update", Value::choice("on_request"))
+        .unwrap();
+    settings
+        .set("appearance.font_size", Value::choice("extra_large"))
+        .unwrap();
+    std::fs::write(directory.join("settings.json"), settings.to_json_string()).unwrap();
+    let mut config = EngineConfig {
+        viewport: Size::new(px(960.0), px(540.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = nsh_core::platform::Idiom::Tv;
+    config.environment.font_scale = 1.3;
+    let mut app = Headless::start(config).unwrap();
+    playlists(&mut app);
+    step(app.press("id:playlists-list >> text:Generated guide actions"));
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.press_key("up"));
+    step(app.press_key("up"));
+    step(app.press("id:playlist-actions-list >> text:Guide data"));
+    if !app
+        .screen()
+        .matches("id:guide-data-list >> text:Retry")
+        .unwrap()
+    {
+        step(app.press("id:guide-data-list >> text:Update the guide now"));
+    }
+    step(app.wait_for("id:guide-data-list >> text:Retry"));
+    step(app.press("id:guide-data-list >> text:1.  Generated guide actions guide"));
+    step(app.wait_for("id:guide-source-actions >> text:Retry"));
+    step(app.press_key("up"));
+    let inside = |screen: &nsh_testing::Screen, selector: &str| {
+        let nodes = screen.layout_nodes();
+        let bounds = |selector| {
+            let id = screen.id(selector).unwrap();
+            nodes.iter().find(|n| n.id == id).unwrap().bounds
+        };
+        let card = bounds("id:guide-source-actions");
+        let viewport = bounds("id:guide-source-actions-scroll");
+        let row = bounds(selector);
+        card.origin.y.0 >= 0.0
+            && card.origin.y.0 + card.size.height.0 <= 540.0
+            && row.origin.x.0 >= viewport.origin.x.0 - 1.0
+            && row.origin.x.0 + row.size.width.0
+                <= viewport.origin.x.0 + viewport.size.width.0 + 1.0
+            && row.origin.y.0 >= viewport.origin.y.0 - 1.0
+            && row.origin.y.0 + row.size.height.0
+                <= viewport.origin.y.0 + viewport.size.height.0 + 1.0
+    };
+    let check_focus = |app: &mut Headless, label: &str| {
+        let selector = format!("id:guide-source-actions >> label:{label}");
+        step(app.wait_until(
+            "focused action is visible",
+            Duration::from_secs(5),
+            |screen| inside(screen, &selector),
+        ));
+        assert_eq!(
+            app.screen()
+                .span_style(&format!("{selector} >> text:{label}"))
+                .unwrap()
+                .color,
+            nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff),
+            "D-pad focus reached {label}"
+        );
+    };
+    let labels = [
+        "Retry",
+        "Switch off",
+        "Move up (used first)",
+        "Move down",
+        "No time shift",
+        "Name",
+        "Change the link",
+        "Remove",
+    ];
+    for label in labels {
+        check_focus(&mut app, label);
+        if label != "Remove" {
+            step(app.press_key("down"));
+        }
+    }
+    step(app.press_key("enter"));
+    step(app.wait_for("text:Remove “Generated guide actions guide”?"));
+    // Keep it is the default remote action; returning rebuilds the scroll
+    // at its initial offset while logical focus remains on Remove.
+    step(app.press_key("enter"));
+    check_focus(&mut app, "Remove");
+    for label in labels[..7].iter().rev() {
+        step(app.press_key("up"));
+        check_focus(&mut app, label);
+    }
+    std::fs::write(&guide, xml).unwrap();
+    step(app.press_key("enter"));
+    step(app.wait_for_gone(
+        "id:guide-source-actions >> text:Retry",
+        Duration::from_secs(5),
+    ));
+    check_focus(&mut app, "Switch off");
+}
+
 fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
     crate::isolated::open_database(path)
         .unwrap()
@@ -133,6 +347,41 @@ fn favorite_names(path: &Path, source: SourceId) -> Vec<String> {
         .into_iter()
         .map(|row| row.name)
         .collect()
+}
+
+#[test]
+fn all_playlists_row_identity_follows_playlist_deletion() {
+    let Some(home) = isolated!() else { return };
+    let directory = home.data_dir();
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    seed(&mut store, home.path(), "Alpha");
+    seed(&mut store, home.path(), "Beta");
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    playlists(&mut app);
+    step(app.wait_for("id:playlists-all >> text:All playlists"));
+    step(app.press("id:playlists-list >> text:Beta"));
+    for _ in 0..30 {
+        step(app.press_key("down"));
+    }
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.wait_for("text:Delete “Beta”?"));
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:playlists-list >> text:Beta", Duration::from_secs(10)));
+    step(app.wait_for("id:playlists-all >> text:All playlists"));
+    assert_eq!(app.screen().count("id:playlists-all").unwrap(), 1);
+    assert!(
+        !app.screen()
+            .matches("id:playlists-all >> text:+ Add playlist")
+            .unwrap()
+    );
 }
 
 #[test]
@@ -1306,6 +1555,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
         step(app.press("text:Settings >> nth=0"));
         step(app.wait_for("text:TV guide data"));
         step(app.press("text:TV guide data"));
+        step(app.press("text:Guide sources"));
         step(app.wait_for("text:Update the guide now"));
         step(app.press("text:Update the guide now"));
         wait_for_requests(
@@ -1315,6 +1565,7 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
             &feed_requests,
             2,
         );
+        step(app.back());
         step(app.back());
         step(app.back());
     } else {
@@ -1357,17 +1608,13 @@ fn exercise_previous_guide_handoff(home: &super::isolated::Home, action: Previou
     );
     let deleted = matches!(action, PreviousGuideAction::DeletePending);
     if deleted {
-        step(app.open_guide_groups());
-        step(app.press_key("left"));
-        step(app.press_key("left"));
-        step(app.wait_for("text:Settings >> nth=0"));
-        step(app.press("text:Settings >> nth=0"));
-        step(app.wait_for("text:TV guide data"));
-        step(app.press("text:TV guide data"));
+        playlists(&mut app);
+        step(app.press("text:Previous"));
+        step(app.press("text:Guide data"));
         step(app.wait_for("text:Delete stored guide data"));
         step(app.press("text:Delete stored guide data"));
-        step(app.wait_for("text:Delete stored guide data?"));
-        step(app.press("text:Delete stored guide data >> nth=1"));
+        step(app.wait_for("text:/^Delete guide data for /"));
+        step(app.press("id:guide-sources-screen >> text:Delete"));
         step(app.wait_for_gone("text:Previous original guide", Duration::from_secs(5)));
     }
     *release.0.lock().unwrap() = true;

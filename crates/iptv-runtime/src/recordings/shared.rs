@@ -20,6 +20,7 @@ const UNSHAREABLE_FOR: Duration = Duration::from_secs(30 * 60);
 /// one segment over the limit, or two that failed their checks (a single
 /// torn final packet may be a connection cut short).
 const STRIKES: u8 = 2;
+const PREPARATION_LOG: &str = concat!(module_path!(), "::source_preparation");
 
 /// Streams whose first HLS segment failed validation after a shared input
 /// had offered its first packets (`LiveInput::first_segment`). Such an input
@@ -503,6 +504,18 @@ impl Runtime {
         share: bool,
         expected: Option<iptv_guide::playback::ResolutionAuthority>,
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
+        let attempt = log::log_enabled!(target: PREPARATION_LOG, log::Level::Debug).then(|| {
+            self.recordings
+                .next_preparation
+                .fetch_add(1, Ordering::Relaxed)
+        });
+        let trace_preparation = move |phase: &'static str| {
+            if let Some(attempt) = attempt {
+                log::debug!(target: PREPARATION_LOG,
+                    "attempt {attempt}, surface {surface}: {phase}");
+            }
+        };
+        trace_preparation("requested");
         let disabled = self.recordings_detached.get()
             || self.shutdown_requested.get()
             || self.recordings.is_stopping();
@@ -537,28 +550,35 @@ impl Runtime {
         };
         async move {
             if disabled {
+                trace_preparation("disabled");
                 return Err(Error::unavailable(key("Channel unavailable")));
             }
             let work = services.clone();
             let stopping = cancel.clone();
+            trace_preparation("queued worker");
             let task = services.spawn(async move {
                 #[cfg(test)]
                 if let Some(arrived) = state.preparation_arrivals.lock().unwrap().remove(&surface) {
                     let _ = arrived.send(());
                 }
+                trace_preparation("waiting for surface gate");
                 let _gate = gate.lock().await;
+                trace_preparation("acquired surface gate");
                 #[cfg(feature = "test-support")]
                 if let Some(pause) = pause {
                     let _ = work.spawn_blocking(move || pause.pause()).await;
                 }
                 let result = async {
+                    trace_preparation("retiring unused inputs");
                     state.retire_unused().await;
+                    trace_preparation("unused inputs retired");
                     if stopping.is_canceled() || revision.is_none() {
                         return Err(Error::unavailable(key("Channel unavailable")));
                     }
                     let member = ContentId::from_stored(channel.clone());
                     let expected_member = member.clone();
-                    let (incarnation, config, authority) = work
+                    trace_preparation("reading source authority");
+                    let authority_read = work
                         .read(move |store| {
                             if !store.source_policy(source_id)?.enabled {
                                 return Err(iptv_store_sqlite::StoreError::Unavailable(key(
@@ -593,7 +613,9 @@ impl Runtime {
                             }
                             Ok((stored.incarnation, stored.source.config, authority))
                         })
-                        .await?;
+                        .await;
+                    trace_preparation("source authority read returned");
+                    let (incarnation, config, authority) = authority_read?;
                     let identity = Identity {
                         source: source_id.0,
                         incarnation: incarnation.clone(),
@@ -654,7 +676,9 @@ impl Runtime {
                                 lease.pending = None;
                             }
                         }
+                        trace_preparation("retiring replaced input");
                         state.retire_unused().await;
+                        trace_preparation("replaced input retired");
                         let id = state.next_input.fetch_add(1, Ordering::Relaxed) + 1;
                         {
                             let mut data = state.lock();
@@ -716,6 +740,7 @@ impl Runtime {
                                 &policy,
                                 Transport::Shared(input),
                             );
+                            trace_preparation("waiting for shared input readiness");
                             if shared
                                 .input
                                 .shared()
@@ -724,6 +749,7 @@ impl Runtime {
                                 .await
                                 .is_ok()
                             {
+                                trace_preparation("shared input ready");
                                 // The provider's first packets (a cold
                                 // start's first stream; `startup.rs`).
                                 work.mark(
@@ -743,7 +769,9 @@ impl Runtime {
                                     .watch(stream, move || validation.state());
                                 incoming = Some(shared);
                             } else {
+                                trace_preparation("closing failed shared input");
                                 shared.input.clone().shutdown().await;
+                                trace_preparation("failed shared input closed");
                             }
                         }
                         if incoming.is_none()
@@ -770,6 +798,7 @@ impl Runtime {
                         }
                         incoming
                     };
+                    trace_preparation("validating source authority");
                     let valid = work
                         .read(move |store| {
                             Ok(store.source_policy(source_id)?.enabled
@@ -789,6 +818,7 @@ impl Runtime {
                         })
                         .await
                         .unwrap_or(false);
+                    trace_preparation("source authority validation returned");
                     let installed = {
                         let mut data = state.lock();
                         let available = incoming
@@ -813,7 +843,9 @@ impl Runtime {
                     // Unsuccessful/stale preparations remain in the registry until
                     // this join, even when another surface now uses the old account.
                     if !installed || incoming.is_none() {
+                        trace_preparation("retiring uninstalled inputs");
                         state.retire_unused().await;
+                        trace_preparation("uninstalled inputs retired");
                     }
                     if !installed {
                         return Err(Error::unavailable(key("Channel unavailable")));
@@ -833,8 +865,15 @@ impl Runtime {
                             lease.pending = None;
                         }
                     }
+                    trace_preparation("retiring failed preparation inputs");
                     state.retire_unused().await;
+                    trace_preparation("failed preparation inputs retired");
                 }
+                trace_preparation(if result.is_ok() {
+                    "worker prepared source"
+                } else {
+                    "worker refused source"
+                });
                 result
             });
             struct Cancel(CancelToken);
@@ -844,8 +883,9 @@ impl Runtime {
                 }
             }
             let _cancel = Cancel(cancel);
-            task.await
-                .map_err(|_| Error::unavailable(key("Channel unavailable")))?
+            let result = task.await;
+            trace_preparation("worker reply received");
+            result.map_err(|_| Error::unavailable(key("Channel unavailable")))?
         }
     }
 }

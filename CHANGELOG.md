@@ -12,7 +12,9 @@ is below 1.0, a minor release may change behavior.
 - Keep Android's system Back gesture available on the first-run welcome and
   library recovery root screens, and let all four D-pad directions select the
   Tizen NSH exit confirmation's answers.
-
+- Group guide refresh, failed-source Retry, source editing and confirmed Clear
+  under each playlist’s Guide data. Clear names the playlist and keeps other
+  playlists, channels and guide links intact (#282).
 - Clarify portal identity transfers in the mobile privacy policy and record
   first-release disclosure evidence and pending store checks (#221).
 - Require an embedded R8 class mapping in Android release bundles and provide
@@ -95,8 +97,14 @@ is below 1.0, a minor release may change behavior.
 
 ### Fixed
 
+- Keep recycled playlist, guide source and playlist action rows attached to
+  the content and command they currently display.
+
 - A Stalker refresh whose live pages fail keeps the last complete channel
   catalog and reports the failure for retry instead of publishing partial rows.
+- Android TV recordings use the TV foreground-service type, and captures keep
+  partial media when Low Power Standby prevents a restart. Android can notify
+  when a background capture fails. Windows checks free space before recording.
 - Pin the macOS Android resource compiler used by local Android validation.
 - Keep Android tablets at tablet scale in split screen and refresh hardware
   keyboard and D-pad controls as devices attach or detach. Open player and

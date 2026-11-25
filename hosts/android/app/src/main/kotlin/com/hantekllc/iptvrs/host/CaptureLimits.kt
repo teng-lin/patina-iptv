@@ -7,9 +7,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.os.Build
 import android.os.PowerManager
+import java.util.Locale
 
 /**
  * What can stop a Record now capture on this device, or make it costly
@@ -46,8 +49,15 @@ internal object CaptureLimits {
         }
     }
 
+    /** Android TV's DVR uses media playback. Handhelds download media to a file. */
+    fun foregroundServiceType(tv: Boolean): Int =
+        if (tv) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK else ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+
     /** Whether Android limits a background capture to six hours a day. */
-    fun backgroundHours(sdk: Int): Boolean = sdk >= BACKGROUND_LIMIT_SDK
+    fun backgroundHours(
+        sdk: Int,
+        tv: Boolean,
+    ): Boolean = sdk >= BACKGROUND_LIMIT_SDK && foregroundServiceType(tv) == ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 
     /** Whether the active network is metered; null when it cannot be read. */
     fun metered(context: Context): Boolean? =
@@ -62,7 +72,7 @@ internal object CaptureLimits {
         val report =
             mutableMapOf<String, Any>(
                 "standbyStops" to standbyStops(context),
-                "backgroundHours" to backgroundHours(Build.VERSION.SDK_INT),
+                "backgroundHours" to backgroundHours(Build.VERSION.SDK_INT, tv(context)),
             )
         metered(context)?.let { report["metered"] = it }
         return report
@@ -75,8 +85,22 @@ internal object CaptureLimits {
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK),
         )
 
+    /** Whether a TV is already off under a policy that prevents its capture. */
+    fun standbyBlocksRecording(context: Context): Boolean {
+        val power = context.getSystemService(PowerManager::class.java) ?: return false
+        return !power.isInteractive && tv(context) && standbyStops(context)
+    }
+
+    /** Recording notifications use the same interface language as the app. */
+    fun localized(context: Context): Context {
+        val tag = context.getSharedPreferences("recording-host", Context.MODE_PRIVATE).getString("language", "")
+        val configuration = Configuration(context.resources.configuration)
+        if (!tag.isNullOrEmpty()) configuration.setLocale(Locale.forLanguageTag(tag))
+        return context.createConfigurationContext(configuration)
+    }
+
     private const val CHANNEL = "recording-stopped"
-    private const val NOTIFICATION = 473
+    private const val NOTIFICATION = 474
 
     /**
      * Tells the viewer that a background capture stopped early, and why

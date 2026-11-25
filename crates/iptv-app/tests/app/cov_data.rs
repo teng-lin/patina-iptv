@@ -502,7 +502,7 @@ fn stored_playlists_switch_refresh_and_go() {
     // now" has nothing to download.
     let provider = "text:/The provider's guide$/";
     let switch = |app: &mut Headless, playlist: &str, to: &str| {
-        act(app, playlist, "Guide sources");
+        act(app, playlist, "Guide data");
         step(app.wait_for(provider));
         step(app.press(provider));
         step(app.wait_for(&format!("text:{to}")));
@@ -519,9 +519,10 @@ fn stored_playlists_switch_refresh_and_go() {
     assert!(!app.screen().matches("text:Alpha Now").unwrap());
     rail(&mut app, "Settings");
     step(app.press("text:TV guide data"));
+    step(app.press("text:Guide sources"));
     step(app.wait_for("text:Update the guide now"));
     step(app.press("text:Update the guide now"));
-    step(app.wait_for("text:This playlist has no guide source switched on"));
+    step(app.wait_for("text:No guide source is switched on"));
     to_guide(&mut app);
     // Another playlist's guide sources change: its guide is looked at
     // when it is shown, not now.
@@ -529,7 +530,7 @@ fn stored_playlists_switch_refresh_and_go() {
     switch(&mut app, "Renamed list", "Switch off");
     // Switched on again, the first's guide is downloaded again.
     rail(&mut app, "Playlists");
-    act(&mut app, "first", "Guide sources");
+    act(&mut app, "first", "Guide data");
     step(app.wait_for(provider));
     step(app.press(provider));
     step(app.wait_for("text:Switch on"));
@@ -542,19 +543,20 @@ fn stored_playlists_switch_refresh_and_go() {
     std::fs::write(&guide_a, guide("Fresh", &["a1", "a2"])).unwrap();
     rail(&mut app, "Settings");
     step(app.press("text:TV guide data"));
+    step(app.press("text:Guide sources"));
     step(app.wait_for("text:Update the guide now"));
     step(app.press("text:Update the guide now"));
     step(app.wait_for_within("text:Fresh Now", IMPORT));
     // Without its file the update fails; the stored guide stays.
     std::fs::remove_file(&guide_a).unwrap();
     step(app.press("text:Update the guide now"));
-    step(app.wait_for_within("text:/^Failed /", IMPORT));
+    step(app.wait_for_within("text:Retry", IMPORT));
     assert!(app.screen().matches("text:Fresh Now").unwrap());
     // "Delete stored guide data": the channels stay without programs.
     step(app.press("text:Delete stored guide data"));
     // Its confirmation's button.
-    step(app.wait_for("text:Delete stored guide data?"));
-    step(app.press("text:Delete stored guide data >> nth=1"));
+    step(app.wait_for("text:/^Delete guide data for /"));
+    step(app.press("text:Delete"));
     step(app.wait_for_within("text:Guide data deleted", IMPORT));
     step(app.wait_for_gone("text:Fresh Now", IMPORT));
     to_guide(&mut app);
@@ -569,8 +571,9 @@ fn stored_playlists_switch_refresh_and_go() {
     std::fs::write(&guide_a, guide("Again", &["a1", "a2"])).unwrap();
     rail(&mut app, "Settings");
     step(app.press("text:TV guide data"));
-    step(app.wait_for("text:Update the guide now"));
-    step(app.press("text:Update the guide now"));
+    step(app.press("text:Guide sources"));
+    step(app.wait_for("text:Retry"));
+    step(app.press("text:Retry"));
     step(app.wait_for_within("text:Again Now", IMPORT));
     to_guide(&mut app);
     drop(app);

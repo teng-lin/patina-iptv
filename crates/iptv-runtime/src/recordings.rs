@@ -270,9 +270,12 @@ pub(crate) struct State {
     inputs_changed: tokio::sync::Notify,
     // Connection IDs belong to this directory-owned registry, including retries.
     next_input: AtomicU64,
+    next_preparation: AtomicU64,
     preparations: Mutex<HashMap<usize, SurfacePreparation>>,
     #[cfg(test)]
     preparation_arrivals: Mutex<HashMap<usize, tokio::sync::oneshot::Sender<()>>>,
+    #[cfg(all(test, feature = "test-support"))]
+    account_refresh: Mutex<Option<Arc<crate::testing::GateState>>>,
     media_ops: tokio::sync::Mutex<()>,
     #[cfg(test)]
     playback_completion: Mutex<Option<PlaybackCompletion>>,
@@ -348,6 +351,10 @@ impl State {
         true
     }
     pub(crate) fn stop(&self) -> bool {
+        self.stop_with_limit(Duration::from_secs(15))
+    }
+
+    fn stop_with_limit(&self, limit: Duration) -> bool {
         self.cancel_all_preparations();
         let generation = {
             let execution = self.execution();
@@ -360,9 +367,7 @@ impl State {
         // A replacement may already be running when this waiter wakes. Wait
         // for the execution we canceled, rather than its successor's flag.
         self.changed
-            .wait_timeout_while(self.lock(), Duration::from_secs(15), |d| {
-                d.completed_run < generation
-            })
+            .wait_timeout_while(self.lock(), limit, |d| d.completed_run < generation)
             .map(|(data, _)| data.completed_run >= generation)
             .unwrap_or(false)
     }
@@ -986,8 +991,14 @@ async fn refresh_accounts(
     services: &Services,
     state: &State,
 ) -> Result<(), crate::model::StoreError> {
+    #[cfg(all(test, feature = "test-support"))]
+    let pause = state.account_refresh.lock().unwrap().take();
     let sources = services
-        .read(|store| {
+        .read(move |store| {
+            #[cfg(all(test, feature = "test-support"))]
+            if let Some(pause) = pause {
+                pause.pause();
+            }
             store
                 .sources()?
                 .into_iter()
@@ -1087,7 +1098,7 @@ async fn recover_media(services: &Services, job: &Job) -> completion::Transition
     }
     // A capture the retirement of scheduled recording marked partial records
     // its size only now; a partial without media cannot be played.
-    transition(
+    let result = transition(
         services,
         job,
         if bytes > 0 {
@@ -1098,7 +1109,14 @@ async fn recover_media(services: &Services, job: &Job) -> completion::Transition
         bytes,
         "Interrupted when the app closed",
     )
-    .await
+    .await;
+    // An unreconciled active row can become partial or failed after its
+    // window elapsed. A receipt replay already has a known outcome.
+    completion::report_failure(
+        services,
+        result,
+        (job.status == Status::Recording).then_some(crate::RecordingFailure::Unexpected),
+    )
 }
 async fn finish_unstarted(
     services: &Services,
@@ -1106,11 +1124,12 @@ async fn finish_unstarted(
     status: Status,
     message: &'static str,
 ) -> completion::Transition {
-    if job.bytes > 0 {
+    let result = if job.bytes > 0 {
         recover_media(services, job).await
     } else {
         transition(services, job, status, 0, message).await
-    }
+    };
+    completion::report_failure(services, result, Some(crate::RecordingFailure::Unexpected))
 }
 
 async fn recover(services: &Services) -> Result<(), crate::model::StoreError> {
@@ -1423,6 +1442,23 @@ async fn record(
     stop: &CancelToken,
     shutdown: &CancelToken,
 ) {
+    // A cold sticky service can recover a pending job while the TV is
+    // already off. There will be no new screen-off broadcast for that job.
+    let standby_on_claim = if !stop.is_canceled()
+        && let Some(standby) = services.ports().recording_standby
+        && services.spawn_blocking(standby).await.unwrap_or(false)
+    {
+        // The platform query ran outside the lock. Recheck the token here
+        // to serialize the cancellation with a viewer's Stop or a host stop.
+        let _data = state.lock();
+        let cancel = !stop.is_canceled();
+        if cancel {
+            stop.cancel();
+        }
+        cancel
+    } else {
+        false
+    };
     let partial = path(services, job.id, true);
     let directory = media_directory(services.directory());
     let exclude = services.ports().exclude_from_backup;
@@ -1575,7 +1611,8 @@ async fn record(
     // The host stopped it early (`host::stop_captures`): kept as partial with
     // the reason, also when the recorder's shutdown followed, which would
     // otherwise keep it to resume.
-    let early = state.lock().stop_reasons.remove(&job.id);
+    let host_stop = state.lock().stop_reasons.remove(&job.id);
+    let early = host_stop.or(standby_on_claim.then(|| host::EarlyStop::TvOff.reason()));
     let outcome = early.map_or(outcome, Err);
     if early.is_none() && shutdown.is_canceled() && state.background() && job.request.end > now() {
         let bytes = std::fs::symlink_metadata(&partial).map_or(0, |m| m.len() / 188 * 188);
@@ -1599,8 +1636,17 @@ async fn record(
     } else {
         outcome
     };
+    // The native host already notifies for each standby/timeout broadcast
+    // stop. A viewer's own Stop also requires no background alert.
+    let notify = if host_stop.is_some() {
+        None
+    } else if standby_on_claim {
+        Some(crate::RecordingFailure::TvStandby)
+    } else {
+        (!stop.is_canceled()).then_some(crate::RecordingFailure::Unexpected)
+    };
     if matches!(
-        completion::finish(services, job, outcome).await,
+        completion::finish(services, job, outcome, notify).await,
         completion::Transition::Failed
     ) {
         state.lock().finalization_errors.insert(job.id);
@@ -1661,8 +1707,7 @@ fn library_bytes(directory: &Path, active: &[JobId]) -> std::io::Result<u64> {
         .fold(total, |total, bytes| total.saturating_add(*bytes)))
 }
 
-/// Native hosts with statvfs can reject already-exhausted storage. Other hosts
-/// rely on the write result; inability to query capacity is not an empty disk.
+/// Free bytes available to the application's storage user, when queryable.
 #[cfg(unix)]
 fn available_space(directory: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
@@ -1681,7 +1726,42 @@ fn available_space(directory: &Path) -> Option<u64> {
             .min(u128::from(u64::MAX)) as u64,
     )
 }
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn available_space(directory: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(
+            directory: *const u16,
+            available: *mut u64,
+            total: *mut u64,
+            free: *mut u64,
+        ) -> i32;
+    }
+
+    // A mapped directory can be listable while one of its parent components
+    // cannot be queried for the normalized path.
+    let normalized = directory.canonicalize().ok();
+    let directory = normalized.as_deref().unwrap_or(directory);
+    let mut path: Vec<_> = directory.as_os_str().encode_wide().collect();
+    if path.contains(&0) {
+        return None;
+    }
+    // UNC roots require a trailing separator. This is a directory on every path.
+    if path.last() != Some(&u16::from(b'\\')) {
+        path.push(u16::from(b'\\'));
+    }
+    path.push(0);
+    let mut available = 0;
+    // SAFETY: the path has exactly one terminating NUL. The caller's
+    // free-space output is writable and the remaining outputs are optional.
+    let ok = unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut available, null_mut(), null_mut()) };
+    (ok != 0).then_some(available)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn available_space(_: &Path) -> Option<u64> {
     None
 }
