@@ -376,3 +376,357 @@ fn failed_private_scratch_admission_preserves_the_destination_and_cleans_its_dir
     drop(busy);
     assert!(owner.drain_services());
 }
+
+/// Rewrites only generated archives, retaining their file ordering and lengths.
+fn rewrite_generated_archive(
+    archive: &[u8],
+    edit: impl FnOnce(&mut serde_json::Value, &mut Vec<Vec<u8>>),
+) -> Vec<u8> {
+    let size = u64::from_le_bytes(archive[9..17].try_into().unwrap()) as usize;
+    let mut manifest: serde_json::Value = serde_json::from_slice(&archive[17..17 + size]).unwrap();
+    let mut offset = 17 + size;
+    let mut payloads = Vec::new();
+    for entry in manifest["files"].as_array().unwrap() {
+        let length = entry["length"].as_u64().unwrap() as usize;
+        payloads.push(archive[offset..offset + length].to_vec());
+        offset += length;
+    }
+    edit(&mut manifest, &mut payloads);
+    if let Some(entries) = manifest
+        .get_mut("files")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for (entry, payload) in entries.iter_mut().zip(&payloads) {
+            entry["length"] = serde_json::json!(payload.len());
+        }
+    }
+    let header = serde_json::to_vec(&manifest).unwrap();
+    let mut bytes = b"PATINABK\x01".to_vec();
+    bytes.extend_from_slice(&(header.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(&header);
+    for payload in payloads {
+        bytes.extend_from_slice(&payload);
+    }
+    bytes
+}
+
+fn generated_tree(path: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+    fn walk(root: &Path, path: &Path, files: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) {
+        for entry in fs::read_dir(path).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(root, &path, files);
+            } else {
+                files.insert(
+                    path.strip_prefix(root).unwrap().to_owned(),
+                    fs::read(path).unwrap(),
+                );
+            }
+        }
+    }
+    let mut files = std::collections::BTreeMap::new();
+    walk(path, path, &mut files);
+    files
+}
+
+#[test]
+fn compatibility_rejections_preserve_current_data_and_the_exact_queued_restore() {
+    use backup::error::Rejection;
+    use serde_json::json;
+    let directory = tempfile::tempdir().unwrap();
+    let original = runtime(&directory.path().join("generated-backup-owner"));
+    let (archived_source, _) = seed(&original, "Generated queued source");
+    let settings = iptv_settings::Settings::new().to_json_string();
+    let destination = directory.path().join("generated-accepted.patinabackup");
+    let output = destination.clone();
+    let export = original.begin_backup().unwrap();
+    block_on(export.worker(move |archive| archive.export(&output, &settings))).unwrap();
+    drop(export);
+    let accepted = fs::read(destination).unwrap();
+
+    let root = directory.path().join("generated-current-owner");
+    let current = runtime(&root);
+    let (live_source, document) = seed(&current, "Generated current source");
+    current
+        .set_setting(
+            "general.user_agent",
+            iptv_settings::Value::text("GeneratedCurrent/1"),
+        )
+        .unwrap();
+    assert!(current.flush_files(Duration::from_secs(5)));
+    let live_settings = fs::read(root.join("settings.json")).unwrap();
+    let live_document = fs::read(&document).unwrap();
+    let busy = current.begin_backup().unwrap();
+    let bytes = accepted.clone();
+    block_on(busy.worker(move |archive| archive.stage(&mut bytes.as_slice()))).unwrap();
+    let pending = backup::sibling(&root, "restore-pending");
+    let queued = generated_tree(&pending);
+    assert!(!queued.is_empty());
+
+    let mut cases = Vec::new();
+    let mut future_envelope = accepted.clone();
+    future_envelope[8] = 2;
+    cases.push((
+        "future envelope",
+        future_envelope,
+        Rejection::Format {
+            found: Some(2),
+            supported: 1,
+        },
+    ));
+    cases.push((
+        "future manifest shape",
+        rewrite_generated_archive(&accepted, |header, _| {
+            header["version"] = json!(2);
+            header.as_object_mut().unwrap().remove("root");
+            header.as_object_mut().unwrap().remove("files");
+        }),
+        Rejection::Format {
+            found: Some(2),
+            supported: 1,
+        },
+    ));
+    cases.push((
+        "foreign format",
+        rewrite_generated_archive(&accepted, |header, _| {
+            header["format"] = json!("generated-private-format-token");
+        }),
+        Rejection::Format {
+            found: None,
+            supported: 1,
+        },
+    ));
+    for version in [serde_json::Value::Null, json!("2"), json!(0)] {
+        cases.push((
+            "malformed manifest version",
+            rewrite_generated_archive(&accepted, |header, _| {
+                if version.is_null() {
+                    header.as_object_mut().unwrap().remove("version");
+                } else {
+                    header["version"] = version;
+                }
+            }),
+            Rejection::Damaged,
+        ));
+    }
+    for (label, version, changed_shape, expected) in [
+        (
+            "future settings shape",
+            json!(iptv_settings::backup::VERSION + 1),
+            true,
+            Rejection::Settings {
+                found: Some(u64::from(iptv_settings::backup::VERSION + 1)),
+                supported: u64::from(iptv_settings::backup::VERSION),
+            },
+        ),
+        (
+            "missing settings version",
+            serde_json::Value::Null,
+            false,
+            Rejection::Damaged,
+        ),
+        (
+            "nonnumeric settings version",
+            json!("7"),
+            false,
+            Rejection::Damaged,
+        ),
+        ("zero settings version", json!(0), false, Rejection::Damaged),
+    ] {
+        cases.push((
+            label,
+            rewrite_generated_archive(&accepted, |header, payloads| {
+                let index = header["files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .position(|e| e["name"] == "settings.json")
+                    .unwrap();
+                let mut settings: serde_json::Value =
+                    serde_json::from_slice(&payloads[index]).unwrap();
+                if version.is_null() {
+                    settings.as_object_mut().unwrap().remove("version");
+                } else {
+                    settings["version"] = version;
+                }
+                if changed_shape {
+                    settings["global"] = json!(["generated future layer"]);
+                }
+                payloads[index] = serde_json::to_vec(&settings).unwrap();
+            }),
+            expected,
+        ));
+    }
+    let database = directory.path().join("generated-future.sqlite");
+    cases.push(("future database", rewrite_generated_archive(&accepted, |header, payloads| {
+        let index = header["files"].as_array().unwrap().iter().position(|e| e["name"] == "iptv.sqlite").unwrap();
+        fs::write(&database, &payloads[index]).unwrap();
+        let db = rusqlite::Connection::open(&database).unwrap();
+        db.execute("INSERT INTO schema_migrations(version,name,applied_at) VALUES (?1,'generated_future',0)", [iptv_store_sqlite::SCHEMA_VERSION + 1]).unwrap();
+        db.pragma_update(None, "user_version", iptv_store_sqlite::SCHEMA_VERSION + 1).unwrap();
+        drop(db);
+        payloads[index] = fs::read(&database).unwrap();
+    }), Rejection::Database { found: iptv_store_sqlite::SCHEMA_VERSION + 1, supported: iptv_store_sqlite::SCHEMA_VERSION }));
+    for name in ["settings.json", "iptv.sqlite"] {
+        cases.push((
+            "damaged payload",
+            rewrite_generated_archive(&accepted, |header, payloads| {
+                let index = header["files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .position(|e| e["name"] == name)
+                    .unwrap();
+                payloads[index] = b"generated damaged payload".to_vec();
+            }),
+            Rejection::Damaged,
+        ));
+    }
+
+    let mut zero_envelope = accepted.clone();
+    zero_envelope[8] = 0;
+    cases.push(("zero envelope", zero_envelope, Rejection::Damaged));
+    cases.push((
+        "truncated envelope",
+        b"PATINABK".to_vec(),
+        Rejection::Damaged,
+    ));
+    cases.push((
+        "large future manifest",
+        rewrite_generated_archive(&accepted, |header, _| {
+            header["version"] = json!(u64::MAX);
+        }),
+        Rejection::Format {
+            found: Some(u64::MAX),
+            supported: 1,
+        },
+    ));
+    for malformed in [
+        serde_json::Value::Null,
+        json!([]),
+        json!({}),
+        json!({"format": 17, "version": 1}),
+    ] {
+        cases.push((
+            "malformed manifest shape",
+            rewrite_generated_archive(&accepted, |header, _| {
+                *header = malformed;
+            }),
+            Rejection::Damaged,
+        ));
+    }
+    for (label, replacement, expected) in [
+        (
+            "foreign settings format",
+            json!({"format": "generated-private-format-token", "version": 1}),
+            Rejection::Settings {
+                found: None,
+                supported: u64::from(iptv_settings::backup::VERSION),
+            },
+        ),
+        (
+            "large future settings",
+            json!({"format": iptv_settings::backup::FORMAT, "version": u64::MAX}),
+            Rejection::Settings {
+                found: Some(u64::MAX),
+                supported: u64::from(iptv_settings::backup::VERSION),
+            },
+        ),
+        (
+            "unknown settings",
+            json!({"format": iptv_settings::backup::FORMAT, "version": iptv_settings::backup::VERSION, "global": {"generated.future_setting": true}}),
+            Rejection::Settings {
+                found: Some(u64::from(iptv_settings::backup::VERSION)),
+                supported: u64::from(iptv_settings::backup::VERSION),
+            },
+        ),
+        ("null settings", serde_json::Value::Null, Rejection::Damaged),
+        ("array settings", json!([]), Rejection::Damaged),
+        (
+            "missing settings format",
+            json!({"version": 1}),
+            Rejection::Damaged,
+        ),
+        (
+            "nonstrings settings format",
+            json!({"format": 17, "version": 1}),
+            Rejection::Damaged,
+        ),
+    ] {
+        cases.push((
+            label,
+            rewrite_generated_archive(&accepted, |header, payloads| {
+                let index = header["files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .position(|e| e["name"] == "settings.json")
+                    .unwrap();
+                payloads[index] = serde_json::to_vec(&replacement).unwrap();
+            }),
+            expected,
+        ));
+    }
+    cases.push((
+        "invalid UTF8 settings",
+        rewrite_generated_archive(&accepted, |header, payloads| {
+            let index = header["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|e| e["name"] == "settings.json")
+                .unwrap();
+            payloads[index] = vec![0xff, 0xfe];
+        }),
+        Rejection::Damaged,
+    ));
+
+    cases.push((
+        "missing referenced local playlist",
+        rewrite_generated_archive(&accepted, |header, payloads| {
+            let entries = header["files"].as_array_mut().unwrap();
+            let index = entries
+                .iter()
+                .position(|entry| entry["name"].as_str().unwrap().starts_with("playlists/"))
+                .unwrap();
+            entries.remove(index);
+            payloads.remove(index);
+        }),
+        Rejection::Damaged,
+    ));
+    for (label, bytes, expected) in cases {
+        let error =
+            block_on(busy.worker(move |archive| archive.stage(&mut bytes.as_slice()))).unwrap_err();
+        assert_eq!(error.rejection(), Some(expected), "{label}: {error}");
+        assert!(!error.to_string().contains("generated-private-format-token"));
+        assert_eq!(
+            generated_tree(&pending),
+            queued,
+            "{label}: queued restore changed"
+        );
+        assert_eq!(
+            name(&current, live_source),
+            "Generated current source",
+            "{label}"
+        );
+        assert_eq!(
+            fs::read(root.join("settings.json")).unwrap(),
+            live_settings,
+            "{label}"
+        );
+        assert_eq!(fs::read(&document).unwrap(), live_document, "{label}");
+        assert!(current.restore_is_pending(), "{label}");
+    }
+    drop(busy);
+    assert!(current.drain_services());
+    drop(current);
+    let restarted = runtime(&root);
+    std::thread::spawn(restarted.restore_activation())
+        .join()
+        .unwrap()
+        .unwrap_or_else(|_| panic!("generated queued restore activation failed"));
+    assert!(!restarted.restore_is_pending());
+    assert_eq!(name(&restarted, archived_source), "Generated queued source");
+    assert!(original.drain_services());
+    assert!(restarted.drain_services());
+}

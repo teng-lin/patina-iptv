@@ -9,6 +9,10 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
+- Explain incompatible backup formats, settings and database schemas separately
+  from damaged backups in first-run setup and Settings. Show available versions
+  and persistent recovery guidance while preserving current data and queued restores (#201).
+
 - Clarify portal identity transfers in the mobile privacy policy and record
   first-release disclosure evidence and pending store checks (#221).
 - Require an embedded R8 class mapping in Android release bundles and provide
