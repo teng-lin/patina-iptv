@@ -101,6 +101,25 @@ class Contract(unittest.TestCase):
         self.assertFalse(self.destination.exists())
         self.assertEqual(self.downloads, [])
 
+    def rust_fixture(self):
+        sysroot = self.root / "synthetic-rust-toolchain"
+        (sysroot / "bin").mkdir(parents=True)
+        (sysroot / "lib/rustlib/x86_64-pc-windows-msvc/lib").mkdir(parents=True)
+        for name in ("rustc.exe", "cargo.exe", "rustc_driver-synthetic.dll"):
+            (sysroot / "bin" / name).write_bytes(("synthetic " + name).encode())
+        (sysroot / "lib/rustlib/x86_64-pc-windows-msvc/lib/std.rlib").write_bytes(b"synthetic standard library")
+        records = [{"pkg": name, "target": "x86_64-pc-windows-msvc", "is_extension": False} for name in ("cargo", "rustc", "rust-std")]
+        self.write_receipts(sysroot, records)
+        return sysroot, records
+
+    def write_receipts(self, sysroot, records, version="1"):
+        directory = sysroot / "lib/rustlib"
+        (directory / "components").write_text("".join(item["pkg"] + "-" + item["target"] + "\n" for item in records))
+        text = f"config_version = {json.dumps(version)}\n"
+        for item in records:
+            text += "\n[[components]]\n" + "".join(f"{name} = {json.dumps(value)}\n" for name, value in item.items())
+        (directory / "multirust-config.toml").write_text(text)
+
     def test_verified_success_stages_only_exact_executable(self):
         self.assertEqual(self.acquire(), "reuse")
         self.assertEqual([path.name for path in self.destination.iterdir()], ["iptv-app.exe"])
@@ -469,6 +488,81 @@ class Contract(unittest.TestCase):
         self.assertNotIn("unrelated.txt", report["known_installer_receipts"])
         self.assertEqual(report["known_installer_receipts"]["multirust-config.toml"]["omitted"], "not UTF-8")
         self.assertEqual(report["known_installer_receipts"]["multirust-channel-manifest.toml"]["omitted"], "exceeds bounded receipt size")
+
+    def test_receipt_order_is_compatible_but_raw_diagnostics_preserve_it(self):
+        sysroot, records = self.rust_fixture()
+        original = handoff.rust_toolchain(sysroot)
+        diagnostic = handoff.rust_diagnostics(sysroot)
+        self.expected["rust_toolchain"] = original
+        self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
+        components = sysroot / "lib/rustlib/components"
+        components.write_text("".join(reversed(components.read_text().splitlines(keepends=True))))
+        current = handoff.rust_toolchain(sysroot)
+        self.assertEqual(current, original)
+        self.assertNotEqual(handoff.rust_diagnostics(sysroot)["files"], diagnostic["files"])
+        self.assertEqual(handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=current), self.api), 101)
+
+    def test_receipt_semantic_changes_are_not_compatible(self):
+        sysroot, records = self.rust_fixture()
+        self.expected["rust_toolchain"] = handoff.rust_toolchain(sysroot)
+        self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
+        for field, value in (("pkg", "rustc-next"), ("target", "aarch64-pc-windows-msvc"), ("is_extension", True)):
+            changed = copy.deepcopy(records)
+            changed[1][field] = value
+            self.write_receipts(sysroot, changed)
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Independent consumer inputs"):
+                handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=handoff.rust_toolchain(sysroot)), self.api)
+            self.assert_closed()
+
+    def test_component_membership_alone_is_bound_before_any_api_or_staging(self):
+        sysroot, _ = self.rust_fixture()
+        self.expected["rust_toolchain"] = handoff.rust_toolchain(sysroot)
+        self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
+        components = sysroot / "lib/rustlib/components"
+        original = components.read_text().splitlines(keepends=True)
+        config = sysroot / "lib/rustlib/multirust-config.toml"
+        config_before = config.read_bytes()
+        for members in (original + ["synthetic-tools-x86_64-pc-windows-msvc\n"], original[:-1], ["rustc-next-x86_64-pc-windows-msvc\n", *original[1:]]):
+            components.write_text("".join(members))
+            self.assertEqual(config.read_bytes(), config_before)
+            with self.subTest(members=members), self.assertRaisesRegex(ValueError, "Independent consumer inputs"):
+                handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=handoff.rust_toolchain(sysroot)), self.api)
+            self.assertEqual(self.requests, [])
+            self.assert_closed()
+
+    def test_non_component_receipts_remain_raw_including_schema_fields_and_order(self):
+        sysroot, records = self.rust_fixture()
+        self.expected["rust_toolchain"] = handoff.rust_toolchain(sysroot)
+        self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
+        for rows in (list(reversed(records)), [dict(records[0], is_extension="false"), *records[1:]], [dict(records[0], unknown_future_field="synthetic"), *records[1:]]):
+            self.write_receipts(sysroot, rows)
+            with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, "Independent consumer inputs"):
+                handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=handoff.rust_toolchain(sysroot)), self.api)
+        self.write_receipts(sysroot, records, version="2")
+        with self.assertRaisesRegex(ValueError, "Independent consumer inputs"):
+            handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=handoff.rust_toolchain(sysroot)), self.api)
+
+    def test_component_receipt_duplicates_invalid_data_and_missing_membership_fail_closed(self):
+        for raw in (b"", b"rustc\nrustc\n", b" rustc\n", b"\xff", b"x" * (64 * 1024 + 1)):
+            with self.subTest(raw_length=len(raw)), self.assertRaises(ValueError):
+                handoff.rustup_components(raw)
+        sysroot, _ = self.rust_fixture()
+        (sysroot / "lib/rustlib/components").unlink()
+        with self.assertRaisesRegex(ValueError, "receipt is missing"):
+            handoff.rust_toolchain(sysroot)
+
+    def test_compiler_driver_and_standard_library_bytes_remain_required_inputs(self):
+        sysroot, _ = self.rust_fixture()
+        self.expected["rust_toolchain"] = handoff.rust_toolchain(sysroot)
+        self.proof["inputs_sha256"] = hashlib.sha256(handoff.encoded(self.expected)).hexdigest()
+        for name in ("bin/rustc_driver-synthetic.dll", "lib/rustlib/x86_64-pc-windows-msvc/lib/std.rlib"):
+            path = sysroot / name
+            original = path.read_bytes()
+            path.write_bytes(original + b" changed")
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Independent consumer inputs"):
+                handoff.validate_producer(self.proof, dict(self.expected, rust_toolchain=handoff.rust_toolchain(sysroot)), self.api)
+            self.assert_closed()
+            path.write_bytes(original)
 
     def test_cli_refuses_wrong_repository_branch_head_and_run_before_acquisition(self):
         (self.root / "target").mkdir()

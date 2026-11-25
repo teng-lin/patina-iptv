@@ -40,9 +40,8 @@ building, sealing, consuming, packaging or measuring a candidate. Normal
 push, cold and reuse recipes retain their checks. Rust diagnostics contain
 relative file names, sizes and SHA-256 for `lib` and `bin`; bounded UTF-8 text
 is captured only for an explicit allowlist of Rustup installer receipts.
-These are diagnostic artifacts, not compatibility exceptions. The full
-Rust library tree must still match, and a mismatch remains fail-closed until
-file-level evidence establishes the affected files and their role.
+These diagnostic artifacts preserve raw bytes separately from the strict
+compatibility policy below; mismatched build inputs remain fail-closed.
 
 The producer and independent cold control start on fresh Windows runners.
 `setup-windows` restores no Rust cache. The producer requires an absent
@@ -61,13 +60,56 @@ build inventory. No pilot installer is published for promotion.
 The independent fingerprints include the exact clean checkout and tracked
 source hashes, root Cargo lock, shipping lock policy input, all recipe and
 workflow sources, clean exact NSH commit/tree, Rust pin and actual compiler
-version/bytes/standard libraries, target/profile/default features, workspace
+version/bytes/standard libraries and the entire Rust `bin` tree (including
+the actual Windows `rustc_driver` DLL), target/profile/default features, workspace
 version, runtime DLL/inventory bytes, image version, MSVC compiler/linker
 bytes and native headers/libraries, discoverable SDK versions and input
 trees, and resolved Perl/NASM/CMake/Ninja bytes. The shipping lock is recorded
 as policy metadata; the root Cargo lock resolves this Windows app. The
 usual deterministic version stamp is part of the recorded source recipe.
 Hashing native input trees has a cost; it is timed as part of the pilot.
+
+### Rustup component receipt ordering
+
+The first built producer in
+[run 45671976193](https://github.com/teng-lin/patina-iptv/actions/runs/45671976193)
+uploaded a verified executable; its consumer correctly refused a different
+raw Rust `lib` aggregate. Two subsequent input-only runs,
+[45677564001](https://github.com/teng-lin/patina-iptv/actions/runs/45677564001)
+and [45678310839](https://github.com/teng-lin/patina-iptv/actions/runs/45678310839),
+retained file-level evidence. The retrieved fresh maps contain 131 `lib`
+files and 21 `bin` files; the compared maps and raw receipts matched.
+
+To attribute the earlier aggregates without pretending to have retrieved
+historical receipt bytes, an independent reconstruction fixed all observed
+131 relative file names and leaf SHA-256 values. The original aggregate is
+SHA-256 over the concatenation of compact UTF-8 JSON `[relative_name, sha256]`
+records in Windows-path sort order. Permuting only the six installed
+component lines in `lib/rustlib/components` reproduced each authoritative
+earlier raw `lib` digest exactly; every other leaf, including
+`multirust-config.toml`, remained fixed. A native reviewer independently
+reproduced these matches under the same SHA-256 binding assumption used for
+artifact verification:
+
+| Recorded raw `lib` tree | SHA-256 reproduced by component-line ordering alone |
+| --- | --- |
+| Earlier producer | `90a6bb96fa7ca15fe7e9587f014fe4c3429a1ec3935b1a4a497f5f7e285730de` |
+| Earlier consumer | `a6681fb5fa3194a00e3c91ff3171ea0becb85bcae538d40d72918a45fb0b8baf` |
+| Earlier cold control | `c9d4bbd9372be907d3116f69fd5dfdf43d2f512efedddf9e9d4be076e7ccb44b` |
+| Retrieved input-only baseline | `0ac097305df1251c0b373d74a8a11481cd11910ad39100f6acee5c9053d8caeb` |
+
+The compatibility policy therefore canonicalizes **only** the exact
+`lib/rustlib/components` receipt as validated, unique installed component
+names in sorted order. It binds the complete membership; empty, duplicate,
+malformed, non-UTF-8 or oversized lists fail visibly. Every other `lib`
+file and every `bin` file remains bound to its raw bytes. In particular,
+`multirust-config.toml` is not normalized: its field, version and ordering
+changes still differ. A policy marker is part of the fingerprint, and raw
+receipt hashes/text stay in diagnostic artifacts. Synthetic checks prove
+order-only compatibility while component identity, compiler-driver,
+standard-library and other receipt changes fail the input/provenance check.
+The historical raw receipt contents are reconstructed, not retrieved; this
+does not establish a successful hosted handoff or a performance gain.
 
 Ambient Cargo configuration and unsupported compiler, flags, target,
 profile and native-library overrides are refused. The helper reads only

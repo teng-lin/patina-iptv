@@ -95,11 +95,37 @@ def file_inventory(directory):
 
 
 def tree_digest(directory):
-    files = file_inventory(directory)
+    return inventory_digest(file_inventory(directory))
+
+
+def inventory_digest(files):
     value = hashlib.sha256()
     for name, checksum in files.items():
         value.update(encoded([name, checksum]))
     return {"sha256": value.hexdigest(), "files": len(files)}
+
+
+def rustup_components(raw):
+    """Installed component membership is meaningful; its line order is not."""
+    if len(raw) > 64 * 1024:
+        raise ValueError("Rustup component receipt exceeds policy size")
+    members = raw.decode("utf-8").splitlines()
+    if not members or len(set(members)) != len(members) or any(not re.fullmatch(r"[A-Za-z0-9_-]+", member) for member in members):
+        raise ValueError("Unsupported Rustup component list")
+    return encoded({"format": "rustup-components-v1", "members": sorted(members)})
+
+
+def rust_toolchain(sysroot):
+    libraries = file_inventory(sysroot / "lib")
+    name = "rustlib/components"
+    if name not in libraries:
+        raise ValueError("Required Rustup receipt is missing")
+    with (sysroot / "lib" / name).open("rb") as source:
+        raw = source.read(64 * 1024 + 1)
+    libraries[name] = hashlib.sha256(rustup_components(raw)).hexdigest()
+    # Windows' actual rustc_driver DLL is in bin, beside the launcher. Bind the
+    # entire directory; launcher/version hashes alone cannot prove the compiler.
+    return {"libraries": inventory_digest(libraries), "binaries": tree_digest(sysroot / "bin"), "receipt_policy": "rustup-components-v1-sorted; all-other-bytes-exact"}
 
 
 def rust_diagnostics(sysroot):
@@ -137,7 +163,12 @@ def rust_diagnostics(sysroot):
                     text[name] = {"utf8": raw.decode("utf-8")}
                 except UnicodeDecodeError:
                     text[name] = {"omitted": "not UTF-8"}
-    return {"schema": 1, "files": files, "known_installer_receipts": text, "contract": "Diagnostic only. Full Rust library tree remains a required exact input."}
+    return {
+        "schema": 1,
+        "files": files,
+        "known_installer_receipts": text,
+        "contract": "Raw diagnostic bytes. Compatibility binds complete Rust bin/lib bytes and strict installed component membership.",
+    }
 
 
 def validate_environment(environment):
@@ -252,7 +283,7 @@ def inputs(root=ROOT):
         "version": tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["package"]["version"],
         "rustc": rustc,
         "cargo": run(["cargo", "-Vv"], root),
-        "rust_toolchain": tree_digest(rust_sysroot / "lib"),
+        "rust_toolchain": rust_toolchain(rust_sysroot),
         "rustc_sha256": digest(rust_sysroot / "bin/rustc.exe"),
         "cargo_sha256": digest(rust_sysroot / "bin/cargo.exe"),
         "locks": {name: digest(root / name) for name in ("Cargo.lock", "tools/ci/package.Cargo.lock", "nsh.rev", "rust-toolchain.toml")},
