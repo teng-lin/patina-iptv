@@ -17,12 +17,15 @@ NOTICES = ("THIRD-PARTY.html", "components.json", "NSH-RUNNERS.html",
 
 
 class Artifacts(unittest.TestCase):
-    def check_packages(self, libraries, *, abi_override=None, missing_notice=None):
+    def check_packages(self, libraries, *, abi_override=None, missing_notice=None,
+                       mapping=b"# compiler: R8\nexample.Synthetic -> a:\n"):
         with tempfile.TemporaryDirectory() as directory:
             artifacts = [Path(directory) / ("synthetic" + suffix) for suffix in (".apk", ".aab")]
             for artifact in artifacts:
                 prefix = "base/" if artifact.suffix == ".aab" else ""
                 with zipfile.ZipFile(artifact, "w") as package:
+                    if artifact.suffix == ".aab" and mapping is not None:
+                        package.writestr("BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map", mapping)
                     for abi, data in libraries.items():
                         package.writestr(prefix + f"lib/{abi}/libnsh.so", data)
                     for notice in NOTICES:
@@ -60,6 +63,14 @@ class Artifacts(unittest.TestCase):
     def test_emulator_abi_override(self):
         for result in self.check_packages({"x86_64": b"\x7fELFsynthetic"}, abi_override="x86_64"):
             self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_aab_requires_usable_embedded_r8_mapping_after_signing(self):
+        for mapping in (None, b"", b"# compiler: R8\n", b"example.Synthetic -> a:\n"):
+            apk, bundle = self.check_packages({"x86_64": b"\x7fELFsynthetic"},
+                                             abi_override="x86_64", mapping=mapping)
+            self.assertEqual(apk.returncode, 0, apk.stderr)
+            self.assertNotEqual(bundle.returncode, 0)
+            self.assertIn("R8 mapping", bundle.stderr)
 
 
 class NativeArtifacts(unittest.TestCase):

@@ -28,14 +28,16 @@ TV, so gates also take three signals that can change while the app runs
 | --- | --- | --- |
 | Form factor: phone, tablet, TV or desktop | Android: the TV UI mode or the leanback feature, otherwise the physical display's smallest width (under 600 dp is a phone), never the window's, so a tablet in split screen stays a tablet ([`DeviceComponent.kt`](../hosts/android/app/src/main/kotlin/com/hantekllc/iptvrs/host/DeviceComponent.kt)). iPad: the system's idiom. Desktops: the build. Tizen: a TV. | Which capabilities exist |
 | Window size class: compact, medium or expanded | The [layout class](../crates/iptv-presentation/src/layout.rs) of the current window at the guide's scale and text size | Layouts |
-| Connected input: a hardware keyboard, a D-pad | Android: `Configuration.keyboard` and `navigation`, unless hidden. Desktops: a keyboard. Tizen: its remote's D-pad. iPad: the current `GCKeyboard` report, refreshed on attachment, detachment and activation. | Keyboard and remote features |
+| Connected input: a hardware keyboard, a D-pad | Android: connected keyboards and D-pads, including game controllers with hat axes. Android configuration supplies the fallback and reports hidden built-in devices. Desktops: a keyboard. Tizen: its remote's D-pad. iPad: the current `GCKeyboard` report, refreshed on attachment, detachment and activation. | Keyboard and remote features |
 
-Android reports the form factor and the input when the app starts and on every
-configuration change; before that report an Android build counts as a tablet
-with neither input. The settings offer check (`settings::offer`), the control
-strip and multiview's offer read the signals as they are now, so a
-change takes effect without a restart. A control that leaves the strip while
-focused passes the focus to its nearest neighbor. The Keyboard or Remote
+Android reports the form factor and input when the app starts and when the
+configuration, display or connected devices change. Before the first report,
+it counts as a tablet with neither input. A tablet keeps its scale in split
+screen, even when compact layout rules apply. The settings, control strip,
+play bar and its More list, guide menus, rail and multiview read the current
+signals. Focus stays with its action as rows change and moves to a nearby
+available action when the focused row leaves. An active recording keeps its
+Stop action. The Keyboard or Remote
 settings, and guide autoplay with its delay, follow the form factor and the
 connected input ([TV controls](tv-controls.md)); a settings page without rows
 leaves the list while the screen stays open, and the page shown, or the one in

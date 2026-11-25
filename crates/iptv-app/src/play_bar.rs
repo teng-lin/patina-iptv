@@ -390,13 +390,13 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
     let record = crate::capabilities::record_now();
     let eligible = |c: &Control| match c {
         Pip => crate::pip::supported(ui) && enabled(ui, Pip),
-        Record => record.offered() && enabled(ui, Record),
+        Record => enabled(ui, Record),
         More => false,
         _ => shown(ui, *c),
     };
     let phone = phone_form();
     let under_more = |c: &Control| match c {
-        Record => record == RecordNow::UnderMore,
+        Record => record != RecordNow::Direct,
         Multiview => phone,
         _ => false,
     };

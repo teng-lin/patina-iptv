@@ -14,6 +14,7 @@
 //! [`MAX`]: 1920 × 1080 and 2560 × 1440 → 1.0, 1440 × 900 → 0.95,
 //! 1280 × 720 → 0.875, 960 × 540 → 0.8.
 
+use iptv_core::capabilities::FormFactor;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::prelude::*;
 
@@ -31,25 +32,16 @@ pub const STEP: f32 = 0.025;
 /// Whether this build scales the guide with its window (desktops).
 const SCALES: bool = !(crate::host::ANDROID || crate::host::IPAD);
 
-/// Whether the guide scales with its window: on desktops, not on a tablet
-/// or a phone, whose windows (an Android tablet's or phone's screen, an
-/// iPad's full screen, Split View, Slide Over or Stage Manager window) are
-/// touched and keep the full sizes. The reported idiom and system decide
-/// too, so a headless tablet, or a headless Android phone, lays out as the
-/// device does. (NSH's default headless environment is an iOS phone; it
-/// keeps the desktop's scaling, which the scenarios built on it measure.)
-fn scales() -> bool {
-    SCALES && idiom() != Idiom::Pad && !phone()
+/// Android uses the device report, so a tablet in a narrow window keeps
+/// the tablet scale while a foldable can change scale with its display.
+pub(crate) fn phone() -> bool {
+    crate::device::reported_android_form()
+        .map_or_else(idiom_phone, |form| form == FormFactor::Phone)
 }
 
-/// A phone: an Android or iOS build reporting the phone idiom, or a
-/// headless Android phone. (NSH's default headless environment, an iOS
-/// phone, is not one: the scenarios built on it measure the desktop.)
-///
-/// Reactive through the window's size: NSH reads the idiom untracked, and
-/// Android derives it from the window's smallest width (a foldable phone
-/// unfolded becomes a tablet), so a change of idiom comes with a resize.
-pub(crate) fn phone() -> bool {
+fn idiom_phone() -> bool {
+    // NSH reads the idiom untracked. Subscribe to the viewport for iOS
+    // and headless Android layout fixtures.
     let _ = window();
     idiom() == Idiom::Phone && (!SCALES || os() == Os::Android)
 }
@@ -80,13 +72,20 @@ pub fn scale_for(width: f32, height: f32, scales: bool) -> f32 {
 /// so a foldable phone unfolded takes the tablet's).
 pub fn now() -> f32 {
     let w = window();
+    if let Some(form) = crate::device::reported_android_form() {
+        return match form {
+            FormFactor::Tv => TV,
+            FormFactor::Phone => PHONE,
+            _ => MAX,
+        };
+    }
     if idiom() == Idiom::Tv {
         return TV;
     }
-    if phone() {
+    if idiom_phone() {
         return PHONE;
     }
-    scale_for(w.width.0, w.height.0, scales())
+    scale_for(w.width.0, w.height.0, SCALES && idiom() != Idiom::Pad)
 }
 
 /// The scale as a memo: views read it in their bindings, which run again
