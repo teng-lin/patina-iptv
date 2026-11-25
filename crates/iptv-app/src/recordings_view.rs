@@ -463,12 +463,7 @@ fn start(ui: Ui, mut request: Request) {
             // What can stop it, said as it starts (#275).
             Ok(_) => {
                 crate::settings_view::notify(&crate::capture_limits::start_notice());
-                // Permission is optional. A system prompt must not hold the
-                // recording action busy or delay either Start or Stop.
-                #[cfg(target_os = "android")]
-                crate::data::spawn_in_app(async {
-                    let _ = nsh_core::prelude::request_notification_permission().await;
-                });
+                crate::host::request_recording_notification_permission();
             }
             Err(error) => crate::settings_view::notify(translated_reason(
                 error
