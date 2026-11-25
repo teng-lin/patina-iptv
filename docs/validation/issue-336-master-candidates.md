@@ -199,7 +199,9 @@ gh api --method GET repos/teng-lin/patina-iptv/actions/workflows/validation.yml/
 # Replace the ID with each cohort or example run. Columns are name, created, started, completed.
 gh api --method GET repos/teng-lin/patina-iptv/actions/runs/45518242886/attempts/1/jobs \
   -F per_page=100 --paginate --slurp \
-  | jq -r '.[] | .jobs[] | select(.conclusion == "success")
+  | jq -r '.[] | .jobs[]
+      | select(.conclusion != "skipped" and (.runner_id // 0) > 0
+          and .started_at != null and .completed_at != null)
       | [.name, .created_at, .started_at, .completed_at] | @tsv'
 
 # ARM64 candidate build in the current example, run 45619533821.
@@ -211,8 +213,8 @@ the run's `created_at` for trigger-to-finish time, the plan's `started_at`
 for post-plan-start elapsed wall time (including downstream queues), and
 the plan's `created_at` from its `started_at` for its runner queue. The
 interval before the plan is `plan.created_at − run.created_at`. Sum
-`completed_at − started_at` across executed jobs
-for unweighted runner-minutes, excluding skipped jobs. Day-level queue
+`completed_at − started_at` across runner-assigned jobs with both
+timestamps for unweighted runner-minutes, excluding skipped jobs. Day-level queue
 percentiles pool those jobs, while other percentiles use one value per
 run. The p50 is the median and p90 is the nearest rank. Read completion
 offsets along workflow `needs` edges to identify the controlling job,
