@@ -649,9 +649,10 @@ fn a_catalog_refresh_closes_the_open_channel_menu() {
     step(s.app.open_guide_groups());
     step(s.app.press_key("right"));
     step(s.app.press_key("m"));
-    step(s.app.wait_for("id:menu-panel >> text:Choose guide data…"));
+    let action = "id:menu-panel >> text:Choose guide data…";
+    step(s.app.wait_for(action));
     iptv_app::hold_reports(false);
-    step(s.app.wait_for_gone("id:menu-panel", IMPORT));
+    step(s.app.wait_for_gone(action, IMPORT));
     step(s.app.wait_for_within("text:Alpha Now", IMPORT));
 }
 
