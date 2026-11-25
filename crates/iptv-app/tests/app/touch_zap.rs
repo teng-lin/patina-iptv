@@ -383,9 +383,23 @@ fn finger_id(app: &mut Headless, id: u32, from: (f32, f32), through: &[(f32, f32
 }
 
 /// A swipe from the middle of the screen, `dy` dp (negative: up).
-pub(super) fn swipe(app: &mut Headless, dy: f32) {
+fn swipe(app: &mut Headless, dy: f32) {
     let from = (SCREEN.0 / 2.0, SCREEN.1 / 2.0);
     finger(app, from, &[(from.0, from.1 + dy)], false);
+}
+
+/// Drive only the touch route on the video catcher. A separate platform press
+/// could open an overlay and mask whether a subsequent swipe was excluded.
+pub(super) fn swipe_without_preview(app: &mut Headless, dy: f32) {
+    let from = (SCREEN.0 / 2.0, SCREEN.1 / 2.0);
+    let to = (from.0, from.1 + dy);
+    let (target, path) = video_path(app);
+    touch(app, TouchPhase::Start, target, &path, from, 1_000.0);
+    touch(app, TouchPhase::Move, target, &path, to, 1_200.0);
+    app.settle();
+    assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    touch(app, TouchPhase::End, target, &path, to, 1_220.0);
+    app.settle();
 }
 
 fn banner_names(app: &Headless, n: usize) -> bool {
@@ -654,8 +668,9 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     step(app.wait_for(&second));
     step(app.press(&second));
     step(app.wait_for_gone("id:multiview-picker", WAIT));
+    let second_url = url(2);
     app.wait_until_fixed_clock("both multiview streams open", WAIT, |_| {
-        (0..2).all(iptv_app::player_has_source)
+        (0..2).all(iptv_app::player_has_source) && streams(&tuned).last() == Some(&second_url)
     });
     let opened = streams(&tuned);
     let opens = [0, 1].map(iptv_app::player_opens);
@@ -676,6 +691,10 @@ fn swipes_change_channel_as_ch_plus_and_minus_and_only_over_live_video() {
     touch(&mut app, TouchPhase::End, target, &path, end, 7_120.0);
     app.settle();
     assert!(!app.screen().matches("id:swipe-preview").unwrap());
+    // Also exercise the catcher's admission while the grid is active and the
+    // picker has closed. A tile's event path does not include the catcher.
+    swipe_without_preview(&mut app, -300.0);
+    swipe_without_preview(&mut app, 300.0);
     quiet(&mut app);
     assert_eq!(streams(&tuned), opened, "a swipe leaves both tiles tuned");
     assert_eq!([0, 1].map(iptv_app::player_opens), opens);

@@ -1227,14 +1227,20 @@ fn exercise_admission(
     if check_movie_swipes {
         // Exercise the full-screen video's touch path with a real VOD
         // source selected and a live channel available in the same catalog.
+        let video = app.screen().id("id:video").unwrap();
+        assert!(app.screen().layout_nodes().iter().any(|node| {
+            node.id == video && node.bounds.size == Size::new(px(1920.0), px(1080.0))
+        }));
         let opens = iptv_app::player_opens(0);
-        crate::touch_zap::swipe(&mut app, -300.0);
-        crate::touch_zap::swipe(&mut app, 300.0);
-        assert!(!app.screen().matches("id:swipe-preview").unwrap());
-        step(app.run_for(Duration::from_secs(2)));
-        assert_eq!(player(&app), surface);
-        assert_eq!(iptv_app::player_opens(0), opens);
-        assert_eq!(props.lock().unwrap()["source"], opened);
+        for dy in [-300.0, 300.0] {
+            crate::touch_zap::swipe_without_preview(&mut app, dy);
+            // Keep the system clock used by the rest of the movie journey.
+            // Allow the default 500 ms live switch delay to elapse each time.
+            step(app.wait(Duration::from_secs(1)));
+            assert_eq!(player(&app), surface);
+            assert_eq!(iptv_app::player_opens(0), opens);
+            assert_eq!(props.lock().unwrap()["source"], opened);
+        }
     }
     // Back returns to the movie's details on Resume, over the same
     // player, opening nothing; Back again to the movies on that title
