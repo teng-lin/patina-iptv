@@ -698,18 +698,70 @@ fn settings_explains_backup_compatibility_and_keeps_current_data_and_scheduled_r
     step(fixture.app.wait_for(&message("Scheduled for next launch")));
 }
 
-fn select_and_schedule_generated(app: &mut Headless, archive: &std::path::Path, welcome: bool) {
-    step(app.on_pick_paths(vec![archive.to_owned()]));
-    if welcome {
-        step(app.press("id:wizard-welcome-restore"));
-    } else {
-        step(app.press(&message("Restore a backup")));
-        step(app.wait_for("id:settings-editor"));
-        step(app.press_key("down"));
-        step(app.press_key("enter"));
+#[track_caller]
+fn compatibility_step(
+    app: &mut Headless,
+    context: &str,
+    action: impl FnOnce(&mut Headless) -> Result<(), String>,
+) {
+    if let Err(error) = action(app) {
+        panic!(
+            "{context}: {error}\npending dialog: {:?}\nall native dialog requests: {:#?}",
+            app.pending_dialog(),
+            app.screen().dialogs(),
+        );
     }
-    step(app.wait_for("id:restore-review"));
-    step(app.press(&message("Schedule restore")));
+}
+
+fn select_and_schedule_generated(
+    app: &mut Headless,
+    archive: &std::path::Path,
+    welcome: bool,
+    context: &str,
+    replace_pending: bool,
+) -> usize {
+    // Parental admission awaits storage before the pending-restore prompt, so
+    // caller-drive both native dialogs rather than relying on input settling.
+    app.answer_dialogs_myself();
+    let dialogs_before_request = app.screen().dialogs().len();
+    compatibility_step(app, context, |app| {
+        app.on_pick_paths(vec![archive.to_owned()])
+    });
+    if welcome {
+        compatibility_step(app, context, |app| app.press("id:wizard-welcome-restore"));
+    } else {
+        compatibility_step(app, context, |app| app.press(&message("Restore a backup")));
+        compatibility_step(app, context, |app| app.wait_for("id:settings-editor"));
+        compatibility_step(app, context, |app| app.press_key("down"));
+        compatibility_step(app, context, |app| app.press_key("enter"));
+    }
+    if replace_pending {
+        compatibility_step(app, context, |app| {
+            app.wait_until(
+                "the scheduled restore replacement prompt",
+                Duration::from_secs(20),
+                |screen| screen.dialogs().len() > dialogs_before_request,
+            )
+        });
+        assert_eq!(
+            app.pending_dialog()
+                .and_then(|dialog| dialog.title.as_deref()),
+            Some(word("Restore scheduled").as_str()),
+            "{context}: {:?}",
+            app.screen().dialogs(),
+        );
+        compatibility_step(app, context, |app| {
+            app.answer_dialog(DialogAnswer::Press(word("Choose another backup…")))
+        });
+    }
+    compatibility_step(app, context, |app| app.wait_for("id:restore-review"));
+    // Async worker dialogs can arrive after press().done() returns. wait_until()
+    // pumps them but does not dispatch on_dialog handlers: inspect and answer the
+    // failure explicitly so the test does not depend on worker timing.
+    app.answer_dialogs_myself();
+    let dialogs_before_schedule = app.screen().dialogs().len();
+    compatibility_step(app, context, |app| app.press(&message("Schedule restore")));
+    dialogs_before_schedule
 }
 
 fn exercise_compatibility_failures(
@@ -743,32 +795,17 @@ fn exercise_compatibility_failures(
     baseline.extend_from_slice(&settings);
     let selected = home.join("generated.patinabackup");
     std::fs::write(&selected, &baseline).unwrap();
-    select_and_schedule_generated(app, &selected, welcome);
-    step(app.wait_for_within(
-        &message("Restore scheduled. Close and reopen Patina to apply it"),
-        Duration::from_secs(20),
-    ));
+    select_and_schedule_generated(app, &selected, welcome, "supported baseline", false);
+    compatibility_step(app, "supported baseline", |app| {
+        app.wait_for_within(
+            &message("Restore scheduled. Close and reopen Patina to apply it"),
+            Duration::from_secs(20),
+        )
+    });
     let pending = root.with_extension("restore-pending");
     let queued = generated_tree(&pending);
     assert!(!queued.is_empty());
 
-    let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let seen = observed.clone();
-    app.on_dialog(move |dialog| {
-        if dialog.title.as_deref() == Some(word("Backup could not be restored").as_str()) {
-            seen.lock().unwrap().push((
-                dialog.message.clone().unwrap_or_default(),
-                dialog
-                    .buttons
-                    .iter()
-                    .map(|button| button.text.clone())
-                    .collect::<Vec<_>>(),
-            ));
-            DialogAnswer::Press(word("Close"))
-        } else {
-            DialogAnswer::Press(word("Choose another backup…"))
-        }
-    });
     let mut cases = Vec::new();
     let version_message = |template: &str, found: u64, supported: u64| {
         word(template)
@@ -794,8 +831,14 @@ fn exercise_compatibility_failures(
     );
     let mut future_envelope = baseline.clone();
     future_envelope[8] = 2;
-    cases.push((future_envelope, format_detail.clone(), newer.clone()));
     cases.push((
+        "newer envelope",
+        future_envelope,
+        format_detail.clone(),
+        newer.clone(),
+    ));
+    cases.push((
+        "newer manifest with changed layout",
         rewrite_generated_archive(&baseline, |header, _| {
             header["version"] = serde_json::json!(2);
             header.as_object_mut().unwrap().remove("files");
@@ -805,6 +848,7 @@ fn exercise_compatibility_failures(
         newer.clone(),
     ));
     cases.push((
+        "newer settings with changed layout",
         rewrite_generated_archive(&baseline, |_, payloads| {
             payloads[1] = serde_json::to_vec(&serde_json::json!({
             "format": iptv_settings::backup::FORMAT, "version": iptv_settings::backup::VERSION + 1,
@@ -814,7 +858,7 @@ fn exercise_compatibility_failures(
         settings_detail,
         newer.clone(),
     ));
-    cases.push((rewrite_generated_archive(&baseline, |_, payloads| {
+    cases.push(("newer database schema", rewrite_generated_archive(&baseline, |_, payloads| {
         let future = home.join("generated-future.sqlite");
         std::fs::write(&future, &payloads[0]).unwrap();
         let db = rusqlite::Connection::open(&future).unwrap();
@@ -824,6 +868,7 @@ fn exercise_compatibility_failures(
         payloads[0] = std::fs::read(future).unwrap();
     }), database_detail, newer));
     cases.push((
+        "foreign backup format",
         rewrite_generated_archive(&baseline, |header, _| {
             header["format"] = serde_json::json!("generated-private-format-token");
         }),
@@ -834,6 +879,7 @@ fn exercise_compatibility_failures(
     let compatible =
         word("Choose another backup, or use a Patina version that supports this backup.");
     cases.push((
+        "unsupported settings enum",
         rewrite_generated_archive(&baseline, |_, payloads| {
             payloads[1] = serde_json::to_vec(&serde_json::json!({
                 "format": iptv_settings::backup::FORMAT,
@@ -849,6 +895,7 @@ fn exercise_compatibility_failures(
         compatible.clone(),
     ));
     cases.push((
+        "foreign settings format",
         rewrite_generated_archive(&baseline, |_, payloads| {
             payloads[1] = serde_json::to_vec(&serde_json::json!({
                 "format": "generated-private-format-token", "version": 1
@@ -861,8 +908,14 @@ fn exercise_compatibility_failures(
     let damaged = word(
         "This backup is damaged or incomplete. Choose another backup, or create a new backup on the original device.",
     );
-    cases.push((b"PATINABK".to_vec(), damaged.clone(), String::new()));
     cases.push((
+        "truncated archive",
+        b"PATINABK".to_vec(),
+        damaged.clone(),
+        String::new(),
+    ));
+    cases.push((
+        "invalid UTF-8 settings",
         rewrite_generated_archive(&baseline, |_, payloads| {
             payloads[1] = vec![0xff, 0xfe];
         }),
@@ -871,6 +924,7 @@ fn exercise_compatibility_failures(
     ));
 
     cases.push((
+        "missing referenced playlist",
         rewrite_generated_archive(&baseline, |_, payloads| {
             let incomplete = home.join("generated-missing-local.sqlite");
             std::fs::write(&incomplete, &payloads[0]).unwrap();
@@ -889,32 +943,65 @@ fn exercise_compatibility_failures(
         word("This backup is damaged or incomplete. Choose another backup, or create a new backup on the original device."),
         String::new(),
     ));
-    for (index, (bytes, explanation, next_step)) in cases.into_iter().enumerate() {
+    let count = cases.len();
+    let entrypoint = if welcome { "first run" } else { "Settings" };
+    for (index, (name, bytes, explanation, next_step)) in cases.into_iter().enumerate() {
+        let context = format!("{entrypoint}, case {}/{count}: {name}", index + 1);
         std::fs::write(&selected, bytes).unwrap();
-        select_and_schedule_generated(app, &selected, welcome);
-        step(app.wait_until(
-            "the persistent backup compatibility explanation",
-            Duration::from_secs(20),
-            |_| observed.lock().unwrap().len() > index,
-        ));
-        let (description, buttons) = observed.lock().unwrap()[index].clone();
-        assert!(description.contains(&explanation), "{description}");
+        let dialogs_before_schedule =
+            select_and_schedule_generated(app, &selected, welcome, &context, true);
+        compatibility_step(app, &context, |app| {
+            app.wait_until(
+                "the persistent backup compatibility explanation",
+                Duration::from_secs(20),
+                |screen| screen.dialogs().len() > dialogs_before_schedule,
+            )
+        });
+        let diagnostics = format!(
+            "{context}\npending dialog: {:?}\nall native dialog requests: {:#?}",
+            app.pending_dialog(),
+            app.screen().dialogs(),
+        );
+        let dialog = app.pending_dialog().expect(&diagnostics);
+        assert_eq!(
+            dialog.title.as_deref(),
+            Some(word("Backup could not be restored").as_str()),
+            "{diagnostics}",
+        );
+        let description = dialog.message.as_deref().unwrap_or_default();
+        assert!(description.contains(&explanation), "{diagnostics}");
         if !next_step.is_empty() {
-            assert!(description.contains(&next_step), "{description}");
+            assert!(description.contains(&next_step), "{diagnostics}");
         }
         assert!(
             description.contains(&word(
                 "Your current data and any previously scheduled restore have been kept."
             )),
-            "{description}"
+            "{diagnostics}"
         );
-        assert!(!description.contains("generated-private-format-token"));
-        assert_eq!(buttons, [word("Close")]);
+        assert!(
+            !description.contains("generated-private-format-token"),
+            "{diagnostics}"
+        );
+        assert_eq!(
+            dialog
+                .buttons
+                .iter()
+                .map(|button| &button.text)
+                .collect::<Vec<_>>(),
+            [&word("Close")],
+            "{diagnostics}",
+        );
+        compatibility_step(app, &context, |app| {
+            app.answer_dialog(DialogAnswer::Press(word("Close")))
+        });
         assert_eq!(
             generated_tree(&pending),
             queued,
-            "rejection {index} changed the accepted restore"
+            "{context}: rejection changed the accepted restore",
         );
-        step(app.wait_for_gone("id:restore-review", Duration::from_secs(3)));
+        compatibility_step(app, &context, |app| {
+            app.wait_for_gone("id:restore-review", Duration::from_secs(3))
+        });
     }
 }
