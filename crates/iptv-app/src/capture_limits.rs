@@ -1,6 +1,7 @@
 //! What can stop a Record now capture on this device, or make it costly,
 //! as the host reports it (#275), and what the viewer is told as one starts
-//! (`iptv_presentation::capabilities::record_now_notices`).
+//! (`iptv_presentation::capabilities::record_now_notices`). The reactive
+//! metered report also gates phone multiview (#279).
 //!
 //! - Android reports through the device observer (`tv.device`,
 //!   `DeviceComponent.kt`) when it attaches, on each configuration change
@@ -15,33 +16,26 @@
 use std::cell::Cell;
 
 use iptv_presentation::capabilities::CaptureLimits;
+use nsh_core::prelude::*;
 
 thread_local! {
-    static REPORTED: Cell<CaptureLimits> = const {
-        Cell::new(CaptureLimits {
-            metered: None,
-            standby_stops: false,
-            background_hours: false,
-            sleep_allowed: false,
-        })
-    };
+    static REPORTED: Cell<Option<Signal<CaptureLimits>>> = const { Cell::new(None) };
+}
+
+/// Own the reactive report in the main window's device bridge.
+pub(crate) fn init() {
+    REPORTED.with(|reported| reported.set(Some(signal(CaptureLimits::default()))));
 }
 
 /// The host's report of `data`: `{"metered": bool, "standbyStops": bool,
 /// "backgroundHours": bool}`; a field missing keeps what was reported.
 pub(crate) fn report(data: &nsh_core::JsonValue) {
     REPORTED.with(|reported| {
-        let mut limits = reported.get();
-        if let Some(metered) = data["metered"].as_bool() {
-            limits.metered = Some(metered);
-        }
-        if let Some(stops) = data["standbyStops"].as_bool() {
-            limits.standby_stops = stops;
-        }
-        if let Some(hours) = data["backgroundHours"].as_bool() {
-            limits.background_hours = hours;
-        }
-        if limits != reported.get() {
+        let Some(reported) = reported.get() else {
+            return;
+        };
+        let limits = parse(data, reported.get_untracked());
+        if limits != reported.get_untracked() {
             log::info!(
                 "iptv capture limits: metered={:?} standby_stops={} background_hours={}",
                 limits.metered,
@@ -53,9 +47,26 @@ pub(crate) fn report(data: &nsh_core::JsonValue) {
     });
 }
 
-/// The limits now, with the desktop's sleep report.
+/// Partial reports update only the fields the host could read.
+fn parse(data: &nsh_core::JsonValue, mut limits: CaptureLimits) -> CaptureLimits {
+    if let Some(metered) = data["metered"].as_bool() {
+        limits.metered = Some(metered);
+    }
+    if let Some(stops) = data["standbyStops"].as_bool() {
+        limits.standby_stops = stops;
+    }
+    if let Some(hours) = data["backgroundHours"].as_bool() {
+        limits.background_hours = hours;
+    }
+    limits
+}
+
+/// The limits now (reactive), with the desktop's sleep report.
 pub(crate) fn now() -> CaptureLimits {
-    let mut limits = REPORTED.with(Cell::get);
+    let mut limits = REPORTED
+        .with(Cell::get)
+        .map(|s| s.get())
+        .unwrap_or_default();
     limits.sleep_allowed = crate::host::keep_awake_failed();
     limits
 }
@@ -82,11 +93,13 @@ mod tests {
     #[test]
     fn a_report_replaces_what_it_names() {
         let json = |text: &str| -> nsh_core::JsonValue { serde_json::from_str(text).unwrap() };
-        report(&json(r#"{"metered":true,"standbyStops":true}"#));
-        assert_eq!(REPORTED.with(Cell::get).metered, Some(true));
-        assert!(REPORTED.with(Cell::get).standby_stops);
-        report(&json(r#"{"metered":false}"#));
-        let limits = REPORTED.with(Cell::get);
+        let first = parse(
+            &json(r#"{"metered":true,"standbyStops":true}"#),
+            CaptureLimits::default(),
+        );
+        assert_eq!(first.metered, Some(true));
+        assert!(first.standby_stops);
+        let limits = parse(&json(r#"{"metered":false}"#), first);
         assert_eq!(limits.metered, Some(false));
         assert!(limits.standby_stops, "kept");
         assert!(!limits.background_hours);

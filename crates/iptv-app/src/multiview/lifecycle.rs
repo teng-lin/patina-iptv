@@ -91,7 +91,8 @@ pub fn bind(ui: Ui) {
             }
         });
     });
-    // A tablet's window going to split screen, a phone turned upright: the
+    // A tablet's window going to split screen, a phone turned upright or
+    // switching to a metered network: the
     // device no longer offers multiview here (#279), so the session
     // collapses to the tile being heard.
     let omitted = computed(move || !crate::capabilities::multiview_offer(ui).shown());
