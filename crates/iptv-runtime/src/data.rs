@@ -98,8 +98,9 @@ enum CommitOutcome {
     Superseded,
 }
 
-/// Install and reconcile synchronously. The sink may read the new schedule or
-/// install another one during delivery, so hold no state borrows across emits.
+/// Install and reconcile synchronously. Source imports and combined rebuilds
+/// pass prepared favorites. The sink may read the new schedule or install
+/// another one during delivery, so hold no state borrows across emits.
 fn commit_schedule(
     owner: &Rc<Runtime>,
     update: ScheduleUpdate<'_>,
@@ -123,6 +124,7 @@ fn commit_schedule(
             {
                 return CommitOutcome::Refused;
             }
+            install_favorites();
             combined::remember_single(owner, source, schedule.clone());
             schedule
         }
@@ -138,6 +140,7 @@ fn commit_schedule(
             {
                 return CommitOutcome::Refused;
             }
+            install_favorites();
             let schedule =
                 CombinedSchedule::new(sources, owner.epoch.get()).with_collapsed_sources(collapsed);
             Rc::new(schedule)
@@ -164,7 +167,6 @@ fn commit_schedule(
         }
         ScheduleUpdate::Catalog(schedule) => schedule,
     };
-    install_favorites();
     let previous = owner.set_schedule(current.clone());
     let revision = owner.schedule_revision.get().wrapping_add(1);
     owner.schedule_revision.set(revision);
@@ -622,24 +624,24 @@ async fn show_part(
     if owner.generation.with(Cell::get) != generation {
         return;
     }
-    let guide_source = imported.source;
-    let guide_revision = crate::stored::guide_edit_revision(owner, guide_source);
-    let _turn = owner.show_turn(imported.source).await;
-    if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
+    let source = imported.source;
+    let guide_revision = crate::stored::guide_edit_revision(owner, source);
+    let _turn = owner.show_turn(source).await;
+    if crate::stored::guide_edit_revision(owner, source) != guide_revision {
         return;
     }
     if owner.generation.with(Cell::get) != generation {
         return;
     }
     if let Some(job) = job
-        && !library::import_is_current(owner, imported.source, job)
+        && !library::import_is_current(owner, source, job)
     {
-        let stored = crate::commands::stored_guide(owner, imported.source, imported.now).await;
+        let stored = crate::commands::stored_guide(owner, source, imported.now).await;
         // Unreadable: without programs rather than with ones that may
         // just have been deleted, until the stored guide can be read.
         imported.guide = stored.unwrap_or_else(|error| {
             log::warn!("iptv data: the stored guide cannot be read: {error}");
-            restore_guide(owner, imported.source, generation);
+            restore_guide(owner, source, generation);
             GuideStore::default()
         });
         held = None;
@@ -647,7 +649,7 @@ async fn show_part(
             return;
         }
     }
-    if crate::stored::guide_edit_revision(owner, guide_source) != guide_revision {
+    if crate::stored::guide_edit_revision(owner, source) != guide_revision {
         return;
     }
     let first_screen = held.is_some();
@@ -658,10 +660,10 @@ async fn show_part(
         }
         return;
     }
-    if Some(imported.source) != owner.shown.get() {
-        source_changed(owner, Some(imported.source));
+    if Some(source) != owner.shown.get() {
+        source_changed(owner, Some(source));
     }
-    stored::note_shown(owner, Some(imported.source));
+    stored::note_shown(owner, Some(source));
     let channels = imported.channels.len();
     let started = crate::time::Instant::now();
     let Imported {
@@ -670,14 +672,14 @@ async fn show_part(
         playback,
         guide,
         now,
-        source,
         resume: resumes,
+        ..
     } = *imported;
     let mut organization_revision = organization::revision(owner);
     let schedule = organization::build(owner, source, groups, catalog, guide, now).await;
     if owner.generation.with(Cell::get) != generation
         || combined::active(owner)
-        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+        || crate::stored::guide_edit_revision(owner, source) != guide_revision
     {
         return;
     }
@@ -717,7 +719,7 @@ async fn show_part(
     };
     if owner.generation.with(Cell::get) != generation
         || combined::active(owner)
-        || crate::stored::guide_edit_revision(owner, guide_source) != guide_revision
+        || crate::stored::guide_edit_revision(owner, source) != guide_revision
     {
         return;
     }
