@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -15,6 +16,52 @@ def module(name):
     result = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(result)
     return result
+
+
+class UpdateIndex(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.work = Path(self.tmp.name)
+        self.output = self.work / "index.json"
+
+    def record(self, version, suffix):
+        verifier = module("verify-public-release")
+        dist = self.work / f"{version}-{suffix}"
+        dist.mkdir()
+        (dist / f"Patina-{version}-{suffix}").write_bytes(b"synthetic package")
+        record = verifier.package_record(dist, "synthetic/repo", f"v{version}", "a" * 40, self.work)
+        file = dist / "record.json"
+        file.write_text(json.dumps(record))
+        return file
+
+    def promote(self, *records):
+        return subprocess.run([sys.executable, str(Path(__file__).with_name("update-index.py")),
+                               "--repository", "synthetic/repo", self.output, *records], capture_output=True)
+
+    def test_partial_release_and_late_retry_preserve_the_latest_package_versions(self):
+        first = self.record("0.1.9", "android-tablet-tv.apk")
+        newer = self.record("0.1.10", "android-tablet-tv.apk")
+        linux = self.record("0.1.9", "linux-x86_64.deb")
+        self.assertEqual(self.promote(first, linux).returncode, 0)
+        self.assertEqual(self.promote(newer).returncode, 0)
+        published = self.output.read_bytes()
+        packages = json.loads(published)["packages"]
+        self.assertEqual([(p["format"], p["version"]) for p in packages], [("apk", "0.1.10"), ("deb", "0.1.9")])
+        self.assertEqual(self.promote(first, newer).returncode, 0)
+        self.assertEqual(self.output.read_bytes(), published)
+
+    def test_conflict_or_invalid_input_preserves_previous_index(self):
+        first = self.record("0.1.9", "linux-x86_64.deb")
+        self.assertEqual(self.promote(first).returncode, 0)
+        previous = self.output.read_bytes()
+        original = first.read_text()
+        for field, bad in (("sha256", "b" * 64), ("length", -1), ("url", "https://example.invalid/file")):
+            record = json.loads(original)
+            record["packages"][0][field] = bad
+            first.write_text(json.dumps(record))
+            self.assertNotEqual(self.promote(first).returncode, 0)
+            self.assertEqual(self.output.read_bytes(), previous)
 
 
 class Contract(unittest.TestCase):
