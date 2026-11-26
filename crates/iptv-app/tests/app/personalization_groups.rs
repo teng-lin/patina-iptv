@@ -38,7 +38,7 @@ fn guide_group_rename_requires_a_custom_name_and_can_restore_a_provider_name() {
     }));
     step(app.open_guide_groups());
     step(app.right_click("id:guide-groups >> text:Generated custom"));
-    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.press("id:menu-panel >> text:Rename group name"));
     step(app.wait_for("text:Display name"));
     step(app.clear("text:Generated custom"));
     step(app.submit("text:Enter text"));
@@ -59,14 +59,14 @@ fn guide_group_rename_requires_a_custom_name_and_can_restore_a_provider_name() {
     step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
 
     step(app.right_click("id:guide-groups >> text:News"));
-    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.press("id:menu-panel >> text:Rename group name"));
     step(app.wait_for("text:Display name"));
     step(app.clear("text:News"));
     step(app.type_text("text:Empty restores the provider name", "Generated news"));
     step(app.submit("text:Generated news"));
     step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
     step(app.right_click("id:guide-groups >> text:Generated news"));
-    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.press("id:menu-panel >> text:Rename group name"));
     step(app.wait_for("text:Display name"));
     step(app.clear("text:Generated news"));
     step(app.submit("text:Empty restores the provider name"));
@@ -344,11 +344,32 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
     step(app.press_key("tab"));
     step(app.wait_for("id:guide-groups >> text:News"));
     step(app.press_key("shift+f10"));
-    step(app.wait_for("id:menu-panel >> text:Reorder groups"));
-    assert!(!app.shows("id:menu-panel >> text:Manage groups"));
+    assert_eq!(
+        app.panel_texts("menu-panel"),
+        [
+            "News",
+            "Rename group name",
+            "Restore group name",
+            "Block group",
+            "Hide group",
+            "Manage groups",
+            "Reorder group",
+            "Group order: Custom order",
+            "Reorder channel",
+            "Channel order: Custom order",
+        ]
+    );
+    let restore = "id:menu-panel >> role:menuitem[Restore group name]";
+    assert!(app.screen().accessibility_state(restore).unwrap().disabled);
     step(app.back());
     step(app.right_click("id:guide-groups >> text:News"));
-    step(app.press("id:menu-panel >> text:Rename group"));
+    step(app.press("id:menu-panel >> text:Rename group name"));
+    step(app.wait_for("text:Display name"));
+    step(app.submit("text:News"));
+    step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
+    step(app.right_click("id:guide-groups >> text:News"));
+    assert!(app.screen().accessibility_state(restore).unwrap().disabled);
+    step(app.press("id:menu-panel >> text:Rename group name"));
     step(app.wait_for("text:Display name"));
     step(app.clear("text:News"));
     step(app.type_text("text:Empty restores the provider name", "Generated news"));
@@ -356,6 +377,7 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
     step(app.wait_for_gone("text:Display name", Duration::from_secs(5)));
     step(app.wait_for("id:guide-groups >> text:Generated news"));
     step(app.right_click("id:guide-groups >> text:Generated news"));
+    assert!(!app.screen().accessibility_state(restore).unwrap().disabled);
     step(app.press("id:menu-panel >> text:Restore group name"));
     step(app.wait_for("id:guide-groups >> text:News"));
     step(app.right_click("id:guide-groups >> text:News"));
@@ -383,7 +405,7 @@ fn guide_group_controls_and_channel_visibility_work_without_a_pin() {
 
     step(app.press_key("tab"));
     step(app.right_click("id:guide-groups >> text:Sport"));
-    step(app.press("id:menu-panel >> text:Reorder groups"));
+    step(app.press("id:menu-panel >> text:Reorder group"));
     step(app.wait_for("id:organization-row-1 >> text:Sport"));
     let grip = "id:organization-row-1 >> id:reorder-handle-1";
     step(app.wait_for(grip));
@@ -419,8 +441,8 @@ fn a_provider_group_named_other_can_be_reordered() {
     let app = &mut fixture.app;
     step(app.open_guide_groups());
     step(app.long_press("id:guide-groups >> text:Other"));
-    step(app.wait_for("id:menu-panel >> text:Reorder groups"));
-    assert!(!app.shows("id:menu-panel >> text:Manage groups"));
+    step(app.wait_for("id:menu-panel >> text:Reorder group"));
+    assert!(!app.shows("id:menu-panel >> text:Group settings"));
 }
 
 #[test]
@@ -465,17 +487,30 @@ fn standalone_group_preferences_apply_to_the_selected_group() {
     step(app.press("id:menu-panel >> text:Remove from favorites"));
     step(app.wait_for("id:guide-row >> text:Local B"));
     let news = "id:guide-groups >> text:News";
-    let menu = "id:menu-panel";
     step(app.open_guide_groups());
     step(app.long_press(news));
     step(app.wait_for("id:menu-panel >> role:header[News]"));
-    assert!(!app.shows("id:menu-panel >> text:Manage favorites…"));
-    step(app.press("id:menu-panel >> text:Show favorites only"));
+    assert!(!app.shows("id:menu-panel >> text:Group settings"));
+    step(app.back());
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    assert_eq!(
+        app.panel_texts("menu-panel"),
+        [
+            "News",
+            "Show favorites only: Off",
+            "Use external player: Off",
+            "Guide time offset: 0:00",
+            "Manage groups",
+        ]
+    );
+    step(app.press("id:menu-panel >> text:Show favorites only: Off"));
     step(app.wait_for_gone("id:guide-row >> text:/Local B/", Duration::from_secs(5)));
-    step(app.long_press(news));
-    step(app.press("id:menu-panel >> text:Guide time offset"));
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    step(app.press("id:menu-panel >> text:Guide time offset: 0:00"));
     step(app.press_key("right"));
-    step(app.wait_for(&format!("{menu} >> text:Guide time offset · +0:15")));
+    step(app.wait_for("id:menu-panel >> text:Guide time offset · +0:15"));
     step(app.press("id:menu-panel >> text:Save"));
     step(crate::isolated::wait_outside(
         app,
@@ -494,7 +529,7 @@ fn standalone_group_preferences_apply_to_the_selected_group() {
     ));
 }
 
-/// The group option appears only with a player to hand streams to; a
+/// The group option is disabled without a player to hand streams to; a
 /// player removed after it was chosen plays the channel here and offers to
 /// turn the option off. Linux is the headless host that has the handoff.
 #[cfg(target_os = "linux")]
@@ -504,7 +539,7 @@ fn the_external_player_option_needs_a_player_and_falls_back_without_one() {
     let mut fixture = start(home, Settings::new(), false);
     let app = &mut fixture.app;
     let news = "id:guide-groups >> text:News";
-    let option = "id:menu-panel >> text:Use external player";
+    let option = "id:menu-panel >> role:menuitem[/^Use external player:/]";
     let external = |path: &std::path::Path, source, wanted: bool| {
         let store = crate::isolated::open_database(path).unwrap();
         let groups = store.groups(source, None).unwrap();
@@ -517,14 +552,17 @@ fn the_external_player_option_needs_a_player_and_falls_back_without_one() {
     };
 
     iptv_app::set_external_player_handler(Some(false));
-    step(app.open_guide_groups());
-    step(app.long_press(news));
-    step(app.wait_for("id:menu-panel >> text:Show favorites only"));
-    assert!(!app.shows(option), "{:?}", app.screen().texts());
+    group(app, "News");
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    step(app.wait_for(option));
+    assert!(app.screen().accessibility_state(option).unwrap().disabled);
     step(app.back());
 
     iptv_app::set_external_player_handler(Some(true));
-    step(app.long_press(news));
+    step(app.back());
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
     step(app.press(option));
     step(crate::isolated::wait_outside(
         app,
@@ -536,10 +574,14 @@ fn the_external_player_option_needs_a_player_and_falls_back_without_one() {
     // The player is uninstalled. The option stays while it is on, so it
     // can still be turned off from group options.
     iptv_app::set_external_player_handler(Some(false));
-    step(app.long_press(news));
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
     step(app.wait_for(option));
+    assert!(!app.screen().accessibility_state(option).unwrap().disabled);
+    step(app.back());
     step(app.back());
 
+    step(app.open_guide_groups());
     step(app.press(news));
     step(app.press_key("right"));
     step(app.press_key("enter"));
@@ -557,8 +599,10 @@ fn the_external_player_option_needs_a_player_and_falls_back_without_one() {
         || external(&fixture.path, fixture.source, false),
     ));
     step(app.wait_for_gone("text:Turn off external player", Duration::from_secs(5)));
-    step(app.open_guide_groups());
-    step(app.long_press(news));
-    step(app.wait_for("id:menu-panel >> text:Show favorites only"));
-    assert!(!app.shows(option), "{:?}", app.screen().texts());
+    step(app.press_key("g"));
+    group(app, "News");
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    step(app.wait_for(option));
+    assert!(app.screen().accessibility_state(option).unwrap().disabled);
 }

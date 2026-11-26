@@ -199,7 +199,19 @@ pub async fn set_policy(
     id: SourceId,
     policy: crate::model::SourcePolicy,
 ) -> Result<(), StoreError> {
-    library::set_policy(owner, id, policy).await?;
+    update_policy(owner, id, move |stored| *stored = policy).await
+}
+
+/// Edit the latest stored policy on the library writer, preserving other controls.
+pub async fn update_policy(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    edit: impl FnOnce(&mut crate::model::SourcePolicy) + Send + 'static,
+) -> Result<(), StoreError> {
+    let (policy, visibility_changed) = library::update_policy(owner, id, edit).await?;
+    if !visibility_changed {
+        return Ok(());
+    }
     crate::favorites::refresh_vod_availability(owner).await;
     if combined::active(owner) {
         if !policy.enabled {

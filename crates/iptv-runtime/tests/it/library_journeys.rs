@@ -105,6 +105,33 @@ fn aggregate_policy_and_deletion_never_reassign_another_sources_channel_identity
         owner.load_settings();
         data::start(&owner);
         displayed(&owner, &mut events, 8).await;
+        // Two quick edits use the latest stored fields without reopening the guide.
+        let schedule = owner.schedule();
+        let source = sources[1];
+        let interval = tokio::task::spawn_local({
+            let owner = owner.clone();
+            async move {
+                data::update_policy(&owner, source, |policy| policy.refresh_seconds = 21600).await
+            }
+        });
+        data::update_policy(&owner, source, |policy| policy.refresh_on_start = true)
+            .await
+            .unwrap();
+        interval.await.unwrap().unwrap();
+        assert_eq!(
+            data::library::policy(&owner, source).unwrap(),
+            SourcePolicy {
+                enabled: true,
+                refresh_seconds: 21600,
+                refresh_on_start: true
+            }
+        );
+        assert!(
+            !data::library::policy(&owner, sources[0])
+                .unwrap()
+                .refresh_on_start
+        );
+        assert!(Rc::ptr_eq(&schedule, &owner.schedule()));
         // Startup drops the settings of playlists the store no longer has.
         assert_eq!(
             owner.settings().stored("playlists.include_vod", &gone),

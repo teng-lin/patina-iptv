@@ -293,11 +293,10 @@ fn user_agent_refresh_and_keys(t: &mut T) {
     );
     let menu = t.app.press_remote(nsh_tv::RemoteKey::Menu);
     t.ok("key menu", menu);
-    t.wait("text:▲▼ choose   OK do it   Back close the sheet", 2);
-    assert!(t.shows("text:Show this playlist"), "the first playlist's");
-    // Show it: the sheet closes over the settings, the guide shows it.
-    t.key("enter");
-    t.gone("text:▲▼ choose   OK do it   Back close the sheet", 2);
+    t.wait("id:playlist-menu-panel >> text:Hide", 2);
+    t.key("backspace");
+    actions(t, "Synthetic Renamed");
+    t.press("text:Show this playlist");
     t.wait("text:Golden Engine", 15);
 }
 
@@ -524,15 +523,15 @@ fn nothing_switched_on(t: &mut T) {
 /// Deleting asks first and says what goes; the last one leaves the
 /// first-run screen.
 fn deleting(t: &mut T) {
-    actions(t, "Linked");
-    t.press("text:Delete");
+    t.press("id:settings-content >> role:button[More options for Linked]");
+    t.press("id:playlist-menu-panel >> text:Delete");
     t.wait("text:Delete “Linked”?", 2);
     assert!(t.shows(
         "text:Its 2 channels, its guide and your favorites from it will be gone from the app. The playlist at your provider is not affected."
     ));
     t.press("text:Keep it");
     t.gone("text:Delete “Linked”?", 2);
-    t.press("text:Delete");
+    t.press("id:playlist-menu-panel >> text:Delete");
     t.press("text:Delete");
     t.gone("text:Linked", 5);
     assert!(!t.shows("text:Reorder playlists"), "one playlist left");

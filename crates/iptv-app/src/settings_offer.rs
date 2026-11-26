@@ -60,6 +60,7 @@ pub const COMMANDS: &[&str] = &[
     "epg.clear",
     "remote.customize",
     "playlists.manage",
+    "playlists.show_all",
     "playlists.add",
     "playlists.update_all",
     "playlists.reorder",
@@ -225,6 +226,15 @@ pub fn offer(device: Device, key: &str) -> Offer {
         )
     {
         return Offer::Hidden;
+    }
+    if key == "playlists.show_all" {
+        let owner = crate::runtime();
+        if !crate::host::IMPORTS
+            || crate::data::combined::active(&owner)
+            || !crate::runtime::data::has_multiple_enabled(&owner)
+        {
+            return Offer::Hidden;
+        }
     }
     // Arranging and ordering playlists needs two of them; sorted by name,
     // there is no hand order to arrange.

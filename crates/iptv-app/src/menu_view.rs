@@ -2,7 +2,7 @@
 //! the program description popover. State lives in `iptv_presentation::menu`;
 //! this opens, draws and performs it. Labels are iptv-rs's own wording.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::organization_view::{self, Kind};
 use crate::runtime::model::SourceId;
 use iptv_core::guide::GroupName;
@@ -15,6 +15,7 @@ use iptv_presentation::menu::{
     Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_offset_menu, group_options,
     program_menu,
 };
+use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, LIST_ITEM, MEDIUM, SANS, SECTION, TITLE};
@@ -90,17 +91,21 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         ManageFavorites => tr("Manage favorites…"),
         ManageBlocked => tr("Manage blocked channels…"),
         ManageHidden => tr("Manage hidden channels…"),
-        ReorderChannels => tr("Reorder channels"),
+        ReorderChannels => tr("Reorder channel"),
         SortChannels => tr("Channel order"),
         CopyChannels => tr("Copy channels to a group…"),
         CreateGroup => tr("New group…"),
         GroupOptions => tr("Group options…"),
+        GroupSettings => tr("Group settings"),
         SortGroups => tr("Group order"),
-        ReorderGroups => tr("Reorder groups"),
+        ReorderGroups => tr("Reorder group"),
         ManageGroups => tr("Manage groups"),
-        RenameGroup => tr("Rename group"),
-        RenamePlaylist => tr("Rename playlist"),
+        RenameGroup => tr("Rename group name"),
+        TogglePlaylist(_) => "",
         ReorderPlaylists => tr("Reorder playlists"),
+        PlaylistOrderAdded => tr("By date added"),
+        PlaylistOrderManual => tr("Custom order"),
+        PlaylistOrderByName => tr("By name"),
         ResetGroupName => tr("Restore group name"),
         ShowFavoritesOnly => tr("Show favorites only"),
         GroupExternalPlayer => tr("Use external player"),
@@ -277,12 +282,17 @@ fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row
     // Only the main window opens player windows.
     let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
         .then(|| crate::desktop::player_windows::can_open(ui, origin.channel));
+    let scope = channel_scope(ui, list);
     let mut rows = channel_menu(
         current
             .then(|| crate::recordings_view::channel_menu_action(ui, origin))
             .flatten(),
         new_window,
-        channel_scope(ui, list).is_some(),
+        |item| {
+            scope.as_ref().is_some_and(|(_, kind)| {
+                item == MenuItem::ReorderChannels || *kind != Kind::Favorites
+            })
+        },
     );
     if !current {
         for row in &mut rows {
@@ -358,33 +368,6 @@ pub fn back(ui: Ui) {
 
 /// Dismisses the entire menu or popover, keeping its guide selection.
 pub fn close(ui: Ui) {
-    if let Some(list) = ui.menu.with(|menu| {
-        let menu = menu.as_ref()?;
-        menu.group_offset.map(|_| menu.list.clone())
-    }) {
-        if show_group_options(ui, list) {
-            ui.menu.update(|menu| {
-                if let Some(menu) = menu {
-                    menu.focus = menu
-                        .rows
-                        .iter()
-                        .position(|row| {
-                            matches!(
-                                row,
-                                Row::Action {
-                                    item: MenuItem::GroupEpgOffset,
-                                    ..
-                                }
-                            )
-                        })
-                        .unwrap_or(menu.focus);
-                }
-            });
-        } else {
-            ui.menu.set(None);
-        }
-        return;
-    }
     let origin = ui
         .menu
         .with(|m| {
@@ -423,6 +406,31 @@ pub fn perform(ui: Ui, item: MenuItem) {
     }) else {
         return;
     };
+    let playlist_order = match item {
+        MenuItem::PlaylistOrderAdded => Some("added"),
+        MenuItem::PlaylistOrderByName => Some("name"),
+        MenuItem::PlaylistOrderManual => Some("manual"),
+        _ => None,
+    };
+    if let Some(value) = playlist_order {
+        ui.menu.set(None);
+        crate::settings_view::settings_guarded(ui, move || {
+            if let Err(error) = crate::settings_view::save_setting(
+                iptv_settings::keys::PLAYLIST_SORT.as_str(),
+                iptv_settings::Value::Enum(value.to_owned()),
+            ) {
+                crate::settings_view::notify_setting_error(error);
+            }
+        });
+        return;
+    }
+    if let MenuItem::TogglePlaylist(id) = item {
+        focus_item(ui, item);
+        if playlist_by_id(id).is_some_and(|p| p.policy.enabled) {
+            crate::settings_view::set_playlist_visibility(ui, id, false);
+        }
+        return;
+    }
     if offset.is_some() && item != MenuItem::SaveEpgOffset {
         ui.menu.update(|menu| {
             if let Some(menu) = menu {
@@ -436,27 +444,23 @@ pub fn perform(ui: Ui, item: MenuItem) {
         });
         return;
     }
-    let parent = (item == MenuItem::ProgramActions)
-        .then(|| ui.menu.get_untracked())
-        .flatten()
-        .map(|mut parent| {
-            // Touch and pointer activation do not move key focus first.
-            // Back returns to the action that opened the full options.
-            if let Some(focus) = parent.rows.iter().position(|row| {
-                *row == Row::Action {
-                    item,
-                    enabled: true,
-                }
-            }) {
-                parent.focus = focus;
-            }
-            parent
-        });
+    let parent = matches!(
+        item,
+        MenuItem::ProgramActions | MenuItem::GroupSettings | MenuItem::GroupEpgOffset
+    )
+    .then(|| ui.menu.get_untracked())
+    .flatten()
+    .map(|mut parent| {
+        // Touch and pointer activation do not move key focus first.
+        // Back returns to the action that opened the full options.
+        parent.focus_on(item);
+        parent
+    });
     ui.menu.set(None);
     let scope = list
         .resolve(&*crate::runtime_owner::schedule())
         .and_then(|_| channel_scope(ui, &list));
-    if target == Target::Group && scope.is_none() {
+    if target == Target::Group && scope.is_none() && item != MenuItem::ReorderPlaylists {
         return;
     }
     let channel = menu_channel(&target);
@@ -642,7 +646,37 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         MenuItem::GroupOptions => {
-            show_group_options(ui, list);
+            show_group_options(ui, list, GroupMenuEntry::Program);
+        }
+        MenuItem::GroupSettings => {
+            let named = group_target(scope.as_ref()).is_some();
+            let mut rows = Vec::new();
+            if named {
+                let preferences = list_preferences(&list);
+                rows.extend([
+                    Row::Action {
+                        item: MenuItem::ShowFavoritesOnly,
+                        enabled: true,
+                    },
+                    Row::Action {
+                        item: MenuItem::GroupExternalPlayer,
+                        enabled: crate::host::EXTERNAL_PLAYER
+                            && (preferences.external_player
+                                || crate::host::external_player_available()),
+                    },
+                    Row::Action {
+                        item: MenuItem::GroupEpgOffset,
+                        enabled: true,
+                    },
+                ]);
+            }
+            rows.push(Row::Action {
+                item: MenuItem::ManageGroups,
+                enabled: true,
+            });
+            let mut menu = Menu::new(rows, Target::Group, list);
+            menu.parent = parent.map(Box::new);
+            ui.menu.set(Some(menu));
         }
         MenuItem::ShowFavoritesOnly
         | MenuItem::GroupExternalPlayer
@@ -668,17 +702,12 @@ pub fn perform(ui: Ui, item: MenuItem) {
         }
         MenuItem::GroupEpgOffset => {
             let minutes = list_preferences(&list).epg_offset_minutes;
-            ui.menu.set(Some(group_offset_menu(list, minutes)));
+            let mut menu = group_offset_menu(list, minutes);
+            menu.parent = parent.map(Box::new);
+            ui.menu.set(Some(menu));
         }
-        MenuItem::RenamePlaylist | MenuItem::ReorderPlaylists => {
-            if let Some(id) = heading_playlist(&list) {
-                let only = if item == MenuItem::RenamePlaylist {
-                    crate::playlists_view::Only::Rename
-                } else {
-                    crate::playlists_view::Only::Reorder
-                };
-                crate::playlists_view::open_only(ui, id, only);
-            }
+        MenuItem::ReorderPlaylists => {
+            organization_view::open_playlist_reorder(ui, heading_playlist(&list));
         }
         MenuItem::RenameGroup => {
             if let Some(target) = group_target(scope.as_ref()) {
@@ -686,13 +715,14 @@ pub fn perform(ui: Ui, item: MenuItem) {
             }
         }
         MenuItem::ResetGroupName => {
-            if let Some((source, Kind::GroupChannels(id))) = scope {
+            if let Some(target) = group_target(scope.as_ref()) {
+                let source = SourceId(target.source);
                 let owner = crate::runtime_owner::runtime();
                 let save = crate::runtime::commands::rename_organization_item(
                     &owner,
                     source,
                     Kind::Groups,
-                    id.as_str().to_owned(),
+                    target.id,
                     String::new(),
                 );
                 crate::tasks::spawn_in_app(async move {
@@ -744,6 +774,14 @@ pub fn perform(ui: Ui, item: MenuItem) {
             log::info!("iptv menu {other:?} not implemented yet");
         }
     }
+}
+
+fn focus_item(ui: Ui, item: MenuItem) {
+    ui.menu.update(|menu| {
+        if let Some(menu) = menu {
+            menu.focus_on(item);
+        }
+    });
 }
 
 fn perform_program(ui: Ui, item: MenuItem, origin: Origin, list: ListId, playing_context: bool) {
@@ -890,7 +928,7 @@ pub fn has_group_options(ui: Ui, entry: usize) -> bool {
         return false;
     }
     let list = ListId::of(entry, &*schedule);
-    channel_scope(ui, &list).is_some()
+    heading_playlist(&list).is_some() || playlist_menu(&list) || channel_scope(ui, &list).is_some()
 }
 
 /// A focused group is actionable even when none of its channels are visible.
@@ -900,45 +938,162 @@ pub fn open_group_options(ui: Ui, entry: usize) -> bool {
         return false;
     }
     let list = ListId::of(entry, &*schedule);
-    show_group_options(ui, list)
+    show_group_options(ui, list, GroupMenuEntry::Heading)
 }
 
-fn show_group_options(ui: Ui, list: ListId) -> bool {
-    use MenuItem::*;
-    let scope = channel_scope(ui, &list);
-    let Some((_, kind)) = scope.as_ref() else {
+pub(crate) fn open_playlist_options(ui: Ui, id: SourceId) {
+    crate::playlists_view::open_only(
+        ui,
+        id,
+        crate::playlists_view::Only::Actions {
+            manual_order: crate::settings::playlists_by_hand(),
+        },
+    );
+}
+
+pub(crate) fn open_playlist_order(ui: Ui, id: SourceId) {
+    let rows = vec![
+        Row::Heading(Heading::PlaylistOrder),
+        Row::Action {
+            item: MenuItem::PlaylistOrderAdded,
+            enabled: true,
+        },
+        Row::Action {
+            item: MenuItem::PlaylistOrderByName,
+            enabled: true,
+        },
+        Row::Action {
+            item: MenuItem::PlaylistOrderManual,
+            enabled: true,
+        },
+    ];
+    let mut menu = Menu::new(
+        rows,
+        Target::Group,
+        ListId::Group(format!("playlist:{}", id.0)),
+    );
+    let current = match crate::settings::choice(iptv_settings::keys::PLAYLIST_SORT) {
+        "added" => MenuItem::PlaylistOrderAdded,
+        "name" => MenuItem::PlaylistOrderByName,
+        _ => MenuItem::PlaylistOrderManual,
+    };
+    menu.focus_on(current);
+    ui.menu.set(Some(menu));
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GroupMenuEntry {
+    Heading,
+    Program,
+}
+
+fn show_group_options(ui: Ui, list: ListId, entry: GroupMenuEntry) -> bool {
+    if let Some(id) = heading_playlist(&list) {
+        if playlist_by_id(id).is_none() {
+            return false;
+        }
+        crate::settings_view::settings_guarded(ui, move || {
+            crate::playlists_view::open_only(ui, id, crate::playlists_view::Only::GuideActions)
+        });
+        return true;
+    }
+    let Some(mut rows) = group_option_rows(ui, &list) else {
         return false;
     };
-    let named = group_target(scope.as_ref()).is_some();
-    let schedule = crate::runtime_owner::schedule();
-    let reorderable = named
-        && matches!(
-            list.resolve(&*schedule).map(Entry::at),
-            Some(Entry::Group(group)) if matches!(schedule.group_label(group), GroupName::Named(_))
-        );
-    let playlist = heading_playlist(&list).is_some();
-    let rows = group_options(|item| match item {
-        // A playlist's heading (the combined view): its own name, and the
-        // order of the playlists, which it shows with another one.
-        RenamePlaylist => playlist,
-        ReorderPlaylists => playlist && crate::settings::playlists_by_hand(),
-        RenameGroup | BlockGroup | HideGroup | ShowFavoritesOnly => named,
-        ResetGroupName | GroupEpgOffset => matches!(kind, Kind::GroupChannels(_)),
-        // Hidden without a player to hand streams to, unless it is on:
-        // then turning it off stays reachable.
-        GroupExternalPlayer => {
-            named
-                && crate::host::EXTERNAL_PLAYER
-                && (list_preferences(&list).external_player
-                    || crate::host::external_player_available())
-        }
-        ReorderGroups => reorderable,
-        ManageGroups => !reorderable && *kind != Kind::Favorites,
-        SortChannels => *kind != Kind::Favorites,
-        _ => true,
-    });
+    if entry == GroupMenuEntry::Program && group_target(channel_scope(ui, &list).as_ref()).is_some()
+    {
+        rows.push(Row::Action {
+            item: MenuItem::GroupSettings,
+            enabled: true,
+        });
+    }
     ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
     true
+}
+
+fn group_option_rows(ui: Ui, list: &ListId) -> Option<Vec<Row>> {
+    use MenuItem::*;
+    let schedule = crate::runtime_owner::schedule();
+    let entry = list.resolve(&*schedule);
+    let scope = entry.and_then(|_| channel_scope(ui, list));
+    let kind = scope.as_ref().map(|(_, kind)| kind);
+    let mut rows: Vec<Row> = if playlist_menu(list) {
+        let stored = crate::runtime().playlists().ok()?;
+        if stored.is_empty() {
+            return None;
+        }
+        stored
+            .into_iter()
+            .map(|playlist| Row::Action {
+                item: TogglePlaylist(playlist.id),
+                enabled: playlist.policy.enabled,
+            })
+            .collect()
+    } else {
+        kind?;
+        Vec::new()
+    };
+    let can_reorder_playlists = rows.len() > 1 && crate::settings::playlists_by_hand();
+    let named = group_target(scope.as_ref()).is_some();
+    let reorderable = named
+        && matches!(
+            entry.map(Entry::at),
+            Some(Entry::Group(group)) if matches!(schedule.group_label(group), GroupName::Named(_))
+        );
+    let can_manage = kind.is_some_and(|kind| *kind != Kind::Favorites);
+    let renamed = matches!(
+        entry.map(Entry::at),
+        Some(Entry::Group(group)) if schedule.group_name_overridden(group)
+    );
+    rows.extend(
+        group_options(|item| match item {
+            ReorderPlaylists => can_reorder_playlists,
+            RenameGroup | ResetGroupName | BlockGroup | HideGroup => named,
+            ReorderGroups | SortGroups => reorderable,
+            SortChannels | ManageGroups => can_manage,
+            ReorderChannels => kind.is_some(),
+            _ => false,
+        })
+        .into_iter()
+        .map(|row| match row {
+            Row::Action {
+                item: ResetGroupName,
+                ..
+            } => Row::Action {
+                item: ResetGroupName,
+                enabled: renamed,
+            },
+            row => row,
+        }),
+    );
+    Some(rows)
+}
+
+fn playlist_by_id(id: SourceId) -> Option<crate::data::Playlist> {
+    crate::runtime()
+        .playlists()
+        .ok()?
+        .into_iter()
+        .find(|playlist| playlist.id == id)
+}
+
+fn playlist_menu(list: &ListId) -> bool {
+    *list == ListId::All && crate::data::combined::active(&crate::runtime())
+}
+
+fn is_playlist_menu(menu: &Menu) -> bool {
+    menu.target == Target::Group && playlist_menu(&menu.list)
+}
+
+/// Catalog changes dismiss channel and group actions. Playlist controls
+/// stay open while their checkboxes update the guide.
+pub(crate) fn catalog_changed(ui: Ui) {
+    if ui
+        .menu
+        .with_untracked(|menu| menu.as_ref().is_some_and(|menu| !is_playlist_menu(menu)))
+    {
+        ui.menu.set(None);
+    }
 }
 
 /// The playlist whose heading `list` is (the combined view's groups
@@ -1017,6 +1172,7 @@ fn heading_text(ui: Ui, heading: Heading) -> String {
                 )
             }),
             Heading::Channel => menu_channel(&menu.target).map_or_else(String::new, channel_name),
+            Heading::PlaylistOrder => tr("Playlist order").to_owned(),
             Heading::Group => {
                 let catalog = crate::runtime_owner::schedule();
                 menu.list
@@ -1049,26 +1205,47 @@ fn action_detail(ui: Ui, item: MenuItem) -> String {
                 clock(program.end),
             );
         }
-        if menu.target == Target::Group {
-            let preferences = list_preferences(&menu.list);
-            match item {
-                MenuItem::SortChannels => {
-                    return organization_view::sort_label(preferences.sort).to_owned();
-                }
-                MenuItem::ShowFavoritesOnly | MenuItem::GroupExternalPlayer => {
-                    let enabled = if item == MenuItem::ShowFavoritesOnly {
-                        preferences.favorites_only
-                    } else {
-                        preferences.external_player
-                    };
-                    return if enabled { tr("On") } else { tr("Off") }.to_owned();
-                }
-                MenuItem::GroupEpgOffset => return offset_label(preferences.epg_offset_minutes),
-                _ => {}
-            }
-        }
         String::new()
     })
+}
+
+/// Renders the current values on the rows that open or change preferences.
+fn preference_label(item: MenuItem, list: &ListId) -> Option<String> {
+    use MenuItem::*;
+    let state_label = |on| if on { tr("On") } else { tr("Off") };
+    Some(match item {
+        SortGroups => group_order_label(list),
+        SortChannels => {
+            let sort = organization_view::sort_label(list_preferences(list).sort);
+            trf("Channel order: {method}", &[("method", sort.into())])
+        }
+        ShowFavoritesOnly => {
+            let state = state_label(list_preferences(list).favorites_only);
+            trf("Show favorites only: {state}", &[("state", state.into())])
+        }
+        GroupExternalPlayer => {
+            let state = state_label(list_preferences(list).external_player);
+            trf("Use external player: {state}", &[("state", state.into())])
+        }
+        GroupEpgOffset => {
+            let offset = offset_label(list_preferences(list).epg_offset_minutes);
+            trf(
+                "Guide time offset: {offset}",
+                &[("offset", (&offset).into())],
+            )
+        }
+        _ => return None,
+    })
+}
+
+pub(crate) fn group_order_label(list: &ListId) -> String {
+    let schedule = crate::runtime_owner::schedule();
+    let order = match list.resolve(&*schedule).map(Entry::at) {
+        Some(Entry::Group(group)) => schedule.groups_order(group),
+        _ => Default::default(),
+    };
+    let method = organization_view::sort_label(order);
+    trf("Group order: {method}", &[("method", method.into())])
 }
 
 fn bind_live_rows(ui: Ui) {
@@ -1129,14 +1306,71 @@ fn bind_live_rows(ui: Ui) {
     });
 }
 
+/// Keep the aggregate menu synchronized with the stored playlists.
+fn bind_playlist_rows(ui: Ui) {
+    let list = computed(move || {
+        ui.menu.with(|menu| {
+            menu.as_ref()
+                .filter(|menu| is_playlist_menu(menu))
+                .map(|menu| menu.list.clone())
+        })
+    });
+    effect(move || {
+        let Some(list) = list.get() else { return };
+        ui.guide_data();
+        ui.app.library.version.get();
+        ui.app.settings.get();
+        let rows = group_option_rows(ui, &list);
+        if ui.menu.with_untracked(|open| {
+            open.as_ref()
+                .is_some_and(|menu| menu.list == list && rows.as_ref() != Some(&menu.rows))
+        }) {
+            ui.menu.update(|open| match rows {
+                Some(rows) => {
+                    if let Some(menu) = open {
+                        menu.replace_rows(rows);
+                    }
+                }
+                None => *open = None,
+            });
+        }
+    });
+}
+
+pub(crate) fn playlist_popup_open(ui: Ui) -> bool {
+    ui.menu
+        .with(|menu| menu.as_ref().is_some_and(is_playlist_menu))
+}
+
 pub fn layer(ui: Ui) -> impl IntoElement {
     bind_live_rows(ui);
+    bind_playlist_rows(ui);
+    when(
+        move || !playlist_popup_open(ui),
+        move || menu_layer(ui, crate::overlays::Overlay::Menu),
+    )
+}
+
+pub(crate) fn playlist_layer(ui: Ui) -> impl IntoElement {
+    when(
+        move || playlist_popup_open(ui),
+        move || menu_layer(ui, crate::overlays::Overlay::PlaylistMenu),
+    )
+}
+
+fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
     let open = move || ui.menu.with(Option::is_some);
     let fixed_heading = move || {
-        ui.menu.with(|menu| match menu.as_ref()?.target {
-            Target::Channel { .. } => Some(Heading::Channel),
-            Target::Group => Some(Heading::Group),
-            Target::Program { .. } => None,
+        ui.menu.with(|menu| {
+            let menu = menu.as_ref()?;
+            if menu.rows.first() == Some(&Row::Heading(Heading::PlaylistOrder)) {
+                return None;
+            }
+            match menu.target {
+                Target::Channel { .. } => Some(Heading::Channel),
+                Target::Group => Some(Heading::Group),
+                Target::Program { .. } => None,
+            }
         })
     };
     let count = move || ui.menu.with(|m| m.as_ref().map_or(0, |m| m.rows.len()));
@@ -1148,6 +1382,17 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             list.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
         }
     });
+    let playlists = computed(move || {
+        ui.app.library.version.get();
+        if ui
+            .menu
+            .with(|menu| menu.as_ref().is_some_and(is_playlist_menu))
+        {
+            crate::runtime().playlists().unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    });
     let row = move |at: Position| {
         let row = move || {
             ui.menu
@@ -1156,8 +1401,27 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         let focused = move || ui.keys_shown() && focus.get() == Some(at.index());
         let mark = move || Mark::of(focused(), false);
         let heading = move || matches!(row(), Some(Row::Heading(_)));
+        let playlist = move || {
+            let Some(Row::Action {
+                item: MenuItem::TogglePlaylist(id),
+                ..
+            }) = row()
+            else {
+                return None;
+            };
+            playlists.with(|playlists| {
+                playlists
+                    .iter()
+                    .find(|playlist| playlist.id == id)
+                    .map(|playlist| (playlist.name.clone(), playlist.policy.enabled))
+            })
+        };
         let title = move || match row() {
             Some(Row::Heading(h)) => heading_text(ui, h),
+            Some(Row::Action {
+                item: MenuItem::TogglePlaylist(_),
+                ..
+            }) => playlist().map(|(name, _)| name).unwrap_or_default(),
             Some(Row::Action { item, .. }) => {
                 ui.guide_data();
                 ui.menu.with(|menu| {
@@ -1168,10 +1432,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                     let favorite = item == MenuItem::ToggleFavorite
                         && channel.is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)));
                     let blocked = directly_blocked(&menu.list, item, channel);
+                    if let Some(preference) = preference_label(item, &menu.list) {
+                        return preference;
+                    }
                     match (item, &menu.target) {
-                        (MenuItem::ReorderChannels, Target::Channel { .. }) => {
-                            tr("Reorder channel")
-                        }
                         (MenuItem::WatchInNewWindow, Target::Channel { .. }) => {
                             tr("Open in new window")
                         }
@@ -1216,20 +1480,40 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             mark,
         )
         .justify_center()
-        .role(move || {
-            if heading() {
-                AccessibilityRole::Header
-            } else {
-                AccessibilityRole::Menuitem
-            }
+        .role(move || match row() {
+            Some(Row::Heading(_)) => AccessibilityRole::Header,
+            Some(Row::Action {
+                item: MenuItem::TogglePlaylist(_),
+                ..
+            }) => AccessibilityRole::Checkbox,
+            _ => AccessibilityRole::Menuitem,
         })
         .label(accessible_label)
+        .disabled(move || matches!(row(), Some(Row::Action { enabled: false, .. })))
         .accessibility_state(move || AccessibilityState {
             selected: focused(),
-            disabled: matches!(row(), Some(Row::Action { enabled: false, .. })),
+            checked: playlist().map(|(_, on)| if on { Checked::True } else { Checked::False }),
             ..Default::default()
         })
-        .child(name)
+        .child(
+            view()
+                .flex_row()
+                .items_center()
+                .child(when(
+                    move || playlist().is_some(),
+                    move || {
+                        crate::ui_kit::playlist_checkbox(
+                            ui,
+                            size,
+                            || true,
+                            move || playlist().is_some_and(|(_, on)| on),
+                            mark,
+                        )
+                        .mr(move || size.px(12.0))
+                    },
+                ))
+                .child(name.flex_1()),
+        )
         .child(when(
             move || !subtitle().is_empty(),
             move || crate::ui_kit::caption(size, subtitle).text_color(move || mark().secondary()),
@@ -1251,7 +1535,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .test_id("menu-layer")
         .accessibility_elements_hidden(move || {
             (!open() && !ui.description.with(Option::is_some))
-                || crate::overlays::Overlay::Description.accessibility_covered(ui)
+                || if overlay == crate::overlays::Overlay::Menu {
+                    crate::overlays::Overlay::Description.accessibility_covered(ui)
+                } else {
+                    overlay.accessibility_covered(ui)
+                }
         })
         .opacity(move || {
             if open() || ui.description.with(Option::is_some) {
@@ -1271,9 +1559,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             view()
                 .flex_1()
                 .bg(tint(0x000000, 0x80))
-                .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::Menu.accessibility_hidden(ui)
-                })
+                .accessibility_elements_hidden(move || overlay.accessibility_hidden(ui))
                 .opacity(menu_opacity)
                 .on_press(move || {
                     ui.touched();
@@ -1284,9 +1570,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             view()
                 .test_id("menu-panel")
                 .w(move || px(size.whole(PANEL_W).min(window().width.0)))
-                .accessibility_elements_hidden(move || {
-                    crate::overlays::Overlay::Menu.accessibility_hidden(ui)
-                })
+                .accessibility_elements_hidden(move || overlay.accessibility_hidden(ui))
                 .opacity(menu_opacity)
                 .pt_safe_area()
                 .px(px(12.0))

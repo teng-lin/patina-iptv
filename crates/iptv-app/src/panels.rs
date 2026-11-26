@@ -177,8 +177,24 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
             let focused =
                 move || current() && ui.focus.with(|f| f.pane) == Pane::Groups && ui.keys_shown();
             let mark = move || Mark::of(focused(), current());
+            let name = move || {
+                ui.guide_data();
+                crate::lists::browser_entry_name(at.index(), &*crate::runtime_owner::schedule())
+            };
+            let arrow = move || {
+                ui.guide_data();
+                crate::lists::playlist_arrow(at.index(), &*crate::runtime_owner::schedule())
+            };
+            let color = move || match mark() {
+                Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
+                m => m.text(),
+            };
             list_rows::row(size, ROW, mark)
+                .flex_row()
+                .items_center()
+                .gap(move || size.px(8.0))
                 .role(AccessibilityRole::Tab)
+                .label(move || name().trim_start().to_owned())
                 .accessibility_state(move || AccessibilityState {
                     selected: current(),
                     ..Default::default()
@@ -200,17 +216,16 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                     ui.touched();
                     crate::menu_view::open_group_options(ui, at.index());
                 })
-                .child(
-                    // Re-read on new data: the recycled cell keeps its index.
-                    list_rows::name(size, move || {
-                        ui.guide_data();
-                        crate::lists::browser_entry_name(at.index())
-                    })
-                    .text_color(move || match mark() {
-                        Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
-                        m => m.text(),
-                    }),
-                )
+                .child(list_rows::name(size, name).flex_1().text_color(color))
+                .child(when(
+                    move || !arrow().is_empty(),
+                    move || {
+                        list_rows::triangle(size, arrow)
+                            .test_id("playlist-disclosure")
+                            .flex_shrink_0()
+                            .text_color(color)
+                    },
+                ))
         },
     )
     .test_id("guide-groups")

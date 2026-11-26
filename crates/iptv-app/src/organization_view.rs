@@ -36,8 +36,8 @@ enum Placement {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Open {
-    source: SourceId,
-    kind: Kind,
+    /// A source-scoped organization editor, or the whole playlist library.
+    scope: Option<(SourceId, Kind)>,
     editor: Editor,
     saving: bool,
     blocks: Blocks,
@@ -48,6 +48,7 @@ pub struct Open {
 }
 enum OrderSave {
     Unchanged,
+    Playlists(Vec<SourceId>),
     Pending {
         source: SourceId,
         kind: Kind,
@@ -62,9 +63,12 @@ impl Open {
     fn new(source: SourceId, kind: Kind, mode: Mode, placement: Placement) -> Self {
         let mut editor = Editor::new(Vec::new(), None);
         editor.mode = mode;
+        Self::with_editor(Some((source, kind)), editor, placement)
+    }
+
+    fn with_editor(scope: Option<(SourceId, Kind)>, editor: Editor, placement: Placement) -> Self {
         Self {
-            source,
-            kind,
+            scope,
             editor,
             saving: false,
             blocks: Blocks::default(),
@@ -73,6 +77,10 @@ impl Open {
             bulk_visibility: None,
             dragging: false,
         }
+    }
+
+    fn kind(&self) -> Option<&Kind> {
+        self.scope.as_ref().map(|(_, kind)| kind)
     }
 
     fn load(
@@ -112,17 +120,17 @@ impl Open {
     }
 
     fn configure_actions(&mut self) {
-        if self.kind == Kind::Groups {
+        if self.kind() == Some(&Kind::Groups) {
             self.editor.set_sorts(GROUP_SORTS);
         }
         let mut actions = vec![Edit::Visibility, Edit::Blocking];
-        if self.kind == Kind::Groups {
+        if self.kind() == Some(&Kind::Groups) {
             actions.push(Edit::Channels);
         }
-        if self.kind != Kind::Favorites {
+        if self.kind() != Some(&Kind::Favorites) {
             actions.push(Edit::SortOptions);
         }
-        if self.kind == Kind::Groups {
+        if self.kind() == Some(&Kind::Groups) {
             actions.extend([Edit::Reorder, Edit::SortChannels]);
         }
         actions.extend(ACTIONS.iter().copied().skip(1));
@@ -197,7 +205,20 @@ impl Open {
                 self.editor.open_actions(id);
                 return None;
             }
-            Mode::Reorder => return None,
+            Mode::Reorder => {
+                if self.scope.is_none()
+                    && let Some(order) = self.editor.reorder.as_mut()
+                    && let Some(item) = order.items().iter().find(|row| row.id == id).cloned()
+                {
+                    if order.selected().is_some() {
+                        order.toggle_selection();
+                    } else {
+                        order.focus_on(&item);
+                        order.toggle_selection();
+                    }
+                }
+                return None;
+            }
             Mode::Visibility => Edit::Visibility,
             Mode::Blocking => Edit::Blocking,
         };
@@ -243,10 +264,18 @@ impl Open {
         if original == order && self.custom_from.is_none_or(|sort| sort == Sort::Manual) {
             return Some(OrderSave::Unchanged);
         }
+        let Some((source, kind)) = self.scope.clone() else {
+            let ids = order
+                .iter()
+                .map(|id| id.parse().ok().map(SourceId))
+                .collect::<Option<_>>()?;
+            self.begin_save();
+            return Some(OrderSave::Playlists(ids));
+        };
         self.begin_save();
         Some(OrderSave::Pending {
-            source: self.source,
-            kind: self.kind.clone(),
+            source,
+            kind,
             original,
             order,
             expected_sort: self.editor.sort,
@@ -308,6 +337,43 @@ pub fn rename_group(ui: Ui, source: SourceId, id: String) {
         Some(Edit::Rename),
         Placement::RenameGroup { restore_name },
     );
+}
+
+/// The group column displays just the playlist headings during a move.
+/// Its normal catalog keeps the viewer's expansion and visibility choices.
+pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
+    let Ok(playlists) = crate::runtime().playlists() else {
+        return;
+    };
+    if playlists.is_empty()
+        || (preferred.is_none() && (playlists.len() < 2 || !crate::settings::playlists_by_hand()))
+    {
+        return;
+    }
+    let rows = playlists
+        .into_iter()
+        .map(|p| Item {
+            id: p.id.0.to_string(),
+            name: p.name,
+            hidden: !p.policy.enabled,
+        })
+        .collect();
+    let mut editor = Editor::new(rows, preferred.map(|id| id.0.to_string()));
+    editor.start_reorder(|_| true);
+    batch(|| {
+        if crate::settings_view::is_open(ui) {
+            crate::settings_view::close(ui);
+        }
+        crate::channels_view::close(ui);
+        ui.panels.update(|panels| panels.hide());
+        ui.mode
+            .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
+        crate::lists::open_groups(ui);
+        crate::browse_playback::hold(ui);
+        next_open(ui);
+        ui.organization
+            .set(Some(Open::with_editor(None, editor, Placement::Groups)));
+    });
 }
 
 pub fn open_group_reorder(ui: Ui, source: SourceId, focus: Option<String>, list: ListId) {
@@ -456,7 +522,10 @@ fn block_kind(kind: &Kind) -> BlockKind {
 }
 
 fn block_state(state: &Open, id: &str) -> Block {
-    match block_kind(&state.kind) {
+    let Some(kind) = state.kind() else {
+        return Block::None;
+    };
+    match block_kind(kind) {
         BlockKind::Group if state.blocks.groups.contains(id) => Block::Group,
         BlockKind::Group => Block::None,
         BlockKind::Channel => state.blocks.channel(id),
@@ -683,39 +752,62 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 fn save_order(ui: Ui) {
     let mut draft = None;
     update(ui, |s| draft = s.begin_order_save());
-    let (source, kind, original, order, expected_sort, from_custom) = match draft {
-        Some(OrderSave::Pending {
-            source,
-            kind,
-            original,
-            order,
-            expected_sort,
-            from_custom,
-        }) => (source, kind, original, order, expected_sort, from_custom),
-        Some(OrderSave::Unchanged) => return close(ui),
-        None => return,
-    };
+    let Some(draft) = draft else { return };
+    if matches!(draft, OrderSave::Unchanged) {
+        return close(ui);
+    }
     let generation = ui.organization_generation.get_untracked();
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
-        let result = if kind == Kind::Favorites {
-            owner.save_favorite_order(source, original, order).await
-        } else {
-            let result = crate::runtime::commands::save_organization_order(
-                &owner,
+        let playlists = matches!(&draft, OrderSave::Playlists(_));
+        let result = match draft {
+            OrderSave::Playlists(ids) => data::reorder(&owner, ids).await,
+            OrderSave::Pending {
+                source,
+                kind: Kind::Favorites,
+                original,
+                order,
+                ..
+            } => owner.save_favorite_order(source, original, order).await,
+            OrderSave::Pending {
                 source,
                 kind,
                 original,
                 order,
                 expected_sort,
                 from_custom,
-            )
-            .await;
-            if result.is_ok() {
-                data::organization_changed(&owner, source);
+            } => {
+                let result = crate::runtime::commands::save_organization_order(
+                    &owner,
+                    source,
+                    kind,
+                    original,
+                    order,
+                    expected_sort,
+                    from_custom,
+                )
+                .await;
+                if result.is_ok() {
+                    data::organization_changed(&owner, source);
+                }
+                result
             }
-            result
+            OrderSave::Unchanged => return,
         };
+        if result.is_ok()
+            && playlists
+            && !crate::settings::playlists_by_hand()
+            && let Err(error) = crate::settings_view::save_setting(
+                iptv_settings::keys::PLAYLIST_SORT.as_str(),
+                iptv_settings::Value::Enum("manual".to_owned()),
+            )
+        {
+            if still_open(ui, generation) {
+                update(ui, Open::finish_save);
+                crate::settings_view::notify_setting_error(error);
+            }
+            return;
+        }
         if !still_open(ui, generation) {
             return;
         }
@@ -745,16 +837,19 @@ fn apply_edit(ui: Ui, edit: Edit) {
     let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
+    let Some((source, scope_kind)) = s.scope.clone() else {
+        return;
+    };
     if let Edit::Sort(sort) = edit {
         if sort == Sort::Manual {
             let placement = match s.placement {
-                Placement::Sort(list) => reorder_placement(ui, &s.kind, list),
+                Placement::Sort(list) => reorder_placement(ui, &scope_kind, list),
                 _ => Placement::Screen,
             };
             open_with(
                 ui,
-                s.source,
-                s.kind,
+                source,
+                scope_kind,
                 s.editor.focus,
                 Mode::Reorder,
                 Some(Edit::Sort(Sort::Manual)),
@@ -770,23 +865,23 @@ fn apply_edit(ui: Ui, edit: Edit) {
     };
     match edit {
         Edit::Blocking => {
-            let kind = block_kind(&s.kind);
+            let kind = block_kind(&scope_kind);
             let blocked = block_state(&s, &item.id);
             if kind == BlockKind::Channel && blocked == Block::Group {
                 crate::settings_view::notify(tr("This channel is blocked by a group."));
                 return;
             }
             update(ui, Open::begin_block);
-            set_block(ui, s.source, kind, item.id, blocked == Block::None);
+            set_block(ui, source, kind, item.id, blocked == Block::None);
             return;
         }
         Edit::Channels => {
             let kind = Kind::group_channels(&item.id);
-            open(ui, s.source, kind, None);
+            open(ui, source, kind, None);
             return;
         }
         Edit::SortChannels => {
-            open_sort(ui, s.source, Kind::group_channels(&item.id), None);
+            open_sort(ui, source, Kind::group_channels(&item.id), None);
             return;
         }
         Edit::Reorder => {
@@ -807,7 +902,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         update(ui, |s| s.editor.toggle_selection());
         return;
     }
-    if s.kind == Kind::Favorites
+    if scope_kind == Kind::Favorites
         && matches!(edit, Edit::Earlier | Edit::Later | Edit::First | Edit::Last)
     {
         let keys = crate::favorites::ordered_keys();
@@ -824,9 +919,8 @@ fn apply_edit(ui: Ui, edit: Edit) {
         finish(ui, &s, generation, Ok(()));
         return;
     }
-    if s.kind == Kind::Favorites && edit == Edit::ResetOrder {
+    if scope_kind == Kind::Favorites && edit == Edit::ResetOrder {
         let keys = crate::favorites::ordered_keys();
-        let source = s.source;
         let ordered = crate::runtime::commands::favorite_provider_order(
             &crate::runtime_owner::runtime(),
             source,
@@ -846,7 +940,7 @@ fn apply_edit(ui: Ui, edit: Edit) {
         });
         return;
     }
-    if (s.editor.sort != Sort::Manual || s.kind == Kind::Groups)
+    if (s.editor.sort != Sort::Manual || scope_kind == Kind::Groups)
         && matches!(edit, Edit::Earlier | Edit::Later | Edit::First | Edit::Last)
     {
         let original: Vec<_> = s.editor.items.iter().map(|item| item.id.clone()).collect();
@@ -867,8 +961,8 @@ fn apply_edit(ui: Ui, edit: Edit) {
         order.insert(to, id);
         let result = crate::runtime::commands::save_organization_order(
             &crate::runtime_owner::runtime(),
-            s.source,
-            s.kind.clone(),
+            source,
+            scope_kind.clone(),
             original,
             order,
             s.editor.sort,
@@ -891,8 +985,8 @@ fn apply_edit(ui: Ui, edit: Edit) {
     let finished = s.clone();
     let result = crate::runtime::commands::edit_organization(
         &crate::runtime_owner::runtime(),
-        s.source,
-        s.kind,
+        source,
+        scope_kind,
         s.editor.items,
         item,
         edit,
@@ -903,10 +997,13 @@ fn apply_edit(ui: Ui, edit: Edit) {
     });
 }
 fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
+    let Some((source, kind)) = s.scope.clone() else {
+        return;
+    };
     let result = crate::runtime::commands::set_organization_sort(
         &crate::runtime_owner::runtime(),
-        s.source,
-        s.kind.clone(),
+        source,
+        kind,
         sort,
     );
     let expected = s.clone();
@@ -916,7 +1013,7 @@ fn store_sort(ui: Ui, s: &Open, generation: u64, sort: Sort) {
         if still_open(ui, generation) && result.is_ok() {
             if matches!(expected.placement, Placement::Sort(_)) {
                 close(ui);
-                data::organization_changed(&crate::runtime_owner::runtime(), expected.source);
+                data::organization_changed(&crate::runtime_owner::runtime(), source);
                 return;
             }
             update(ui, |s| s.editor.sort_focus = None);
@@ -936,20 +1033,23 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
         ));
         return;
     }
+    let Some((source, kind)) = s.scope.clone() else {
+        return;
+    };
     if matches!(s.placement, Placement::RenameGroup { .. }) {
         if still_open(ui, generation) {
             close(ui);
         }
-        data::organization_changed(&crate::runtime_owner::runtime(), s.source);
+        data::organization_changed(&crate::runtime_owner::runtime(), source);
         return;
     }
     let expected = s.clone();
     crate::tasks::spawn_in_app(async move {
-        let loaded = items(expected.source, &expected.kind, None).await;
+        let loaded = items(source, &kind, None).await;
         if still_open(ui, generation) {
             update(ui, |s| s.finish_edit(&expected, loaded.ok()));
         }
-        data::organization_changed(&crate::runtime_owner::runtime(), expected.source);
+        data::organization_changed(&crate::runtime_owner::runtime(), source);
     });
 }
 
@@ -974,11 +1074,13 @@ fn commit(ui: Ui) {
         crate::settings_view::notify(tr("Enter a group name."));
         return;
     }
-    let target = s.clone();
+    let Some((source, kind)) = s.scope.clone() else {
+        return;
+    };
     let result = crate::runtime::commands::rename_organization_item(
         &crate::runtime_owner::runtime(),
-        target.source,
-        target.kind,
+        source,
+        kind,
         item.id,
         text,
     );
@@ -1056,16 +1158,18 @@ fn screen_title(s: &Open) -> &'static str {
     match s.editor.mode {
         Mode::Visibility => return tr("Manage hidden channels…"),
         Mode::Blocking => return tr("Manage blocked channels…"),
-        Mode::Reorder if s.kind == Kind::Groups => return tr("Reorder groups"),
+        Mode::Reorder if s.scope.is_none() => return tr("Reorder playlists"),
+        Mode::Reorder if s.kind() == Some(&Kind::Groups) => return tr("Reorder groups"),
         Mode::Reorder => return tr("Reorder channels"),
         _ => {}
     }
-    match &s.kind {
-        Kind::Groups => tr("Organize groups"),
-        Kind::Favorites => tr("Order favorites"),
-        Kind::GroupChannels(_) => tr("Organize group channels"),
-        Kind::CustomChannels(_) => tr("Order custom-group members"),
-        Kind::Channels => tr("Organize channels"),
+    match s.kind() {
+        Some(Kind::Groups) => tr("Organize groups"),
+        Some(Kind::Favorites) => tr("Order favorites"),
+        Some(Kind::GroupChannels(_)) => tr("Organize group channels"),
+        Some(Kind::CustomChannels(_)) => tr("Order custom-group members"),
+        Some(Kind::Channels) => tr("Organize channels"),
+        None => tr("Reorder playlists"),
     }
 }
 
@@ -1076,13 +1180,13 @@ fn screen_caption(s: &Open) -> &'static str {
         Mode::Blocking => return tr("OK blocks or unblocks the focused channel."),
         _ => {}
     }
-    match &s.kind {
-        Kind::Favorites => {
+    match s.kind() {
+        Some(Kind::Favorites) => {
             tr("Order applies to favorites. Names and visibility apply across this playlist.")
         }
-        Kind::GroupChannels(_) => tr("Order applies only to this group. \
+        Some(Kind::GroupChannels(_)) => tr("Order applies only to this group. \
                 Names and visibility apply across this playlist."),
-        Kind::CustomChannels(_) => {
+        Some(Kind::CustomChannels(_)) => {
             tr("Order applies only to these members. Edit membership in Custom groups.")
         }
         _ => tr("Includes hidden items. OK opens actions; \
@@ -1112,6 +1216,9 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
         ui.app.settings.get();
         item()
             .map(|i| {
+                if i.hidden && state(ui, |s| s.scope.is_none()) == Some(true) {
+                    return tr("Hidden").to_owned();
+                }
                 if reordering(ui) || visibility() {
                     return String::new();
                 }
@@ -1190,7 +1297,10 @@ fn item_row(ui: Ui, size: Scale, at: Position, focus: Memo<Option<usize>>) -> im
         .child(when(visibility, move || visibility_switch(ui, size, shown)))
         .child(ui_kit::detail(size, status).text_color(move || mark().secondary()))
         .child(when(
-            move || reordering(ui) && ui.drag_editing(),
+            move || {
+                reordering(ui)
+                    && (ui.drag_editing() || state(ui, |s| s.scope.is_none()) == Some(true))
+            },
             move || reorder_drag::handle(size, at.index()),
         ))
         .child(order_outline(ui, grabbed))
@@ -1291,14 +1401,19 @@ fn action_row(ui: Ui, size: Scale, at: Position) -> impl IntoElement {
             ui.app.settings.get();
             state(ui, |s| {
                 let item = s.editor.focused()?;
-                let blocked = match (block_kind(&s.kind), block_state(s, &item.id)) {
+                let blocked = match (block_kind(s.kind()?), block_state(s, &item.id)) {
                     (BlockKind::Channel, Block::Group) if edit() == Some(Edit::Blocking) => {
                         return Some(tr("Blocked by group"));
                     }
                     (_, Block::None) => false,
                     _ => true,
                 };
-                Some(label(edit()?, item.hidden, blocked, s.kind == Kind::Groups))
+                Some(label(
+                    edit()?,
+                    item.hidden,
+                    blocked,
+                    s.kind() == Some(&Kind::Groups),
+                ))
             })
             .flatten()
             .unwrap_or("")
@@ -1339,7 +1454,7 @@ fn sort_sheet(ui: Ui, size: Scale) -> impl IntoElement {
     let title = match state(ui, |s| {
         (
             matches!(s.placement, Placement::Sort(_)),
-            s.kind == Kind::Groups,
+            s.kind() == Some(&Kind::Groups),
         )
     }) {
         Some((true, true)) => tr("Group order"),
@@ -1500,7 +1615,7 @@ pub(crate) fn guide_order_scope(ui: Ui) -> Option<(SourceId, ListId)> {
         let Placement::Guide { list, .. } = &s.placement else {
             return None;
         };
-        Some((s.source, list.clone()))
+        Some((s.scope.as_ref()?.0, list.clone()))
     })
     .flatten()
 }
@@ -1564,6 +1679,10 @@ pub(crate) fn guide_order_open(ui: Ui) -> bool {
     matches!(placement(ui), Placement::Guide { .. })
 }
 
+pub(crate) fn group_column_order_open(ui: Ui) -> bool {
+    placement(ui) == Placement::Groups
+}
+
 pub(crate) fn inline_order_open(ui: Ui) -> bool {
     matches!(placement(ui), Placement::Groups | Placement::Guide { .. })
 }
@@ -1587,7 +1706,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
             let Placement::Panel(list) = &s.placement else {
                 return String::new();
             };
-            if s.kind == Kind::Groups {
+            if s.kind() == Some(&Kind::Groups) {
                 return String::new();
             }
             let catalog = crate::runtime_owner::schedule();
@@ -1670,7 +1789,7 @@ fn reorder_panel(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
-    let groups = move || placement(ui) == Placement::Groups;
+    let groups = move || group_column_order_open(ui);
     view()
         .test_id("organization-screen")
         .absolute()
@@ -1823,9 +1942,32 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let size = Scale::new();
     effect(move || {
         ui.app.library.version.get();
+        ui.app.settings.get();
+        if untracked(|| state(ui, |s| s.scope.is_none() && !s.saving)) == Some(true) {
+            let valid = crate::runtime().playlists().is_ok_and(|rows| {
+                untracked(|| {
+                    state(ui, |s| {
+                        rows.iter().map(|p| p.id.0.to_string()).eq(s
+                            .editor
+                            .items
+                            .iter()
+                            .map(|item| item.id.clone()))
+                    })
+                }) == Some(true)
+            });
+            if !valid {
+                untracked(|| close(ui));
+                crate::settings_view::notify(tr(
+                    "The list could not be reloaded. Reopen it and try again.",
+                ));
+            }
+            return;
+        }
         if let Some((source, kind)) = untracked(|| {
             state(ui, |s| {
-                (!s.saving && s.editor.reorder.is_none()).then(|| (s.source, s.kind.clone()))
+                s.scope
+                    .clone()
+                    .filter(|_| !s.saving && s.editor.reorder.is_none())
             })
             .flatten()
         }) {

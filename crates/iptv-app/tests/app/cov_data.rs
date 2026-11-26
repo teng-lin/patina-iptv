@@ -260,7 +260,7 @@ fn guide_failed(data: &Path, source: SourceId) -> bool {
 pub(super) fn open_actions(app: &mut Headless, name: &str) {
     let row = format!("id:settings-content >> role:checkbox[/^{name}/]");
     if app.screen().matches(&row).unwrap() {
-        step(app.long_press(&row));
+        step(app.open_playlist_actions(name));
     } else {
         step(app.press(&format!("text:{name}")));
     }

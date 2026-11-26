@@ -195,7 +195,11 @@ pub fn rejected(f: ImportFailure) -> String {
 
 pub fn act(act: Act, kind: Option<SourceKind>, shown: bool, running: bool) -> &'static str {
     match act {
-        Act::Enabled => tr("Enable / disable playlist"),
+        Act::Reorder => tr("Reorder playlist"),
+        Act::PlaylistOrder => tr("Playlist order"),
+        Act::ReorderGroups => tr("Reorder group"),
+        Act::GroupOrder => tr("Group order"),
+        Act::Hide => tr("Hide"),
         Act::RefreshInterval => tr("Automatic refresh"),
         Act::RefreshOnStart => tr("Refresh on startup"),
         Act::OnDemand => tr("Movies and series"),

@@ -845,7 +845,13 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
                         .flex_1()
                         .flex_row()
                         .child(rail::column(ui))
-                        .child(panels::group_column(ui, groups))
+                        .child(
+                            when(
+                                move || organization_view::group_column_order_open(ui),
+                                move || view().w(move || px(panels::groups_width(ui))),
+                            )
+                            .otherwise(move || panels::group_column(ui, groups)),
+                        )
                         .child(grid::guide(ui, rows)),
                 ),
         )
@@ -875,6 +881,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(play_bar::layer(ui, go_back))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
+        .child(menu_view::playlist_layer(ui))
         .child(vod_view::layer(ui))
         .child(recordings_view::layer(ui))
         .child(guide_assign_view::layer(ui))
@@ -1153,7 +1160,11 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 chooser::close(ui);
                 true
             }
-            _ if matches!(top, Some(Overlay::Menu | Overlay::Description)) => {
+            _ if matches!(
+                top,
+                Some(Overlay::Menu | Overlay::PlaylistMenu | Overlay::Description)
+            ) =>
+            {
                 menu_view::back(ui);
                 true
             }

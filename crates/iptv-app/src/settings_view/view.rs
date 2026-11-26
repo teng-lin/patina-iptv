@@ -197,9 +197,11 @@ fn hint(ui: Ui) -> &'static str {
 }
 
 /// The playlist of the focused row, if it is one.
-fn focused_playlist(ui: Ui) -> Option<i64> {
+pub(crate) fn focused_playlist(ui: Ui) -> Option<i64> {
     match state(ui, |s| {
-        (s.pane() == Pane::Rows).then(|| s.focus_id()).flatten()
+        (s.pane() == Pane::Rows && s.editor().is_none())
+            .then(|| s.focus_id())
+            .flatten()
     })
     .flatten()?
     {
@@ -279,7 +281,9 @@ fn rows_list(ui: Ui, rows: Memo<Vec<Row>>, size: Scale) -> impl IntoElement {
     let list = element_ref();
     let focused_index = computed(move || {
         let id = state(ui, |s| {
-            (s.pane() == Pane::Rows).then(|| s.focus_id()).flatten()
+            (s.pane() == Pane::Rows && s.editor().is_none())
+                .then(|| s.focus_id())
+                .flatten()
         })
         .flatten()?;
         rows.with(|r| r.iter().position(|row| row.id() == Some(id)))
@@ -344,6 +348,12 @@ fn row_view(
         Some(Row::Playlist(p)) => Some(p),
         _ => None,
     };
+    let open_actions = move || {
+        ui.touched();
+        if let Some(id) = row().and_then(|r| r.id()) {
+            update(ui, |screen, ctx| screen.hold_row(id, ctx));
+        }
+    };
     let title = move || match row() {
         Some(Row::Heading {
             section,
@@ -389,7 +399,8 @@ fn row_view(
         r if note_of(r).is_empty() => ROW,
         _ => ROW_TWO,
     };
-    list_rows::row_with(size, pitch, mark)
+    let content = list_rows::row_with(size, pitch, mark)
+        .flex_1()
         .role(move || match row() {
             Some(Row::Heading { .. }) => AccessibilityRole::Header,
             Some(Row::Playlist(_)) => AccessibilityRole::Checkbox,
@@ -441,21 +452,11 @@ fn row_view(
                 update(ui, |screen, ctx| screen.tap(id, ctx));
             }
         })
-        .on_long_press(move || {
-            ui.touched();
-            if let Some(id) = row().and_then(|r| r.id()) {
-                update(ui, |screen, ctx| screen.hold_row(id, ctx));
-            }
-        })
-        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
-            ui.touched();
-            if let Some(id) = row().and_then(|r| r.id()) {
-                update(ui, |screen, ctx| screen.hold_row(id, ctx));
-            }
-        })
+        .on_long_press(open_actions)
+        .on_context_menu(move |_: &nsh_core::ContextMenuEvent| open_actions())
         // A playlist's check box: shown in lists, or hidden. Other rows
         // keep it at no width (a recycled row changes kind).
-        .child(check_box(
+        .child(ui_kit::playlist_checkbox(
             ui,
             size,
             move || playlist().is_some(),
@@ -503,40 +504,54 @@ fn row_view(
                     (_, false) => tint(WHITE, TEXT_DISABLED_ALPHA),
                 }
             }),
-        )
-}
-
-/// A check box, filled with the accent and ticked while `checked`;
-/// nothing (no width) unless `shown`.
-fn check_box(
-    ui: Ui,
-    size: Scale,
-    shown: impl Fn() -> bool + Copy + 'static,
-    checked: impl Fn() -> bool + Copy + 'static,
-    mark: impl Fn() -> Mark + Copy + 'static,
-) -> impl IntoElement {
-    let side = move || size.px(if shown() { 22.0 } else { 0.0 });
-    view()
-        .test_id("settings-playlist-check")
-        .w(side)
-        .h(side)
-        .flex_shrink_0()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.0))
-        .border(move || px(if shown() { 2.0 } else { 0.0 }))
-        .border_color(move || mark().text())
-        .bg(move || {
-            if checked() {
-                rgb(ui.app.theme.with(|t| t.accent.main))
-            } else {
-                tint(WHITE, 0)
-            }
-        })
-        .child(
-            list_rows::second(size, move || if checked() { "✓" } else { "" }, SANS)
-                .text_color(rgb(WHITE)),
-        )
+        );
+    view().flex_row().items_center().child(content).child(when(
+        move || playlist().is_some(),
+        move || {
+            let side = move || size.whole(32.0);
+            let inset = move || px((ui_kit::TOUCH - side()) / 2.0);
+            let bg = crate::play_bar::back_bg(ui);
+            view()
+                .flex_row()
+                .items_center()
+                .child(
+                    ui_kit::round_more(
+                        side,
+                        bg,
+                        move || {
+                            trf(
+                                "More options for {name}",
+                                &[("name", title().as_str().into())],
+                            )
+                        },
+                        open_actions,
+                    )
+                    .mx(inset),
+                )
+                .child(
+                    ui_kit::round_button(
+                        side,
+                        bg,
+                        ui_kit::icons::Icon::Trash,
+                        move || trf("Delete “{name}”", &[("name", title().as_str().into())]),
+                        move || {
+                            ui.touched();
+                            if let Some(playlist) = playlist() {
+                                settings_guarded(ui, move || {
+                                    crate::playlists_view::open_only(
+                                        ui,
+                                        crate::runtime::model::SourceId(playlist.id),
+                                        crate::playlists_view::Only::Delete,
+                                    )
+                                });
+                            }
+                        },
+                    )
+                    .test_id("settings-delete-playlist")
+                    .mx(inset),
+                )
+        },
+    ))
 }
 
 fn footer(ui: Ui, size: Scale) -> impl IntoElement {

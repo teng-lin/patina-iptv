@@ -5,8 +5,249 @@ use personalization::*;
 use std::time::Duration;
 
 #[track_caller]
+pub(super) fn wait_visible_order(app: &mut crate::Headless, expected: &[&str]) {
+    step(app.wait_until(
+        &format!("guide rows in order: {expected:?}"),
+        Duration::from_secs(5),
+        |screen| {
+            let nodes = screen.layout_nodes();
+            let mut previous_y = f32::NEG_INFINITY;
+            expected.iter().all(|name| {
+                let Some(row) = nodes.iter().find(|node| {
+                    node.text.as_ref().is_some_and(|text| {
+                        text.text.text.trim().trim_start_matches('★').trim() == *name
+                    })
+                }) else {
+                    return false;
+                };
+                let y = row.bounds.origin.y.0;
+                let next = y > previous_y;
+                previous_y = y;
+                next
+            })
+        },
+    ));
+}
+
+#[test]
+fn group_and_channel_sort_choices_apply_and_preserve_custom_positions() {
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+    use iptv_providers::model::ContentKind;
+    use nsh_core::platform::{Idiom, Os};
+
+    let Some(home) = isolated!() else { return };
+    let playlist = r#"#EXTM3U
+#EXTINF:-1 group-title="Sport",Local C
+http://example.test/c
+#EXTINF:-1 group-title="Sport",Local A
+http://example.test/a
+#EXTINF:-1 group-title="Sport",Local B
+http://example.test/b
+#EXTINF:-1 group-title="Arts",Local D
+http://example.test/d
+#EXTINF:-1 group-title="News",Local E
+http://example.test/e
+"#;
+    let mut fixture = launch_playlist(
+        home,
+        Settings::new(),
+        false,
+        playlist,
+        |path, source| {
+            let mut store = crate::isolated::open_database(path).unwrap();
+            let catalog = iptv_providers::m3u::parse_m3u(playlist);
+            let sport = catalog
+                .groups
+                .iter()
+                .find(|group| group.name == "Sport")
+                .unwrap();
+            let news = catalog
+                .groups
+                .iter()
+                .find(|group| group.name == "News")
+                .unwrap();
+            store.move_group(source, &news.id, 0).unwrap();
+            let scope = OrganizationScope::GroupChannels(sport.id.clone());
+            let provider = ["Local C", "Local A", "Local B"].map(|name| {
+                catalog
+                    .channels
+                    .items
+                    .iter()
+                    .find(|channel| channel.name == name)
+                    .unwrap()
+                    .id
+                    .as_str()
+                    .to_owned()
+            });
+            let custom = [
+                provider[2].clone(),
+                provider[0].clone(),
+                provider[1].clone(),
+            ];
+            store
+                .save_guide_order(source, &scope, &provider, &custom)
+                .unwrap();
+            for (name, last, elapsed) in [
+                ("Local A", 3, 1_000),
+                ("Local B", 1, 9_000),
+                ("Local C", 2, 4_000),
+            ] {
+                let channel = catalog
+                    .channels
+                    .items
+                    .iter()
+                    .find(|channel| channel.name == name)
+                    .unwrap();
+                store
+                    .record_watch(source, &channel.id, ContentKind::Live, last, None)
+                    .unwrap();
+                store
+                    .add_channel_watch_time(source, &channel.id, elapsed)
+                    .unwrap();
+            }
+        },
+        |config| config.environment.idiom = Idiom::Desktop,
+        |_| {},
+    );
+    let app = &mut fixture.app;
+    step(app.set_environment("desktop", |env| {
+        env.idiom = Idiom::Desktop;
+        env.os = Os::Linux;
+    }));
+    let db = crate::isolated::open_database(&fixture.path).unwrap();
+    let sport = db
+        .groups(fixture.source, Some(ContentKind::Live))
+        .unwrap()
+        .into_iter()
+        .find(|group| group.name == "Sport")
+        .unwrap();
+    let sport_scope = OrganizationScope::GroupChannels(sport.id);
+
+    let pick = |app: &mut crate::Headless, label, sort| {
+        step(app.press(&format!("id:organization-sort >> text:/^(✓ )?{label}$/")));
+        if sort == Sort::Manual {
+            step(app.press("id:organization-screen >> text:Done"));
+        }
+        step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    };
+    let group_heading = "id:guide-groups >> role:tab[Sport]";
+    let mut group_mode = "Custom order";
+    for (option, label, sort, groups) in [
+        (
+            "Playlist order",
+            "Playlist order",
+            Sort::Provider,
+            ["Sport", "Arts", "News"],
+        ),
+        (
+            r"Name \(A–Z\)",
+            "Name (A–Z)",
+            Sort::Name,
+            ["Arts", "News", "Sport"],
+        ),
+        (
+            r"Name \(Z–A\)",
+            "Name (Z–A)",
+            Sort::NameDescending,
+            ["Sport", "News", "Arts"],
+        ),
+        (
+            "Custom order",
+            "Custom order",
+            Sort::Manual,
+            ["News", "Sport", "Arts"],
+        ),
+    ] {
+        step(app.open_guide_groups());
+        step(app.right_click(group_heading));
+        step(app.press(&format!("id:menu-panel >> text:Group order: {group_mode}")));
+        pick(app, option, sort);
+        step(app.open_guide_groups());
+        wait_visible_order(app, &groups);
+        assert_eq!(
+            db.guide_sort(fixture.source, &OrganizationScope::Groups)
+                .unwrap(),
+            sort
+        );
+        group_mode = label;
+    }
+
+    group(app, "Sport");
+    let cell = "id:guide-ui >> role:cell[No information] >> nth=1";
+    let mut channel_mode = "Custom order";
+    for (option, label, sort, channels) in [
+        (
+            "Playlist order",
+            "Playlist order",
+            Sort::Provider,
+            ["Local C", "Local A", "Local B"],
+        ),
+        (
+            r"Name \(A–Z\)",
+            "Name (A–Z)",
+            Sort::Name,
+            ["Local A", "Local B", "Local C"],
+        ),
+        (
+            r"Name \(Z–A\)",
+            "Name (Z–A)",
+            Sort::NameDescending,
+            ["Local C", "Local B", "Local A"],
+        ),
+        (
+            r"Last watched \(newest first\)",
+            "Last watched (newest first)",
+            Sort::LastWatched,
+            ["Local A", "Local C", "Local B"],
+        ),
+        (
+            r"Last watched \(oldest first\)",
+            "Last watched (oldest first)",
+            Sort::OldestWatched,
+            ["Local B", "Local C", "Local A"],
+        ),
+        (
+            r"Watch time \(most first\)",
+            "Watch time (most first)",
+            Sort::MostWatched,
+            ["Local B", "Local C", "Local A"],
+        ),
+        (
+            r"Watch time \(least first\)",
+            "Watch time (least first)",
+            Sort::LeastWatched,
+            ["Local A", "Local C", "Local B"],
+        ),
+        (
+            "Custom order",
+            "Custom order",
+            Sort::Manual,
+            ["Local B", "Local C", "Local A"],
+        ),
+    ] {
+        step(app.right_click(cell));
+        let row = format!("Channel order: {channel_mode}");
+        let texts = app.panel_texts("menu-panel");
+        assert!(
+            texts.ends_with(&["Reorder channel".to_owned(), row.clone()]),
+            "{texts:?}"
+        );
+        step(app.press(&format!("id:menu-panel >> text:{row}")));
+        pick(app, option, sort);
+        for (index, name) in channels.iter().enumerate() {
+            step(app.wait_for(&format!("id:guide-row >> nth={index} >> text:★ {name}")));
+        }
+        assert_eq!(db.guide_sort(fixture.source, &sport_scope).unwrap(), sort);
+        channel_mode = label;
+    }
+    step(app.right_click(cell));
+    step(app.wait_for("id:menu-panel >> text:Channel order: Custom order"));
+}
+
+#[track_caller]
 fn open_inline_order(app: &mut crate::headless::Headless) {
-    menu(app, "Reorder channels");
+    menu(app, "Reorder channel");
     step(app.wait_for("id:guide-reorder-handle"));
     assert!(!app.screen().matches("id:organization-row-0").unwrap());
 }
@@ -88,7 +329,7 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
     open_inline_order(app);
     step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
     step(app.back());
-    menu(app, "Channel order");
+    menu(app, "/^Channel order:/");
     step(app.wait_for("text:Playlist order"));
     step(app.press("text:Playlist order"));
     step(app.wait_for_gone("id:organization-sort", Duration::from_secs(5)));
@@ -104,7 +345,7 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
     open_inline_order(app);
     step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local A"));
     step(app.back());
-    menu(app, "Channel order");
+    menu(app, "/^Channel order:/");
     step(app.wait_for("text:/Custom order$/"));
     step(app.press("text:/Custom order$/"));
     step(app.wait_for("id:reorder-handle-0"));
@@ -112,13 +353,13 @@ fn the_guide_uses_independent_favorite_and_provider_group_orders() {
     // Custom positions are only activated by saving the editor.
     step(app.press("id:organization-screen >> text:Close"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
-    menu(app, "Channel order");
+    menu(app, "/^Channel order:/");
     step(app.wait_for("text:✓ Playlist order"));
     step(app.press("text:Custom order"));
     step(app.wait_for("id:organization-row-0 >> text:Local B"));
     step(app.press("id:organization-screen >> text:Done"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
-    menu(app, "Channel order");
+    menu(app, "/^Channel order:/");
     step(app.wait_for("text:✓ Custom order"));
 }
 
@@ -133,7 +374,7 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
     step(app.press_key("tab"));
     step(app.press_key("down"));
     step(app.press_key("right"));
-    menu(app, "Reorder channels");
+    menu(app, "Reorder channel");
     step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
     step(app.wait_for("id:guide-row"));
     assert!(!app.screen().matches("id:organization-row-0").unwrap());
@@ -167,11 +408,11 @@ fn tv_reorders_channels_in_the_guide_and_grabs_only_after_ok() {
         .unwrap();
     assert_eq!(channels[0].name, "Local B");
     let scope = iptv_library::OrganizationScope::GroupChannels(group.id);
-    menu(app, "Channel order");
+    menu(app, "/^Channel order:/");
     step(app.wait_for("text:Playlist order"));
     step(app.press("text:Playlist order"));
     step(app.wait_for_gone("id:organization-sort", Duration::from_secs(5)));
-    menu(app, "Channel order");
+    menu(app, "/^Channel order:/");
     step(app.wait_for("text:Custom order"));
     step(app.press("text:Custom order"));
     step(app.wait_for("text:OK picks up or places · ↑/↓ move · ←/→ jump to either end"));
@@ -252,7 +493,7 @@ fn custom_channel_order_from_a_group_menu_opens_the_drag_editor() {
     step(app.press_key("tab"));
     step(app.wait_for("id:guide-groups >> text:News"));
     step(app.right_click("id:guide-groups >> text:News"));
-    step(app.press("id:menu-panel >> text:Channel order"));
+    step(app.press("id:menu-panel >> text:/^Channel order:/"));
     for option in [
         "Playlist order",
         "Name (A–Z)",
@@ -354,8 +595,8 @@ fn fullscreen_channel_order(home: crate::isolated::Home, overlay: bool) {
     step(app.wait_for("id:channel-list >> text:/^1  Local A/"));
     step(app.press_key("m"));
     step(app.press("id:menu-panel >> text:More options"));
-    step(app.wait_for("id:menu-panel >> text:Channel order"));
-    step(app.press("id:menu-panel >> text:Channel order"));
+    step(app.wait_for("id:menu-panel >> text:/^Channel order:/"));
+    step(app.press("id:menu-panel >> text:/^Channel order:/"));
     step(app.wait_for("text:Name (Z–A)"));
     step(app.press("text:Name (Z–A)"));
     step(app.wait_for("id:channel-list >> text:/^2  Local A/"));

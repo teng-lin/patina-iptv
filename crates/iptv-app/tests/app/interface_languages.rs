@@ -226,36 +226,33 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
     assert!(!app.shows("3 channels"));
     // Its actions (a long press on its row).
     step(app.long_press("role:checkbox[/^Synthetic personalization/]"));
-    let yes = de.t("Yes");
-    shown(
-        app,
-        &de.f(
-            "Playlist enabled: {answer}",
-            &[("answer", yes.as_str().into())],
-        ),
-    );
+    shown(app, &de.t("Hide"));
     shown(app, &de.t("Refresh now"));
-    shown(app, &de.t("Custom groups"));
-    // Organization (the seventh action, by remote as it is below the fold).
-    for _ in 0..6 {
-        step(app.press_key("down"));
-    }
-    step(app.press_key("enter"));
+    step(app.back());
+    step(app.press(&format!(
+        "id:settings-content >> text:{}",
+        de.t("Manage playlists")
+    )));
+    step(app.press("id:playlists-list >> text:Synthetic personalization"));
+    step(app.press(&format!(
+        "id:playlist-actions-list >> text:{}",
+        de.t("Organize groups")
+    )));
     step(app.wait_for("id:organization-screen"));
-    shown(app, &de.t("Organize channels"));
+    shown(app, &de.t("Organize groups"));
     shown(
         app,
         &de.t("Includes hidden items. OK opens actions; select items for bulk hide/show. Back returns."),
     );
     shown(app, &format!("{} >> nth=0", de.t("Visible")));
     step(app.press("id:organization-row-0"));
-    shown(app, &de.t("Hide channel"));
+    shown(app, &de.t("Hide group"));
     shown(app, &de.t("Move to first"));
     shown(app, &de.t("Use provider name"));
-    press(app, &de.t("Hide channel"));
+    press(app, &de.t("Hide group"));
     shown(app, &de.t("Hidden"));
     step(app.press("id:organization-row-0"));
-    press(app, &de.t("Show channel"));
+    press(app, &de.t("Show group"));
     step(app.back());
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(3)));
     // A refresh that fails says so, and why, in German.

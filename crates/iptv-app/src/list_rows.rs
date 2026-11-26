@@ -120,6 +120,11 @@ pub fn name(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
         .text_size(move || size.text_px(LIST_ITEM))
 }
 
+/// A triangle at the same size as the playing-channel marker.
+pub(crate) fn triangle(size: Scale, glyph: impl IntoReactive<SharedString>) -> Text {
+    text(glyph).text_size(move || size.text_px(crate::fonts::CHANNEL * 0.6))
+}
+
 /// A second line in `family` (Roboto Condensed for program titles).
 pub fn second(size: Scale, content: impl IntoReactive<SharedString>, family: &'static str) -> Text {
     text(content)

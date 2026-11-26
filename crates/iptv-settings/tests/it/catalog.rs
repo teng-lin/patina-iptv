@@ -447,6 +447,7 @@ const COMMANDS: &[(&str, &str, &[&str])] = &[
     ("general.about", "", &[]),
     ("about.privacy_policy", "", &[]),
     ("playlists.manage", "", &[]),
+    ("playlists.show_all", "", &[]),
     ("playlists.add", "", &[]),
     ("playlists.reorder", "", &[]),
     ("playlists.update_all", "", &[]),

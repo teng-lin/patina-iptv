@@ -129,6 +129,7 @@ pub static COMMANDS: &[Command] = &[
             "Open the playlists screen: add, choose, refresh, rename, change the guide address, delete.",
         ),
     ),
+    Command::new(S::Playlists, "", "playlists.show_all", key("Show all playlists")),
     Command::new(
         S::Playlists,
         "",

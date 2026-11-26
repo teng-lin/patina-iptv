@@ -50,19 +50,19 @@ pub fn policy(
     crate::library::policy(owner, id)
 }
 
-pub(super) async fn set_policy(
+pub(super) async fn update_policy(
     owner: &Rc<crate::Runtime>,
     id: SourceId,
-    policy: crate::model::SourcePolicy,
-) -> Result<(), StoreError> {
-    crate::library::save_policy(owner, id, policy).await?;
+    edit: impl FnOnce(&mut crate::model::SourcePolicy) + Send + 'static,
+) -> Result<(crate::model::SourcePolicy, bool), StoreError> {
+    let (policy, visibility_changed) = crate::library::update_policy(owner, id, edit).await?;
     refresh_after_commit(owner, |snapshot| {
         if let Some(playlist) = snapshot.playlists.iter_mut().find(|p| p.id == id) {
             playlist.policy = policy;
         }
     })
     .await;
-    Ok(())
+    Ok((policy, visibility_changed))
 }
 
 /// Persists the shown identity without delaying navigation.

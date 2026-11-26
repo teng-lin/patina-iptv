@@ -284,6 +284,8 @@ pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organiz
         groups,
         blocks: store.guide_blocks(source)?,
         group_preferences,
+        renamed_groups: store.renamed_groups(source)?,
+        group_sort: store.guide_sort(source, &Kind::Groups)?,
         channel_sort: store.guide_sort(source, &Kind::Channels)?,
     })
 }

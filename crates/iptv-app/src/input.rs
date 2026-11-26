@@ -161,6 +161,7 @@ fn capture(ui: Ui) -> Option<Capture> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InputOwner {
     Overlay(crate::overlays::Overlay),
+    SettingsPlaylist(i64),
     ChannelList(iptv_presentation::channel_list::ListPane),
     Multiview,
     PlayBar,
@@ -178,6 +179,10 @@ fn surface(ui: &Ui) -> Surface {
             ui.channels
                 .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
                 .unwrap_or(InputOwner::Overlay(overlay))
+        } else if overlay == crate::overlays::Overlay::Settings
+            && let Some(id) = crate::settings_view::focused_playlist(*ui)
+        {
+            InputOwner::SettingsPlaylist(id)
         } else {
             InputOwner::Overlay(overlay)
         }
@@ -602,6 +607,17 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
             nav.keymap = crate::remote_editor::keymap();
+            if key == RemoteKey::Ok
+                && matches!(here.1, InputOwner::SettingsPlaylist(_))
+                && !crate::remote_editor::overridden(ctx, key)
+            {
+                nav.keymap.set_override(iptv_nav::Binding {
+                    context: Some(ctx),
+                    key,
+                    press: Press::Long,
+                    action: Action::ShowMenu,
+                });
+            }
         }
         let now = ui.now_ms();
         // `remote.long_press`, taken up when a key goes down (a new press
@@ -942,7 +958,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         }
         return;
     }
-    if top == Some(Overlay::Menu) {
+    if matches!(top, Some(Overlay::Menu | Overlay::PlaylistMenu)) {
         match action {
             Action::MoveUp => ui
                 .menu
