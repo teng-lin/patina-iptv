@@ -814,6 +814,19 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
     if repeat && one_shot_action(action, ui.mode.get_untracked(), context(&ui)) {
         return;
     }
+    // Transport keys control the owned receiver even while its destination
+    // picker or another overlay has focus.
+    if ui.player_surface == 0 && ui.cast_remote.get_untracked() && action == Action::PlayPause {
+        crate::player_keys::play_pause(ui, key);
+        return;
+    }
+    if action == Action::Stop
+        && ui.player_surface == 0
+        && (ui.cast_remote.get_untracked() || ui.cast_busy.get_untracked())
+    {
+        crate::player_keys::stop_playback(ui);
+        return;
+    }
     if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {
         crate::player_keys::stop_playback(ui);
         return;

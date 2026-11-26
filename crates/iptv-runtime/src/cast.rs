@@ -2,7 +2,7 @@
 use crate::{ExternalPlaybackAuthorization, Runtime};
 use futures_channel::oneshot;
 use iptv_core::{
-    cast::{Command, Error, Receiver, RemoteState},
+    cast::{Command, Error, Receiver, RemoteState, Target},
     playback::PlaySource,
 };
 use iptv_import::CancelToken;
@@ -18,7 +18,16 @@ pub trait Port: Send + Sync {
     /// Connects and creates a gated LAN relay without opening the upstream.
     fn prepare(&self, receiver: Receiver, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
 }
+/// A system route picker is mounted by the host; its player remains owned by
+/// this runtime's transport. The opaque view identity carries no media metadata.
+pub trait NativePort: Send + Sync {
+    fn view_id(&self) -> Option<u64>;
+    fn prepare(&self, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
+    fn cancel_pending(&self);
+}
 pub trait Prepared: Send {
+    /// Recheck policy and intent while a system picker waits for owner approval.
+    fn guard(&mut self, _current: Box<dyn Fn() -> bool + Send + Sync>) {}
     /// Sends LOAD and waits for the selected TV's first authorized HTTP request.
     fn load(&mut self) -> Task<'_, ()>;
     /// Open and settle under the grant, joining relay retirement on denial.
@@ -65,12 +74,12 @@ pub trait Remote: Send + Sync {
     }
 }
 pub struct Destination {
-    pub receiver: Receiver,
+    pub receiver: Target,
     pub key: String,
     pub authority: iptv_guide::playback::ResolutionAuthority,
 }
 pub(crate) struct Active {
-    pub receiver: Receiver,
+    pub receiver: Target,
     pub key: String,
     pub authority: iptv_guide::playback::ResolutionAuthority,
     remote: Arc<dyn Remote>,
@@ -123,10 +132,31 @@ impl Runtime {
     pub fn cast_intent_current(&self, ticket: u64) -> bool {
         self.cast_intent() == ticket
     }
-    pub fn cast_available(&self) -> bool {
+    pub fn chromecast_available(&self) -> bool {
         self.services().ports().cast.is_some()
     }
+    pub fn cast_available(&self) -> bool {
+        self.services().ports().cast.is_some() || self.native_cast_available()
+    }
+    pub fn native_cast_available(&self) -> bool {
+        self.services().ports().native_cast.is_some()
+    }
+    pub fn native_cast_view(&self) -> Option<u64> {
+        self.services()
+            .ports()
+            .native_cast
+            .as_ref()
+            .and_then(|port| port.view_id())
+    }
+    pub fn cancel_pending_native_cast(&self) {
+        if let Some(port) = &self.services().ports().native_cast {
+            port.cancel_pending();
+        }
+    }
     pub async fn cast_receivers(&self) -> Result<Vec<Receiver>, Error> {
+        if self.services().ports().cast.is_none() && self.native_cast_available() {
+            return Ok(Vec::new());
+        }
         let port = self
             .services()
             .ports()
@@ -137,7 +167,7 @@ impl Runtime {
             .await
             .map_err(|_| Error::Unavailable)?
     }
-    pub fn cast_target(&self) -> Option<(Receiver, String)> {
+    pub fn cast_target(&self) -> Option<(Target, String)> {
         self.cast
             .borrow()
             .as_ref()
@@ -145,9 +175,24 @@ impl Runtime {
     }
     pub async fn prepare_cast(
         &self,
-        receiver: Receiver,
+        receiver: Target,
         source: PlaySource,
     ) -> Result<Box<dyn Prepared>, Error> {
+        if receiver == Target::AirPlay {
+            let port = self
+                .services()
+                .ports()
+                .native_cast
+                .clone()
+                .ok_or(Error::Unavailable)?;
+            return self
+                .spawn_network(async move { port.prepare(source).await })
+                .await
+                .map_err(|_| Error::Unavailable)?;
+        }
+        let Target::Chromecast(receiver) = receiver else {
+            unreachable!()
+        };
         let port = self
             .services()
             .ports()
@@ -180,7 +225,7 @@ impl Runtime {
     pub async fn admit_cast(
         &self,
         ticket: u64,
-        prepared: Box<dyn Prepared>,
+        mut prepared: Box<dyn Prepared>,
         destination: Destination,
         claim: Box<dyn Send>,
         grant: ExternalPlaybackAuthorization,
@@ -189,6 +234,12 @@ impl Runtime {
             return Err(Error::Denied);
         }
         let generation = self.cast_generation.clone();
+        let guarded_generation = generation.clone();
+        let guarded_grant = grant.clone();
+        prepared.guard(Box::new(move || {
+            guarded_generation.load(std::sync::atomic::Ordering::Acquire) == ticket
+                && guarded_grant.is_current()
+        }));
         let cancel = CancelOnDrop(CancelToken::new());
         let signal = cancel.0.clone();
         let (offer, offered) = oneshot::channel();
@@ -336,6 +387,23 @@ impl Runtime {
         if command == Command::Stop {
             self.clear_cast(&remote);
         }
+        Ok(())
+    }
+    /// Retire the old media before a channel replacement while keeping the
+    /// native player's selected route. Explicit Stop always disconnects it.
+    pub async fn replace_native_cast(&self) -> Result<(), Error> {
+        let remote = self
+            .cast
+            .borrow()
+            .as_ref()
+            .filter(|active| active.receiver == Target::AirPlay)
+            .map(|active| active.remote.clone())
+            .ok_or(Error::Unavailable)?;
+        let worker = remote.clone();
+        self.spawn_network(async move { worker.retire().await })
+            .await
+            .map_err(|_| Error::Unknown)?;
+        self.clear_cast(&remote);
         Ok(())
     }
     fn clear_cast(&self, remote: &Arc<dyn Remote>) {

@@ -97,7 +97,14 @@ pub struct PlaybackRelay {
     write_timeouts: Arc<std::sync::atomic::AtomicUsize>,
 }
 
+#[derive(Clone, Copy)]
+struct ExternalNetwork {
+    listen: SocketAddr,
+    peer: Option<IpAddr>,
+}
+
 struct Session {
+    lan: bool,
     cast_peer: Option<IpAddr>,
     requests: Arc<std::sync::atomic::AtomicU64>,
     prefix: String,
@@ -611,7 +618,37 @@ impl PlaybackRelay {
         {
             return Err(invalid("Invalid Cast interface"));
         }
-        Self::start_gated(url, headers, policy, Some((listen, receiver)))
+        Self::start_gated(
+            url,
+            headers,
+            policy,
+            Some(ExternalNetwork {
+                listen,
+                peer: Some(receiver),
+            }),
+        )
+    }
+
+    /// Apple's public route picker does not expose the selected receiver's IP.
+    /// This LAN listener admits only private IPv4 peers bearing its random
+    /// capability. Provider URLs and headers remain behind opaque HLS routes.
+    /// The runtime must retire local playback and grant the admission gate
+    /// before any provider request can start, including AVPlayer's priming fetch.
+    pub fn start_airplay(
+        url: &str,
+        headers: &[(String, String)],
+        policy: PlaybackPolicy,
+        listen: SocketAddr,
+    ) -> Result<(Self, ExternalAdmission), FetchError> {
+        if !matches!(listen.ip(), IpAddr::V4(ip) if ip.is_private() || ip.is_link_local()) {
+            return Err(invalid("AirPlay requires a private LAN interface"));
+        }
+        Self::start_gated(
+            url,
+            headers,
+            policy,
+            Some(ExternalNetwork { listen, peer: None }),
+        )
     }
 
     /// Capability-bearing GET and HEAD requests from the selected receiver.
@@ -623,7 +660,7 @@ impl PlaybackRelay {
         url: &str,
         headers: &[(String, String)],
         policy: PlaybackPolicy,
-        cast: Option<(SocketAddr, IpAddr)>,
+        cast: Option<ExternalNetwork>,
     ) -> Result<(Self, ExternalAdmission), FetchError> {
         let (state, _) = watch::channel(ExternalState::Waiting);
         let requested = Arc::new(AtomicBool::new(false));
@@ -637,7 +674,7 @@ impl PlaybackRelay {
         headers: &[(String, String)],
         policy: PlaybackPolicy,
         external_gate: Option<ExternalGate>,
-        cast: Option<(SocketAddr, IpAddr)>,
+        cast: Option<ExternalNetwork>,
     ) -> Result<Self, FetchError> {
         let mut root = Url::parse(url).map_err(|_| invalid("Invalid playback URL"))?;
         if !matches!(root.scheme(), "http" | "https") {
@@ -649,7 +686,7 @@ impl PlaybackRelay {
         let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
         let listener = TcpListener::bind(cast.map_or_else(
             || SocketAddr::from(([127, 0, 0, 1], 0)),
-            |(listen, _)| listen,
+            |network| network.listen,
         ))
         .map_err(io_error)?;
         listener.set_nonblocking(true).map_err(io_error)?;
@@ -704,7 +741,8 @@ impl PlaybackRelay {
         let requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let session = Arc::new(Session {
             requests: requests.clone(),
-            cast_peer: cast.map(|(_, peer)| peer),
+            lan: cast.is_some(),
+            cast_peer: cast.and_then(|network| network.peer),
             prefix,
             proxy: proxy.clone(),
             path,
@@ -766,6 +804,8 @@ impl PlaybackRelay {
                                 continue;
                             };
                                 if session.cast_peer.is_some_and(|peer| peer != remote.ip()) { continue; }
+                                if session.lan && session.cast_peer.is_none()
+                                    && !matches!(remote.ip(), IpAddr::V4(ip) if ip.is_private() || ip.is_link_local() || ip.is_loopback()) { continue; }
                                 let session = session.clone();
                                 tasks.spawn(async move { let _ = serve(socket, &session).await; });
                             }
@@ -969,7 +1009,7 @@ fn apply_hls_directives(url: &mut Url, query: &str) -> Result<(), FetchError> {
 
 impl Session {
     fn cors(&self) -> &'static str {
-        if self.cast_peer.is_some() {
+        if self.lan {
             concat!(
                 "Access-Control-Allow-Origin: *\r\n",
                 "Access-Control-Allow-Private-Network: true\r\n",
@@ -998,7 +1038,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     let mut opaque_route = None;
     let (raw_key, target) = if let Some(routes) = &session.opaque {
         let (id, query) = target.split_once('?').unwrap_or((target, ""));
-        let suffix = if session.cast_peer.is_some() {
+        let suffix = if session.lan {
             ".m3u8"
         } else {
             media_suffix(&session.root)
@@ -1054,7 +1094,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             .entry(session.root.origin())
             .or_default() += 1;
     }
-    if session.cast_peer.is_some() {
+    if session.lan {
         if method == "OPTIONS" {
             let response = format!(
                 "HTTP/1.1 204 No Content\r\nConnection: close\r\n{}\r\n",
@@ -1110,7 +1150,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             headers.insert(name, value);
         }
     }
-    let cast_root = session.cast_peer.is_some() && opaque_route.is_some_and(|(_, root)| root);
+    let cast_root = session.lan && opaque_route.is_some_and(|(_, root)| root);
     if cast_root {
         headers.remove("range");
         headers.remove("if-range");
@@ -1608,12 +1648,7 @@ async fn read_request(socket: &mut TcpStream, session: &Session) -> io::Result<S
     let mut buf = [0; 1024];
     loop {
         if !admitted {
-            match admit(
-                &bytes,
-                &session.proxy,
-                &session.path,
-                session.cast_peer.is_some(),
-            ) {
+            match admit(&bytes, &session.proxy, &session.path, session.lan) {
                 Admission::Admitted => admitted = true,
                 Admission::Undecided => {}
                 Admission::Refused => return Err(refused()),
@@ -1746,6 +1781,7 @@ pub mod fuzzing {
 
 #[cfg(test)]
 mod tests {
+    mod airplay;
     use super::*;
     #[test]
     fn xml_and_legacy_text_cannot_fall_through_as_binary() {

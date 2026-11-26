@@ -7,6 +7,14 @@ pub struct Receiver {
     pub name: String,
 }
 
+/// Apple owns AirPlay discovery and route selection through its native picker.
+/// Unlike a Chromecast, that destination has no app-visible network address.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Chromecast(Receiver),
+    AirPlay,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Volume(u8),
@@ -19,6 +27,7 @@ pub enum Command {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
+    Cancelled,
     Unavailable,
     Refused,
     Unknown,

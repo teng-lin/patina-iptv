@@ -10,18 +10,21 @@ fn main() {
     let probe = std::env::var("PATINA_AIRPLAY_PROBE").as_deref() == Ok("1");
     if probe {
         println!("cargo:rustc-cfg=patina_airplay_probe");
-        if matches!(
-            std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
-            Ok("macos" | "ios")
-        ) {
-            let source = "src/host/native/apple_airplay.m";
-            println!("cargo:rerun-if-changed={source}");
-            cc::Build::new()
-                .file(source)
-                .flag("-fobjc-arc")
-                .compile("patina_airplay_probe");
-            println!("cargo:rustc-link-lib=framework=AVKit");
-            println!("cargo:rustc-link-lib=framework=AVFoundation");
+    }
+    if matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("macos" | "ios")
+    ) {
+        let source = "src/host/native/apple_airplay.m";
+        println!("cargo:rerun-if-changed={source}");
+        cc::Build::new()
+            .file(source)
+            .flag("-fobjc-arc")
+            .compile("patina_airplay_probe");
+        println!("cargo:rustc-link-lib=framework=AVKit");
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
+        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+            println!("cargo:rustc-link-lib=framework=SystemConfiguration");
         }
     }
     println!("cargo:rerun-if-env-changed=PATINA_UPDATE_ROOT");

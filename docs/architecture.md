@@ -277,7 +277,7 @@ The workspace has nineteen crates under `crates/` and the vendored
 | `iptv-player-mpv` | Adapters | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | Application | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite`; `iptv-net` with its `native` feature |
 | `iptv-web` | Adapters, and with its `bridge` feature View | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers`, `iptv-search`; `iptv-nav` and `iptv-presentation` with `bridge` |
-| `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, on Linux `iptv-cast`, in the browser `iptv-web` and `iptv-store-sqlite` |
+| `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, on desktops `iptv-cast`, on Apple hosts AVKit and AVFoundation, in the browser `iptv-web` and `iptv-store-sqlite` |
 | `nsh-tv` (vendored) | View | NSH |
 | `iptv-tui` | Hosts | `iptv-app`, `iptv-library`, `iptv-net`, `iptv-player-mpv`, `iptv-providers`, `iptv-settings`, `iptv-store-sqlite`, NSH |
 
@@ -725,3 +725,22 @@ Which layer a model or a state machine belongs to is decided by
 [the placement questions](#where-a-piece-of-code-belongs), never by the fact
 that it is pure. Native application orchestration belongs in the runtime;
 adapters own platform I/O.
+
+The Apple AirPlay adapter lives in `iptv-app/src/host/native/apple_airplay`.
+`iptv-runtime::cast` owns its authorization, stream claim and relay lifetime
+through a host `NativePort`; the portable core identifies the opaque AirPlay
+target without depending on Apple APIs. A runtime-scoped mailbox moves native
+commands onto the main thread. Its persistent route picker belongs to the
+chooser layer, so hiding the play bar cannot destroy the remote player. Native
+callbacks carry the owning generation; stale callbacks and queued commands are
+ignored after cancellation or replacement. Apple's receiver approval stays in
+the system UI, rather than being inferred from successful pairing or selection.
+
+Playback transport uses the same shared play bar for local Media3/mpv and
+remote playback. Explicit media Play/Pause keys and Android picture-in-picture
+actions enter the same idempotent app-level pause setter; only the toggle key
+reverses state. The destination picker carries destination identity separately
+from display names, puts this device first, and has no parallel playback remote.
+Returning locally joins remote relay retirement before the local viewing claim
+is reopened. A newer Stop intent suppresses that reopen. Native picker buttons
+may come and go with the play bar while their runtime-owned player stays mounted.

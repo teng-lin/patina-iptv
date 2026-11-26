@@ -445,9 +445,22 @@ pub fn start(ui: &Ui, channel: usize) {
     open(ui, 0, session);
 }
 
+/// An explicit Play or Pause is idempotent on every host. The play bar uses
+/// toggle_pause; dedicated media keys use this same local/remote dispatch.
+pub(crate) fn set_paused(ui: Ui, paused: bool) {
+    crate::interruption::viewer_acted(ui);
+    if ui.cast_remote.get_untracked() {
+        crate::casting::set_paused(ui, paused);
+    } else if ui.paused.get_untracked() != paused
+        || (!paused && crate::on_demand::active(ui) && ui.player.main().finished.get_untracked())
+    {
+        toggle_pause(ui);
+    }
+}
+
 pub fn toggle_pause(ui: Ui) {
     if ui.cast_remote.get_untracked() {
-        crate::casting::remote(ui, usize::from(ui.paused.get_untracked()));
+        crate::casting::set_paused(ui, !ui.paused.get_untracked());
         return;
     }
     crate::interruption::viewer_acted(ui);

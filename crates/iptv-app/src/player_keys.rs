@@ -112,7 +112,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
         Action::ShowControls => ui.update_panels(|p, now| p.show_controls(now)),
         Action::ShowInfo if fullscreen => ui.update_panels(|p, now| p.show_info(now)),
         Action::ShowHistory => crate::chooser::open(ui, crate::chooser::Kind::History),
-        Action::PlayPause => crate::player::toggle_pause(ui),
+        Action::PlayPause => play_pause(ui, key),
         // Catch-up seeking (`seek.rs`); nothing to seek in a live stream.
         Action::SeekBack => seek(-crate::seek::steps().rewind),
         Action::SeekForward => seek(crate::seek::steps().forward),
@@ -130,12 +130,28 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
     true
 }
 
+/// Android media keys and every other host share explicit play/pause semantics.
+/// Only the toggle key (and the play-bar button) reverses the current state.
+pub(crate) fn play_pause(ui: Ui, key: RemoteKey) {
+    // Keep an owner's explicit Play-or-pause remapping a toggle.
+    if crate::remote_editor::media_toggle_override(crate::input::context(&ui), key) {
+        crate::player::toggle_pause(ui);
+        return;
+    }
+    match key {
+        RemoteKey::Play => crate::player::set_paused(ui, false),
+        RemoteKey::Pause => crate::player::set_paused(ui, true),
+        _ => crate::player::toggle_pause(ui),
+    }
+}
+
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
     crate::runtime_owner::runtime().next_cast_intent();
+    crate::runtime_owner::runtime().cancel_pending_native_cast();
     if ui.cast_remote.get_untracked() {
-        crate::casting::remote(ui, 3);
+        crate::casting::stop(ui);
         return;
     }
     crate::external_player::stop(ui);

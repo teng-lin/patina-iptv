@@ -1,12 +1,17 @@
-// Native view for the opt-in AirPlay probe. NSH creates, updates and destroys it on main.
+// Native AirPlay player. NSH creates, updates and destroys the view on main.
 #import <AVFoundation/AVFoundation.h>
 #import <AVKit/AVKit.h>
 #import <TargetConditionals.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <string.h>
 
 #if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
+#import <SystemConfiguration/SystemConfiguration.h>
 #define PlatformView NSView
 #else
 #import <UIKit/UIKit.h>
@@ -21,15 +26,28 @@ typedef void (*StateCallback)(const void *, bool, uint8_t);
 
 static void *PlayerObservation = &PlayerObservation;
 
-@interface PatinaAirPlayProbe : PlatformView
-- (instancetype)initWithContext:(const void *)context emit:(StateCallback)emit;
+@class PatinaAirPlayPlayer;
+static NSMapTable<NSNumber *, PatinaAirPlayPlayer *> *PatinaPlayers;
+static NSHashTable *PatinaRouteButtons;
+static void PatinaBindRoutePickers(uint64_t owner);
+
+@interface PatinaAirPlayPlayer : PlatformView <AVRoutePickerViewDelegate>
+- (instancetype)initWithContext:(const void *)context emit:(StateCallback)emit poll:(void (*)(const void *))poll;
+- (void)remote:(uint8_t)command value:(int16_t)value;
+- (void)disconnect;
 - (void)setSource:(NSURL *)source;
 - (void)command:(ProbeCommand)command;
 - (void)scheduleRefresh;
 - (void)invalidate;
+- (void)setOwnerID:(uint64_t)owner;
+- (AVPlayer *)routingPlayer;
+- (void)routesWillPresent;
+- (void)routesDidEnd;
 @end
 
-@implementation PatinaAirPlayProbe {
+@implementation PatinaAirPlayPlayer {
+    NSTimer *_timer;
+    void (*_poll)(const void *);
     AVPlayer *_player;
     AVRoutePickerView *_picker;
     NSURL *_source;
@@ -44,19 +62,35 @@ static void *PlayerObservation = &PlayerObservation;
     BOOL _lastExternal;
     BOOL _wasRouted;
     BOOL _playIssued;
+    uint64_t _ownerID;
+    BOOL _routeChoiceArmed;
+    BOOL _handoffRequested;
+    BOOL _routeUIOpen;
+    BOOL _routeWasActive;
+    NSTimeInterval _routeSwitchDeadline;
+    NSUInteger _routeChoiceSerial;
+    NSTimeInterval _routeRecentlyClosed;
 #if !TARGET_OS_OSX
     BOOL _audioSessionActive;
 #endif
 }
 
-- (instancetype)initWithContext:(const void *)context emit:(StateCallback)emit {
+- (instancetype)initWithContext:(const void *)context emit:(StateCallback)emit poll:(void (*)(const void *))poll {
     self = [super initWithFrame:CGRectZero];
     if (!self) return nil;
     _context = context;
     _emit = emit;
+    _poll = poll;
+    __weak PatinaAirPlayPlayer *weakSelf = self;
+    _timer = [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer __unused) {
+        PatinaAirPlayPlayer *owner = weakSelf;
+        if (owner && owner->_emit && owner->_poll) owner->_poll(owner->_context);
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:_timer forMode:NSRunLoopCommonModes];
     _intent = ProbeStop;
     _failedSources = [NSMutableSet set];
     _picker = [[AVRoutePickerView alloc] initWithFrame:self.bounds];
+    _picker.delegate = self;
 #if TARGET_OS_OSX
     _picker.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 #else
@@ -84,9 +118,57 @@ static void *PlayerObservation = &PlayerObservation;
     _picker.player = player;
 #endif
     for (NSString *key in keys) [_player addObserver:self forKeyPath:key options:0 context:PlayerObservation];
+    PatinaBindRoutePickers(_ownerID);
 }
 
+- (AVPlayer *)routingPlayer { return _player; }
+
+- (void)setOwnerID:(uint64_t)owner {
+    if (!PatinaPlayers) PatinaPlayers = [NSMapTable strongToWeakObjectsMapTable];
+    if (_ownerID && [PatinaPlayers objectForKey:@(_ownerID)] == self)
+        [PatinaPlayers removeObjectForKey:@(_ownerID)];
+    uint64_t previous = _ownerID;
+    _ownerID = owner;
+    if (owner) [PatinaPlayers setObject:self forKey:@(owner)];
+    PatinaBindRoutePickers(previous);
+    PatinaBindRoutePickers(owner);
+}
+
+- (void)routesWillPresent {
+    if (!_ownerID || !_emit) return;
+    _routeUIOpen = YES;
+    _routeWasActive = _routeWasActive || (_player.currentItem && (_wasRouted || _player.externalPlaybackActive));
+    _routeSwitchDeadline = [NSDate timeIntervalSinceReferenceDate] + 90.0;
+    _routeChoiceArmed = YES;
+    NSUInteger serial = ++_routeChoiceSerial;
+    __weak PatinaAirPlayPlayer *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        PatinaAirPlayPlayer *owner = weakSelf;
+        if (owner && owner->_routeChoiceSerial == serial) owner->_routeChoiceArmed = NO;
+    });
+    _emit(_context, false, 6);
+}
+
+- (void)routesDidEnd {
+    _routeUIOpen = NO;
+    _routeRecentlyClosed = [NSDate timeIntervalSinceReferenceDate];
+    if (_ownerID && _emit) _emit(_context, false, 7);
+    NSUInteger serial = _routeChoiceSerial;
+    __weak PatinaAirPlayPlayer *weakSelf = self;
+    for (NSNumber *delay in @[@0.5, @2.1, @90.0]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            PatinaAirPlayPlayer *owner = weakSelf;
+            if (owner && owner->_routeChoiceSerial == serial) [owner refresh];
+        });
+    }
+    [self scheduleRefresh];
+}
+
+- (void)routePickerViewWillBeginPresentingRoutes:(AVRoutePickerView *)picker { [self routesWillPresent]; }
+- (void)routePickerViewDidEndPresentingRoutes:(AVRoutePickerView *)picker { [self routesDidEnd]; }
+
 - (void)publish:(ProbeState)state external:(BOOL)external {
+    if (external && (state == ProbePlaying || state == ProbePaused)) _handoffRequested = NO;
     if (!_emit || (_published && _lastState == state && _lastExternal == external)) return;
     _published = YES;
     _lastState = state;
@@ -137,6 +219,60 @@ static void *PlayerObservation = &PlayerObservation;
     }
     external = external && routed;
 #endif
+#if !TARGET_OS_OSX
+    // The system owns the device list. Start handoff only after an actual
+    // route choice, leaving local playback alone if the picker is dismissed.
+    if (_ownerID && _routeChoiceArmed && routed && _intent == ProbeStop && !_source) {
+        _routeChoiceArmed = NO;
+        _handoffRequested = YES;
+        _emit(_context, true, 8);
+    }
+#endif
+    if (_ownerID && _handoffRequested && !_routeUIOpen && !routed &&
+        [NSDate timeIntervalSinceReferenceDate] - _routeRecentlyClosed < 2.0) {
+        _handoffRequested = NO;
+        _routeChoiceArmed = NO;
+        _emit(_context, false, 9);
+        [self stopWithState:ProbeIdle];
+        _wasRouted = NO;
+        [self publish:ProbeIdle external:NO];
+        return;
+    }
+    if (_ownerID && _routeWasActive) {
+        NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+        if (_routeUIOpen && (!routed || !external)) {
+            // Route changes are multi-step. Do not retire the item on an
+            // intermediate KVO event while the user is choosing an output.
+            [self publish:ProbeWaiting external:external];
+            return;
+        }
+        if (!_routeUIOpen) {
+#if TARGET_OS_OSX
+            // A Mac exposes only AVPlayer's video route. Give its final KVO
+            // update a main-loop turn before treating a local choice as final.
+            BOOL localSettled = !routed && now - _routeRecentlyClosed >= 0.5;
+#else
+            // On iPad the audio-session route disambiguates local selection
+            // from externalPlaybackActive temporarily becoming false.
+            BOOL localSettled = !routed;
+#endif
+            if (localSettled) {
+                _routeWasActive = NO;
+                _routeChoiceArmed = NO;
+                _handoffRequested = NO;
+                _emit(_context, false, 9);
+                [self stopWithState:ProbeIdle];
+                _wasRouted = NO;
+                [self publish:ProbeIdle external:NO];
+                return;
+            }
+            if ((!routed || !external) && now < _routeSwitchDeadline) {
+                [self publish:ProbeWaiting external:external];
+                return;
+            }
+            if (now - _routeRecentlyClosed >= 2.0) _routeWasActive = NO;
+        }
+    }
     if ((_wasRouted && !routed) || (_playIssued && !external)) {
         [_failedSources removeAllObjects];
         if (_intent != ProbeStop) [self stopWithState:ProbeRouteLost];
@@ -198,7 +334,7 @@ static void *PlayerObservation = &PlayerObservation;
 - (void)scheduleRefresh {
     // AVFoundation may deliver KVO and route notifications off main. Read the
     // current item/route on main instead of applying stale notification values.
-    __weak PatinaAirPlayProbe *weakSelf = self;
+    __weak PatinaAirPlayPlayer *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf refresh]; });
 }
 
@@ -266,13 +402,54 @@ static void *PlayerObservation = &PlayerObservation;
             _playIssued = NO;
             [_player pause];
             break;
-        case ProbeStop: [self stopWithState:ProbeIdle]; break;
+        case ProbeStop:
+            _routeWasActive = NO;
+            [self stopWithState:ProbeIdle];
+            break;
     }
+    [self refresh];
+}
+
+- (void)remote:(uint8_t)command value:(int16_t)value {
+    if (command < 3) { [self command:(ProbeCommand)command]; return; }
+    switch (command) {
+        case 3: _player.volume = MAX(0.0, MIN(1.0, value / 100.0)); break;
+        case 4: _player.volume = MAX(0.0, MIN(1.0, _player.volume + value / 100.0)); break;
+        case 5: _player.muted = !_player.muted; break;
+    }
+}
+
+- (void)disconnect {
+    _routeWasActive = NO;
+    _handoffRequested = NO;
+    [self stopWithState:ProbeIdle];
+    _player.allowsExternalPlayback = NO;
+#if TARGET_OS_OSX
+    _picker.player = nil;
+#endif
+    for (NSString *key in @[@"externalPlaybackActive", @"timeControlStatus", @"currentItem.status", @"status"]) {
+        [_player removeObserver:self forKeyPath:key context:PlayerObservation];
+    }
+    // A new, empty AVPlayer releases this app's route without changing the
+    // system output device or another application's playback session.
+    _player = [AVPlayer new];
+    _player.allowsExternalPlayback = YES;
+    for (NSString *key in @[@"externalPlaybackActive", @"timeControlStatus", @"currentItem.status", @"status"]) {
+        [_player addObserver:self forKeyPath:key options:0 context:PlayerObservation];
+    }
+#if TARGET_OS_OSX
+    _picker.player = _player;
+#endif
+    _source = nil; [_failedSources removeAllObjects]; _wasRouted = NO; _published = NO;
+    PatinaBindRoutePickers(_ownerID);
     [self refresh];
 }
 
 - (void)invalidate {
     if (!_emit) return;
+    [self setOwnerID:0];
+    _picker.delegate = nil;
+    [_timer invalidate]; _timer = nil; _poll = NULL;
     _emit = NULL;
     [self setObservedPlayer:nil];
 #if !TARGET_OS_OSX
@@ -282,20 +459,109 @@ static void *PlayerObservation = &PlayerObservation;
 }
 @end
 
-void *patina_airplay_create(const void *context, StateCallback emit) {
-    return (__bridge_retained void *)[[PatinaAirPlayProbe alloc] initWithContext:context emit:emit];
+// Picker controls may be mounted/unmounted with the play bar. They share the
+// persistent runtime player and never own a stream or stop it when removed.
+@interface PatinaCastButton : AVRoutePickerView <AVRoutePickerViewDelegate>
+@property (nonatomic) uint64_t ownerID;
+- (void)bindPlayer;
+@end
+@implementation PatinaCastButton
+- (instancetype)initWithFrame:(CGRect)frame {
+    self = [super initWithFrame:frame];
+    if (!self) return nil;
+    self.delegate = self;
+#if !TARGET_OS_OSX
+    self.prioritizesVideoDevices = YES;
+    self.tintColor = UIColor.whiteColor;
+#endif
+    if (!PatinaRouteButtons) PatinaRouteButtons = [NSHashTable weakObjectsHashTable];
+    [PatinaRouteButtons addObject:self];
+    return self;
+}
+- (void)setOwnerID:(uint64_t)owner { _ownerID = owner; [self bindPlayer]; }
+- (void)bindPlayer {
+#if TARGET_OS_OSX
+    self.player = [[PatinaPlayers objectForKey:@(_ownerID)] routingPlayer];
+#endif
+}
+- (void)routePickerViewWillBeginPresentingRoutes:(AVRoutePickerView *)picker {
+    [[PatinaPlayers objectForKey:@(_ownerID)] routesWillPresent];
+}
+- (void)routePickerViewDidEndPresentingRoutes:(AVRoutePickerView *)picker {
+    [[PatinaPlayers objectForKey:@(_ownerID)] routesDidEnd];
+}
+@end
+static void PatinaBindRoutePickers(uint64_t owner) {
+    if (!owner) return;
+    for (PatinaCastButton *button in PatinaRouteButtons) {
+        if (button.ownerID == owner) [button bindPlayer];
+    }
+}
+void patina_airplay_owner(const void *view, uint64_t owner) {
+    [(__bridge PatinaAirPlayPlayer *)view setOwnerID:owner];
+}
+void *patina_cast_button_create(void) {
+    return (__bridge_retained void *)[[PatinaCastButton alloc] initWithFrame:CGRectZero];
+}
+void patina_cast_button_owner(const void *view, uint64_t owner) {
+    [(__bridge PatinaCastButton *)view setOwnerID:owner];
+}
+void patina_cast_button_accent(const void *view, uint32_t rgb) {
+#if TARGET_OS_OSX
+    PatinaCastButton *button = (__bridge PatinaCastButton *)view;
+    NSColor *accent = [NSColor colorWithSRGBRed:((rgb >> 16) & 255) / 255.0
+        green:((rgb >> 8) & 255) / 255.0 blue:(rgb & 255) / 255.0 alpha:1.0];
+    [button setRoutePickerButtonColor:NSColor.whiteColor forState:AVRoutePickerViewButtonStateNormal];
+    [button setRoutePickerButtonColor:accent forState:AVRoutePickerViewButtonStateActive];
+#else
+    ((__bridge PatinaCastButton *)view).activeTintColor = [UIColor colorWithRed:((rgb >> 16) & 255) / 255.0
+        green:((rgb >> 8) & 255) / 255.0 blue:(rgb & 255) / 255.0 alpha:1.0];
+#endif
+}
+
+void *patina_airplay_create(const void *context, StateCallback emit, void (*poll)(const void *)) {
+    return (__bridge_retained void *)[[PatinaAirPlayPlayer alloc] initWithContext:context emit:emit poll:poll];
 }
 
 void patina_airplay_source(const void *view, const char *source) {
     NSURL *url = source ? [NSURL URLWithString:[NSString stringWithUTF8String:source]] : nil;
     if (![url.scheme isEqualToString:@"http"] || !url.host.length || url.user || url.password) url = nil;
-    [(__bridge PatinaAirPlayProbe *)view setSource:url];
+    [(__bridge PatinaAirPlayPlayer *)view setSource:url];
 }
 
 void patina_airplay_command(const void *view, uint8_t command) {
-    [(__bridge PatinaAirPlayProbe *)view command:(ProbeCommand)command];
+    [(__bridge PatinaAirPlayPlayer *)view command:(ProbeCommand)command];
 }
 
 void patina_airplay_invalidate(const void *view) {
-    [(__bridge PatinaAirPlayProbe *)view invalidate];
+    [(__bridge PatinaAirPlayPlayer *)view invalidate];
+}
+
+void patina_airplay_remote(const void *view, uint8_t command, int16_t value) {
+    [(__bridge PatinaAirPlayPlayer *)view remote:command value:value];
+}
+void patina_airplay_disconnect(const void *view) {
+    [(__bridge PatinaAirPlayPlayer *)view disconnect];
+}
+
+// No discovery or connection: read only the local interface selected by the OS.
+bool patina_airplay_interface(char *buffer, size_t length) {
+    NSString *interface = @"en0";
+#if TARGET_OS_OSX
+    NSDictionary *state = CFBridgingRelease(SCDynamicStoreCopyValue(NULL, CFSTR("State:/Network/Global/IPv4")));
+    interface = state[@"PrimaryInterface"];
+    if (![interface hasPrefix:@"en"]) return false;
+#endif
+    struct ifaddrs *addresses = NULL;
+    if (getifaddrs(&addresses) != 0) return false;
+    bool found = false;
+    for (struct ifaddrs *entry = addresses; entry; entry = entry->ifa_next) {
+        if (!entry->ifa_addr || entry->ifa_addr->sa_family != AF_INET ||
+            !(entry->ifa_flags & IFF_UP) || (entry->ifa_flags & IFF_LOOPBACK) ||
+            strcmp(entry->ifa_name, interface.UTF8String) != 0) continue;
+        struct sockaddr_in *address = (struct sockaddr_in *)entry->ifa_addr;
+        if (inet_ntop(AF_INET, &address->sin_addr, buffer, (socklen_t)length)) { found = true; break; }
+    }
+    freeifaddrs(addresses);
+    return found;
 }

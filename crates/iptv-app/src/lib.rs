@@ -42,6 +42,7 @@ pub mod guide {
 mod guide_window_walkthrough;
 pub mod theme;
 
+mod airplay;
 mod archive_playback;
 mod backup;
 /// The document pickers a device has, and the ones headless apps get.
@@ -269,6 +270,9 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub(crate) cast_busy: Signal<bool>,
+    pub(crate) cast_picker_open: Signal<bool>,
+    pub(crate) cast_discovering: Signal<bool>,
+    pub(crate) cast_local_pending: Signal<bool>,
     pub(crate) cast_stop_pending: Signal<Option<u64>>,
     pub(crate) cast_remote: Signal<bool>,
     pub(crate) external_request: Signal<u64>,
@@ -411,6 +415,9 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             cast_busy: signal(false),
+            cast_picker_open: signal(false),
+            cast_discovering: signal(false),
+            cast_local_pending: signal(false),
             cast_stop_pending: signal(None),
             cast_remote: signal(false),
             external_request: signal(0),

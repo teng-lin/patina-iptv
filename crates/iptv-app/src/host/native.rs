@@ -7,7 +7,7 @@ mod ios_device;
 
 #[cfg(target_os = "android")]
 mod android_transport;
-#[cfg(all(patina_airplay_probe, any(target_os = "ios", target_os = "macos")))]
+#[cfg(any(target_os = "ios", target_os = "macos"))]
 mod apple_airplay;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod casting;
@@ -68,6 +68,10 @@ pub(crate) const IMPORTS: bool = true;
 static TEST_CAST: std::sync::OnceLock<std::sync::Arc<dyn iptv_runtime::cast::Port>> =
     std::sync::OnceLock::new();
 
+#[cfg(feature = "test-support")]
+static TEST_NATIVE_CAST: std::sync::OnceLock<std::sync::Arc<dyn iptv_runtime::cast::NativePort>> =
+    std::sync::OnceLock::new();
+
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
@@ -78,6 +82,14 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     #[cfg(feature = "test-support")]
     if let Some(port) = TEST_CAST.get() {
         ports.cast = Some(port.clone());
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        ports.native_cast = Some(std::sync::Arc::new(apple_airplay::Sender::new()));
+    }
+    #[cfg(feature = "test-support")]
+    if let Some(port) = TEST_NATIVE_CAST.get() {
+        ports.native_cast = Some(port.clone());
     }
     ports.background_recordings = crate::host::BUILT.background_recordings();
     ports.recording_schedule = recording_host::schedule;
@@ -135,6 +147,12 @@ pub mod exports {
         assert!(super::TEST_CAST.set(port).is_ok());
     }
 
+    /// Supplies an owner-local native route adapter in the existing app harness.
+    #[cfg(feature = "test-support")]
+    pub fn install_test_native_cast_port(port: std::sync::Arc<dyn iptv_runtime::cast::NativePort>) {
+        assert!(super::TEST_NATIVE_CAST.set(port).is_ok());
+    }
+
     /// Explicit synthetic-key injection for the headless test binary only.
     #[cfg(feature = "test-support")]
     pub use super::credential_key::install_test_key;
@@ -167,7 +185,6 @@ pub mod exports {
     #[cfg(target_os = "macos")]
     #[native_components(macos)]
     pub fn components(components: &nsh_platform_macos::Components) {
-        #[cfg(patina_airplay_probe)]
         super::apple_airplay::register(components);
         mpv::register(components, super::transport::policy);
     }
@@ -177,7 +194,6 @@ pub mod exports {
     #[cfg(target_os = "ios")]
     #[native_components(ios)]
     pub fn components(components: &nsh_platform_ios::Components) {
-        #[cfg(patina_airplay_probe)]
         super::apple_airplay::register(components);
         super::ios_device::register(components);
         mpv::register(components, super::transport::policy);

@@ -289,6 +289,27 @@ vulnerability-free.
 
 ## Casting on the local network
 
-The Linux Cast sender gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
+The desktop Cast sender gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
 
 The relay listens on the interface used to reach the TV, on TCP port 49152 by default. Set `PATINA_CAST_RELAY_PORT` to choose another port before starting Patina. A firewall rule can limit access to the receiver address.
+
+AirPlay on macOS and iPad uses Apple's native video route picker and AVPlayer.
+The public picker does not expose the selected receiver's IP to Patina. Its
+relay therefore uses a random 192-bit capability and admits private IPv4 peers,
+rather than claiming the Chromecast adapter's additional receiver-IP binding.
+It binds a concrete private address on the Mac's primary physical interface or
+the iPad's Wi-Fi interface, on an ephemeral port. A VPN-only or IPv6-only path
+is unavailable. The capability and media use plain HTTP on the trusted LAN;
+provider addresses, headers, playlist comments and rendition links stay behind
+opaque routes. No provider address is passed to AVPlayer or the receiver.
+
+AVPlayer may request a playlist while preparing the system picker. That request
+waits behind the same admission gate as the receiver: the runtime validates
+parental authority, reserves the account claim, retires local viewing inputs,
+and only then permits an upstream fetch. While receiver approval is pending,
+intent or authorization revocation cancels the handoff. Cancel restores local
+playback; Play here retires the remote stream before reopening locally. Stop
+revokes the relay and releases this app's player, without selecting a system
+output or affecting another application's player. The persistent mpv surface
+stays mounted throughout. Only live HLS is supported; this path does not remux
+or transcode incompatible streams.

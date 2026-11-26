@@ -7,7 +7,7 @@ use crate::{
 };
 use iptv_core::{
     capabilities::FormFactor,
-    cast::{Command, Error, Receiver, RemoteState},
+    cast::{Command, Error, Receiver, RemoteState, Target},
 };
 use nsh_core::prelude::set_timeout;
 use std::time::Duration;
@@ -35,28 +35,73 @@ pub(super) fn open(ui: Ui) {
     if ui.cast_busy.get_untracked() {
         return;
     }
-    if ui.cast_remote.get_untracked() {
-        chooser::open(ui, chooser::Kind::CastRemote);
+    discover(ui);
+}
+pub(super) fn discover(ui: Ui) {
+    if ui.cast_discovering.get_untracked() {
         return;
     }
-    ui.cast_busy.set(true);
+    chooser::show_receivers(ui, Vec::new());
+    if !runtime().chromecast_available() {
+        return;
+    }
+    ui.cast_discovering.set(true);
     let channel = ui.player.main().key.get_untracked();
     crate::tasks::spawn_in_app(async move {
         let result = runtime().cast_receivers().await;
-        ui.cast_busy.set(false);
-        if channel != ui.player.main().key.get_untracked() || !available(ui) {
+        ui.cast_discovering.set(false);
+        let still_open = ui.chooser.with_untracked(|open| {
+            open.as_ref()
+                .is_some_and(|open| open.kind == chooser::Kind::Cast)
+        });
+        if !still_open || channel != ui.player.main().key.get_untracked() || !available(ui) {
             return;
         }
-        match result {
-            Ok(receivers) if !receivers.is_empty() => chooser::show_receivers(ui, receivers),
-            Ok(_) => notify(tr("No Chromecast found on this network.")),
-            Err(e) => report(e),
+        // Keep current and local destinations usable when discovery fails.
+        if let Ok(receivers) = result {
+            chooser::show_receivers(ui, receivers);
         }
     });
 }
+pub(super) fn destination_selected(value: &str) -> bool {
+    match runtime().cast_target() {
+        None => value == "local",
+        Some((Target::Chromecast(receiver), _)) => value == receiver.address.to_string(),
+        Some((Target::AirPlay, _)) => false, // Selection is shown by Apple's named-device picker.
+    }
+}
+pub(super) fn play_here(ui: Ui) {
+    if ui.cast_busy.get_untracked() {
+        if ui.cast_remote.get_untracked() {
+            ui.cast_local_pending.set(true);
+        } else {
+            runtime().cancel_pending_native_cast();
+        }
+    } else if ui.cast_remote.get_untracked() {
+        control(ui, Command::Stop, true);
+    }
+}
 pub(super) fn select(ui: Ui, receiver: Receiver) {
+    if runtime()
+        .cast_target()
+        .is_some_and(|(target, _)| matches!(target, Target::Chromecast(current) if current.address == receiver.address))
+    {
+        play_here(ui);
+        return;
+    }
     if let Some(channel) = ui.playing.get_untracked() {
-        start(ui, channel, receiver);
+        start(ui, channel, Target::Chromecast(receiver));
+    }
+}
+pub(super) fn select_airplay(ui: Ui) {
+    if runtime().native_cast_available()
+        && !ui.cast_busy.get_untracked()
+        && !runtime()
+            .cast_target()
+            .is_some_and(|(target, _)| target == Target::AirPlay)
+        && let Some(channel) = ui.playing.get_untracked()
+    {
+        start(ui, channel, Target::AirPlay);
     }
 }
 pub(super) fn change(ui: Ui, channel: usize) -> bool {
@@ -67,10 +112,11 @@ pub(super) fn change(ui: Ui, channel: usize) -> bool {
         false
     }
 }
-fn start(ui: Ui, channel: usize, receiver: Receiver) {
+fn start(ui: Ui, channel: usize, receiver: Target) {
     if ui.cast_busy.get_untracked() {
         return;
     }
+    let airplay = receiver == Target::AirPlay;
     let guide = schedule();
     let Some(key) = guide.channel_key(channel) else {
         return;
@@ -99,6 +145,9 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
     let ticket = owner.next_cast_intent();
     let current = move || runtime().cast_intent_current(ticket);
     ui.cast_busy.set(true);
+    if airplay && runtime().native_cast_view().is_none() {
+        chooser::open(ui, chooser::Kind::AirPlay);
+    }
     crate::tasks::spawn_in_app(async move {
         let mut retired = false;
         let mut transferred = false;
@@ -160,7 +209,15 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
             };
             crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
             if owner.cast_target().is_some() {
-                owner.cast_command(Command::Stop).await?;
+                if airplay
+                    && owner
+                        .cast_target()
+                        .is_some_and(|(target, _)| target == Target::AirPlay)
+                {
+                    owner.replace_native_cast().await?;
+                } else {
+                    owner.cast_command(Command::Stop).await?;
+                }
                 retired = true;
                 ui.cast_remote.set(false);
             }
@@ -238,6 +295,13 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
                 owner.parental_end_transfer(&target);
             }
         }
+        if ui.chooser.with_untracked(|open| {
+            open.as_ref().is_some_and(|open| {
+                matches!(open.kind, chooser::Kind::AirPlay | chooser::Kind::Cast)
+            })
+        }) {
+            chooser::close(ui);
+        }
         finish_pending_stop(ui);
     });
 }
@@ -271,15 +335,25 @@ fn monitor(ui: Ui, ticket: u64) {
         });
     });
 }
-pub(super) fn remote(ui: Ui, index: usize) {
-    let command = match index {
-        0 => Command::Pause,
-        1 => Command::Play,
-        2 | 3 => Command::Stop,
-        _ => return,
-    };
+pub(crate) fn set_paused(ui: Ui, paused: bool) {
+    if ui.paused.get_untracked() != paused {
+        control(
+            ui,
+            if paused {
+                Command::Pause
+            } else {
+                Command::Play
+            },
+            false,
+        );
+    }
+}
+pub(crate) fn stop(ui: Ui) {
+    control(ui, Command::Stop, false);
+}
+fn control(ui: Ui, command: Command, resume_local: bool) {
     if ui.cast_busy.get_untracked() {
-        if index == 3 {
+        if command == Command::Stop && !resume_local {
             ui.cast_stop_pending.set(Some(runtime().cast_intent()));
         }
         return;
@@ -295,7 +369,7 @@ pub(super) fn remote(ui: Ui, index: usize) {
             Ok(()) if command == Command::Stop => {
                 ui.cast_remote.set(false);
                 ui.playing.set(None);
-                if index == 2
+                if resume_local
                     && !pending_stop_current(ui)
                     && let Some(ch) = schedule().find_channel(&key)
                 {
@@ -314,10 +388,17 @@ fn pending_stop_current(ui: Ui) -> bool {
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
 fn finish_pending_stop(ui: Ui) {
-    let stop = pending_stop_current(ui);
+    let stop_requested = pending_stop_current(ui);
     ui.cast_stop_pending.set(None);
-    if stop && ui.cast_remote.get_untracked() {
-        remote(ui, 3);
+    let local = ui.cast_local_pending.get_untracked();
+    ui.cast_local_pending.set(false);
+    if ui.cast_remote.get_untracked() {
+        if stop_requested {
+            stop(ui);
+        } else if local {
+            chooser::close(ui);
+            control(ui, Command::Stop, true);
+        }
     }
 }
 pub(crate) fn volume(ui: Ui, command: Command) -> bool {
@@ -332,15 +413,14 @@ pub(crate) fn volume(ui: Ui, command: Command) -> bool {
     true
 }
 fn report(error: Error) {
+    log::debug!("cast operation result: {error:?}");
     notify(tr(match error {
-        Error::Unavailable => "Could not connect to the Chromecast or open the relay port.",
-        Error::Refused => "The Chromecast refused this stream.",
-        Error::Unknown => "Could not confirm playback on the Chromecast.",
-        Error::NoRequest => {
-            "The TV did not request the stream. Check the firewall and Wi-Fi client isolation."
+        Error::Cancelled => return,
+        Error::Unavailable | Error::Refused | Error::Unknown | Error::NoRequest => {
+            "Could not start playback on the selected device."
         }
         Error::Busy => "No provider connection is available.",
         Error::Denied => "Playback is no longer authorized.",
-        Error::Unsupported => "Casting requires a live HLS channel.",
+        Error::Unsupported => "This channel cannot be cast.",
     }));
 }
