@@ -51,7 +51,11 @@ pub(super) async fn receive(
     let (file, path) = tokio::task::spawn_blocking(move || {
         tempfile::Builder::new()
             .prefix("patina-update-")
-            .suffix(".part")
+            .suffix(if cfg!(target_os = "android") {
+                ".apk"
+            } else {
+                ".part"
+            })
             .tempfile_in(directory)
             .map(|temp| temp.into_parts())
     })

@@ -32,7 +32,7 @@ internal object UpdateHost {
 
     fun active() = owner.get() != null
     fun owns(context: Context, path: File): Boolean =
-        path.name.startsWith("patina-update-") && path.name.endsWith(".part") &&
+        path.name.startsWith("patina-update-") && path.name.endsWith(".apk") &&
             path.parentFile == context.cacheDir && path.canonicalFile == path
 
     @Synchronized fun discard(context: Context, file: File) {
