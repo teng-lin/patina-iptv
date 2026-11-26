@@ -16,7 +16,6 @@ iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\powershe
 # Transport identifier, invariant product name and internal verification diagnostics.
 iptv-app/src/host/updates.rs	Patina
 iptv-runtime/src/native/app_updates.rs	Patina
-iptv-runtime/src/native/app_updates/trust.rs	incomplete update state
 iptv-runtime/src/native/app_updates/trust.rs	invalid trusted root version
 
 # The persisted fallback group name is also used to recognize the generated bucket.
