@@ -226,11 +226,7 @@ impl Remote for Playing {
         })
     }
     fn state(&self) -> Task<'_, RemoteState> {
-        Box::pin(async {
-            timeout(Duration::from_secs(15), self.observe())
-                .await
-                .map_err(|_| Error::Unknown)?
-        })
+        Box::pin(self.observe())
     }
     fn retire(&self) -> Retirement<'_> {
         Box::pin(async move {
@@ -244,32 +240,62 @@ impl Remote for Playing {
 
 impl Playing {
     async fn observe(&self) -> Result<RemoteState, Error> {
-        let mut control = self.control.lock().await;
-        let status = match control.session.status(self.id).await {
-            Ok(s) => s,
+        const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+        const REJOIN_TIMEOUT: Duration = Duration::from_secs(15);
+
+        let deadline = Instant::now() + PROBE_TIMEOUT;
+        let mut control = tokio::time::timeout_at(deadline, self.control.lock())
+            .await
+            .map_err(|_| Error::Unknown)?;
+        let result = status_or_rejoin(
+            deadline,
+            control.session.status(self.id),
+            REJOIN_TIMEOUT,
+            self.rejoin_owned(),
+        )
+        .await;
+        let (replacement, status) = match result {
+            Ok(owned) => owned,
             Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-            Err(_) => {
-                let joined = match Session::rejoin(self.address).await {
-                    Ok(joined) => joined,
-                    Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-                    Err(error) => return Err(map_error(error)),
-                };
-                if joined.lookup(&self.url).await.map_err(map_error)? != Some(self.id) {
-                    return Ok(RemoteState::Ended);
-                }
-                control.session = joined;
-                match control.session.status(self.id).await {
-                    Ok(status) => status,
-                    Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-                    Err(error) => return Err(map_error(error)),
-                }
-            }
+            Err(error) => return Err(map_error(error)),
         };
+        if let Some(joined) = replacement {
+            control.session = joined;
+        }
         Ok(observed_state(
             status,
             &mut control.idle_since,
             Instant::now(),
         ))
+    }
+
+    async fn rejoin_owned(&self) -> Result<(Session, Status), googlecast::Error> {
+        let joined = Session::rejoin(self.address).await?;
+        if joined.lookup(&self.url).await? != Some(self.id) {
+            return Err(googlecast::Error::Ended);
+        }
+        let status = joined.status(self.id).await?;
+        Ok((joined, status))
+    }
+}
+
+// A silent control connection can consume its whole deadline. Start the
+// recovery budget only when switching to a fresh connection.
+async fn status_or_rejoin<S>(
+    deadline: Instant,
+    status: impl Future<Output = Result<Status, googlecast::Error>>,
+    rejoin_timeout: Duration,
+    rejoin: impl Future<Output = Result<(S, Status), googlecast::Error>>,
+) -> Result<(Option<S>, Status), googlecast::Error> {
+    match tokio::time::timeout_at(deadline, status).await {
+        Ok(Ok(status)) => Ok((None, status)),
+        Ok(Err(googlecast::Error::Ended)) => Err(googlecast::Error::Ended),
+        Ok(Err(_)) | Err(_) => {
+            let (session, status) = timeout(rejoin_timeout, rejoin)
+                .await
+                .map_err(|_| googlecast::Error::Unknown)??;
+            Ok((Some(session), status))
+        }
     }
 }
 
@@ -291,34 +317,4 @@ fn observed_state(status: Status, idle_since: &mut Option<Instant>, now: Instant
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reasonless_idle_has_a_grace_period_that_playback_resets() {
-        let start = Instant::now();
-        let mut idle_since = None;
-        let mut sample = |status, seconds| {
-            observed_state(
-                status,
-                &mut idle_since,
-                start + Duration::from_secs(seconds),
-            )
-        };
-        assert_eq!(sample(Status::Idle, 0), RemoteState::Loading);
-        assert_eq!(sample(Status::Paused, 14), RemoteState::Paused);
-        assert_eq!(sample(Status::Idle, 15), RemoteState::Loading);
-        assert_eq!(sample(Status::Idle, 29), RemoteState::Loading);
-        assert_eq!(sample(Status::Idle, 30), RemoteState::Ended);
-        for status in [
-            Status::Failed,
-            Status::Finished,
-            Status::Canceled,
-            Status::Interrupted,
-        ] {
-            assert_eq!(sample(Status::Playing, 31), RemoteState::Playing);
-            assert_eq!(sample(Status::Idle, 31), RemoteState::Loading);
-            assert_eq!(sample(status, 31), RemoteState::Ended);
-        }
-    }
-}
+mod tests;
