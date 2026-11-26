@@ -183,6 +183,19 @@ impl Store {
         Ok(rows.into_iter().map(|(item, _)| item).collect())
     }
 
+    /// IDs of groups whose saved display name differs from the provider name.
+    pub fn renamed_groups(&self, source: SourceId) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT o.group_id
+             FROM group_overlays o LEFT JOIN groups g ON g.source_id=o.source_id AND g.id=o.group_id
+             WHERE o.source_id=?1 AND o.custom_name IS NOT NULL
+               AND (g.id IS NULL OR o.custom_name <> g.name)",
+        )?;
+        stmt.query_map([source.0], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()
+            .map_err(Into::into)
+    }
+
     /// Reads guide blocks apart from the parental settings and credential.
     pub fn guide_blocks(&self, source: SourceId) -> Result<Blocks> {
         let mut blocks = Blocks::default();

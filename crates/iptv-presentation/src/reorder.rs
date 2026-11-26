@@ -332,6 +332,12 @@ impl<T: Clone + Eq> Reorder<T> {
         }
     }
 
+    /// Records the current row order as saved while related settings still need saving.
+    pub fn mark_saved(&mut self) {
+        self.original.clone_from(&self.items);
+        self.dirty = false;
+    }
+
     /// Save: ends the mode with the new order (or `Unchanged`).
     pub fn commit(&mut self) -> Outcome<T> {
         if self.phase == Phase::Done {

@@ -229,7 +229,7 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
                         ),
                 ),
         )
-        .child(empty_state(ui))
+        .child(empty_state(ui, size))
         .child(hint_card(ui));
     view()
         .flex_1()
@@ -246,8 +246,9 @@ pub fn guide(ui: Ui, rows: ElementRef) -> impl IntoElement {
 }
 
 /// Over an empty list: what it would hold and how to fill it.
-fn empty_state(ui: Ui) -> impl IntoElement {
+fn empty_state(ui: Ui, size: Scale) -> impl IntoElement {
     let empty = move || ui.list.with(|l| l.is_empty());
+    let settings = computed(move || crate::menu_view::empty_group_settings_available(ui));
     let message = move || match ui.list.with(|l| l.entry()) {
         FAVORITES => tr(
             "No favorite channels yet. Hold OK (or press Menu) on a channel and choose “Add to favorites”, or star channels with “Manage favorites…”.",
@@ -261,15 +262,36 @@ fn empty_state(ui: Ui) -> impl IntoElement {
         .items_center()
         .justify_center()
         .px(px(40.0))
+        .gap(px(12.0))
         .accessibility_elements_hidden(move || !empty())
         .opacity(move || if empty() { 1.0_f32 } else { 0.0 })
-        .pointer_events(PointerEvents::None)
+        .pointer_events(move || {
+            if settings.get() {
+                PointerEvents::BoxNone
+            } else {
+                PointerEvents::None
+            }
+        })
         .child(
             text(message)
                 .text_size(px(16.0))
                 .text_center()
                 .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA)),
         )
+        .child(when(
+            move || settings.get(),
+            move || {
+                crate::ui_kit::button(
+                    ui,
+                    size,
+                    move || tr("Group settings"),
+                    move || ui.focus.with(|f| f.pane == Pane::Guide),
+                    move || {
+                        crate::menu_view::open_empty_group_settings(ui);
+                    },
+                )
+            },
+        ))
 }
 
 /// After a group was chosen: what the keys do here, until a key or Back.

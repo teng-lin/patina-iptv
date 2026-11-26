@@ -61,6 +61,7 @@ pub const COMMANDS: &[&str] = &[
     "epg.clear",
     "remote.customize",
     "playlists.manage",
+    "playlists.show_all",
     "playlists.add",
     "playlists.update_all",
     "playlists.reorder",
@@ -233,6 +234,22 @@ pub fn offer(device: Device, key: &str) -> Offer {
                 | "epg.add_source"
                 | "epg.update_now"
         )
+    {
+        return Offer::Hidden;
+    }
+    if key == "playlists.show_all" {
+        let owner = crate::runtime();
+        if !crate::host::IMPORTS
+            || crate::data::combined::active(&owner)
+            || !crate::runtime::data::has_multiple_enabled(&owner)
+        {
+            return Offer::Hidden;
+        }
+    }
+    if key == "playlists.manage"
+        && !crate::runtime()
+            .playlists()
+            .is_ok_and(|rows| !rows.is_empty())
     {
         return Offer::Hidden;
     }

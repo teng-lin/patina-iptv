@@ -195,7 +195,11 @@ pub fn rejected(f: ImportFailure) -> String {
 
 pub fn act(act: Act, kind: Option<SourceKind>, shown: bool, running: bool) -> &'static str {
     match act {
-        Act::Enabled => tr("Enable / disable playlist"),
+        Act::Reorder => tr("Reorder playlist"),
+        Act::PlaylistOrder => tr("Playlist order"),
+        Act::ReorderGroups => tr("Reorder group"),
+        Act::GroupOrder => tr("Group order"),
+        Act::Hide => tr("Hide"),
         Act::RefreshInterval => tr("Automatic refresh"),
         Act::RefreshOnStart => tr("Refresh on startup"),
         Act::OnDemand => tr("Movies and series"),
@@ -288,7 +292,7 @@ pub fn param_value(form: &Form, p: Param) -> String {
 }
 
 /// What deleting `p` takes away, and what the guide does next.
-pub fn delete_consequences(p: &Playlist, next: Option<&str>, shown: bool) -> String {
+pub fn delete_consequences(p: &Playlist, next: Option<&str>, has_other_playlists: bool) -> String {
     let gone = trf(
         "{count, plural, \
          one {Its # channel, its guide and your favorites from it will be gone from the app. \
@@ -297,13 +301,13 @@ pub fn delete_consequences(p: &Playlist, next: Option<&str>, shown: bool) -> Str
          The playlist at your provider is not affected.}}",
         &[("count", p.channels.into())],
     );
-    match (shown, next) {
-        (true, Some(next)) => {
+    match next {
+        Some(next) => {
             let switches = trf("The guide switches to “{name}”.", &[("name", next.into())]);
             format!("{gone} {switches}")
         }
-        (_, None) => format!("{gone} {}", tr("No playlists will be left.")),
-        (false, Some(_)) => gone,
+        None if !has_other_playlists => format!("{gone} {}", tr("No playlists will be left.")),
+        None => gone,
     }
 }
 
@@ -544,8 +548,8 @@ mod tests {
         let text = delete_consequences(&p, Some("Other"), true);
         assert!(text.contains("1 channel,") && text.contains("favorites"));
         assert!(text.contains("switches to “Other”"));
-        assert!(delete_consequences(&p, None, true).contains("No playlists will be left"));
-        assert!(!delete_consequences(&p, Some("Other"), false).contains("switches"));
+        assert!(delete_consequences(&p, None, false).contains("No playlists will be left"));
+        assert!(!delete_consequences(&p, None, true).contains("switches"));
     }
 
     #[test]
@@ -597,11 +601,11 @@ mod tests {
             "Guide : aucune source"
         );
         assert_eq!(
-            in_language("de", || delete_consequences(&p, None, true)),
+            in_language("de", || delete_consequences(&p, None, false)),
             in_language("de", || {
                 format!(
                     "{} {}",
-                    delete_consequences(&p, Some("Other"), false),
+                    delete_consequences(&p, None, true),
                     tr("No playlists will be left.")
                 )
             })

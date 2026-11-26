@@ -2,6 +2,7 @@
 use super::file_writer::WriteError;
 pub use crate::model::SaveFailure;
 use crate::network::NetworkConfig;
+use futures_channel::oneshot;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
 use std::path::{Path, PathBuf};
@@ -25,6 +26,14 @@ pub(crate) fn get(shared: &Shared) -> Arc<Settings> {
 
 fn replace(shared: &Shared, settings: Arc<Settings>) {
     *shared.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
+}
+
+fn publish(owner: &std::rc::Rc<super::Runtime>, before: &Settings, next: Arc<Settings>) {
+    let order_changed = choice(before, keys::PLAYLIST_SORT) != choice(&next, keys::PLAYLIST_SORT);
+    replace(owner.services().shared_settings(), next);
+    if order_changed {
+        crate::data::order_changed(owner);
+    }
 }
 
 fn path(directory: &Path) -> PathBuf {
@@ -183,6 +192,22 @@ impl std::fmt::Display for SaveError {
 
 impl std::error::Error for SaveError {}
 
+pub(crate) fn check_setting_write(owner: &super::Runtime, key: &str) -> Result<(), SaveError> {
+    let protect_all = owner.settings().get("parental.require_pin_for").ok()
+        == Some(Value::Enum("blocked_content_and_settings".into()));
+    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
+        return Err(SaveError::ParentalLocked);
+    }
+    check_writable(owner)
+}
+
+fn check_writable(owner: &super::Runtime) -> Result<(), SaveError> {
+    match owner.settings_read_only.get() {
+        Some(error) => Err(SaveError::Storage(error)),
+        None => Ok(()),
+    }
+}
+
 /// Stores `value` for `key` (globally), tells the views, and saves in the
 /// background. Only an invalid value is an error here; a save that fails
 /// later is reported, and the settings go back to the saved ones unless a
@@ -195,6 +220,20 @@ pub(crate) fn set(
     set_in(owner, key, &Target::Global, value)
 }
 
+/// Sets a global preference and waits until its file write has settled.
+pub(crate) async fn set_and_wait(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    value: Value,
+) -> Result<(), SaveError> {
+    check_setting_write(owner, key)?;
+    let (reply, done) = oneshot::channel();
+    apply_with_reply(owner, key, |next| next.set(key, value), Some(reply))?;
+    done.await
+        .unwrap_or(Err(WriteError::Storage(std::io::ErrorKind::Interrupted)))
+        .map_err(SaveError::from)
+}
+
 /// [`set`] at `at`: a playlist's own value overrides the global one there.
 /// A value equal to what `at` would inherit removes its own value instead,
 /// so later global changes apply to it again.
@@ -204,11 +243,7 @@ pub(crate) fn set_in(
     at: &Target,
     value: Value,
 ) -> Result<(), SaveError> {
-    let protect_all = owner.settings().get("parental.require_pin_for").ok()
-        == Some(Value::Enum("blocked_content_and_settings".into()));
-    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
-        return Err(SaveError::ParentalLocked);
-    }
+    check_setting_write(owner, key)?;
     apply(owner, key, |next| {
         if *at != Target::Global {
             let mut inheriting = next.clone();
@@ -323,11 +358,7 @@ pub(crate) fn set_own(
     at: &Target,
     value: Option<Value>,
 ) -> Result<(), SaveError> {
-    let protect_all = owner.settings().get("parental.require_pin_for").ok()
-        == Some(Value::Enum("blocked_content_and_settings".into()));
-    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
-        return Err(SaveError::ParentalLocked);
-    }
+    check_setting_write(owner, key)?;
     apply(owner, key, |next| {
         let before = next.stored(key, at).cloned();
         let mut changes = match value {
@@ -354,15 +385,25 @@ fn apply(
     key: &str,
     edit: impl FnOnce(&mut Settings) -> Result<Vec<iptv_settings::Change>, SettingsError>,
 ) -> Result<(), SaveError> {
-    if let Some(error) = owner.settings_read_only.get() {
-        return Err(SaveError::Storage(error));
-    }
+    apply_with_reply(owner, key, edit, None)
+}
+
+type SaveReply = oneshot::Sender<Result<(), WriteError>>;
+
+fn apply_with_reply(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    edit: impl FnOnce(&mut Settings) -> Result<Vec<iptv_settings::Change>, SettingsError>,
+    reply: Option<SaveReply>,
+) -> Result<(), SaveError> {
+    check_writable(owner)?;
     let services = owner.services();
-    let mut next = (*services.settings()).clone();
+    let before = services.settings();
+    let mut next = (*before).clone();
     let changes = edit(&mut next).map_err(SaveError::Invalid)?;
     let json = next.to_json_string();
     let next = Arc::new(next);
-    replace(services.shared_settings(), next.clone());
+    publish(owner, &before, next.clone());
     if key.starts_with("parental.") {
         owner.parental_policy_changed();
     }
@@ -376,6 +417,9 @@ fn apply(
         // Neither a file writer nor a host keeps the files here: the
         // settings apply for this session.
         owner.note_session_only();
+        if let Some(reply) = reply {
+            let _ = reply.send(Ok(()));
+        }
         return Ok(());
     }
     let saved = services
@@ -396,15 +440,18 @@ fn apply(
                 if let Some((_, previous)) =
                     owner.settings_saved.with(|saved| saved.borrow().clone())
                 {
-                    replace(services.shared_settings(), previous);
+                    publish(&owner, &services.settings(), previous);
                     owner.emit(super::RuntimeEvent::SettingsChanged);
                 }
             }
             Settled::Failed => {}
         }
+        let handled = reply.is_some_and(|reply| reply.send(result).is_ok());
         if let Err(error) = result {
             log::warn!("iptv settings: {}", SaveError::from(error));
-            owner.emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
+            if !handled {
+                owner.emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
+            }
         }
     });
     Ok(())

@@ -160,6 +160,7 @@ pub fn label(key: &str) -> &'static str {
         "playlists.update_interval" => tr("Refresh playlists every"),
         "playlists.update_on_start" => tr("Refresh when the app starts"),
         "playlists.manage" => tr("Manage playlists"),
+        "playlists.show_all" => tr("Show all playlists"),
         "playlists.add" => tr("Add a playlist"),
         "playlists.reorder" => tr("Reorder playlists"),
         "playlists.update_all" => tr("Refresh all playlists now"),
@@ -335,8 +336,9 @@ pub fn choice(family: &str, variant: &str) -> String {
         return crate::i18n::language_name(variant).to_owned();
     }
     let name = match (family, variant) {
-        ("sort", "manual") => tr("Arranged by hand"),
+        ("sort", "manual") => tr("Custom order"),
         ("sort", "name") => tr("By name"),
+        ("sort", "added") => tr("By date added"),
         ("sort", "playlist_order") => tr("As in the playlist"),
         ("sort", "watch_time") => tr("Most watched first"),
         ("sort", "date_added") => tr("Newest first"),

@@ -210,6 +210,20 @@ impl Schedule for CombinedSchedule {
             |group| schedule.group_preferences(group),
         )
     }
+    fn groups_order(&self, group: usize) -> iptv_core::organization::Sort {
+        self.groups.get(group).map_or_default(|&(source, group)| {
+            self.sources[source]
+                .schedule
+                .groups_order(group.unwrap_or_default())
+        })
+    }
+
+    fn group_name_overridden(&self, group: usize) -> bool {
+        self.groups.get(group).is_some_and(|&(source, group)| {
+            group.is_some_and(|group| self.sources[source].schedule.group_name_overridden(group))
+        })
+    }
+
     fn group_channels(&self, g: usize) -> Vec<usize> {
         let Some(&(s, g)) = self.groups.get(g) else {
             return Vec::new();

@@ -137,7 +137,7 @@ fn schedule_changed(
             if clamped != rows {
                 ui.visible_rows.set(clamped);
             }
-            ui.menu.set(None);
+            crate::menu_view::catalog_changed(ui);
             ui.description.set(None);
             ui.editor.set(None);
             ui.app.data_version.update(|version| *version += 1);

@@ -128,6 +128,14 @@ pub trait Schedule {
     fn group_preferences(&self, _group: usize) -> crate::organization::GroupPreferences {
         crate::organization::GroupPreferences::default()
     }
+    /// The order of groups in the playlist that owns this group.
+    fn groups_order(&self, _group: usize) -> crate::organization::Sort {
+        crate::organization::Sort::default()
+    }
+    /// Whether this group has a stored display-name override.
+    fn group_name_overridden(&self, _group: usize) -> bool {
+        false
+    }
     fn channel_sort(&self) -> crate::organization::Sort {
         crate::organization::Sort::default()
     }

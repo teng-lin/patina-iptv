@@ -374,7 +374,7 @@ fn settings(app: &mut Headless, home: &Path) {
     step(app.press("text:Playlists >> nth=0"));
     step(app.wait_for("text:Add a playlist"));
     assert!(!app.screen().matches("text:Default User-Agent").unwrap());
-    assert!(!app.screen().matches("text:Manage playlists").unwrap());
+    assert!(app.screen().matches("text:Manage playlists").unwrap());
     step(app.wait_for("role:checkbox[/^synthetic/]"));
     // One playlist: nothing to arrange.
     assert!(!app.screen().matches("text:Reorder playlists").unwrap());
@@ -540,8 +540,7 @@ fn other_pages(app: &mut Headless) {
     // closes them, back to the page.
     step(app.press("text:Playlists >> nth=0"));
     step(app.long_press("role:checkbox[/^synthetic/]"));
-    step(app.wait_for("id:playlist-actions-list"));
-    step(app.press("text:Rename"));
+    step(app.press("id:playlist-menu-panel >> text:Rename"));
     let field = input(app);
     step(app.wait_for("text:Playlist name"));
     step(app.clear(&field));
@@ -552,7 +551,7 @@ fn other_pages(app: &mut Headless) {
     // Menu on the row opens them too.
     step(app.press_key("right"));
     step(app.press_remote(nsh_tv::RemoteKey::Menu));
-    step(app.wait_for("id:playlist-actions-list"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Hide"));
     step(app.back());
     step(app.wait_for_gone("id:playlists-task", GONE));
     step(app.wait_for("text:Add a playlist"));
