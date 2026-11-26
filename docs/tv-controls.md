@@ -33,7 +33,8 @@ keys have no row of their own; the editor's row sums them up.
 - A key without a hold action acts at once and again on each repeat, so a
   held arrow keeps moving. Menu is the exception, on a remote and as `M`
   on a keyboard: held, it acts once instead of opening and closing a menu
-  or the play bar with every repeat.
+  or the play bar with every repeat. Favorite toggles also act once per
+  press, including custom key bindings.
 - A hold decided by an auto-repeat is the hold's one action, exactly as one
   decided by the timer.
 - A waiting press belongs to the surface it went down on: the keymap's
@@ -85,13 +86,17 @@ back to live.
 | Up / Down | Move between channels, wrapping at the first and last rows. The groups column wraps between its first and last entries. | Repeats |
 | Left | Earlier programs, then the groups column, then the rail | The groups column |
 | Right | Later programs | Repeats |
-| OK | Choose: tunes a live channel in the TV Guide preview; the playing channel returns to full screen; a past program with replay replays; any other program opens its details | The program and channel menu |
-| Menu | The program and channel menu; on the groups column, the group's options | – |
+| OK | Choose: tunes a live channel in the TV Guide preview; the playing channel returns to full screen; a past program with replay replays; any other program opens its details | Compact channel actions for the focused program |
+| Menu | Compact channel actions; on the groups column, the group's options | – |
 | Back | Hint card, then back to the programs on air, then groups, then rail, then leave (see [Back](#back)) | Back to the video, when something plays |
 | Ch+ / Ch− and Page Up / Down | A page of channels | Repeats |
 | Record | Records the focused program if it is on now; on another program it says only a program on now can be recorded | – |
 | Guide | – (already the guide) | – |
 | Info | – | – |
+
+Choose **More options** in compact channel actions to reach the full program
+menu, including live replay, details and group management. Back returns to
+the compact menu with **More options** focused; Menu dismisses either menu.
 
 Moving the focus never tunes a channel unless **Autoplay** (`guide.autoplay`)
 is on; it then tunes the focused live channel after `guide.switch_delay`, and

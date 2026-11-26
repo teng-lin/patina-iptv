@@ -324,7 +324,7 @@ fn custom_groups_and_guide_assignment_speak_the_interface_language() {
     let mut fixture = start_in(home, "ru", "auto");
     let app = &mut fixture.app;
     step(app.wait_for(r"text:/^(пн|вт|ср|чт|пт|сб|вс), \d{1,2} \S+  \d\d:\d\d$/"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     shown(app, &ru.t("Manage favorites…"));
     press(app, &ru.t("New group…"));
     step(app.wait_for("id:custom-groups-screen"));
@@ -384,7 +384,7 @@ fn custom_groups_and_guide_assignment_speak_the_interface_language() {
     }
     step(app.wait_for_gone("id:custom-groups-screen", Duration::from_secs(3)));
     // No guide is stored: the chooser says so instead of opening.
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     shown(app, &ru.t("Manage favorites…"));
     press(app, &ru.t("Choose guide data…"));
     shown(
@@ -408,7 +408,7 @@ fn backup_remote_keys_and_the_clock_speak_the_interface_language() {
             r"text:/^\d{1,2}月\d{1,2}日\((月|火|水|木|金|土|日)\)  午(前|後)\d{1,2}:\d\d$/",
         ),
     );
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     shown(app, &ja.t("Manage favorites…"));
     step(app.press(&format!("text:{} >> nth=0", ja.t("Settings"))));
     shown(app, &ja.t("Back up"));

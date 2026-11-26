@@ -33,6 +33,7 @@ pub enum MenuItem {
     AssignEpg,
     ChannelOptions,
     ChannelActions,
+    ProgramActions,
     ProtectChannel,
     // Playlist (a playlist's heading in the groups column).
     RenamePlaylist,
@@ -124,6 +125,8 @@ pub struct Menu {
     pub target: Target,
     pub list: ListId,
     pub group_offset: Option<i32>,
+    /// The compact context to return to after inspecting its full options.
+    pub parent: Option<Box<Menu>>,
     /// The program menu was opened for the full-screen player's channel.
     /// That target can be outside the guide list the viewer last browsed.
     pub playing_context: bool,
@@ -139,6 +142,7 @@ impl Menu {
             target,
             list,
             group_offset: None,
+            parent: None,
             playing_context: false,
         }
     }
@@ -285,6 +289,7 @@ pub fn channel_menu(
             BlockChannel,
             HideChannel,
             ProtectChannel,
+            ProgramActions,
         ]
         .map(action),
     );

@@ -749,7 +749,7 @@ fn a_popup_hides_its_underlay_while_the_pointer_bar_keeps_its_visible_controls()
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
     step(app.press_key("down"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     exposure.shown(app, "menu-panel", true);
     exposure.shown(app, "guide-ui", false);
     step(app.press("text:Manage favorites…"));

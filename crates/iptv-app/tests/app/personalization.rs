@@ -185,9 +185,34 @@ pub(super) fn launch_playlist(
         app,
     }
 }
+/// The header retains the full program menu; timeline context opens compact actions.
+#[track_caller]
+pub fn open_program_menu(app: &mut Headless) {
+    step(app.long_press("id:guide-header-program"));
+    step(app.wait_for("id:menu-panel >> role:menuitem"));
+}
+
+/// Keyboard/remote journeys use the compact menu's explicit full-menu entry.
+#[track_caller]
+pub fn open_program_menu_with_keys(app: &mut Headless) {
+    step(app.press_key("m"));
+    for _ in 0..40 {
+        if app
+            .screen()
+            .accessibility_state("id:menu-panel >> role:menuitem[More options]")
+            .is_ok_and(|state| state.selected)
+        {
+            step(app.press_key("enter"));
+            return;
+        }
+        step(app.press_key("down"));
+    }
+    panic!("the D-pad did not reach More options");
+}
+
 #[track_caller]
 pub fn menu(app: &mut Headless, label: &str) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for("text:Manage favorites…"));
     step(app.press(&format!("text:{label}")));
 }

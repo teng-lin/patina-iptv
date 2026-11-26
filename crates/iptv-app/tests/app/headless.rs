@@ -5,6 +5,8 @@
 //! simulated time (`run_for`, `wait`, `fast_forward`) remain unscaled to preserve
 //! deterministic test advancement and playback timing.
 
+use nsh_core::PayloadValue;
+use nsh_core::keymap::{KeyMatch, Keymap, Keystroke};
 use nsh_core::{EventKind, EventPayload, KeyEvent, ROOT_ID, TextEngine};
 use nsh_engine::EngineConfig;
 use nsh_testing::Screen;
@@ -131,6 +133,27 @@ impl Headless {
         self.0.press_key(key)
     }
 
+    /// Auto-repeat a named shortcut in the main window, outside text input.
+    /// Match the latest observed `MountItem::Keymap` and dispatch the public
+    /// binding as native hosts do; `press_key` is always a fresh press.
+    pub fn repeat_key_binding(&mut self, key: &str, keymap: &Keymap) -> Result<KeyMatch, String> {
+        self.ready_for_input()?;
+        let stroke = Keystroke::parse_with(key, false).map_err(|e| e.to_string())?;
+        let found = keymap.find(stroke, false, true);
+        self.0
+            .step(format!("repeat named shortcut {key}: {found:?}"));
+        if let Some(id) = found.fired() {
+            self.engine().control().dispatch_event(
+                ROOT_ID,
+                EventKind::KeyCommand,
+                EventPayload::Value(PayloadValue::Number(f64::from(id))),
+            );
+        }
+        self.0.settle();
+        self.0.wait(Duration::ZERO)?;
+        Ok(found)
+    }
+
     /// Deliver a hardware-only remote key through the mounted raw listener.
     /// NSH's simulated keyboard accepts named keystrokes only.
     pub fn press_remote(&mut self, key: RemoteKey) -> Result<(), String> {
@@ -195,9 +218,21 @@ impl Headless {
             RemoteKey::Previous => "MediaTrackPrevious",
             RemoteKey::Back => "GoBack",
             RemoteKey::Digit(d) => ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"][d as usize],
-            _ => return Err(format!("missing raw phase event for {key:?}")),
+            _ => nsh_tv::transport::TABLE
+                .iter()
+                .find(|entry| entry.key == key)
+                .map(|entry| entry.dom_code)
+                .ok_or_else(|| format!("missing raw phase event for {key:?}"))?,
         };
-        event.key = name.into();
+        event.key = if nsh_tv::transport::TABLE
+            .iter()
+            .any(|entry| entry.key == key)
+        {
+            "Unidentified"
+        } else {
+            name
+        }
+        .into();
         event.code = match key {
             RemoteKey::Digit(d) => format!("Digit{d}").into(),
             _ => name.into(),

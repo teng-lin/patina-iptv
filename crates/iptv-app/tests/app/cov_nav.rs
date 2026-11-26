@@ -231,29 +231,29 @@ fn guide_keys(app: &mut Headless) {
     step(app.back());
     step(app.press_key("home"));
     wait_focused(app, "Morning Talk");
-    // Menu: the program's menu; Menu again closes it.
-    step(app.press_key("m"));
+    // More options reaches the full program menu; Menu closes it.
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press_key("down"));
     step(app.press_key("up"));
     step(app.press_key("m"));
     gone(app, "text:Details");
-    // Menu, then OK on its first item: the search screen.
-    step(app.press_key("m"));
+    // The full menu, then OK on its first item: the search screen.
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press_key("enter"));
     step(app.wait_for(FIELD));
     gone(app, "text:Details");
     close_search(app);
     // Its Details (tapped): the popover, which Menu closes; Back too.
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press("text:Details"));
     wait_times(app, 1);
     step(app.press_key("down"));
     step(app.press_key("m"));
     wait_times(app, 0);
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press("text:Details"));
     wait_times(app, 1);
@@ -343,7 +343,7 @@ fn guide_keys(app: &mut Headless) {
     // focused channel, OK again removes it; Left preserves favorites;
     // Right adds all, and explicit confirmed removal clears them; Back closes.
     const STAR: &str = "text:★ Test Channel Four";
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Manage favorites…"));
     step(app.press("text:Manage favorites…"));
     step(app.press_key("down"));

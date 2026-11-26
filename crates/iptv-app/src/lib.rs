@@ -1154,7 +1154,7 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if matches!(top, Some(Overlay::Menu | Overlay::Description)) => {
-                menu_view::close(ui);
+                menu_view::back(ui);
                 true
             }
             _ if top == Some(Overlay::Search) => {

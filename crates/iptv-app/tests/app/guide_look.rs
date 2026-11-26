@@ -84,7 +84,7 @@ fn the_guide_uses_the_bundled_fonts_and_proportions() {
     step(app.press("text:Watch"));
     step(app.wait_for_within("text:Golden Engine", IMPORT));
 
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.press("text:Details"));
     step(app.wait_for("id:description-layer >> text:Generated details for Quiet Harbour"));
     assert!(!app.screen().matches("text:A synthetic program description for testing the guide. Real descriptions come from the EPG.").unwrap());

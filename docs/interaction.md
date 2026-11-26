@@ -113,9 +113,12 @@ In the guide:
   long press or right-click on the program title in the header opens its
   program menu. Screen readers can invoke the title's menu action; on
   iPad, VoiceOver calls it **More options**. On
-  channel names and timeline cells, those gestures open
-  channel options. A
-  long press or right-click moves the focus to what it opens the menu for;
+  channel names and timeline cells, those gestures open compact channel
+  actions. Remote Long OK and Menu, and keyboard M or Shift+F10, open the
+  same compact actions for the focused timeline cell. **More options** opens
+  the full program menu for that captured channel and time block. Back
+  returns to the compact menu with **More options** focused; Menu dismisses
+  either menu. A context gesture moves focus to what it opens the menu for;
   `guide.autoplay` then holds on that channel, after the menu or its details
   close, until the viewer moves the focus to another channel. A choice still
   plays.
@@ -281,12 +284,12 @@ visible entry point for touch and pointer users.
 - **Now:** in the guide, the channel list and recordings: Menu on a remote, and
   long OK on Android; M on a keyboard, and Shift+F10 on desktop. Long press and
   right-click open channel actions on a channel header or player-list row,
-  and group options on a group. On tablets and desktops, guide timeline cells
-  open the same channel menu for the selected program's time block.
-  Long OK on a player-list row opens its channel actions. Menu and M still
-  give access to program and group actions from the player list. In the
-  guide grid, the program menu also includes actions for its channel and
-  group. Menu or M on the single-playlist All channels group adds a
+  and group options on a group. Guide timeline cells open the same compact
+  channel menu for the selected program's time block on every device.
+  Long OK, Menu and M on a player-list row also open that row's compact
+  channel actions. **More options** in either compact menu gives access to
+  the full program, channel and group actions, including live replay,
+  details and favorite management. Menu or M on the single-playlist All channels group adds a
   playlist. During full-screen TV playback, either OK press and Menu open
   the play bar ([TV controls](tv-controls.md)).
 - Choose **Channel actions** from a program menu to use that program's

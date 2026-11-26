@@ -14,7 +14,7 @@ rule was checked on.
 | Where | Vertical wheel or two-finger swipe | Horizontal swipe, or Shift + wheel | Right-click | Visible way in |
 |---|---|---|---|---|
 | Guide | Moves through the channels | Moves through program time | Channel menu on a channel name or program cell | Long press or Menu key |
-| Guide's program title in the header | Nothing | Nothing | Program menu | Long press or Menu key |
+| Guide's program title in the header | Nothing | Nothing | Program menu | Long press; More options in compact channel actions |
 | Guide's groups column | Scrolls the groups | Nothing | Group options | Long press or Menu key |
 | Channel list over the video | Scrolls the channels | Nothing | Channel menu | ⋯ at the end of each row |
 | Channel list's groups column | Scrolls the groups | Nothing | Group options | ⋯ on the shown group's row |

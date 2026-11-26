@@ -1,4 +1,4 @@
-//! The guide's context menu (Long OK / Menu) as a scrolling side panel, and
+//! The guide's context menus as scrolling side panels, and
 //! the program description popover. State lives in `iptv_presentation::menu`;
 //! this opens, draws and performs it. Labels are iptv-rs's own wording.
 
@@ -15,7 +15,7 @@ use iptv_presentation::menu::{
     Heading, Menu, MenuItem, Origin, Row, Target, channel_menu, group_offset_menu, group_options,
     program_menu,
 };
-use nsh_core::{platform::Idiom, prelude::*};
+use nsh_core::prelude::*;
 
 use crate::fonts::{HEADER_BODY, HEADER_TIMES, LIST_ITEM, MEDIUM, SANS, SECTION, TITLE};
 use crate::list_rows::{self, Mark, ROW};
@@ -53,6 +53,7 @@ fn implemented(item: MenuItem, surface: usize) -> bool {
             | MenuItem::ReorderChannels
             | MenuItem::SortChannels
             | MenuItem::ChannelActions
+            | MenuItem::ProgramActions
             | MenuItem::ChannelOptions
             | MenuItem::GroupOptions
             | MenuItem::CopyChannels
@@ -85,6 +86,7 @@ fn label(item: MenuItem, favorite: bool, blocked: bool) -> &'static str {
         AssignEpg => tr("Choose guide data…"),
         ChannelOptions => tr("Channel options…"),
         ChannelActions => tr("Channel actions…"),
+        ProgramActions => tr("More options"),
         ManageFavorites => tr("Manage favorites…"),
         ManageBlocked => tr("Manage blocked channels…"),
         ManageHidden => tr("Manage hidden channels…"),
@@ -116,7 +118,7 @@ fn title(channel: usize, p: crate::guide::Program) -> String {
     crate::listing_labels::listing(crate::runtime_owner::schedule().listing(channel, p))
 }
 
-/// Long OK / Menu: the menu for the focused program (in full screen, the
+/// The full menu reached from the program header (in full screen, the
 /// playing channel's current program).
 pub fn open(ui: Ui) {
     let now = ui.focus.with(|f| f.now);
@@ -140,6 +142,10 @@ pub fn open(ui: Ui) {
 }
 
 pub fn open_for(ui: Ui, channel: usize, minute: i32) {
+    open_program_at(ui, channel, minute, current_list(ui), false);
+}
+
+fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_context: bool) {
     let schedule = crate::runtime_owner::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
@@ -149,14 +155,15 @@ pub fn open_for(ui: Ui, channel: usize, minute: i32) {
         channel,
         program_start: program.start,
     };
-    let list = current_list(ui);
     let rows = program_rows(ui, origin, program, &list);
     crate::recordings_view::remember(ui, origin);
     let target = Target::Program {
         channel: key,
         start: program.start,
     };
-    ui.menu.set(Some(Menu::new(rows, target, list)));
+    let mut menu = Menu::new(rows, target, list);
+    menu.playing_context = playing_context;
+    ui.menu.set(Some(menu));
 }
 
 fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &ListId) -> Vec<Row> {
@@ -232,10 +239,16 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
 
 /// The player list has no timeline cursor. Its channel actions use the live block.
 pub fn open_channel(ui: Ui, channel: usize) {
-    open_channel_at(ui, channel, crate::clock::now_minute(), current_list(ui));
+    open_channel_at(
+        ui,
+        channel,
+        crate::clock::now_minute(),
+        current_list(ui),
+        false,
+    );
 }
 
-fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
+fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_context: bool) {
     let schedule = crate::runtime_owner::schedule();
     let Some(key) = schedule.channel_key(channel) else {
         return;
@@ -247,7 +260,7 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
     };
     let offset = crate::player::guide_offset(&*schedule, channel);
     let rows = channel_rows(ui, origin, &list, true);
-    ui.menu.set(Some(Menu::new(
+    let mut menu = Menu::new(
         rows,
         Target::Channel {
             channel: key,
@@ -255,20 +268,34 @@ fn open_channel_at(ui: Ui, channel: usize, minute: i32, list: ListId) {
             offset,
         },
         list,
-    )));
+    );
+    menu.playing_context = playing_context;
+    ui.menu.set(Some(menu));
 }
 
 fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row> {
     // Only the main window opens player windows.
     let new_window = ((crate::host::LINUX || crate::host::MACOS) && ui.player_surface == 0)
         .then(|| crate::desktop::player_windows::can_open(ui, origin.channel));
-    channel_menu(
+    let mut rows = channel_menu(
         current
             .then(|| crate::recordings_view::channel_menu_action(ui, origin))
             .flatten(),
         new_window,
         channel_scope(ui, list).is_some(),
-    )
+    );
+    if !current {
+        for row in &mut rows {
+            if let Row::Action {
+                item: MenuItem::ProgramActions,
+                enabled,
+            } = row
+            {
+                *enabled = false;
+            }
+        }
+    }
+    rows
 }
 
 fn menu_channel(target: &Target) -> Option<usize> {
@@ -320,7 +347,16 @@ pub(crate) fn invalidate_shifted_context(
         .update(|state| state.invalidate_context(shifted));
 }
 
-/// Closes the menu or popover, keeping focus on its guide selection.
+/// Back from full options restores their compact context and its focus.
+pub fn back(ui: Ui) {
+    if let Some(parent) = ui.menu.with(|menu| menu.as_ref()?.parent.clone()) {
+        ui.menu.set(Some(*parent));
+        return;
+    }
+    close(ui);
+}
+
+/// Dismisses the entire menu or popover, keeping its guide selection.
 pub fn close(ui: Ui) {
     if let Some(list) = ui.menu.with(|menu| {
         let menu = menu.as_ref()?;
@@ -400,6 +436,22 @@ pub fn perform(ui: Ui, item: MenuItem) {
         });
         return;
     }
+    let parent = (item == MenuItem::ProgramActions)
+        .then(|| ui.menu.get_untracked())
+        .flatten()
+        .map(|mut parent| {
+            // Touch and pointer activation do not move key focus first.
+            // Back returns to the action that opened the full options.
+            if let Some(focus) = parent.rows.iter().position(|row| {
+                *row == Row::Action {
+                    item,
+                    enabled: true,
+                }
+            }) {
+                parent.focus = focus;
+            }
+            parent
+        });
     ui.menu.set(None);
     let scope = list
         .resolve(&*crate::runtime_owner::schedule())
@@ -409,6 +461,43 @@ pub fn perform(ui: Ui, item: MenuItem) {
     }
     let channel = menu_channel(&target);
     if channel.is_none() && target != Target::Group {
+        return;
+    }
+    if item == MenuItem::ProgramActions {
+        let Some(origin) = program_origin(&target) else {
+            return;
+        };
+        let Target::Channel {
+            program, offset, ..
+        } = &target
+        else {
+            return;
+        };
+        let schedule = crate::runtime_owner::schedule();
+        if origin_program(&*schedule, origin) != *program
+            || crate::player::guide_offset(&*schedule, origin.channel) != *offset
+        {
+            open_channel_at(
+                ui,
+                origin.channel,
+                origin.program_start,
+                list,
+                playing_context,
+            );
+            return;
+        }
+        open_program_at(
+            ui,
+            origin.channel,
+            origin.program_start,
+            list,
+            playing_context,
+        );
+        ui.menu.update(|menu| {
+            if let Some(menu) = menu {
+                menu.parent = parent.map(Box::new);
+            }
+        });
         return;
     }
     if let Target::Channel {
@@ -427,14 +516,20 @@ pub fn perform(ui: Ui, item: MenuItem) {
             || origin_program(&*schedule, origin) != program
             || !crate::recordings_view::perform_channel_action(ui, origin, item)
         {
-            open_channel_at(ui, origin.channel, program.start, list);
+            open_channel_at(ui, origin.channel, program.start, list, playing_context);
         }
         return;
     }
     match item {
         MenuItem::ChannelActions => {
             if let Some(origin) = program_origin(&target) {
-                open_channel_at(ui, origin.channel, origin.program_start, list);
+                open_channel_at(
+                    ui,
+                    origin.channel,
+                    origin.program_start,
+                    list,
+                    playing_context,
+                );
             }
         }
         MenuItem::BlockChannel | MenuItem::BlockGroup => {
@@ -1389,21 +1484,18 @@ pub fn open_at(ui: Ui, channel: usize) {
         crate::lists::tap(ui, channel, minute);
         crate::browse_playback::hold(ui);
         let minute = ui.focus.with_untracked(|focus| focus.cursor);
-        open_channel_at(ui, channel, minute, current_list(ui));
+        open_channel_at(ui, channel, minute, current_list(ui), false);
     });
 }
 
-/// A right-click or long press on a timeline cell keeps focus on that
-/// program and holds autoplay. Desktop and tablet use the channel menu.
+/// The timeline's shared context action: a remote's Menu or Long OK,
+/// a touch hold, or a right-click. Keep the focused program and hold
+/// autoplay while opening the same compact channel actions on every device.
 pub fn open_timeline_context(ui: Ui) {
     crate::browse_playback::hold(ui);
-    if matches!(idiom(), Idiom::Desktop | Idiom::Pad) {
-        if let Some(channel) = crate::lists::focused_channel(ui) {
-            let minute = ui.focus.with_untracked(|focus| focus.cursor);
-            open_channel_at(ui, channel, minute, current_list(ui));
-        }
-    } else {
-        open(ui);
+    if let Some(channel) = crate::lists::focused_channel(ui) {
+        let minute = ui.focus.with_untracked(|focus| focus.cursor);
+        open_channel_at(ui, channel, minute, current_list(ui), false);
     }
 }
 

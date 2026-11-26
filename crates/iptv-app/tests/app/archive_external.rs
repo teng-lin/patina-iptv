@@ -243,7 +243,7 @@ fn previous(app: &mut Headless) {
 }
 
 fn menu_replay(app: &mut Headless) {
-    step(app.press_key("m"));
+    personalization::open_program_menu_with_keys(app);
     step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
     step(app.press("id:menu-panel >> text:Play from the beginning"));
 }
@@ -373,27 +373,51 @@ fn fullscreen_restart_keeps_the_playing_channel_outside_the_browse_group() {
     if app.screen().matches("id:menu-panel").unwrap() {
         step(app.back());
     }
+    // The first News archive legitimately falls back from its external player.
+    // Clear that setup notice before checking for a new Sport policy fallback.
+    step(app.wait_for_gone(
+        "text:No external player is installed, so this channel plays here.",
+        WAIT,
+    ));
     back_to_guide(app);
     personalization::group(app, "Sport");
     // The ordinary fullscreen shortcut keeps channel A while the guide is on B.
     step(app.press_key("f"));
-    step(app.press_key("shift+f10"));
-    step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
-    let before = iptv_app::player_opens(0);
-    let published = sources.lock().unwrap().len();
-    step(app.press("id:menu-panel >> text:Play from the beginning"));
-    step(
-        app.wait_until("one restart of the captured playing channel", WAIT, |_| {
-            iptv_app::player_opens(0) == before + 1 && sources.lock().unwrap().len() > published
-        }),
-    );
-    exact_archive(sources.lock().unwrap().last().unwrap(), at + 3600);
-    assert_eq!(iptv_app::player_opens(0), before + 1);
-    assert!(
-        !app.screen()
-            .matches("id:menu-panel >> text:Turn off external player")
-            .unwrap()
-    );
+    for nested in [false, true] {
+        step(app.press_key("shift+f10"));
+        step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
+        if nested {
+            step(app.press("id:menu-panel >> text:Channel actions…"));
+            step(app.wait_for("id:menu-panel >> text:More options"));
+            step(app.press("id:menu-panel >> text:More options"));
+            step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
+            step(app.back());
+            step(app.wait_for("id:menu-panel >> text:More options"));
+            step(app.press("id:menu-panel >> text:More options"));
+            step(app.wait_for("id:menu-panel >> text:Play from the beginning"));
+        }
+        let before = iptv_app::player_opens(0);
+        let published = sources.lock().unwrap().len();
+        step(app.press("id:menu-panel >> text:Play from the beginning"));
+        step(
+            app.wait_until("one restart of the captured playing channel", WAIT, |_| {
+                iptv_app::player_opens(0) == before + 1 && sources.lock().unwrap().len() > published
+            }),
+        );
+        exact_archive(sources.lock().unwrap().last().unwrap(), at + 3600);
+        assert_eq!(iptv_app::player_opens(0), before + 1);
+        assert!(
+            !app.screen()
+                .matches("id:menu-panel >> text:Turn off external player")
+                .unwrap()
+        );
+        assert!(
+            !app.screen()
+                .matches("text:No external player is installed, so this channel plays here.")
+                .unwrap(),
+            "the playing channel must not borrow Sport's external-player preference"
+        );
+    }
 }
 
 #[cfg(target_os = "linux")]
