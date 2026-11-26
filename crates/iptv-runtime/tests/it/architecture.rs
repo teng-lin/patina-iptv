@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 const DEPENDENCIES: &[&str] = &[
     // Native update metadata transport and verification, plus atomic trust-state replacement.
     "futures-util",
+    "rustix", // Linux AppImage backup links, permission checks and atomic exchange.
     "tempfile",
     "tough",
     "url",
