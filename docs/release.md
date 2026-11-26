@@ -733,11 +733,11 @@ active recording defers the handoff. Keep production activation gated on the
 signed install-over-previous exercises in the proposal.
 
 Set `PATINA_APPIMAGE_HANDOFF=1` for AppImage rehearsals with the staging
-feed. AppRun identifies its open image by inode. About can replace that
+feed. AppRun records its image path’s device and inode at startup. About can replace that
 file after confirmation or save the verified image to a new name on a writable
 filesystem. Patina keeps playing until the viewer restarts it. Each replacement
 preserves the old image beside the installation as
 `<file>.<previous-version>.previous`. Keep that file until the new version
-opens the existing library. Restoring the executable alone cannot reverse a
+opens the existing library, then remove the backup when it is no longer needed. Restoring the executable alone cannot reverse a
 database migration. DEB, RPM and pacman users can download the corresponding
 package through About and apply it with their system package tool.

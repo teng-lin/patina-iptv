@@ -35,13 +35,16 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         let Some(parent) = destination.parent() else {
             return;
         };
+        if !owner
+            .can_stage_appimage(parent.to_owned(), Some(destination.clone()))
+            .await
+        {
+            return notify(tr("Choose a writable location and a new file name."));
+        }
         notify(tr("Downloading…"));
         let Some(file) = owner.download_update(asset, parent.to_owned()).await else {
             return notify(tr("Update download failed. Try again."));
         };
-        if !is_open(ui) {
-            return;
-        }
         if owner.save_appimage(destination, file).await {
             notify(tr("AppImage saved."));
         } else {
@@ -53,9 +56,15 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         return;
     }
     let Some(image) = image else { return };
+    if owner.recording_background_needed() {
+        return notify(tr("Finish recording before installing the update."));
+    }
     let Some(parent) = image.path().parent() else {
         return;
     };
+    if !owner.can_stage_appimage(parent.to_owned(), None).await {
+        return notify(tr("Could not replace the AppImage. Try Save as…"));
+    }
     notify(tr("Downloading…"));
     let Some(file) = owner.download_update(asset, parent.to_owned()).await else {
         return notify(tr(
@@ -83,7 +92,7 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         return notify(tr("Finish recording before installing the update."));
     }
     let Some(previous) = owner.replace_appimage(image, file).await else {
-        return notify(tr("Choose a writable location and a new file name."));
+        return notify(tr("Could not replace the AppImage. Try Save as…"));
     };
     let _ = alert_dialog()
         .title(tr("Restart Patina to use the update."))

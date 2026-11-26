@@ -1,8 +1,12 @@
 //! Full-file AppImage replacement on the same filesystem as the running image.
+use rustix::fs::{AtFlags, CWD, RenameFlags, linkat, renameat_with};
 use std::{
     fs::{self, File},
     io::{self, Read},
-    os::unix::fs::{MetadataExt, PermissionsExt},
+    os::{
+        fd::AsRawFd,
+        unix::fs::{MetadataExt, PermissionsExt},
+    },
     path::{Path, PathBuf},
 };
 use tempfile::TempPath;
@@ -15,19 +19,15 @@ pub struct RunningImage {
 }
 
 impl RunningImage {
-    /// AppRun keeps its actual image open across exec. A checkout, extracted
-    /// AppDir, renamed installation or already replaced image falls back to Save.
+    /// The AppImage launcher records the installed file's identity at startup.
     fn current() -> Option<Self> {
         let path = PathBuf::from(std::env::var_os("APPIMAGE")?);
-        let fd = std::env::var("PATINA_APPIMAGE_FD")
-            .ok()?
-            .parse::<u32>()
-            .ok()?;
-        let running = fs::metadata(format!("/proc/self/fd/{fd}")).ok()?;
+        let id = std::env::var("PATINA_APPIMAGE_ID").ok()?;
+        let (device, inode) = id.split_once(':')?;
         let image = Self {
             path,
-            device: running.dev(),
-            inode: running.ino(),
+            device: device.parse().ok()?,
+            inode: inode.parse().ok()?,
         };
         image.inspect().ok()?;
         Some(image)
@@ -37,14 +37,13 @@ impl RunningImage {
         &self.path
     }
 
+    fn matches(&self, meta: &fs::Metadata) -> bool {
+        meta.is_file() && meta.dev() == self.device && meta.ino() == self.inode
+    }
+
     fn inspect(&self) -> io::Result<()> {
         let meta = fs::symlink_metadata(&self.path)?;
-        if !self.path.is_absolute()
-            || !meta.is_file()
-            || meta.permissions().readonly()
-            || meta.dev() != self.device
-            || meta.ino() != self.inode
-        {
+        if !self.path.is_absolute() || meta.permissions().readonly() || !self.matches(&meta) {
             return Err(io::ErrorKind::InvalidInput.into());
         }
         Ok(())
@@ -54,27 +53,71 @@ impl RunningImage {
         let installed = File::open(&self.path)?;
         installed.try_lock().map_err(io::Error::other)?;
         self.inspect()?;
+        let installed_meta = installed.metadata()?;
+        if !self.matches(&installed_meta) {
+            return Err(io::ErrorKind::InvalidInput.into());
+        }
         let mut name = self.path.as_os_str().to_owned();
         name.push(concat!(".", env!("CARGO_PKG_VERSION"), ".previous"));
         let previous = PathBuf::from(name);
         let parent = self.path.parent().ok_or(io::ErrorKind::InvalidInput)?;
-        executable(&stage, installed.metadata()?.permissions().mode() & 0o755)?;
+        if !trusted_directory(parent) {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        executable(&stage, installed_meta.permissions().mode() & 0o755)?;
         let directory = File::open(parent)?;
-        match fs::hard_link(&self.path, &previous) {
+        let source = format!("/proc/self/fd/{}", installed.as_raw_fd());
+        match linkat(
+            CWD,
+            source.as_str(),
+            CWD,
+            &previous,
+            AtFlags::SYMLINK_FOLLOW,
+        )
+        .map_err(io::Error::from)
+        {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                 let backup = fs::symlink_metadata(&previous)?;
-                if !backup.is_file() || backup.dev() != self.device || backup.ino() != self.inode {
+                if !self.matches(&backup) {
                     return Err(e);
                 }
             }
             Err(e) => return Err(e),
         }
         directory.sync_all()?;
-        stage.persist(&self.path)?;
+        self.exchange(stage)?;
         directory.sync_all()?;
         Ok(previous)
     }
+
+    fn exchange(&self, stage: TempPath) -> io::Result<()> {
+        let candidate = fs::symlink_metadata(&stage)?;
+        let exchange = || renameat_with(CWD, &*stage, CWD, &self.path, RenameFlags::EXCHANGE);
+        exchange()?;
+        // The displaced inode tells us exactly what the atomic exchange replaced.
+        // An external rename immediately before the exchange must not lose a file.
+        if fs::symlink_metadata(&stage).is_ok_and(|old| self.matches(&old)) {
+            return Ok(());
+        }
+        let still_candidate = fs::symlink_metadata(&self.path)
+            .is_ok_and(|now| now.dev() == candidate.dev() && now.ino() == candidate.ino());
+        if !still_candidate || exchange().is_err() {
+            // The directory changed again: leave the displaced file available for recovery.
+            let _ = stage.keep();
+        }
+        Err(io::ErrorKind::AlreadyExists.into())
+    }
+}
+
+fn trusted_directory(path: &Path) -> bool {
+    // SAFETY: geteuid reads the calling process's effective user ID without arguments.
+    let uid = unsafe { libc::geteuid() };
+    fs::metadata(path).is_ok_and(|meta| {
+        meta.is_dir()
+            && (meta.uid() == uid || meta.uid() == 0)
+            && (meta.mode() & 0o022 == 0 || meta.mode() & 0o1000 != 0)
+    })
 }
 
 fn executable(path: &Path, permissions: u32) -> io::Result<()> {
@@ -92,6 +135,23 @@ fn executable(path: &Path, permissions: u32) -> io::Result<()> {
 }
 
 impl crate::Runtime {
+    pub async fn can_stage_appimage(
+        &self,
+        directory: PathBuf,
+        destination: Option<PathBuf>,
+    ) -> bool {
+        self.services()
+            .spawn_blocking(move || {
+                trusted_directory(&directory)
+                    && destination.is_none_or(|path| {
+                        fs::symlink_metadata(path)
+                            .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+                    })
+            })
+            .await
+            .unwrap_or(false)
+    }
+
     pub async fn running_appimage(&self) -> Option<RunningImage> {
         self.services()
             .spawn_blocking(RunningImage::current)
@@ -115,6 +175,9 @@ impl crate::Runtime {
         self.services()
             .spawn_blocking(move || {
                 let parent = destination.parent().ok_or(io::ErrorKind::InvalidInput)?;
+                if !trusted_directory(parent) {
+                    return Err(io::ErrorKind::PermissionDenied.into());
+                }
                 executable(&stage, 0o700)?;
                 stage.persist_noclobber(&destination)?;
                 File::open(parent)?.sync_all()
@@ -158,6 +221,22 @@ mod tests {
         assert!(image.replace(staged(dir.path())).is_err());
         assert_eq!(fs::read(&previous).unwrap(), b"synthetic old image");
     }
+    #[test]
+    fn exchange_restores_a_file_changed_by_an_external_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Patina.AppImage");
+        let old = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        let meta = old.as_file().metadata().unwrap();
+        let image = RunningImage {
+            path: path.clone(),
+            device: meta.dev(),
+            inode: meta.ino(),
+        };
+        fs::write(&path, b"external replacement").unwrap();
+        assert!(image.exchange(staged(dir.path())).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"external replacement");
+    }
+
     #[test]
     fn invalid_download_readonly_image_and_existing_backup_preserve_the_installation() {
         let dir = tempfile::tempdir().unwrap();

@@ -75,9 +75,10 @@ export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 for hook in "$APPDIR"/apprun-hooks/*.sh; do
   [ ! -f "$hook" ] || source "$hook"
 done
-# Identify the mounted file by inode when a viewer later requests replacement.
-if [[ -n ${APPIMAGE:-} && -f $APPIMAGE ]] && exec {image_fd}<"$APPIMAGE"; then
-  export PATINA_APPIMAGE_FD=$image_fd
+# Record the launch path's identity without leaking a file descriptor to helpers.
+unset PATINA_APPIMAGE_ID
+if [[ -n ${APPIMAGE:-} && -f $APPIMAGE ]] && image_id=$(stat -Lc '%d:%i' -- "$APPIMAGE"); then
+  export PATINA_APPIMAGE_ID=$image_id
 fi
 cd "$APPDIR/usr/bin"
 RUN
