@@ -7,6 +7,8 @@ mod ios_device;
 
 #[cfg(target_os = "android")]
 mod android_transport;
+#[cfg(target_os = "linux")]
+mod casting;
 mod clock;
 mod external_player;
 pub(crate) use external_player::*;
@@ -63,6 +65,10 @@ pub(crate) const IMPORTS: bool = true;
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
+    #[cfg(target_os = "linux")]
+    {
+        ports.cast = Some(std::sync::Arc::new(casting::Sender));
+    }
     ports.background_recordings = crate::host::BUILT.background_recordings();
     ports.recording_schedule = recording_host::schedule;
     #[cfg(target_os = "android")]

@@ -19,7 +19,7 @@ use std::{
     },
     hash::BuildHasher,
     io,
-    net::TcpListener,
+    net::{IpAddr, SocketAddr, TcpListener},
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, Ordering},
@@ -83,6 +83,7 @@ impl Default for PlaybackPolicy {
 /// Owns the lifetime of one stream and all of its adaptive subresources.
 /// Its URL is a random capability, never logged or persisted.
 pub struct PlaybackRelay {
+    requests: Arc<std::sync::atomic::AtomicU64>,
     url: String,
     prefix: String,
     source_url: String,
@@ -97,6 +98,8 @@ pub struct PlaybackRelay {
 }
 
 struct Session {
+    cast_peer: Option<IpAddr>,
+    requests: Arc<std::sync::atomic::AtomicU64>,
     prefix: String,
     /// `http://127.0.0.1:<port>`: how a request names this relay when the
     /// player uses it as its proxy.
@@ -579,7 +582,7 @@ impl PlaybackRelay {
         headers: &[(String, String)],
         policy: PlaybackPolicy,
     ) -> Result<Self, FetchError> {
-        Self::start_inner(url, headers, policy, None)
+        Self::start_inner(url, headers, policy, None, None)
     }
 
     pub fn start_external(
@@ -587,10 +590,45 @@ impl PlaybackRelay {
         headers: &[(String, String)],
         policy: PlaybackPolicy,
     ) -> Result<(Self, ExternalAdmission), FetchError> {
+        Self::start_gated(url, headers, policy, None)
+    }
+
+    /// Serves opaque HLS routes on the interface of an established Cast connection.
+    /// Only the selected receiver is admitted. The caller grants upstream access
+    /// after the receiver's authenticated media request and policy revalidation.
+    pub fn start_cast(
+        url: &str,
+        headers: &[(String, String)],
+        policy: PlaybackPolicy,
+        listen: SocketAddr,
+        receiver: IpAddr,
+    ) -> Result<(Self, ExternalAdmission), FetchError> {
+        if listen.ip().is_unspecified()
+            || listen.ip().is_multicast()
+            || receiver.is_unspecified()
+            || receiver.is_multicast()
+            || listen.is_ipv4() != receiver.is_ipv4()
+        {
+            return Err(invalid("Invalid Cast interface"));
+        }
+        Self::start_gated(url, headers, policy, Some((listen, receiver)))
+    }
+
+    /// Capability-bearing GET and HEAD requests from the selected receiver.
+    pub fn cast_requests(&self) -> u64 {
+        self.requests.load(Ordering::Relaxed)
+    }
+
+    fn start_gated(
+        url: &str,
+        headers: &[(String, String)],
+        policy: PlaybackPolicy,
+        cast: Option<(SocketAddr, IpAddr)>,
+    ) -> Result<(Self, ExternalAdmission), FetchError> {
         let (state, _) = watch::channel(ExternalState::Waiting);
         let requested = Arc::new(AtomicBool::new(false));
         let gate = ExternalGate(state.clone(), requested.clone());
-        let relay = Self::start_inner(url, headers, policy, Some(gate))?;
+        let relay = Self::start_inner(url, headers, policy, Some(gate), cast)?;
         Ok((relay, ExternalAdmission(state, requested)))
     }
 
@@ -599,6 +637,7 @@ impl PlaybackRelay {
         headers: &[(String, String)],
         policy: PlaybackPolicy,
         external_gate: Option<ExternalGate>,
+        cast: Option<(SocketAddr, IpAddr)>,
     ) -> Result<Self, FetchError> {
         let mut root = Url::parse(url).map_err(|_| invalid("Invalid playback URL"))?;
         if !matches!(root.scheme(), "http" | "https") {
@@ -608,7 +647,11 @@ impl PlaybackRelay {
         let mut random = [0u8; 24];
         getrandom::fill(&mut random).map_err(io_error)?;
         let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
-        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).map_err(io_error)?;
+        let listener = TcpListener::bind(cast.map_or_else(
+            || SocketAddr::from(([127, 0, 0, 1], 0)),
+            |(listen, _)| listen,
+        ))
+        .map_err(io_error)?;
         listener.set_nonblocking(true).map_err(io_error)?;
         let proxy = format!("http://{}", listener.local_addr().map_err(io_error)?);
         let path = format!("/{token}/");
@@ -648,7 +691,9 @@ impl PlaybackRelay {
                 .or_insert(auth.clone());
         }
         let source_url = url.to_owned();
-        let url = if external_gate.is_some() {
+        let url = if cast.is_some() {
+            format!("{prefix}stream.m3u8")
+        } else if external_gate.is_some() {
             format!("{prefix}stream{}", media_suffix(&root))
         } else {
             map_url(&prefix, &root)?
@@ -656,7 +701,10 @@ impl PlaybackRelay {
         let error = Arc::new(Mutex::new(None));
         #[cfg(any(test, feature = "test-support"))]
         let write_timeouts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let session = Arc::new(Session {
+            requests: requests.clone(),
+            cast_peer: cast.map(|(_, peer)| peer),
             prefix,
             proxy: proxy.clone(),
             path,
@@ -713,10 +761,11 @@ impl PlaybackRelay {
                             _ = &mut stopped => break,
                             Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
                             connection = listener.accept(), if tasks.len() < MAX_CONNECTIONS => {
-                                let Ok((socket, _)) = connection else {
+                                let Ok((socket, remote)) = connection else {
                                 tokio::time::sleep(Duration::from_millis(50)).await;
                                 continue;
                             };
+                                if session.cast_peer.is_some_and(|peer| peer != remote.ip()) { continue; }
                                 let session = session.clone();
                                 tasks.spawn(async move { let _ = serve(socket, &session).await; });
                             }
@@ -728,6 +777,7 @@ impl PlaybackRelay {
             })
             .map_err(io_error)?;
         Ok(Self {
+            requests,
             prefix,
             url,
             source_url,
@@ -917,6 +967,16 @@ fn apply_hls_directives(url: &mut Url, query: &str) -> Result<(), FetchError> {
     Ok(())
 }
 
+impl Session {
+    fn cors(&self) -> &'static str {
+        if self.cast_peer.is_some() {
+            "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range, If-Range\r\nAccess-Control-Expose-Headers: Content-Range, Accept-Ranges\r\n"
+        } else {
+            ""
+        }
+    }
+}
+
 async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     let request = read_request(&mut socket, session).await?;
     let mut lines = request.split("\r\n");
@@ -932,7 +992,11 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     let mut opaque_route = None;
     let (raw_key, target) = if let Some(routes) = &session.opaque {
         let (id, query) = target.split_once('?').unwrap_or((target, ""));
-        let suffix = media_suffix(&session.root);
+        let suffix = if session.cast_peer.is_some() {
+            ".m3u8"
+        } else {
+            media_suffix(&session.root)
+        };
         let root = id.strip_prefix("stream") == Some(suffix);
         let resolved = routes.lock().ok().and_then(|routes| {
             if root {
@@ -984,6 +1048,16 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             .entry(session.root.origin())
             .or_default() += 1;
     }
+    if session.cast_peer.is_some() {
+        if method == "OPTIONS" {
+            let response = format!(
+                "HTTP/1.1 204 No Content\r\nConnection: close\r\n{}\r\n",
+                session.cors()
+            );
+            return send_bytes(session, &mut socket, response.as_bytes()).await;
+        }
+        session.requests.fetch_add(1, Ordering::Relaxed);
+    }
     if !matches!(method, "GET" | "HEAD") || !matches!(target.scheme(), "http" | "https") {
         return answer(session, &mut socket, head_only, 400, b"Unsupported request").await;
     }
@@ -1029,6 +1103,11 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
         {
             headers.insert(name, value);
         }
+    }
+    let cast_root = session.cast_peer.is_some() && opaque_route.is_some_and(|(_, root)| root);
+    if cast_root {
+        headers.remove("range");
+        headers.remove("if-range");
     }
     let prepared = Prepared {
         public_only: session.policy.public_only || target.origin() != session.root.origin(),
@@ -1150,7 +1229,7 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
     let hls = kind == Manifest::Hls;
     let dash = kind == Manifest::Xml;
     let final_url = response.url().clone();
-    if kind == Manifest::Unsupported {
+    if kind == Manifest::Unsupported || (cast_root && !hls) {
         if let Ok(mut error) = session.error.lock() {
             *error = Some(FetchErrorKind::Unsupported);
         }
@@ -1260,7 +1339,8 @@ async fn serve(mut socket: TcpStream, session: &Session) -> io::Result<()> {
             "application/dash+xml"
         };
         let head = format!(
-            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: {mime}\r\nContent-Length: {}\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nConnection: close\r\n{}Content-Type: {mime}\r\nContent-Length: {}\r\n\r\n",
+            session.cors(),
             body.len()
         );
         send_bytes(session, &mut socket, head.as_bytes()).await?;
@@ -1344,6 +1424,7 @@ async fn stream_response(
     head_only: bool,
 ) -> io::Result<()> {
     let mut head = response_head(&response);
+    head.push_str(session.cors());
     if let Some(length) = length {
         head.push_str(&format!("Content-Length: {length}\r\n"));
     }
@@ -1477,10 +1558,15 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 /// capability is compared in one piece once all of it is there and in
 /// constant time: neither a partial token nor the time of a refusal says
 /// how much of a guess was right.
-fn admit(head: &[u8], proxy: &str, capability: &str) -> Admission {
+fn admit(head: &[u8], proxy: &str, capability: &str, cast: bool) -> Admission {
     let target = match (after(head, b"GET "), after(head, b"HEAD ")) {
         (Ok(target), _) | (_, Ok(target)) => target,
         (Err(true), _) | (_, Err(true)) => return Admission::Undecided,
+        _ if cast => match after(head, b"OPTIONS ") {
+            Ok(target) => target,
+            Err(true) => return Admission::Undecided,
+            Err(false) => return Admission::Refused,
+        },
         _ => return Admission::Refused,
     };
     let path = if target.first().is_none_or(|byte| *byte == b'/') {
@@ -1516,7 +1602,12 @@ async fn read_request(socket: &mut TcpStream, session: &Session) -> io::Result<S
     let mut buf = [0; 1024];
     loop {
         if !admitted {
-            match admit(&bytes, &session.proxy, &session.path) {
+            match admit(
+                &bytes,
+                &session.proxy,
+                &session.path,
+                session.cast_peer.is_some(),
+            ) {
                 Admission::Admitted => admitted = true,
                 Admission::Undecided => {}
                 Admission::Refused => return Err(refused()),
@@ -1547,7 +1638,8 @@ async fn answer(
     body: &[u8],
 ) -> io::Result<()> {
     let head = format!(
-        "HTTP/1.1 {status} Error\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        "HTTP/1.1 {status} Error\r\nConnection: close\r\n{}Content-Length: {}\r\n\r\n",
+        session.cors(),
         body.len()
     );
     send_bytes(session, socket, head.as_bytes()).await?;
@@ -1568,7 +1660,8 @@ async fn external_failure(
     }
     let body = b"Requested range is not satisfiable";
     let mut head = format!(
-        "HTTP/1.1 416 Range Not Satisfiable\r\nConnection: close\r\nContent-Length: {}\r\n",
+        "HTTP/1.1 416 Range Not Satisfiable\r\nConnection: close\r\n{}Content-Length: {}\r\n",
+        session.cors(),
         body.len(),
     );
     let mut ranges = response.headers().get_all("content-range").iter();
@@ -1692,7 +1785,7 @@ mod tests {
     const CAPABILITY: &str = "/0123456789abcdef0123456789abcdef0123456789abcdef/";
 
     fn admitted(head: &str) -> Admission {
-        admit(head.as_bytes(), PROXY, CAPABILITY)
+        admit(head.as_bytes(), PROXY, CAPABILITY, false)
     }
 
     #[test]
@@ -1753,10 +1846,10 @@ mod tests {
             guess[position] = if guess[position] == b'f' { b'0' } else { b'f' };
             let mut head = b"GET ".to_vec();
             head.extend_from_slice(&guess);
-            assert_eq!(admit(&head, PROXY, CAPABILITY), Admission::Refused);
+            assert_eq!(admit(&head, PROXY, CAPABILITY, false), Admission::Refused);
             for cut in 4..head.len() {
                 assert_eq!(
-                    admit(&head[..cut], PROXY, CAPABILITY),
+                    admit(&head[..cut], PROXY, CAPABILITY, false),
                     Admission::Undecided,
                     "a partial guess wrong at {position} was judged at {cut}"
                 );
@@ -1987,6 +2080,37 @@ mod tests {
         let (mut socket, _) = upstream_request(&upstream).await;
         socket.write_all(failure).await.unwrap();
         assert_eq!(get.await.unwrap(), format!("{head}Playback request failed"));
+    }
+
+    #[tokio::test]
+    async fn cast_preflight_neither_admits_nor_fetches_and_errors_include_cors() {
+        let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source = format!("http://{}/generated.m3u8", upstream.local_addr().unwrap());
+        let (relay, gate) = PlaybackRelay::start_cast(
+            &source,
+            &[],
+            PlaybackPolicy::default(),
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            IpAddr::from([127, 0, 0, 1]),
+        )
+        .unwrap();
+        let preflight = raw_local_request("OPTIONS", relay.url().into()).await;
+        assert!(preflight.starts_with("HTTP/1.1 204"));
+        assert!(preflight.contains("Access-Control-Allow-Origin: *"));
+        assert!(preflight.contains("Access-Control-Allow-Private-Network: true"));
+        assert!(!gate.received_request());
+        assert_eq!(relay.cast_requests(), 0);
+        drop(gate);
+        let refused = raw_local_request("GET", relay.url().into()).await;
+        assert!(refused.starts_with("HTTP/1.1 403"));
+        assert!(refused.contains("Access-Control-Allow-Origin: *"));
+        assert_eq!(relay.cast_requests(), 1);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), upstream.accept())
+                .await
+                .is_err()
+        );
+        relay.shutdown().await;
     }
 
     async fn raw_local_request(method: &'static str, target: String) -> String {

@@ -31,6 +31,8 @@ const MAX_ROWS: usize = 7;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Picture,
+    Cast,
+    CastRemote,
     More,
     Volume,
     Sleep,
@@ -81,6 +83,18 @@ pub(super) fn open_more(
     }));
 }
 
+pub(crate) fn show_receivers(ui: Ui, receivers: Vec<iptv_core::cast::Receiver>) {
+    let len = receivers.len();
+    ui.chooser.set(Some(Open {
+        kind: Kind::Cast,
+        list: Chooser::new(len, 0),
+        labels: receivers.iter().map(|r| r.name.clone()).collect(),
+        values: receivers.iter().map(|r| r.address.to_string()).collect(),
+        tracks: None,
+        more: None,
+    }));
+}
+
 fn picture_label(size: PictureSize) -> &'static str {
     match size {
         PictureSize::Normal => tr("Normal"),
@@ -123,6 +137,8 @@ fn title(kind: Kind) -> &'static str {
         Kind::Track(Track::Text) => tr("Subtitles"),
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
+        Kind::Cast => tr("Cast to TV"),
+        Kind::CastRemote => tr("Casting through this device"),
         Kind::Leave => tr("Close Patina?"),
     }
 }
@@ -189,7 +205,15 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             Vec::new(),
             0,
         ),
-        Kind::More => (Vec::new(), Vec::new(), 0),
+        Kind::CastRemote => (
+            ["Pause", "Play", "Play here", "Stop casting"]
+                .into_iter()
+                .map(|s| tr(s).to_owned())
+                .collect(),
+            Vec::new(),
+            0,
+        ),
+        Kind::Cast | Kind::More => (Vec::new(), Vec::new(), 0),
         Kind::Volume => (
             (0..=10).map(|n| format!("{}%", n * 10)).collect(),
             Vec::new(),
@@ -341,6 +365,18 @@ pub fn pick(ui: Ui, index: usize) {
                 crate::play_bar::activate(ui, control, more.window);
             }
         }
+        Kind::Cast => {
+            if let (Some(name), Ok(address)) = (open.labels.get(index), value.parse()) {
+                crate::casting::select(
+                    ui,
+                    iptv_core::cast::Receiver {
+                        name: name.clone(),
+                        address,
+                    },
+                );
+            }
+        }
+        Kind::CastRemote => crate::casting::remote(ui, index),
         Kind::History => play_recent(ui, &value),
         Kind::Leave => {
             if index == 1 {
@@ -462,7 +498,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                             crate::play_bar::label(ui, *c.more.as_ref()?.controls.get(index)?)
                                 .to_owned()
                         }
-                        Kind::History | Kind::Volume => c.labels.get(index)?.clone(),
+                        Kind::Cast | Kind::History | Kind::Volume => c.labels.get(index)?.clone(),
                         Kind::Track(_) => c
                             .track_labels_in(crate::i18n::language())
                             .get(index)?
@@ -470,7 +506,11 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
                     let checked = match c.kind {
-                        Kind::History | Kind::More | Kind::Leave => false,
+                        Kind::History
+                        | Kind::Cast
+                        | Kind::CastRemote
+                        | Kind::More
+                        | Kind::Leave => false,
                         Kind::Volume => volume_index(ui) == index,
                         _ => c.list.selected == index,
                     };
@@ -482,8 +522,12 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
         let action = move || {
             ui.chooser.with(|c| {
-                c.as_ref()
-                    .is_some_and(|c| matches!(c.kind, Kind::More | Kind::Leave))
+                c.as_ref().is_some_and(|c| {
+                    matches!(
+                        c.kind,
+                        Kind::Cast | Kind::CastRemote | Kind::More | Kind::Leave
+                    )
+                })
             })
         };
         list_rows::row(size, ROW, mark)

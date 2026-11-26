@@ -74,6 +74,7 @@ jni = "0.21"
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+iptv-cast.workspace = true
 dbus-secret-service = { version = "4.1", features = ["crypto-rust"] }
 # The logind and portal sleep inhibitors while recording (host/native/keep_awake.rs).
 dbus = "0.9"

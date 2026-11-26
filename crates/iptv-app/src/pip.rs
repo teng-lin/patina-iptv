@@ -83,6 +83,9 @@ pub fn supported(ui: Ui) -> bool {
 
 /// Whether the control strip's button can open the window now.
 pub fn can_enter(ui: Ui) -> bool {
+    if ui.cast_remote.get() {
+        return false;
+    }
     let playing = playing(ui);
     ui.pip.with(|p| p.can_enter(playing))
 }
@@ -120,6 +123,10 @@ pub fn bind(ui: Ui) {
 /// The control strip's button: asks the host to open the window (on the
 /// desktops, opens the app's own).
 pub fn enter(ui: Ui) {
+    if ui.cast_remote.get_untracked() {
+        crate::settings_view::notify(crate::i18n::tr("Stop casting to open picture in picture."));
+        return;
+    }
     let playing = untracked(|| playing(ui));
     let mut asked = false;
     ui.pip.update(|p| asked = p.request(playing));

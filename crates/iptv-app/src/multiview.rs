@@ -107,6 +107,9 @@ pub fn disabled_reason(ui: Ui) -> Option<&'static str> {
 /// A session already open is not refused for a reason that disables it
 /// (the account's limit): its streams were admitted.
 pub fn availability(ui: Ui) -> Availability {
+    if ui.cast_remote.get() {
+        return Availability::Unavailable(iptv_presentation::capabilities::Reason::Casting);
+    }
     let mut offer = offer(ui);
     if let MultiviewOffer::Disabled(_) = offer
         && session(ui)

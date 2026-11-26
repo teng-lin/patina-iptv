@@ -1,6 +1,6 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use crate::commands::external_playback_check;
+use crate::commands::playback_handoff_check;
 use iptv_core::add_playlist::ImportId;
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
@@ -270,7 +270,7 @@ impl Runtime {
         Ok(self
             .services()
             .read(move |store| {
-                Ok(external_playback_check(store, &authority, &group, access)?.is_some())
+                Ok(playback_handoff_check(store, &authority, Some(&group), access)?.is_some())
             })
             .await?)
     }
@@ -285,7 +285,20 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .call(move |store| external_playback_check(store, &authority, &group, access))
+            .call(move |store| playback_handoff_check(store, &authority, Some(&group), access))
+            .await?)
+    }
+
+    /// Checks source identity and parental policy in store order before a Cast load
+    /// or opening the selected receiver's relay gate.
+    pub async fn authorize_cast_playback(
+        &self,
+        authority: ResolutionAuthority,
+    ) -> Result<Option<ExternalPlaybackAuthorization>, crate::Error> {
+        let access = self.parental_snapshot();
+        Ok(self
+            .services()
+            .call(move |store| playback_handoff_check(store, &authority, None, access))
             .await?)
     }
 

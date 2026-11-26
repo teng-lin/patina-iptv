@@ -151,10 +151,10 @@ fn channel_native(
     })
 }
 
-pub(crate) fn external_playback_check(
+pub(crate) fn playback_handoff_check(
     store: &Store,
     authority: &ResolutionAuthority,
-    group: &str,
+    external_group: Option<&str>,
     access: crate::parental::Snapshot,
 ) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
     let source = SourceId(authority.source());
@@ -165,9 +165,6 @@ pub(crate) fn external_playback_check(
             return Ok(None);
         };
         if !store.source_policy(source)?.enabled
-            || !store
-                .guide_group_preferences(source, group)?
-                .external_player
             || store.guide_channel_blocked(source, channel.as_str())?
         {
             return Ok(None);
@@ -175,13 +172,18 @@ pub(crate) fn external_playback_check(
         let Some(stored) = store.source(source)? else {
             return Ok(None);
         };
-        let scope = Kind::group_channels(group);
-        if !store
-            .ordered_guide_channels(source, &scope)?
-            .iter()
-            .any(|row| &row.channel.id == channel)
-        {
-            return Ok(None);
+        if let Some(group) = external_group {
+            let scope = Kind::group_channels(group);
+            if !store
+                .guide_group_preferences(source, group)?
+                .external_player
+                || !store
+                    .ordered_guide_channels(source, &scope)?
+                    .iter()
+                    .any(|row| &row.channel.id == channel)
+            {
+                return Ok(None);
+            }
         }
         let Some(row) = store.channel(source, channel)? else {
             return Ok(None);

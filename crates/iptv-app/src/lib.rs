@@ -44,6 +44,7 @@ pub use backup::{Pickers, set_pickers_for_test};
 mod browse_playback;
 mod capabilities;
 mod capture_limits;
+mod casting;
 mod channels_view;
 mod chooser;
 mod clock;
@@ -261,6 +262,8 @@ pub struct Ui {
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
+    pub(crate) cast_busy: Signal<bool>,
+    pub(crate) cast_remote: Signal<bool>,
     pub(crate) external_request: Signal<u64>,
     pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
     pub(crate) external_playback: Signal<Option<external_player::Active>>,
@@ -400,6 +403,8 @@ impl Ui {
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
+            cast_busy: signal(false),
+            cast_remote: signal(false),
             external_request: signal(0),
             external_handoff_target: signal(None),
             external_playback: signal(None),

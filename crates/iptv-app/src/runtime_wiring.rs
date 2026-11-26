@@ -47,7 +47,8 @@ pub(crate) fn start(ui: Ui) {
         let background = lifecycle() == nsh_core::platform::Lifecycle::Background;
         let target = crate::host::EXTERNAL_PLAYER
             .then(|| crate::external_player::handoff_target(ui))
-            .flatten();
+            .flatten()
+            .or_else(|| runtime().cast_parental_target());
         runtime().set_foreground_for_external(!background, target.as_ref());
         if was_background.replace(background) && !background && crate::host::ANDROID {
             crate::external_player::returned(ui);

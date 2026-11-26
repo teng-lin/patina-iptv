@@ -96,6 +96,15 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
+        if self.cast_busy.get_untracked() {
+            crate::settings_view::notify(crate::i18n::tr(
+                "Wait for the current cast request to finish.",
+            ));
+            return;
+        }
+        if playback != Playback::Live && crate::casting::local_blocked(*self) {
+            return;
+        }
         external_player::cancel_pending(*self);
         if !allow_guide_channel(channel) {
             return;
@@ -113,6 +122,12 @@ impl Ui {
             runtime().parental_content_left(&old);
         }
         if !parental_view::allow_play(*self, channel, playback) {
+            return;
+        }
+        if self.player_surface == 0
+            && playback == Playback::Live
+            && crate::casting::change(*self, channel)
+        {
             return;
         }
         if self.player_surface != 0 {
@@ -431,6 +446,10 @@ pub fn start(ui: &Ui, channel: usize) {
 }
 
 pub fn toggle_pause(ui: Ui) {
+    if ui.cast_remote.get_untracked() {
+        crate::casting::remote(ui, usize::from(ui.paused.get_untracked()));
+        return;
+    }
     crate::interruption::viewer_acted(ui);
     if crate::on_demand::active(ui)
         && ui.player.main().finished.get_untracked()
@@ -582,6 +601,9 @@ fn stop_current(ui: Ui, handoff: Option<&iptv_core::parental::Target>) {
 }
 
 pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource) {
+    if crate::casting::local_blocked(ui) {
+        return;
+    }
     crate::seek::cancel(ui);
     crate::vod_view::flush(ui);
     ui.player.vod.set(None);
@@ -615,6 +637,9 @@ pub fn play_vod(
     source: PlaySource,
     full_screen: bool,
 ) {
+    if crate::casting::local_blocked(ui) {
+        return;
+    }
     crate::interruption::viewer_acted(ui);
     crate::seek::cancel(ui);
     crate::on_demand::flush(ui, false);

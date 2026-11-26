@@ -31,6 +31,7 @@
 //! use iptv_runtime::stored::configs_from_sources;
 //! ```
 pub mod build_config;
+pub mod cast;
 pub mod data;
 mod error;
 mod events;
@@ -107,6 +108,8 @@ type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
+    cast: RefCell<Option<cast::Active>>,
+    cast_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
     recordings_detached: Cell<bool>,
@@ -180,6 +183,8 @@ impl Runtime {
         let guide_checks = guide_checks::GuideChecks::default();
         let schedule = Rc::new(SyntheticSchedule);
         Self {
+            cast: RefCell::default(),
+            cast_generation: Default::default(),
             parental: RefCell::default(),
             recordings,
             recordings_detached: Cell::new(false),

@@ -29,6 +29,7 @@ pub fn recordings_library_untracked(ui: Ui) -> bool {
 pub fn reason(reason: Reason) -> &'static str {
     use crate::i18n::tr;
     match reason {
+        Reason::Casting => tr("Stop casting to open multiview."),
         Reason::WaitingForPlayer => tr("Waiting for player availability"),
         Reason::UnsupportedPip => tr("Picture in picture is unavailable on this device"),
         Reason::PlaybackRequired => tr("Play a channel first"),
