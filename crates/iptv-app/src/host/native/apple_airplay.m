@@ -25,6 +25,7 @@ static void *PlayerObservation = &PlayerObservation;
 - (instancetype)initWithContext:(const void *)context emit:(StateCallback)emit;
 - (void)setSource:(NSURL *)source;
 - (void)command:(ProbeCommand)command;
+- (void)scheduleRefresh;
 - (void)invalidate;
 @end
 
@@ -139,6 +140,12 @@ static void *PlayerObservation = &PlayerObservation;
         _playIssued = NO;
         [_player pause];
         [_player replaceCurrentItemWithPlayerItem:[AVPlayerItem playerItemWithURL:_source]];
+        // Replacement can renegotiate or drop the external route. Read the
+        // player's new route on the next main-queue turn before issuing play.
+        _wasRouted = NO;
+        [self scheduleRefresh];
+        [self publish:ProbeWaiting external:_player.externalPlaybackActive];
+        return;
     }
     if (_player.currentItem.status == AVPlayerItemStatusFailed) {
         [_failedSources addObject:_source];
