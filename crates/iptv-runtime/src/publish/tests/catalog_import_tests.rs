@@ -110,6 +110,7 @@ impl Transport for Playlist {
         };
         Box::pin(std::future::ready(Ok(StreamingResponse {
             status: 200,
+            same_request_origin: false,
             content_length: Some(bytes.len() as u64),
             body: Body::new(PlaylistBody(MemoryBody::new(bytes, 8_192))),
         })))

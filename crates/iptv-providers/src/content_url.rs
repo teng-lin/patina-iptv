@@ -1,4 +1,4 @@
-//! URLs supplied by playlist/guide content never grant access to local resources.
+//! URLs supplied by content cannot grant new access to local resources.
 //! DNS answers must additionally be checked and pinned by the transport adapter.
 use std::{fmt, net::IpAddr};
 
@@ -52,6 +52,30 @@ pub fn validate_picked(value: &str) -> Result<(), ContentUrlError> {
         Ok(())
     } else {
         Err(ContentUrlError)
+    }
+}
+
+/// The exact origin of an explicitly picked loopback HTTP(S) playlist.
+#[derive(Clone)]
+pub struct LoopbackOrigin(url::Origin);
+
+impl LoopbackOrigin {
+    pub fn picked_playlist(value: &str) -> Option<Self> {
+        let url = url::Url::parse(value.trim()).ok()?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return None;
+        }
+        let loopback = match url.host()? {
+            url::Host::Ipv4(ip) => ip.is_loopback(),
+            url::Host::Ipv6(ip) => ip.is_loopback(),
+            url::Host::Domain(host) => host.trim_end_matches('.') == "localhost",
+        };
+        loopback.then(|| Self(url.origin()))
+    }
+
+    pub fn contains(&self, value: &str) -> bool {
+        url::Url::parse(value.trim())
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.origin() == self.0)
     }
 }
 

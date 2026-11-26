@@ -418,6 +418,33 @@ fn unusable_stream_entries_do_not_reject_other_channels() {
     assert_channels(&stage.channels);
 }
 
+#[test]
+fn picked_loopback_playlist_accepts_only_its_own_origin() {
+    let picked = config("http://127.0.0.1:18097/lineup.m3u");
+    for (same_request_origin, url, accepted) in [
+        (true, "http://127.0.0.1:18097/live.ts", true),
+        (true, "http://127.0.0.1:18098/live.ts", false),
+        (true, "http://10.0.0.1:18097/live.ts", false),
+        (true, "https://media.example.test/live.ts", true),
+        (false, "http://127.0.0.1:18097/live.ts", false),
+    ] {
+        let mut fetch = FakeFetch::body(format!("#EXTM3U\n#EXTINF:-1,Synthetic\n{url}\n"));
+        fetch.same_request_origin = same_request_origin;
+        let mut stage = Stage::default();
+        let result = block_on(iptv_import::import_source_into(
+            &fetch,
+            &picked,
+            &ImportOptions::new(synth::NOW),
+            &mut NoProgress,
+            &CancelToken::new(),
+            &mut stage,
+        ));
+        assert_eq!(result.is_ok(), accepted, "{url}");
+        assert_eq!(stage.finished, accepted, "{url}");
+        assert_eq!(stage.channels.len(), usize::from(accepted), "{url}");
+    }
+}
+
 #[derive(Default)]
 struct Stage {
     channels: Vec<iptv_providers::model::Channel>,

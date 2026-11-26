@@ -235,6 +235,7 @@ impl Transport for Page {
                 .await?;
             Ok(StreamingResponse {
                 status: response.status,
+                same_request_origin: response.same_request_origin,
                 content_length: response.content_length,
                 body: Body::new(PageBody {
                     body: Some(response.body),

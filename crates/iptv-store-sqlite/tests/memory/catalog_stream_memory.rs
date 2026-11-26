@@ -66,6 +66,7 @@ impl Fetch for Generated {
     ) -> Result<StreamingResponse<Body>, FetchError> {
         Ok(StreamingResponse {
             status: 200,
+            same_request_origin: false,
             content_length: None,
             body: Body {
                 small: if request.url.contains("get_account_info")

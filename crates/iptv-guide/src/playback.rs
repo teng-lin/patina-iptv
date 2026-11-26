@@ -16,6 +16,7 @@ use std::cell::RefCell;
 
 use iptv_core::playback::PlaySource;
 use iptv_providers::CatchupError;
+use iptv_providers::content_url::LoopbackOrigin;
 use iptv_providers::m3u::{
     CatchupRequest, DEFAULT_CATCHUP_WINDOW_DAYS, build_catchup_url, expand_live_url,
 };
@@ -107,6 +108,7 @@ impl ResolutionAuthority {
 #[derive(Clone)]
 enum Inner {
     M3u {
+        loopback: Option<LoopbackOrigin>,
         user_agent: Option<String>,
         referrer: Option<String>,
     },
@@ -160,6 +162,7 @@ impl PlaybackContext {
         };
         Self {
             inner: Inner::M3u {
+                loopback: LoopbackOrigin::picked_playlist(config.location.expose()),
                 user_agent: clean(&config.user_agent),
                 referrer: clean(&config.referrer),
             },
@@ -225,6 +228,7 @@ impl PlaybackContext {
             Inner::M3u {
                 user_agent,
                 referrer,
+                ..
             } => {
                 let mut h = Vec::new();
                 if let Some(ua) = user_agent {
@@ -368,6 +372,13 @@ fn channel_headers(channel: &Channel) -> &[(String, String)] {
 fn source(context: Option<&PlaybackContext>, url: String, channel: &Channel) -> PlaySource {
     let headers = context.map_or_else(Vec::new, |c| c.headers(&url));
     let public_only = match (&channel.stream, context.map(|c| &c.inner)) {
+        (
+            StreamLocator::Url { .. },
+            Some(Inner::M3u {
+                loopback: Some(origin),
+                ..
+            }),
+        ) => !origin.contains(&url),
         (StreamLocator::Xtream { .. }, Some(Inner::Xtream { client, .. })) => {
             client.stream_must_be_public(&url)
         }
@@ -482,6 +493,7 @@ mod diagnostic_regression {
     fn contexts_pending_commands_and_resolutions_redact_secrets() {
         let context = PlaybackContext {
             inner: Inner::M3u {
+                loopback: None,
                 user_agent: Some("synthetic-private-marker".into()),
                 referrer: Some("synthetic-private-marker".into()),
             },

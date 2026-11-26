@@ -491,6 +491,7 @@ impl Fetch for HostFetch {
         pending.hand_over();
         Ok(StreamingResponse {
             status,
+            same_request_origin: false,
             content_length,
             body: HostBody {
                 id,

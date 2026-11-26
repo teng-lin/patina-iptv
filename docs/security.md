@@ -152,9 +152,12 @@ rasterizer, with external files, remote references and embedded images disabled.
 A public Xtream account keeps public-address checks enabled for its generated
 stream URLs. A deliberately selected LAN account permits its own scheme, host
 and effective port only; another origin does not inherit that exception. Stalker
-uses its private-portal/owned-host policy. Playlist-supplied direct links remain
-untrusted content. Redirect and subresource transport checks still apply. Explicit
-HTTP media remains unencrypted on the network even though catalog storage is encrypted.
+uses its private-portal/owned-host policy. In native builds, an explicitly
+entered loopback M3U address can provide streams from the same scheme, host
+and effective port when the playlist response comes from that origin. Other
+playlist-supplied destinations require public hosts. Redirect and subresource
+transport checks still apply. Explicit HTTP media remains unencrypted on the
+network even though catalog storage is encrypted.
 The compile-time `IPTV_RS_DEV_PLAYLIST` fixture hook is absent from release builds.
 
 ## Export, recordings and local authority
