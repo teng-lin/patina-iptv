@@ -113,7 +113,7 @@ impl RunningImage {
     }
 }
 
-struct StagingDirectory {
+pub struct StagingDirectory {
     name: PathBuf,
     directory: File,
 }
@@ -129,13 +129,18 @@ impl StagingDirectory {
         let directory = File::options()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-            .open(&name)?;
-        let meta = directory.metadata()?;
+            .open(&name)
+            .inspect_err(|_| {
+                // The entry was freshly created. Never recurse, including on a shared mount.
+                let _ = fs::remove_dir(&name);
+            })?;
+        let stage = Self { name, directory };
+        let meta = stage.directory.metadata()?;
         // SAFETY: geteuid reads the process's effective user ID without arguments.
         if meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 {
             return Err(io::ErrorKind::PermissionDenied.into());
         }
-        Ok(Self { name, directory })
+        Ok(stage)
     }
 
     fn path(&self) -> PathBuf {
@@ -209,17 +214,19 @@ impl crate::Runtime {
             .unwrap_or(false)
     }
 
-    pub async fn download_appimage(
-        &self,
-        asset: super::ReleaseAsset,
-        parent: PathBuf,
-    ) -> Option<StagedImage> {
-        let directory = self
-            .services()
+    pub async fn stage_appimage(&self, parent: PathBuf) -> Option<StagingDirectory> {
+        self.services()
             .spawn_blocking(move || StagingDirectory::new(&parent))
             .await
             .ok()?
-            .ok()?;
+            .ok()
+    }
+
+    pub async fn download_appimage(
+        &self,
+        asset: super::ReleaseAsset,
+        directory: StagingDirectory,
+    ) -> Option<StagedImage> {
         let file = self.download_update(asset, directory.path()).await?;
         Some(StagedImage {
             file,

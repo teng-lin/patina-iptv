@@ -742,5 +742,7 @@ preserves the old image beside the installation as
 `<file>.<previous-version>.previous`, adding its inode to the name if an earlier
 backup already occupies it. Keep that file until the new version
 opens the existing library, then remove the backup when it is no longer needed. Restoring the executable alone cannot reverse a
-database migration. DEB, RPM and pacman users can download the corresponding
+database migration. A hard interruption can also leave a hidden
+`.patina-update-*` directory beside the chosen file. After restarting, inspect
+its contents before removing it. DEB, RPM and pacman users can download the corresponding
 package through About and apply it with their system package tool.
