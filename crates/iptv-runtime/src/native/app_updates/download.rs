@@ -64,6 +64,8 @@ pub(super) async fn receive(
             .prefix("patina-update-")
             .suffix(if cfg!(target_os = "android") {
                 ".apk"
+            } else if cfg!(windows) {
+                ".exe"
             } else {
                 ".part"
             })

@@ -11,6 +11,8 @@ pub(crate) enum PackageAction {
     Install(iptv_runtime::app_updates::ReleaseAsset),
     #[cfg(target_os = "linux")]
     AppImage(iptv_runtime::app_updates::ReleaseAsset),
+    #[cfg(windows)]
+    Windows(iptv_runtime::app_updates::ReleaseAsset, &'static str),
     #[cfg(any(
         target_os = "linux",
         target_os = "windows",
@@ -25,6 +27,8 @@ impl PackageAction {
         match *self {
             #[cfg(target_os = "linux")]
             Self::AppImage(_) => crate::i18n::tr("Update AppImage"),
+            #[cfg(windows)]
+            Self::Windows(..) => crate::i18n::tr("Download and update"),
             #[cfg(target_os = "android")]
             Self::Install(_) => crate::i18n::tr("Download and update"),
             #[cfg(any(
@@ -43,6 +47,79 @@ impl PackageAction {
         match self {
             #[cfg(target_os = "linux")]
             Self::AppImage(asset) => linux::update(_ui, asset).await,
+            #[cfg(windows)]
+            Self::Windows(asset, publisher) => {
+                use crate::i18n::tr;
+                let owner = crate::runtime_owner::runtime();
+                if owner.recording_background_needed() {
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
+                crate::settings_view::notify(tr("Downloading…"));
+                let Some(stage) = owner
+                    .download_update(asset.clone(), std::env::temp_dir())
+                    .await
+                else {
+                    return crate::settings_view::notify(tr("Update download failed. Try again."));
+                };
+                if !crate::settings_view::updates::is_open(_ui) {
+                    return;
+                }
+                crate::settings_view::notify(tr("Verifying installer…"));
+                let Some(mut setup) = owner
+                    .prepare_windows_setup(
+                        stage,
+                        asset,
+                        publisher,
+                        tr("The installer could not be verified or opened."),
+                    )
+                    .await
+                else {
+                    return crate::settings_view::notify(tr(
+                        "The installer could not be verified or opened.",
+                    ));
+                };
+                if !crate::settings_view::updates::is_open(_ui) {
+                    return;
+                }
+                let confirmed = nsh_base::alert_dialog()
+                    .title(tr("Install update?"))
+                    .description(tr("Patina will close before the installer opens."))
+                    .action("install", tr("Install update"))
+                    .cancel("close", tr("Cancel"))
+                    .close_on_escape(true)
+                    .show()
+                    .await;
+                if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
+                    return;
+                }
+                if owner.recording_background_needed() {
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
+                if !owner.shutdown_recording_host() {
+                    return crate::settings_view::notify(tr(
+                        "The recording host is still closing. Try updating again.",
+                    ));
+                }
+                if owner.recording_background_needed() {
+                    owner.start_recordings();
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
+                if setup.install_after_exit() {
+                    crate::desktop::close_after_shutdown(_ui);
+                } else {
+                    owner.start_recordings();
+                    crate::settings_view::notify(tr(
+                        "The installer could not be verified or opened.",
+                    ));
+                }
+            }
+
             #[cfg(any(
                 target_os = "linux",
                 target_os = "windows",
@@ -187,6 +264,13 @@ pub(crate) async fn check(
                 && asset.url().ends_with(".AppImage")
             {
                 action = Some(PackageAction::AppImage(asset));
+            }
+            #[cfg(windows)]
+            if !preview
+                && let Some(publisher) = option_env!("PATINA_WINDOWS_PUBLISHER").map(str::trim)
+                && !publisher.is_empty()
+            {
+                action = Some(PackageAction::Windows(asset, publisher));
             }
             #[cfg(target_os = "android")]
             if option_env!("PATINA_APK_HANDOFF") == Some("1") && android_build.is_some() {

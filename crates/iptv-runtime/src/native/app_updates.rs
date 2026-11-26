@@ -5,6 +5,8 @@ pub mod appimage;
 mod download;
 mod selection;
 mod trust;
+#[cfg(windows)]
+mod windows;
 pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};
 
 use std::{sync::Arc, time::Duration};
