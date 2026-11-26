@@ -15,21 +15,23 @@ mkdir -p "$project/.nsh/rust" "$out"
 cp "$root/tools/ci/package.Cargo.lock" "$project/.nsh/rust/Cargo.lock"
 export PATINA_AIRPLAY_PROBE=1
 
-if [[ "$platform" == macos ]]; then
-  runtime="$root/target/mpv-runtime-macos"
-  fetch=(--platform macos --destination "$runtime")
-  if [[ -n "${PATINA_MPV_RUNTIME_MANIFEST:-}" ]]; then
-    fetch+=(--manifest "$PATINA_MPV_RUNTIME_MANIFEST")
-  elif [[ -z "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ]]; then
-    PATINA_MPV_RUNTIME_ARCHIVE=$(python3 tools/ci/native_candidates.py macos)
-  fi
-  if [[ -n "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ]]; then
-    fetch+=(--archive "$PATINA_MPV_RUNTIME_ARCHIVE")
-  fi
-  python3 tools/mpv-runtime-unix/runtime.py fetch "${fetch[@]}"
-  export PKG_CONFIG_PATH="$runtime/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-  export DYLD_FALLBACK_LIBRARY_PATH="$runtime/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
-else
+# NSH builds and executes a macOS descriptor even when packaging an iPad app.
+# Set its dyld path here, after macOS has launched the script interpreter.
+runtime="$root/target/mpv-runtime-macos"
+fetch=(--platform macos --destination "$runtime")
+if [[ -n "${PATINA_MPV_RUNTIME_MANIFEST:-}" ]]; then
+  fetch+=(--manifest "$PATINA_MPV_RUNTIME_MANIFEST")
+elif [[ -z "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ]]; then
+  PATINA_MPV_RUNTIME_ARCHIVE=$(python3 tools/ci/native_candidates.py macos)
+fi
+if [[ -n "${PATINA_MPV_RUNTIME_ARCHIVE:-}" ]]; then
+  fetch+=(--archive "$PATINA_MPV_RUNTIME_ARCHIVE")
+fi
+python3 tools/mpv-runtime-unix/runtime.py fetch "${fetch[@]}"
+export PKG_CONFIG_PATH="$runtime/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export DYLD_FALLBACK_LIBRARY_PATH="$runtime/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+
+if [[ "$platform" != macos ]]; then
   triple=aarch64-apple-ios
   [[ "$platform" != ios-simulator ]] || triple+=-sim
   rustup target add "$triple"
