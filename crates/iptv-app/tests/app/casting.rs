@@ -17,9 +17,18 @@ use std::{
 struct FakeCast {
     events: Arc<Mutex<Vec<&'static str>>>,
     states: Arc<Mutex<VecDeque<Result<RemoteState, Error>>>>,
+    next_command: Arc<Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
     load_error: Option<Error>,
     allow_error: Option<Error>,
     initially_paused: bool,
+}
+
+impl FakeCast {
+    fn hold_next_command(&self) -> tokio::sync::oneshot::Sender<()> {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        *self.next_command.lock().unwrap() = Some(receive);
+        send
+    }
 }
 
 impl Port for FakeCast {
@@ -59,17 +68,22 @@ impl Prepared for FakeCast {
 impl Remote for FakeCast {
     fn command(&self, command: Command) -> Task<'_, ()> {
         Box::pin(async move {
-            let mut events = self.events.lock().unwrap();
-            match command {
-                Command::Pause => events.push("pause"),
-                Command::Play => events.push("play"),
-                Command::Stop => {
-                    events.push("disconnected at stop");
-                    return Err(Error::Unavailable);
-                }
+            let event = match command {
+                Command::Pause => "pause",
+                Command::Play => "play",
+                Command::Stop => "disconnected at stop",
                 _ => panic!("unexpected control {command:?}"),
+            };
+            self.events.lock().unwrap().push(event);
+            let held = self.next_command.lock().unwrap().take();
+            if let Some(held) = held {
+                let _ = held.await;
             }
-            Ok(())
+            if command == Command::Stop {
+                Err(Error::Unavailable)
+            } else {
+                Ok(())
+            }
         })
     }
     fn state(&self) -> Task<'_, RemoteState> {
@@ -257,4 +271,104 @@ fn a_successful_status_resets_the_disconnect_budget() {
     ));
     assert!(fake.states.lock().unwrap().is_empty());
     assert_eq!(*fake.events.lock().unwrap(), ["load", "allow", "retire"]);
+}
+
+#[test]
+fn stop_during_a_failed_cast_channel_switch_keeps_local_playback_closed() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    let reply = fake.hold_next_command();
+    step(app.press("id:play-bar-next-channel"));
+    step(
+        app.wait_until("retiring old cast", Duration::from_secs(10), |_| {
+            fake.events
+                .lock()
+                .unwrap()
+                .contains(&"disconnected at stop")
+        }),
+    );
+    // Global Stop invalidates the switch ticket and queues its own stop intent.
+    // The outgoing receiver stays active in the owner until the worker returns.
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
+    reply.send(()).unwrap();
+    step(app.wait_for("text:Playback is no longer authorized."));
+    step(app.wait_for_gone("id:play-bar-next-channel", Duration::from_secs(3)));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "retire", "disconnected at stop"]
+    );
+}
+
+#[test]
+fn play_here_keeps_its_chooser_open_while_a_remote_command_finishes() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    let reply = fake.hold_next_command();
+    step(app.press("id:play-bar-play-pause"));
+    step(
+        app.wait_until("remote pause", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"pause")
+        }),
+    );
+    let here = "id:chooser-items >> text:Play here";
+    step(app.press(here));
+    assert!(app.screen().matches(here).unwrap());
+    reply.send(()).unwrap();
+    step(
+        app.wait_until("remote pause finished", Duration::from_secs(10), |screen| {
+            screen
+                .accessibility_state("id:play-bar-cast")
+                .is_ok_and(|state| !state.busy)
+        }),
+    );
+    step(app.press(here));
+    step(
+        app.wait_until("local playback", Duration::from_secs(10), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire", "disconnected at stop"]
+    );
+}
+
+#[test]
+fn a_global_stop_queued_during_pause_uses_its_own_cast_intent() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    let reply = fake.hold_next_command();
+    step(app.press("id:chooser-items >> text:Pause"));
+    step(
+        app.wait_until("remote pause", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"pause")
+        }),
+    );
+    // Each Stop replaces the preceding intent while the same command is pending.
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
+    step(app.press_remote(nsh_tv::RemoteKey::Stop));
+    reply.send(()).unwrap();
+    step(
+        app.wait_until("remote stopped", Duration::from_secs(10), |_| {
+            fake.events
+                .lock()
+                .unwrap()
+                .contains(&"disconnected at stop")
+        }),
+    );
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire", "disconnected at stop"]
+    );
 }
