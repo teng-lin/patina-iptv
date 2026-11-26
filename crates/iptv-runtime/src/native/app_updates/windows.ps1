@@ -10,7 +10,7 @@ try {
     $hash = [Security.Cryptography.SHA256]::Create()
     $digest = [BitConverter]::ToString($hash.ComputeHash($handle)).Replace('-', '')
     if ($digest -ine $env:PATINA_SETUP_DIGEST) { exit 1 }
-    $signature = Get-AuthenticodeSignature -LiteralPath $path
+    $signature = Microsoft.PowerShell.Security\Get-AuthenticodeSignature -LiteralPath $path
     if ($signature.Status -ne 'Valid' -or !$signature.TimeStamperCertificate -or
         ![string]::Equals($signature.SignerCertificate.Subject, $env:PATINA_SETUP_SUBJECT,
             [StringComparison]::Ordinal)) { exit 1 }
