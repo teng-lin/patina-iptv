@@ -617,10 +617,10 @@ keys KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP \
   KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP \
   KEYCODE_DPAD_UP KEYCODE_DPAD_UP
 keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_RIGHT KEYCODE_MENU
-expect "iptv playlists: Actions of $source_id([^0-9]|$)" 10
+expect "iptv playlists: Actions \\{[^}]*\\} of $source_id([^0-9]|$)" 10
 pause 1
-# Its first action is Show, then Refresh (one playlist: no Show all).
-keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+# The context menu starts on Rename, then Delete, then Refresh now.
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 expect "iptv playlists: refresh $source_id([^0-9]|$)" 10
 expect 'iptv data: refreshed ImportCounts' 180
 assert_resume "$before_refresh" "playback refresh"
