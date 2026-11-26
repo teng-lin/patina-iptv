@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "rust": "../../crates/iptv-app",
   "root": "AirPlayProbe",
+  "features": [],
   "appearance": "system",
   "window": { "defaultSize": { "width": 600, "height": 460 } },
   "macos": {
