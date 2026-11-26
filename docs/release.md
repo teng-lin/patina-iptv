@@ -662,7 +662,8 @@ python3 tools/ci/update-index.py ../update-feed/targets/index.json update-releas
 ```
 
 A retry or an older record preserves newer package entries. A conflict for
-the same package and version aborts before replacing the file. The resulting
+the same package and version, or different commits for one release across
+platforms, aborts before replacing the file. The resulting
 target is ready for the repository’s signing event. Publish the signed target
 and versioned metadata before the timestamp.
 
