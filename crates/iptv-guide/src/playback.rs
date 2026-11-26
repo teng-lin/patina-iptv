@@ -372,13 +372,15 @@ fn channel_headers(channel: &Channel) -> &[(String, String)] {
 fn source(context: Option<&PlaybackContext>, url: String, channel: &Channel) -> PlaySource {
     let headers = context.map_or_else(Vec::new, |c| c.headers(&url));
     let public_only = match (&channel.stream, context.map(|c| &c.inner)) {
+        // Import grants this exception to the channel's live URL. A
+        // catch-up template cannot grant it to a public live channel.
         (
-            StreamLocator::Url { .. },
+            StreamLocator::Url { url: live_url, .. },
             Some(Inner::M3u {
                 loopback: Some(origin),
                 ..
             }),
-        ) => !origin.contains(&url),
+        ) => !(origin.contains(live_url) && origin.contains(&url)),
         (StreamLocator::Xtream { .. }, Some(Inner::Xtream { client, .. })) => {
             client.stream_must_be_public(&url)
         }
