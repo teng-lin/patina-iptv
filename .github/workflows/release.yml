@@ -420,9 +420,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: signing-status-*
+          merge-multiple: true
+          path: signing-status
       - name: Verify public asset inventory, checksums and provenance without rebuilding
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.promote_tag || github.ref_name }}
-        run: python3 tools/ci/verify-public-release.py "$TAG" "$GITHUB_SHA" "$GITHUB_REF"
+        run: python3 tools/ci/verify-public-release.py "$TAG" "$GITHUB_SHA" "$GITHUB_REF" --update-record update-release.json --signing-directory signing-status
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-update-record-${{ github.run_attempt }}
+          path: update-release.json
+          if-no-files-found: error

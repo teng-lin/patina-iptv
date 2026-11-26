@@ -112,12 +112,28 @@ pub fn row_with(
         .bg(move || mark().bg())
 }
 
+/// A row that grows with its content when a label wraps.
+pub(crate) fn row_minimum(
+    size: Scale,
+    pitch: impl Fn() -> f32 + Copy + 'static,
+    mark: impl Fn() -> Mark + 'static,
+) -> View {
+    row_with(size, pitch, mark)
+        .h(nsh_core::geometry::auto())
+        .min_h(move || px(size.whole(text_pitch(pitch())) - 2.0 * size.whole(GAP)))
+}
+
 /// A name in a list: one line of Roboto at the guide's channel name size.
 pub fn name(size: Scale, content: impl IntoReactive<SharedString>) -> Text {
     text(content)
         .number_of_lines(1)
         .font_family(SANS)
         .text_size(move || size.text_px(LIST_ITEM))
+}
+
+/// A triangle at the same size as the playing-channel marker.
+pub(crate) fn triangle(size: Scale, glyph: impl IntoReactive<SharedString>) -> Text {
+    text(glyph).text_size(move || size.text_px(crate::fonts::CHANNEL * 0.6))
 }
 
 /// A second line in `family` (Roboto Condensed for program titles).

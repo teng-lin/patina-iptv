@@ -256,7 +256,7 @@ adapters.
 
 ## Crates
 
-The workspace has eighteen crates under `crates/` and the vendored
+The workspace has nineteen crates under `crates/` and the vendored
 `nsh-tv`. [Dependency rules](#dependency-rules) govern their dependencies.
 
 | Crate | Layer | Depends on (workspace crates) |
@@ -270,13 +270,14 @@ The workspace has eighteen crates under `crates/` and the vendored
 | `iptv-import` | Domain | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-settings`, `iptv-library` |
 | `iptv-nav` | Presentation state | none |
 | `iptv-presentation` | Presentation state | `iptv-core`, `iptv-epg`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`; `iptv-guide` for tests |
+| `iptv-cast` | Adapters | Native Cast discovery and control protocol |
 | `iptv-net` | Adapters | `iptv-providers`, `iptv-import` |
 | `iptv-store-sqlite` | Adapters | `iptv-core`, `iptv-providers`, `iptv-epg`, `iptv-import`, `iptv-library`, `iptv-sqlcipher-init` (native only) |
 | `iptv-sqlcipher-init` | Adapters | none |
 | `iptv-player-mpv` | Adapters | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | Application | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite`; `iptv-net` with its `native` feature |
 | `iptv-web` | Adapters, and with its `bridge` feature View | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers`, `iptv-search`; `iptv-nav` and `iptv-presentation` with `bridge` |
-| `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, in the browser `iptv-web` and `iptv-store-sqlite` |
+| `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, on Linux `iptv-cast`, in the browser `iptv-web` and `iptv-store-sqlite` |
 | `nsh-tv` (vendored) | View | NSH |
 | `iptv-tui` | Hosts | `iptv-app`, `iptv-library`, `iptv-net`, `iptv-player-mpv`, `iptv-providers`, `iptv-settings`, `iptv-store-sqlite`, NSH |
 

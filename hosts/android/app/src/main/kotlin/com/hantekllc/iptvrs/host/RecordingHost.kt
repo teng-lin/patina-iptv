@@ -22,6 +22,8 @@ import android.os.PowerManager
 object RecordingHost {
     @Volatile private var desiredActive = false
 
+    fun updateMustWait(): Boolean = desiredActive
+
     @Volatile private lateinit var context: Context
 
     @JvmStatic fun setLanguage(tag: String) {

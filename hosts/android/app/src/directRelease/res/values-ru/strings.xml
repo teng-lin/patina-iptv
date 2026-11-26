@@ -1,0 +1,5 @@
+<resources>
+    <string name="update_recording_active">Завершите запись перед установкой обновления.</string>
+    <string name="update_install_unavailable">Android не удалось открыть установщик. Повторите попытку в настройках.</string>
+    <string name="update_invalid_apk">Этот APK не подходит для обновления установленной версии Patina.</string>
+</resources>

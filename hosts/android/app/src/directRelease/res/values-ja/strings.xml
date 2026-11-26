@@ -1,0 +1,5 @@
+<resources>
+    <string name="update_recording_active">録画を終了してから更新をインストールしてください。</string>
+    <string name="update_install_unavailable">インストーラーを開けませんでした。設定から再試行してください。</string>
+    <string name="update_invalid_apk">この APK はインストール済みの Patina を更新できません。</string>
+</resources>

@@ -64,17 +64,29 @@ pub fn choose(ui: Ui, kind: Kind, value: String) {
 
 pub fn step_volume(ui: Ui, up: bool) {
     let delta = if up { VOLUME_STEP } else { -VOLUME_STEP };
+    if crate::casting::volume(ui, iptv_core::cast::Command::StepVolume(delta as i8)) {
+        return;
+    }
     change_volume(ui, |v| v.step(delta));
     log_volume(ui);
 }
 
 pub fn toggle_mute(ui: Ui) {
+    if crate::casting::volume(ui, iptv_core::cast::Command::ToggleMute) {
+        return;
+    }
     let muted = !untracked(|| muted(ui));
     change_volume(ui, |v| v.muted = muted);
     log_volume(ui);
 }
 
 pub fn set_volume(ui: Ui, level: i32) {
+    if crate::casting::volume(
+        ui,
+        iptv_core::cast::Command::Volume(level.clamp(0, 100) as u8),
+    ) {
+        return;
+    }
     change_volume(ui, |v| v.set(level));
 }
 

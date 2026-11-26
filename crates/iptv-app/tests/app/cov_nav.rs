@@ -312,10 +312,10 @@ fn guide_keys(app: &mut Headless) {
     step(app.press_key("down"));
     step(app.press_key("right"));
     step(app.wait_for(PLAYLIST_ROW));
-    const ACTIONS: &str = "id:playlist-actions-list";
+    const ACTIONS: &str = "id:playlist-menu-panel >> text:Hide";
     step(app.press_key("m"));
     step(app.wait_for(ACTIONS));
-    step(app.wait_for("text:Refresh now"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Delete"));
     step(app.press_key("down"));
     step(app.back());
     gone(app, ACTIONS);
@@ -615,31 +615,7 @@ fn tile_channel(name: &str) -> String {
 
 /// The open tile menu's labels, top to bottom.
 fn menu_labels(app: &Headless) -> Vec<String> {
-    let nodes = app.screen().layout_nodes();
-    let Some(panel) = nodes
-        .iter()
-        .find(|n| n.test_id.as_deref() == Some("multiview-menu"))
-        .map(|n| n.id)
-    else {
-        return Vec::new();
-    };
-    let parent: std::collections::HashMap<_, _> = nodes.iter().map(|n| (n.id, n.parent)).collect();
-    let inside = |mut id| {
-        while let Some(&up) = parent.get(&id) {
-            if up == panel {
-                return true;
-            }
-            id = up;
-        }
-        false
-    };
-    let mut found: Vec<(String, f32)> = nodes
-        .iter()
-        .filter(|n| inside(n.id))
-        .filter_map(|n| Some((n.text.as_ref()?.text.text.to_string(), n.bounds.origin.y.0)))
-        .collect();
-    found.sort_by(|a, b| a.1.total_cmp(&b.1));
-    found.into_iter().map(|t| t.0).collect()
+    app.panel_texts("multiview-menu")
 }
 
 /// Opens the active tile's menu and chooses `label` by keys.

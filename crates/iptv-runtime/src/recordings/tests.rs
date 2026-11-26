@@ -1548,3 +1548,18 @@ async fn an_unlocked_legacy_blocked_recording_captures_after_the_viewer_relocks(
     capture_accepted_media(&owner, id).await;
     assert!(owner.drain_services());
 }
+
+#[test]
+fn cast_claim_replaces_main_viewer_and_counts_until_release() {
+    let owner = Runtime::new(crate::Ports::for_tests());
+    let source = SourceId(9);
+    assert!(owner.reserve_viewing(0, source));
+    let claim = owner
+        .reserve_cast_viewing(source)
+        .expect("replace the local viewer");
+    owner.release_viewing(0);
+    assert!(!owner.reserve_viewing(0, source));
+    assert!(owner.reserve_cast_viewing(source).is_none());
+    drop(claim);
+    assert!(owner.reserve_viewing(0, source));
+}

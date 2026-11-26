@@ -189,6 +189,12 @@ jobs:
           python3 tools/ci/merge-android-native.py target/android-native-inputs
           bash tools/ci/prepare-android.sh target/android-native-inputs/android-native-arm64-v8a/notices
           tar -cf target/signing-input.tar target/android-unsigned
+      - name: Retain the direct APK obfuscation map
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-direct-apk-r8-map
+          path: hosts/android/app/build/outputs/mapping/directRelease/mapping.txt
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: signing-input-android

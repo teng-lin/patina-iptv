@@ -87,6 +87,83 @@ fn playlists_and_their_guide_sources() {
     deleting(&mut t);
 }
 
+#[test]
+fn manage_playlists_is_offered_for_hidden_sources_and_disappears_when_empty() {
+    use crate::personalization::{M3U, step};
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source, SourceConfig},
+    };
+    use std::time::Duration;
+
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let playlist = home.path().join("synthetic.m3u");
+    std::fs::write(&playlist, M3U).unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Synthetic personalization".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(playlist.to_string_lossy()),
+                user_agent: None,
+                referrer: None,
+            }),
+        })
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            iptv_store_sqlite::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(M3U);
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+
+    let mut app = crate::headless::Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-header-details >> text:Synthetic personalization · News"));
+    step(app.open_settings_playlists());
+    let manage = "id:settings-content >> text:Manage playlists";
+    let row = "id:settings-content >> role:checkbox[/^Synthetic personalization/]";
+    step(app.wait_for(manage));
+    step(app.press(row));
+    step(app.wait_until(
+        "the sole playlist is hidden",
+        Duration::from_secs(5),
+        |screen| {
+            screen
+                .accessibility_state(row)
+                .is_ok_and(|state| state.checked == Some(nsh_core::Checked::False))
+        },
+    ));
+    step(app.wait_for(manage));
+    step(app.open_playlist_actions("Synthetic personalization"));
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.press("id:playlist-delete-confirmation >> text:Delete"));
+    step(app.wait_for_gone(manage, Duration::from_secs(5)));
+    step(app.wait_for("id:settings-content >> text:Add a playlist"));
+    assert!(
+        crate::isolated::open_database(path)
+            .unwrap()
+            .sources()
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// Settings → Playlists.
 fn open_playlists(t: &mut T) {
     let opened = t.app.open_settings_playlists();
@@ -293,11 +370,10 @@ fn user_agent_refresh_and_keys(t: &mut T) {
     );
     let menu = t.app.press_remote(nsh_tv::RemoteKey::Menu);
     t.ok("key menu", menu);
-    t.wait("text:▲▼ choose   OK do it   Back close the sheet", 2);
-    assert!(t.shows("text:Show this playlist"), "the first playlist's");
-    // Show it: the sheet closes over the settings, the guide shows it.
-    t.key("enter");
-    t.gone("text:▲▼ choose   OK do it   Back close the sheet", 2);
+    t.wait("id:playlist-menu-panel >> text:Hide", 2);
+    t.key("backspace");
+    actions(t, "Synthetic Renamed");
+    t.press("text:Show this playlist");
     t.wait("text:Golden Engine", 15);
 }
 
@@ -524,15 +600,15 @@ fn nothing_switched_on(t: &mut T) {
 /// Deleting asks first and says what goes; the last one leaves the
 /// first-run screen.
 fn deleting(t: &mut T) {
-    actions(t, "Linked");
-    t.press("text:Delete");
+    t.press("id:settings-content >> role:button[More options for Linked]");
+    t.press("id:playlist-menu-panel >> text:Delete");
     t.wait("text:Delete “Linked”?", 2);
     assert!(t.shows(
         "text:Its 2 channels, its guide and your favorites from it will be gone from the app. The playlist at your provider is not affected."
     ));
     t.press("text:Keep it");
     t.gone("text:Delete “Linked”?", 2);
-    t.press("text:Delete");
+    t.press("id:playlist-menu-panel >> text:Delete");
     t.press("text:Delete");
     t.gone("text:Linked", 5);
     assert!(!t.shows("text:Reorder playlists"), "one playlist left");

@@ -200,8 +200,8 @@ pub(super) fn cell(
         )
         .child(
             // The playing marker, after the name.
-            text(move || if playing() { "▶" } else { "" })
-                .text_size(move || size.text_px(CHANNEL * 0.6))
+            crate::list_rows::triangle(size, move || if playing() { "▶" } else { "" })
+                .test_id("guide-playing-marker")
                 .text_color(move || rgb(ui.app.theme.with(|t| t.guide().playing))),
         )
         .child(when(grips, move || {

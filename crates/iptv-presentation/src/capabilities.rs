@@ -63,6 +63,7 @@ pub fn keys(host: Host) -> Option<Keys> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
+    Casting,
     WaitingForPlayer,
     UnsupportedPip,
     PlaybackRequired,

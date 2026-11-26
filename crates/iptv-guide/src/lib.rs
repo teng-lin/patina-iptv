@@ -57,6 +57,8 @@ pub struct Organization {
     pub blocks: iptv_core::organization::Blocks,
     pub group_preferences:
         std::collections::HashMap<String, iptv_core::organization::GroupPreferences>,
+    pub renamed_groups: std::collections::HashSet<String>,
+    pub group_sort: iptv_core::organization::Sort,
     pub channel_sort: iptv_core::organization::Sort,
 }
 
@@ -67,6 +69,8 @@ struct OrganizationState {
     channel_blocks: Vec<iptv_core::organization::Block>,
     blocked_groups: std::collections::HashSet<String>,
     group_preferences: std::collections::HashMap<String, iptv_core::organization::GroupPreferences>,
+    renamed_groups: std::collections::HashSet<String>,
+    group_sort: iptv_core::organization::Sort,
     channel_sort: iptv_core::organization::Sort,
     epg_offsets: Option<Vec<i32>>,
     offset_bounds: (i32, i32),
@@ -804,6 +808,8 @@ impl Shape<'_> {
             state.epg_offsets = Some(offsets);
         }
         state.group_preferences = organization.group_preferences;
+        state.renamed_groups = organization.renamed_groups;
+        state.group_sort = organization.group_sort;
         state.channel_sort = organization.channel_sort;
         state.blocked_groups = organization.blocks.groups;
         state.order = self.playlist_order.to_vec();
@@ -1072,6 +1078,21 @@ impl Schedule for EpgSchedule {
             .and_then(|state| state.group_preferences.get(&key))
             .copied()
             .unwrap_or_default()
+    }
+
+    fn groups_order(&self, _group: usize) -> iptv_core::organization::Sort {
+        self.organization
+            .borrow()
+            .as_ref()
+            .map_or_default(|state| state.group_sort)
+    }
+
+    fn group_name_overridden(&self, group: usize) -> bool {
+        let key = self.group_key(group);
+        self.organization
+            .borrow()
+            .as_ref()
+            .is_some_and(|state| state.renamed_groups.contains(&key))
     }
 
     fn channel_sort(&self) -> iptv_core::organization::Sort {
