@@ -7,16 +7,27 @@ mod android;
 pub(crate) enum PackageAction {
     #[cfg(target_os = "android")]
     Install(iptv_runtime::app_updates::ReleaseAsset),
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android"
+    ))]
     Download(String),
 }
 
 impl PackageAction {
     pub(crate) fn label(&self) -> &'static str {
-        use crate::i18n::tr;
-        match self {
+        match *self {
             #[cfg(target_os = "android")]
-            Self::Install(_) => tr("Download and update"),
-            Self::Download(_) => tr("Download package"),
+            Self::Install(_) => crate::i18n::tr("Download and update"),
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "android"
+            ))]
+            Self::Download(_) => crate::i18n::tr("Download package"),
         }
     }
 
@@ -24,6 +35,12 @@ impl PackageAction {
         #[cfg(target_os = "android")]
         use crate::i18n::tr;
         match self {
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "android"
+            ))]
             Self::Download(url) => {
                 crate::settings_view::updates::open(&url).await;
             }
