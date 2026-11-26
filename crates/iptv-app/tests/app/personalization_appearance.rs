@@ -175,11 +175,11 @@ fn the_about_update_action_keeps_manual_downloads_viewer_initiated() {
     step(app.press("text:About"));
     app.answer_dialogs_myself();
     step(app.press("text:Release notes and downloads"));
-    step(app.wait_until(
-        "update dialog",
-        Duration::from_secs(3),
-        |screen| !screen.dialogs().is_empty(),
-    ));
+    step(
+        app.wait_until("update dialog", Duration::from_secs(3), |screen| {
+            !screen.dialogs().is_empty()
+        }),
+    );
     assert!(app.screen().opened_urls().is_empty());
     step(app.answer_dialog(DialogAnswer::Press("Release notes and downloads".into())));
     assert_eq!(
