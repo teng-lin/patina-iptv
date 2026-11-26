@@ -348,11 +348,15 @@ def dsc_name(name, version):
 
 # -------------------------------------------------------------- collecting
 
+class CommandTimeout(SystemExit):
+    """A required source command exceeded its time limit."""
+
+
 def run(arguments, cwd=None):
     try:
         return subprocess.run(arguments, cwd=cwd, capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
-        raise SystemExit(f"timed out collecting source: {' '.join(arguments)}") from None
+        raise CommandTimeout(f"timed out collecting source: {' '.join(arguments)}") from None
 
 
 def download(url, destination):
@@ -491,8 +495,14 @@ def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
     else:
         # The installed version is no longer the newest in its pocket.
         print(f"  {label} is not in the archive index ({listed.stderr.strip()}); using historical .dsc", file=sys.stderr)
-        current = run(["apt-get", "source", "--print-uris", name])
-        pool = ubuntu_pool(name, current.stdout) if current.returncode == 0 else None
+        pool = None
+        try:
+            current = run(["apt-get", "source", "--print-uris", name])
+        except CommandTimeout:
+            pass  # The current archive is only a hint for the historical source.
+        else:
+            if current.returncode == 0:
+                pool = ubuntu_pool(name, current.stdout)
         description = dsc_name(name, version)
         description_url = launchpad_url(name, version, description)
         if pool and download(pool + quote(description), directory / description):

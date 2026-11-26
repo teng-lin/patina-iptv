@@ -556,6 +556,16 @@ class Collecting(unittest.TestCase):
             return Missing()
 
         self.collect_linux(no_hints)
+
+        def timed_out_hint(arguments):
+            if arguments[-1] == "synthetic-media":
+                raise sources.CommandTimeout("optional source lookup timed out")
+            return Missing()
+
+        self.collect_linux(timed_out_hint)
+        with patch.object(subprocess, "run", side_effect=subprocess.TimeoutExpired("apt-get", 180)):
+            with self.assertRaisesRegex(sources.CommandTimeout, "timed out collecting source"):
+                sources.run(["apt-get", "source", "--print-uris", "synthetic-media=7:1.2-3"])
         # A file that does not match the description is refused.
         self.setUp()
         self.files = {base + name: data for name, data in files.items()}
