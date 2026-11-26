@@ -781,7 +781,7 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
         );
         step(app.wait(remaining.min(Duration::from_millis(50))));
     }
-    if !app.shows("id:play-bar-record") {
+    if !app.screen().matches("id:play-bar-record").unwrap() {
         step(app.press("label:Video"));
     }
     observation.observe("before stop press", app.screen());
