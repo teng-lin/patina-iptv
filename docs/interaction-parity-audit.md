@@ -31,14 +31,20 @@ group behavior, and the persistent player surface.
   press and a configured long action still act once. Navigation and seek
   continue to repeat. This fixes an operation-level inconsistency without
   suppressing every repeat globally.
-- Archive selection in `Ui::watch` consults the group's external-player
-  preference, while the existing **Play from the beginning** menu handler
-  directly requests internal catch-up playback. This is a policy difference
-  to investigate on a host with external playback, not a confirmed cause of
-  the TV context-menu bug. A macOS headless pass cannot establish Android or
-  Linux external-player handoff behavior.
+- The initial audit found that archive selection consulted the group's
+  external-player preference while **Play from the beginning** requested
+  internal playback. [PR #368][archive-policy] resolved that difference
+  through one captured archive choice and group policy; its report records
+  synthetic Android TV acceptance for external handoff and internal fallback.
+  [PR #371][archive-polling] adds bounded polling and a quiet-UI regression
+  for external event files, with all six archive scenarios passing in Linux
+  CI. That evidence is separate from this input change's physical-device and
+  spoken/focus acceptance.
 
 Android acceptance uses a dedicated synthetic validation APK. Emulator and
 physical-device evidence are recorded separately; see
 [disposable Android validation](android-validation.md). This audit does not
 claim physical-device or screen-reader acceptance from headless tests.
+
+[archive-policy]: https://github.com/teng-lin/patina-iptv/pull/368
+[archive-polling]: https://github.com/teng-lin/patina-iptv/pull/371
