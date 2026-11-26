@@ -348,6 +348,7 @@ pub struct Ui {
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
+    update_dialog_open: Signal<bool>,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
@@ -479,6 +480,7 @@ impl Ui {
             guide_assign: signal(None),
             parental: signal(None),
             settings_screen: signal(None),
+            update_dialog_open: signal(false),
             player,
             player_surface: 0,
             media: media::Media::new(),
