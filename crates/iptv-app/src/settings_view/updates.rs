@@ -5,6 +5,14 @@ use nsh_core::prelude::open_url;
 
 pub(super) use crate::host::updates::RELEASES;
 
+pub(super) fn label() -> &'static str {
+    if crate::host::updates::feed(crate::device::direct_android_build()).is_some() {
+        tr("Check for updates")
+    } else {
+        tr("Release notes and downloads")
+    }
+}
+
 /// Hold the action through its result dialog. Dropping a cancelled UI task
 /// also makes the row available again while its app owner still exists.
 struct UpdateDialog(nsh_core::prelude::Signal<bool>);
@@ -33,7 +41,7 @@ async fn show(ui: crate::Ui) {
         return;
     }
     let mut dialog = alert_dialog()
-        .title(super::words::label("general.check_updates"))
+        .title(label())
         .description(message)
         .close_on_escape(true)
         .cancel("close", tr("Close"));
