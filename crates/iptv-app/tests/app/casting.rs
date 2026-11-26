@@ -4,7 +4,7 @@ use iptv_core::{
     cast::{Command, Error, Receiver, RemoteState},
     playback::PlaySource,
 };
-use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Task};
+use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Retirement, Task};
 use iptv_settings::{Settings, Value};
 use personalization::step;
 use std::{
@@ -81,10 +81,9 @@ impl Remote for FakeCast {
                 .unwrap_or(Ok(RemoteState::Playing))
         })
     }
-    fn retire(&self) -> Task<'_, ()> {
+    fn retire(&self) -> Retirement<'_> {
         Box::pin(async {
             self.events.lock().unwrap().push("retire");
-            Ok(())
         })
     }
 }

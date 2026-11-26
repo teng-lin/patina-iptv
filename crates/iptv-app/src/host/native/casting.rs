@@ -5,7 +5,7 @@ use iptv_core::{
     playback::PlaySource,
 };
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
-use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Task};
+use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Retirement, Task};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::time::{Instant, timeout};
 
@@ -232,12 +232,12 @@ impl Remote for Playing {
                 .map_err(|_| Error::Unknown)?
         })
     }
-    fn retire(&self) -> Task<'_, ()> {
+    fn retire(&self) -> Retirement<'_> {
         Box::pin(async move {
-            if let Some(relay) = self.relay.lock().await.take() {
+            let mut slot = self.relay.lock().await;
+            if let Some(relay) = slot.take() {
                 relay.shutdown().await;
             }
-            Ok(())
         })
     }
 }
