@@ -55,6 +55,9 @@ impl PackageAction {
                 else {
                     return crate::settings_view::notify(tr("Update download failed. Try again."));
                 };
+                if !crate::settings_view::updates::is_open(_ui) {
+                    return;
+                }
                 crate::settings_view::notify(tr("Verifying installer…"));
                 let Some(mut setup) = owner
                     .prepare_windows_setup(
