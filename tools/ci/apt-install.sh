@@ -38,6 +38,20 @@ bounded() {
   as_root timeout --kill-after=15 "$seconds" "$@"
 }
 
+apt=(apt-get)
+source_files=("$sources/sources.list" "$sources/sources.list.d/"*.list "$sources/sources.list.d/"*.sources)
+if [[ ${PATINA_APT_UBUNTU_ONLY:-false} == true ]]; then
+  # This caller needs only Ubuntu packages. Keep using the image's signed
+  # deb822 entries through both mirror attempts and skip unrelated vendor feeds.
+  ubuntu_source="$sources/sources.list.d/ubuntu.sources"
+  if [[ ! -r "$ubuntu_source" ]]; then
+    echo "::error::Ubuntu package sources missing at $ubuntu_source" >&2
+    exit 1
+  fi
+  source_files=("$ubuntu_source")
+  apt+=(-o "Dir::Etc::sourcelist=$ubuntu_source" -o Dir::Etc::sourceparts=-)
+fi
+
 archive_sources=()
 original_sources=()
 switch_mirror() {
@@ -45,7 +59,7 @@ switch_mirror() {
   # Keep the distro, pockets and Signed-By from the image's original entries.
   local mirror='https?://(azure|([a-z0-9-]+\.)?(ec2|gce))\.archive\.ubuntu\.com/ubuntu([[:space:]/]|$)'
   local mirrorlist='mirror\+file:/{1,3}etc/apt/apt-mirrors\.txt([[:space:]]|$)'
-  for source in "$sources/sources.list" "$sources/sources.list.d/"*.list "$sources/sources.list.d/"*.sources; do
+  for source in "${source_files[@]}"; do
     if [ -f "$source" ] && grep -Eq "$mirror|$mirrorlist" "$source"; then
       archive_sources+=("$source")
       original_sources+=("$(cat "$source")")
@@ -67,20 +81,20 @@ restore_mirror() {
 }
 
 fetch_packages() {
-  bounded "$refresh_seconds" apt-get update -q -o APT::Update::Error-Mode=any || return
+  bounded "$refresh_seconds" "${apt[@]}" update -q -o APT::Update::Error-Mode=any || return
   if [ "${#snapshot_packages[@]}" -gt 0 ]; then
-    if bounded "$download_seconds" apt-get install -q --download-only "${snapshot_packages[@]}"; then
+    if bounded "$download_seconds" "${apt[@]}" install -q --download-only "${snapshot_packages[@]}"; then
       snapshot=true
       return
     fi
     echo '::warning::could not populate the shared snapshot; downloading only the requested packages'
     snapshot_packages=()
   fi
-  bounded "$download_seconds" apt-get install -q --download-only "${packages[@]}"
+  bounded "$download_seconds" "${apt[@]}" install -q --download-only "${packages[@]}"
 }
 
 install_packages() {
-  bounded "$install_seconds" apt-get install -q --no-download "$@" "${packages[@]}"
+  bounded "$install_seconds" "${apt[@]}" install -q --no-download "$@" "${packages[@]}"
 }
 
 repair_packages() {
