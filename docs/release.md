@@ -737,7 +737,8 @@ feed. AppRun records its image path’s device and inode at startup. About can r
 file after confirmation or save the verified image to a new name on a writable
 filesystem. Patina keeps playing until the viewer restarts it. Each replacement
 preserves the old image beside the installation as
-`<file>.<previous-version>.previous`. Keep that file until the new version
+`<file>.<previous-version>.previous`, adding its inode to the name if an earlier
+backup already occupies it. Keep that file until the new version
 opens the existing library, then remove the backup when it is no longer needed. Restoring the executable alone cannot reverse a
 database migration. DEB, RPM and pacman users can download the corresponding
 package through About and apply it with their system package tool.

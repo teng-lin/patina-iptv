@@ -5,7 +5,7 @@ use std::{
     io::{self, Read},
     os::{
         fd::AsRawFd,
-        unix::fs::{MetadataExt, PermissionsExt},
+        unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
 };
@@ -57,38 +57,41 @@ impl RunningImage {
         if !self.matches(&installed_meta) {
             return Err(io::ErrorKind::InvalidInput.into());
         }
-        let mut name = self.path.as_os_str().to_owned();
-        name.push(concat!(".", env!("CARGO_PKG_VERSION"), ".previous"));
-        let previous = PathBuf::from(name);
         let parent = self.path.parent().ok_or(io::ErrorKind::InvalidInput)?;
-        if !trusted_directory(parent) {
-            return Err(io::ErrorKind::PermissionDenied.into());
-        }
         executable(&stage, installed_meta.permissions().mode() & 0o755)?;
         let directory = File::open(parent)?;
-        let source = format!("/proc/self/fd/{}", installed.as_raw_fd());
-        match linkat(
-            CWD,
-            source.as_str(),
-            CWD,
-            &previous,
-            AtFlags::SYMLINK_FOLLOW,
-        )
-        .map_err(io::Error::from)
-        {
-            Ok(()) => {}
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                let backup = fs::symlink_metadata(&previous)?;
-                if !self.matches(&backup) {
-                    return Err(e);
-                }
-            }
-            Err(e) => return Err(e),
-        }
+        let previous = self.backup(&installed)?;
         directory.sync_all()?;
         self.exchange(stage)?;
         directory.sync_all()?;
         Ok(previous)
+    }
+
+    fn backup(&self, installed: &File) -> io::Result<PathBuf> {
+        let mut name = self.path.as_os_str().to_owned();
+        name.push(concat!(".", env!("CARGO_PKG_VERSION"), ".previous"));
+        let mut alternate = name.clone();
+        alternate.push(format!(".{}", self.inode));
+        let source = format!("/proc/self/fd/{}", installed.as_raw_fd());
+        for name in [name, alternate] {
+            let previous = PathBuf::from(name);
+            match linkat(
+                CWD,
+                source.as_str(),
+                CWD,
+                &previous,
+                AtFlags::SYMLINK_FOLLOW,
+            ) {
+                Ok(()) => return Ok(previous),
+                Err(rustix::io::Errno::EXIST) => {
+                    if fs::symlink_metadata(&previous).is_ok_and(|backup| self.matches(&backup)) {
+                        return Ok(previous);
+                    }
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Err(io::ErrorKind::AlreadyExists.into())
     }
 
     fn exchange(&self, stage: TempPath) -> io::Result<()> {
@@ -110,14 +113,67 @@ impl RunningImage {
     }
 }
 
-fn trusted_directory(path: &Path) -> bool {
-    // SAFETY: geteuid reads the calling process's effective user ID without arguments.
-    let uid = unsafe { libc::geteuid() };
-    fs::metadata(path).is_ok_and(|meta| {
-        meta.is_dir()
-            && (meta.uid() == uid || meta.uid() == 0)
-            && (meta.mode() & 0o022 == 0 || meta.mode() & 0o1000 != 0)
-    })
+struct StagingDirectory {
+    name: PathBuf,
+    directory: File,
+}
+
+impl StagingDirectory {
+    fn new(parent: &Path) -> io::Result<Self> {
+        // Pin a private subdirectory even when the chosen folder is shared.
+        let name = tempfile::Builder::new()
+            .prefix(".patina-update-")
+            .permissions(fs::Permissions::from_mode(0o700))
+            .tempdir_in(parent)?
+            .keep();
+        let directory = File::options()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(&name)?;
+        let meta = directory.metadata()?;
+        // SAFETY: geteuid reads the process's effective user ID without arguments.
+        if meta.uid() != unsafe { libc::geteuid() } || meta.mode() & 0o077 != 0 {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        Ok(Self { name, directory })
+    }
+
+    fn path(&self) -> PathBuf {
+        format!("/proc/self/fd/{}", self.directory.as_raw_fd()).into()
+    }
+}
+
+impl Drop for StagingDirectory {
+    fn drop(&mut self) {
+        if let Ok((owned, named)) = self
+            .directory
+            .metadata()
+            .and_then(|owned| fs::symlink_metadata(&self.name).map(|named| (owned, named)))
+            && owned.dev() == named.dev()
+            && owned.ino() == named.ino()
+        {
+            // Never recurse into a replacement directory or remove a displaced file.
+            let _ = fs::remove_dir(&self.name);
+        }
+    }
+}
+
+pub struct StagedImage {
+    file: TempPath,
+    _directory: StagingDirectory,
+}
+
+impl StagedImage {
+    fn replace(self, image: RunningImage) -> io::Result<PathBuf> {
+        image.replace(self.file)
+    }
+
+    fn save(self, destination: PathBuf) -> io::Result<()> {
+        let parent = destination.parent().ok_or(io::ErrorKind::InvalidInput)?;
+        executable(&self.file, 0o700)?;
+        self.file.persist_noclobber(&destination)?;
+        File::open(parent)?.sync_all()
+    }
 }
 
 fn executable(path: &Path, permissions: u32) -> io::Result<()> {
@@ -135,21 +191,32 @@ fn executable(path: &Path, permissions: u32) -> io::Result<()> {
 }
 
 impl crate::Runtime {
-    pub async fn can_stage_appimage(
-        &self,
-        directory: PathBuf,
-        destination: Option<PathBuf>,
-    ) -> bool {
+    pub async fn can_save_appimage(&self, destination: PathBuf) -> bool {
         self.services()
             .spawn_blocking(move || {
-                trusted_directory(&directory)
-                    && destination.is_none_or(|path| {
-                        fs::symlink_metadata(path)
-                            .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
-                    })
+                fs::symlink_metadata(destination)
+                    .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
             })
             .await
             .unwrap_or(false)
+    }
+
+    pub async fn download_appimage(
+        &self,
+        asset: super::ReleaseAsset,
+        parent: PathBuf,
+    ) -> Option<StagedImage> {
+        let directory = self
+            .services()
+            .spawn_blocking(move || StagingDirectory::new(&parent))
+            .await
+            .ok()?
+            .ok()?;
+        let file = self.download_update(asset, directory.path()).await?;
+        Some(StagedImage {
+            file,
+            _directory: directory,
+        })
     }
 
     pub async fn running_appimage(&self) -> Option<RunningImage> {
@@ -161,9 +228,13 @@ impl crate::Runtime {
     }
 
     /// Keep a recovery copy until the viewer has launched and checked the new build.
-    pub async fn replace_appimage(&self, image: RunningImage, stage: TempPath) -> Option<PathBuf> {
+    pub async fn replace_appimage(
+        &self,
+        image: RunningImage,
+        stage: StagedImage,
+    ) -> Option<PathBuf> {
         self.services()
-            .spawn_blocking(move || image.replace(stage).ok())
+            .spawn_blocking(move || stage.replace(image).ok())
             .await
             .ok()
             .flatten()
@@ -171,17 +242,9 @@ impl crate::Runtime {
 
     /// Save to a new name chosen by the viewer, including on another filesystem
     /// when the verified download was staged in that destination directory.
-    pub async fn save_appimage(&self, destination: PathBuf, stage: TempPath) -> bool {
+    pub async fn save_appimage(&self, destination: PathBuf, stage: StagedImage) -> bool {
         self.services()
-            .spawn_blocking(move || {
-                let parent = destination.parent().ok_or(io::ErrorKind::InvalidInput)?;
-                if !trusted_directory(parent) {
-                    return Err(io::ErrorKind::PermissionDenied.into());
-                }
-                executable(&stage, 0o700)?;
-                stage.persist_noclobber(&destination)?;
-                File::open(parent)?.sync_all()
-            })
+            .spawn_blocking(move || stage.save(destination))
             .await
             .is_ok_and(|result| result.is_ok())
     }
@@ -222,6 +285,31 @@ mod tests {
         assert_eq!(fs::read(&previous).unwrap(), b"synthetic old image");
     }
     #[test]
+    fn shared_destination_saves_only_to_a_new_name_through_the_pinned_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o775)).unwrap();
+        let destination = dir.path().join("saved.AppImage");
+        for first in [true, false] {
+            let directory = StagingDirectory::new(dir.path()).unwrap();
+            assert_eq!(
+                directory.directory.metadata().unwrap().mode() & 0o777,
+                0o700
+            );
+            let image = StagedImage {
+                file: staged(&directory.path()),
+                _directory: directory,
+            };
+            assert_eq!(image.save(destination.clone()).is_ok(), first);
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        assert!(
+            fs::read(destination)
+                .unwrap()
+                .ends_with(b"synthetic new image")
+        );
+    }
+
+    #[test]
     fn exchange_restores_a_file_changed_by_an_external_writer() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("Patina.AppImage");
@@ -261,8 +349,8 @@ mod tests {
             ".previous"
         ));
         fs::write(&backup, b"unrelated").unwrap();
-        assert!(image.replace(staged(dir.path())).is_err());
-        assert_eq!(fs::read(&path).unwrap(), b"original");
+        let alternate = image.replace(staged(dir.path())).unwrap();
+        assert_eq!(fs::read(alternate).unwrap(), b"original");
         assert_eq!(fs::read(&backup).unwrap(), b"unrelated");
     }
 }

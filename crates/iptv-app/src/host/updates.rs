@@ -146,7 +146,8 @@ pub(crate) async fn check(
                 action = Some(PackageAction::Download(asset.url().to_owned()));
             }
             #[cfg(target_os = "linux")]
-            if option_env!("PATINA_APPIMAGE_HANDOFF") == Some("1")
+            if cfg!(target_arch = "x86_64")
+                && option_env!("PATINA_APPIMAGE_HANDOFF") == Some("1")
                 && asset.url().ends_with(".AppImage")
             {
                 action = Some(PackageAction::AppImage(asset));

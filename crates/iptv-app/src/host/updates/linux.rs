@@ -35,14 +35,11 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         let Some(parent) = destination.parent() else {
             return;
         };
-        if !owner
-            .can_stage_appimage(parent.to_owned(), Some(destination.clone()))
-            .await
-        {
+        if !owner.can_save_appimage(destination.clone()).await {
             return notify(tr("Choose a writable location and a new file name."));
         }
         notify(tr("Downloading…"));
-        let Some(file) = owner.download_update(asset, parent.to_owned()).await else {
+        let Some(file) = owner.download_appimage(asset, parent.to_owned()).await else {
             return notify(tr("Update download failed. Try again."));
         };
         if owner.save_appimage(destination, file).await {
@@ -62,11 +59,8 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
     let Some(parent) = image.path().parent() else {
         return;
     };
-    if !owner.can_stage_appimage(parent.to_owned(), None).await {
-        return notify(tr("Could not replace the AppImage. Try Save as…"));
-    }
     notify(tr("Downloading…"));
-    let Some(file) = owner.download_update(asset, parent.to_owned()).await else {
+    let Some(file) = owner.download_appimage(asset, parent.to_owned()).await else {
         return notify(tr(
             "Download failed. Try Save as… to choose another location.",
         ));
