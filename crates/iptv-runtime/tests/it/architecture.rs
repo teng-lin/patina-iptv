@@ -8,6 +8,11 @@ use std::path::{Path, PathBuf};
 /// the native services it owns, and what those need. No UI toolkit, shell,
 /// player, JNI or platform credential store.
 const DEPENDENCIES: &[&str] = &[
+    // Native update metadata transport and verification, plus atomic trust-state replacement.
+    "futures-util",
+    "tempfile",
+    "tough",
+    "url",
     "chrono", // Native recurring schedules preserve local wall-clock time.
     "futures-channel",
     "getrandom",

@@ -38,6 +38,13 @@ subtle = "2.6"
 zeroize = "1.8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
+# Update discovery uses TUF only on the native distribution targets.
+[target.'cfg(any(target_os = "android", target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+tough = { version = "0.24", default-features = false }
+url.workspace = true
+tempfile.workspace = true
+futures-util = "0.3"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
