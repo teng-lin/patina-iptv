@@ -153,7 +153,7 @@ pub fn label(key: &str) -> &'static str {
         "general.check_updates" if option_env!("PATINA_UPDATE_FEED").is_none() => {
             tr("Release notes and downloads")
         }
-        "general.check_updates" => tr("Look for a new version"),
+        "general.check_updates" => tr("Check for updates"),
         "general.about" => tr("About this app"),
         "about.privacy_policy" => tr("Privacy policy"),
         "playlists.include_live" => tr("Live channels"),

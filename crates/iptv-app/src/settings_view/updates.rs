@@ -20,7 +20,7 @@ async fn show(ui: crate::Ui) {
         return;
     }
     let mut dialog = alert_dialog()
-        .title(tr("Look for a new version"))
+        .title(tr("Check for updates"))
         .description(message)
         .close_on_escape(true)
         .cancel("close", tr("Close"));
