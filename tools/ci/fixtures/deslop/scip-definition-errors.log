@@ -1,0 +1,8 @@
+### argv: scip /synthetic
+Generating SCIP start...
+rust-analyzer: Loading build script synthetic run
+2026-11-26T21:43:08.203198007Z ERROR Encountered enclosing definition with no name def=Module(Module { id: ModuleIdLt { [salsa id]: Id(123) } })
+2026-11-26T21:43:55.912871Z ERROR Bug: definition at alpha/src/lib.rs:0:9-0:14 should have been in an SCIP document but was not.
+2026-11-26T21:43:55.912892Z ERROR Bug: definition at beta/tests/common/mod.rs:0:7-0:12 should have been in an SCIP document but was not.
+Generating SCIP finished 1.019900208s
+### exit: 0

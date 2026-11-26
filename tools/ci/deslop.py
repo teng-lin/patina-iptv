@@ -452,6 +452,7 @@ def main(arguments=None, *, tree=ROOT):
                 print("Cannot write report: tree is dirty or index not valid.")
                 for problem in head["problems"]:
                     print(problem)
+                print_timings("HEAD", head)
                 return 1
             validate_record(head)
             args.write.parent.mkdir(parents=True, exist_ok=True)

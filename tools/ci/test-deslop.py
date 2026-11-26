@@ -106,6 +106,13 @@ class Health(unittest.TestCase):
         log += "### argv: scip /synthetic\n### exit: 0\n"
         self.assertEqual(len(deslop.index_health(log)), 2)
 
+    def test_scip_definition_errors_in_a_successful_process_invalidate_the_index(self):
+        problems = deslop.index_health((FIXTURES / "scip-definition-errors.log").read_text())
+        self.assertEqual(len(problems), 3)
+        self.assertIn("enclosing definition with no name", problems[0])
+        self.assertIn("alpha/src/lib.rs", problems[1])
+        self.assertIn("beta/tests/common/mod.rs", problems[2])
+
     def test_wrapper_preserves_streams_arguments_stdin_and_exit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -483,6 +490,7 @@ class Commands(unittest.TestCase):
                     code, output, _, _ = self.invoke(["--write", str(path)], head=head)
                     self.assertEqual(code, 1)
                     self.assertIn("Cannot write", output)
+                    self.assertIn("HEAD seconds: preflight=1.00, index=2.00, total=3.00", output)
                     self.assertFalse(path.exists())
 
     def test_write_creates_parent_preserves_diagnostics_and_prints_cost(self):
