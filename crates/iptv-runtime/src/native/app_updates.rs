@@ -119,6 +119,15 @@ async fn verified_index(
     .load()
     .await
     .ok()?;
+    // The signed repository metadata is already authenticated. Preserve its
+    // rollback floor even if a mirror withholds the target bytes.
+    let _session = tokio::task::spawn_blocking(move || {
+        session.commit()?;
+        Ok::<_, std::io::Error>(session)
+    })
+    .await
+    .ok()?
+    .ok()?;
     let name = TargetName::new("index.json").ok()?;
     let bytes = repository
         .read_target(&name)
@@ -127,12 +136,7 @@ async fn verified_index(
         .into_vec()
         .await
         .ok()?;
-    let result = selection::select(&bytes, installed)?;
-    tokio::task::spawn_blocking(move || session.commit())
-        .await
-        .ok()?
-        .ok()?;
-    Some(result)
+    selection::select(&bytes, installed)
 }
 
 #[cfg(test)]

@@ -56,10 +56,9 @@ async fn verifies_targets_and_keeps_rotation_and_replay_state_across_checks() {
     ));
     fs::copy(fixture.join("2.root.json"), metadata.join("2.root.json")).unwrap();
     publish(2);
-    assert!(matches!(
-        check().await,
-        Some(UpdateResult::Available { .. })
-    ));
+    fs::write(&file, b"changed").unwrap();
+    assert!(check().await.is_none());
+    fs::write(&file, &data).unwrap();
     // Subsequent checks start at the accepted root even after the mirror drops it.
     fs::remove_file(metadata.join("2.root.json")).unwrap();
     let trusted = fs::read(state.join("trusted.json")).unwrap();
