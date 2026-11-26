@@ -15,7 +15,12 @@ pub trait Port: Send + Sync {
 pub trait Prepared: Send {
     /// Sends LOAD and waits for the selected TV's first authorized HTTP request.
     fn load(&mut self) -> Task<'_, ()>;
-    fn allow(self: Box<Self>) -> Task<'static, Arc<dyn Remote>>;
+    /// Opens the upstream and confirms the initial playback state.
+    fn allow(self: Box<Self>) -> Task<'static, Admitted>;
+}
+pub struct Admitted {
+    pub remote: Arc<dyn Remote>,
+    pub paused: bool,
 }
 pub trait Remote: Send + Sync {
     fn command(&self, command: Command) -> Task<'_, ()>;
@@ -120,26 +125,26 @@ impl Runtime {
         destination: Destination,
         claim: Box<dyn Send>,
         grant: ExternalPlaybackAuthorization,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
         if self.cast.borrow().is_some() || !grant.is_current() {
             return Err(Error::Denied);
         }
         let generation = self.cast_generation.clone();
-        let remote = self
+        let (remote, paused) = self
             .spawn_network(async move {
                 if generation.load(std::sync::atomic::Ordering::Acquire) != ticket
                     || !grant.is_current()
                 {
                     return Err(Error::Denied);
                 }
-                let remote = prepared.allow().await?;
+                let Admitted { remote, paused } = prepared.allow().await?;
                 if generation.load(std::sync::atomic::Ordering::Acquire) != ticket
                     || !grant.is_current()
                 {
                     remote.stop().await?;
                     return Err(Error::Denied);
                 }
-                Ok(remote)
+                Ok((remote, paused))
             })
             .await
             .map_err(|_| Error::Unknown)??;
@@ -158,7 +163,7 @@ impl Runtime {
             failed_polls: 0,
             _claim: claim,
         });
-        Ok(())
+        Ok(paused)
     }
     pub async fn cast_command(&self, command: Command) -> Result<(), Error> {
         let remote = self

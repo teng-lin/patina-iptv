@@ -177,7 +177,7 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
             retired = true;
             owner.retire_viewing_inputs(0).await;
             let grant = check().await?;
-            owner
+            let paused = owner
                 .admit_cast(
                     ticket,
                     prepared,
@@ -201,7 +201,7 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
             ui.player.main().key.set(Some(key.clone()));
             ui.playing.set(schedule().find_channel(&key));
             ui.cast_remote.set(true);
-            ui.paused.set(false);
+            ui.paused.set(paused);
             monitor(ui, ticket);
             Ok(())
         }

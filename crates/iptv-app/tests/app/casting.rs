@@ -4,7 +4,7 @@ use iptv_core::{
     cast::{Command, Error, Receiver, RemoteState},
     playback::PlaySource,
 };
-use iptv_runtime::cast::{Port, Prepared, Remote, Task};
+use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Task};
 use iptv_settings::{Settings, Value};
 use personalization::step;
 use std::{
@@ -19,6 +19,7 @@ struct FakeCast {
     states: Arc<Mutex<VecDeque<Result<RemoteState, Error>>>>,
     load_error: Option<Error>,
     allow_error: Option<Error>,
+    initially_paused: bool,
 }
 
 impl Port for FakeCast {
@@ -42,13 +43,16 @@ impl Prepared for FakeCast {
             self.load_error.map_or(Ok(()), Err)
         })
     }
-    fn allow(self: Box<Self>) -> Task<'static, Arc<dyn Remote>> {
+    fn allow(self: Box<Self>) -> Task<'static, Admitted> {
         Box::pin(async move {
             self.events.lock().unwrap().push("allow");
             if let Some(error) = self.allow_error {
                 return Err(error);
             }
-            Ok(Arc::new(*self) as Arc<dyn Remote>)
+            Ok(Admitted {
+                paused: self.initially_paused,
+                remote: Arc::new(*self),
+            })
         })
     }
 }
@@ -157,6 +161,35 @@ fn remote_controls_and_play_here_recover_one_connection_after_disconnect() {
             "retire",
             "disconnected at stop"
         ]
+    );
+}
+
+#[test]
+fn play_pause_uses_the_receivers_confirmed_pause_state_at_handoff() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        initially_paused: true,
+        ..Default::default()
+    };
+    // A later poll cannot supply the initial pause state for this test.
+    fake.states
+        .lock()
+        .unwrap()
+        .extend([Ok(RemoteState::Loading); 10]);
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(
+        app.wait_until("handoff to paused receiver", Duration::from_secs(10), |s| {
+            s.accessibility_state("id:play-bar-cast")
+                .is_ok_and(|state| !state.busy && !state.disabled)
+                && fake.events.lock().unwrap().contains(&"allow")
+        }),
+    );
+    step(app.press("id:play-bar-play-pause"));
+    step(
+        app.wait_until("play the paused receiver", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"play")
+        }),
     );
 }
 

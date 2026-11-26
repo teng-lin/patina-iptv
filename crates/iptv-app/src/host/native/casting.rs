@@ -5,12 +5,13 @@ use iptv_core::{
     playback::PlaySource,
 };
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
-use iptv_runtime::cast::{Port, Prepared, Remote, Task};
+use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Task};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 
 pub(super) struct Sender;
 const DEFAULT_PORT: u16 = 49152;
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 fn map_error(error: googlecast::Error) -> Error {
     match error {
         googlecast::Error::Unreachable => Error::Unavailable,
@@ -123,7 +124,7 @@ impl Prepared for Handoff {
             Ok(())
         })
     }
-    fn allow(self: Box<Self>) -> Task<'static, Arc<dyn Remote>> {
+    fn allow(self: Box<Self>) -> Task<'static, Admitted> {
         Box::pin(async move {
             let Handoff {
                 address,
@@ -143,10 +144,11 @@ impl Prepared for Handoff {
                     .await
                     .map_err(|_| Error::Unknown)?
                     .map_err(map_error)?;
-                timeout(Duration::from_secs(15), async {
+                timeout(SETTLE_TIMEOUT, async {
                     loop {
                         match session.status(id).await.map_err(map_error)? {
-                            Status::Playing | Status::Paused => return Ok(id),
+                            Status::Playing => return Ok((id, false)),
+                            Status::Paused => return Ok((id, true)),
                             Status::Failed
                             | Status::Finished
                             | Status::Canceled
@@ -162,17 +164,23 @@ impl Prepared for Handoff {
             }
             .await;
             match outcome {
-                Ok(id) => {
+                Ok((id, paused)) => {
                     if let Some(release) = release {
                         let _ = release.send(());
                     }
-                    Ok(Arc::new(Playing {
-                        address,
-                        url: relay.url().to_owned(),
-                        session: tokio::sync::Mutex::new(session),
-                        id,
-                        relay: tokio::sync::Mutex::new(Some(relay)),
-                    }) as Arc<dyn Remote>)
+                    Ok(Admitted {
+                        remote: Arc::new(Playing {
+                            address,
+                            url: relay.url().to_owned(),
+                            control: tokio::sync::Mutex::new(Control {
+                                session,
+                                idle_since: None,
+                            }),
+                            id,
+                            relay: tokio::sync::Mutex::new(Some(relay)),
+                        }),
+                        paused,
+                    })
                 }
                 Err(e) => {
                     relay.shutdown().await;
@@ -182,10 +190,14 @@ impl Prepared for Handoff {
         })
     }
 }
+struct Control {
+    session: Session,
+    idle_since: Option<Instant>,
+}
 struct Playing {
     address: SocketAddr,
     url: String,
-    session: tokio::sync::Mutex<Session>,
+    control: tokio::sync::Mutex<Control>,
     id: i64,
     relay: tokio::sync::Mutex<Option<PlaybackRelay>>,
 }
@@ -201,7 +213,12 @@ impl Remote for Playing {
                 Command::Stop => googlecast::Command::Stop,
             };
             timeout(Duration::from_secs(15), async {
-                self.session.lock().await.command(self.id, cmd).await
+                self.control
+                    .lock()
+                    .await
+                    .session
+                    .command(self.id, cmd)
+                    .await
             })
             .await
             .map_err(|_| Error::Unknown)?
@@ -227,8 +244,8 @@ impl Remote for Playing {
 
 impl Playing {
     async fn observe(&self) -> Result<RemoteState, Error> {
-        let mut session = self.session.lock().await;
-        let status = match session.status(self.id).await {
+        let mut control = self.control.lock().await;
+        let status = match control.session.status(self.id).await {
             Ok(s) => s,
             Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
             Err(_) => {
@@ -240,19 +257,68 @@ impl Playing {
                 if joined.lookup(&self.url).await.map_err(map_error)? != Some(self.id) {
                     return Ok(RemoteState::Ended);
                 }
-                *session = joined;
-                match session.status(self.id).await {
+                control.session = joined;
+                match control.session.status(self.id).await {
                     Ok(status) => status,
                     Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
                     Err(error) => return Err(map_error(error)),
                 }
             }
         };
-        Ok(match status {
-            Status::Playing => RemoteState::Playing,
-            Status::Paused => RemoteState::Paused,
-            Status::Unknown | Status::Buffering => RemoteState::Loading,
-            _ => RemoteState::Ended,
-        })
+        Ok(observed_state(
+            status,
+            &mut control.idle_since,
+            Instant::now(),
+        ))
+    }
+}
+
+fn observed_state(status: Status, idle_since: &mut Option<Instant>, now: Instant) -> RemoteState {
+    if status != Status::Idle {
+        *idle_since = None;
+    }
+    match status {
+        Status::Playing => RemoteState::Playing,
+        Status::Paused => RemoteState::Paused,
+        Status::Idle if now - *idle_since.get_or_insert(now) >= SETTLE_TIMEOUT => {
+            RemoteState::Ended
+        }
+        Status::Unknown | Status::Buffering | Status::Idle => RemoteState::Loading,
+        Status::Failed | Status::Finished | Status::Canceled | Status::Interrupted => {
+            RemoteState::Ended
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reasonless_idle_has_a_grace_period_that_playback_resets() {
+        let start = Instant::now();
+        let mut idle_since = None;
+        let mut sample = |status, seconds| {
+            observed_state(
+                status,
+                &mut idle_since,
+                start + Duration::from_secs(seconds),
+            )
+        };
+        assert_eq!(sample(Status::Idle, 0), RemoteState::Loading);
+        assert_eq!(sample(Status::Paused, 14), RemoteState::Paused);
+        assert_eq!(sample(Status::Idle, 15), RemoteState::Loading);
+        assert_eq!(sample(Status::Idle, 29), RemoteState::Loading);
+        assert_eq!(sample(Status::Idle, 30), RemoteState::Ended);
+        for status in [
+            Status::Failed,
+            Status::Finished,
+            Status::Canceled,
+            Status::Interrupted,
+        ] {
+            assert_eq!(sample(Status::Playing, 31), RemoteState::Playing);
+            assert_eq!(sample(Status::Idle, 31), RemoteState::Loading);
+            assert_eq!(sample(status, 31), RemoteState::Ended);
+        }
     }
 }
