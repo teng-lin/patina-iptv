@@ -150,12 +150,7 @@ pub fn label(key: &str) -> &'static str {
         "general.reset_watch_time" => tr("Forget viewing time"),
         "general.restart" => tr("Restart the app"),
         "general.send_logs" => tr("Send a diagnostic log"),
-        "general.check_updates"
-            if crate::host::updates::feed(crate::device::direct_android_build()).is_none() =>
-        {
-            tr("Release notes and downloads")
-        }
-        "general.check_updates" => tr("Check for updates"),
+        "general.check_updates" => super::updates::label(),
         "general.about" => tr("About this app"),
         "about.privacy_policy" => tr("Privacy policy"),
         "playlists.include_live" => tr("Live channels"),
