@@ -438,8 +438,9 @@ How the per-release archives of the remaining system libraries are produced:
    Linux it runs `apt-get source --download-only <source>=<version>` after
    `tools/ci/enable-deb-src.sh` and checks every file against the checksums of
    the signed archive index. A version that has left the index (a newer update
-   was published after the runner image was built) is fetched from Launchpad,
-   which keeps every published version, and checked against its `.dsc`.
+   was published after the runner image was built) uses the historical `.dsc`
+   from the official Ubuntu HTTPS archive or Launchpad. Each source file must
+   match the size and checksum in that exact version’s description.
 3. **The archive and a `.json` manifest are released** next to the packages and
    listed in `SHA256SUMS`. The manifest names every file with its address and
    SHA-256; the archive contains the same manifest, `SOURCE.txt` and, on macOS,
@@ -643,6 +644,14 @@ creation or upload. Missing provenance or a release-membership predicate fails.
 Rehearsals verify the actual branch ref and remain drafts; they do not prove a
 later tag or signing configuration. Post-publication verification downloads and
 checks the public bytes again. Never bypass a failure by replacing public files.
+
+After verification, the same job retains `update-release.json` in the Actions
+artifact `verified-update-record-<run attempt>`. This is the per-release input
+for [Android and desktop updates](plans/2026-11-25-cross-platform-updates.md).
+It identifies the available viewer packages, their immutable URLs, exact sizes
+and hashes, and each desktop preview’s signing status from the signing job.
+Treat it as input to the future authenticated feed publisher. Clients require
+signed update metadata before offering an installer.
 
 Unsigned candidate packages and their checked evidence are retained for 30 days
 in Actions. A promoted release publishes `candidate-manifest.json` with checksums

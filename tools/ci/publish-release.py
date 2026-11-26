@@ -119,18 +119,19 @@ def record_signing(platform, state, directory):
     (directory / f"{platform}.json").write_text(json.dumps({"platform": platform, "signed": state == "signed"}) + "\n")
 
 
+def platform_signed(directory, platform):
+    path = directory / f"{platform}.json"
+    if not path.is_file():
+        raise SystemExit(f"no signing record for {platform} in {directory}")
+    record = json.loads(path.read_text())
+    if record.get("platform") != platform or not isinstance(record.get("signed"), bool):
+        raise SystemExit(f"malformed signing record: {path}")
+    return record["signed"]
+
+
 def release_notes(directory):
-    """Notes for the unsigned packages, from every signing record. Missing records fail:
-    a package must never be described as signed without its job saying so."""
-    states = {}
-    for platform in SIGNED_PLATFORMS:
-        path = directory / f"{platform}.json"
-        if not path.is_file():
-            raise SystemExit(f"no signing record for {platform} in {directory}")
-        record = json.loads(path.read_text())
-        if record.get("platform") != platform or not isinstance(record.get("signed"), bool):
-            raise SystemExit(f"malformed signing record: {path}")
-        states[platform] = record["signed"]
+    """Describe the actual signing result for every desktop preview."""
+    states = {platform: platform_signed(directory, platform) for platform in SIGNED_PLATFORMS}
     previews = [platform for platform, signed in states.items() if not signed]
     if not previews:
         return ""
