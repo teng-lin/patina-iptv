@@ -26,9 +26,8 @@ pairs name the upstream archive, patches and resources.
 
 Linux: `apt-get source --download-only <source>=<version>` for the exact
 version `dpkg-query` reports (needs deb-src entries: enable-deb-src.sh). A
-version that has left the archive index is fetched from Launchpad, which
-keeps every published version. Unchanged files still in the configured
-archive can be fetched there. The exact version's .dsc checks each file.
+version that has left the archive index uses its historical .dsc from the
+official Ubuntu archive or Launchpad. The exact version's .dsc checks each file.
 
 Usage:
   native-sources.py macos APP OUTPUT.tar
@@ -45,6 +44,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from urllib.parse import quote, urlsplit
 
 REPOSITORY = "https://github.com/teng-lin/patina-iptv"
 # GitHub refuses release files of 2 GiB or more.
@@ -332,6 +332,16 @@ def launchpad_url(name, version, filename):
     return f"https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/{name}/{version}/{filename}"
 
 
+def ubuntu_pool(name, listing):
+    """Only take the pool directory from APT. Fetch .dsc files over trusted Ubuntu HTTPS."""
+    pattern = re.compile(r"(/pool/(?:main|universe|restricted|multiverse)/[a-z0-9]+/" + re.escape(name) + r"/)[^/]+$")
+    for row in print_uris(listing, require_description=False):
+        match = pattern.search(urlsplit(row["url"]).path)
+        if match:
+            return "https://archive.ubuntu.com/ubuntu" + match[1]
+    return None
+
+
 def dsc_name(name, version):
     return f"{name}_{version.split(':', 1)[-1]}.dsc"
 
@@ -347,13 +357,16 @@ def run(arguments, cwd=None):
 
 def download(url, destination):
     """True when the file arrived. Integrity is the caller's checksum, not the transport."""
+    # Historical .dsc files supply checksums for the whole package. Their
+    # original request and every redirect must use authenticated transport.
+    protocols = "=https" if url.endswith(".dsc") else "=https,http"
     arguments = [
         "curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
         # Also refused and reset connections; the checksum guards what arrives.
         "--retry-all-errors", "--connect-timeout", "20", "--max-time", "120", "--retry-max-time", "120",
         # Leave time for a retry when a connected server stops sending bytes.
         "--speed-limit", "1", "--speed-time", "20",
-        "--proto", "=https,http", "--proto-redir", "=https,http", "--output", str(destination), url,
+        "--proto", protocols, "--proto-redir", protocols, "--output", str(destination), url,
     ]
     try:
         result = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
@@ -477,31 +490,34 @@ def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
         raise SystemExit("apt has no deb-src entries: run tools/ci/enable-deb-src.sh first")
     else:
         # The installed version is no longer the newest in its pocket.
-        print(f"  {label} is not in the archive index ({listed.stderr.strip()}); using Launchpad", file=sys.stderr)
+        print(f"  {label} is not in the archive index ({listed.stderr.strip()}); using historical .dsc", file=sys.stderr)
+        current = run(["apt-get", "source", "--print-uris", name])
+        pool = ubuntu_pool(name, current.stdout) if current.returncode == 0 else None
         description = dsc_name(name, version)
-        if not download(launchpad_url(name, version, description), directory / description):
-            raise SystemExit(
-                f"cannot fetch source of {label}: neither the configured deb-src indexes nor Launchpad have it")
+        description_url = launchpad_url(name, version, description)
+        if pool and download(pool + quote(description), directory / description):
+            description_url = pool + quote(description)
+            component["origin"] = "ubuntu-archive"
+        elif download(description_url, directory / description):
+            component["origin"] = "launchpad"
+        else:
+            raise SystemExit(f"cannot fetch source of {label}: neither the configured deb-src indexes nor Launchpad "
+                             "or the official Ubuntu archive have the historical .dsc")
         files = [{"name": description, "size": (directory / description).stat().st_size, "algorithm": "sha256",
                   "checksum": digest(directory / description)}, *dsc_files((directory / description).read_text())]
         for row in files:
             row["url"] = launchpad_url(name, version, row["name"])
-        # A newer distro revision often reuses the same upstream tarball and
-        # detached signature. APT names their current archive URLs directly.
-        missing = [row for row in files[1:] if not cached_source(cache, row, directory / row["name"])]
-        archive_urls = {}
-        if missing:
-            current = run(["apt-get", "source", "--print-uris", name])
-            if current.returncode == 0:
-                archive_urls = {row["name"]: row["url"] for row in print_uris(current.stdout, require_description=False)}
-        for row in missing:
+        files[0]["url"] = description_url
+        # The immutable Launchpad URL identifies each member across cache and
+        # mirror hits. Only the exact historical .dsc decides which bytes pass.
+        for row in files[1:]:
             destination = directory / row["name"]
-            archive_url = archive_urls.get(row["name"])
-            if archive_url and download(archive_url, destination):
+            if cached_source(cache, row, destination):
+                continue
+            if pool and download(pool + quote(row["name"]), destination):
                 continue
             if not download(row["url"], destination):
                 raise SystemExit(f"cannot fetch source of {label}: {row['name']}")
-        component["origin"] = "launchpad"
     component["sources"] = []
     for row in files:
         check_file(directory / row["name"], row, label)

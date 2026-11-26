@@ -571,20 +571,24 @@ class Collecting(unittest.TestCase):
         files = self.source_files()
         original = "synthetic-media_1.2.orig.tar.xz"
         base = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/synthetic-media/7:1.2-3/"
-        archive = "https://archive.example.test/pool/" + original
+        pool = "https://archive.ubuntu.com/ubuntu/pool/main/s/synthetic-media/"
+        archive = pool + original
         self.files = {base + name: data for name, data in files.items() if name != original}
         self.files[archive] = files[original]
+        dsc = "synthetic-media_1.2-3.dsc"
+        self.files[pool + dsc] = self.files.pop(base + dsc)
 
         def apt(arguments):
             if arguments[-1] != "synthetic-media":
                 return subprocess.CompletedProcess(arguments, 100, "", "Version not found")
             current = {"synthetic-media_1.2-4.dsc": b"current dsc", original: files[original]}
-            listing = "".join(f"'https://archive.example.test/pool/{name}' {name} {len(data)} "
+            listing = "".join(f"'http://mirror.example.test/ubuntu/pool/main/s/synthetic-media/{name}' {name} {len(data)} "
                               f"SHA256:{hashlib.sha256(data).hexdigest()}\n" for name, data in current.items())
             return subprocess.CompletedProcess(arguments, 0, listing, "")
 
         description, _ = self.collect_linux(apt)
         source = next(row for row in description["components"][0]["sources"] if row["file"].endswith(original))
+        self.assertEqual(description["components"][0]["origin"], "ubuntu-archive")
         self.assertEqual(source["url"], base + original, "stable canonical URL regardless of fetch mirror")
         self.assertIn(archive, self.attempts)
         self.assertNotIn(base + original, self.attempts)
