@@ -190,3 +190,15 @@ async fn a_peer_that_closes_during_tls_never_opens_a_cast_session() {
     let (result, ()) = tokio::join!(Session::connect(address), disconnect);
     assert!(matches!(result, Err(Error::Unreachable)));
 }
+
+#[tokio::test]
+async fn connecting_to_a_running_receiver_reuses_its_transport_without_relaunching() {
+    let (address, server) = receiver(&rustls::version::TLS13, true).await;
+    let session = Session::connect(address).await.unwrap();
+    assert_eq!(session.lookup(URL).await, Ok(None));
+    drop(session);
+    timeout(Duration::from_secs(5), server)
+        .await
+        .expect("sender closes the control socket")
+        .unwrap();
+}
