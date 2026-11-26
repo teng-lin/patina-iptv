@@ -5,7 +5,7 @@ mod selection;
 mod trust;
 pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use iptv_net::{NetClient, NetConfig};
 use iptv_providers::HttpRequest;
@@ -41,6 +41,30 @@ impl Transport for FeedTransport {
             404 | 410 => Err(failure(TransportErrorKind::FileNotFound)),
             _ => Err(failure(TransportErrorKind::Other)),
         }
+    }
+}
+
+/// Tough writes each accepted role before requesting the next. Preserve that
+/// progress before waiting on a mirror that can disappear at any point.
+#[derive(Debug, Clone)]
+struct MetadataTransport<T> {
+    inner: T,
+    session: Arc<trust::Session>,
+    deadline: tokio::time::Instant,
+}
+
+#[tough::async_trait]
+impl<T: Transport + Clone> Transport for MetadataTransport<T> {
+    async fn fetch(&self, url: Url) -> Result<TransportStream, TransportError> {
+        let failed = || TransportError::new(TransportErrorKind::Other, url.as_str());
+        let session = Arc::clone(&self.session);
+        tokio::task::spawn_blocking(move || session.commit())
+            .await
+            .map_err(|_| failed())?
+            .map_err(|_| failed())?;
+        tokio::time::timeout_at(self.deadline, self.inner.fetch(url.clone()))
+            .await
+            .map_err(|_| failed())?
     }
 }
 
@@ -82,11 +106,7 @@ impl crate::Runtime {
                     .ok()?;
                     verified_index(&state, root, &base, FeedTransport(client), installed).await
                 };
-                tokio::time::timeout(Duration::from_secs(45), check)
-                    .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or(UpdateResult::Unavailable)
+                check.await.unwrap_or(UpdateResult::Unavailable)
             })
             .await
             .unwrap_or(UpdateResult::Unavailable)
@@ -97,7 +117,7 @@ async fn verified_index(
     state: &std::path::Path,
     root: &[u8],
     base: &Url,
-    transport: impl Transport + 'static,
+    transport: impl Transport + Clone + 'static,
     installed: InstalledPackage,
 ) -> Option<UpdateResult> {
     let directory = state.to_owned();
@@ -108,29 +128,30 @@ async fn verified_index(
     .await
     .ok()?
     .ok()?;
+    let session = Arc::new(session);
     let repository = RepositoryLoader::new(
         &session.root,
         base.join("metadata/").ok()?,
         base.join("targets/").ok()?,
     )
-    .transport(transport)
+    .transport(MetadataTransport {
+        inner: transport,
+        session: Arc::clone(&session),
+        deadline: tokio::time::Instant::now() + Duration::from_secs(45),
+    })
     .limits(tough::Limits {
         max_root_updates: 32,
         ..Default::default()
     })
     .datastore(session.work.path())
     .load()
-    .await
-    .ok()?;
-    // The signed repository metadata is already authenticated. Preserve its
-    // rollback floor even if a mirror withholds the target bytes.
-    let _session = tokio::task::spawn_blocking(move || {
-        session.commit()?;
-        Ok::<_, std::io::Error>(session)
-    })
-    .await
-    .ok()?
-    .ok()?;
+    .await;
+    // Keep the latest role accepted during a partial refresh, too.
+    tokio::task::spawn_blocking(move || session.commit())
+        .await
+        .ok()?
+        .ok()?;
+    let repository = repository.ok()?;
     let name = TargetName::new("index.json").ok()?;
     let bytes = repository
         .read_target(&name)

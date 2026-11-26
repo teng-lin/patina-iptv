@@ -79,6 +79,7 @@ pub enum UpdateResult {
         preview: bool,
         asset: ReleaseAsset,
     },
+    RequirementsUnconfirmed,
     NoCompatiblePackage,
     Unavailable,
 }
@@ -156,7 +157,13 @@ pub(super) fn select(bytes: &[u8], installed: InstalledPackage) -> Option<Update
         return Some(UpdateResult::Current);
     }
     if !meets(&installed.minimum, &package["minimum"])? {
-        return Some(UpdateResult::NoCompatiblePackage);
+        // Android reports the device API. Desktop stamps describe the oldest
+        // supported host, so a higher floor needs a manual compatibility check.
+        return Some(if installed.platform == "android" {
+            UpdateResult::NoCompatiblePackage
+        } else {
+            UpdateResult::RequirementsUnconfirmed
+        });
     }
     if installed.platform == "android"
         && installed

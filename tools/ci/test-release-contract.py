@@ -30,6 +30,8 @@ class UpdateIndex(unittest.TestCase):
         dist = self.work / f"{version}-{suffix}"
         dist.mkdir()
         (dist / f"Patina-{version}-{suffix}").write_bytes(b"synthetic package")
+        for platform, state in (("windows", "signed"), ("macos", "unsigned")):
+            verifier.release.record_signing(platform, state, self.work)
         record = verifier.package_record(dist, "synthetic/repo", f"v{version}", "a" * 40, self.work)
         file = dist / "record.json"
         file.write_text(json.dumps(record))
@@ -50,6 +52,34 @@ class UpdateIndex(unittest.TestCase):
         self.assertEqual([(p["format"], p["version"]) for p in packages], [("apk", "0.1.10"), ("deb", "0.1.9")])
         self.assertEqual(self.promote(first, newer).returncode, 0)
         self.assertEqual(self.output.read_bytes(), published)
+
+    def test_desktop_promotions_preserve_signing_status_and_require_consistent_release_identity(self):
+        windows = self.record("0.1.9", "windows-x86_64-setup.exe")
+        mac = self.record("0.1.9", "macos-arm64.dmg")
+        self.assertEqual(self.promote(windows, mac).returncode, 0)
+        published = self.output.read_bytes()
+        self.assertNotIn(b"\r", published)
+        self.assertEqual([(p["format"], p["signing"]) for p in json.loads(published)["packages"]],
+                         [("dmg", "preview"), ("exe", "signed")])
+        linux = self.record("0.1.9", "linux-x86_64.deb")
+        record = json.loads(linux.read_text())
+        record["commit"] = "b" * 40
+        linux.write_text(json.dumps(record))
+        self.assertNotEqual(self.promote(linux).returncode, 0)
+        self.assertEqual(self.output.read_bytes(), published)
+
+    def test_rejects_malformed_new_version_before_writing_target(self):
+        first = self.record("0.1.9", "android-tablet-tv.apk")
+        newer = self.record("0.1.10", "android-tablet-tv.apk")
+        self.assertEqual(self.promote(first).returncode, 0)
+        previous = self.output.read_bytes()
+        original = newer.read_text()
+        for field, bad in (("signing", None), ("versionCode", 2), ("minimum", {}), ("architectures", "x86")):
+            record = json.loads(original)
+            record["packages"][0][field] = bad
+            newer.write_text(json.dumps(record))
+            self.assertNotEqual(self.promote(newer).returncode, 0)
+            self.assertEqual(self.output.read_bytes(), previous)
 
     def test_conflict_or_invalid_input_preserves_previous_index(self):
         first = self.record("0.1.9", "linux-x86_64.deb")

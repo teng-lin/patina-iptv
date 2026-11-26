@@ -56,12 +56,17 @@ async fn verifies_targets_and_keeps_rotation_and_replay_state_across_checks() {
     ));
     fs::copy(fixture.join("2.root.json"), metadata.join("2.root.json")).unwrap();
     publish(2);
+    // The new timestamp survives even when the mirror withholds its snapshot.
+    fs::remove_file(metadata.join("2.snapshot.json")).unwrap();
+    assert!(check().await.is_none());
+    publish(1);
+    assert!(check().await.is_none());
+    publish(2);
     fs::write(&file, b"changed").unwrap();
     assert!(check().await.is_none());
     fs::write(&file, &data).unwrap();
     // Subsequent checks start at the accepted root even after the mirror drops it.
     fs::remove_file(metadata.join("2.root.json")).unwrap();
-    let trusted = fs::read(state.join("trusted.json")).unwrap();
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(
             &trust::Session::open(&state, &root).unwrap().root
@@ -74,7 +79,12 @@ async fn verifies_targets_and_keeps_rotation_and_replay_state_across_checks() {
     );
     publish(1);
     assert!(check().await.is_none());
-    assert_eq!(fs::read(state.join("trusted.json")).unwrap(), trusted);
+    let session = trust::Session::open(&state, &root).unwrap();
+    let timestamp: serde_json::Value =
+        serde_json::from_slice(&fs::read(session.work.path().join("timestamp.json")).unwrap())
+            .unwrap();
+    assert_eq!(timestamp["signed"]["version"], 2);
+    drop(session);
     publish(2);
     fs::write(&file, b"changed").unwrap();
     assert!(check().await.is_none());
@@ -202,4 +212,25 @@ fn desktop_packages_require_the_matching_artifact_and_report_publisher_status() 
         index["packages"][0]["url"] = json!("https://example.invalid/other");
         assert!(select(&index).is_none());
     }
+}
+
+#[test]
+fn a_newer_desktop_requirement_needs_manual_confirmation() {
+    let mut index: serde_json::Value =
+        serde_json::from_slice(include_bytes!("../../../tests/fixtures/updates/index.json"))
+            .unwrap();
+    let entry = &mut index["packages"][0];
+    entry["platform"] = json!("macos");
+    entry["minimum"] = json!({"macos": "15.0"});
+    entry["format"] = json!("dmg");
+    entry["architectures"] = json!(["arm64"]);
+    let mut package = installed();
+    package.platform = "macos";
+    package.format = Some("dmg".into());
+    package.architecture = "arm64";
+    package.minimum = json!({"macos":"14.0"});
+    assert_eq!(
+        selection::select(&serde_json::to_vec(&index).unwrap(), package),
+        Some(UpdateResult::RequirementsUnconfirmed)
+    );
 }
