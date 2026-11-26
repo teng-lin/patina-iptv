@@ -122,6 +122,7 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]
+cc = "1"
 embed-resource = "3.0"
 # The bundle id for the iOS simulator's entitlements (build.rs).
 serde_json.workspace = true

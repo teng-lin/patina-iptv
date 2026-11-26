@@ -5,6 +5,24 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build_version.rs");
     build_version::emit();
+    println!("cargo:rustc-check-cfg=cfg(patina_airplay_probe)");
+    println!("cargo:rerun-if-env-changed=PATINA_AIRPLAY_PROBE");
+    if std::env::var("PATINA_AIRPLAY_PROBE").as_deref() == Ok("1") {
+        println!("cargo:rustc-cfg=patina_airplay_probe");
+        if matches!(
+            std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+            Ok("macos" | "ios")
+        ) {
+            let source = "src/host/native/apple_airplay.m";
+            println!("cargo:rerun-if-changed={source}");
+            cc::Build::new()
+                .file(source)
+                .flag("-fobjc-arc")
+                .compile("patina_airplay_probe");
+            println!("cargo:rustc-link-lib=framework=AVKit");
+            println!("cargo:rustc-link-lib=framework=AVFoundation");
+        }
+    }
     println!("cargo:rerun-if-env-changed=PATINA_UPDATE_ROOT");
     println!("cargo:rerun-if-env-changed=PATINA_UPDATE_FEED");
     let root = std::env::var_os("PATINA_UPDATE_ROOT");
