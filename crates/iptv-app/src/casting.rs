@@ -32,11 +32,11 @@ pub(super) fn local_blocked(ui: Ui) -> bool {
 }
 
 pub(super) fn open(ui: Ui) {
-    if ui.cast_remote.get_untracked() {
-        chooser::open(ui, chooser::Kind::CastRemote);
+    if ui.cast_busy.get_untracked() {
         return;
     }
-    if ui.cast_busy.get_untracked() {
+    if ui.cast_remote.get_untracked() {
+        chooser::open(ui, chooser::Kind::CastRemote);
         return;
     }
     ui.cast_busy.set(true);
@@ -101,6 +101,7 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
     ui.cast_busy.set(true);
     crate::tasks::spawn_in_app(async move {
         let mut retired = false;
+        let mut transferred = false;
         let result = async {
             let check = || async {
                 let grant = owner
@@ -172,6 +173,7 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
             let prepared = owner.load_cast(ticket, prepared, grant).await?;
             check().await?;
             crate::player::stop_for_handoff(ui, &target);
+            transferred = true;
             retired = true;
             owner.retire_viewing_inputs(0).await;
             let grant = check().await?;
@@ -189,23 +191,25 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
                 )
                 .await?;
             if !current() {
-                let _ = owner.cast_command(Command::Stop).await;
+                if owner.cast_command(Command::Stop).await.is_err() {
+                    monitor(ui, ticket);
+                }
+                // Active owns the transferred grant until clear_cast retires it.
+                transferred = false;
                 return Err(Error::Denied);
             }
             ui.player.main().key.set(Some(key.clone()));
             ui.playing.set(schedule().find_channel(&key));
             ui.cast_remote.set(true);
             ui.paused.set(false);
-            monitor(ui, key);
+            monitor(ui, ticket);
             Ok(())
         }
         .await;
         ui.cast_busy.set(false);
         if let Err(e) = result {
             report(e);
-            if retired && !current() {
-                owner.parental_end_transfer(&target);
-            }
+
             if current() {
                 ui.paused.set(old_paused);
                 if retired
@@ -213,40 +217,51 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
                         .as_deref()
                         .and_then(|key| schedule().find_channel(key))
                 {
+                    ui.playing.set(None);
                     ui.play(ch, Playback::Live);
+                    if ui.playing.get_untracked() == Some(ch) {
+                        ui.paused.set(old_paused);
+                    }
+                    if transferred
+                        && ui.playing.get_untracked() == Some(ch)
+                        && crate::parental_view::live_target(ui, ch).as_ref() == Some(&target)
+                    {
+                        transferred = false;
+                    }
                 }
             }
+            if transferred {
+                owner.parental_end_transfer(&target);
+            }
         }
+        finish_pending_stop(ui);
     });
 }
-fn monitor(ui: Ui, key: String) {
+fn monitor(ui: Ui, ticket: u64) {
     let _timer = set_timeout(Duration::from_secs(3), move || {
-        if runtime()
-            .cast_target()
-            .is_none_or(|(_, active)| active != key)
-        {
+        if runtime().active_cast_ticket() != Some(ticket) {
             return;
         }
         crate::tasks::spawn_in_app(async move {
-            match runtime().poll_cast().await {
+            match runtime().poll_cast(ticket).await {
                 Ok(RemoteState::Ended)
                     if runtime().cast_target().is_none() && ui.cast_remote.get_untracked() =>
                 {
                     ui.cast_remote.set(false);
                     ui.playing.set(None);
-                    notify(tr("Casting ended."));
+                    if !ui.cast_busy.get_untracked() {
+                        chooser::open(ui, chooser::Kind::CastEnded);
+                    }
                 }
                 Ok(state) => {
-                    if runtime()
-                        .cast_target()
-                        .is_some_and(|(_, active)| active == key)
-                    {
+                    if runtime().active_cast_ticket() == Some(ticket) {
                         if matches!(state, RemoteState::Playing | RemoteState::Paused) {
                             ui.paused.set(state == RemoteState::Paused);
                         }
-                        monitor(ui, key);
+                        monitor(ui, ticket);
                     }
                 }
+                Err(_) if runtime().active_cast_ticket() == Some(ticket) => monitor(ui, ticket),
                 Err(_) => {}
             }
         });
@@ -260,6 +275,9 @@ pub(super) fn remote(ui: Ui, index: usize) {
         _ => return,
     };
     if ui.cast_busy.get_untracked() {
+        if index == 3 {
+            ui.cast_stop_pending.set(true);
+        }
         return;
     }
     let Some((_, key)) = runtime().cast_target() else {
@@ -282,7 +300,16 @@ pub(super) fn remote(ui: Ui, index: usize) {
             Ok(()) => ui.paused.set(command == Command::Pause),
             Err(e) => report(e),
         }
+        finish_pending_stop(ui);
     });
+}
+fn finish_pending_stop(ui: Ui) {
+    if ui.cast_stop_pending.get_untracked() {
+        ui.cast_stop_pending.set(false);
+        if ui.cast_remote.get_untracked() {
+            remote(ui, 3);
+        }
+    }
 }
 pub(crate) fn volume(ui: Ui, command: Command) -> bool {
     if !ui.cast_remote.get_untracked() {
@@ -301,7 +328,7 @@ fn report(error: Error) {
         Error::Refused => "The Chromecast refused this stream.",
         Error::Unknown => "Could not confirm playback on the Chromecast.",
         Error::NoRequest => {
-            "The TV did not reach this device. Check the firewall and Wi-Fi client isolation."
+            "The TV did not request the stream. Check the firewall and Wi-Fi client isolation."
         }
         Error::Busy => "No provider connection is available.",
         Error::Denied => "Playback is no longer authorized.",

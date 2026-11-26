@@ -30,6 +30,7 @@ const DEADLINE: Duration = Duration::from_secs(15);
 pub enum Error {
     Unreachable,
     Refused,
+    LoadFailed,
     Unknown,
     Ended,
 }
@@ -313,7 +314,8 @@ async fn drive(
                         && pending.get(&id).is_some_and(|p|p.namespace==m.namespace && p.destination==m.source)
                         && let Some(p)=pending.remove(&id) {
                         let result=match v["type"].as_str(){
-                            Some("LOAD_FAILED"|"LOAD_CANCELLED"|"INVALID_REQUEST"|"LAUNCH_ERROR"|"INVALID_PLAYER_STATE")=>Err(Error::Refused),
+                            Some("LOAD_FAILED")=>Err(Error::LoadFailed),
+                            Some("LOAD_CANCELLED"|"INVALID_REQUEST"|"LAUNCH_ERROR"|"INVALID_PLAYER_STATE")=>Err(Error::Refused),
                             Some("MEDIA_STATUS"|"RECEIVER_STATUS")=>Ok(v),
                             _=>Err(Error::Unknown)
                         };
@@ -399,7 +401,7 @@ mod tests {
             .await;
         };
         let (actual, _) = tokio::join!(session.load(url), refusal);
-        assert_eq!(actual, Err(Error::Refused));
+        assert_eq!(actual, Err(Error::LoadFailed));
         drop(session);
         owner.await.unwrap();
     }

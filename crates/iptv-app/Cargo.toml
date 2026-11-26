@@ -73,8 +73,10 @@ jni = "0.21"
 # localtime_r for the device's UTC offset (time.rs).
 libc = "0.2"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 iptv-cast.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 dbus-secret-service = { version = "4.1", features = ["crypto-rust"] }
 # The logind and portal sleep inhibitors while recording (host/native/keep_awake.rs).
 dbus = "0.9"

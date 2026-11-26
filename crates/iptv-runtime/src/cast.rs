@@ -19,10 +19,18 @@ pub trait Prepared: Send {
 }
 pub trait Remote: Send + Sync {
     fn command(&self, command: Command) -> Task<'_, ()>;
-    /// Returns true while the receiver still owns this media session.
+    /// Reports the owned media session, or a transport error if its state is unknown.
     fn state(&self) -> Task<'_, RemoteState>;
     /// Joins upstream retirement before the account claim can be released.
     fn retire(&self) -> Task<'_, ()>;
+    /// Revoke relay access even when the control connection has been lost.
+    fn stop(&self) -> Task<'_, ()> {
+        Box::pin(async {
+            self.retire().await?;
+            let _ = self.command(Command::Stop).await;
+            Ok(())
+        })
+    }
 }
 pub struct Destination {
     pub receiver: Receiver,
@@ -34,6 +42,8 @@ pub(crate) struct Active {
     pub key: String,
     pub authority: iptv_guide::playback::ResolutionAuthority,
     remote: Arc<dyn Remote>,
+    failed_polls: u8,
+    ticket: u64,
     _claim: Box<dyn Send>,
 }
 
@@ -126,8 +136,7 @@ impl Runtime {
                 if generation.load(std::sync::atomic::Ordering::Acquire) != ticket
                     || !grant.is_current()
                 {
-                    let _ = remote.command(Command::Stop).await;
-                    remote.retire().await?;
+                    remote.stop().await?;
                     return Err(Error::Denied);
                 }
                 Ok(remote)
@@ -135,12 +144,9 @@ impl Runtime {
             .await
             .map_err(|_| Error::Unknown)??;
         if !self.cast_intent_current(ticket) || self.cast.borrow().is_some() {
-            self.spawn_network(async move {
-                let _ = remote.command(Command::Stop).await;
-                remote.retire().await
-            })
-            .await
-            .map_err(|_| Error::Unknown)??;
+            self.spawn_network(async move { remote.stop().await })
+                .await
+                .map_err(|_| Error::Unknown)??;
             return Err(Error::Denied);
         }
         *self.cast.borrow_mut() = Some(Active {
@@ -148,6 +154,8 @@ impl Runtime {
             key: destination.key,
             authority: destination.authority,
             remote,
+            ticket,
+            failed_polls: 0,
             _claim: claim,
         });
         Ok(())
@@ -162,14 +170,11 @@ impl Runtime {
             .clone();
         let worker = remote.clone();
         self.spawn_network(async move {
-            let result = worker.command(command).await;
             if command == Command::Stop {
-                // This service delivers through our relay. Once shutdown joins,
-                // a disconnected receiver cannot retain an upstream connection.
-                worker.retire().await?;
-                return Ok(());
+                worker.stop().await
+            } else {
+                worker.command(command).await
             }
-            result
         })
         .await
         .map_err(|_| Error::Unknown)??;
@@ -199,12 +204,17 @@ impl Runtime {
             )
         })
     }
-    pub async fn poll_cast(&self) -> Result<RemoteState, Error> {
+    pub fn active_cast_ticket(&self) -> Option<u64> {
+        self.cast.borrow().as_ref().map(|active| active.ticket)
+    }
+
+    pub async fn poll_cast(&self, ticket: u64) -> Result<RemoteState, Error> {
         let (authority, remote) = self
             .cast
             .borrow()
             .as_ref()
-            .map(|a| (a.authority.clone(), a.remote.clone()))
+            .filter(|active| active.ticket == ticket)
+            .map(|active| (active.authority.clone(), active.remote.clone()))
             .ok_or(Error::Unavailable)?;
         let allowed = self
             .authorize_cast_playback(authority)
@@ -212,33 +222,49 @@ impl Runtime {
             .ok()
             .flatten()
             .is_some_and(|grant| grant.is_current());
-        let worker = remote.clone();
-        let state = self
-            .spawn_network(async move {
-                if !allowed {
-                    let _ = worker.command(Command::Stop).await;
+        if self.active_cast_ticket() != Some(ticket) {
+            return Err(Error::Unavailable);
+        }
+        let state = if allowed {
+            let worker = remote.clone();
+            let observed = self
+                .spawn_network(async move { worker.state().await })
+                .await
+                .map_err(|_| Error::Unknown)?;
+            let mut slot = self.cast.borrow_mut();
+            let active = slot
+                .as_mut()
+                .filter(|active| active.ticket == ticket)
+                .ok_or(Error::Unavailable)?;
+            match observed {
+                Ok(observed) => {
+                    active.failed_polls = 0;
+                    observed
                 }
-                let state = if allowed {
-                    worker.state().await.unwrap_or(RemoteState::Ended)
-                } else {
+                Err(_) => {
+                    // Each poll already tries to rejoin once. Keep serving during
+                    // short control outages, then retire an unreachable receiver.
+                    active.failed_polls = active.failed_polls.saturating_add(1);
+                    if active.failed_polls < 3 {
+                        return Ok(RemoteState::Loading);
+                    }
                     RemoteState::Ended
-                };
-                if state == RemoteState::Ended {
-                    worker.retire().await?;
                 }
-                Ok(state)
+            }
+        } else {
+            RemoteState::Ended
+        };
+        if state == RemoteState::Ended {
+            let worker = remote.clone();
+            self.spawn_network(async move {
+                if allowed {
+                    worker.retire().await
+                } else {
+                    worker.stop().await
+                }
             })
             .await
             .map_err(|_| Error::Unknown)??;
-        if !self
-            .cast
-            .borrow()
-            .as_ref()
-            .is_some_and(|a| Arc::ptr_eq(&a.remote, &remote))
-        {
-            return Err(Error::Unavailable);
-        }
-        if state == RemoteState::Ended {
             self.clear_cast(&remote);
         }
         Ok(state)

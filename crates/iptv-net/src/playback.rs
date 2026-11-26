@@ -970,7 +970,13 @@ fn apply_hls_directives(url: &mut Url, query: &str) -> Result<(), FetchError> {
 impl Session {
     fn cors(&self) -> &'static str {
         if self.cast_peer.is_some() {
-            "Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range, If-Range\r\nAccess-Control-Expose-Headers: Content-Range, Accept-Ranges\r\n"
+            concat!(
+                "Access-Control-Allow-Origin: *\r\n",
+                "Access-Control-Allow-Private-Network: true\r\n",
+                "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n",
+                "Access-Control-Allow-Headers: Range, If-Range\r\n",
+                "Access-Control-Expose-Headers: Content-Range, Accept-Ranges\r\n",
+            )
         } else {
             ""
         }

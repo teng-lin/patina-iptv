@@ -33,6 +33,7 @@ pub enum Kind {
     Picture,
     Cast,
     CastRemote,
+    CastEnded,
     More,
     Volume,
     Sleep,
@@ -139,6 +140,7 @@ fn title(kind: Kind) -> &'static str {
         Kind::History => tr("Recently watched"),
         Kind::Cast => tr("Cast to TV"),
         Kind::CastRemote => tr("Casting through this device"),
+        Kind::CastEnded => tr("Casting ended."),
         Kind::Leave => tr("Close Patina?"),
     }
 }
@@ -205,10 +207,15 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             Vec::new(),
             0,
         ),
+        Kind::CastEnded => (
+            vec![tr("Play here").to_owned(), tr("Close").to_owned()],
+            ui.player.main().key.get_untracked().into_iter().collect(),
+            0,
+        ),
         Kind::CastRemote => (
-            ["Pause", "Play", "Play here", "Stop casting"]
+            [tr("Pause"), tr("Play"), tr("Play here"), tr("Stop casting")]
                 .into_iter()
-                .map(|s| tr(s).to_owned())
+                .map(str::to_owned)
                 .collect(),
             Vec::new(),
             0,
@@ -377,6 +384,14 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::CastRemote => crate::casting::remote(ui, index),
+        Kind::CastEnded => {
+            if index == 0
+                && ui.playing.get_untracked().is_none()
+                && let Some(channel) = crate::runtime_owner::schedule().find_channel(&value)
+            {
+                ui.play(channel, Playback::Live);
+            }
+        }
         Kind::History => play_recent(ui, &value),
         Kind::Leave => {
             if index == 1 {
@@ -509,6 +524,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                         Kind::History
                         | Kind::Cast
                         | Kind::CastRemote
+                        | Kind::CastEnded
                         | Kind::More
                         | Kind::Leave => false,
                         Kind::Volume => volume_index(ui) == index,
@@ -525,7 +541,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                 c.as_ref().is_some_and(|c| {
                     matches!(
                         c.kind,
-                        Kind::Cast | Kind::CastRemote | Kind::More | Kind::Leave
+                        Kind::Cast | Kind::CastRemote | Kind::CastEnded | Kind::More | Kind::Leave
                     )
                 })
             })

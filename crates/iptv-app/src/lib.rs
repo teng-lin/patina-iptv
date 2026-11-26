@@ -263,6 +263,7 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub(crate) cast_busy: Signal<bool>,
+    pub(crate) cast_stop_pending: Signal<bool>,
     pub(crate) cast_remote: Signal<bool>,
     pub(crate) external_request: Signal<u64>,
     pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
@@ -404,6 +405,7 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             cast_busy: signal(false),
+            cast_stop_pending: signal(false),
             cast_remote: signal(false),
             external_request: signal(0),
             external_handoff_target: signal(None),

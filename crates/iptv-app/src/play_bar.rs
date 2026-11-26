@@ -400,7 +400,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
     let phone = phone_form();
     let under_more = |c: &Control| match c {
         Record => record != RecordNow::Direct,
-        Multiview => phone,
+        Cast | Multiview => phone,
         _ => false,
     };
     let candidates: Vec<_> = LEFT
@@ -533,8 +533,9 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
-        .disabled(move || !shown(ui, control))
+        .disabled(move || !shown(ui, control) || (control == Control::Cast && ui.cast_busy.get()))
         .accessibility_state(move || AccessibilityState {
+            busy: control == Control::Cast && ui.cast_busy.get(),
             selected: focused(ui, control),
             has_popup: control == Control::More,
             expanded: (control == Control::More).then(|| {

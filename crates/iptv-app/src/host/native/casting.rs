@@ -1,4 +1,4 @@
-//! Linux Cast transport. The runtime authorizes each opening of the relay.
+//! Desktop Cast transport. The runtime authorizes each opening of the relay.
 use iptv_cast::googlecast::{self, Session, Status};
 use iptv_core::{
     cast::{Command, Error, Receiver, RemoteState},
@@ -14,7 +14,7 @@ const DEFAULT_PORT: u16 = 49152;
 fn map_error(error: googlecast::Error) -> Error {
     match error {
         googlecast::Error::Unreachable => Error::Unavailable,
-        googlecast::Error::Refused => Error::Refused,
+        googlecast::Error::Refused | googlecast::Error::LoadFailed => Error::Refused,
         googlecast::Error::Unknown | googlecast::Error::Ended => Error::Unknown,
     }
 }
@@ -73,7 +73,7 @@ struct Handoff {
     session: Session,
     relay: PlaybackRelay,
     gate: ExternalAdmission,
-    reply: Option<tokio::sync::oneshot::Receiver<Result<i64, Error>>>,
+    reply: Option<tokio::sync::oneshot::Receiver<Result<i64, googlecast::Error>>>,
     release: Option<tokio::sync::oneshot::Sender<()>>,
 }
 impl Prepared for Handoff {
@@ -85,7 +85,7 @@ impl Prepared for Handoff {
             let (release, released) = tokio::sync::oneshot::channel();
             self.release = Some(release);
             tokio::spawn(async move {
-                let result = session.load(&url).await.map_err(map_error);
+                let result = session.load(&url).await;
                 let _ = loaded.send(result);
                 // Until the handoff commits, cancellation revokes ownership of
                 // just this capability, including after a delayed LOAD reply.
@@ -95,21 +95,31 @@ impl Prepared for Handoff {
                     let _ = session.command(id, googlecast::Command::Stop).await;
                 }
             });
-            let wait = timeout(Duration::from_secs(10), self.gate.connected());
-            tokio::pin!(wait);
-            tokio::select! {
-                connected=&mut wait=>{
-                    if connected!=Ok(true){return Err(Error::NoRequest);}
-                    self.reply=Some(reply);
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            let early_reply = tokio::select! {
+                connected = tokio::time::timeout_at(deadline, self.gate.connected()) => {
+                    if connected != Ok(true) {
+                        return Err(Error::NoRequest);
+                    }
+                    None
                 }
-                result=&mut reply=>{
-                    let id=result.map_err(|_|Error::Unknown)??;
-                    if wait.await!=Ok(true){return Err(Error::NoRequest);}
-                    let (send,ready)=tokio::sync::oneshot::channel();
-                    let _=send.send(Ok(id));
-                    self.reply=Some(ready);
+                result = &mut reply => Some(result.map_err(|_| Error::Unknown)?),
+            };
+            if let Some(result) = early_reply {
+                let id = match result {
+                    Err(googlecast::Error::LoadFailed) if !self.gate.received_request() => {
+                        return Err(Error::NoRequest);
+                    }
+                    other => other.map_err(map_error)?,
+                };
+                if tokio::time::timeout_at(deadline, self.gate.connected()).await != Ok(true) {
+                    return Err(Error::NoRequest);
                 }
+                let (send, ready) = tokio::sync::oneshot::channel();
+                let _ = send.send(Ok(id));
+                reply = ready;
             }
+            self.reply = Some(reply);
             Ok(())
         })
     }
@@ -124,13 +134,15 @@ impl Prepared for Handoff {
                 release,
             } = *self;
             if !gate.allow() {
-                return Err(Error::Denied);
+                relay.shutdown().await;
+                return Err(Error::Unknown);
             }
             let outcome = async {
                 let id = reply
                     .ok_or(Error::Unknown)?
                     .await
-                    .map_err(|_| Error::Unknown)??;
+                    .map_err(|_| Error::Unknown)?
+                    .map_err(map_error)?;
                 timeout(Duration::from_secs(15), async {
                     loop {
                         match session.status(id).await.map_err(map_error)? {
@@ -188,35 +200,19 @@ impl Remote for Playing {
                 Command::Pause => googlecast::Command::Pause,
                 Command::Stop => googlecast::Command::Stop,
             };
-            self.session
-                .lock()
-                .await
-                .command(self.id, cmd)
-                .await
-                .map_err(map_error)
+            timeout(Duration::from_secs(15), async {
+                self.session.lock().await.command(self.id, cmd).await
+            })
+            .await
+            .map_err(|_| Error::Unknown)?
+            .map_err(map_error)
         })
     }
     fn state(&self) -> Task<'_, RemoteState> {
-        Box::pin(async move {
-            let mut session = self.session.lock().await;
-            let status = match session.status(self.id).await {
-                Ok(s) => s,
-                Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-                Err(_) => {
-                    let joined = Session::rejoin(self.address).await.map_err(map_error)?;
-                    if joined.lookup(&self.url).await.map_err(map_error)? != Some(self.id) {
-                        return Ok(RemoteState::Ended);
-                    }
-                    *session = joined;
-                    session.status(self.id).await.map_err(map_error)?
-                }
-            };
-            Ok(match status {
-                Status::Playing => RemoteState::Playing,
-                Status::Paused => RemoteState::Paused,
-                Status::Unknown | Status::Buffering => RemoteState::Loading,
-                _ => RemoteState::Ended,
-            })
+        Box::pin(async {
+            timeout(Duration::from_secs(15), self.observe())
+                .await
+                .map_err(|_| Error::Unknown)?
         })
     }
     fn retire(&self) -> Task<'_, ()> {
@@ -225,6 +221,38 @@ impl Remote for Playing {
                 relay.shutdown().await;
             }
             Ok(())
+        })
+    }
+}
+
+impl Playing {
+    async fn observe(&self) -> Result<RemoteState, Error> {
+        let mut session = self.session.lock().await;
+        let status = match session.status(self.id).await {
+            Ok(s) => s,
+            Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
+            Err(_) => {
+                let joined = match Session::rejoin(self.address).await {
+                    Ok(joined) => joined,
+                    Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
+                    Err(error) => return Err(map_error(error)),
+                };
+                if joined.lookup(&self.url).await.map_err(map_error)? != Some(self.id) {
+                    return Ok(RemoteState::Ended);
+                }
+                *session = joined;
+                match session.status(self.id).await {
+                    Ok(status) => status,
+                    Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
+                    Err(error) => return Err(map_error(error)),
+                }
+            }
+        };
+        Ok(match status {
+            Status::Playing => RemoteState::Playing,
+            Status::Paused => RemoteState::Paused,
+            Status::Unknown | Status::Buffering => RemoteState::Loading,
+            _ => RemoteState::Ended,
         })
     }
 }
