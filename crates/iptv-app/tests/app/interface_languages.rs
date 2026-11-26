@@ -255,9 +255,14 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
     press(app, &de.t("Show group"));
     step(app.back());
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(3)));
-    // A refresh that fails says so, and why, in German.
+    // A refresh that fails says so, and why, in German. Refresh returns
+    // from this playlist's management task to Settings.
     std::fs::remove_file(&playlist).unwrap();
-    press(app, &de.t("Refresh now"));
+    step(app.press(&format!(
+        "id:playlist-actions-list >> text:{}",
+        de.t("Refresh now")
+    )));
+    step(app.wait_for_gone("id:playlists-list", Duration::from_secs(3)));
     let failed = de.f("Refresh failed: {reason}", &[("reason", "".into())]);
     step(app.wait_for_within(&format!("text:/ · {}/", pattern(&failed)), IMPORT));
     assert!(!app.shows("Refresh failed"));

@@ -1226,7 +1226,7 @@ fn playlist_reorder_from_settings_and_guide_restores_expansion_and_visibility() 
     step(app.right_click("id:guide-groups >> role:tab[Beta]"));
     step(app.press("id:playlist-menu-panel >> text:Group order: Custom order"));
     step(app.press("id:organization-sort >> text:Name (A–Z)"));
-    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    step(app.wait_for_gone("id:organization-sort", Duration::from_secs(5)));
     step(app.open_guide_groups());
     step(app.right_click("id:guide-groups >> role:tab[Beta]"));
     step(app.wait_for("id:playlist-menu-panel >> text:Group order: Name (A–Z)"));
@@ -1546,7 +1546,7 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
             .unwrap(),
         2
     );
-    assert_eq!(app.screen().count("text:▾  Disabled").unwrap(), 0);
+    assert!(!app.shows("id:guide-groups >> role:tab[Disabled]"));
     // A parent previews only that playlist, and a tap folds its children.
     step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▶"));

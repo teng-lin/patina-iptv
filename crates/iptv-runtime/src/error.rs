@@ -10,6 +10,11 @@ impl Error {
             _ => None,
         }
     }
+    /// A settings-protected write lost its parental authorization.
+    pub fn settings_locked(&self) -> bool {
+        self.unavailable_reason() == Some("Unlock parental controls before changing settings")
+    }
+
     /// The database and supported schema versions, if the file is too new.
     pub fn newer_schema(&self) -> Option<(u32, u32)> {
         match self.0 {

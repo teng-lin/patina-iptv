@@ -209,6 +209,10 @@ fn cancel(ui: Ui) {
 }
 
 fn perform(ui: Ui, effect: Effect) {
+    if matches!(effect, Effect::Policy(..)) {
+        crate::settings_view::settings_guarded(ui, move || apply_effect(ui, effect));
+        return;
+    }
     if matches!(
         &effect,
         Effect::Add
@@ -226,6 +230,10 @@ fn perform(ui: Ui, effect: Effect) {
         });
         return;
     }
+    apply_effect(ui, effect);
+}
+
+fn apply_effect(ui: Ui, effect: Effect) {
     crate::tasks::spawn_in_app(async move {
         log::info!("iptv playlists: {}", effect_name(&effect));
         let changes_library = matches!(effect, Effect::Delete(_) | Effect::Policy(..));
@@ -346,7 +354,11 @@ fn perform(ui: Ui, effect: Effect) {
         };
         if let Err(e) = result {
             log::warn!("iptv playlists: the store refused it: {e}");
-            if changes_library {
+            if e.settings_locked() {
+                crate::settings_view::notify_setting_error(
+                    crate::settings::SaveError::ParentalLocked,
+                );
+            } else if changes_library {
                 crate::settings_view::notify(tr(
                     "The change could not be saved. Reopen the list and try again.",
                 ));

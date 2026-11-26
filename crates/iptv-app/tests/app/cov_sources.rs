@@ -87,6 +87,83 @@ fn playlists_and_their_guide_sources() {
     deleting(&mut t);
 }
 
+#[test]
+fn manage_playlists_is_offered_for_hidden_sources_and_disappears_when_empty() {
+    use crate::personalization::{M3U, step};
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source, SourceConfig},
+    };
+    use std::time::Duration;
+
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let playlist = home.path().join("synthetic.m3u");
+    std::fs::write(&playlist, M3U).unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Synthetic personalization".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(playlist.to_string_lossy()),
+                user_agent: None,
+                referrer: None,
+            }),
+        })
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            iptv_store_sqlite::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(M3U);
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+
+    let mut app = crate::headless::Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-header-details >> text:Synthetic personalization · News"));
+    step(app.open_settings_playlists());
+    let manage = "id:settings-content >> text:Manage playlists";
+    let row = "id:settings-content >> role:checkbox[/^Synthetic personalization/]";
+    step(app.wait_for(manage));
+    step(app.press(row));
+    step(app.wait_until(
+        "the sole playlist is hidden",
+        Duration::from_secs(5),
+        |screen| {
+            screen
+                .accessibility_state(row)
+                .is_ok_and(|state| state.checked == Some(nsh_core::Checked::False))
+        },
+    ));
+    step(app.wait_for(manage));
+    step(app.open_playlist_actions("Synthetic personalization"));
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.press("id:playlist-delete-confirmation >> text:Delete"));
+    step(app.wait_for_gone(manage, Duration::from_secs(5)));
+    step(app.wait_for("id:settings-content >> text:Add a playlist"));
+    assert!(
+        crate::isolated::open_database(path)
+            .unwrap()
+            .sources()
+            .unwrap()
+            .is_empty()
+    );
+}
+
 /// Settings → Playlists.
 fn open_playlists(t: &mut T) {
     let opened = t.app.open_settings_playlists();

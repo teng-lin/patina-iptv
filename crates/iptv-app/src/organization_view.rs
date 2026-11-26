@@ -837,9 +837,15 @@ fn persist_order(ui: Ui) {
             Err(error) => {
                 log::warn!("iptv organization: {error}");
                 update(ui, Open::finish_save);
-                crate::settings_view::notify(tr(
-                    "The change could not be saved. Reopen the list and try again.",
-                ));
+                if playlists && error.settings_locked() {
+                    crate::settings_view::notify_setting_error(
+                        crate::settings::SaveError::ParentalLocked,
+                    );
+                } else {
+                    crate::settings_view::notify(tr(
+                        "The change could not be saved. Reopen the list and try again.",
+                    ));
+                }
             }
         }
     });

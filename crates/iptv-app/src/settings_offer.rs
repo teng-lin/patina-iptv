@@ -246,6 +246,13 @@ pub fn offer(device: Device, key: &str) -> Offer {
             return Offer::Hidden;
         }
     }
+    if key == "playlists.manage"
+        && !crate::runtime()
+            .playlists()
+            .is_ok_and(|rows| !rows.is_empty())
+    {
+        return Offer::Hidden;
+    }
     // Arranging and ordering playlists needs two of them; sorted by name,
     // there is no hand order to arrange.
     if matches!(key, "playlists.reorder" | "playlists.sort")

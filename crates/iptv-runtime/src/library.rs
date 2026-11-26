@@ -177,9 +177,13 @@ pub fn reorder_sources(
     owner: &super::Runtime,
     order: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    owner
-        .services()
-        .call(move |store| store.set_source_order(&order))
+    let services = owner.services();
+    let current = services.clone();
+    let authorization = owner.parental_snapshot();
+    services.call(move |store| {
+        crate::parental::require_settings_write(store, &authorization, &current.settings())?;
+        store.set_source_order(&order)
+    })
 }
 pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
     store
@@ -333,7 +337,11 @@ pub fn update_policy(
     id: SourceId,
     edit: impl FnOnce(&mut iptv_library::SourcePolicy) + Send + 'static,
 ) -> impl std::future::Future<Output = Result<(iptv_library::SourcePolicy, bool), StoreError>> {
-    owner.services().call(move |store| {
+    let services = owner.services();
+    let current = services.clone();
+    let authorization = owner.parental_snapshot();
+    services.call(move |store| {
+        crate::parental::require_settings_write(store, &authorization, &current.settings())?;
         let mut policy = store.source_policy(id)?;
         let was_enabled = policy.enabled;
         edit(&mut policy);

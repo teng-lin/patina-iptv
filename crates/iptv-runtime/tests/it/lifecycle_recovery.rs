@@ -226,6 +226,107 @@ fn failed_playlist_sort_publication_restores_the_combined_guide_order() {
 }
 
 #[test]
+fn queued_playlist_writes_recheck_settings_authority() {
+    use crate::common;
+    use iptv_core::parental::{Pin, Target};
+    use iptv_runtime::data;
+    use iptv_settings::{Settings, Value, keys};
+    use iptv_store_sqlite::{DatabaseKey, Store};
+
+    for (mode, protects_settings) in [("manual", true), ("name", true), ("manual", false)] {
+        let directory = tempfile::tempdir().unwrap();
+        let key = DatabaseKey::from_bytes([0x68; 32]);
+        let mut store = Store::open_encrypted(directory.path().join("iptv.sqlite"), &key).unwrap();
+        let first = store
+            .add_source(&common::m3u_source("Generated A"))
+            .unwrap();
+        let second = store
+            .add_source(&common::m3u_source("Generated Z"))
+            .unwrap();
+        let stored_order = || {
+            store
+                .sources()
+                .unwrap()
+                .into_iter()
+                .map(|source| source.id)
+                .collect::<Vec<_>>()
+        };
+        let mut settings = Settings::new();
+        settings
+            .set(keys::PLAYLIST_SORT.as_str(), Value::choice(mode))
+            .unwrap();
+        settings
+            .set(
+                keys::PARENTAL_REQUIRE_PIN_FOR.as_str(),
+                Value::choice(if protects_settings {
+                    "blocked_content_and_settings"
+                } else {
+                    "blocked_content"
+                }),
+            )
+            .unwrap();
+        settings
+            .set(
+                keys::PARENTAL_UNLOCK_WINDOW.as_str(),
+                Value::choice("until_restart"),
+            )
+            .unwrap();
+        std::fs::write(
+            directory.path().join("settings.json"),
+            settings.to_json_string(),
+        )
+        .unwrap();
+        let owner = owner(directory.path());
+        owner.load_settings();
+        support::block_on(owner.parental_change_pin(None, Pin::parse("2468").unwrap())).unwrap();
+        assert!(owner.parental_settings_allowed());
+        let gate = owner.host_handle().hold_writer().unwrap();
+        assert!(gate.wait_entered(LIMIT));
+        let mut reorder = Box::pin(data::reorder(&owner, vec![second, first]));
+        assert!(
+            reorder
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        let mut hide = Box::pin(data::update_policy(&owner, first, |policy| {
+            policy.enabled = false;
+        }));
+        assert!(
+            hide.as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+        );
+        owner.parental_lock();
+        gate.release();
+        let reordered = support::block_on(reorder);
+        let hidden = support::block_on(hide);
+
+        if protects_settings {
+            assert!(reordered.unwrap_err().settings_locked(), "{mode}");
+            assert!(hidden.unwrap_err().settings_locked(), "{mode}");
+            assert_eq!(stored_order(), [first, second], "{mode}");
+            assert!(store.source_policy(first).unwrap().enabled, "{mode}");
+            support::block_on(
+                owner.parental_authorize(Target::settings(), Pin::parse("2468").unwrap()),
+            )
+            .unwrap();
+            support::block_on(data::reorder(&owner, vec![second, first])).unwrap();
+            support::block_on(data::update_policy(&owner, first, |policy| {
+                policy.enabled = false;
+            }))
+            .unwrap();
+        } else {
+            reordered.unwrap();
+            hidden.unwrap();
+        }
+        assert_eq!(stored_order(), [second, first], "{mode}");
+        assert!(!store.source_policy(first).unwrap().enabled, "{mode}");
+        assert!(owner.drain_services());
+    }
+}
+
+#[test]
 fn shutdown_drains_accepted_database_work_even_when_its_reply_is_dropped() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = owner(directory.path());

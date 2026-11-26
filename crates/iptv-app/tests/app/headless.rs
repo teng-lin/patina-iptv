@@ -105,15 +105,21 @@ impl Headless {
             }
             self.press(manage)?;
         }
-        let source = format!("id:playlists-list >> text:{name}");
-        self.wait_for("id:playlists-list")?;
-        while !self.screen().matches(&source)? {
-            let previous = self.panel_texts("playlists-list");
-            for _ in 0..5 {
-                self.press_key("down")?;
-            }
-            if self.panel_texts("playlists-list") == previous {
-                break;
+        let list = "id:playlists-list";
+        let source = format!("{list} >> text:{name}");
+        self.wait_for(list)?;
+        if !self.screen().matches(&source)? {
+            let half_page = self
+                .screen()
+                .layout_nodes()
+                .into_iter()
+                .find(|node| node.test_id.as_deref() == Some("playlists-list"))
+                .map(|node| nsh_core::prelude::px(node.bounds.size.height.0 / 2.0))
+                .ok_or_else(|| "the playlist picker has no scroll viewport".to_owned())?;
+            while !self.screen().matches(&source)? {
+                self.0
+                    .scroll(list, half_page)
+                    .map_err(|err| format!("could not find playlist {name}: {err}"))?;
             }
         }
         self.press(&source)?;

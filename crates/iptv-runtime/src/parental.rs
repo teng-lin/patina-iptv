@@ -715,11 +715,35 @@ impl Snapshot {
 
     fn grants_current(&self, grants: &[Target], allows: impl Fn(&Target, u64) -> bool) -> bool {
         let now = now_ms();
-        self.policy_revision.load(Ordering::SeqCst) == self.policy_at
+        self.policy_current()
             && (grants.is_empty()
                 || (self.epoch.load(Ordering::SeqCst) == self.at
                     && grants.iter().all(|grant| allows(grant, now))))
     }
+
+    fn policy_current(&self) -> bool {
+        self.policy_revision.load(Ordering::SeqCst) == self.policy_at
+    }
+}
+
+/// Settings-protected writes can outlive the grant that admitted them.
+pub(crate) fn require_settings_write(
+    store: &iptv_store_sqlite::Store,
+    snapshot: &Snapshot,
+    settings: &iptv_settings::Settings,
+) -> iptv_store_sqlite::Result<()> {
+    let policy = policy_settings(settings);
+    if !policy.settings {
+        return Ok(());
+    }
+    if policy != snapshot.access.policy || !snapshot.policy_current() {
+        return Err(settings_locked());
+    }
+    require_admin(store, snapshot)
+}
+
+fn settings_locked() -> iptv_store_sqlite::StoreError {
+    iptv_store_sqlite::StoreError::Unavailable("Unlock parental controls before changing settings")
 }
 
 /// Administrative changes are gated against the credential that exists at
@@ -729,9 +753,7 @@ pub(crate) fn require_admin(
     snapshot: &Snapshot,
 ) -> iptv_store_sqlite::Result<()> {
     if !admin_allowed(store, snapshot)? {
-        return Err(iptv_store_sqlite::StoreError::Unavailable(
-            "Unlock parental controls before changing settings",
-        ));
+        return Err(settings_locked());
     }
     Ok(())
 }

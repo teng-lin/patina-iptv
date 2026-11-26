@@ -260,9 +260,13 @@ fn show_playlist(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
                 .await
         {
             log::warn!("iptv settings: the store refused a playlist's check box: {e}");
-            notify(tr(
-                "The change could not be saved. Reopen the list and try again.",
-            ));
+            if e.settings_locked() {
+                notify_setting_error(crate::settings::SaveError::ParentalLocked);
+            } else {
+                notify(tr(
+                    "The change could not be saved. Reopen the list and try again.",
+                ));
+            }
         }
         playlists_changed(ui);
     });
