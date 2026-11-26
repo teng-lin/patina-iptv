@@ -1,4 +1,4 @@
-use super::receiver::{self, URL};
+use super::receiver::{self, AppState, URL};
 use iptv_cast::googlecast::{Command, Error, Session, Status};
 use std::time::Duration;
 use tokio::{net::TcpListener, time::timeout};
@@ -6,14 +6,14 @@ use tokio_rustls::rustls;
 
 #[tokio::test]
 async fn live_controls_use_the_owned_session_on_both_tls_versions() {
-    for (version, launched) in [
-        (&rustls::version::TLS12, false),
-        (&rustls::version::TLS12, true),
-        (&rustls::version::TLS13, false),
-        (&rustls::version::TLS13, true),
+    for (version, initial) in [
+        (&rustls::version::TLS12, AppState::AwaitingLaunch),
+        (&rustls::version::TLS12, AppState::Running),
+        (&rustls::version::TLS13, AppState::AwaitingLaunch),
+        (&rustls::version::TLS13, AppState::Running),
     ] {
-        let (address, server) = receiver::start(version, launched).await;
-        let session = if launched {
+        let (address, server) = receiver::start(version, initial).await;
+        let session = if initial == AppState::Running {
             Session::rejoin(address).await
         } else {
             Session::connect(address).await
@@ -34,6 +34,7 @@ async fn live_controls_use_the_owned_session_on_both_tls_versions() {
         ] {
             session.command(id, command).await.unwrap();
         }
+        assert_eq!(session.status(id).await, Ok(Status::Playing));
         session.command(id, Command::Stop).await.unwrap();
         assert_eq!(session.status(id).await, Err(Error::Ended));
         drop(session);
@@ -46,7 +47,7 @@ async fn live_controls_use_the_owned_session_on_both_tls_versions() {
 
 #[tokio::test]
 async fn rejoining_an_empty_receiver_leaves_it_idle() {
-    let (address, server) = receiver::start(&rustls::version::TLS13, false).await;
+    let (address, server) = receiver::start(&rustls::version::TLS13, AppState::MustStayIdle).await;
     assert!(matches!(Session::rejoin(address).await, Err(Error::Ended)));
     timeout(Duration::from_secs(5), server)
         .await
@@ -67,7 +68,7 @@ async fn a_peer_that_closes_during_tls_never_opens_a_cast_session() {
 
 #[tokio::test]
 async fn connecting_to_a_running_receiver_reuses_its_transport_without_relaunching() {
-    let (address, server) = receiver::start(&rustls::version::TLS13, true).await;
+    let (address, server) = receiver::start(&rustls::version::TLS13, AppState::Running).await;
     let session = Session::connect(address).await.unwrap();
     assert_eq!(session.lookup(URL).await, Ok(None));
     drop(session);

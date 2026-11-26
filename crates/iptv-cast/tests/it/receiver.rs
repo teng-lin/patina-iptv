@@ -37,9 +37,16 @@ struct Envelope {
     message: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AppState {
+    Running,
+    AwaitingLaunch,
+    MustStayIdle,
+}
+
 pub(super) async fn start(
     version: &'static SupportedProtocolVersion,
-    launched: bool,
+    initial: AppState,
 ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let config = rustls::ServerConfig::builder_with_provider(Arc::new(
@@ -59,7 +66,7 @@ pub(super) async fn start(
     let task = tokio::spawn(async move {
         let (socket, _) = listener.accept().await.unwrap();
         let mut socket = acceptor.accept(socket).await.unwrap();
-        let mut running = launched;
+        let mut running = initial == AppState::Running;
         let mut root_connected = false;
         let mut media_connected = false;
         let mut expected_volume = [
@@ -74,6 +81,8 @@ pub(super) async fn start(
             let mut buf = vec![0; len as usize];
             socket.read_exact(&mut buf).await.unwrap();
             let request = Envelope::decode(buf.as_slice()).unwrap();
+            assert_eq!(request.version, 0);
+            assert_eq!(request.kind, 0, "expected a UTF-8 Cast message");
             let body: Value = serde_json::from_str(request.message.as_ref().unwrap()).unwrap();
             let kind = body["type"].as_str().unwrap();
             let mut reply = match request.namespace.as_str() {
@@ -91,7 +100,10 @@ pub(super) async fn start(
                     assert!(root_connected && request.destination == ROOT);
                     match kind {
                         "LAUNCH" => {
-                            assert!(!running, "rejoin relaunched the active receiver");
+                            assert!(
+                                initial == AppState::AwaitingLaunch && !running,
+                                "unexpected LAUNCH"
+                            );
                             assert_eq!(body["appId"], APP);
                             running = true;
                         }
