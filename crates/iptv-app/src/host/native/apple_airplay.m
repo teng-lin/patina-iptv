@@ -56,11 +56,8 @@ static void *PlayerObservation = &PlayerObservation;
     _emit = emit;
     _intent = ProbeStop;
     _failedSources = [NSMutableSet set];
-    _player = [AVPlayer new];
-    _player.allowsExternalPlayback = YES;
     _picker = [[AVRoutePickerView alloc] initWithFrame:self.bounds];
 #if TARGET_OS_OSX
-    _picker.player = _player;
     _picker.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 #else
     _picker.prioritizesVideoDevices = YES;
@@ -71,10 +68,22 @@ static void *PlayerObservation = &PlayerObservation;
         name:AVAudioSessionInterruptionNotification object:[AVAudioSession sharedInstance]];
 #endif
     [self addSubview:_picker];
-    for (NSString *key in @[@"externalPlaybackActive", @"timeControlStatus", @"currentItem.status", @"status"]) {
-        [_player addObserver:self forKeyPath:key options:0 context:PlayerObservation];
-    }
+    [self setObservedPlayer:[AVPlayer new]];
     return self;
+}
+
+// Keep the picker and KVO attached to the same player, including after a terminal failure.
+- (void)setObservedPlayer:(AVPlayer *)player {
+    NSArray<NSString *> *keys = @[@"externalPlaybackActive", @"timeControlStatus", @"currentItem.status", @"status"];
+    for (NSString *key in keys) [_player removeObserver:self forKeyPath:key context:PlayerObservation];
+    [self clearItem];
+    _wasRouted = NO;
+    _player = player;
+    _player.allowsExternalPlayback = YES;
+#if TARGET_OS_OSX
+    _picker.player = player;
+#endif
+    for (NSString *key in keys) [_player addObserver:self forKeyPath:key options:0 context:PlayerObservation];
 }
 
 - (void)publish:(ProbeState)state external:(BOOL)external {
@@ -227,6 +236,17 @@ static void *PlayerObservation = &PlayerObservation;
 }
 
 - (void)command:(ProbeCommand)command {
+    // Only a new user Play retries a failed fixture, e.g. after Local Network permission changed.
+    if (command == ProbePlay && _source) {
+        [_failedSources removeObject:_source];
+        if (_player.status == AVPlayerStatusFailed) {
+            // A failed AVPlayer cannot be reused for another item.
+            [self setObservedPlayer:[AVPlayer new]];
+        } else if (_player.currentItem.status == AVPlayerItemStatusFailed) {
+            // A failure can precede its queued KVO refresh.
+            [self clearItem];
+        }
+    }
 #if !TARGET_OS_OSX
     if (command == ProbePlay && !_audioSessionActive && [self canLoadSource]) {
         AVAudioSession *audio = [AVAudioSession sharedInstance];
@@ -254,13 +274,8 @@ static void *PlayerObservation = &PlayerObservation;
 - (void)invalidate {
     if (!_emit) return;
     _emit = NULL;
-    for (NSString *key in @[@"externalPlaybackActive", @"timeControlStatus", @"currentItem.status", @"status"]) {
-        [_player removeObserver:self forKeyPath:key context:PlayerObservation];
-    }
-    [self clearItem];
-#if TARGET_OS_OSX
-    _picker.player = nil;
-#else
+    [self setObservedPlayer:nil];
+#if !TARGET_OS_OSX
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self releaseAudioSession];
 #endif
