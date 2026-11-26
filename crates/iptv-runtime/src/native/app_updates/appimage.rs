@@ -1,5 +1,5 @@
 //! Full-file AppImage replacement on the same filesystem as the running image.
-use rustix::fs::{AtFlags, CWD, RenameFlags, linkat, renameat_with};
+use rustix::fs::{Access, AtFlags, CWD, RenameFlags, accessat, linkat, renameat_with};
 use std::{
     fs::{self, File},
     io::{self, Read},
@@ -194,7 +194,15 @@ impl crate::Runtime {
     pub async fn can_save_appimage(&self, destination: PathBuf) -> bool {
         self.services()
             .spawn_blocking(move || {
-                fs::symlink_metadata(destination)
+                destination.parent().is_some_and(|parent| {
+                    accessat(
+                        CWD,
+                        parent,
+                        Access::WRITE_OK | Access::EXEC_OK,
+                        AtFlags::EACCESS,
+                    )
+                    .is_ok()
+                }) && fs::symlink_metadata(destination)
                     .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
             })
             .await
