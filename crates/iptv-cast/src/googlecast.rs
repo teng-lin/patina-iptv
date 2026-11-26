@@ -207,7 +207,11 @@ impl Session {
             _ => None,
         };
         if let Some(volume) = value {
-            self.status(id).await?;
+            match self.status(id).await? {
+                Status::Playing | Status::Paused | Status::Buffering => {}
+                Status::Unknown => return Err(Error::Unknown),
+                _ => return Err(Error::Ended),
+            }
             self.request(RECEIVER, ROOT, json!({"type":"SET_VOLUME","volume":volume}))
                 .await?;
             return Ok(());
@@ -334,78 +338,7 @@ async fn write(socket: &mut (impl AsyncWrite + Unpin), ns: &str, dest: &str, v: 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::io::{AsyncWriteExt, DuplexStream};
-
-    async fn next_load(peer: &mut DuplexStream) -> (Envelope, Value) {
-        loop {
-            let len = peer.read_u32().await.unwrap();
-            let mut bytes = vec![0; len as usize];
-            peer.read_exact(&mut bytes).await.unwrap();
-            let frame = Envelope::decode(bytes.as_slice()).unwrap();
-            if frame.namespace == MEDIA {
-                let body = serde_json::from_str(frame.message.as_deref().unwrap()).unwrap();
-                return (frame, body);
-            }
-        }
-    }
-    async fn answer(peer: &mut DuplexStream, src: &str, value: Value) {
-        let response = Envelope {
-            version: 0,
-            source: src.into(),
-            destination: "sender-0".into(),
-            namespace: MEDIA.into(),
-            kind: 0,
-            message: Some(value.to_string()),
-        }
-        .encode_to_vec();
-        peer.write_u32(response.len() as u32).await.unwrap();
-        peer.write_all(&response).await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn only_the_current_transports_correlated_load_can_establish_ownership() {
-        let (client, mut receiver) = tokio::io::duplex(8192);
-        let (outgoing, requests) = mpsc::channel(8);
-        let owner = tokio::spawn(drive(client, requests));
-        let session = Session {
-            outgoing,
-            local_ip: IpAddr::from([127, 0, 0, 1]),
-            transport: "synthetic-app".into(),
-        };
-        let url = "http://localhost/generated/stream.m3u8";
-        let fake = async {
-            let (_, load) = next_load(&mut receiver).await;
-            let id = &load["requestId"];
-            assert_eq!(load["media"]["streamType"], "LIVE");
-            assert!(load.get("volume").is_none() && load.get("currentTime").is_none());
-            answer(
-                &mut receiver,
-                "previous-app",
-                json!({"requestId":id,"type":"LOAD_FAILED"}),
-            )
-            .await;
-            answer(&mut receiver,"synthetic-app",json!({"type":"MEDIA_STATUS","status":[{"mediaSessionId":1,"playerState":"IDLE","idleReason":"INTERRUPTED"}]})).await;
-            answer(&mut receiver,"synthetic-app",json!({"requestId":id,"type":"MEDIA_STATUS","status":[{"mediaSessionId":2,"media":{"contentId":url}}]})).await;
-        };
-        let (actual, _) = tokio::join!(session.load(url), fake);
-        assert_eq!(actual, Ok(2));
-        let refusal = async {
-            let (_, load) = next_load(&mut receiver).await;
-            answer(
-                &mut receiver,
-                "synthetic-app",
-                json!({"requestId":load["requestId"],"type":"LOAD_FAILED"}),
-            )
-            .await;
-        };
-        let (actual, _) = tokio::join!(session.load(url), refusal);
-        assert_eq!(actual, Err(Error::LoadFailed));
-        drop(session);
-        owner.await.unwrap();
-    }
-}
+mod tests;
 
 #[cfg(test)]
 mod receiver_tests;

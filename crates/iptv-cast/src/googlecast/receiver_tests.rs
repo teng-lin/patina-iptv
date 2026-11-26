@@ -34,6 +34,8 @@ async fn receiver(
         let (socket, _) = listener.accept().await.unwrap();
         let mut socket = acceptor.accept(socket).await.unwrap();
         let mut running = launched;
+        let mut root_connected = false;
+        let mut media_connected = false;
         let mut expected_volume = [
             json!({"level":0.45}),
             json!({"level":0.5}),
@@ -50,8 +52,17 @@ async fn receiver(
             let kind = body["type"].as_str().unwrap();
             let mut reply = match request.namespace.as_str() {
                 HEARTBEAT => json!({"type":"PONG"}),
-                CONNECTION => continue,
+                CONNECTION => {
+                    assert_eq!(body, json!({"type":"CONNECT", "origin":{}}));
+                    match request.destination.as_str() {
+                        ROOT => root_connected = true,
+                        TRANSPORT if root_connected && running => media_connected = true,
+                        other => panic!("unexpected connection to {other}"),
+                    }
+                    continue;
+                }
                 RECEIVER => {
+                    assert!(root_connected && request.destination == ROOT);
                     match kind {
                         "LAUNCH" => {
                             assert!(!running, "rejoin relaunched the active receiver");
@@ -75,7 +86,7 @@ async fn receiver(
                     json!({"type":"RECEIVER_STATUS","status":{"applications":apps,"volume":volume}})
                 }
                 MEDIA => {
-                    assert!(running && request.destination == TRANSPORT);
+                    assert!(media_connected && request.destination == TRANSPORT);
                     match kind {
                         "LOAD" => {
                             assert_eq!(body["media"]["contentId"], URL);
@@ -167,4 +178,15 @@ async fn rejoining_an_empty_receiver_leaves_it_idle() {
         .await
         .expect("sender closes the control socket")
         .unwrap();
+}
+
+#[tokio::test]
+async fn a_peer_that_closes_during_tls_never_opens_a_cast_session() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let disconnect = async {
+        drop(listener.accept().await.unwrap());
+    };
+    let (result, ()) = tokio::join!(Session::connect(address), disconnect);
+    assert!(matches!(result, Err(Error::Unreachable)));
 }
