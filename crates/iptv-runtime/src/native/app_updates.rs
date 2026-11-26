@@ -3,6 +3,8 @@
 mod download;
 mod selection;
 mod trust;
+#[cfg(windows)]
+mod windows;
 pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};
 
 use std::time::Duration;

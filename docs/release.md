@@ -731,3 +731,12 @@ handoff activity. The normal release bundle goes through the store. Use the
 About action to download the selected build and confirm installation. An
 active recording defers the handoff. Keep production activation gated on the
 signed install-over-previous exercises in the proposal.
+
+For a signed Windows rehearsal, set `PATINA_WINDOWS_PUBLISHER` at compile
+time to the exact subject distinguished name of the approved Authenticode
+publisher. Obtain it independently from the signing administrator. About offers
+setup only when the verified release record also reports a signed installer.
+The verifier checks Authenticode, the timestamp and the authorized SHA-256
+while holding the EXE open against replacement. The viewer confirms before
+the per-user Inno Setup wizard starts. Preview releases continue to show
+their release notes.
