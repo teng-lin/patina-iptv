@@ -1,5 +1,7 @@
 //! User-requested checks against the update repository embedded by the app build.
 
+#[cfg(target_os = "linux")]
+pub mod appimage;
 mod download;
 mod selection;
 mod trust;

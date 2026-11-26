@@ -2626,6 +2626,7 @@ dependencies = [
  "log",
  "pbkdf2",
  "rusqlite",
+ "rustix",
  "serde_json",
  "sha2",
  "subtle",
