@@ -406,3 +406,6 @@ mod tests {
         owner.await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod receiver_tests;

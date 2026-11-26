@@ -15,7 +15,10 @@ const SERVICE: &str = "_googlecast._tcp";
 const IPV4: i32 = 0;
 
 pub(super) fn discover() -> Result<Vec<Receiver>, dbus::Error> {
-    let bus = Connection::new_system()?;
+    browse(&Connection::new_system()?)
+}
+
+fn browse(bus: &Connection) -> Result<Vec<Receiver>, dbus::Error> {
     bus.add_match_no_cb("type='signal',sender='org.freedesktop.Avahi',interface='org.freedesktop.Avahi.ServiceBrowser'")?;
     let server = bus.with_proxy(AVAHI, "/", Duration::from_secs(1));
     let (browser,): (Path<'static>,) = server.method_call(
@@ -59,7 +62,7 @@ pub(super) fn discover() -> Result<Vec<Receiver>, dbus::Error> {
             _ => {}
         }
     }
-    resolve(&bus, services)
+    resolve(bus, services)
 }
 
 fn resolve(
@@ -128,3 +131,6 @@ fn resolve(
     // Avahi releases the browser and resolvers when this private D-Bus connection closes.
     Ok(found.into_values().collect())
 }
+
+#[cfg(test)]
+mod tests;

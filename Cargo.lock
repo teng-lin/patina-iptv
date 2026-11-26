@@ -2526,6 +2526,7 @@ dependencies = [
  "dbus",
  "mdns-sd",
  "prost",
+ "rcgen",
  "rustls-webpki",
  "serde_json",
  "tokio",
