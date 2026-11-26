@@ -737,6 +737,7 @@ time to the exact subject distinguished name of the approved Authenticode
 publisher. Obtain it independently from the signing administrator. About offers
 setup only when the verified release record also reports a signed installer.
 The verifier checks Authenticode, the timestamp and the authorized SHA-256
-while holding the EXE open against replacement. After confirmation the helper waits for Patina to exit before starting the
-per-user wizard. Setup cannot ask Restart Manager to close another Patina session. Preview releases continue to show
-their release notes.
+while holding the EXE open against replacement. After confirmation the helper
+waits for Patina to exit before starting the per-user wizard. Setup cannot ask
+Restart Manager to close another Patina session. Preview releases continue to
+show their release notes.

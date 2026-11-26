@@ -10,13 +10,20 @@ use std::{
 };
 use tempfile::TempPath;
 
+const VERIFIER: &str = concat!(
+    include_str!("windows-publisher.ps1"),
+    "\n",
+    include_str!("windows.ps1")
+);
+
 pub struct PendingSetup {
     child: Child,
+    _stage: TempPath,
 }
 
 impl PendingSetup {
     /// The helper starts Setup only after this process has exited. Closing stdin cancels.
-    pub fn install_after_exit(mut self) -> bool {
+    pub fn install_after_exit(&mut self) -> bool {
         self.child
             .stdin
             .take()
@@ -38,13 +45,22 @@ impl crate::Runtime {
         stage: TempPath,
         asset: ReleaseAsset,
         publisher: &'static str,
+        failure_message: &'static str,
     ) -> Option<PendingSetup> {
         if publisher.trim().is_empty() {
             return None;
         }
         self.services()
             .spawn_blocking(move || {
-                prepare(stage, &asset.sha256, publisher, include_str!("windows.ps1")).ok()
+                prepare(
+                    stage,
+                    &asset.sha256,
+                    publisher,
+                    std::process::id(),
+                    failure_message,
+                    VERIFIER,
+                )
+                .ok()
             })
             .await
             .ok()
@@ -69,12 +85,13 @@ fn prepare(
     stage: TempPath,
     digest: &str,
     publisher: &str,
+    parent: u32,
+    failure_message: &str,
     script: &str,
 ) -> Result<PendingSetup, Verification> {
     let system = system_directory().ok_or(Verification::Unavailable)?;
     let interpreter = system.join(r"WindowsPowerShell\v1.0\powershell.exe");
-    let path = stage.keep().map_err(|_| Verification::Unavailable)?;
-    let child = Command::new(interpreter)
+    let mut child = Command::new(interpreter)
         .args([
             "-NoLogo",
             "-NoProfile",
@@ -83,8 +100,9 @@ fn prepare(
             script,
         ])
         .creation_flags(0x08000000) // CREATE_NO_WINDOW for the verifier, installer has its own UI.
-        .env("PATINA_STAGED_SETUP", &path)
-        .env("PATINA_UPDATE_PARENT", std::process::id().to_string())
+        .env("PATINA_STAGED_SETUP", &stage)
+        .env("PATINA_UPDATE_PARENT", parent.to_string())
+        .env("PATINA_SETUP_ERROR", failure_message)
         .env("PATINA_SETUP_DIGEST", digest)
         .env(
             "PSModulePath",
@@ -95,23 +113,18 @@ fn prepare(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .spawn();
-    let setup = child
-        .map_err(|_| Verification::Unavailable)
-        .and_then(|mut child| {
-            let result = verified(&mut child, Duration::from_secs(90));
-            if let Err(reason) = result {
-                // A hung trust provider may still hold the staged file open.
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(reason);
-            }
-            Ok(PendingSetup { child })
-        });
-    if setup.is_err() {
-        let _ = std::fs::remove_file(path);
+        .spawn()
+        .map_err(|_| Verification::Unavailable)?;
+    if let Err(reason) = verified(&mut child, Duration::from_secs(90)) {
+        // Release any verifier lock before the stage guard removes its file.
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(reason);
     }
-    setup
+    Ok(PendingSetup {
+        child,
+        _stage: stage,
+    })
 }
 
 fn verified(child: &mut Child, timeout: Duration) -> Result<(), Verification> {
@@ -161,7 +174,9 @@ mod tests {
                     path,
                     &digest,
                     "CN=Synthetic Patina",
-                    include_str!("windows.ps1")
+                    std::process::id(),
+                    "",
+                    VERIFIER
                 )
                 .err(),
                 Some(reason)
@@ -171,36 +186,59 @@ mod tests {
     }
 
     #[test]
-    fn confirmation_writes_once_and_cancellation_closes_the_pipe() {
-        // A synthetic verifier records the parent's decision without running an installer.
-        let script = r#"
-            [Console]::Out.WriteLine('verified')
-            [Console]::Out.Flush()
-            $decision = [Console]::In.ReadLine()
-            if ($decision -ceq 'install') { $text = 'confirmed' } else { $text = 'cancelled' }
-            [IO.File]::Delete($env:PATINA_STAGED_SETUP)
-            [IO.File]::WriteAllText(($env:PATINA_STAGED_SETUP + '.result'), $text)
-        "#;
+    fn confirmation_waits_for_exit_and_cancellation_cleans_the_verified_file() {
+        // Exercise the production protocol, locking, process wait, launch and cleanup with
+        // a harmless system executable. Only the separate publisher predicate is synthetic.
+        let script = concat!(
+            "function Test-PatinaPublisher { return $true }\n",
+            include_str!("windows.ps1")
+        );
         let dir = tempfile::tempdir().unwrap();
+        let system = system_directory().unwrap();
+        let bytes = std::fs::read(system.join("whoami.exe")).unwrap();
+        let digest = format!("{:x}", Sha256::digest(&bytes));
         for confirm in [true, false] {
-            let stage = tempfile::NamedTempFile::new_in(dir.path())
-                .unwrap()
-                .into_temp_path();
+            let mut parent = Command::new(system.join(r"WindowsPowerShell\v1.0\powershell.exe"))
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    "[Console]::In.ReadLine()",
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .spawn()
+                .unwrap();
+            let mut stage = tempfile::Builder::new()
+                .suffix(".exe")
+                .tempfile_in(dir.path())
+                .unwrap();
+            stage.write_all(&bytes).unwrap();
+            let stage = stage.into_temp_path();
             let location = stage.to_path_buf();
-            let mut marker = location.as_os_str().to_owned();
-            marker.push(".result");
-            let setup = prepare(stage, "", "", script).unwrap();
+            let mut setup = prepare(stage, &digest, "", parent.id(), "", script).unwrap();
             if confirm {
                 assert!(setup.install_after_exit());
+                assert!(setup.child.try_wait().unwrap().is_none());
+                assert!(location.exists());
             } else {
-                drop(setup);
+                drop(setup.child.stdin.take());
             }
+            drop(parent.stdin.take());
+            parent.wait().unwrap();
             let end = std::time::Instant::now() + Duration::from_secs(15);
-            let expected = if confirm { "confirmed" } else { "cancelled" };
-            while std::fs::read_to_string(&marker).ok().as_deref() != Some(expected) {
-                assert!(std::time::Instant::now() < end);
+            let status = loop {
+                if let Some(status) = setup.child.try_wait().unwrap() {
+                    break status;
+                }
+                if std::time::Instant::now() >= end {
+                    let _ = setup.child.kill();
+                    let _ = setup.child.wait();
+                    panic!("installer handoff did not finish");
+                }
                 std::thread::sleep(Duration::from_millis(20));
-            }
+            };
+            assert_eq!(status.success(), confirm);
             assert!(!location.exists());
         }
     }

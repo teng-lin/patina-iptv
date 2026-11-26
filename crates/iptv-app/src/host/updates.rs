@@ -56,7 +56,15 @@ impl PackageAction {
                     return crate::settings_view::notify(tr("Update download failed. Try again."));
                 };
                 crate::settings_view::notify(tr("Verifying installer…"));
-                let Some(setup) = owner.prepare_windows_setup(stage, asset, publisher).await else {
+                let Some(mut setup) = owner
+                    .prepare_windows_setup(
+                        stage,
+                        asset,
+                        publisher,
+                        tr("The installer could not be verified or opened."),
+                    )
+                    .await
+                else {
                     return crate::settings_view::notify(tr(
                         "The installer could not be verified or opened.",
                     ));
@@ -82,7 +90,7 @@ impl PackageAction {
                 }
                 if !owner.shutdown_recording_host() {
                     return crate::settings_view::notify(tr(
-                        "The recording host is still closing; try quitting again",
+                        "The recording host is still closing. Try updating again.",
                     ));
                 }
                 if owner.recording_background_needed() {
