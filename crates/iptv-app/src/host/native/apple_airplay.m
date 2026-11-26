@@ -67,6 +67,8 @@ static void *PlayerObservation = &PlayerObservation;
     _picker.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(routeChanged:)
         name:AVAudioSessionRouteChangeNotification object:[AVAudioSession sharedInstance]];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(audioInterrupted:)
+        name:AVAudioSessionInterruptionNotification object:[AVAudioSession sharedInstance]];
 #endif
     [self addSubview:_picker];
     for (NSString *key in @[@"externalPlaybackActive", @"timeControlStatus", @"currentItem.status", @"status"]) {
@@ -90,10 +92,26 @@ static void *PlayerObservation = &PlayerObservation;
     [_player replaceCurrentItemWithPlayerItem:nil];
 }
 
+#if !TARGET_OS_OSX
+- (void)releaseAudioSession {
+    if (!_audioSessionActive) return;
+    _audioSessionActive = NO;
+    [[AVAudioSession sharedInstance] setActive:NO
+        withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:NULL];
+}
+#endif
+
 - (void)stopWithState:(ProbeState)state {
     _intent = ProbeStop;
     _stoppedState = state;
     [self clearItem];
+#if !TARGET_OS_OSX
+    [self releaseAudioSession];
+#endif
+}
+
+- (BOOL)canLoadSource {
+    return _source && _player.status != AVPlayerStatusFailed && ![_failedSources containsObject:_source];
 }
 
 - (void)refresh {
@@ -119,8 +137,7 @@ static void *PlayerObservation = &PlayerObservation;
         [self publish:_stoppedState external:external];
         return;
     }
-    if (!_source || _player.status == AVPlayerStatusFailed ||
-        [_failedSources containsObject:_source]) {
+    if (![self canLoadSource]) {
         [self stopWithState:ProbeFailed];
         [self publish:ProbeFailed external:external];
         return;
@@ -142,7 +159,9 @@ static void *PlayerObservation = &PlayerObservation;
         [_player replaceCurrentItemWithPlayerItem:[AVPlayerItem playerItemWithURL:_source]];
         // Replacement can renegotiate or drop the external route. Read the
         // player's new route on the next main-queue turn before issuing play.
+#if TARGET_OS_OSX
         _wasRouted = NO;
+#endif
         [self scheduleRefresh];
         [self publish:ProbeWaiting external:_player.externalPlaybackActive];
         return;
@@ -187,6 +206,17 @@ static void *PlayerObservation = &PlayerObservation;
 - (void)routeChanged:(NSNotification *)notification {
     [self scheduleRefresh];
 }
+
+- (void)audioInterrupted:(NSNotification *)notification {
+    if (!_audioSessionActive ||
+        [notification.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue] !=
+            AVAudioSessionInterruptionTypeBegan) return;
+    // AVAudioSession delivers this on main after the system deactivates it.
+    // Leave playback paused until another explicit Play acquires a new session.
+    _audioSessionActive = NO;
+    [self stopWithState:ProbePaused];
+    [self refresh];
+}
 #endif
 
 - (void)setSource:(NSURL *)source {
@@ -198,7 +228,7 @@ static void *PlayerObservation = &PlayerObservation;
 
 - (void)command:(ProbeCommand)command {
 #if !TARGET_OS_OSX
-    if (command == ProbePlay && !_audioSessionActive) {
+    if (command == ProbePlay && !_audioSessionActive && [self canLoadSource]) {
         AVAudioSession *audio = [AVAudioSession sharedInstance];
         if (![audio setCategory:AVAudioSessionCategoryPlayback mode:AVAudioSessionModeMoviePlayback
                        options:0 error:NULL] || ![audio setActive:YES error:NULL]) {
@@ -232,9 +262,7 @@ static void *PlayerObservation = &PlayerObservation;
     _picker.player = nil;
 #else
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    if (_audioSessionActive) {
-        [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:NULL];
-    }
+    [self releaseAudioSession];
 #endif
 }
 @end
