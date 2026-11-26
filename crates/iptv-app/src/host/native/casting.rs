@@ -5,12 +5,13 @@ use iptv_core::{
     playback::PlaySource,
 };
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
-use iptv_runtime::cast::{Port, Prepared, Remote, Task};
+use iptv_runtime::cast::{Admitted, Authorization, Port, Prepared, Remote, Retirement, Task};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 
 pub(super) struct Sender;
 const DEFAULT_PORT: u16 = 49152;
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 fn map_error(error: googlecast::Error) -> Error {
     match error {
         googlecast::Error::Unreachable => Error::Unavailable,
@@ -123,7 +124,7 @@ impl Prepared for Handoff {
             Ok(())
         })
     }
-    fn allow(self: Box<Self>) -> Task<'static, Arc<dyn Remote>> {
+    fn allow(self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted> {
         Box::pin(async move {
             let Handoff {
                 address,
@@ -133,46 +134,53 @@ impl Prepared for Handoff {
                 reply,
                 release,
             } = *self;
-            if !gate.allow() {
-                relay.shutdown().await;
-                return Err(Error::Unknown);
-            }
-            let outcome = async {
-                let id = reply
-                    .ok_or(Error::Unknown)?
-                    .await
-                    .map_err(|_| Error::Unknown)?
-                    .map_err(map_error)?;
-                timeout(Duration::from_secs(15), async {
-                    loop {
-                        match session.status(id).await.map_err(map_error)? {
-                            Status::Playing | Status::Paused => return Ok(id),
-                            Status::Failed
-                            | Status::Finished
-                            | Status::Canceled
-                            | Status::Interrupted => return Err(Error::Refused),
-                            Status::Idle | Status::Unknown | Status::Buffering => {
-                                tokio::time::sleep(Duration::from_millis(250)).await
+            let outcome = authorization
+                .while_current(async {
+                    if !gate.allow() {
+                        return Err(Error::Unknown);
+                    }
+                    let id = reply
+                        .ok_or(Error::Unknown)?
+                        .await
+                        .map_err(|_| Error::Unknown)?
+                        .map_err(map_error)?;
+                    timeout(SETTLE_TIMEOUT, async {
+                        loop {
+                            match session.status(id).await.map_err(map_error)? {
+                                Status::Playing => return Ok((id, false)),
+                                Status::Paused => return Ok((id, true)),
+                                Status::Failed
+                                | Status::Finished
+                                | Status::Canceled
+                                | Status::Interrupted => return Err(Error::Refused),
+                                Status::Idle | Status::Unknown | Status::Buffering => {
+                                    tokio::time::sleep(Duration::from_millis(250)).await
+                                }
                             }
                         }
-                    }
+                    })
+                    .await
+                    .map_err(|_| Error::Unknown)?
                 })
-                .await
-                .map_err(|_| Error::Unknown)?
-            }
-            .await;
+                .await;
             match outcome {
-                Ok(id) => {
+                Ok((id, paused)) => {
                     if let Some(release) = release {
                         let _ = release.send(());
                     }
-                    Ok(Arc::new(Playing {
-                        address,
-                        url: relay.url().to_owned(),
-                        session: tokio::sync::Mutex::new(session),
-                        id,
-                        relay: tokio::sync::Mutex::new(Some(relay)),
-                    }) as Arc<dyn Remote>)
+                    Ok(Admitted {
+                        remote: Arc::new(Playing {
+                            address,
+                            url: relay.url().to_owned(),
+                            control: tokio::sync::Mutex::new(Control {
+                                session,
+                                idle_since: None,
+                            }),
+                            id,
+                            relay: tokio::sync::Mutex::new(Some(relay)),
+                        }),
+                        paused,
+                    })
                 }
                 Err(e) => {
                     relay.shutdown().await;
@@ -182,10 +190,14 @@ impl Prepared for Handoff {
         })
     }
 }
+struct Control {
+    session: Session,
+    idle_since: Option<Instant>,
+}
 struct Playing {
     address: SocketAddr,
     url: String,
-    session: tokio::sync::Mutex<Session>,
+    control: tokio::sync::Mutex<Control>,
     id: i64,
     relay: tokio::sync::Mutex<Option<PlaybackRelay>>,
 }
@@ -201,7 +213,12 @@ impl Remote for Playing {
                 Command::Stop => googlecast::Command::Stop,
             };
             timeout(Duration::from_secs(15), async {
-                self.session.lock().await.command(self.id, cmd).await
+                self.control
+                    .lock()
+                    .await
+                    .session
+                    .command(self.id, cmd)
+                    .await
             })
             .await
             .map_err(|_| Error::Unknown)?
@@ -209,50 +226,95 @@ impl Remote for Playing {
         })
     }
     fn state(&self) -> Task<'_, RemoteState> {
-        Box::pin(async {
-            timeout(Duration::from_secs(15), self.observe())
-                .await
-                .map_err(|_| Error::Unknown)?
-        })
+        Box::pin(self.observe())
     }
-    fn retire(&self) -> Task<'_, ()> {
+    fn retire(&self) -> Retirement<'_> {
         Box::pin(async move {
-            if let Some(relay) = self.relay.lock().await.take() {
+            let mut slot = self.relay.lock().await;
+            if let Some(relay) = slot.take() {
                 relay.shutdown().await;
             }
-            Ok(())
         })
     }
 }
 
 impl Playing {
     async fn observe(&self) -> Result<RemoteState, Error> {
-        let mut session = self.session.lock().await;
-        let status = match session.status(self.id).await {
-            Ok(s) => s,
+        const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
+        const REJOIN_TIMEOUT: Duration = Duration::from_secs(15);
+
+        let deadline = Instant::now() + PROBE_TIMEOUT;
+        let mut control = tokio::time::timeout_at(deadline, self.control.lock())
+            .await
+            .map_err(|_| Error::Unknown)?;
+        let result = status_or_rejoin(
+            deadline,
+            control.session.status(self.id),
+            REJOIN_TIMEOUT,
+            self.rejoin_owned(),
+        )
+        .await;
+        let (replacement, status) = match result {
+            Ok(owned) => owned,
             Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-            Err(_) => {
-                let joined = match Session::rejoin(self.address).await {
-                    Ok(joined) => joined,
-                    Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-                    Err(error) => return Err(map_error(error)),
-                };
-                if joined.lookup(&self.url).await.map_err(map_error)? != Some(self.id) {
-                    return Ok(RemoteState::Ended);
-                }
-                *session = joined;
-                match session.status(self.id).await {
-                    Ok(status) => status,
-                    Err(googlecast::Error::Ended) => return Ok(RemoteState::Ended),
-                    Err(error) => return Err(map_error(error)),
-                }
-            }
+            Err(error) => return Err(map_error(error)),
         };
-        Ok(match status {
-            Status::Playing => RemoteState::Playing,
-            Status::Paused => RemoteState::Paused,
-            Status::Unknown | Status::Buffering => RemoteState::Loading,
-            _ => RemoteState::Ended,
-        })
+        if let Some(joined) = replacement {
+            control.session = joined;
+        }
+        Ok(observed_state(
+            status,
+            &mut control.idle_since,
+            Instant::now(),
+        ))
+    }
+
+    async fn rejoin_owned(&self) -> Result<(Session, Status), googlecast::Error> {
+        let joined = Session::rejoin(self.address).await?;
+        if joined.lookup(&self.url).await? != Some(self.id) {
+            return Err(googlecast::Error::Ended);
+        }
+        let status = joined.status(self.id).await?;
+        Ok((joined, status))
     }
 }
+
+// A silent control connection can consume its whole deadline. Start the
+// recovery budget only when switching to a fresh connection.
+async fn status_or_rejoin<S>(
+    deadline: Instant,
+    status: impl Future<Output = Result<Status, googlecast::Error>>,
+    rejoin_timeout: Duration,
+    rejoin: impl Future<Output = Result<(S, Status), googlecast::Error>>,
+) -> Result<(Option<S>, Status), googlecast::Error> {
+    match tokio::time::timeout_at(deadline, status).await {
+        Ok(Ok(status)) => Ok((None, status)),
+        Ok(Err(googlecast::Error::Ended)) => Err(googlecast::Error::Ended),
+        Ok(Err(_)) | Err(_) => {
+            let (session, status) = timeout(rejoin_timeout, rejoin)
+                .await
+                .map_err(|_| googlecast::Error::Unknown)??;
+            Ok((Some(session), status))
+        }
+    }
+}
+
+fn observed_state(status: Status, idle_since: &mut Option<Instant>, now: Instant) -> RemoteState {
+    if status != Status::Idle {
+        *idle_since = None;
+    }
+    match status {
+        Status::Playing => RemoteState::Playing,
+        Status::Paused => RemoteState::Paused,
+        Status::Idle if now - *idle_since.get_or_insert(now) >= SETTLE_TIMEOUT => {
+            RemoteState::Ended
+        }
+        Status::Unknown | Status::Buffering | Status::Idle => RemoteState::Loading,
+        Status::Failed | Status::Finished | Status::Canceled | Status::Interrupted => {
+            RemoteState::Ended
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

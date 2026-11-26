@@ -177,7 +177,7 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
             retired = true;
             owner.retire_viewing_inputs(0).await;
             let grant = check().await?;
-            owner
+            let paused = owner
                 .admit_cast(
                     ticket,
                     prepared,
@@ -201,7 +201,7 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
             ui.player.main().key.set(Some(key.clone()));
             ui.playing.set(schedule().find_channel(&key));
             ui.cast_remote.set(true);
-            ui.paused.set(false);
+            ui.paused.set(paused);
             monitor(ui, ticket);
             Ok(())
         }
@@ -210,7 +210,11 @@ fn start(ui: Ui, channel: usize, receiver: Receiver) {
         if let Err(e) = result {
             report(e);
 
-            if current() {
+            if retired && pending_stop_current(ui) {
+                // The old receiver is already stopped. Preserve the viewer's Stop
+                // even when the switch failed after releasing its local surface.
+                ui.playing.set(None);
+            } else if current() {
                 ui.paused.set(old_paused);
                 if retired
                     && let Some(ch) = previous
@@ -276,7 +280,7 @@ pub(super) fn remote(ui: Ui, index: usize) {
     };
     if ui.cast_busy.get_untracked() {
         if index == 3 {
-            ui.cast_stop_pending.set(true);
+            ui.cast_stop_pending.set(Some(runtime().cast_intent()));
         }
         return;
     }
@@ -292,6 +296,7 @@ pub(super) fn remote(ui: Ui, index: usize) {
                 ui.cast_remote.set(false);
                 ui.playing.set(None);
                 if index == 2
+                    && !pending_stop_current(ui)
                     && let Some(ch) = schedule().find_channel(&key)
                 {
                     ui.play(ch, Playback::Live);
@@ -303,12 +308,16 @@ pub(super) fn remote(ui: Ui, index: usize) {
         finish_pending_stop(ui);
     });
 }
+fn pending_stop_current(ui: Ui) -> bool {
+    ui.cast_stop_pending
+        .get_untracked()
+        .is_some_and(|ticket| runtime().cast_intent_current(ticket))
+}
 fn finish_pending_stop(ui: Ui) {
-    if ui.cast_stop_pending.get_untracked() {
-        ui.cast_stop_pending.set(false);
-        if ui.cast_remote.get_untracked() {
-            remote(ui, 3);
-        }
+    let stop = pending_stop_current(ui);
+    ui.cast_stop_pending.set(None);
+    if stop && ui.cast_remote.get_untracked() {
+        remote(ui, 3);
     }
 }
 pub(crate) fn volume(ui: Ui, command: Command) -> bool {

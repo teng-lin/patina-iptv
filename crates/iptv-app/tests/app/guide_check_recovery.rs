@@ -250,13 +250,31 @@ impl Scenario {
         rail(&mut self.app, "Settings");
         step(self.app.press("text:TV guide data"));
         step(self.app.press("text:Guide sources"));
+        self.confirm_guide_deletion();
+        to_guide(&mut self.app);
+        step(self.app.wait_for_gone("text:/ Now$/", IMPORT));
+    }
+
+    /// From Guide sources, wait for the stored guide (including any failed download) to be removed.
+    fn confirm_guide_deletion(&mut self) {
+        let saved = store(&self.data);
+        let source = self.source;
+        let guide = || saved.epg_guide(source).unwrap();
+        assert!(
+            guide().is_some(),
+            "the playlist has a guide record to delete"
+        );
+
         step(self.app.wait_for("text:Delete stored guide data"));
         step(self.app.press("text:Delete stored guide data"));
         step(self.app.wait_for("text:/^Delete guide data for /"));
         step(self.app.press("text:Delete"));
-        step(self.app.wait_for_within("text:Guide data deleted", IMPORT));
-        to_guide(&mut self.app);
-        step(self.app.wait_for_gone("text:/ Now$/", IMPORT));
+        until(
+            &mut self.app,
+            "the stored guide was deleted",
+            IMPORT,
+            |_| guide().is_none(),
+        );
     }
 
     /// From the guide: Settings, its TV guide data page.
@@ -437,10 +455,12 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
         !s.pending(),
         "the update owns the guide: no timer meanwhile"
     );
-    step(s.app.press("text:Delete stored guide data"));
-    step(s.app.wait_for("text:/^Delete guide data for /"));
-    step(s.app.press("text:Delete"));
-    step(s.app.wait_for_within("text:Guide data deleted", IMPORT));
+    assert!(
+        s.stored_guide()
+            .is_some_and(|guide| guide.feeds.iter().any(|feed| feed.program_count > 0)),
+        "the generated programs are stored before deletion"
+    );
+    s.confirm_guide_deletion();
     s.until_pending("the revoked update kept a guide check");
     // The check the update asked for, hours away, comes due.
     step(s.app.fast_forward(LATER));

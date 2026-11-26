@@ -336,6 +336,10 @@ pub fn pick(ui: Ui, index: usize) {
     let Some(open) = ui.chooser.get_untracked() else {
         return;
     };
+    if open.kind == Kind::CastRemote && index == 2 && ui.cast_busy.get_untracked() {
+        crate::settings_view::notify(tr("Wait for the current cast request to finish."));
+        return;
+    }
     let value = open.values.get(index).cloned().unwrap_or_default();
     close(ui);
     match open.kind {
