@@ -1,5 +1,12 @@
 # Agent rules for Patina IPTV
 
+- **Review the whole change.** Scope the diff against its base, trace the normal
+  entry points and callers, and check behavior through startup, use, failure,
+  retry, and shutdown as applicable. Review product behavior, UX, accessibility,
+  localization, data integrity, backward compatibility, platform and dependency
+  changes, test coverage, and CI and release impact. Use focused tests to verify
+  findings where practical. Apply Rust review and Rust best-practices as
+  supplemental checks for Rust code.
 - **Synthetic data only.** Fixtures, tests, docs, screenshots and commit text
   use generated playlists/EPG and local mock servers. Never commit real
   provider URLs, names, channel lists or credentials. Real-provider testing
