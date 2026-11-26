@@ -373,6 +373,12 @@ fn fullscreen_restart_keeps_the_playing_channel_outside_the_browse_group() {
     if app.screen().matches("id:menu-panel").unwrap() {
         step(app.back());
     }
+    // The first News archive legitimately falls back from its external player.
+    // Clear that setup notice before checking for a new Sport policy fallback.
+    step(app.wait_for_gone(
+        "text:No external player is installed, so this channel plays here.",
+        WAIT,
+    ));
     back_to_guide(app);
     personalization::group(app, "Sport");
     // The ordinary fullscreen shortcut keeps channel A while the guide is on B.
