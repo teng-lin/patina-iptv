@@ -8,7 +8,15 @@ try {
     $version = (& python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version'])").Trim()
     if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Installer needs a numeric workspace version.' }
     if ($env:VERSION -and $env:VERSION -ne $version) { throw 'Release VERSION differs from Cargo.toml.' }
-    if (!$SkipBuild) { & "$PSScriptRoot/build-windows.ps1" -Release }
+    if (!$SkipBuild) {
+        $previousPackage = $env:PATINA_UPDATE_PACKAGE
+        try {
+            $env:PATINA_UPDATE_PACKAGE = 'exe'
+            & "$PSScriptRoot/build-windows.ps1" -Release
+        } finally {
+            $env:PATINA_UPDATE_PACKAGE = $previousPackage
+        }
+    }
     $exe = Join-Path $root 'target/release/iptv-app.exe'
     & python "$PSScriptRoot/ci/check-windows-icon.py" $exe
     if ($LASTEXITCODE -ne 0) { throw 'Executable icon verification failed.' }

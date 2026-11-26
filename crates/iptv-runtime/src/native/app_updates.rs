@@ -77,32 +77,7 @@ impl crate::Runtime {
                         ..Default::default()
                     })
                     .ok()?;
-                    let session = trust::Session::open(&state, root).ok()?;
-                    let repository = RepositoryLoader::new(
-                        &session.root,
-                        base.join("metadata/").ok()?,
-                        base.join("targets/").ok()?,
-                    )
-                    .transport(FeedTransport(client))
-                    .limits(tough::Limits {
-                        max_root_updates: 32,
-                        ..Default::default()
-                    })
-                    .datastore(session.work.path())
-                    .load()
-                    .await
-                    .ok()?;
-                    let name = TargetName::new("index.json").ok()?;
-                    let bytes = repository
-                        .read_target(&name)
-                        .await
-                        .ok()??
-                        .into_vec()
-                        .await
-                        .ok()?;
-                    let result = selection::select(&bytes, installed.packaged())?;
-                    session.commit().ok()?;
-                    Some(result)
+                    verified_index(&state, root, &base, FeedTransport(client), installed).await
                 };
                 tokio::time::timeout(Duration::from_secs(45), check)
                     .await
@@ -114,3 +89,51 @@ impl crate::Runtime {
             .unwrap_or(UpdateResult::Unavailable)
     }
 }
+
+async fn verified_index(
+    state: &std::path::Path,
+    root: &[u8],
+    base: &Url,
+    transport: impl Transport + 'static,
+    installed: InstalledPackage,
+) -> Option<UpdateResult> {
+    let directory = state.to_owned();
+    let anchor = root.to_vec();
+    let (session, installed) = tokio::task::spawn_blocking(move || {
+        trust::Session::open(&directory, &anchor).map(|session| (session, installed.packaged()))
+    })
+    .await
+    .ok()?
+    .ok()?;
+    let repository = RepositoryLoader::new(
+        &session.root,
+        base.join("metadata/").ok()?,
+        base.join("targets/").ok()?,
+    )
+    .transport(transport)
+    .limits(tough::Limits {
+        max_root_updates: 32,
+        ..Default::default()
+    })
+    .datastore(session.work.path())
+    .load()
+    .await
+    .ok()?;
+    let name = TargetName::new("index.json").ok()?;
+    let bytes = repository
+        .read_target(&name)
+        .await
+        .ok()??
+        .into_vec()
+        .await
+        .ok()?;
+    let result = selection::select(&bytes, installed)?;
+    tokio::task::spawn_blocking(move || session.commit())
+        .await
+        .ok()?
+        .ok()?;
+    Some(result)
+}
+
+#[cfg(test)]
+mod tests;

@@ -32,6 +32,8 @@ android {
     namespace = "com.hantekllc.iptvrs.host"
     compileSdk = 36
 
+    buildFeatures { buildConfig = true }
+
     defaultConfig {
         applicationId = "com.hantekllc.iptvrs"
         minSdk = 26
@@ -75,6 +77,11 @@ android {
                 "debug" -> signingConfigs.getByName("debug")
                 else -> null
             }
+        }
+        // Same package identity and signing pipeline, distinct distribution actions.
+        create("directRelease") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
         }
         // `release` for measuring (tools/perf-android.sh): profileable from
         // the shell (src/profile/AndroidManifest.xml), so simpleperf works on
@@ -120,7 +127,7 @@ val checkReleaseSigning by tasks.registering {
     }
 }
 // Every release build (assemble, bundle, install, lint) starts with preReleaseBuild.
-tasks.matching { it.name == "preReleaseBuild" }.configureEach { dependsOn(checkReleaseSigning) }
+tasks.matching { it.name == "preReleaseBuild" || it.name == "preDirectReleaseBuild" }.configureEach { dependsOn(checkReleaseSigning) }
 
 dependencies {
     testImplementation("junit:junit:4.13.2")

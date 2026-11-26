@@ -409,7 +409,7 @@ fn run(ui: Ui, key: &'static str) {
         }
         "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
-        "general.check_updates" => updates::run(),
+        "general.check_updates" => updates::run(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
             crate::tasks::spawn_in_app(async move {

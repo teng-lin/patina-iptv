@@ -5,11 +5,11 @@ use nsh_core::prelude::open_url;
 
 pub(super) const RELEASES: &str = "https://github.com/teng-lin/patina-iptv/releases";
 
-pub(super) fn run() {
-    crate::tasks::spawn_in_app(show());
+pub(super) fn run(ui: crate::Ui) {
+    crate::tasks::spawn_in_app(show(ui));
 }
 
-async fn show() {
+async fn show(ui: crate::Ui) {
     #[cfg(any(
         target_os = "android",
         target_os = "linux",
@@ -25,6 +25,9 @@ async fn show() {
     )))]
     let (message, url) = (String::new(), None::<String>);
 
+    if super::state(ui, |screen| screen.page().key) != Some("about") {
+        return;
+    }
     let mut dialog = alert_dialog()
         .title(super::words::label("general.check_updates"))
         .description(message)
@@ -67,6 +70,16 @@ async fn check() -> (String, Option<String>) {
     super::notify(tr("Checking…"));
     let owner = crate::runtime_owner::runtime();
     let installed = InstalledPackage::native(version);
+    #[cfg(target_os = "android")]
+    let installed = {
+        let mut package = installed;
+        if let Some((code, api)) = crate::device::direct_android_build() {
+            package.format = Some("apk".into());
+            package.android_code = Some(code);
+            package.minimum = serde_json::json!({"androidApi": api});
+        }
+        package
+    };
     let root = include_bytes!(concat!(env!("OUT_DIR"), "/update-root.json"));
     let result = owner.check_app_update(feed, root, installed).await;
     let (message, url) = match result {

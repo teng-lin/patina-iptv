@@ -68,14 +68,15 @@ Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
 APK and AAB for tablets and TVs, each containing both ARM architectures.
 Packaging fails if either native library or the notices are missing. Both
 signing certificates are checked against the configured keystore before upload.
-The signed AAB carries the release's R8 mapping file. To symbolicate a crash,
-extract the map from the AAB for that exact release:
+For a direct APK crash, retrieve `android-direct-apk-r8-map` from the producing
+workflow run. For a store install, extract the map from the exact signed AAB.
 
 ```sh
 unzip -p Patina-0.1.7-android-tablet-tv.aab \
   BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map > mapping.txt
 ```
- Manual runs also offer platforms=android
+
+Manual runs also offer platforms=android
 or platforms=desktop independently. platforms=all adds an iPad device IPA;
 only that option requires Apple signing secrets and still needs iPad validation.
 
@@ -711,3 +712,14 @@ Desktop release artifacts also retain a `*-build-environment.json` beside their
 SBOMs: candidate commit, lock/pin file hashes, compiler/tool versions and installed
 apt/Homebrew package versions. These inventories aid reconstruction and diagnosis;
 they neither freeze the host repositories nor promise byte-identical rebuilds.
+
+
+### Native update checks
+
+For a rehearsal build, set `PATINA_UPDATE_FEED` to the HTTPS directory serving
+the staging repository and `PATINA_UPDATE_ROOT` to its out-of-band public TUF
+root file before compiling Patina. The feed serves `metadata/` and `targets/`.
+Disclose the selected host in the privacy notice before distributing a
+configured build. A build without that pair opens the manual release page from
+Settings → About. Existing installations need one manual upgrade to acquire
+the checker.

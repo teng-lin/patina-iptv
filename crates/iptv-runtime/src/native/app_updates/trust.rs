@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use tempfile::{NamedTempFile, TempDir};
@@ -16,15 +16,15 @@ const FILES: &[&str] = &[
     "latest_known_time.json",
 ];
 
-pub(super) struct Session<'a> {
+pub(super) struct Session {
     _lock: File,
-    directory: &'a Path,
+    directory: PathBuf,
     pub(super) work: TempDir,
     pub(super) root: Vec<u8>,
 }
 
-impl<'a> Session<'a> {
-    pub(super) fn open(directory: &'a Path, embedded: &[u8]) -> io::Result<Self> {
+impl Session {
+    pub(super) fn open(directory: &Path, embedded: &[u8]) -> io::Result<Self> {
         fs::create_dir_all(directory)?;
         let lock = File::options()
             .read(true)
@@ -53,7 +53,7 @@ impl<'a> Session<'a> {
         }
         Ok(Self {
             _lock: lock,
-            directory,
+            directory: directory.to_owned(),
             work,
             root,
         })
@@ -64,12 +64,12 @@ impl<'a> Session<'a> {
         for &name in FILES {
             files.insert(name, fs::read_to_string(self.work.path().join(name))?);
         }
-        let mut state = NamedTempFile::new_in(self.directory)?;
+        let mut state = NamedTempFile::new_in(&self.directory)?;
         serde_json::to_writer(&mut state, &files)?;
         state.as_file().sync_all()?;
         state.persist(self.directory.join("trusted.json"))?;
         #[cfg(unix)]
-        File::open(self.directory)?.sync_all()?;
+        File::open(&self.directory)?.sync_all()?;
         Ok(())
     }
 }

@@ -32,9 +32,12 @@ impl InstalledPackage {
         Self {
             platform,
             architecture,
-            format: option_env!("PATINA_UPDATE_PACKAGE").map(str::to_owned),
+            format: match platform {
+                "windows" | "macos" => option_env!("PATINA_UPDATE_PACKAGE").map(str::to_owned),
+                _ => None,
+            },
             version,
-            android_code: option_env!("IPTV_ANDROID_VERSION_CODE").and_then(|s| s.parse().ok()),
+            android_code: None,
             minimum,
         }
     }
@@ -90,9 +93,10 @@ fn meets(have: &Value, need: &Value) -> Option<bool> {
                     .ok()
             };
             let required = parts(required.as_str()?)?;
-            let Some(actual) = actual.as_str().and_then(parts) else {
+            let Some(mut actual) = actual.as_str().and_then(parts) else {
                 return Some(false);
             };
+            actual.resize(actual.len().max(required.len()), 0);
             if actual < required {
                 return Some(false);
             }
