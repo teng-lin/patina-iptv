@@ -6,6 +6,12 @@
 
 use crate::i18n::tr;
 
+#[cfg(patina_airplay_probe)]
+#[path = "../../../tools/apple-airplay-probe/view.rs"]
+mod airplay_probe;
+#[cfg(patina_airplay_probe)]
+pub use airplay_probe::AirPlayProbe;
+
 static TUI_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Enables TUI-host layout adjustments (such as bypassing desktop horizontal

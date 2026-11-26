@@ -1,0 +1,23 @@
+{
+  "name": "Patina AirPlay Probe",
+  "id": "com.hantekllc.patina.airplayprobe",
+  "version": "0.1.0",
+  "rust": "../../crates/iptv-app",
+  "root": "AirPlayProbe",
+  "appearance": "system",
+  "window": { "defaultSize": { "width": 600, "height": 460 } },
+  "macos": {
+    "infoPlist": {
+      "NSLocalNetworkUsageDescription": "Plays generated test video from the fixture server on your network.",
+      "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+    }
+  },
+  "ios": {
+    "infoPlist": {
+      "UIDeviceFamily": [2],
+      "UIBackgroundModes": ["audio"],
+      "NSLocalNetworkUsageDescription": "Plays generated test video from the fixture server on your network.",
+      "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+    }
+  }
+}
