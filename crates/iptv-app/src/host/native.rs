@@ -7,6 +7,8 @@ mod ios_device;
 
 #[cfg(target_os = "android")]
 mod android_transport;
+#[cfg(all(patina_airplay_probe, any(target_os = "ios", target_os = "macos")))]
+mod apple_airplay;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod casting;
 mod clock;
@@ -165,6 +167,8 @@ pub mod exports {
     #[cfg(target_os = "macos")]
     #[native_components(macos)]
     pub fn components(components: &nsh_platform_macos::Components) {
+        #[cfg(patina_airplay_probe)]
+        super::apple_airplay::register(components);
         mpv::register(components, super::transport::policy);
     }
 
@@ -173,6 +177,8 @@ pub mod exports {
     #[cfg(target_os = "ios")]
     #[native_components(ios)]
     pub fn components(components: &nsh_platform_ios::Components) {
+        #[cfg(patina_airplay_probe)]
+        super::apple_airplay::register(components);
         super::ios_device::register(components);
         mpv::register(components, super::transport::policy);
     }

@@ -137,7 +137,8 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["credentials"], path)
         for path in ("tools/fetch-mpvkit.sh", "tools/mpv-runtime-ios/runtime-ios.json",
                      "crates/iptv-player-mpv/src/mpv/ios.rs", "tools/ci/check-ios.sh",
-                     "crates/iptv-app/nsh.json", "tools/check-ios-simulator-entitlements.sh"):
+                     "crates/iptv-app/nsh.json", "tools/check-ios-simulator-entitlements.sh",
+                     "crates/iptv-app/src/host/native/apple_airplay.m", "tools/apple-airplay-probe/view.rs"):
             self.assertTrue(v.select([path])["ios"], path)
         self.assertFalse(v.select(["docs/architecture.md"])["ios"])
 

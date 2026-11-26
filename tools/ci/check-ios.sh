@@ -20,3 +20,8 @@ cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
 # docs/ios-validation.md checks the packaged one by hand.
 cargo build --locked -p iptv-app --lib --target aarch64-apple-ios-sim
 bash tools/check-ios-simulator-entitlements.sh target/aarch64-apple-ios-sim/debug/libiptv_app.rlib
+
+# The dedicated probe opts into a native view that normal builds do not compile.
+PATINA_AIRPLAY_PROBE=1 cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
+xcrun --sdk macosx clang -fsyntax-only -fobjc-arc -mmacosx-version-min=14.0 \
+  -isysroot "$(xcrun --sdk macosx --show-sdk-path)" crates/iptv-app/src/host/native/apple_airplay.m
