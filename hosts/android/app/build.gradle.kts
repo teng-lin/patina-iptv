@@ -82,7 +82,6 @@ android {
         create("directRelease") {
             initWith(getByName("release"))
             if (validationAppId != null) {
-                require(releaseSigning == "debug") { "Direct APK rehearsals require local debug signing" }
                 applicationIdSuffix = ".validation"
             }
             matchingFallbacks += listOf("release")
@@ -132,6 +131,14 @@ val checkReleaseSigning by tasks.registering {
 }
 // Every release build (assemble, bundle, install, lint) starts with preReleaseBuild.
 tasks.matching { it.name == "preReleaseBuild" || it.name == "preDirectReleaseBuild" }.configureEach { dependsOn(checkReleaseSigning) }
+
+tasks.matching { it.name == "preDirectReleaseBuild" }.configureEach {
+    doFirst {
+        require(validationAppId == null || releaseSigning == "debug") {
+            "Direct APK rehearsals require local debug signing"
+        }
+    }
+}
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
