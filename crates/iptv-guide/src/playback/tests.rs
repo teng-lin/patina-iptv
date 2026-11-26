@@ -79,6 +79,59 @@ fn play(r: Resolution) -> iptv_core::playback::PlaySource {
 }
 
 #[test]
+fn m3u_playback_only_trusts_the_picked_loopback_origin() {
+    let context = PlaybackContext::m3u(&M3uSourceConfig {
+        location: SecretUrl::new("http://127.0.0.1:18097/lineup.m3u"),
+        user_agent: None,
+        referrer: None,
+    });
+    for (url, public_only) in [
+        ("http://127.0.0.1:18097/live.ts", false),
+        ("http://127.0.0.1:18098/live.ts", true),
+        ("https://127.0.0.1:18097/live.ts", true),
+        ("https://media.example.test/live.ts", true),
+    ] {
+        let playlist = parse_m3u(&format!("#EXTM3U\n#EXTINF:-1,Synthetic\n{url}\n"));
+        let channel = &playlist.channels.items[0];
+        assert_eq!(
+            play(resolve(Some(&context), channel, None, CLOCK)).public_only,
+            public_only,
+            "{url}"
+        );
+        assert!(play(resolve(None, channel, None, CLOCK)).public_only);
+    }
+}
+
+#[test]
+fn m3u_catchup_cannot_grant_loopback_access_to_a_public_live_channel() {
+    let context = PlaybackContext::m3u(&M3uSourceConfig {
+        location: SecretUrl::new("http://127.0.0.1:18097/lineup.m3u"),
+        user_agent: None,
+        referrer: None,
+    });
+    let archive = Archive {
+        start: NOW - 3600,
+        end: NOW - 1800,
+    };
+    for (live_url, public_only) in [
+        ("https://media.example.test/live.ts", true),
+        ("http://127.0.0.1:18097/live.ts", false),
+    ] {
+        let playlist = parse_m3u(&format!(
+            "#EXTM3U\n#EXTINF:-1 catchup=\"default\" \
+             catchup-source=\"http://127.0.0.1:18097/replay?start={{utc}}\",Synthetic\n{live_url}\n"
+        ));
+        let channel = &playlist.channels.items[0];
+        let source = play(resolve(Some(&context), channel, Some(archive), CLOCK));
+        assert_eq!(
+            source.url,
+            format!("http://127.0.0.1:18097/replay?start={}", archive.start)
+        );
+        assert_eq!(source.public_only, public_only, "{live_url}");
+    }
+}
+
+#[test]
 fn xtream_live_urls_follow_the_allowed_format() {
     let ch = xtream_channel(42, None);
     let hls = PlaybackContext::xtream(&creds(None), None, StreamFormat::Auto).unwrap();

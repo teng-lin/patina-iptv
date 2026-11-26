@@ -87,6 +87,8 @@ pub trait BodyStream {
 /// Status plus a body that has not been read yet.
 pub struct StreamingResponse<B> {
     pub status: u16,
+    /// The adapter verified that the HTTP response came from the requested origin.
+    pub same_request_origin: bool,
     /// `Content-Length` after decompression is unknown, so this is only the
     /// wire length when the adapter knows it (for progress).
     pub content_length: Option<u64>,

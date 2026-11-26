@@ -60,6 +60,7 @@ impl Transport for Native {
             let response = self.0.fetch_stream(request).await?;
             Ok(StreamingResponse {
                 status: response.status,
+                same_request_origin: response.same_request_origin,
                 content_length: response.content_length,
                 body: Body::new(NativeBody(response.body)),
             })

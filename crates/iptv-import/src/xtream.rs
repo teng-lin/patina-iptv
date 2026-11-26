@@ -183,7 +183,7 @@ async fn stream_list<F: Fetch, P: ProgressSink>(
     let mut failure = None;
     let mut count = 0;
     let result = ctx
-        .stream(step, phase, req, |bytes| {
+        .stream(step, phase, req, |bytes, _| {
             parser
                 .feed(bytes, &mut |row| {
                     if failure.is_none() {

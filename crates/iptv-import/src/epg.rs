@@ -417,7 +417,7 @@ async fn load_source<F: Fetch, S: GuideSink, P: ProgressSink>(
     };
     ctx.phase(Phase::Guide(cfg.id));
     let bytes = ctx
-        .stream(step, Phase::Guide(cfg.id), req, |chunk| {
+        .stream(step, Phase::Guide(cfg.id), req, |chunk, _| {
             parser
                 .feed(chunk, &mut |item| state.push(item))
                 .map_err(decode)?;

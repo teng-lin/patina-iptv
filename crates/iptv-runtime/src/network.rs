@@ -216,6 +216,7 @@ impl Fetch for Client {
             }
             Ok(StreamingResponse {
                 status: response.status,
+                same_request_origin: response.same_request_origin,
                 content_length: response.content_length,
                 body: Body::new(Counted {
                     body: response.body,
@@ -290,6 +291,7 @@ mod tests {
             self.asked.lock().unwrap().push(request);
             Box::pin(std::future::ready(Ok(StreamingResponse {
                 status: self.status,
+                same_request_origin: false,
                 content_length: self.declared,
                 body: Body::new(Memory(MemoryBody::new(&self.body, 4))),
             })))

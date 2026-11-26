@@ -129,7 +129,7 @@ impl<'a, F: Fetch, P: ProgressSink> Ctx<'a, F, P> {
         step: Step,
         phase: Phase,
         mut req: HttpRequest,
-        mut sink: impl FnMut(&[u8]) -> Result<u64, ImportError>,
+        mut sink: impl FnMut(&[u8], bool) -> Result<u64, ImportError>,
     ) -> Result<u64, ImportError> {
         self.check()?;
         req.timeout = Some(
@@ -156,7 +156,7 @@ impl<'a, F: Fetch, P: ProgressSink> Ctx<'a, F, P> {
             let Some(chunk) = chunk else { break };
             progress.bytes += chunk.len() as u64;
             self.account_bytes(step, chunk.len())?;
-            progress.items = sink(&chunk)?;
+            progress.items = sink(&chunk, resp.same_request_origin)?;
             if progress.bytes - last_report >= REPORT_EVERY_BYTES {
                 last_report = progress.bytes;
                 self.report(progress.clone());

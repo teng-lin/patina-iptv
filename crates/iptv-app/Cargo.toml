@@ -113,7 +113,8 @@ keyring = { version = "3.6.3", default-features = false, features = ["apple-nati
 
 
 [target.'cfg(windows)'.dependencies]
-nsh-platform-windows.workspace = true
+# The Windows app builds without NSH's defaults and needs SVG rendering for its icons.
+nsh-platform-windows = { workspace = true, features = ["svg"] }
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 

@@ -219,6 +219,7 @@ impl NetClient {
             log::debug!("read local file ({len:?} bytes)");
             return Ok(StreamingResponse {
                 status: 200,
+                same_request_origin: false,
                 content_length: len,
                 body: NetBody {
                     inner: Inner::File(f),
@@ -230,6 +231,7 @@ impl NetClient {
         let preserve_gzip = request.preserve_gzip;
         let shown = request.redacted_url();
         let req = self.build(request)?;
+        let request_origin = req.url.origin();
         let (client, public_client) = if preserve_gzip {
             let pair = self
                 .gzip_clients
@@ -259,6 +261,7 @@ impl NetClient {
         log::debug!("{shown}: HTTP {status}");
         Ok(StreamingResponse {
             status,
+            same_request_origin: resp.url().origin() == request_origin,
             content_length: resp.content_length(),
             body: NetBody {
                 inner: Inner::Http(resp),
