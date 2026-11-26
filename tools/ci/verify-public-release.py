@@ -9,6 +9,8 @@ import re
 import subprocess
 import tempfile
 
+import update_packages
+
 SPEC = importlib.util.spec_from_file_location("publish_release", Path(__file__).with_name("publish-release.py"))
 release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
@@ -41,17 +43,7 @@ def package_record(directory, repository, tag, commit, signing_directory):
     code = versioning.android_version_code(version)
     base = f"https://github.com/{repository}/releases"
     packages = []
-    formats = [
-        ("android", "apk", "android-tablet-tv.apk", ["arm64-v8a", "armeabi-v7a"], {"androidApi": 26}),
-        ("windows", "exe", "windows-x86_64-setup.exe", ["x86_64"], {"windows": "10.0"}),
-        ("macos", "dmg", "macos-arm64.dmg", ["arm64"], {"macos": "14.0"}),
-    ]
-    for kind, suffix in (("appimage", "AppImage"), ("deb", "deb"), ("rpm", "rpm"), ("pacman", "pkg.tar.zst")):
-        minimum = {"glibc": "2.39"}
-        if kind != "appimage":
-            minimum["gtk"] = "4.14"
-        formats.append(("linux", kind, f"linux-x86_64.{suffix}", ["x86_64"], minimum))
-    for platform, kind, suffix, architectures, minimum in formats:
+    for platform, kind, suffix, architectures, minimum in update_packages.formats():
         asset = directory / f"Patina-{version}-{suffix}"
         if not asset.is_file():
             continue

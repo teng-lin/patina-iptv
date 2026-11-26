@@ -653,6 +653,21 @@ and hashes, and each desktop preview’s signing status from the signing job.
 Treat it as input to the future authenticated feed publisher. Clients require
 signed update metadata before offering an installer.
 
+For a staging signing event, run the following at the Patina checkout with a
+verified release record and a checkout of the TUF repository. Start from its
+latest accepted target, serialize signing events, and inspect the target diff
+before signing. The command creates the first index when the file is absent.
+
+```sh
+python3 tools/ci/update-index.py ../update-feed/targets/index.json update-release.json
+```
+
+A retry or an older record preserves newer package entries. A conflict for
+the same package and version, or different commits for one release across
+platforms, aborts before replacing the file. The resulting
+target is ready for the repository’s signing event. Publish the signed target
+and versioned metadata before the timestamp.
+
 Unsigned candidate packages and their checked evidence are retained for 30 days
 in Actions. A promoted release publishes `candidate-manifest.json` with checksums
 and final-workflow provenance, retaining the unsigned input/check record after
