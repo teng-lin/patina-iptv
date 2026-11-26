@@ -440,8 +440,9 @@ How the per-release archives of the remaining system libraries are produced:
    Linux it runs `apt-get source --download-only <source>=<version>` after
    `tools/ci/enable-deb-src.sh` and checks every file against the checksums of
    the signed archive index. A version that has left the index (a newer update
-   was published after the runner image was built) is fetched from Launchpad,
-   which keeps every published version, and checked against its `.dsc`.
+   was published after the runner image was built) uses the historical `.dsc`
+   from the official Ubuntu HTTPS archive or Launchpad. Each source file must
+   match the size and checksum in that exact version’s description.
 3. **The archive and a `.json` manifest are released** next to the packages and
    listed in `SHA256SUMS`. The manifest names every file with its address and
    SHA-256; the archive contains the same manifest, `SOURCE.txt` and, on macOS,
