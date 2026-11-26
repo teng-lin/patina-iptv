@@ -58,8 +58,26 @@ impl PackageAction {
                 let Some((code, directory)) = asset.android_code().zip(android::directory()) else {
                     return crate::settings_view::notify(tr("Update check failed. Try again."));
                 };
-                crate::settings_view::notify(tr("Downloading…"));
-                let Some(path) = owner.download_update(asset, directory).await else {
+                if owner.recording_background_needed() {
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
+                let progress = nsh_base::alert_dialog()
+                    .title(tr("Downloading…"))
+                    .cancel("cancel", tr("Cancel"))
+                    .close_on_escape(true)
+                    .show();
+                let closer = progress.closer();
+                let path = tokio::select! {
+                    biased;
+                    _ = progress => return,
+                    path = owner.download_update(asset, directory) => path,
+                };
+                if let Some(closer) = closer {
+                    closer.close();
+                }
+                let Some(path) = path else {
                     return crate::settings_view::notify(tr("Update download failed. Try again."));
                 };
                 if !crate::settings_view::updates::is_open(_ui) {
@@ -92,10 +110,21 @@ impl PackageAction {
                     }
                     let _ = std::fs::remove_file(owned);
                 }
-                crate::settings_view::notify(tr("Update download failed. Try again."));
+                crate::settings_view::notify(if owner.recording_background_needed() {
+                    tr("Finish recording before installing the update.")
+                } else {
+                    tr("Android could not open the installer. Try again from Settings.")
+                });
             }
         }
     }
+}
+
+pub(crate) fn feed(android_build: Option<(u64, u64)>) -> Option<&'static str> {
+    if cfg!(target_os = "android") && android_build.is_none() {
+        return None;
+    }
+    option_env!("PATINA_UPDATE_FEED")
 }
 
 #[cfg(any(
@@ -111,7 +140,7 @@ pub(crate) async fn check(
     const PRODUCT: &str = "Patina";
     use iptv_runtime::app_updates::{InstalledPackage, UpdateResult};
     let version = env!("CARGO_PKG_VERSION");
-    let Some(feed) = option_env!("PATINA_UPDATE_FEED") else {
+    let Some(feed) = feed(android_build) else {
         return (
             format!("{PRODUCT} {version}\n{RELEASES}"),
             Some(RELEASES.to_owned()),
@@ -131,7 +160,14 @@ pub(crate) async fn check(
     let mut action = None;
     let (message, url) = match result {
         UpdateResult::Current => (tr("Patina is up to date.").to_owned(), None),
-        UpdateResult::Unavailable => (tr("Update check failed. Try again.").to_owned(), None),
+        UpdateResult::Unavailable => (
+            tr("Update check failed. Try again.").to_owned(),
+            Some(RELEASES.to_owned()),
+        ),
+        UpdateResult::RequirementsUnconfirmed => (
+            tr("Check the system requirements in the release notes.").to_owned(),
+            Some(RELEASES.to_owned()),
+        ),
         UpdateResult::NoCompatiblePackage => (
             tr("No compatible package found.").to_owned(),
             Some(RELEASES.to_owned()),

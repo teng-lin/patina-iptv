@@ -33,7 +33,7 @@ impl InstalledPackage {
             platform,
             architecture,
             format: match platform {
-                "windows" | "macos" => option_env!("PATINA_UPDATE_PACKAGE").map(str::to_owned),
+                "macos" => option_env!("PATINA_UPDATE_PACKAGE").map(str::to_owned),
                 _ => None,
             },
             version,
@@ -43,7 +43,7 @@ impl InstalledPackage {
     }
 
     pub(super) fn packaged(mut self) -> Self {
-        if self.platform == "linux" && self.format.is_none() {
+        if matches!(self.platform, "linux" | "windows") && self.format.is_none() {
             self.format = std::env::current_exe()
                 .ok()
                 .and_then(|exe| std::fs::read_to_string(exe.parent()?.join("patina-package")).ok())
@@ -79,6 +79,7 @@ pub enum UpdateResult {
         preview: bool,
         asset: ReleaseAsset,
     },
+    RequirementsUnconfirmed,
     NoCompatiblePackage,
     Unavailable,
 }
@@ -156,7 +157,13 @@ pub(super) fn select(bytes: &[u8], installed: InstalledPackage) -> Option<Update
         return Some(UpdateResult::Current);
     }
     if !meets(&installed.minimum, &package["minimum"])? {
-        return Some(UpdateResult::NoCompatiblePackage);
+        // Android reports the device API. Desktop stamps describe the oldest
+        // supported host, so a higher floor needs a manual compatibility check.
+        return Some(if installed.platform == "android" {
+            UpdateResult::NoCompatiblePackage
+        } else {
+            UpdateResult::RequirementsUnconfirmed
+        });
     }
     if installed.platform == "android"
         && installed

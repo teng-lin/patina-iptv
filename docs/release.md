@@ -68,8 +68,9 @@ Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
 APK and AAB for tablets and TVs, each containing both ARM architectures.
 Packaging fails if either native library or the notices are missing. Both
 signing certificates are checked against the configured keystore before upload.
-For a direct APK crash, retrieve `android-direct-apk-r8-map` from the producing
-workflow run. For a store install, extract the map from the exact signed AAB.
+The signed AAB for each release retains both R8 mapping files. For a direct APK
+crash, extract `BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map`.
+For a store install, extract the bundle's own map from the same release.
 
 ```sh
 unzip -p Patina-0.1.7-android-tablet-tv.aab \
@@ -663,7 +664,8 @@ python3 tools/ci/update-index.py ../update-feed/targets/index.json update-releas
 ```
 
 A retry or an older record preserves newer package entries. A conflict for
-the same package and version aborts before replacing the file. The resulting
+the same package and version, or different commits for one release across
+platforms, aborts before replacing the file. The resulting
 target is ready for the repository’s signing event. Publish the signed target
 and versioned metadata before the timestamp.
 
