@@ -59,7 +59,7 @@ impl Session {
         })
     }
 
-    pub(super) fn commit(self) -> io::Result<()> {
+    pub(super) fn commit(&self) -> io::Result<()> {
         let mut files = BTreeMap::new();
         for &name in FILES {
             files.insert(name, fs::read_to_string(self.work.path().join(name))?);
