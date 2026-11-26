@@ -3,10 +3,14 @@ pub(crate) const RELEASES: &str = "https://github.com/teng-lin/patina-iptv/relea
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "linux")]
+mod linux;
 
 pub(crate) enum PackageAction {
     #[cfg(target_os = "android")]
     Install(iptv_runtime::app_updates::ReleaseAsset),
+    #[cfg(target_os = "linux")]
+    AppImage(iptv_runtime::app_updates::ReleaseAsset),
     #[cfg(windows)]
     Windows(iptv_runtime::app_updates::ReleaseAsset, &'static str),
     #[cfg(any(
@@ -21,6 +25,8 @@ pub(crate) enum PackageAction {
 impl PackageAction {
     pub(crate) fn label(&self) -> &'static str {
         match *self {
+            #[cfg(target_os = "linux")]
+            Self::AppImage(_) => crate::i18n::tr("Update AppImage"),
             #[cfg(windows)]
             Self::Windows(..) => crate::i18n::tr("Download and update"),
             #[cfg(target_os = "android")]
@@ -39,6 +45,8 @@ impl PackageAction {
         #[cfg(target_os = "android")]
         use crate::i18n::tr;
         match self {
+            #[cfg(target_os = "linux")]
+            Self::AppImage(asset) => linux::update(_ui, asset).await,
             #[cfg(windows)]
             Self::Windows(asset, publisher) => {
                 use crate::i18n::tr;
@@ -249,6 +257,13 @@ pub(crate) async fn check(
         } => {
             if cfg!(target_os = "linux") {
                 action = Some(PackageAction::Download(asset.url().to_owned()));
+            }
+            #[cfg(target_os = "linux")]
+            if cfg!(target_arch = "x86_64")
+                && option_env!("PATINA_APPIMAGE_HANDOFF") == Some("1")
+                && asset.url().ends_with(".AppImage")
+            {
+                action = Some(PackageAction::AppImage(asset));
             }
             #[cfg(windows)]
             if !preview

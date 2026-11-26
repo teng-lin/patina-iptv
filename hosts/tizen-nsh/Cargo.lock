@@ -2237,6 +2237,7 @@ dependencies = [
  "libc",
  "log",
  "pbkdf2",
+ "rustix",
  "serde_json",
  "sha2",
  "subtle",

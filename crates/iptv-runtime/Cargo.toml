@@ -45,6 +45,9 @@ url = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 futures-util = { version = "0.3", optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["fs"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

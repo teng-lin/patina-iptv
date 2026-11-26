@@ -734,6 +734,19 @@ About action to download the selected build and confirm installation. An
 active recording defers the handoff. Keep production activation gated on the
 signed install-over-previous exercises in the proposal.
 
+Set `PATINA_APPIMAGE_HANDOFF=1` for AppImage rehearsals with the staging
+feed. AppRun records its image path’s device and inode at startup. About can replace that
+file after confirmation or save the verified image to a new name on a writable
+filesystem. Patina keeps playing until the viewer restarts it. Each replacement
+preserves the old image beside the installation as
+`<file>.<previous-version>.previous`, adding its inode to the name if an earlier
+backup already occupies it. Keep that file until the new version
+opens the existing library, then remove the backup when it is no longer needed. Restoring the executable alone cannot reverse a
+database migration. A hard interruption can also leave a hidden
+`.patina-update-*` directory beside the chosen file. After restarting, inspect
+its contents before removing it. DEB, RPM and pacman users can download the corresponding
+package through About and apply it with their system package tool.
+
 For a signed Windows rehearsal, set `PATINA_WINDOWS_PUBLISHER` at compile
 time to the exact subject distinguished name of the approved Authenticode
 publisher. Obtain it independently from the signing administrator. About offers
