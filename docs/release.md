@@ -644,6 +644,14 @@ Rehearsals verify the actual branch ref and remain drafts; they do not prove a
 later tag or signing configuration. Post-publication verification downloads and
 checks the public bytes again. Never bypass a failure by replacing public files.
 
+After verification, the same job retains `update-release.json` in the Actions
+artifact `verified-update-record-<run attempt>`. This is the per-release input
+for [Android and desktop updates](plans/2026-11-25-cross-platform-updates.md).
+It identifies the available viewer packages, their immutable URLs, exact sizes
+and hashes, and each desktop preview’s signing status from the signing job.
+Treat it as input to the future authenticated feed publisher. Clients require
+signed update metadata before offering an installer.
+
 Unsigned candidate packages and their checked evidence are retained for 30 days
 in Actions. A promoted release publishes `candidate-manifest.json` with checksums
 and final-workflow provenance, retaining the unsigned input/check record after

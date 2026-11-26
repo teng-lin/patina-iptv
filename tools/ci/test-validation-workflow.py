@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """The tier workflows keep required checks, exact-SHA releases and native coverage."""
+import hashlib
 import importlib.util
 import os
 from pathlib import Path
@@ -435,6 +436,39 @@ class FuzzCommand(unittest.TestCase):
 
 
 class PublicArtifacts(unittest.TestCase):
+    def test_update_record_only_lists_available_viewer_packages_for_the_exact_version(self):
+        verifier = module("verify-public-release")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dist = root / "packages"
+            dist.mkdir()
+            for name in ("Patina-9.8.7-android-tablet-tv.apk", "Patina-9.8.7-android-tablet-tv.aab",
+                         "Patina-9.8.6-macos-arm64.dmg", "Patina-9.8.7-sbom.cdx.json"):
+                (dist / name).write_bytes(b"synthetic")
+            signing = root / "signing"
+            record = verifier.package_record(dist, "synthetic/repo", "v9.8.7", "a" * 40, signing)
+            self.assertEqual(len(record["packages"]), 1)
+            apk, = record["packages"]
+            self.assertEqual(apk["versionCode"], 10_008_007)
+            self.assertEqual(apk["architectures"], ["arm64-v8a", "armeabi-v7a"])
+            self.assertEqual(apk["url"], "https://github.com/synthetic/repo/releases/download/v9.8.7/Patina-9.8.7-android-tablet-tv.apk")
+            self.assertEqual(apk["length"], len(b"synthetic"))
+            self.assertEqual(apk["sha256"], hashlib.sha256(b"synthetic").hexdigest())
+            for suffix in ("windows-x86_64-setup.exe", "macos-arm64.dmg", "linux-x86_64.AppImage",
+                           "linux-x86_64.deb", "linux-x86_64.rpm", "linux-x86_64.pkg.tar.zst"):
+                (dist / f"Patina-9.8.7-{suffix}").write_bytes(b"synthetic desktop")
+            with self.assertRaisesRegex(SystemExit, "no signing record"):
+                verifier.package_record(dist, "synthetic/repo", "v9.8.7", "a" * 40, signing)
+            verifier.release.record_signing("windows", "unsigned", signing)
+            verifier.release.record_signing("macos", "signed", signing)
+            record = verifier.package_record(dist, "synthetic/repo", "v9.8.7", "a" * 40, signing)
+            by_kind = {p["format"]: p for p in record["packages"]}
+            self.assertEqual(set(by_kind), {"apk", "exe", "dmg", "appimage", "deb", "rpm", "pacman"})
+            self.assertEqual(by_kind["exe"]["signing"], "preview")
+            self.assertEqual(by_kind["dmg"]["signing"], "signed")
+            with self.assertRaisesRegex(ValueError, "no supported"):
+                verifier.package_record(dist, "synthetic/repo", "v9.8.8", "a" * 40, signing)
+
     def test_public_verification_rejects_modified_or_extra_assets_before_attestation(self):
         verifier = module("verify-public-release")
         with tempfile.TemporaryDirectory() as temporary:
