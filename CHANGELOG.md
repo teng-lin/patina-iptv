@@ -7,8 +7,13 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-26
+
 ### Changed
 
+- Manage playlists directly in **Settings → Playlists**. Show or hide each
+  playlist, open its actions, and choose manual or alphabetical order. The
+  guide's playlist headings also offer rename and reorder actions.
 - Returning to the guide when a channel or multiview session ends follows the
   selected guide layout. Opening Playlists or Organization from the player
   also uses the selected layout.
@@ -23,6 +28,12 @@ is below 1.0, a minor release may change behavior.
   remote and desktop keyboard bindings.
 - Archive programs' **Play from the beginning** action follows the same
   group external-player preference as choosing the program directly.
+- Restored the play bar, back arrow, and other control icons on Windows.
+- A locally served M3U playlist can play streams from the same loopback origin.
+- Screen readers announce the full names of Settings tabs even when the
+  visible labels are shortened.
+- On Samsung Tizen, canceling a new playlist import before it commits also
+  cancels its typed guide URL, so neither is added on its own.
 
 ## [0.1.9] - 2026-11-25
 
@@ -559,7 +570,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...v0.1.7
