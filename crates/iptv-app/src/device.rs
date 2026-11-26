@@ -133,7 +133,6 @@ pub(crate) fn reported_android_form() -> Option<FormFactor> {
     REPORTED.with(Cell::get)?.with(|report| report.form_factor)
 }
 
-#[cfg(target_os = "android")]
 pub(crate) fn direct_android_build() -> Option<(u64, u64)> {
     REPORTED
         .with(Cell::get)?

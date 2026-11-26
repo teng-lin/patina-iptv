@@ -3,33 +3,19 @@ use crate::i18n::tr;
 use nsh_base::alert_dialog;
 use nsh_core::prelude::open_url;
 
-pub(super) const RELEASES: &str = "https://github.com/teng-lin/patina-iptv/releases";
+pub(super) use crate::host::updates::RELEASES;
 
 pub(super) fn run(ui: crate::Ui) {
     crate::tasks::spawn_in_app(show(ui));
 }
 
 async fn show(ui: crate::Ui) {
-    #[cfg(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    ))]
-    let (message, url) = check().await;
-    #[cfg(not(any(
-        target_os = "android",
-        target_os = "linux",
-        target_os = "windows",
-        target_os = "macos"
-    )))]
-    let (message, url) = (String::new(), None::<String>);
-
+    let (message, url) = crate::host::updates::check(crate::device::direct_android_build()).await;
     if super::state(ui, |screen| screen.page().key) != Some("about") {
         return;
     }
     let mut dialog = alert_dialog()
-        .title(super::words::label("general.check_updates"))
+        .title(tr("Look for a new version"))
         .description(message)
         .close_on_escape(true)
         .cancel("close", tr("Close"));
@@ -50,57 +36,4 @@ async fn show(ui: crate::Ui) {
             .show()
             .await;
     }
-}
-
-#[cfg(any(
-    target_os = "android",
-    target_os = "linux",
-    target_os = "windows",
-    target_os = "macos"
-))]
-async fn check() -> (String, Option<String>) {
-    use iptv_runtime::app_updates::{InstalledPackage, UpdateResult};
-    let version = env!("CARGO_PKG_VERSION");
-    let Some(feed) = option_env!("PATINA_UPDATE_FEED") else {
-        return (
-            format!("Patina {version}\n{RELEASES}"),
-            Some(RELEASES.to_owned()),
-        );
-    };
-    super::notify(tr("Checking…"));
-    let owner = crate::runtime_owner::runtime();
-    let installed = InstalledPackage::native(version);
-    #[cfg(target_os = "android")]
-    let installed = {
-        let mut package = installed;
-        if let Some((code, api)) = crate::device::direct_android_build() {
-            package.format = Some("apk".into());
-            package.android_code = Some(code);
-            package.minimum = serde_json::json!({"androidApi": api});
-        }
-        package
-    };
-    let root = include_bytes!(concat!(env!("OUT_DIR"), "/update-root.json"));
-    let result = owner.check_app_update(feed, root, installed).await;
-    let (message, url) = match result {
-        UpdateResult::Current => (tr("Patina is up to date.").to_owned(), None),
-        UpdateResult::Unavailable => (tr("Update check failed. Try again.").to_owned(), None),
-        UpdateResult::NoCompatiblePackage => (
-            tr("No compatible package found.").to_owned(),
-            Some(RELEASES.to_owned()),
-        ),
-        UpdateResult::Available {
-            version,
-            notes,
-            preview,
-        } => {
-            let label = if preview {
-                tr("Preview")
-            } else {
-                tr("Update available")
-            };
-            (format!("{label} · Patina {version}"), Some(notes))
-        }
-    };
-    (format!("Patina {version}\n{message}"), url)
 }
