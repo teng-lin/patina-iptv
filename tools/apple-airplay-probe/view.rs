@@ -8,7 +8,7 @@ use serde_json::json;
 fn fixture_url(address: &str, channel: u8) -> Option<String> {
     let address: SocketAddrV4 = address.trim().parse().ok()?;
     let ip = address.ip();
-    if address.port() == 0 || !(ip.is_private() || ip.is_loopback() || ip.is_link_local()) {
+    if address.port() == 0 || !(ip.is_private() || ip.is_link_local()) {
         return None;
     }
     Some(format!("http://{address}/ch{channel}/index.m3u8"))
@@ -44,7 +44,7 @@ pub fn AirPlayProbe() -> impl IntoElement {
             });
         } else {
             source.set(None);
-            channel_name.set("Enter a private IPv4 address and a port");
+            channel_name.set("Enter a LAN IPv4 address and port");
         }
     };
     let send = move |action| {
@@ -118,12 +118,7 @@ mod tests {
 
     #[test]
     fn generated_channels_accept_only_local_ipv4_authorities() {
-        for address in [
-            "192.168.9.11:8089",
-            "10.0.0.1:1234",
-            "169.254.2.2:80",
-            "127.0.0.1:9000",
-        ] {
+        for address in ["192.168.9.11:8089", "10.0.0.1:1234", "169.254.2.2:80"] {
             assert_eq!(
                 fixture_url(address, 1),
                 Some(format!("http://{address}/ch1/index.m3u8"))
@@ -131,6 +126,7 @@ mod tests {
         }
         for address in [
             "",
+            "127.0.0.1:9000",
             "192.168.9.11:0",
             "198.51.100.10:8089",
             "fixture.invalid:8089",

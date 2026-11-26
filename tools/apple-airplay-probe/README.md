@@ -24,8 +24,8 @@ For a physical iPad, build with `tools/apple-airplay-probe/package.sh ios`. Sign
 ## Exercise a receiver
 
 1. On a reachable LAN fixture server, run `bash tools/make-hls-fixtures.sh`, then `python3 tools/mock-server.py --loop 8089`. The server continuously serves the generated test pattern and color bars.
-2. On the sender, enter the server's private IPv4 address and port, then select **Channel A**. Both sender and receiver must be able to reach the server. A loopback address works for sender-only checks.
-3. Use the system picker to select an available video receiver. Press **Play**. On macOS the player can need an item before a video route becomes available. If needed, press **Play** before opening the picker. Check for moving video and sound at the receiver and `external playback on` on the sender.
+2. On the sender, enter the server's private IPv4 address and port, then select **Channel A**. Both sender and receiver must be able to reach the server.
+3. Use the system picker to select an available video receiver. Press **Play**. On macOS the player can need an item before a video route becomes available. If needed, press **Play** before opening the picker. Check for moving video and sound at the receiver and `external playback on` on the sender. If the route stays selected and the status stays at `waiting`, record that the route has yet to start video playback. The probe continues waiting for external playback.
 4. Select **Channel B**, confirm the image and tone change at the receiver, then exercise **Pause**, **Play** and **Stop**. Start again and disconnect the receiver during playback. Check that the sender shows the route loss and stays silent.
 5. For an iPad sender, background it and lock the screen during playback. Record whether the receiver continues playing, the audio stays at the receiver, and controls work after returning to the probe. For a Mac sender, test a separate video-capable receiver.
 
