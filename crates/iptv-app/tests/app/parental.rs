@@ -69,7 +69,7 @@ fn aggregate_playlist_reorder_requires_the_settings_pin() {
     std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
     let playlist = home.path().join("synthetic.m3u");
     std::fs::write(&playlist, personalization::M3U).unwrap();
-    let mut store = crate::isolated::open_database(&dir.join("iptv.sqlite")).unwrap();
+    let mut store = crate::isolated::open_database(dir.join("iptv.sqlite")).unwrap();
     let parsed = iptv_providers::m3u::parse_m3u(personalization::M3U);
     for name in ["First playlist", "Second playlist"] {
         let source = store
