@@ -153,6 +153,9 @@ def plan(root=ROOT, release=False, tier="full", host="linux", test_threads=None,
                  "--features", COVERAGE_FEATURES),
             step("native-player-tests", "cargo", "test", "--locked", "--timings", "-p", "iptv-player-mpv", "--lib",
                  "--", "--format=pretty"),
+            *([step("windows-updater-tests", "cargo", "test", "--locked", "--timings",
+                    "-p", "iptv-runtime", "--lib", "app_updates::windows::tests", "--", "--format=pretty")]
+              if host == "windows" else []),
             *app_build_steps,
         ]
     memory = [argument for module in ("catalog_stream_memory::", "epg_memory::", "epg_stream_memory::")

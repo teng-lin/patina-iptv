@@ -43,6 +43,11 @@ impl PackageAction {
             Self::Windows(asset, publisher) => {
                 use crate::i18n::tr;
                 let owner = crate::runtime_owner::runtime();
+                if owner.recording_background_needed() {
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
                 crate::settings_view::notify(tr("Downloading…"));
                 let Some(stage) = owner
                     .download_update(asset.clone(), std::env::temp_dir())
@@ -50,6 +55,7 @@ impl PackageAction {
                 else {
                     return crate::settings_view::notify(tr("Update download failed. Try again."));
                 };
+                crate::settings_view::notify(tr("Verifying installer…"));
                 let Some(setup) = owner.prepare_windows_setup(stage, asset, publisher).await else {
                     return crate::settings_view::notify(tr(
                         "The installer could not be verified or opened.",
@@ -60,9 +66,9 @@ impl PackageAction {
                 }
                 let confirmed = nsh_base::alert_dialog()
                     .title(tr("Install update?"))
-                    .description(tr("Patina will close once the installer opens."))
+                    .description(tr("Patina will close before the installer opens."))
                     .action("install", tr("Install update"))
-                    .cancel("close", tr("Close"))
+                    .cancel("close", tr("Cancel"))
                     .close_on_escape(true)
                     .show()
                     .await;
@@ -74,12 +80,21 @@ impl PackageAction {
                         "Finish recording before installing the update.",
                     ));
                 }
-                if owner.launch_windows_setup(setup).await {
-                    // A new capture may have started during the publisher check.
-                    if !owner.recording_background_needed() {
-                        crate::desktop::quit(_ui);
-                    }
+                if !owner.shutdown_recording_host() {
+                    return crate::settings_view::notify(tr(
+                        "The recording host is still closing; try quitting again",
+                    ));
+                }
+                if owner.recording_background_needed() {
+                    owner.start_recordings();
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
+                if setup.install_after_exit() {
+                    crate::desktop::close_after_shutdown(_ui);
                 } else {
+                    owner.start_recordings();
                     crate::settings_view::notify(tr(
                         "The installer could not be verified or opened.",
                     ));
@@ -190,8 +205,8 @@ pub(crate) async fn check(
             }
             #[cfg(windows)]
             if !preview
-                && let Some(publisher) = option_env!("PATINA_WINDOWS_PUBLISHER")
-                && !publisher.trim().is_empty()
+                && let Some(publisher) = option_env!("PATINA_WINDOWS_PUBLISHER").map(str::trim)
+                && !publisher.is_empty()
             {
                 action = Some(PackageAction::Windows(asset, publisher));
             }
