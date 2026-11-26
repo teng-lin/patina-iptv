@@ -10,6 +10,7 @@ use iptv_core::import_limits::{DecodeBuffer, ImportLimits, LimitExceeded, LimitK
 use std::{borrow::Cow, collections::HashSet, io::Write};
 
 use flate2::write::MultiGzDecoder;
+use iptv_providers::content_url::LoopbackOrigin;
 use iptv_providers::m3u::{M3uParser, M3uPlaylist};
 use iptv_providers::model::{Channel, ContentKind, M3uSourceConfig, StreamLocator};
 use iptv_providers::{GroupId, HttpRequest};
@@ -210,6 +211,7 @@ fn into_catalog(
     sniff: &[u8],
     stats: crate::catalog::ImportStats,
     allow_private_fixture: bool,
+    loopback: Option<&LoopbackOrigin>,
     emitted: u64,
     unusable_streams: usize,
 ) -> Result<Catalog, ImportError> {
@@ -257,13 +259,7 @@ fn into_catalog(
             })?;
         }
         for channel in &playlist.channels.items {
-            if let StreamLocator::Url { url, .. } = &channel.stream {
-                iptv_providers::content_url::validate(url).map_err(|_| {
-                    ImportError::InvalidConfig(
-                        "playlist stream URL must name a public HTTP(S) host".into(),
-                    )
-                })?;
-            }
+            validate_channel_stream(&channel.stream, loopback)?;
         }
     }
     let mut catalog = Catalog::new(SourceMeta::M3u {
@@ -282,6 +278,18 @@ fn into_catalog(
     catalog.groups = playlist.groups;
     catalog.channels = catalog.absorb(Step::Playlist, None, playlist.channels);
     Ok(catalog)
+}
+
+fn validate_channel_stream(
+    stream: &StreamLocator,
+    loopback: Option<&LoopbackOrigin>,
+) -> Result<(), ImportError> {
+    if let StreamLocator::Url { url, .. } = stream
+        && loopback.is_some_and(|origin| origin.contains(url))
+    {
+        return Ok(());
+    }
+    crate::validate_stream(stream)
 }
 
 /// Imports an M3U playlist from its URL (or a `file://`/absolute path the
@@ -325,21 +333,29 @@ pub(crate) async fn import_m3u<F: Fetch, P: ProgressSink>(
     let allow_private_fixture = false;
     #[cfg(debug_assertions)]
     let allow_private_fixture = ctx.allow_private_fixture;
+    let picked_loopback = LoopbackOrigin::picked_playlist(location);
+    let mut loopback = None;
     let mut emitted = 0;
-    ctx.stream(Step::Playlist, Phase::Playlist, req, |chunk| {
-        let count = feeder.push(chunk)?;
-        if let Some(s) = &mut sink {
-            for channel in std::mem::take(&mut feeder.taken) {
-                if !allow_private_fixture {
-                    crate::validate_stream(&channel.stream)?;
+    ctx.stream(
+        Step::Playlist,
+        Phase::Playlist,
+        req,
+        |chunk, same_request_origin| {
+            loopback = picked_loopback.as_ref().filter(|_| same_request_origin);
+            let count = feeder.push(chunk)?;
+            if let Some(s) = &mut sink {
+                for channel in std::mem::take(&mut feeder.taken) {
+                    if !allow_private_fixture {
+                        validate_channel_stream(&channel.stream, loopback)?;
+                    }
+                    s.push(crate::CatalogRow::Channel(channel))
+                        .map_err(|e| ImportError::Storage(e.to_string()))?;
+                    emitted += 1;
                 }
-                s.push(crate::CatalogRow::Channel(channel))
-                    .map_err(|e| ImportError::Storage(e.to_string()))?;
-                emitted += 1;
             }
-        }
-        Ok(count)
-    })
+            Ok(count)
+        },
+    )
     .await?;
     let (playlist, sniff, unusable_streams) = feeder.finish()?;
     let mut catalog = into_catalog(
@@ -347,6 +363,7 @@ pub(crate) async fn import_m3u<F: Fetch, P: ProgressSink>(
         &sniff,
         ctx.stats.clone(),
         allow_private_fixture,
+        loopback,
         emitted,
         unusable_streams,
     )?;
@@ -395,7 +412,7 @@ pub fn import_m3u_text(
         bytes: bytes.len() as u64,
         ..Default::default()
     };
-    let catalog = into_catalog(playlist, &sniff, stats, false, 0, unusable_streams)?;
+    let catalog = into_catalog(playlist, &sniff, stats, false, None, 0, unusable_streams)?;
     report_done(progress, catalog.channels.len());
     Ok(catalog)
 }

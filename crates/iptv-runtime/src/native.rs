@@ -1,6 +1,13 @@
 //! The native implementations of the runtime's ports, and the services only
 //! native hosts have. Everything here is behind the default `native`
 //! feature: a browser build supplies its ports from the host instead.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos",
+    target_os = "windows"
+))]
+pub mod app_updates;
 pub(crate) mod execution;
 pub(crate) mod network;
 

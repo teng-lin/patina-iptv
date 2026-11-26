@@ -16,8 +16,9 @@
 //!   playlist (AC11).
 //! - Back from the source picker returns to the form's source control.
 //!   Back from the form returns to welcome or closes the settings wizard.
-//! - Submitting while an import runs does nothing; results for a canceled
-//!   or superseded import are ignored by [`ImportId`].
+//! - Submitting while an import runs does nothing. Canceling a draft with
+//!   a required guide waits for that import's result before another submit.
+//!   Progress and results are matched by import ID. Stale IDs are ignored.
 //!
 //! Secrets: usernames, passwords and MAC addresses print as `***` in
 //! `Debug`; URLs print only `scheme://host[:port]` because playlist URLs
@@ -256,6 +257,10 @@ pub enum Step {
     Processing {
         id: ImportId,
         progress: Option<ImportProgress>,
+    },
+    /// A required-guide import is settling a cancellation at publication.
+    Canceling {
+        id: ImportId,
     },
     Succeeded {
         id: ImportId,
@@ -519,7 +524,7 @@ impl Wizard {
             Step::Form => Some(self.form_focus),
             Step::Succeeded { .. } => Some(Target::Done),
             Step::Failed { .. } => Some(Target::ChooseAnotherType),
-            Step::Processing { .. } | Step::Closed => None,
+            Step::Processing { .. } | Step::Canceling { .. } | Step::Closed => None,
         }
     }
 
@@ -530,6 +535,12 @@ impl Wizard {
             Step::ChooseType { focus } => self.on_choose_type(focus, event),
             Step::Form => self.on_form(event),
             Step::Processing { id, .. } => self.on_processing(id, event),
+            Step::Canceling { id } => match event {
+                WizardEvent::Succeeded { .. } | WizardEvent::Failed { .. } => {
+                    self.on_processing(id, event)
+                }
+                _ => None,
+            },
             Step::Succeeded { id, .. } => match event {
                 WizardEvent::Ok | WizardEvent::Back | WizardEvent::Tap(Target::Done) => {
                     self.step = Step::Closed;
@@ -827,7 +838,13 @@ impl Wizard {
     fn on_processing(&mut self, running: ImportId, event: WizardEvent) -> Option<WizardEffect> {
         match event {
             WizardEvent::Cancel | WizardEvent::Back | WizardEvent::Tap(Target::CancelImport) => {
-                self.fail(ImportFailure::new(FailureKind::Canceled));
+                if self.value(Field::EpgUrl).trim().is_empty() {
+                    self.fail(ImportFailure::new(FailureKind::Canceled));
+                } else {
+                    // The required guide can have swapped in just before
+                    // Cancel. Wait for that import's answer before retry.
+                    self.step = Step::Canceling { id: running };
+                }
                 Some(WizardEffect::CancelImport { id: running })
             }
             WizardEvent::Progress { id, progress } if id == running => {
@@ -1660,6 +1677,41 @@ mod tests {
                 },
             });
             assert_eq!(w.step(), Step::Form, "{cancel:?}");
+        }
+    }
+
+    #[test]
+    fn cancel_with_a_typed_guide_waits_for_the_matching_commit_result() {
+        let counts = ImportCounts {
+            channels: 3,
+            ..Default::default()
+        };
+        for committed in [false, true] {
+            let mut w = filled(PlaylistKind::M3uUrl);
+            set(&mut w, Field::EpgUrl, "https://example.test/guide.xml");
+            let (id, _) = submit(&mut w).unwrap();
+            assert_eq!(w.handle(E::Cancel), Some(WizardEffect::CancelImport { id }));
+            assert_eq!(w.step(), Step::Canceling { id });
+            assert_eq!(w.handle(E::Tap(Target::Submit)), None, "cannot add twice");
+            assert_eq!(w.handle(E::Back), None, "one cancellation request");
+            w.handle(E::Succeeded {
+                id: ImportId(id.0.wrapping_add(1)),
+                counts,
+            });
+            assert_eq!(w.step(), Step::Canceling { id });
+
+            if committed {
+                w.handle(E::Succeeded { id, counts });
+                assert_eq!(w.step(), Step::Succeeded { id, counts });
+            } else {
+                w.handle(E::Failed {
+                    id,
+                    failure: ImportFailure::new(Canceled),
+                });
+                assert_eq!(w.step(), Step::Form);
+                assert_eq!(w.focus(), Some(Target::Submit));
+                assert_eq!(w.value(Field::EpgUrl), "https://example.test/guide.xml");
+            }
         }
     }
 

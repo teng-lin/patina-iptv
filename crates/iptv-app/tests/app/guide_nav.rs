@@ -150,21 +150,21 @@ fn the_timeline_pans_by_touch_and_left_reaches_retained_listings() {
     }
     step(app.wait_for("text:Show -31"));
     assert!(focused(&app, "Show -31"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(&mut app);
     step(app.wait_for("text:Play from the beginning"));
-    step(app.back());
+    step(app.press_key("m"));
 
     step(app.press_key("left"));
     step(app.wait_for("text:Show -32"));
     assert!(focused(&app, "Show -32"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(&mut app);
     step(app.wait_for("text:Details"));
     assert!(
         !app.screen()
             .matches("id:menu-panel >> text:Play from the beginning")
             .unwrap()
     );
-    step(app.back());
+    step(app.press_key("m"));
     step(app.press_key("enter"));
     step(app.wait_for("id:description-layer >> text:Generated details for Show -32"));
     assert_eq!(iptv_app::player_opens(0), 0);
@@ -291,9 +291,10 @@ fn correcting_the_guide_clock_cancels_an_archive_open_in_progress() {
     assert_eq!(iptv_app::player_opens(0), before);
 
     step(app.press_key("g"));
-    step(app.open_guide_groups());
-    step(app.long_press("id:guide-groups >> text:News"));
-    step(app.press("id:menu-panel >> text:Guide time offset"));
+    crate::personalization::group(&mut app, "News");
+    crate::personalization::menu(&mut app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    step(app.press("id:menu-panel >> text:Guide time offset: 0:00"));
     step(app.press_key("right"));
     step(app.press_key("right"));
     step(app.wait_for("id:menu-panel >> text:Guide time offset · +0:30"));

@@ -88,6 +88,7 @@ impl Fetch for Feeds {
     ) -> impl Future<Output = Result<StreamingResponse<Body>, FetchError>> {
         let response = |status, body| StreamingResponse {
             status,
+            same_request_origin: false,
             content_length: None,
             body,
         };

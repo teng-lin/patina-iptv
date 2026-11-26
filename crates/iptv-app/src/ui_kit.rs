@@ -56,9 +56,19 @@ pub fn round_more(
     label: impl Fn() -> String + 'static,
     on_press: impl Fn() + 'static,
 ) -> View {
-    let dots = icons::src(icons::Icon::More);
+    round_button(side, bg, icons::Icon::More, label, on_press)
+}
+
+/// A round icon button with a tap target of at least [`TOUCH`].
+pub(crate) fn round_button(
+    side: impl Fn() -> f32 + Copy + 'static,
+    bg: impl Fn() -> Rgba + 'static,
+    icon: icons::Icon,
+    label: impl Fn() -> String + 'static,
+    on_press: impl Fn() + 'static,
+) -> View {
     let slop = move || ((TOUCH - side()) / 2.0).max(0.0);
-    round_icon(side, slop, bg, dots, label, on_press)
+    round_icon(side, slop, bg, icons::src(icon), label, on_press)
 }
 
 fn round_icon(
@@ -102,6 +112,37 @@ pub use crate::theme::{ERROR, ERROR_FOCUSED};
 /// A screen's margins (dp at full size).
 pub const MARGIN_X: f32 = 48.0;
 pub const MARGIN_Y: f32 = 24.0;
+
+/// The checkbox used by playlist visibility rows.
+pub(crate) fn playlist_checkbox(
+    ui: Ui,
+    size: Scale,
+    shown: impl Fn() -> bool + Copy + 'static,
+    checked: impl Fn() -> bool + Copy + 'static,
+    mark: impl Fn() -> Mark + Copy + 'static,
+) -> View {
+    let side = move || size.px(if shown() { 22.0 } else { 0.0 });
+    view()
+        .w(side)
+        .h(side)
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .border(move || px(if shown() { 2.0 } else { 0.0 }))
+        .border_color(move || mark().text())
+        .bg(move || {
+            if checked() {
+                rgb(ui.app.theme.with(|t| t.accent.main))
+            } else {
+                tint(WHITE, 0)
+            }
+        })
+        .child(
+            list_rows::second(size, move || if checked() { "✓" } else { "" }, SANS)
+                .text_color(rgb(WHITE)),
+        )
+}
 
 const WHITE: u32 = 0xFFFFFF;
 /// A button's fill at rest.

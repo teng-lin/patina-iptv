@@ -63,6 +63,7 @@ type Handler = Box<dyn Fn(&HttpRequest, &SimRequest) -> Reply>;
 pub struct FakeFetch {
     handler: Handler,
     pub chunk: usize,
+    pub same_request_origin: bool,
     pub log: RefCell<Vec<HttpRequest>>,
     pub clock: Cell<Duration>,
     /// Every wait the importer asked for, in order.
@@ -76,6 +77,7 @@ impl FakeFetch {
         Self {
             handler: Box::new(handler),
             chunk: 7 * 1024 + 3,
+            same_request_origin: true,
             log: RefCell::new(Vec::new()),
             clock: Cell::new(Duration::ZERO),
             slept: RefCell::new(Vec::new()),
@@ -163,12 +165,14 @@ impl Fetch for FakeFetch {
             Reply::Http(r) | Reply::Slow(_, r) => {
                 Box::pin(std::future::ready(Ok(StreamingResponse {
                     status: r.status,
+                    same_request_origin: self.same_request_origin,
                     content_length: Some(r.body.len() as u64),
                     body: MemoryBody::new(&r.body, chunk),
                 })))
             }
             Reply::Truncated(r) => Box::pin(std::future::ready(Ok(StreamingResponse {
                 status: r.status,
+                same_request_origin: self.same_request_origin,
                 content_length: None,
                 body: MemoryBody::new(&r.body, chunk)
                     .failing_at_end(FetchError::new(FetchErrorKind::Body, "connection reset")),

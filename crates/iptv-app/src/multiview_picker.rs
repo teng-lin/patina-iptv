@@ -369,23 +369,6 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         ))
 }
 
-fn group_name(ui: Ui, entry: usize) -> String {
-    let catalog = catalog(ui);
-    let name = entry_name(entry, &*catalog);
-    match Entry::at(entry) {
-        Entry::Group(g) if catalog.group_is_playlist(g) => {
-            let arrow = if catalog.group_is_collapsed(g) {
-                "▸"
-            } else {
-                "▾"
-            };
-            format!("{arrow}  {name}")
-        }
-        Entry::Group(g) if catalog.group_depth(g) > 0 => format!("    {name}"),
-        _ => name,
-    }
-}
-
 fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl IntoElement {
     let mark = move || {
         Mark::of(
@@ -393,18 +376,43 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
             entry.get() == at.index(),
         )
     };
+    let name = move || {
+        ui.app.data_version.get();
+        crate::lists::browser_entry_name(at.index(), &*catalog(ui))
+    };
+    let expanded = move || {
+        ui.app.data_version.get();
+        crate::lists::playlist_expanded(at.index(), &*catalog(ui))
+    };
     list_rows::row(size, ROW, mark)
+        .flex_row()
+        .items_center()
+        .gap(move || size.px(8.0))
+        .role(AccessibilityRole::Tab)
+        .label(move || name().trim_start().to_owned())
+        .accessibility_state(move || AccessibilityState {
+            selected: entry.get() == at.index(),
+            expanded: expanded(),
+            ..Default::default()
+        })
         .on_press(move || {
             ui.touched();
             group(ui, at.index(), true);
         })
         .child(
-            list_rows::name(size, move || {
-                ui.app.data_version.get();
-                group_name(ui, at.index())
-            })
-            .text_color(move || mark().text()),
+            list_rows::name(size, name)
+                .flex_1()
+                .text_color(move || mark().text()),
         )
+        .child(when(
+            move || expanded().is_some(),
+            move || {
+                list_rows::triangle(size, move || crate::lists::playlist_arrow(expanded()))
+                    .test_id("playlist-disclosure")
+                    .flex_shrink_0()
+                    .text_color(move || mark().text())
+            },
+        ))
 }
 
 fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> impl IntoElement {

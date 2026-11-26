@@ -4,6 +4,11 @@
 //! (rename, User-Agent, a detail). Focus is kept by identity (a
 //! playlist's id), never by list position. Pure: the view feeds it remote
 //! keys and taps and carries out the [`Effect`]s it returns.
+//!
+//! Opened for one task from elsewhere (a playlist's actions from the
+//! settings, or a shortcut from the groups column's menu:
+//! [`Only`]), the screen is [`Screen::finished`] once that task ends,
+//! instead of falling back to its list.
 
 use iptv_library::SourceId;
 use iptv_providers::model::{Source, SourceKind};
@@ -25,7 +30,13 @@ pub enum Item {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Act {
     Show,
-    Enabled,
+    /// Browse every enabled playlist together (with two or more).
+    AllPlaylists,
+    Hide,
+    Reorder,
+    PlaylistOrder,
+    ReorderGroups,
+    GroupOrder,
     RefreshInterval,
     RefreshOnStart,
     /// Its movie and series import, on or off (not offered for M3U, which
@@ -47,6 +58,30 @@ pub enum Act {
     Delete,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyEdit {
+    Hide,
+    ToggleOnStart,
+    NextInterval,
+}
+
+impl PolicyEdit {
+    pub fn apply(self, policy: &mut iptv_library::SourcePolicy) {
+        match self {
+            Self::Hide => policy.enabled = false,
+            Self::ToggleOnStart => policy.refresh_on_start = !policy.refresh_on_start,
+            Self::NextInterval => {
+                let intervals = [0, 3600, 21600, 43200, 86400];
+                let index = intervals
+                    .iter()
+                    .position(|&n| n == policy.refresh_seconds)
+                    .unwrap_or(0);
+                policy.refresh_seconds = intervals[(index + 1) % intervals.len()];
+            }
+        }
+    }
+}
+
 /// The streams-at-once values the action steps through after Automatic
 /// (`None`); `playlists.max_connections` allows 1 to 20.
 pub const STREAMS: [u32; 10] = [1, 2, 3, 4, 5, 6, 8, 10, 15, 20];
@@ -58,6 +93,21 @@ pub fn next_streams(current: Option<u32>) -> Option<u32> {
         None => Some(STREAMS[0]),
         Some(n) => STREAMS.into_iter().find(|step| *step > n),
     }
+}
+
+/// The one task the screen was opened for, if not its list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Only {
+    /// One playlist's actions (the settings' playlist rows).
+    Actions { manual_order: bool },
+    /// The context menu on a playlist heading in the guide.
+    GuideActions,
+    /// Full source management after choosing a playlist in Settings.
+    Management,
+    /// Renaming one playlist.
+    Rename,
+    /// Confirming deletion of one playlist from its guide heading.
+    Delete,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +158,8 @@ pub enum Notice {
 pub enum Key {
     Up,
     Down,
+    Left,
+    Right,
     Ok,
     Back,
     Menu,
@@ -116,10 +168,14 @@ pub enum Key {
 /// What the screen asks the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
+    Reorder(SourceId),
+    PlaylistOrder(SourceId),
+    ReorderGroups(SourceId),
+    GroupOrder(SourceId),
     /// Open the add-playlist wizard.
     Add,
     Show(SourceId),
-    Policy(SourceId, iptv_library::SourcePolicy),
+    Policy(SourceId, PolicyEdit),
     /// Switch the movie and series import of `id` (its own setting).
     ToggleOnDemand(SourceId),
     Organize(SourceId, bool),
@@ -150,6 +206,13 @@ pub fn plain_link(link: &str) -> bool {
     !authority.contains('@') && !link.contains('?')
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Origin {
+    Library,
+    SettingsPicker,
+    Task(Only),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Screen {
     rows: Vec<Playlist>,
@@ -158,6 +221,7 @@ pub struct Screen {
     editing: Option<Editing>,
     notice: Option<Notice>,
     details: Option<Form>,
+    origin: Origin,
 }
 
 impl Screen {
@@ -174,7 +238,60 @@ impl Screen {
             editing: None,
             notice: None,
             details: None,
+            origin: Origin::Library,
         }
+    }
+
+    /// Settings chooses a source for management and returns there when editing ends.
+    pub fn settings_picker(rows: Vec<Playlist>) -> Self {
+        Self {
+            origin: Origin::SettingsPicker,
+            ..Self::new(rows, None)
+        }
+    }
+
+    /// The screen opened for one task ([`Only`]), focused on `id`.
+    /// Returns `None` when the task is unavailable for the current rows.
+    pub fn only(rows: Vec<Playlist>, id: SourceId, only: Only) -> Option<Self> {
+        let mut screen = Self::new(rows, Some(id));
+        screen.origin = Origin::Task(only);
+        let opened = match only {
+            Only::Actions { .. } | Only::GuideActions => screen.open_actions(id, Act::Rename),
+            Only::Management => screen.open_actions(id, Act::Show),
+            Only::Rename => {
+                let opened = screen.open_actions(id, Act::Rename);
+                if opened {
+                    screen.act(id, Act::Rename);
+                }
+                opened
+            }
+            Only::Delete => {
+                screen.row(id)?;
+                screen.act(id, Act::Delete);
+                true
+            }
+        };
+        opened.then_some(screen)
+    }
+
+    /// What the screen was opened for, if not its list.
+    pub fn opened_for(&self) -> Option<Only> {
+        match self.origin {
+            Origin::Task(only) => Some(only),
+            _ => None,
+        }
+    }
+
+    /// Opened for one task ([`Screen::only`]) and that task is over: the
+    /// app closes the screen.
+    pub fn finished(&self) -> bool {
+        let Some(only) = self.opened_for() else {
+            return self.origin == Origin::SettingsPicker && self.rows.is_empty();
+        };
+        if self.editing.is_some() || self.notice.is_some() {
+            return false;
+        }
+        self.layer == Layer::List || (only == Only::Rename && self.details.is_none())
     }
 
     /// Opens the actions of `id` with `act` focused (from another screen,
@@ -228,6 +345,9 @@ impl Screen {
     /// more), then "Add playlist".
     pub fn items(&self) -> Vec<Item> {
         let mut items: Vec<Item> = self.rows.iter().map(|r| Item::Playlist(r.id)).collect();
+        if self.origin == Origin::SettingsPicker {
+            return items;
+        }
         if !self.rows.is_empty() {
             items.push(Item::AllPlaylists);
         }
@@ -243,17 +363,45 @@ impl Screen {
         let Some(row) = self.row(id) else {
             return Vec::new();
         };
+        if self.opened_for() == Some(Only::GuideActions) {
+            let mut acts = vec![Act::Rename, Act::Delete];
+            if row.policy.enabled {
+                acts.push(Act::Hide);
+            }
+            acts.extend([
+                Act::Refresh,
+                Act::RefreshInterval,
+                Act::RefreshOnStart,
+                Act::Reorder,
+                Act::PlaylistOrder,
+                Act::ReorderGroups,
+                Act::GroupOrder,
+            ]);
+            return acts;
+        }
+        if let Some(Only::Actions { manual_order }) = self.opened_for() {
+            let mut acts = vec![Act::Rename, Act::Delete, Act::Refresh];
+            if row.policy.enabled {
+                acts.push(Act::Hide);
+            }
+            acts.extend([Act::RefreshInterval, Act::RefreshOnStart]);
+            if manual_order && self.rows.len() > 1 {
+                acts.push(Act::Reorder);
+            }
+            return acts;
+        }
         let mut acts = Vec::new();
         if row.policy.enabled {
             acts.push(Act::Show);
+            if self.rows.iter().filter(|r| r.policy.enabled).count() > 1 {
+                acts.push(Act::AllPlaylists);
+            }
         }
-        acts.extend([
-            Act::Refresh,
-            Act::Rename,
-            Act::Enabled,
-            Act::RefreshInterval,
-            Act::RefreshOnStart,
-        ]);
+        acts.extend([Act::Refresh, Act::Rename]);
+        if row.policy.enabled {
+            acts.push(Act::Hide);
+        }
+        acts.extend([Act::RefreshInterval, Act::RefreshOnStart]);
         if row.kind != SourceKind::M3u {
             acts.push(Act::OnDemand);
         }
@@ -298,7 +446,7 @@ impl Screen {
             Layer::Actions { id, focus } if !self.acts(id).contains(&focus) => {
                 self.layer = Layer::Actions {
                     id,
-                    focus: self.acts(id).first().copied().unwrap_or(Act::Enabled),
+                    focus: self.acts(id).first().copied().unwrap_or(Act::Rename),
                 };
             }
             _ => {}
@@ -325,6 +473,7 @@ impl Screen {
                 }
                 Key::Ok => self.confirm(id, delete),
                 Key::Back | Key::Menu => self.confirm(id, false),
+                Key::Left | Key::Right => None,
             },
             Layer::Details { id } => self.details_key(id, key),
         }
@@ -332,6 +481,9 @@ impl Screen {
 
     fn list_key(&mut self, key: Key) -> Option<Effect> {
         let items = self.items();
+        if items.is_empty() {
+            return Some(Effect::Close);
+        }
         let at = items.iter().position(|i| *i == self.focus).unwrap_or(0);
         match (key, self.focus) {
             (Key::Up, _) => self.focus = items[at.saturating_sub(1)],
@@ -340,13 +492,16 @@ impl Screen {
             (Key::Ok, Item::RefreshAll) => return Some(Effect::RefreshAll),
             (Key::Ok, Item::AllPlaylists) => return Some(Effect::AllPlaylists),
             (Key::Ok | Key::Menu, Item::Playlist(id)) => {
+                if self.origin == Origin::SettingsPicker {
+                    self.origin = Origin::Task(Only::Management);
+                }
                 self.layer = Layer::Actions {
                     id,
-                    focus: self.acts(id).first().copied().unwrap_or(Act::Enabled),
+                    focus: self.acts(id).first().copied().unwrap_or(Act::Rename),
                 };
             }
             (Key::Back, _) => return Some(Effect::Close),
-            (Key::Menu, _) => {}
+            (Key::Menu | Key::Left | Key::Right, _) => {}
         }
         None
     }
@@ -362,6 +517,7 @@ impl Screen {
                 self.layer = Layer::List;
                 return None;
             }
+            Key::Left | Key::Right => return None,
         };
         self.layer = Layer::Actions { id, focus: to };
         None
@@ -370,6 +526,9 @@ impl Screen {
     /// OK (or a tap) on `act` of playlist `id`.
     pub fn act(&mut self, id: SourceId, act: Act) -> Option<Effect> {
         let row = self.row(id)?.clone();
+        if !self.acts(id).contains(&act) {
+            return None;
+        }
         self.notice = None;
         self.layer = Layer::Actions { id, focus: act };
         let to_list = |s: &mut Self, effect| {
@@ -378,27 +537,24 @@ impl Screen {
             Some(effect)
         };
         match act {
-            Act::Enabled | Act::RefreshInterval | Act::RefreshOnStart => {
-                let mut policy = row.policy;
-                match act {
-                    Act::Enabled => policy.enabled = !policy.enabled,
-                    Act::RefreshOnStart => policy.refresh_on_start = !policy.refresh_on_start,
-                    _ => {
-                        let values = [0, 3600, 21600, 43200, 86400];
-                        let at = values
-                            .iter()
-                            .position(|v| *v == policy.refresh_seconds)
-                            .unwrap_or(0);
-                        policy.refresh_seconds = values[(at + 1) % values.len()];
-                    }
-                }
-                Some(Effect::Policy(id, policy))
+            Act::Hide | Act::RefreshInterval | Act::RefreshOnStart => {
+                let edit = match act {
+                    Act::Hide => PolicyEdit::Hide,
+                    Act::RefreshOnStart => PolicyEdit::ToggleOnStart,
+                    _ => PolicyEdit::NextInterval,
+                };
+                Some(Effect::Policy(id, edit))
             }
             Act::OnDemand => Some(Effect::ToggleOnDemand(id)),
             Act::Streams => Some(Effect::CycleStreams(id)),
             Act::CustomGroups => Some(Effect::CustomGroups(id)),
             Act::Channels | Act::Groups => Some(Effect::Organize(id, act == Act::Groups)),
+            Act::Reorder => to_list(self, Effect::Reorder(id)),
+            Act::PlaylistOrder => to_list(self, Effect::PlaylistOrder(id)),
+            Act::ReorderGroups => to_list(self, Effect::ReorderGroups(id)),
+            Act::GroupOrder => to_list(self, Effect::GroupOrder(id)),
             Act::Show => to_list(self, Effect::Show(id)),
+            Act::AllPlaylists => to_list(self, Effect::AllPlaylists),
             Act::Refresh => to_list(self, Effect::Refresh(id)),
             // The guide sources screen opens over the actions.
             Act::Guides => Some(Effect::Guides(id)),
@@ -456,6 +612,7 @@ impl Screen {
                 };
                 None
             }
+            Key::Left | Key::Right => None,
         }
     }
 
@@ -506,18 +663,27 @@ impl Screen {
         }
     }
 
-    /// The confirmation's answer: delete, or back to the actions.
+    /// Resolves the current confirmation for `id`.
     pub fn confirm(&mut self, id: SourceId, delete: bool) -> Option<Effect> {
-        if delete {
+        if !matches!(self.layer, Layer::Confirm { id: current, .. } if current == id) {
+            return None;
+        }
+        if self.opened_for() == Some(Only::Delete)
+            || (delete
+                && !matches!(
+                    self.opened_for(),
+                    Some(Only::Actions { .. } | Only::GuideActions | Only::Management)
+                ))
+        {
             self.layer = Layer::List;
             self.focus = Item::Playlist(id);
-            return Some(Effect::Delete(id));
+            return delete.then_some(Effect::Delete(id));
         }
         self.layer = Layer::Actions {
             id,
             focus: Act::Delete,
         };
-        None
+        delete.then_some(Effect::Delete(id))
     }
 
     /// A tap on a list row: focus it and OK.
@@ -710,9 +876,10 @@ mod tests {
             s.acts(B),
             [
                 Act::Show,
+                Act::AllPlaylists,
                 Act::Refresh,
                 Act::Rename,
-                Act::Enabled,
+                Act::Hide,
                 Act::RefreshInterval,
                 Act::RefreshOnStart,
                 Act::Channels,
@@ -729,6 +896,7 @@ mod tests {
         assert_eq!(s.layer(), Layer::List);
         // Menu opens them too; Back closes them, keeping the focus.
         s.key(Key::Menu);
+        s.key(Key::Down);
         s.key(Key::Down);
         assert_eq!(s.key(Key::Ok), Some(Effect::Refresh(B)));
         s.key(Key::Ok);
@@ -767,6 +935,56 @@ mod tests {
         s.key(Key::Down);
         assert_eq!(s.key(Key::Ok), Some(Effect::Delete(A)));
         assert_eq!(s.layer(), Layer::List);
+    }
+
+    #[test]
+    fn management_keeps_delete_available_until_the_source_is_removed() {
+        let mut screen = Screen::only(rows(), B, Only::Management).unwrap();
+        screen.act(B, Act::Delete);
+        assert_eq!(screen.confirm(B, true), Some(Effect::Delete(B)));
+        assert!(!screen.finished());
+        assert_eq!(
+            screen.layer(),
+            Layer::Actions {
+                id: B,
+                focus: Act::Delete,
+            },
+        );
+
+        screen.key(Key::Ok);
+        assert_eq!(screen.confirm(B, true), Some(Effect::Delete(B)));
+        screen.set_rows(vec![row(A, "First")]);
+        assert!(screen.finished());
+    }
+
+    #[test]
+    fn standalone_delete_returns_to_the_guide_and_ignores_stale_answers() {
+        assert!(Screen::only(rows(), SourceId(999), Only::Delete).is_none());
+        for cancel in [Key::Ok, Key::Back, Key::Menu] {
+            let mut screen = Screen::only(rows(), B, Only::Delete).unwrap();
+            assert!(!screen.finished());
+            assert_eq!(
+                screen.layer(),
+                Layer::Confirm {
+                    id: B,
+                    delete: false
+                }
+            );
+            assert_eq!(screen.confirm(A, true), None);
+            assert_eq!(screen.key(cancel), None);
+            assert!(screen.finished());
+            assert_eq!(screen.confirm(B, true), None);
+        }
+
+        let mut screen = Screen::only(rows(), B, Only::Delete).unwrap();
+        screen.key(Key::Down);
+        assert_eq!(screen.key(Key::Ok), Some(Effect::Delete(B)));
+        assert!(screen.finished());
+
+        let mut screen = Screen::only(rows(), B, Only::Delete).unwrap();
+        screen.set_rows(vec![row(A, "First")]);
+        assert!(screen.finished());
+        assert_eq!(screen.confirm(B, true), None);
     }
 
     #[test]
@@ -959,6 +1177,138 @@ mod tests {
             }
         );
         assert!(!s.open_actions(SourceId(9), Act::OnDemand));
+    }
+    #[test]
+    fn all_playlists_is_offered_with_another_enabled_one() {
+        let mut s = Screen::new(rows(), Some(A));
+        assert!(s.acts(A).contains(&Act::AllPlaylists));
+        assert_eq!(s.act(A, Act::AllPlaylists), Some(Effect::AllPlaylists));
+        assert_eq!(s.layer(), Layer::List);
+        let s = Screen::new(vec![row(A, "First")], Some(A));
+        assert!(!s.acts(A).contains(&Act::AllPlaylists));
+    }
+
+    #[test]
+    fn individual_menu_targets_one_playlist_and_cycles_its_refresh_policy() {
+        let mut screen = Screen::only(rows(), B, Only::Actions { manual_order: true }).unwrap();
+        assert_eq!(
+            screen.layer(),
+            Layer::Actions {
+                id: B,
+                focus: Act::Rename
+            }
+        );
+        let ordered = [
+            Act::Rename,
+            Act::Delete,
+            Act::Refresh,
+            Act::Hide,
+            Act::RefreshInterval,
+            Act::RefreshOnStart,
+            Act::Reorder,
+        ];
+        assert_eq!(screen.acts(B), ordered);
+        for expected in &ordered[1..] {
+            screen.key(Key::Down);
+            assert_eq!(
+                screen.layer(),
+                Layer::Actions {
+                    id: B,
+                    focus: *expected
+                }
+            );
+        }
+        for expected in ordered.iter().rev().skip(1) {
+            screen.key(Key::Up);
+            assert_eq!(
+                screen.layer(),
+                Layer::Actions {
+                    id: B,
+                    focus: *expected
+                }
+            );
+        }
+        let mut policy = iptv_library::SourcePolicy::default();
+        for seconds in [3600, 21600, 43200, 86400, 0] {
+            let Some(Effect::Policy(B, edit)) = screen.act(B, Act::RefreshInterval) else {
+                panic!("missing interval edit")
+            };
+            edit.apply(&mut policy);
+            assert_eq!(policy.refresh_seconds, seconds);
+        }
+        let Some(Effect::Policy(B, startup)) = screen.act(B, Act::RefreshOnStart) else {
+            panic!("missing startup edit")
+        };
+        startup.apply(&mut policy);
+        assert!(!policy.refresh_on_start);
+        assert!(policy.enabled);
+        let sorted = Screen::only(
+            rows(),
+            B,
+            Only::Actions {
+                manual_order: false,
+            },
+        )
+        .unwrap();
+        assert!(!sorted.acts(B).contains(&Act::Reorder));
+        screen.set_rows(vec![row(B, "Remaining")]);
+        assert!(!screen.acts(B).contains(&Act::Reorder));
+        let mut hidden = row(B, "Hidden");
+        hidden.policy.enabled = false;
+        screen.set_rows(vec![hidden]);
+        assert_eq!(
+            screen.acts(B),
+            [
+                Act::Rename,
+                Act::Delete,
+                Act::Refresh,
+                Act::RefreshInterval,
+                Act::RefreshOnStart,
+            ]
+        );
+        assert_eq!(screen.act(B, Act::Hide), None);
+    }
+
+    #[test]
+    fn settings_picker_returns_to_settings_after_managing_the_selected_source() {
+        let mut picker = Screen::settings_picker(rows());
+        assert_eq!(
+            picker.items(),
+            [Item::Playlist(A), Item::Playlist(B), Item::Playlist(C)]
+        );
+        assert!(!picker.finished());
+        picker.tap(Item::Playlist(B));
+        assert_eq!(picker.opened_for(), Some(Only::Management));
+        assert!(picker.acts(B).contains(&Act::Guides));
+        picker.key(Key::Back);
+        assert!(picker.finished());
+        assert!(Screen::settings_picker(vec![]).finished());
+    }
+
+    #[test]
+    fn a_screen_opened_for_one_task_finishes_with_it() {
+        // Actions from the settings: Back ends them.
+        let mut s = Screen::only(rows(), B, Only::Actions { manual_order: true }).unwrap();
+        assert!(matches!(s.layer(), Layer::Actions { id: B, .. }));
+        assert!(!s.finished());
+        s.key(Key::Back);
+        assert!(s.finished());
+        // Rename: the entry is open at once; keeping a new name ends it.
+        let mut s = Screen::only(rows(), B, Only::Rename).unwrap();
+        assert_eq!(s.editing().map(|e| e.kind), Some(EditKind::Rename));
+        s.set_text("Renamed");
+        assert_eq!(s.commit(), Some(Effect::Rename(B, "Renamed".into())));
+        assert!(s.finished());
+        // An empty name says why and stays.
+        let mut s = Screen::only(rows(), B, Only::Rename).unwrap();
+        s.set_text("  ");
+        assert_eq!(s.commit(), None);
+        assert!(!s.finished());
+        // The full screen never finishes on its own.
+        let mut s = Screen::new(rows(), Some(A));
+        s.key(Key::Ok);
+        s.key(Key::Back);
+        assert!(!s.finished());
     }
 }
 

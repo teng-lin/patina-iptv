@@ -123,10 +123,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     })
     .unwrap();
     step(app.wait_for_within("text:Local A", Duration::from_secs(20)));
-    rail(&mut app);
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Synthetic library"));
-    step(app.press("text:Synthetic library"));
+    step(app.open_playlist_actions("Synthetic library"));
     // Channel editor is available by remote; hidden items remain in this manager.
     for _ in 0..6 {
         step(app.press_key("down"));
@@ -306,19 +303,22 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
             .unwrap()
             .enabled
     );
+    step(app.back());
+    step(app.press("id:settings-content >> role:checkbox[/^Synthetic library · /]"));
+    step(app.wait_until(
+        "source restored by Settings",
+        Duration::from_secs(5),
+        |_| {
+            crate::isolated::open_database(&path)
+                .unwrap()
+                .source_policy(source)
+                .unwrap()
+                .enabled
+        },
+    ));
+    step(app.open_playlist_actions("Synthetic library"));
     step(app.press_key("enter"));
-    assert!(
-        crate::isolated::open_database(&path)
-            .unwrap()
-            .source_policy(source)
-            .unwrap()
-            .enabled
-    );
-    // Show the enabled playlist, open settings via the guide's Menu.
-    for _ in 0..3 {
-        step(app.press_key("up"));
-    }
-    step(app.press_key("enter"));
+    step(app.close_settings());
     step(app.wait_for_within("text:Local A", Duration::from_secs(20)));
     crate::device_signals::report(&mut app, "tv", false, true);
     rail(&mut app);

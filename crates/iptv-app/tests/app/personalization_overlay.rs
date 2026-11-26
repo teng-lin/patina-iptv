@@ -41,7 +41,7 @@ fn overlay_choosing_a_channel_watches_it_full_screen_by_default() {
     step(app.back());
     step(app.back());
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     assert_eq!(player(app).id, id);
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }
@@ -57,7 +57,7 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
     // The guide menu confirms it stayed in browsing.
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     step(app.back());
     step(app.back());
     step(app.press_key("enter"));
@@ -66,7 +66,7 @@ fn overlay_keeps_the_guide_when_the_viewer_asks_and_back_returns_to_video() {
     step(app.back());
     // Re-entering the guide keeps its configured overlay layout and surface identity.
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     assert_eq!(player(app).id, id);
     assert_eq!(player(app).bounds.size.width.0, 1920.0);
 }
@@ -195,19 +195,19 @@ fn disabling_the_playing_playlist_keeps_the_overlay_and_player_surface() {
     );
     let id = player(app).id;
 
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.wait_for("text:Synthetic second playlist"));
-    step(app.press("text:Synthetic second playlist"));
-    step(app.wait_for("text:Playlist enabled: No"));
-    step(app.press("text:Playlist enabled: No"));
-    step(app.wait_for("text:Playlist enabled: Yes"));
-    step(app.back());
-    step(app.press("text:Synthetic personalization"));
-    step(app.wait_for("text:Playlist enabled: Yes"));
-    step(app.press("text:Playlist enabled: Yes"));
+    // Settings → Playlists: the second playlist's check box shows it, the
+    // playing one's hides it.
+    step(app.open_settings_playlists());
+    let second = "role:checkbox[/^Synthetic second playlist/]";
+    step(app.wait_for(second));
+    step(app.press(second));
+    step(
+        app.wait_until("the second playlist shown", Duration::from_secs(5), |s| {
+            s.accessibility_state(second)
+                .is_ok_and(|a| a.checked == Some(nsh_core::Checked::True))
+        }),
+    );
+    step(app.press("role:checkbox[/^Synthetic personalization/]"));
     step(app.wait_for("id:guide-ui >> label:Second A"));
     assert!(!iptv_app::player_has_source(0));
     assert_eq!(player(app).id, id);

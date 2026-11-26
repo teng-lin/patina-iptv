@@ -199,8 +199,25 @@ pub async fn set_policy(
     id: SourceId,
     policy: crate::model::SourcePolicy,
 ) -> Result<(), StoreError> {
-    library::set_policy(owner, id, policy).await?;
+    update_policy(owner, id, move |stored| *stored = policy).await
+}
+
+/// Edit the latest stored policy on the library writer, preserving other controls.
+pub async fn update_policy(
+    owner: &Rc<crate::Runtime>,
+    id: SourceId,
+    edit: impl FnOnce(&mut crate::model::SourcePolicy) + Send + 'static,
+) -> Result<(), StoreError> {
+    let (policy, visibility_changed) = library::update_policy(owner, id, edit).await?;
+    if !visibility_changed {
+        return Ok(());
+    }
     crate::favorites::refresh_vod_availability(owner).await;
+    // The checkbox can be changed again while metadata and availability
+    // reload. Only apply playback changes for the current visibility.
+    if !library::policy(owner, id).is_ok_and(|current| current.enabled == policy.enabled) {
+        return Ok(());
+    }
     if combined::active(owner) {
         if !policy.enabled {
             crate::library::cancel_running(owner, id);
@@ -329,6 +346,23 @@ pub async fn rename(
     Ok(())
 }
 
+/// Puts the playlists in `order` (their hand order); lists showing
+/// several follow it unless they sort by name.
+pub async fn reorder(owner: &Rc<crate::Runtime>, order: Vec<SourceId>) -> Result<(), StoreError> {
+    library::reorder(owner, order).await?;
+    order_changed(owner);
+    Ok(())
+}
+
+/// The playlists' order changed (arranged, or `playlists.sort`
+/// switched): lists showing several follow.
+pub fn order_changed(owner: &Rc<crate::Runtime>) {
+    library::order_changed(owner);
+    if combined::active(owner) {
+        rebuild_combined(owner);
+    }
+}
+
 /// Changes the guide sources of playlist `id`; false when `edit` changes
 /// nothing. The guide on screen is checked again once the edits settle
 /// (changed feeds are downloaded); another playlist's when it is shown.
@@ -342,6 +376,14 @@ pub async fn edit_guides(
         guides_changed(owner, id);
     }
     Ok(edited)
+}
+
+/// The fallback the guide would show after deleting the current playlist.
+pub fn next_playlist_after_deletion(owner: &Runtime, id: SourceId) -> Option<String> {
+    crate::library::newest_excluding(owner, Some(id))
+        .ok()
+        .flatten()
+        .map(|next| next.source.name)
 }
 
 /// Deletes stored playlist `id` with its channels, guide and favorites.
@@ -1347,6 +1389,9 @@ fn start_import_with(
                     return;
                 }
                 if cancel.is_canceled() {
+                    let _ = tx.send(Msg::Playlist(Err(ImportFailure::new(
+                        FailureKind::Canceled,
+                    ))));
                     return;
                 }
                 if !services.can_import() {
@@ -1358,7 +1403,12 @@ fn start_import_with(
                     return;
                 }
                 let failed = tx.clone();
-                if !services.submit_import(visible, move |worker| async move {
+                // A new source with a typed guide waits for its terminal
+                // result even after Cancel. Waiting for an unrelated import
+                // on the browser lane should not delay that result.
+                let cancel_while_queued =
+                    (job.stored.is_none() && job.epg_url.is_some()).then(|| cancel.clone());
+                if !services.submit_import(visible, cancel_while_queued, move |worker| async move {
                     pipeline(&worker, job, &tx, &cancel, &revoked, &authorization).await;
                 }) {
                     let _ = failed.send(Msg::Playlist(Err(ImportFailure::new(FailureKind::Busy))));
@@ -1507,8 +1557,13 @@ fn start_import_with(
                 if !open {
                     if !finished {
                         failed = true;
-                        log::warn!("iptv data: import thread ended without a result");
-                        on_update(Update::Done(Err(ImportFailure::new(FailureKind::Network))));
+                        let kind = if cancel.is_canceled() {
+                            FailureKind::Canceled
+                        } else {
+                            log::warn!("iptv data: import ended without a result");
+                            FailureKind::Network
+                        };
+                        on_update(Update::Done(Err(ImportFailure::new(kind))));
                     }
                     break;
                 }
@@ -1988,9 +2043,13 @@ async fn read_guide(
         owner.end_guide_check(source);
         return;
     }
-    if !services.submit_import(source_is_visible(owner, source), move |worker| async move {
-        guide_pipeline(&worker, source, &tx, read, &cancel).await;
-    }) {
+    if !services.submit_import(
+        source_is_visible(owner, source),
+        None,
+        move |worker| async move {
+            guide_pipeline(&worker, source, &tx, read, &cancel).await;
+        },
+    ) {
         owner.end_guide_check(source);
         // What the caller asked for decides, not what running work reduced
         // it to: a read meant to check is owed one, and a background check
@@ -2063,6 +2122,149 @@ use crate::imports::kept_file_name;
 /// Current browser generation for async state installation guards.
 pub fn generation(owner: &crate::Runtime) -> u64 {
     owner.generation.get()
+}
+
+#[cfg(all(test, feature = "native"))]
+mod playlist_lifecycle_tests {
+    use super::*;
+    use iptv_providers::{SecretUrl, model::M3uSourceConfig};
+
+    fn run(test: impl AsyncFnOnce(Rc<Runtime>)) {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = Rc::new(Runtime::new(crate::Ports::new(
+            directory.path().into(),
+            |_| Ok(crate::model::DatabaseKey::from_bytes([0x73; 32])),
+        )));
+        owner.bind_tasks(
+            |task| drop(tokio::task::spawn_local(task)),
+            |duration| Box::pin(tokio::time::sleep(duration)),
+        );
+        owner.start_services();
+        let executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        tokio::task::LocalSet::new().block_on(&executor, async {
+            tokio::time::timeout(Duration::from_secs(15), test(owner.clone()))
+                .await
+                .expect("playlist lifecycle scenario timed out");
+        });
+        assert!(owner.drain_services());
+    }
+
+    fn synthetic(name: &str) -> Source {
+        Source {
+            name: name.to_owned(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new("https://example.test/synthetic.m3u"),
+                user_agent: None,
+                referrer: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn deleting_the_shown_source_previews_the_enabled_manual_order_fallback() {
+        run(async |owner| {
+            let (shown, fallback, hidden) = owner
+                .services()
+                .call(|store| {
+                    let shown = store.add_source(&synthetic("Synthetic shown"))?;
+                    let hidden = store.add_source(&synthetic("Synthetic hidden"))?;
+                    let fallback = store.add_source(&synthetic("Synthetic fallback"))?;
+                    let earlier = store.add_source(&synthetic("Synthetic earlier"))?;
+                    store.set_active_source(shown)?;
+                    store.set_source_order(&[shown, earlier, fallback, hidden])?;
+                    store.set_source_policy(
+                        hidden,
+                        crate::model::SourcePolicy {
+                            enabled: false,
+                            ..Default::default()
+                        },
+                    )?;
+                    Ok((shown, fallback, hidden))
+                })
+                .await
+                .unwrap();
+            crate::library::install(&owner, crate::library::snapshot(&owner).await.unwrap());
+            assert_eq!(
+                next_playlist_after_deletion(&owner, shown).as_deref(),
+                Some("Synthetic fallback")
+            );
+            assert_eq!(
+                next_playlist_after_deletion(&owner, hidden).as_deref(),
+                Some("Synthetic shown")
+            );
+            owner
+                .services()
+                .call(move |store| {
+                    store.delete_source(shown)?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            crate::library::install(&owner, crate::library::snapshot(&owner).await.unwrap());
+            assert_eq!(
+                crate::library::newest(&owner).unwrap().unwrap().id,
+                fallback
+            );
+        });
+    }
+
+    #[test]
+    fn reenabled_source_stays_shown_while_the_earlier_hide_reloads() {
+        run(async |owner| {
+            let shown = owner
+                .services()
+                .call(|store| store.add_source(&synthetic("Synthetic shown")))
+                .await
+                .unwrap();
+            owner.shown.set(Some(shown));
+            crate::library::install(&owner, crate::library::snapshot(&owner).await.unwrap());
+
+            // Hold the reader so the checked state from both writes reaches
+            // the UI before either can make a playback change.
+            let (entered, held) = futures_channel::oneshot::channel();
+            let (release, released) = std::sync::mpsc::channel();
+            let reader = owner.services().read(move |_| {
+                let _ = entered.send(());
+                released
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("reader was not released");
+                Ok(())
+            });
+            held.await.unwrap();
+
+            let (updates, mut updated) = unbounded_channel();
+            let weak = Rc::downgrade(&owner);
+            owner.bind(move |event| {
+                if matches!(event, crate::RuntimeEvent::LibraryChanged)
+                    && let Some(owner) = weak.upgrade()
+                    && let Ok(policy) = library::policy(&owner, shown)
+                {
+                    let _ = updates.send(policy.enabled);
+                }
+            });
+
+            let set_visibility = |enabled| {
+                let owner = owner.clone();
+                tokio::task::spawn_local(async move {
+                    update_policy(&owner, shown, move |policy| policy.enabled = enabled).await
+                })
+            };
+            let hide = set_visibility(false);
+            assert_eq!(updated.recv().await, Some(false));
+            let show = set_visibility(true);
+            assert_eq!(updated.recv().await, Some(true));
+            release.send(()).unwrap();
+            reader.await.unwrap();
+            hide.await.unwrap().unwrap();
+            show.await.unwrap().unwrap();
+
+            assert_eq!(owner.shown_source(), Some(shown));
+            assert!(library::policy(&owner, shown).unwrap().enabled);
+        });
+    }
 }
 
 #[cfg(test)]

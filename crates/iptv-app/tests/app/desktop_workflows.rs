@@ -396,7 +396,7 @@ fn the_wheel_right_click_and_hover_never_tune_and_context_menus_target_their_row
     step(app.press("id:guide-groups >> text:Generated news"));
     step(app.open_guide_groups());
     step(app.right_click("id:guide-groups >> text:Generated news"));
-    step(app.wait_for("text:Reorder channels"));
+    step(app.wait_for("text:Reorder channel"));
     step(app.back());
     menu_closed(app);
     step(app.press_key("up"));
@@ -620,7 +620,7 @@ fn window_full_screen_resizing_and_display_scale_keep_the_stream_and_the_channel
     step(app.press("id:channel-list >> text:/^◂/"));
     step(app.wait_for("id:channel-list-groups >> id:group-more"));
     step(app.press("id:channel-list-groups >> id:group-more"));
-    step(app.wait_for("id:menu-panel >> text:Reorder channels"));
+    step(app.wait_for("id:menu-panel >> text:Reorder channel"));
     step(app.back());
     menu_closed(app);
     assert_eq!(iptv_app::player_opens(0), opens);

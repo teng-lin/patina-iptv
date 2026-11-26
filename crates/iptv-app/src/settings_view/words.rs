@@ -150,7 +150,7 @@ pub fn label(key: &str) -> &'static str {
         "general.reset_watch_time" => tr("Forget viewing time"),
         "general.restart" => tr("Restart the app"),
         "general.send_logs" => tr("Send a diagnostic log"),
-        "general.check_updates" => tr("Look for a new version"),
+        "general.check_updates" => super::updates::label(),
         "general.about" => tr("About this app"),
         "about.privacy_policy" => tr("Privacy policy"),
         "playlists.include_live" => tr("Live channels"),
@@ -160,8 +160,9 @@ pub fn label(key: &str) -> &'static str {
         "playlists.update_interval" => tr("Refresh playlists every"),
         "playlists.update_on_start" => tr("Refresh when the app starts"),
         "playlists.manage" => tr("Manage playlists"),
+        "playlists.show_all" => tr("Show all playlists"),
         "playlists.add" => tr("Add a playlist"),
-        "playlists.reorder" => tr("Arrange playlists"),
+        "playlists.reorder" => tr("Reorder playlists"),
         "playlists.update_all" => tr("Refresh all playlists now"),
         "channels.group_sort" => tr("Group order"),
         "channels.channel_sort" => tr("Channel order"),
@@ -310,6 +311,7 @@ pub fn description(key: &str) -> Option<&'static str> {
         "remote.customize" => {
             tr("Choose a key, press and action per screen; capture keys or restore defaults.")
         }
+        "general.check_updates" => super::updates::RELEASES,
         "about.privacy_policy" => super::PRIVACY_POLICY_URL,
         "general.about" => tr(
             "The version of this app. Text is set in Roboto and Roboto Condensed (Google, \
@@ -334,8 +336,9 @@ pub fn choice(family: &str, variant: &str) -> String {
         return crate::i18n::language_name(variant).to_owned();
     }
     let name = match (family, variant) {
-        ("sort", "manual") => tr("Arranged by hand"),
+        ("sort", "manual") => tr("Custom order"),
         ("sort", "name") => tr("By name"),
+        ("sort", "added") => tr("By date added"),
         ("sort", "playlist_order") => tr("As in the playlist"),
         ("sort", "watch_time") => tr("Most watched first"),
         ("sort", "date_added") => tr("Newest first"),

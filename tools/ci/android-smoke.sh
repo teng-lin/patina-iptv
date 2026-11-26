@@ -355,6 +355,24 @@ ui_selected_changed() {
   menu_selection=$observed
 }
 ui_editor_closed() { python3 "$ui_probe" "$ui_xml" editor-closed; }
+ui_context_closed() {
+  python3 "$ui_probe" "$ui_xml" absent 'Channel options…' &&
+    python3 "$ui_probe" "$ui_xml" absent 'More options'
+}
+ui_pick_menu_item() {
+  local wanted=$1 menu_selection previous_selection
+  menu_selection=$(python3 "$ui_probe" "$ui_xml" selected-label) || fail "cannot read native menu selection"
+  for _ in $(seq 1 30); do
+    if python3 "$ui_probe" "$ui_xml" selected "$wanted"; then
+      keys KEYCODE_DPAD_CENTER
+      return
+    fi
+    previous_selection=$menu_selection
+    keys KEYCODE_DPAD_DOWN
+    ui_wait 'context menu selection after Down' ui_selected_changed "$previous_selection"
+  done
+  fail "cannot reach $wanted in native menu"
+}
 assert_favorites() {
   ui_wait "favorites count after $2" ui_count_matches "$1"
   cp "$ui_xml" "$out/favorites-${2// /-}.xml"
@@ -367,24 +385,28 @@ request_favorites_clear() {
 
 step "confirm bulk favorites removal with remote and touch"
 mark
-keys KEYCODE_MENU
-# Menu composition depends on the current program. Follow its actual selected
-# accessibility label rather than assuming an action index. Every wait is
-# bounded, including adb's UI-automation idle wait.
-ui_wait 'initial context menu selection' python3 "$ui_probe" "$ui_xml" selected Search
-menu_selection=Search
-menu_found=false
-for _ in $(seq 1 30); do
-  if python3 "$ui_probe" "$ui_xml" selected 'Manage favorites…'; then
-    menu_found=true
-    break
+if [ "$is_tv" = true ]; then
+  # Exercise Guide Long OK itself, including the real release, before Menu.
+  # One second uses the same deliberate-hold transport as the player journey.
+  adb shell "CLASSPATH=$probe app_process /system/bin ShortKeys --hold-ms 1000 KEYCODE_DPAD_CENTER"
+  expect 'iptv (long press by timer: ShowMenu|key=ok .*phase=(Repeat|Up) .*action=Some\(ShowMenu\))' 10
+  ui_wait 'Guide Long OK opens compact actions' python3 "$ui_probe" "$ui_xml" selected 'Add to favorites'
+  keys KEYCODE_MENU
+  ui_wait 'Guide context closes after Menu' ui_context_closed
+  # Menu is queued after OK Up; its acknowledged close orders this log check
+  # after the release, rather than merely after the earlier hold timer.
+  if applog | grep -E 'key=ok .*phase=Up .*action=Some\(Select\)' >/dev/null; then
+    fail "Guide Long OK also performed a short OK action on release"
   fi
-  previous_selection=$menu_selection
-  keys KEYCODE_DPAD_DOWN
-  ui_wait 'context menu selection after Down' ui_selected_changed "$previous_selection"
-done
-[ "$menu_found" = true ] || fail "cannot reach Manage favorites in native menu"
-keys KEYCODE_DPAD_CENTER
+  mark
+fi
+keys KEYCODE_MENU
+# Every device starts with compact actions. Follow actual selected labels
+# through More options, retaining the existing bounded observation waits.
+ui_wait 'Menu opens compact actions' python3 "$ui_probe" "$ui_xml" selected 'Add to favorites'
+ui_pick_menu_item 'More options'
+ui_wait 'advanced context menu selection' python3 "$ui_probe" "$ui_xml" selected Search
+ui_pick_menu_item 'Manage favorites…'
 ui_wait 'empty native favorites editor' ui_initial_editor
 keys KEYCODE_DPAD_RIGHT
 assert_favorites "$favorites_total" 'remote Add all'
@@ -581,15 +603,24 @@ before_refresh=$(resume_identity)
 [ -n "$before_refresh" ] || fail "no persisted channel before refresh"
 mark
 # From the confirmed Guide pane: Tab -> Groups, Left -> rail/Search.
-# Down clamps at Settings; Up is Playlists even when VOD rows are present.
+# Down clamps at Settings, which holds the playlists (#366).
 keys KEYCODE_TAB KEYCODE_DPAD_LEFT
 expect 'key=left .*ctx=Groups' 10
 keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN \
   KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN
-keys KEYCODE_DPAD_UP KEYCODE_DPAD_CENTER
+keys KEYCODE_DPAD_CENTER
+expect 'iptv settings: open' 10
 pause 1
-# The shown playlist is focused. Its first action is Show, then Refresh.
-keys KEYCODE_DPAD_CENTER KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
+# The pages: Up clamps at General, Down is Playlists, Right enters its rows
+# on the one playlist; Menu opens that playlist's actions.
+keys KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP \
+  KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP KEYCODE_DPAD_UP \
+  KEYCODE_DPAD_UP KEYCODE_DPAD_UP
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_RIGHT KEYCODE_MENU
+expect "iptv playlists: Actions \\{[^}]*\\} of $source_id([^0-9]|$)" 10
+pause 1
+# The context menu starts on Rename, then Delete, then Refresh now.
+keys KEYCODE_DPAD_DOWN KEYCODE_DPAD_DOWN KEYCODE_DPAD_CENTER
 expect "iptv playlists: refresh $source_id([^0-9]|$)" 10
 expect 'iptv data: refreshed ImportCounts' 180
 assert_resume "$before_refresh" "playback refresh"
@@ -597,10 +628,11 @@ assert_resume "$before_refresh" "playback refresh"
 if applog | grep -E 'iptv player 0 (open:|error)' >/dev/null; then
   fail "refresh reopened or failed the playing stream"
 fi
-# Closing the playlist screen runs as an app task. Later keys must wait
-# for that effect, rather than landing on the screen being closed.
-keys KEYCODE_BACK
-expect 'iptv playlists: close' 10
+# Refresh ends the playlist's sheet. Back leaves the rows, then closes the
+# settings: later keys must wait for that, rather than land on the screen
+# being closed.
+keys KEYCODE_BACK KEYCODE_BACK
+expect 'iptv settings: close' 10
 # Let each movement settle into its pane before sending the next.
 for _ in 1 2; do
   mark

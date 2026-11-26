@@ -34,6 +34,7 @@ pub(crate) enum Overlay {
     RemoteEditor,
     Playlists,
     GuideAssign,
+    PlaylistMenu,
     Settings,
     FavoritesEditor,
     /// A chooser the play bar or a menu opened (tracks, picture size…).
@@ -76,6 +77,7 @@ impl Overlay {
             | Self::GuideAssign
             | Self::Chooser
             | Self::Description
+            | Self::PlaylistMenu
             | Self::Menu => Context::Menu,
             Self::Search => Context::Search,
             Self::ChannelPicker | Self::ChannelList => Context::ChannelList,
@@ -83,7 +85,7 @@ impl Overlay {
     }
 
     /// Every overlay, topmost layer first.
-    pub(crate) const ALL: [Overlay; 24] = [
+    pub(crate) const ALL: [Overlay; 25] = [
         Overlay::QuitConfirm,
         Overlay::Leave,
         Overlay::StoreStartupFailure,
@@ -100,6 +102,7 @@ impl Overlay {
         Overlay::RemoteEditor,
         Overlay::Playlists,
         Overlay::GuideAssign,
+        Overlay::PlaylistMenu,
         Overlay::Settings,
         Overlay::FavoritesEditor,
         Overlay::Chooser,
@@ -133,7 +136,10 @@ impl Overlay {
             Overlay::FavoritesEditor => ui.editor.with(Option::is_some),
             Overlay::Chooser => crate::chooser::is_open(ui, false),
             Overlay::Description => ui.description.with(Option::is_some),
-            Overlay::Menu => ui.menu.with(Option::is_some),
+            Overlay::PlaylistMenu => crate::menu_view::playlist_popup_open(ui),
+            Overlay::Menu => {
+                ui.menu.with(Option::is_some) && !crate::menu_view::playlist_popup_open(ui)
+            }
             Overlay::Search => crate::search_view::is_open(ui),
             Overlay::ChannelPicker => crate::multiview_picker::is_open(ui),
             Overlay::ChannelList => crate::channels_view::is_open(ui),
@@ -182,6 +188,7 @@ impl Overlay {
             Overlay::Leave
             | Overlay::Chooser
             | Overlay::Description
+            | Overlay::PlaylistMenu
             | Overlay::Menu
             | Overlay::ChannelPicker
             | Overlay::ChannelList => false,
@@ -216,6 +223,7 @@ impl Overlay {
             | Overlay::Settings
             | Overlay::FavoritesEditor
             | Overlay::Chooser
+            | Overlay::PlaylistMenu
             | Overlay::Menu
             | Overlay::Search
             | Overlay::ChannelPicker
@@ -300,13 +308,14 @@ mod tests {
             | Overlay::FavoritesEditor
             | Overlay::Chooser
             | Overlay::Description
+            | Overlay::PlaylistMenu
             | Overlay::Menu
             | Overlay::Search
             | Overlay::ChannelPicker
             | Overlay::ChannelList => Overlay::ALL.contains(&overlay),
         };
         assert!(Overlay::ALL.into_iter().all(listed));
-        assert_eq!(Overlay::ALL.len(), 24);
+        assert_eq!(Overlay::ALL.len(), 25);
     }
 
     #[test]
@@ -317,6 +326,7 @@ mod tests {
             Overlay::Leave,
             Overlay::Chooser,
             Overlay::Description,
+            Overlay::PlaylistMenu,
             Overlay::Menu,
             Overlay::ChannelPicker,
             Overlay::ChannelList,

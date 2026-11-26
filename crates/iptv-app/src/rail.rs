@@ -59,7 +59,6 @@ fn label(item: RailItem) -> &'static str {
         RailItem::Movies => tr("Movies"),
         RailItem::Shows => tr("Shows"),
         RailItem::Recordings => tr("Recordings"),
-        RailItem::Playlists => tr("Playlists"),
         RailItem::Settings => tr("Settings"),
     }
 }
@@ -84,7 +83,6 @@ pub(crate) fn icon(item: RailItem) -> ImageSrc {
         RailItem::Recordings => {
             "<circle cx='12' cy='12' r='8'/><circle cx='12' cy='12' r='3' fill='currentColor'/>"
         }
-        RailItem::Playlists => "<path d='M4 6h12M4 11h12M4 16h7'/><path d='M15 14v6l5-3z'/>",
         RailItem::Settings => {
             "<circle cx='12' cy='12' r='3.5'/><path d='M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8'/>"
         }

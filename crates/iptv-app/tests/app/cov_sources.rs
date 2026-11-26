@@ -87,31 +87,117 @@ fn playlists_and_their_guide_sources() {
     deleting(&mut t);
 }
 
-/// The rail's Playlists.
+#[test]
+fn manage_playlists_is_offered_for_hidden_sources_and_disappears_when_empty() {
+    use crate::personalization::{M3U, step};
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source, SourceConfig},
+    };
+    use std::time::Duration;
+
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let playlist = home.path().join("synthetic.m3u");
+    std::fs::write(&playlist, M3U).unwrap();
+    let source = store
+        .add_source(&Source {
+            name: "Synthetic personalization".into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new(playlist.to_string_lossy()),
+                user_agent: None,
+                referrer: None,
+            }),
+        })
+        .unwrap();
+    store
+        .set_source_policy(
+            source,
+            iptv_store_sqlite::SourcePolicy {
+                refresh_on_start: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(M3U);
+    store
+        .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+        .unwrap();
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+
+    let mut app = crate::headless::Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-header-details >> text:Synthetic personalization · News"));
+    step(app.open_settings_playlists());
+    let manage = "id:settings-content >> text:Manage playlists";
+    let row = "id:settings-content >> role:checkbox[/^Synthetic personalization/]";
+    step(app.wait_for(manage));
+    step(app.press(row));
+    step(app.wait_until(
+        "the sole playlist is hidden",
+        Duration::from_secs(5),
+        |screen| {
+            screen
+                .accessibility_state(row)
+                .is_ok_and(|state| state.checked == Some(nsh_core::Checked::False))
+        },
+    ));
+    step(app.wait_for(manage));
+    step(app.open_playlist_actions("Synthetic personalization"));
+    step(app.press("id:playlist-actions-list >> text:Delete"));
+    step(app.press("id:playlist-delete-confirmation >> text:Delete"));
+    step(app.wait_for_gone(manage, Duration::from_secs(5)));
+    step(app.wait_for("id:settings-content >> text:Add a playlist"));
+    assert!(
+        crate::isolated::open_database(path)
+            .unwrap()
+            .sources()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// Settings → Playlists.
 fn open_playlists(t: &mut T) {
-    t.app.open_guide_groups().unwrap();
-    t.key("left");
-    t.key("left");
-    t.press("text:Playlists >> nth=0");
-    t.wait("text:Tap a playlist for what you can do with it", 5);
+    let opened = t.app.open_settings_playlists();
+    t.ok("Settings → Playlists", opened);
+}
+
+/// Playlist `name`'s actions: a long press on its row there.
+fn actions(t: &mut T, name: &str) {
+    let opened = t.app.open_playlist_actions(name);
+    t.ok(&format!("{name}'s actions"), opened);
+}
+
+/// A playlist row's note ending with `status` (its summary first).
+fn note(status: &str) -> String {
+    format!("text:/ · {status}( · On screen)?$/")
 }
 
 /// One playlist: its row, no "Refresh all".
 fn first_playlist(t: &mut T) {
     open_playlists(t);
     t.wait("text:synthetic", 5);
-    assert!(t.shows("text:M3U playlist · 2 channels"));
-    assert!(t.shows(&format!("text:/^Updated {TIME}$/")));
-    assert!(t.shows("text:On screen"));
-    assert!(t.shows("text:M3U link or file, Xtream Codes login, Stalker portal"));
-    assert!(!t.shows("text:Refresh all playlists"), "one playlist");
+    assert!(t.shows(&format!(
+        "text:/^M3U playlist · 2 channels · Updated {TIME} · On screen$/"
+    )));
+    assert!(t.shows("text:Add a playlist"));
+    assert!(t.shows("text:Refresh all playlists now"));
+    assert!(!t.shows("text:Reorder playlists"), "one playlist");
     t.rebase();
 }
 
-/// "+ Add playlist" opens the wizard over the screen; a playlist by link,
-/// named, is shown once added.
+/// "Add a playlist" opens the wizard over the settings; a playlist by
+/// link, named, is shown once added.
 fn add_by_link(t: &mut T, srv: &Server) {
-    t.press("id:playlists-screen >> text:+ Add playlist");
+    t.press("id:settings-content >> text:Add a playlist");
     t.press("id:wizard-field-PlaylistUrl");
     t.enter(&srv.url("/link.m3u"));
     t.wait(&format!("text:{}", srv.url("/link.m3u")), 5);
@@ -124,11 +210,12 @@ fn add_by_link(t: &mut T, srv: &Server) {
     t.wait("text:Test Link Channel 1 · Linked", 10);
     open_playlists(t);
     t.wait("text:Linked", 5);
-    assert!(t.shows("text:Refresh all playlists"));
-    assert!(t.shows("text:Each one downloads again; the one on screen updates in place"));
-    t.count(&format!("text:/^Updated {TIME}$/"), 2, 5);
+    // Two playlists: they can be ordered and arranged.
+    assert!(t.shows("text:Playlist order"));
+    assert!(t.shows("text:Reorder playlists"));
+    t.count(&note(&format!("Updated {TIME}")), 2, 5);
     // These management journeys explicitly inspect an individual source.
-    t.press("text:Linked");
+    actions(t, "Linked");
     t.press("text:Show this playlist");
     t.wait("text:Test Link Channel 1", 10);
     open_playlists(t);
@@ -136,7 +223,7 @@ fn add_by_link(t: &mut T, srv: &Server) {
 
 /// A file's actions (no provider details), a tap beside them, renaming.
 fn file_playlist_actions(t: &mut T) {
-    t.press("text:synthetic");
+    actions(t, "synthetic");
     t.wait("text:Refresh now", 5);
     for text in [
         "Guide: the provider's own",
@@ -155,7 +242,7 @@ fn file_playlist_actions(t: &mut T) {
     t.press_beside("Refresh now");
     t.gone("text:Refresh now", 2);
 
-    t.press("text:synthetic");
+    actions(t, "synthetic");
     t.open_sheet("text:Rename", "text:Playlist name");
     assert_eq!(t.field(), "synthetic");
     t.enter("Synthetic Renamed");
@@ -163,7 +250,7 @@ fn file_playlist_actions(t: &mut T) {
     t.gone("text:Playlist name", 2);
     assert!(!t.shows("text:synthetic"));
     // An empty name keeps the old one; Cancel changes nothing.
-    t.press("text:Synthetic Renamed");
+    actions(t, "Synthetic Renamed");
     t.open_sheet("text:Rename", "text:Playlist name");
     t.enter("");
     t.wait("text:A playlist needs a name. The old one is kept.", 2);
@@ -182,7 +269,7 @@ fn file_playlist_actions(t: &mut T) {
 /// ones stay; working, they replace them.
 fn provider_details(t: &mut T, srv: &Server) {
     let link = srv.url("/link.m3u");
-    t.press("text:Linked");
+    actions(t, "Linked");
     t.wait("text:On screen now: back to the guide", 2);
     assert!(t.shows("text:Guide: none"));
     t.press("text:Playlist link");
@@ -204,12 +291,16 @@ fn provider_details(t: &mut T, srv: &Server) {
     t.open_sheet("text:Playlist link >> nth=1", "text:Playlist link >> nth=2");
     t.enter(&srv.url("/missing.m3u"));
     t.press("text:Check and save");
+    // The row behind says why, and keeps the old channels.
     t.wait(
-        "text:New details not saved: the answer was not a playlist. The old ones stay.",
+        &note("New details not saved: the answer was not a playlist\\. The old ones stay\\."),
         15,
     );
     assert!(t.shows("text:Check and save"), "refused: the form stays");
-    assert!(t.shows("text:M3U playlist · 1 channel"), "the old channels");
+    assert!(
+        t.shows("text:/^M3U playlist · 1 channel · /"),
+        "the old channels"
+    );
     // By keys: Down to "Check and save", Up to the link, OK types.
     t.key("down");
     t.wait(
@@ -222,10 +313,10 @@ fn provider_details(t: &mut T, srv: &Server) {
     t.enter(&srv.url("/link2.m3u"));
     t.press("text:Check and save");
     t.gone("text:Check and save", 15);
-    t.wait("text:M3U playlist · 2 channels >> nth=1", 10);
+    t.count("text:/^M3U playlist · 2 channels · /", 2, 10);
     t.wait("text:Test Link Channel 2", 10);
     // Back from the form leaves it unchanged.
-    t.press("text:Linked");
+    actions(t, "Linked");
     t.press("text:Playlist link");
     t.wait("text:Check and save", 2);
     t.key("backspace");
@@ -238,7 +329,7 @@ fn provider_details(t: &mut T, srv: &Server) {
 /// A User-Agent is tried like new details and kept; refreshing; the list
 /// by keys.
 fn user_agent_refresh_and_keys(t: &mut T) {
-    t.press("text:Linked");
+    actions(t, "Linked");
     t.open_sheet("text:User-Agent", "text:User-Agent >> nth=1");
     t.wait(
         "text:Empty: the app's own; some providers ask for a particular one",
@@ -248,9 +339,9 @@ fn user_agent_refresh_and_keys(t: &mut T) {
     t.enter("Synthetic/1");
     t.gone("text:Cancel", 2);
     // Checked and saved: the actions close, the row is updated again.
-    t.count(&format!("text:/^Updated {TIME}$/"), 2, 15);
-    assert!(!t.shows("text:/^Checking the new details/"));
-    t.press("text:Linked");
+    t.count(&note(&format!("Updated {TIME}")), 2, 15);
+    assert!(!t.shows("text:/Checking the new details/"));
+    actions(t, "Linked");
     t.open_sheet("text:User-Agent", "text:User-Agent >> nth=1");
     t.wait("text:Cancel", 2);
     assert_eq!(t.field(), "Synthetic/1", "the User-Agent was kept");
@@ -263,32 +354,32 @@ fn user_agent_refresh_and_keys(t: &mut T) {
     t.wait("text:Streams at once: 2", 2);
     t.press("text:Refresh now");
     t.gone("text:Show this playlist", 2);
-    t.press("text:Refresh all playlists");
+    t.gone("id:playlists-task", 5);
+    t.press("text:Refresh all playlists now");
     // Both refresh, then read as updated again.
-    t.count(&format!("text:/^Updated {TIME}$/"), 2, 20);
-    t.gone("text:/^Refreshing \\d playlists?…$/", 20);
+    t.count(&note(&format!("Updated {TIME}")), 2, 20);
 
     // Keys: the focus pill, the hints, Menu opens a playlist's actions.
-    t.key("down");
-    t.wait("text:▲▼ choose   OK actions   Back close", 2);
-    // Two playlist rows, All playlists, Refresh all, then Add.
-    for _ in 0..4 {
+    // Two playlist rows, then Add, then Refresh all (focused).
+    for _ in 0..3 {
         t.key("up");
     }
+    t.wait(
+        "text:▲▼ move   OK show or hide   Menu its settings   ◀ Back pages",
+        2,
+    );
     let menu = t.app.press_remote(nsh_tv::RemoteKey::Menu);
     t.ok("key menu", menu);
-    t.wait("text:▲▼ choose   OK do it   Back close the sheet", 2);
-    assert!(t.shows("text:Show this playlist"), "the first playlist's");
-    // Show it: the screen closes on its guide.
-    t.key("enter");
-    t.gone("text:▲▼ choose   OK actions   Back close", 2);
+    t.wait("id:playlist-menu-panel >> text:Hide", 2);
+    t.key("backspace");
+    actions(t, "Synthetic Renamed");
+    t.press("text:Show this playlist");
     t.wait("text:Golden Engine", 15);
 }
 
 /// The guide sources of the file playlist (shown again).
 fn guide_sources(t: &mut T, srv: &Server) {
-    open_playlists(t);
-    t.press("text:Synthetic Renamed");
+    actions(t, "Synthetic Renamed");
     t.press("text:Guide data");
     t.wait("text:Guide data · Synthetic Renamed", 5);
     t.wait(
@@ -509,19 +600,19 @@ fn nothing_switched_on(t: &mut T) {
 /// Deleting asks first and says what goes; the last one leaves the
 /// first-run screen.
 fn deleting(t: &mut T) {
-    t.press("text:Linked");
-    t.press("text:Delete");
+    t.press("id:settings-content >> role:button[More options for Linked]");
+    t.press("id:playlist-menu-panel >> text:Delete");
     t.wait("text:Delete “Linked”?", 2);
     assert!(t.shows(
         "text:Its 2 channels, its guide and your favorites from it will be gone from the app. The playlist at your provider is not affected."
     ));
     t.press("text:Keep it");
     t.gone("text:Delete “Linked”?", 2);
-    t.press("text:Delete");
+    t.press("id:playlist-menu-panel >> text:Delete");
     t.press("text:Delete");
     t.gone("text:Linked", 5);
-    assert!(!t.shows("text:Refresh all playlists"));
-    t.press("text:Synthetic Renamed");
+    assert!(!t.shows("text:Reorder playlists"), "one playlist left");
+    actions(t, "Synthetic Renamed");
     t.press("text:Delete");
     t.wait("text:/No playlists will be left\\.$/", 2);
     t.press("text:Delete");

@@ -178,7 +178,7 @@ fn backup_export_cancel_restore_and_restart_preserve_personalized_library() {
     wait_for_guide(&mut app, &path, source);
     step(app.open_guide_groups());
     step(app.press_key("right"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.wait_for(&message("Manage favorites…")));
     step(app.press(&message("Settings >> nth=0")));
     step(app.wait_for(&message("Back up")));
@@ -426,7 +426,7 @@ fn start_app_at(viewport: Size<Points>) -> Headless {
 
 /// Opens Settings on its first page (General) from the guide.
 fn open_settings(app: &mut Headless) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for(&message("Manage favorites…")));
     step(app.press(&message("Settings >> nth=0")));
     step(app.wait_for(&message("Clear history")));

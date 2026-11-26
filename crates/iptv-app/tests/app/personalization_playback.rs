@@ -69,15 +69,15 @@ fn a_clock_edit_with_reordered_rows_keeps_the_menu_focus_and_preview() {
         )
         .unwrap();
     drop(store);
-    step(app.open_guide_groups());
-    let group_menu = "id:guide-groups >> text:News";
-    step(app.long_press(group_menu));
-    step(app.press("id:menu-panel >> text:Guide time offset"));
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    step(app.press("id:menu-panel >> text:Guide time offset: 0:00"));
     step(app.press_key("right"));
     step(app.wait_for("id:menu-panel >> text:Guide time offset · +0:15"));
     let writer = iptv_app::hold_writer();
     step(app.press("id:menu-panel >> text:Save"));
-    step(app.long_press(group_menu));
+    step(app.open_guide_groups());
+    step(app.long_press("id:guide-groups >> text:News"));
     step(app.wait_for("id:menu-panel >> role:header[News]"));
     drop(writer);
     step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
@@ -255,13 +255,19 @@ fn rapid_navigation_cancels_tuning_menus_cancel_preview_and_input_extends_fullsc
     opened.lock().unwrap().clear();
     step(app.press_key("up"));
     step(app.press_key("m"));
-    step(app.wait_for("text:Manage favorites…"));
+    step(app.wait_for("id:menu-panel >> text:Channel options…"));
     step(app.run_for(Duration::from_secs(1)));
     assert!(
         opened.lock().unwrap().is_empty(),
         "menu cancels a pending tune"
     );
     step(app.back());
+    step(app.run_for(Duration::from_millis(500)));
+    assert!(
+        opened.lock().unwrap().is_empty(),
+        "closing context actions keeps autoplay held, like a touch hold"
+    );
+    step(app.press_key("enter"));
     step(app.run_for(Duration::from_millis(500)));
     loaded_stream(app, &opened, "http://example.test/b");
     assert_eq!(*opened.lock().unwrap(), ["http://example.test/b"]);

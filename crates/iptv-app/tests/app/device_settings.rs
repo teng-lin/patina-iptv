@@ -212,7 +212,7 @@ fn choose(app: &mut Headless) -> bool {
     let full = app.screen().matches("id:player-banner").unwrap();
     if !full {
         step(app.press_key("m"));
-        step(app.wait_for("text:Manage favorites…"));
+        step(app.wait_for("id:menu-panel >> text:Channel options…"));
         step(app.back());
     }
     full

@@ -29,6 +29,7 @@ pub const WIRED: &[&str] = &[
     "guide.visible_minutes",
     "general.resume_last_channel",
     "general.user_agent",
+    "playlists.sort",
     "epg.update",
     "appearance.accent",
     "appearance.background",
@@ -50,6 +51,7 @@ pub const COMMANDS: &[&str] = &[
     "history.clear",
     "search.clear_history",
     "parental.change_pin",
+    "general.check_updates",
     "about.privacy_policy",
     "general.backup",
     "general.restore",
@@ -59,6 +61,10 @@ pub const COMMANDS: &[&str] = &[
     "epg.clear",
     "remote.customize",
     "playlists.manage",
+    "playlists.show_all",
+    "playlists.add",
+    "playlists.update_all",
+    "playlists.reorder",
 ];
 
 /// Not shown: the changed keys (`remote.key_overrides`), which the
@@ -88,7 +94,6 @@ const NOT_OFFERED: &[&str] = &[
     "general.usage_statistics",
     "general.auto_update",
     "general.beta_updates",
-    "general.check_updates",
     "general.about",
     "playback.video_decoder",
     "playback.audio_decoder",
@@ -202,6 +207,16 @@ pub fn offer(device: Device, key: &str) -> Offer {
         return Offer::Hidden;
     }
     let host = device.host;
+    if key == "general.check_updates"
+        && (crate::is_tui_mode()
+            || matches!(
+                host.platform,
+                iptv_core::capabilities::Platform::Ipad
+                    | iptv_core::capabilities::Platform::Unknown
+            ))
+    {
+        return Offer::Hidden;
+    }
     // Recording needs blocking workers. Backup and restore check their
     // own worker and document-picker support (`backup::offered`).
     if !crate::host::HAS_WORKERS && key.starts_with("recordings.") {
@@ -213,9 +228,42 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if !crate::host::IMPORTS
         && matches!(
             key,
-            "playlists.manage" | "epg.add_source" | "epg.update_now"
+            "playlists.manage"
+                | "playlists.add"
+                | "playlists.update_all"
+                | "epg.add_source"
+                | "epg.update_now"
         )
     {
+        return Offer::Hidden;
+    }
+    if key == "playlists.show_all" {
+        let owner = crate::runtime();
+        if !crate::host::IMPORTS
+            || crate::data::combined::active(&owner)
+            || !crate::runtime::data::has_multiple_enabled(&owner)
+        {
+            return Offer::Hidden;
+        }
+    }
+    if key == "playlists.manage"
+        && !crate::runtime()
+            .playlists()
+            .is_ok_and(|rows| !rows.is_empty())
+    {
+        return Offer::Hidden;
+    }
+    // Arranging and ordering playlists needs two of them; sorted by name,
+    // there is no hand order to arrange.
+    if matches!(key, "playlists.reorder" | "playlists.sort")
+        && crate::runtime_owner::runtime()
+            .playlists()
+            .map_or(0, |playlists| playlists.len())
+            < 2
+    {
+        return Offer::Hidden;
+    }
+    if key == "playlists.reorder" && !crate::settings::playlists_by_hand() {
         return Offer::Hidden;
     }
     if NOT_OFFERED.contains(&key) || SUMMED_UP.contains(&key) || RETIRED.contains(&key) {

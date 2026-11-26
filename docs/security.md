@@ -152,9 +152,12 @@ rasterizer, with external files, remote references and embedded images disabled.
 A public Xtream account keeps public-address checks enabled for its generated
 stream URLs. A deliberately selected LAN account permits its own scheme, host
 and effective port only; another origin does not inherit that exception. Stalker
-uses its private-portal/owned-host policy. Playlist-supplied direct links remain
-untrusted content. Redirect and subresource transport checks still apply. Explicit
-HTTP media remains unencrypted on the network even though catalog storage is encrypted.
+uses its private-portal/owned-host policy. In native builds, an explicitly
+entered loopback M3U address can provide streams from the same scheme, host
+and effective port when the playlist response comes from that origin. Other
+playlist-supplied destinations require public hosts. Redirect and subresource
+transport checks still apply. Explicit HTTP media remains unencrypted on the
+network even though catalog storage is encrypted.
 The compile-time `IPTV_RS_DEV_PLAYLIST` fixture hook is absent from release builds.
 
 ## Export, recordings and local authority
@@ -283,3 +286,9 @@ The pinned Rust, NSH, mpv/FFmpeg and platform dependency inventories are in
 `tools/ci/pins.py`, the Cargo lockfiles and platform build manifests. An advisory
 exception is scoped acceptance, not a claim that all native dependencies are
 vulnerability-free.
+
+## Casting on the local network
+
+The Linux Cast sender gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
+
+The relay listens on the interface used to reach the TV, on TCP port 49152 by default. Set `PATINA_CAST_RELAY_PORT` to choose another port before starting Patina. A firewall rule can limit access to the receiver address.

@@ -1,0 +1,5 @@
+<resources>
+    <string name="update_recording_active">Beenden Sie die Aufnahme vor der Installation des Updates.</string>
+    <string name="update_install_unavailable">Android konnte die Installation nicht öffnen. Versuchen Sie es erneut in den Einstellungen.</string>
+    <string name="update_invalid_apk">Diese APK kann die installierte Patina-Version nicht aktualisieren.</string>
+</resources>

@@ -72,6 +72,7 @@ open class TvActivity : Activity() {
         CredentialKey.initialize(this)
         RecordingHost.attach(this)
         ExternalPlayerHost.attach(this)
+        UpdateHost.attach(this)
         // Use large ceilings for Patina's own Rust root. The 4095 MiB
         // heap ceiling fits 32-bit Android, and zero keeps the default stack.
         nsh.setLimits(4095, 0, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE)
@@ -128,8 +129,14 @@ open class TvActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (!hostMounted) return
+        UpdateHost.resumed(this)
         // The backup rows follow the document pickers that resolve now.
         backups.resumed()
+    }
+
+    override fun onPause() {
+        UpdateHost.paused(this)
+        super.onPause()
     }
 
     override fun onStop() {

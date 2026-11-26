@@ -50,19 +50,19 @@ pub fn policy(
     crate::library::policy(owner, id)
 }
 
-pub(super) async fn set_policy(
+pub(super) async fn update_policy(
     owner: &Rc<crate::Runtime>,
     id: SourceId,
-    policy: crate::model::SourcePolicy,
-) -> Result<(), StoreError> {
-    crate::library::save_policy(owner, id, policy).await?;
+    edit: impl FnOnce(&mut crate::model::SourcePolicy) + Send + 'static,
+) -> Result<(crate::model::SourcePolicy, bool), StoreError> {
+    let (policy, visibility_changed) = crate::library::update_policy(owner, id, edit).await?;
     refresh_after_commit(owner, |snapshot| {
         if let Some(playlist) = snapshot.playlists.iter_mut().find(|p| p.id == id) {
             playlist.policy = policy;
         }
     })
     .await;
-    Ok(())
+    Ok((policy, visibility_changed))
 }
 
 /// Persists the shown identity without delaying navigation.
@@ -244,6 +244,25 @@ pub(super) async fn rename(
     })
     .await;
     Ok(())
+}
+
+/// Saves `order` as the playlists' hand order and puts the snapshot in it.
+pub(super) async fn reorder(
+    owner: &Rc<crate::Runtime>,
+    order: Vec<SourceId>,
+) -> Result<(), StoreError> {
+    crate::library::reorder_sources(owner, order.clone()).await?;
+    refresh_after_commit(owner, |snapshot| {
+        let at = |id: SourceId| order.iter().position(|o| *o == id).unwrap_or(usize::MAX);
+        snapshot.playlists.sort_by_key(|p| at(p.id));
+    })
+    .await;
+    Ok(())
+}
+
+/// The playlists' order changed: the library's readers look again.
+pub(super) fn order_changed(owner: &Rc<crate::Runtime>) {
+    changed(owner);
 }
 
 /// Saves a changed guide configuration and refreshes the library metadata.

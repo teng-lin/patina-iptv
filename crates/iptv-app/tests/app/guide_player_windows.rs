@@ -61,6 +61,16 @@ fn enter_popup_pip(app: &mut crate::Headless, session: u64) {
 #[test]
 fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback() {
     let Some(home) = isolated!() else { return };
+    let _ = env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Off)
+        .filter_module(
+            "iptv_runtime::recordings::shared::source_preparation",
+            log::LevelFilter::Debug,
+        )
+        .filter_module("iptv_app::source_publication", log::LevelFilter::Debug)
+        .format_timestamp_millis()
+        .is_test(true)
+        .try_init();
     let root = home.data_dir();
     std::fs::create_dir_all(&root).unwrap();
     let mut settings = iptv_settings::Settings::new();
@@ -78,7 +88,11 @@ fn guide_context_menu_opens_auxiliary_players_and_browsing_keeps_main_playback()
             }),
         })
         .unwrap();
-    let parsed = iptv_providers::m3u::parse_m3u(crate::personalization::M3U);
+    // A loopback 404 drives the shared-input probe to its normal fallback
+    // without DNS. The headless host below acknowledges the published loads.
+    let server = crate::support::Server::start(&[]);
+    let playlist = crate::personalization::M3U.replace("http://example.test/", &server.url("/"));
+    let parsed = iptv_providers::m3u::parse_m3u(&playlist);
     store
         .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
         .unwrap();

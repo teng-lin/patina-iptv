@@ -18,6 +18,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("content_image.rs", "PERMITS"),                // Artwork concurrency limit.
     ("content_image.rs", "CLIENT"),                 // Artwork transport cache.
     ("host/native/credential_key.rs", "TEST_KEY"),  // Synthetic test key injection.
+    ("host/updates/android.rs", "HOST"),            // Direct APK installer JNI class handle.
     ("host/native/external_player.rs", "HOST"),     // Android chooser JNI class handle.
     ("host/native/external_player.rs", "PLAYBACK"), // External playback outlives the foreground activity.
     ("host/native/external_player.rs", "TEST_HANDLER"), // test-support-only handler probe override.
@@ -65,6 +66,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("clock.rs", "SHOWN"),                                     // Visible guide clock origin.
     ("video.rs", "OPENS"),   // Native player open instrumentation.
     ("video.rs", "SOURCED"), // Native player source projection.
+    // Synthetic receiver for headless Cast journeys.
+    ("host/native.rs", "TEST_CAST"),
 ];
 
 /// Platform `cfg` outside `src/host/`, the host glue: what is still to

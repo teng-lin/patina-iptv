@@ -472,7 +472,6 @@ fn open(ui: Ui, item: RailItem) {
         RailItem::Movies => crate::vod_view::open(ui, iptv_core::vod::Kind::Movie),
         RailItem::Shows => crate::vod_view::open(ui, iptv_core::vod::Kind::Series),
         RailItem::Recordings => crate::recordings_view::open(ui),
-        RailItem::Playlists => crate::playlists_view::open(ui),
         RailItem::Settings => crate::settings_view::open(ui),
         other => log::info!("iptv rail: {other:?} not implemented yet"),
     }
@@ -505,24 +504,31 @@ fn toggle_playlist(entry: usize) -> bool {
     }
 }
 
-pub fn browser_entry_name(entry: usize) -> String {
-    let schedule = crate::runtime_owner::schedule();
-    let name = entry_name(entry, &*schedule);
-    if let Entry::Group(g) = Entry::at(entry) {
-        if schedule.group_is_playlist(g) {
-            return format!(
-                "{}  {}",
-                if schedule.group_is_collapsed(g) {
-                    "▸"
-                } else {
-                    "▾"
-                },
-                name
-            );
+/// Expansion state of a playlist heading in a combined guide.
+pub(crate) fn playlist_expanded(entry: usize, schedule: &dyn Schedule) -> Option<bool> {
+    match Entry::at(entry) {
+        Entry::Group(group) if schedule.group_is_playlist(group) => {
+            Some(!schedule.group_is_collapsed(group))
         }
-        if schedule.group_depth(g) > 0 {
-            return format!("    {name}");
-        }
+        _ => None,
+    }
+}
+
+/// The disclosure triangle of a playlist heading: ▶ folded, ▼ open.
+pub(crate) fn playlist_arrow(expanded: Option<bool>) -> &'static str {
+    match expanded {
+        Some(false) => "▶",
+        Some(true) => "▼",
+        None => "",
+    }
+}
+
+pub(crate) fn browser_entry_name(entry: usize, schedule: &dyn Schedule) -> String {
+    let name = entry_name(entry, schedule);
+    if let Entry::Group(group) = Entry::at(entry)
+        && schedule.group_depth(group) > 0
+    {
+        return format!("    {name}");
     }
     name
 }

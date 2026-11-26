@@ -108,18 +108,14 @@ fn inspect_offscreen_source_and_unmatched_samples_without_changing_saved_choices
         ..EngineConfig::new(Root::of::<iptv_app::App>())
     });
     t.wait("text:/Synthetic Viewer/", 10);
-    t.app.open_guide_groups().unwrap();
-    t.key("left");
-    t.key("left");
-    t.press("text:Playlists >> nth=0");
-    t.press("text:Synthetic viewer");
+    let opened = t.app.open_playlist_actions("Synthetic viewer");
+    t.ok("Synthetic viewer's actions", opened);
     t.press("text:Show this playlist");
+    let closed = t.app.close_settings();
+    t.ok("settings closed", closed);
     t.wait("text:Synthetic Viewer", 10);
-    t.app.open_guide_groups().unwrap();
-    t.key("left");
-    t.key("left");
-    t.press("text:Playlists >> nth=0");
-    t.press("text:Synthetic inspection");
+    let opened = t.app.open_playlist_actions("Synthetic inspection");
+    t.ok("Synthetic inspection's actions", opened);
     t.press("text:Guide data");
     t.wait("text:Guide data · Synthetic inspection", 5);
     t.press("text:Update the guide now");

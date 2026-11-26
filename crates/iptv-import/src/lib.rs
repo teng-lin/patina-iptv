@@ -122,7 +122,8 @@ async fn import_source_impl<'a, F: Fetch, P: ProgressSink>(
     let allow_private_fixture = false;
     #[cfg(debug_assertions)]
     let allow_private_fixture = options.allow_private_fixture;
-    if !allow_private_fixture {
+    // M3U validates each row during import, where the response origin is available.
+    if !allow_private_fixture && !matches!(config, SourceConfig::M3u(_)) {
         for stream in catalog
             .channels
             .iter()

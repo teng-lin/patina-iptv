@@ -18,18 +18,21 @@ use crate::input::dismiss_keyboard;
 
 mod editors;
 pub(crate) mod remote_keys;
+pub(crate) mod updates;
 mod view;
 mod words;
 
+pub(crate) use view::focused_playlist;
 pub use view::layer;
 pub(crate) use view::notice_layer;
+pub(crate) use words::choice as choice_label;
 
 use std::cell::Cell;
 use std::time::Duration;
 
 use iptv_nav::Action;
 use iptv_presentation::settings::screen::{
-    Ctx, Editor, Effect, Key, Page, Pane, Part, Row, Screen, Status,
+    Ctx, Editor, Effect, Key, Page, Pane, Part, PlaylistRow, Row, RowId, Screen, Status,
 };
 use iptv_settings::schema::ValueType;
 use iptv_settings::{Section, Settings, Value};
@@ -54,11 +57,21 @@ pub static PAGES: &[Page] = &[
             Part::Section(Section::History),
         ],
     },
-    // The playlists screen, which holds each playlist's own settings,
-    // and the User-Agent its requests send unless the playlist names one.
+    // Every stored playlist with its check box (shown or hidden; Menu
+    // opens its own actions), then adding, refreshing and ordering them.
     Page {
         key: "playlists",
-        parts: &[Part::Keys(&["playlists.manage", "general.user_agent"])],
+        parts: &[
+            Part::Playlists,
+            Part::Offered(&[
+                "playlists.add",
+                "playlists.update_all",
+                "playlists.sort",
+                "playlists.reorder",
+                "playlists.show_all",
+                "playlists.manage",
+            ]),
+        ],
     },
     Page {
         key: "epg",
@@ -107,7 +120,11 @@ pub static PAGES: &[Page] = &[
     },
     Page {
         key: "about",
-        parts: &[Part::Keys(&["general.about", "about.privacy_policy"])],
+        parts: &[
+            Part::Keys(&["general.about"]),
+            Part::Offered(&["general.check_updates"]),
+            Part::Keys(&["about.privacy_policy"]),
+        ],
     },
 ];
 
@@ -154,8 +171,10 @@ pub fn open(ui: Ui) {
         // A document picker may have been installed or removed since the
         // host last said which resolve (the backup rows follow).
         crate::backup::probe_pickers();
-        let screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
+        let mut screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
+        screen.set_playlists(playlist_rows());
         ui.settings_screen.set(Some(screen));
+        log::info!("iptv settings: open");
     }
 }
 
@@ -168,6 +187,9 @@ pub fn close(ui: Ui) {
         LAST.with(|l| l.set(page));
     }
     let typing = editing_text(ui);
+    if ui.settings_screen.with_untracked(Option::is_some) {
+        log::info!("iptv settings: close");
+    }
     ui.settings_screen.set(None);
     if typing {
         dismiss_keyboard();
@@ -196,8 +218,58 @@ fn screen_key(action: Action) -> Option<Key> {
         Action::Back => Key::Back,
         Action::PageUp | Action::ChannelUp => Key::PageUp,
         Action::PageDown | Action::ChannelDown => Key::PageDown,
+        Action::ShowMenu => Key::Menu,
         _ => return None,
     })
+}
+
+/// The stored playlists, as the Playlists page lists them.
+fn playlist_rows() -> Vec<PlaylistRow> {
+    crate::runtime()
+        .playlists()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| PlaylistRow {
+            id: p.id.0,
+            enabled: p.policy.enabled,
+        })
+        .collect()
+}
+
+/// The stored playlists changed: the Playlists page follows.
+pub(crate) fn playlists_changed(ui: Ui) {
+    if ui.settings_screen.with_untracked(Option::is_some) {
+        let rows = playlist_rows();
+        update(ui, move |screen, ctx| {
+            screen.set_playlists(rows);
+            screen.refresh(ctx);
+            Effect::None
+        });
+    }
+}
+
+/// Changes playlist visibility from a checkbox after the settings PIN check.
+pub(crate) fn set_playlist_visibility(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
+    settings_guarded(ui, move || show_playlist(ui, id, show));
+}
+
+fn show_playlist(ui: Ui, id: crate::runtime::model::SourceId, show: bool) {
+    crate::tasks::spawn_in_app(async move {
+        if let Err(e) =
+            crate::data::update_policy(&crate::runtime(), id, move |policy| policy.enabled = show)
+                .await
+        {
+            log::warn!("iptv settings: the store refused a playlist's check box: {e}");
+            if e.settings_locked() {
+                notify_setting_error(crate::settings::SaveError::ParentalLocked);
+            } else {
+                notify(tr(
+                    "The change could not be saved. Reopen the list and try again.",
+                ));
+            }
+        }
+        playlists_changed(ui);
+    });
 }
 
 /// A remote action while the screen is shown. While text is typed, the
@@ -246,17 +318,45 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                 && (!crate::runtime_owner::runtime().parental_has_pin()
                     || !crate::runtime_owner::runtime().parental_settings_allowed())
             {
-                crate::parental_view::protected_settings(ui, move || {
-                    if let Err(e) = crate::settings::set(key, value) {
-                        notify_setting_error(e);
-                    }
-                });
-            } else if let Err(e) = crate::settings::set(key, value) {
-                notify_setting_error(e);
+                crate::parental_view::protected_settings(ui, move || store(key, value));
+            } else {
+                store(key, value);
             }
         }
+        // Playlist rows act on the settings as the commands do: behind the
+        // PIN while the settings are protected and locked.
+        Effect::ShowPlaylist(id, show) => {
+            set_playlist_visibility(ui, crate::runtime::model::SourceId(id), show);
+        }
+        Effect::PlaylistActions(id) => settings_guarded(ui, move || {
+            crate::menu_view::open_playlist_options(ui, crate::runtime::model::SourceId(id));
+        }),
         Effect::Run(key) => run(ui, key),
         Effect::Close => close(ui),
+    }
+}
+
+fn store(key: &'static str, value: Value) {
+    if let Err(error) = save_setting(key, value) {
+        notify_setting_error(error);
+    }
+}
+
+/// Stores the setting through the runtime.
+pub(crate) fn save_setting(key: &str, value: Value) -> Result<(), crate::settings::SaveError> {
+    crate::settings::set(key, value)
+}
+
+/// Runs `then` now, or after the PIN while the settings are protected
+/// and locked (as [`run`] does for commands).
+pub(crate) fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
+    if crate::settings::choice(iptv_settings::keys::PARENTAL_REQUIRE_PIN_FOR)
+        == "blocked_content_and_settings"
+        && !crate::runtime().parental_settings_allowed()
+    {
+        crate::parental_view::protected_settings(ui, then);
+    } else {
+        then();
     }
 }
 
@@ -310,6 +410,7 @@ fn run(ui: Ui, key: &'static str) {
         }
         "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
+        "general.check_updates" => updates::run(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
             crate::tasks::spawn_in_app(async move {
@@ -353,7 +454,27 @@ fn run(ui: Ui, key: &'static str) {
         }
         "remote.customize" => crate::remote_editor::open(ui),
         // The playlists screen, over the settings screen.
-        "playlists.manage" => crate::playlists_view::open(ui),
+        "playlists.manage" => crate::playlists_view::choose_for_management(ui),
+        "playlists.show_all" => {
+            close(ui);
+            crate::data::switch_all(&crate::runtime());
+        }
+        // As the playlists screen's Add: behind the PIN once one is set.
+        "playlists.add" => {
+            if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed()
+            {
+                crate::parental_view::request(
+                    ui,
+                    iptv_core::parental::Target::settings(),
+                    move || crate::wizard_view::open_add(ui),
+                );
+            } else {
+                crate::wizard_view::open_add(ui);
+            }
+        }
+        "playlists.update_all" => crate::data::refresh_all(&crate::runtime()),
+        // The playlists in their manual order, the first one focused.
+        "playlists.reorder" => crate::organization_view::open_playlist_reorder(ui, None),
         other => log::info!("iptv settings: {other} is not implemented yet"),
     }
 }
@@ -375,7 +496,7 @@ fn note(settings: &Settings, row: &Row) -> String {
     let restart = match row {
         Row::Setting(s) => s.flags.requires_restart,
         Row::Command(c) => c.requires_restart,
-        Row::Heading { .. } => false,
+        Row::Heading { .. } | Row::Playlist(_) => false,
     };
     match (status(settings, row), row) {
         (Status::NotYet, _) => tr("Not available yet").to_owned(),
@@ -597,7 +718,7 @@ mod tests {
         assert_eq!(screen_key(Action::Select), Some(Key::Ok));
         assert_eq!(screen_key(Action::ChannelDown), Some(Key::PageDown));
         assert_eq!(screen_key(Action::Digit(3)), None);
-        assert_eq!(screen_key(Action::ShowMenu), None);
+        assert_eq!(screen_key(Action::ShowMenu), Some(Key::Menu));
     }
 
     #[test]

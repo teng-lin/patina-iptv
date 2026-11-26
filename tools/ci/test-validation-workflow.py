@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """The tier workflows keep required checks, exact-SHA releases and native coverage."""
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -435,6 +437,60 @@ class FuzzCommand(unittest.TestCase):
 
 
 class PublicArtifacts(unittest.TestCase):
+    def test_record_uses_tagged_candidate_after_verifying_publisher_provenance(self):
+        verifier = module("verify-public-release")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            candidate, publisher = "a" * 40, "b" * 40
+            repo, tag, ref = "synthetic/repo", "v1.0.0", "refs/heads/master"
+            self.assertEqual(verifier.release_commit(directory, repo, tag, candidate, f"refs/tags/{tag}"), candidate)
+            (directory / "Patina-1.0.0-android-tablet-tv.apk").write_bytes(b"synthetic")
+            manifest = {"repository": repo, "tag": tag, "sha": candidate, "publisher": {"ref": ref, "sha": publisher}}
+            (directory / "candidate-manifest.json").write_text(json.dumps(manifest))
+            verifier.release.write_checksums(directory)
+            runner = Mock()
+            verifier.verify(directory, repo, publisher, ref, runner)
+            for call in runner.call_args_list:
+                self.assertIn(publisher, call.args[0])
+            commit = verifier.release_commit(directory, repo, tag, publisher, ref)
+            record = verifier.package_record(directory, repo, tag, commit, directory)
+            self.assertEqual(record["commit"], candidate)
+            with self.assertRaisesRegex(ValueError, "promotion manifest"):
+                verifier.release_commit(directory, repo, tag, candidate, ref)
+
+    def test_update_record_only_lists_available_viewer_packages_for_the_exact_version(self):
+        verifier = module("verify-public-release")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dist = root / "packages"
+            dist.mkdir()
+            for name in ("Patina-9.8.7-android-tablet-tv.apk", "Patina-9.8.7-android-tablet-tv.aab",
+                         "Patina-9.8.6-macos-arm64.dmg", "Patina-9.8.7-sbom.cdx.json"):
+                (dist / name).write_bytes(b"synthetic")
+            signing = root / "signing"
+            record = verifier.package_record(dist, "synthetic/repo", "v9.8.7", "a" * 40, signing)
+            self.assertEqual(len(record["packages"]), 1)
+            apk, = record["packages"]
+            self.assertEqual(apk["versionCode"], 10_008_007)
+            self.assertEqual(apk["architectures"], ["arm64-v8a", "armeabi-v7a"])
+            self.assertEqual(apk["url"], "https://github.com/synthetic/repo/releases/download/v9.8.7/Patina-9.8.7-android-tablet-tv.apk")
+            self.assertEqual(apk["length"], len(b"synthetic"))
+            self.assertEqual(apk["sha256"], hashlib.sha256(b"synthetic").hexdigest())
+            for suffix in ("windows-x86_64-setup.exe", "macos-arm64.dmg", "linux-x86_64.AppImage",
+                           "linux-x86_64.deb", "linux-x86_64.rpm", "linux-x86_64.pkg.tar.zst"):
+                (dist / f"Patina-9.8.7-{suffix}").write_bytes(b"synthetic desktop")
+            with self.assertRaisesRegex(SystemExit, "no signing record"):
+                verifier.package_record(dist, "synthetic/repo", "v9.8.7", "a" * 40, signing)
+            verifier.release.record_signing("windows", "unsigned", signing)
+            verifier.release.record_signing("macos", "signed", signing)
+            record = verifier.package_record(dist, "synthetic/repo", "v9.8.7", "a" * 40, signing)
+            by_kind = {p["format"]: p for p in record["packages"]}
+            self.assertEqual(set(by_kind), {"apk", "exe", "dmg", "appimage", "deb", "rpm", "pacman"})
+            self.assertEqual(by_kind["exe"]["signing"], "preview")
+            self.assertEqual(by_kind["dmg"]["signing"], "signed")
+            with self.assertRaisesRegex(ValueError, "no supported"):
+                verifier.package_record(dist, "synthetic/repo", "v9.8.8", "a" * 40, signing)
+
     def test_public_verification_rejects_modified_or_extra_assets_before_attestation(self):
         verifier = module("verify-public-release")
         with tempfile.TemporaryDirectory() as temporary:

@@ -533,6 +533,7 @@ mod warning_tests {
             let response = self.response(request);
             ready(Ok(crate::StreamingResponse {
                 status: response.status,
+                same_request_origin: false,
                 content_length: Some(response.body.len() as u64),
                 body: crate::MemoryBody::new(&response.body, 83),
             }))

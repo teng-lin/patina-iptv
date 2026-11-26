@@ -1,0 +1,5 @@
+<resources>
+    <string name="update_recording_active">Termina la registrazione prima di installare l’aggiornamento.</string>
+    <string name="update_install_unavailable">Android non ha potuto aprire il programma di installazione. Riprova dalle impostazioni.</string>
+    <string name="update_invalid_apk">Questo APK non può aggiornare la copia installata di Patina.</string>
+</resources>

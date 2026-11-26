@@ -7,11 +7,33 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-11-26
+
 ### Changed
 
-- Returning to the guide when a channel or multiview session ends follows the
-  selected guide layout. Opening Playlists or Organization from the player
-  also uses the selected layout.
+- Open **Settings → Playlists** to choose which playlists appear in the guide.
+  Arrange them yourself or sort them by name. You can also rename or reorder
+  playlists from their headings in the guide.
+- When a channel or multiview session ends, Patina returns to the guide in
+  your chosen layout. Opening Playlists or Organization from the player also
+  uses that layout.
+
+### Fixed
+
+- Open quick channel actions in the TV Guide by holding OK, pressing Menu,
+  touching and holding, or right-clicking. Press Menu in the player's channel
+  list for the same quick actions. Choose **More options** for the full menu.
+- Holding a favorite shortcut adds or removes the favorite once. This also
+  works with custom remote and keyboard shortcuts.
+- **Play from the beginning** uses the external player you chose for that
+  group, just like selecting the program from the guide.
+- The play bar, back arrow, and other control icons display correctly on Windows.
+- If you run an M3U playlist server on the same device as Patina, you can play
+  streams served from the playlist's own address and port.
+- Screen readers announce the full names of Settings tabs when there is only
+  room to show shortened labels.
+- On Samsung TVs, canceling a new playlist while it's saving also cancels the
+  guide address you entered with it.
 
 ## [0.1.9] - 2026-11-25
 
@@ -548,7 +570,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.10...HEAD
+[0.1.10]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/teng-lin/patina-iptv/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/teng-lin/patina-iptv/compare/v0.1.6...v0.1.7

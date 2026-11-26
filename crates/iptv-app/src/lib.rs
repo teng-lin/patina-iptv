@@ -36,6 +36,7 @@ pub mod guide {
 mod guide_window_walkthrough;
 pub mod theme;
 
+mod archive_playback;
 mod backup;
 /// The document pickers a device has, and the ones headless apps get.
 #[cfg(feature = "test-support")]
@@ -43,6 +44,7 @@ pub use backup::{Pickers, set_pickers_for_test};
 mod browse_playback;
 mod capabilities;
 mod capture_limits;
+mod casting;
 mod channels_view;
 mod chooser;
 mod clock;
@@ -260,6 +262,9 @@ pub struct Ui {
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
+    pub(crate) cast_busy: Signal<bool>,
+    pub(crate) cast_stop_pending: Signal<Option<u64>>,
+    pub(crate) cast_remote: Signal<bool>,
     pub(crate) external_request: Signal<u64>,
     pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
     pub(crate) external_playback: Signal<Option<external_player::Active>>,
@@ -347,6 +352,7 @@ pub struct Ui {
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
+    update_dialog_open: Signal<bool>,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
@@ -398,6 +404,9 @@ impl Ui {
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
+            cast_busy: signal(false),
+            cast_stop_pending: signal(None),
+            cast_remote: signal(false),
             external_request: signal(0),
             external_handoff_target: signal(None),
             external_playback: signal(None),
@@ -478,6 +487,7 @@ impl Ui {
             guide_assign: signal(None),
             parental: signal(None),
             settings_screen: signal(None),
+            update_dialog_open: signal(false),
             player,
             player_surface: 0,
             media: media::Media::new(),
@@ -844,7 +854,13 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
                         .flex_1()
                         .flex_row()
                         .child(rail::column(ui))
-                        .child(panels::group_column(ui, groups))
+                        .child(
+                            when(
+                                move || organization_view::group_column_order_open(ui),
+                                move || view().w(move || px(panels::groups_width(ui))),
+                            )
+                            .otherwise(move || panels::group_column(ui, groups)),
+                        )
                         .child(grid::guide(ui, rows)),
                 ),
         )
@@ -874,6 +890,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(play_bar::layer(ui, go_back))
         .child(fav_editor::layer(ui))
         .child(settings_view::layer(ui))
+        .child(menu_view::playlist_layer(ui))
         .child(vod_view::layer(ui))
         .child(recordings_view::layer(ui))
         .child(guide_assign_view::layer(ui))
@@ -1152,8 +1169,12 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 chooser::close(ui);
                 true
             }
-            _ if matches!(top, Some(Overlay::Menu | Overlay::Description)) => {
-                menu_view::close(ui);
+            _ if matches!(
+                top,
+                Some(Overlay::Menu | Overlay::PlaylistMenu | Overlay::Description)
+            ) =>
+            {
+                menu_view::back(ui);
                 true
             }
             _ if top == Some(Overlay::Search) => {

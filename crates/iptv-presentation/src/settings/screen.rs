@@ -23,6 +23,11 @@
 //! Right/Up more, Page keys ten steps, OK keeps, Back cancels), text opens
 //! a text editor (OK keeps a valid text, Back cancels), a command runs
 //! (after a confirmation when the catalog asks for one).
+//!
+//! Playlists ([`Part::Playlists`]): the stored playlists, each with a
+//! check box that shows or hides it ([`Screen::set_playlists`]). OK
+//! flips the box; Menu (a long press, a right-click) asks for the
+//! playlist's own actions ([`Effect::PlaylistActions`]).
 
 pub use iptv_settings::validate::grid;
 
@@ -76,9 +81,30 @@ pub enum Part {
     /// Settings or commands by key, in this order (shown whatever their
     /// [`Offer`]).
     Keys(&'static [&'static str]),
+    /// Settings or commands by key, in this order, left out where the app
+    /// does not offer them ([`Offer::Hidden`]).
+    Offered(&'static [&'static str]),
     /// Every setting and command the app offers as advanced
     /// ([`Offer::Advanced`]), under its section's name, in catalog order.
     Advanced,
+    /// The stored playlists ([`Screen::set_playlists`]), one row each.
+    Playlists,
+}
+
+/// A stored playlist, as its settings row shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlaylistRow {
+    pub id: i64,
+    /// Shown in lists (its check box).
+    pub enabled: bool,
+}
+
+/// What a row is, for the focus: a setting or command by key, or a
+/// playlist by id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowId {
+    Key(&'static str),
+    Playlist(i64),
 }
 
 /// One entry of the pages list.
@@ -99,15 +125,26 @@ pub enum Row {
     },
     Setting(&'static Setting),
     Command(&'static Command),
+    Playlist(PlaylistRow),
 }
 
 impl Row {
     /// The key of a setting or command row.
     pub fn key(&self) -> Option<&'static str> {
         match self {
-            Row::Heading { .. } => None,
+            Row::Heading { .. } | Row::Playlist(_) => None,
             Row::Setting(s) => Some(s.key),
             Row::Command(c) => Some(c.key),
+        }
+    }
+
+    /// What the row is, for the focus; `None` for a heading (never
+    /// focused).
+    pub fn id(&self) -> Option<RowId> {
+        match self {
+            Row::Heading { .. } => None,
+            Row::Playlist(p) => Some(RowId::Playlist(p.id)),
+            _ => self.key().map(RowId::Key),
         }
     }
 }
@@ -120,6 +157,9 @@ pub struct Ctx<'a> {
 
 impl Ctx<'_> {
     pub fn status(&self, row: &Row) -> Status {
+        if matches!(row, Row::Playlist(_)) {
+            return Status::Active;
+        }
         let Some(key) = row.key() else {
             return Status::ReadOnly;
         };
@@ -160,16 +200,42 @@ impl Ctx<'_> {
     }
 }
 
-/// The rows of `page`. On a page of several sections, rows without a
+/// The rows of `page`, without its playlists ([`Part::Playlists`]: see
+/// [`Screen::rows`]). On a page of several sections, rows without a
 /// subsection get their section's name as heading.
 pub fn rows(page: &Page, ctx: &Ctx) -> Vec<Row> {
-    let several = page.parts.len() > 1;
+    rows_with(page, ctx, &[])
+}
+
+fn rows_with(page: &Page, ctx: &Ctx, playlists: &[PlaylistRow]) -> Vec<Row> {
+    let several = page
+        .parts
+        .iter()
+        .filter(|p| !matches!(p, Part::Playlists | Part::Keys(_) | Part::Offered(_)))
+        .count()
+        > 1;
     let tree = catalog::tree(false);
     let mut rows = Vec::new();
     for part in page.parts {
         let section = match part {
             Part::Advanced => {
                 rows.extend(advanced_rows(ctx));
+                continue;
+            }
+            Part::Playlists => {
+                rows.extend(playlists.iter().copied().map(Row::Playlist));
+                continue;
+            }
+            Part::Offered(keys) => {
+                rows.extend(
+                    keys.iter()
+                        .filter(|k| (ctx.offer)(k) != Offer::Hidden)
+                        .filter_map(|k| {
+                            catalog::setting(k)
+                                .map(Row::Setting)
+                                .or_else(|| catalog::command(k).map(Row::Command))
+                        }),
+                );
                 continue;
             }
             Part::Keys(keys) => {
@@ -333,6 +399,8 @@ pub enum Key {
     Back,
     PageUp,
     PageDown,
+    /// Menu (a long press, a right-click): a playlist row's actions.
+    Menu,
 }
 
 /// What the app should do after a key or tap.
@@ -346,6 +414,10 @@ pub enum Effect {
     },
     /// Run the command `key`.
     Run(&'static str),
+    /// Show (`true`) or hide playlist `id` (its check box).
+    ShowPlaylist(i64, bool),
+    /// Open playlist `id`'s own actions.
+    PlaylistActions(i64),
     Close,
 }
 
@@ -357,8 +429,9 @@ pub struct Screen {
     pages: Vec<Page>,
     page: usize,
     pane: Pane,
-    focus: Option<&'static str>,
+    focus: Option<RowId>,
     editor: Option<Editor>,
+    playlists: Vec<PlaylistRow>,
 }
 
 fn moved(at: usize, by: isize, len: usize) -> usize {
@@ -377,6 +450,7 @@ impl Screen {
             pane: Pane::Pages,
             focus: None,
             editor: None,
+            playlists: Vec::new(),
         }
     }
 
@@ -430,11 +504,15 @@ impl Screen {
     /// [`Screen::refresh`]).
     fn keep_focus(&mut self, ctx: &Ctx) {
         let rows = self.rows(ctx);
-        let there = |key: &str| rows.iter().any(|r| r.key() == Some(key));
-        if self.editor.as_ref().is_some_and(|e| !there(e.key())) {
+        let there = |id: RowId| rows.iter().any(|r| r.id() == Some(id));
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(|e| !there(RowId::Key(e.key())))
+        {
             self.editor = None;
         }
-        if self.pane == Pane::Rows && self.focus.is_some_and(|k| !there(k)) {
+        if self.pane == Pane::Rows && self.focus.is_none_or(|k| !there(k)) {
             self.focus = None;
             self.enter_rows(ctx);
             if self.focus.is_none() {
@@ -457,21 +535,45 @@ impl Screen {
 
     /// The focused row's key (meaningful in [`Pane::Rows`]).
     pub fn focus(&self) -> Option<&'static str> {
+        match self.focus? {
+            RowId::Key(key) => Some(key),
+            RowId::Playlist(_) => None,
+        }
+    }
+
+    /// The focused row (meaningful in [`Pane::Rows`]).
+    pub fn focus_id(&self) -> Option<RowId> {
         self.focus
+    }
+
+    /// The stored playlists [`Part::Playlists`] lists, in their order. The
+    /// focus stays on its playlist while it is there, else moves to the
+    /// one that took its place.
+    pub fn set_playlists(&mut self, playlists: Vec<PlaylistRow>) {
+        if let Some(RowId::Playlist(id)) = self.focus
+            && !playlists.iter().any(|p| p.id == id)
+        {
+            let at = self.playlists.iter().position(|p| p.id == id);
+            self.focus = at
+                .and_then(|at| playlists.get(at).or(playlists.last()))
+                .map(|p| RowId::Playlist(p.id));
+        }
+        self.playlists = playlists;
     }
 
     pub fn editor(&self) -> Option<&Editor> {
         self.editor.as_ref()
     }
 
+    /// The chosen page's rows, its playlists included.
     pub fn rows(&self, ctx: &Ctx) -> Vec<Row> {
-        rows(self.page(), ctx)
+        rows_with(self.page(), ctx, &self.playlists)
     }
 
     /// The row with the focus, if the rows pane has it.
     pub fn focused_row(&self, ctx: &Ctx) -> Option<Row> {
-        let key = self.focus.filter(|_| self.pane == Pane::Rows)?;
-        self.rows(ctx).into_iter().find(|r| r.key() == Some(key))
+        let id = self.focus.filter(|_| self.pane == Pane::Rows)?;
+        self.rows(ctx).into_iter().find(|r| r.id() == Some(id))
     }
 
     pub fn key(&mut self, key: Key, ctx: &Ctx) -> Effect {
@@ -495,7 +597,7 @@ impl Screen {
                 return Effect::None;
             }
             Key::Back => return Effect::Close,
-            Key::Left => self.page,
+            Key::Left | Key::Menu => self.page,
         };
         if to != self.page {
             self.page = to;
@@ -508,15 +610,15 @@ impl Screen {
     /// the app acts on, else the first row.
     fn enter_rows(&mut self, ctx: &Ctx) {
         let rows = self.rows(ctx);
-        let keys: Vec<&'static str> = rows.iter().filter_map(Row::key).collect();
-        if keys.is_empty() {
+        let ids: Vec<RowId> = rows.iter().filter_map(Row::id).collect();
+        if ids.is_empty() {
             return;
         }
-        if self.focus.is_none_or(|k| !keys.contains(&k)) {
+        if self.focus.is_none_or(|k| !ids.contains(&k)) {
             let active = rows
                 .iter()
-                .find(|r| r.key().is_some() && ctx.status(r) == Status::Active);
-            self.focus = active.and_then(Row::key).or(Some(keys[0]));
+                .find(|r| r.id().is_some() && ctx.status(r) == Status::Active);
+            self.focus = active.and_then(Row::id).or(Some(ids[0]));
         }
         self.pane = Pane::Rows;
     }
@@ -526,9 +628,9 @@ impl Screen {
         let rows: Vec<Row> = self
             .rows(ctx)
             .into_iter()
-            .filter(|r| r.key().is_some())
+            .filter(|r| r.id().is_some())
             .collect();
-        let keys: Vec<&'static str> = rows.iter().filter_map(Row::key).collect();
+        let keys: Vec<RowId> = rows.iter().filter_map(Row::id).collect();
         if keys.is_empty() {
             self.pane = Pane::Pages;
             return Effect::None;
@@ -538,7 +640,7 @@ impl Screen {
             Some(at) => at,
             // Nothing is highlighted: OK shows the focus on the first row
             // rather than acting on a row nobody saw focused.
-            None if key == Key::Ok => {
+            None if matches!(key, Key::Ok | Key::Menu) => {
                 self.focus = Some(keys[0]);
                 return Effect::None;
             }
@@ -553,14 +655,36 @@ impl Screen {
             Key::Left | Key::Back => self.pane = Pane::Pages,
             Key::Right => {}
             Key::Ok => return self.activate(rows[at], ctx),
+            Key::Menu => return self.menu(rows[at]),
         }
         Effect::None
+    }
+
+    /// Menu on `row`: a playlist's own actions.
+    fn menu(&mut self, row: Row) -> Effect {
+        match row {
+            Row::Playlist(p) => Effect::PlaylistActions(p.id),
+            _ => Effect::None,
+        }
+    }
+
+    /// A long press or right-click on a row: it takes the focus and acts
+    /// as Menu.
+    pub fn hold_row(&mut self, id: RowId, ctx: &Ctx) -> Effect {
+        self.editor = None;
+        let Some(row) = self.rows(ctx).into_iter().find(|r| r.id() == Some(id)) else {
+            return Effect::None;
+        };
+        self.pane = Pane::Rows;
+        self.focus = Some(id);
+        self.menu(row)
     }
 
     /// OK (or a tap) on `row`.
     fn activate(&mut self, row: Row, ctx: &Ctx) -> Effect {
         let active = ctx.status(&row) == Status::Active;
         let s = match row {
+            Row::Playlist(p) => return Effect::ShowPlaylist(p.id, !p.enabled),
             Row::Setting(s) if active => s,
             Row::Command(c) if active && c.confirm => {
                 self.editor = Some(Editor::Confirm { command: c });
@@ -664,12 +788,27 @@ impl Screen {
 
     /// A tap on a row: it takes the focus and acts as OK.
     pub fn tap_row(&mut self, key: &str, ctx: &Ctx) -> Effect {
+        let Some(id) = self
+            .rows(ctx)
+            .iter()
+            .filter_map(Row::key)
+            .find(|k| *k == key)
+            .map(RowId::Key)
+        else {
+            self.editor = None;
+            return Effect::None;
+        };
+        self.tap(id, ctx)
+    }
+
+    /// A tap on the row `id`: it takes the focus and acts as OK.
+    pub fn tap(&mut self, id: RowId, ctx: &Ctx) -> Effect {
         self.editor = None;
-        let Some(row) = self.rows(ctx).into_iter().find(|r| r.key() == Some(key)) else {
+        let Some(row) = self.rows(ctx).into_iter().find(|r| r.id() == Some(id)) else {
             return Effect::None;
         };
         self.pane = Pane::Rows;
-        self.focus = row.key();
+        self.focus = Some(id);
         self.activate(row, ctx)
     }
 

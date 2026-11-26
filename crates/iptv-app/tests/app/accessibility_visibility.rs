@@ -467,7 +467,7 @@ fn modal_back_restores_channel_identity_after_reordering_and_recovery_can_cancel
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
     step(app.press_key("down"));
-    personalization::menu(app, "Reorder channels");
+    personalization::menu(app, "Reorder channel");
     step(app.wait_for("id:guide-reorder-handle"));
     exposure.shown(app, "guide-ui", true);
     exposure.shown(app, "guide-program", false);
@@ -718,22 +718,26 @@ fn modal_screens_and_editors_hide_only_their_underlay_and_restore_it_on_back() {
     step(app.back());
     step(app.back());
     exposure.shown(app, "guide-ui", true);
-    step(app.press("label:Playlists"));
-    step(app.wait_for("id:playlists-screen"));
+    // Settings → Playlists: a playlist's actions hide the page under
+    // them; the wizard over the settings hides their whole layer.
+    step(app.open_settings_playlists());
     exposure.shown(app, "guide-ui", false);
-    exposure.shown(app, "playlists-list", true);
-    step(app.press("text:Synthetic personalization"));
-    exposure.shown(app, "playlists-list", false);
+    exposure.shown(app, "settings-content", true);
+    step(app.long_press("role:checkbox[/^Synthetic personalization/]"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Hide"));
+    exposure.shown(app, "playlist-menu-panel", true);
+    exposure.shown(app, "settings-content", false);
     step(app.back());
-    exposure.shown(app, "playlists-list", true);
-    step(app.press("id:playlists-screen >> text:+ Add playlist"));
+    step(app.wait_for_gone("id:playlist-menu-panel", std::time::Duration::from_secs(2)));
+    exposure.shown(app, "settings-content", true);
+    step(app.press("id:settings-content >> text:Add a playlist"));
     step(app.wait_for("text:Playlist link"));
-    exposure.shown(app, "playlists-screen", false);
     // Settings alerts are siblings of its screen and can outlive it. A
     // higher opaque screen must hide the whole layer, including an alert.
     exposure.shown(app, "settings-layer", false);
     step(app.back());
-    exposure.shown(app, "playlists-screen", true);
+    exposure.shown(app, "settings-content", true);
+    step(app.back());
     step(app.back());
     exposure.shown(app, "guide-ui", true);
     exposure.shown(app, "settings-layer", true);
@@ -745,7 +749,7 @@ fn a_popup_hides_its_underlay_while_the_pointer_bar_keeps_its_visible_controls()
     let (mut fixture, exposure) = fixture(home);
     let app = &mut fixture.app;
     step(app.press_key("down"));
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     exposure.shown(app, "menu-panel", true);
     exposure.shown(app, "guide-ui", false);
     step(app.press("text:Manage favorites…"));

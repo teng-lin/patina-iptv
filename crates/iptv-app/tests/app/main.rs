@@ -25,7 +25,9 @@ mod support;
 
 mod accessibility_visibility;
 mod architecture;
+mod archive_external;
 mod backup_restore;
+mod casting;
 mod catalog_lint;
 mod cold_start;
 mod cold_start_slow_provider;

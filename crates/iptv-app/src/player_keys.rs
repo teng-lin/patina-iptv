@@ -133,6 +133,11 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> boo
 /// Long Back (or Stop): nothing plays (multiview's tiles neither); back to
 /// the guide.
 pub(crate) fn stop_playback(ui: Ui) {
+    crate::runtime_owner::runtime().next_cast_intent();
+    if ui.cast_remote.get_untracked() {
+        crate::casting::remote(ui, 3);
+        return;
+    }
     crate::external_player::stop(ui);
     crate::interruption::viewer_acted(ui);
     log::info!("iptv player: stopped by the viewer");

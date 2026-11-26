@@ -12,7 +12,7 @@ default = ["native"]
 # What only native hosts have: the iptv-net adapter, thread-based executors
 # and the native-only services (recording, backup files, the credential
 # store, staged probes). Without it the crate builds for wasm32.
-native = ["dep:iptv-net", "dep:getrandom", "tokio/rt", "tokio/rt-multi-thread", "tokio/time"]
+native = ["dep:iptv-net", "dep:getrandom", "tokio/fs", "tokio/io-util", "dep:tough", "dep:url", "dep:tempfile", "dep:futures-util", "tokio/rt", "tokio/rt-multi-thread", "tokio/time"]
 # Synthetic latency controls, absent from production packages.
 test-support = []
 
@@ -37,6 +37,16 @@ pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
 subtle = "2.6"
 zeroize = "1.8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# Update discovery uses TUF only on the native distribution targets.
+[target.'cfg(any(target_os = "android", target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+tough = { version = "0.24", default-features = false, optional = true }
+url = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+futures-util = { version = "0.3", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["fs"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

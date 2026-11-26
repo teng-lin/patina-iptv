@@ -268,6 +268,7 @@ impl Client {
 
                 return Ok(StreamingResponse {
                     status: 200,
+                    same_request_origin: false,
                     content_length: Some(reader.len()),
                     body: Body::Private {
                         reader: Some(reader),
@@ -282,6 +283,7 @@ impl Client {
         let response = self.net.fetch_stream(request).await?;
         Ok(StreamingResponse {
             status: response.status,
+            same_request_origin: response.same_request_origin,
             content_length: response.content_length,
             body: Body::Network(response.body),
         })

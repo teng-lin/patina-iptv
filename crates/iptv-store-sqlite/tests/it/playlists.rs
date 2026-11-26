@@ -43,6 +43,30 @@ fn the_shown_source_is_remembered_while_it_exists() {
     assert_eq!(s.active_source().unwrap(), Some(c));
 }
 
+#[test]
+fn sources_keep_the_order_they_are_given() {
+    let mut s = store();
+    let a = s.add_source(&m3u_source("A")).unwrap();
+    let b = s.add_source(&xtream_source("B")).unwrap();
+    let c = s.add_source(&m3u_source("C")).unwrap();
+    let order = |s: &Store| {
+        s.sources()
+            .unwrap()
+            .iter()
+            .map(|x| x.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(order(&s), [a, b, c]);
+    s.set_source_order(&[c, a, b]).unwrap();
+    assert_eq!(order(&s), [c, a, b]);
+    // Unknown ids are ignored; sources left out follow in their order.
+    s.set_source_order(&[b, SourceId(99)]).unwrap();
+    assert_eq!(order(&s), [b, c, a]);
+    // A new source goes last.
+    let d = s.add_source(&m3u_source("D")).unwrap();
+    assert_eq!(order(&s), [b, c, a, d]);
+}
+
 fn guides() -> Vec<GuideSource> {
     vec![
         GuideSource {

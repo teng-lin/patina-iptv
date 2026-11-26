@@ -15,6 +15,14 @@
       "height": 720
     }
   },
+  "macos": {
+    "infoPlist": {
+      "NSLocalNetworkUsageDescription": "Finds nearby Chromecast devices and streams video to the TV you choose.",
+      "NSBonjourServices": [
+        "_googlecast._tcp"
+      ]
+    }
+  },
   "ios": {
     "infoPlist": {
       "UIDeviceFamily": [
@@ -39,7 +47,7 @@
       }
     }
   },
-  "version": "0.1.9",
+  "version": "0.1.11",
   "schemes": [
     "patina"
   ]

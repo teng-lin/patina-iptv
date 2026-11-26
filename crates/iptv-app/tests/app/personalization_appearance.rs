@@ -4,7 +4,7 @@ use iptv_settings::Settings;
 use personalization::*;
 use std::time::Duration;
 fn settings(app: &mut Headless) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for("text:Manage favorites…"));
     step(app.press("text:Settings >> nth=0"));
     step(app.wait_for("text:Appearance >> nth=0"));
@@ -160,6 +160,32 @@ fn the_about_page_shows_the_privacy_address_before_opening_and_after_browser_fai
     step(app.press("text:Privacy policy"));
     step(app.wait_for(&format!("id:app-notice >> text:{URL}")));
     assert_eq!(app.screen().opened_urls(), [URL, URL]);
+}
+
+#[test]
+fn the_about_update_action_keeps_manual_downloads_viewer_initiated() {
+    use nsh_testing::DialogAnswer;
+    if option_env!("PATINA_UPDATE_FEED").is_some() {
+        return;
+    }
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    settings(app);
+    step(app.press("text:About"));
+    app.answer_dialogs_myself();
+    step(app.press("text:Release notes and downloads"));
+    step(
+        app.wait_until("update dialog", Duration::from_secs(3), |screen| {
+            !screen.dialogs().is_empty()
+        }),
+    );
+    assert!(app.screen().opened_urls().is_empty());
+    step(app.answer_dialog(DialogAnswer::Press("Release notes and downloads".into())));
+    assert_eq!(
+        app.screen().opened_urls(),
+        ["https://github.com/teng-lin/patina-iptv/releases"]
+    );
 }
 
 #[test]

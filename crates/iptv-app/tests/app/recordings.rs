@@ -232,7 +232,7 @@ fn exercise(home: crate::isolated::Home, idiom: Idiom) {
     use iptv_core::recording::Status;
     let (mut app, path, source, _) =
         fixture(&home, idiom, "https://example.test/generated.ts", None);
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.wait_for("text:Manage favorites…"));
     assert!(!app.shows("text:Schedule a recording…"));
     assert!(!app.shows("text:Schedule recording"));
@@ -383,7 +383,7 @@ fn future_program(home: crate::isolated::Home, idiom: Idiom, listing: GuideFixtu
     step(app.back());
     step(app.wait_for_gone(favorite, Duration::from_secs(2)));
     // Nor does its program menu.
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     let details = "id:menu-panel >> text:Details";
     step(app.wait_for(details));
     for item in ["Schedule recording", "Schedule a recording…", "Record"] {
@@ -504,7 +504,7 @@ fn details_record_on_a_current_program_records_now_without_a_form() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs() as i64;
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(&mut app);
     step(app.press("id:menu-panel >> text:Details"));
     let record = "id:description-layer >> text:Record";
     step(app.wait_for(record));
@@ -586,7 +586,7 @@ fn serve_capture(
     mut stream: std::net::TcpStream,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
-    use std::io::{Read, Write};
+    use std::io::{ErrorKind, Read, Write};
     stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
@@ -609,11 +609,26 @@ fn serve_capture(
         packet[0] = 0x47;
         packet[3] = 0x10;
     }
+    let mut pending = packets.as_slice();
     while !stop.load(std::sync::atomic::Ordering::Acquire) {
-        if stream.write_all(&packets).is_err() {
-            return;
+        match stream.write(pending) {
+            Ok(0) => return,
+            Ok(written) => {
+                pending = &pending[written..];
+                if pending.is_empty() {
+                    pending = &packets;
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            // The shared input pauses reads until a headless consumer attaches.
+            // Preserve packet alignment when the socket buffers fill in the meantime.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return,
         }
-        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -745,8 +760,11 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     observation.observe("before start press", app.screen());
     step(app.press("label:Record"));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
+    let start_timeout = Duration::from_secs(15);
+    let start_deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(start_timeout);
     step(
-        app.wait_until("active record toggle", Duration::from_secs(15), |screen| {
+        app.wait_until("active record toggle", start_timeout, |screen| {
             observation.observe("await active toggle", screen);
             screen
                 .accessibility_state("id:play-bar-record")
@@ -761,6 +779,26 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             .iter()
             .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
     );
+    // The toggle acknowledges an active job before its capture owns any media.
+    // Exercise Stop on a real capture, using the rest of the existing start budget.
+    let active_jobs = jobs(&path);
+    let [job] = active_jobs.as_slice() else {
+        panic!("one recording job after Start; {}", observation.report());
+    };
+    let spool = iptv_runtime::recordings::media_directory(&home.data_dir())
+        .join(format!("{}.part", job.id.0));
+    while !std::fs::metadata(&spool).is_ok_and(|file| file.is_file() && file.len() >= 188) {
+        let remaining = start_deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "no captured media before Stop; {}",
+            observation.report()
+        );
+        step(app.wait(remaining.min(Duration::from_millis(50))));
+    }
+    if !app.screen().matches("id:play-bar-record").unwrap() {
+        step(app.press("label:Video"));
+    }
     observation.observe("before stop press", app.screen());
     step(app.press("id:play-bar-record"));
     step(

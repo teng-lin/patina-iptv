@@ -47,9 +47,180 @@ fn wait(app: &mut Headless, text: &str) {
     ));
 }
 fn settings_menu(app: &mut Headless) {
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu(app);
     step(app.wait_for("id:menu-panel"));
     step(app.press("id:menu-panel >> text:Settings"));
+}
+
+#[test]
+fn aggregate_playlist_reorder_requires_the_settings_pin() {
+    use iptv_store_sqlite::parental::ParentalCredential;
+
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set(
+            "parental.require_pin_for",
+            Value::choice("blocked_content_and_settings"),
+        )
+        .unwrap();
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
+    let playlist = home.path().join("synthetic.m3u");
+    std::fs::write(&playlist, personalization::M3U).unwrap();
+    let mut store = crate::isolated::open_database(dir.join("iptv.sqlite")).unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(personalization::M3U);
+    for name in ["First playlist", "Second playlist"] {
+        let source = store
+            .add_source(&iptv_providers::model::Source {
+                name: name.to_owned(),
+                config: iptv_providers::model::SourceConfig::M3u(
+                    iptv_providers::model::M3uSourceConfig {
+                        location: iptv_providers::SecretUrl::new(playlist.to_string_lossy()),
+                        user_agent: None,
+                        referrer: None,
+                    },
+                ),
+            })
+            .unwrap();
+        store
+            .set_source_policy(
+                source,
+                iptv_store_sqlite::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+            .unwrap();
+    }
+    store.set_all_playlists(true).unwrap();
+    store
+        .set_parental_credential(&ParentalCredential {
+            salt: [0x63; 16],
+            verifier: [
+                108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236, 123, 169,
+                134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+            ],
+            recovery_verifier: [0; 32],
+            failures: 0,
+            retry_after: 0,
+        })
+        .unwrap();
+    drop(store);
+    let mut app = Headless::start(nsh_engine::EngineConfig {
+        viewport: nsh_core::Size::new(nsh_core::prelude::px(1920.0), nsh_core::prelude::px(1080.0)),
+        ..nsh_engine::EngineConfig::new(nsh_core::element::Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-header-details >> text:First playlist · News"));
+    let app = &mut app;
+    step(app.open_guide_groups());
+    let reorder = |app: &mut Headless| {
+        step(app.long_press("id:guide-groups >> role:tab[All playlists]"));
+        step(app.press("id:menu-panel >> text:Reorder playlists"));
+        wait(app, "Enter parental PIN");
+        assert!(!app.shows("id:organization-screen"));
+    };
+
+    reorder(app);
+    step(app.back());
+    step(app.wait_for_gone("text:Enter parental PIN", Duration::from_secs(5)));
+    assert!(!app.shows("id:organization-screen"));
+
+    reorder(app);
+    digits(app, "2468");
+    continue_entry(app);
+    step(app.wait_for("id:organization-screen >> text:Reorder playlists"));
+}
+
+#[test]
+fn an_open_playlist_menu_checks_the_settings_pin_again_before_changing_policy() {
+    use nsh_core::{EventKind, EventPayload, ViewKind};
+
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set(
+            "parental.require_pin_for",
+            Value::choice("blocked_content_and_settings"),
+        )
+        .unwrap();
+    let fixture = personalization::launch_prepared(
+        home,
+        settings,
+        false,
+        |path, _| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+                    salt: [0x63; 16],
+                    verifier: [
+                        108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236,
+                        123, 169, 134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+                    ],
+                    recovery_verifier: [0; 32],
+                    failures: 0,
+                    retry_after: 0,
+                })
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let (mut app, path, source) = (fixture.app, fixture.path, fixture.source);
+    step(app.open_guide_groups());
+    step(app.press("id:navigation-rail >> label:Settings"));
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    step(app.wait_for("id:settings-screen"));
+    step(app.open_settings_playlists());
+    step(
+        app.press("id:settings-content >> role:button[More options for Synthetic personalization]"),
+    );
+
+    let refresh = "id:playlist-menu-panel >> text:Automatic refresh: Off";
+    step(app.wait_for(refresh));
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: serde_json::Value::Null,
+        },
+    );
+    app.settle();
+
+    let interval = || {
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .source_policy(source)
+            .unwrap()
+            .refresh_seconds
+    };
+    step(app.press(refresh));
+    wait(&mut app, "Enter parental PIN");
+    step(app.press("id:parental-cancel"));
+    step(app.wait_for(refresh));
+    assert_eq!(interval(), 0);
+
+    step(app.press(refresh));
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    step(app.wait_for("id:playlist-menu-panel >> text:Automatic refresh: every hour"));
+    assert_eq!(interval(), 3600);
 }
 
 #[test]
@@ -116,18 +287,6 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     personalization::menu(&mut app, "Manage PIN-protected content…");
     wait(&mut app, "Blocked content");
     step(app.press("text:Lock now"));
-    step(app.open_guide_groups());
-    step(app.press_key("left"));
-    step(app.press_key("left"));
-    step(app.press("text:Playlists >> nth=0"));
-    step(app.press("id:playlists-list >> text:Synthetic personalization"));
-    for _ in 0..30 {
-        step(app.press_key("down"));
-    }
-    step(app.press_key("up"));
-    step(app.press_key("up"));
-    step(app.press("id:playlist-actions-list >> text:Guide data"));
-    step(app.wait_for("text:Guide data · Synthetic personalization"));
     let snapshot = || {
         let store = crate::isolated::open_database(&path).unwrap();
         (
@@ -137,31 +296,52 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     };
     let before = snapshot();
     assert_eq!(before.0.as_ref().unwrap().feeds[0].program_count, 1);
-    // Update, editing and confirmed Clear all require the PIN even when
-    // Guide data was reached through Playlists instead of Settings.
+    // Playlists and their guide data are managed in the settings, which
+    // this policy protects: the PIN is asked as they open (the earliest
+    // point), and cancelling keeps them closed and the store as it was.
+    let settings = "id:navigation-rail >> label:Settings";
+    let open_settings = |app: &mut Headless, pin: Option<&str>| {
+        if !app.screen().matches(settings).unwrap() {
+            step(app.open_guide_groups());
+            step(app.wait_for(settings));
+        }
+        step(app.press(settings));
+        wait(app, "Enter parental PIN");
+        match pin {
+            Some(pin) => {
+                digits(app, pin);
+                continue_entry(app);
+                step(app.wait_for("id:settings-screen"));
+            }
+            None => {
+                step(app.press("id:parental-cancel"));
+                step(app.wait_for_gone(
+                    "id:parental-layer >> text:Enter parental PIN",
+                    Duration::from_secs(5),
+                ));
+                assert!(!app.screen().matches("id:settings-screen").unwrap());
+            }
+        }
+    };
+    let guide_data = |app: &mut Headless| {
+        step(app.open_playlist_actions("Synthetic personalization"));
+        for _ in 0..30 {
+            step(app.press_key("down"));
+        }
+        step(app.press_key("up"));
+        step(app.press_key("up"));
+        step(app.press("id:playlist-actions-list >> text:Guide data"));
+        step(app.wait_for("text:Guide data · Synthetic personalization"));
+    };
+    open_settings(&mut app, None);
+    assert_eq!(snapshot(), before);
+    // Unlocked as they open, the settings' grant covers the update and
+    // the source edit made there.
+    open_settings(&mut app, Some("2468"));
+    guide_data(&mut app);
     step(app.press("id:guide-data-list >> text:Update the guide now"));
-    wait(&mut app, "Enter parental PIN");
-    step(app.press("id:parental-cancel"));
-    assert_eq!(snapshot(), before);
-    step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
-    step(app.press("id:guide-source-actions >> text:Switch off"));
-    wait(&mut app, "Enter parental PIN");
-    step(app.press("id:parental-cancel"));
-    assert_eq!(snapshot(), before);
-    step(app.back());
-    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
-    step(app.press_key("down"));
-    step(app.press_key("enter"));
-    wait(&mut app, "Enter parental PIN");
-    step(app.press("id:parental-cancel"));
-    assert_eq!(snapshot(), before);
-    // Unlock resumes the selected update, then editing. Closing the
-    // per-use screen revokes that grant before Clear is attempted.
-    step(app.press("id:guide-data-list >> text:Update the guide now"));
-    wait(&mut app, "Enter parental PIN");
-    digits(&mut app, "2468");
-    continue_entry(&mut app);
     step(app.wait_for("text:Guide updated"));
+    assert!(!app.shows("id:parental-layer >> text:Enter parental PIN"));
     step(app.press("id:guide-data-list >> text:1.  Generated protected feed"));
     step(app.press("id:guide-source-actions >> text:No time shift"));
     step(app.wait_until(
@@ -169,17 +349,25 @@ fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
         Duration::from_secs(5),
         |_| snapshot().1[0].shift_minutes == 30,
     ));
-    step(app.back());
-    step(app.back());
-    step(app.press("id:playlist-actions-list >> text:Guide data"));
-    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
+    // Closing the settings revokes that grant (every use asks): opening
+    // them again asks again, and cancelling keeps the stored guide.
+    for _ in 0..4 {
+        if !app.screen().matches("id:guide-sources-screen").unwrap() {
+            break;
+        }
+        step(app.back());
+    }
+    step(app.back()); // the playlist's actions
+    step(app.close_settings());
     let before_clear = snapshot();
     assert_eq!(before_clear.0.as_ref().unwrap().feeds[0].program_count, 1);
+    open_settings(&mut app, None);
+    assert_eq!(snapshot(), before_clear);
+    open_settings(&mut app, Some("2468"));
+    guide_data(&mut app);
+    step(app.press("id:guide-data-list >> text:Delete stored guide data"));
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    wait(&mut app, "Enter parental PIN");
-    digits(&mut app, "2468");
-    continue_entry(&mut app);
     step(app.wait_for("text:Guide data deleted"));
     assert!(snapshot().0.is_none());
     assert_eq!(
@@ -309,7 +497,8 @@ fn setup_block_remote_unlock_change_and_recovery() {
     continue_entry(&mut app);
     step(app.wait_for("id:wizard-form"));
     step(app.back());
-    step(app.back());
+    step(app.wait_for_gone("id:wizard-form", Duration::from_secs(5)));
+    step(app.close_settings());
     step(app.press_key("tab"));
     step(app.press_key("enter"));
     wait(&mut app, "Enter parental PIN");

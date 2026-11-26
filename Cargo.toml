@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/iptv-core",
+    "crates/iptv-cast",
     "crates/iptv-presentation",
     "crates/iptv-nav",
     "crates/iptv-settings",
@@ -25,7 +26,7 @@ members = [
 exclude = ["crates/iptv-app/.nsh"]
 
 [workspace.package]
-version = "0.1.9"
+version = "0.1.11"
 edition = "2024"
 # The toolchain pinned in rust-toolchain.toml: the only one CI builds and tests.
 rust-version = "1.99.1"
@@ -38,6 +39,7 @@ publish = false
 iptv-runtime = { path = "crates/iptv-runtime", default-features = false }
 iptv-library = { path = "crates/iptv-library" }
 iptv-player-mpv = { path = "crates/iptv-player-mpv" }
+iptv-cast = { path = "crates/iptv-cast" }
 iptv-core = { path = "crates/iptv-core" }
 iptv-presentation = { path = "crates/iptv-presentation" }
 iptv-nav = { path = "crates/iptv-nav" }

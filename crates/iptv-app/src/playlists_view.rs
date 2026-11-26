@@ -27,6 +27,7 @@ use crate::runtime::model::SourceId;
 use iptv_nav::Action;
 use nsh_core::prelude::*;
 
+pub use state::Only;
 pub use state::Screen as Open;
 use state::{Act, EditKind, Effect, Item, Key, Layer, Screen};
 pub(crate) use words::masked_link;
@@ -40,6 +41,40 @@ use crate::{Ui, ViewMode, tint};
 
 const WHITE: u32 = 0xFFFFFF;
 const CARD_W: f32 = 640.0;
+
+/// What a playlist's row says under its name: its type and channels,
+/// then what its last refresh did (running, updated, failed, details
+/// refused) and whether it is on screen; and whether that is a failure.
+/// Reactive: the library's activity and the playlist on screen.
+pub(crate) fn summary(ui: Ui, playlist: &Playlist) -> (String, bool) {
+    let activity = ui
+        .app
+        .library
+        .activity
+        .with(|a| a.get(&playlist.id).cloned());
+    let (status, failed) = words::status(playlist, activity.as_ref(), crate::time::wall_unix());
+    let shown = !ui.app.library.all.get() && ui.app.library.shown.get() == Some(playlist.id);
+    let parts = [
+        words::summary(playlist),
+        status,
+        if shown {
+            tr("On screen").to_owned()
+        } else {
+            String::new()
+        },
+    ];
+    let line = parts
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (line, failed)
+}
+
+/// Whether the screen is open for one task over another screen.
+pub(crate) fn task_open(ui: Ui) -> bool {
+    state(ui, |s| s.opened_for().is_some()).unwrap_or(false)
+}
 
 // --- Actions -------------------------------------------------------------------
 
@@ -55,6 +90,21 @@ pub fn open(ui: Ui) {
     ui.playlists.set(Some(screen));
     if ui.mode.get_untracked() == ViewMode::Fullscreen {
         ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+    }
+}
+
+pub(crate) fn choose_for_management(ui: Ui) {
+    ui.playlists.set(Some(Screen::settings_picker(load())));
+}
+
+/// Opens a playlist task from Settings or a guide heading.
+pub fn open_only(ui: Ui, id: SourceId, only: Only) {
+    if is_open(ui) || crate::wizard_view::is_open(ui) {
+        return;
+    }
+    if let Some(screen) = Screen::only(load(), id, only) {
+        log::info!("iptv playlists: {only:?} of {}", id.0);
+        ui.playlists.set(Some(screen));
     }
 }
 
@@ -97,11 +147,17 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 /// Changes the state and carries out what it answers.
 fn update(ui: Ui, f: impl FnOnce(&mut Screen) -> Option<Effect>) {
     let mut effect = None;
+    let mut finished = false;
     ui.playlists.update(|s| {
         if let Some(s) = s {
             effect = f(s);
+            finished = s.finished();
         }
     });
+    // Opened for one task, which is over: back to where it came from.
+    if finished {
+        close(ui);
+    }
     if let Some(effect) = effect {
         perform(ui, effect);
     }
@@ -116,6 +172,8 @@ pub fn key(ui: Ui, action: Action) {
     let key = match action {
         Action::MoveUp => Key::Up,
         Action::MoveDown => Key::Down,
+        Action::MoveLeft => Key::Left,
+        Action::MoveRight => Key::Right,
         Action::Select => Key::Ok,
         Action::Back => Key::Back,
         Action::ShowMenu => Key::Menu,
@@ -151,6 +209,10 @@ fn cancel(ui: Ui) {
 }
 
 fn perform(ui: Ui, effect: Effect) {
+    if matches!(effect, Effect::Policy(..)) {
+        crate::settings_view::settings_guarded(ui, move || apply_effect(ui, effect));
+        return;
+    }
     if matches!(
         &effect,
         Effect::Add
@@ -168,9 +230,37 @@ fn perform(ui: Ui, effect: Effect) {
         });
         return;
     }
+    apply_effect(ui, effect);
+}
+
+fn apply_effect(ui: Ui, effect: Effect) {
     crate::tasks::spawn_in_app(async move {
         log::info!("iptv playlists: {}", effect_name(&effect));
+        let changes_library = matches!(effect, Effect::Delete(_) | Effect::Policy(..));
         let result = match effect {
+            Effect::Reorder(id) => {
+                close(ui);
+                crate::organization_view::open_playlist_reorder(ui, Some(id));
+                Ok(())
+            }
+            Effect::PlaylistOrder(id) => {
+                crate::menu_view::open_playlist_order(ui, id);
+                Ok(())
+            }
+            Effect::ReorderGroups(id) | Effect::GroupOrder(id) => {
+                let list = iptv_presentation::lists::ListId::Group(format!("playlist:{}", id.0));
+                if matches!(effect, Effect::ReorderGroups(_)) {
+                    crate::organization_view::open_group_reorder(ui, id, None, list);
+                } else {
+                    crate::organization_view::open_sort(
+                        ui,
+                        id,
+                        crate::organization_view::Kind::Groups,
+                        Some(list),
+                    );
+                }
+                Ok(())
+            }
             Effect::AllPlaylists => {
                 close(ui);
                 data::switch_all(&crate::runtime_owner::runtime());
@@ -189,8 +279,9 @@ fn perform(ui: Ui, effect: Effect) {
                 data::refresh(&crate::runtime_owner::runtime(), id);
                 Ok(())
             }
-            Effect::Policy(id, policy) => {
-                data::set_policy(&crate::runtime_owner::runtime(), id, policy).await
+            Effect::Policy(id, edit) => {
+                data::update_policy(&crate::runtime_owner::runtime(), id, move |p| edit.apply(p))
+                    .await
             }
             Effect::ToggleOnDemand(id) => {
                 let on = on_demand(id);
@@ -263,6 +354,15 @@ fn perform(ui: Ui, effect: Effect) {
         };
         if let Err(e) = result {
             log::warn!("iptv playlists: the store refused it: {e}");
+            if e.settings_locked() {
+                crate::settings_view::notify_setting_error(
+                    crate::settings::SaveError::ParentalLocked,
+                );
+            } else if changes_library {
+                crate::settings_view::notify(tr(
+                    "The change could not be saved. Reopen the list and try again.",
+                ));
+            }
         }
     });
 }
@@ -271,6 +371,9 @@ fn perform(ui: Ui, effect: Effect) {
 fn effect_name(effect: &Effect) -> String {
     match effect {
         Effect::Add => "add".to_owned(),
+        Effect::Reorder(id) => format!("reorder playlist {}", id.0),
+        Effect::PlaylistOrder(_) | Effect::GroupOrder(_) => "playlist order".to_owned(),
+        Effect::ReorderGroups(id) => format!("reorder playlist {}", id.0),
         Effect::AllPlaylists => "show all playlists".to_owned(),
         Effect::Show(id) => format!("show {}", id.0),
         Effect::Refresh(id) => format!("refresh {}", id.0),
@@ -341,6 +444,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             });
         }
     });
+    // Opened for one task, which ended however it ended (a key, a check
+    // of new details, a playlist deleted elsewhere): back to where it
+    // came from, so no empty layer covers it.
+    effect(move || {
+        if state(ui, Screen::finished).unwrap_or(false) {
+            untracked(|| close(ui));
+        }
+    });
     // New details checked: saved closes the form, refused keeps it.
     effect(move || {
         let ended = ui.app.library.activity.with(|a| {
@@ -367,9 +478,25 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     let entry =
         computed(move || state(ui, |s| s.editing().map(|e| (e.kind, e.prefilled))).flatten());
     let size = Scale::new();
-    when(
-        move || is_open(ui),
-        move || {
+    let only = computed(move || state(ui, |s| s.opened_for().is_some()));
+    dynamic(move || match only.get() {
+        None => view(),
+        // Opened for one task: its sheet over what opened it.
+        Some(true) => untracked(move || {
+            view()
+                .test_id("playlists-task")
+                .absolute()
+                .inset_0()
+                .child(sheet(ui, size))
+                .child(dynamic(move || {
+                    let shown = entry.get();
+                    untracked(move || match shown {
+                        Some((kind, prefilled)) => edit_sheet(ui, kind, prefilled),
+                        None => view(),
+                    })
+                }))
+        }),
+        Some(false) => untracked(move || {
             ui_kit::screen(ui, size)
                 .test_id("playlists-screen")
                 .accessibility_elements_hidden(move || {
@@ -392,15 +519,15 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         None => view(),
                     })
                 }))
-        },
-    )
+        }),
+    })
 }
 
 fn yes_no(yes: bool) -> &'static str {
     if yes { tr("Yes") } else { tr("No") }
 }
 
-fn hint(ui: Ui) -> &'static str {
+pub(crate) fn hint(ui: Ui) -> &'static str {
     let layer = state(ui, Screen::layer).unwrap_or(Layer::List);
     match (ui.keys_shown(), layer) {
         (true, Layer::List) => tr("▲▼ choose   OK actions   Back close"),
@@ -555,17 +682,25 @@ fn row(
 fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
     // Which sheet, not where its focus is.
     let open = computed(move || match state(ui, Screen::layer) {
-        Some(Layer::Actions { id, .. }) => Some((Sheet::Actions, id)),
-        Some(Layer::Confirm { id, .. }) => Some((Sheet::Confirm, id)),
-        Some(Layer::Details { id }) => Some((Sheet::Details, id)),
+        Some(Layer::Actions { id, .. }) => Some(Sheet::Actions(id)),
+        Some(Layer::Confirm { id, .. }) => Some(Sheet::Confirm(id)),
+        Some(Layer::Details { id }) => Some(Sheet::Details(id)),
         Some(Layer::List) | None => None,
     });
     dynamic(move || {
         let shown = open.get();
         untracked(move || match shown {
-            Some((Sheet::Actions, id)) => backdrop(ui, actions_card(ui, size, id).into_element()),
-            Some((Sheet::Confirm, id)) => backdrop(ui, confirm_card(ui, size, id).into_element()),
-            Some((Sheet::Details, id)) => {
+            Some(Sheet::Actions(id))
+                if matches!(
+                    state(ui, Screen::opened_for).flatten(),
+                    Some(Only::Actions { .. } | Only::GuideActions | Only::Management)
+                ) =>
+            {
+                backdrop(ui, actions_card(ui, size, id).into_element()).items_end()
+            }
+            Some(Sheet::Actions(id)) => backdrop(ui, actions_card(ui, size, id).into_element()),
+            Some(Sheet::Confirm(id)) => backdrop(ui, confirm_card(ui, size, id).into_element()),
+            Some(Sheet::Details(id)) => {
                 backdrop(ui, details_card::card(ui, size, id).into_element())
             }
             None => view(),
@@ -575,9 +710,9 @@ fn sheet(ui: Ui, size: Scale) -> impl IntoElement {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Sheet {
-    Actions,
-    Confirm,
-    Details,
+    Actions(SourceId),
+    Confirm(SourceId),
+    Details(SourceId),
 }
 
 fn backdrop(ui: Ui, card: AnyElement) -> View {
@@ -619,7 +754,11 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             )
         })
     };
-    let acts = state(ui, |s| s.acts(id)).unwrap_or_default();
+    let task = state(ui, Screen::opened_for).flatten();
+    let guide = task == Some(Only::GuideActions);
+    let contextual = guide || matches!(task, Some(Only::Actions { .. }));
+    let side_panel = contextual || task == Some(Only::Management);
+    let acts = computed(move || state(ui, |s| s.acts(id)).unwrap_or_default());
     let notice = move || state(ui, |s| s.notice()).flatten();
     let act_row = move |act: Act| {
         let focused =
@@ -628,10 +767,10 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             let shown = ui.app.library.shown.get() == Some(id);
             let kind = playlist().map(|p| p.kind);
             match (act, playlist()) {
-                (Act::Enabled, Some(p)) => trf(
-                    "Playlist enabled: {answer}",
-                    &[("answer", yes_no(p.policy.enabled).into())],
-                ),
+                (Act::Rename, _) if guide => tr("Rename playlist").to_owned(),
+                (Act::Delete, _) if guide => tr("Delete playlist").to_owned(),
+                (Act::Hide, _) if guide => tr("Hide playlist").to_owned(),
+                (Act::Refresh, _) if guide && !running() => tr("Refresh Now").to_owned(),
                 (Act::RefreshInterval, Some(p)) => {
                     let every = match p.policy.refresh_seconds {
                         0 => tr("Off").to_owned(),
@@ -644,6 +783,18 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                         "Automatic refresh: {interval}",
                         &[("interval", (&every).into())],
                     )
+                }
+                (Act::PlaylistOrder, _) => {
+                    ui.app.settings.get();
+                    let order = crate::settings::choice(iptv_settings::keys::PLAYLIST_SORT);
+                    let method = crate::settings_view::choice_label("sort", order);
+                    trf("Playlist order: {method}", &[("method", (&method).into())])
+                }
+                (Act::GroupOrder, _) => {
+                    ui.guide_data();
+                    crate::menu_view::group_order_label(&iptv_presentation::lists::ListId::Group(
+                        format!("playlist:{}", id.0),
+                    ))
                 }
                 (Act::RefreshOnStart, Some(p)) => trf(
                     "Refresh on startup: {answer}",
@@ -672,10 +823,30 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             update(ui, |s| s.act(id, act));
         })
     };
-    card(ui, size)
-        .child(ui_kit::title(size, move || {
-            playlist().map(|p| p.name).unwrap_or_default()
-        }))
+    let panel = if side_panel {
+        view()
+            .test_id(if contextual {
+                "playlist-menu-panel"
+            } else {
+                "playlist-management-panel"
+            })
+            .h(percentage(1.0))
+            .w(move || size.px(400.0))
+            .max_w(percentage(1.0))
+            .pt_safe_area()
+            .px(move || size.px(12.0))
+            .py(move || size.px(16.0))
+            .gap(move || size.px(6.0))
+            .bg(move || rgb(ui.app.theme.with(|t| t.background.panel)))
+            .on_press(|| {})
+    } else {
+        card(ui, size)
+    };
+    panel
+        .child(
+            ui_kit::title(size, move || playlist().map(|p| p.name).unwrap_or_default())
+                .role(AccessibilityRole::Header),
+        )
         .child(ui_kit::body(size, move || {
             playlist().map(|p| words::summary(&p)).unwrap_or_default()
         }))
@@ -694,58 +865,65 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
         )
         .child(view().h(move || size.px(6.0)))
         .child({
-            let count = acts.len();
-            let acts = std::rc::Rc::new(acts);
             let rows = element_ref();
-            let focused_acts = acts.clone();
+
             effect(move || {
                 if let Some(Layer::Actions { focus, .. }) = state(ui, Screen::layer)
-                    && let Some(at) = focused_acts.iter().position(|a| *a == focus)
+                    && let Some(at) = acts.with(|items| items.iter().position(|a| *a == focus))
                 {
                     rows.scroll_to_index(at as u32, percentage(0.5), px(0.0), false);
                 }
             });
-            virtual_list(
-                move || count,
+            let list = virtual_list(
+                move || acts.with(Vec::len),
                 move |at| {
-                    let acts = acts.clone();
                     dynamic(move || {
-                        let act = acts[at.index()];
-                        untracked(move || act_row(act))
+                        let act = acts.with(|items| items.get(at.index()).copied());
+                        untracked(move || act.map_or_else(view, act_row))
                     })
                 },
             )
             .test_id("playlist-actions-list")
             .estimated_item_size(list_rows::pitch(size, list_rows::ROW))
-            .element_ref(&rows)
-            .h(move || size.px(360.0))
+            .element_ref(&rows);
+            if side_panel {
+                list.flex_1()
+            } else {
+                list.h(move || size.px(360.0))
+            }
         })
 }
 
 fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
-    let (title, body) = state(ui, |s| {
-        let Some(p) = s.row(id) else {
-            return (String::new(), String::new());
-        };
-        let next = s
-            .rows()
-            .iter()
-            .rev()
-            .find(|r| r.id != id)
-            .map(|r| r.name.as_str());
-        let shown = ui.app.library.shown.get_untracked() == Some(id);
-        (
-            trf("Delete “{name}”?", &[("name", (&p.name).into())]),
-            words::delete_consequences(p, next, shown),
-        )
-    })
-    .unwrap_or_default();
+    let copy = computed(move || {
+        state(ui, |s| {
+            let Some(p) = s.row(id) else {
+                return (String::new(), String::new());
+            };
+            let shown = !ui.app.library.all.get() && ui.app.library.shown.get() == Some(id);
+            let next = shown
+                .then(|| crate::runtime::data::next_playlist_after_deletion(&crate::runtime(), id))
+                .flatten();
+            (
+                trf("Delete “{name}”?", &[("name", (&p.name).into())]),
+                words::delete_consequences(
+                    p,
+                    next.as_deref(),
+                    s.rows().iter().any(|row| row.id != id),
+                ),
+            )
+        })
+        .unwrap_or_default()
+    });
     let focused = move |delete: bool| {
         move || state(ui, |s| s.layer() == Layer::Confirm { id, delete }).unwrap_or(false)
     };
     card(ui, size)
-        .child(ui_kit::title(size, title))
-        .child(ui_kit::body(size, body))
+        .test_id("playlist-delete-confirmation")
+        .child(ui_kit::title(size, move || {
+            copy.with(|copy| copy.0.clone())
+        }))
+        .child(ui_kit::body(size, move || copy.with(|copy| copy.1.clone())))
         .child(view().h(move || size.px(8.0)))
         .child(ui_kit::action(
             ui,

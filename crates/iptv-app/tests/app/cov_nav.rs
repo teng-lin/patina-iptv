@@ -231,29 +231,29 @@ fn guide_keys(app: &mut Headless) {
     step(app.back());
     step(app.press_key("home"));
     wait_focused(app, "Morning Talk");
-    // Menu: the program's menu; Menu again closes it.
-    step(app.press_key("m"));
+    // More options reaches the full program menu; Menu closes it.
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press_key("down"));
     step(app.press_key("up"));
     step(app.press_key("m"));
     gone(app, "text:Details");
-    // Menu, then OK on its first item: the search screen.
-    step(app.press_key("m"));
+    // The full menu, then OK on its first item: the search screen.
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press_key("enter"));
     step(app.wait_for(FIELD));
     gone(app, "text:Details");
     close_search(app);
     // Its Details (tapped): the popover, which Menu closes; Back too.
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press("text:Details"));
     wait_times(app, 1);
     step(app.press_key("down"));
     step(app.press_key("m"));
     wait_times(app, 0);
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Details"));
     step(app.press("text:Details"));
     wait_times(app, 1);
@@ -290,11 +290,12 @@ fn guide_keys(app: &mut Headless) {
     close_search(app);
     // From Search down past TV: with only an M3U playlist, which never
     // carries movies or shows, Movies and Shows are not offered;
-    // Recordings, Playlists and Settings follow.
-    const PLAYLISTS: &str = "text:▲▼ choose   OK actions   Back close";
+    // Recordings and Settings follow (the playlists are in the settings).
     const SETTINGS: &str = "text:▲▼ page   ▶ OK its settings   Back close";
+    const PLAYLIST_ROW: &str = "text:▲▼ move   OK show or hide   Menu its settings   ◀ Back pages";
     assert!(!app.shows("id:navigation-rail >> label:Movies"));
     assert!(!app.shows("id:navigation-rail >> label:Shows"));
+    assert!(!app.shows("id:navigation-rail >> label:Playlists"));
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("down")); // Live TV
@@ -305,30 +306,28 @@ fn guide_keys(app: &mut Headless) {
     gone(app, "id:recordings-screen");
     step(app.press_key("down"));
     step(app.press_key("enter"));
-    step(app.wait_for(PLAYLISTS));
-    // The screen takes the keys: OK opens the playlist's actions (their
-    // rows the kit's), Back closes them, then the screen.
-    const ACTIONS: &str = "text:▲▼ choose   OK do it   Back close the sheet";
+    step(app.wait_for(SETTINGS));
+    // Its Playlists page: the playlist's row first; Menu opens its actions
+    // (their rows the kit's), Back closes them, then the rows, the screen.
     step(app.press_key("down"));
-    step(app.press_key("up"));
-    step(app.press_key("enter"));
+    step(app.press_key("right"));
+    step(app.wait_for(PLAYLIST_ROW));
+    const ACTIONS: &str = "id:playlist-menu-panel >> text:Hide";
+    step(app.press_key("m"));
     step(app.wait_for(ACTIONS));
-    step(app.wait_for("text:Refresh now"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Delete"));
     step(app.press_key("down"));
     step(app.back());
     gone(app, ACTIONS);
+    step(app.wait_for(PLAYLIST_ROW));
     step(app.back());
-    gone(app, PLAYLISTS);
-    step(app.press_key("down"));
-    step(app.press_key("enter"));
     step(app.wait_for(SETTINGS));
-    step(app.press_key("down"));
     step(app.press_key("up"));
     step(app.back());
     gone(app, SETTINGS);
     // Up to TV, OK: the groups; Up shows All channels, OK takes it (the
     // hint again, which the next key but Back dismisses).
-    for _ in 0..3 {
+    for _ in 0..2 {
         step(app.press_key("up"));
     }
     step(app.press_key("enter"));
@@ -344,7 +343,7 @@ fn guide_keys(app: &mut Headless) {
     // focused channel, OK again removes it; Left preserves favorites;
     // Right adds all, and explicit confirmed removal clears them; Back closes.
     const STAR: &str = "text:★ Test Channel Four";
-    step(app.press_key("m"));
+    crate::personalization::open_program_menu_with_keys(app);
     step(app.wait_for("text:Manage favorites…"));
     step(app.press("text:Manage favorites…"));
     step(app.press_key("down"));
@@ -616,31 +615,7 @@ fn tile_channel(name: &str) -> String {
 
 /// The open tile menu's labels, top to bottom.
 fn menu_labels(app: &Headless) -> Vec<String> {
-    let nodes = app.screen().layout_nodes();
-    let Some(panel) = nodes
-        .iter()
-        .find(|n| n.test_id.as_deref() == Some("multiview-menu"))
-        .map(|n| n.id)
-    else {
-        return Vec::new();
-    };
-    let parent: std::collections::HashMap<_, _> = nodes.iter().map(|n| (n.id, n.parent)).collect();
-    let inside = |mut id| {
-        while let Some(&up) = parent.get(&id) {
-            if up == panel {
-                return true;
-            }
-            id = up;
-        }
-        false
-    };
-    let mut found: Vec<(String, f32)> = nodes
-        .iter()
-        .filter(|n| inside(n.id))
-        .filter_map(|n| Some((n.text.as_ref()?.text.text.to_string(), n.bounds.origin.y.0)))
-        .collect();
-    found.sort_by(|a, b| a.1.total_cmp(&b.1));
-    found.into_iter().map(|t| t.0).collect()
+    app.panel_texts("multiview-menu")
 }
 
 /// Opens the active tile's menu and chooses `label` by keys.

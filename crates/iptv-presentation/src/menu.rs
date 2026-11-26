@@ -11,6 +11,7 @@
 
 use crate::lists::ListId;
 use iptv_core::guide::{Airing, Program};
+use iptv_library::SourceId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MenuItem {
@@ -33,7 +34,14 @@ pub enum MenuItem {
     AssignEpg,
     ChannelOptions,
     ChannelActions,
+    ProgramActions,
     ProtectChannel,
+    // Playlist (a playlist's heading in the groups column).
+    TogglePlaylist(SourceId),
+    ReorderPlaylists,
+    PlaylistOrderAdded,
+    PlaylistOrderByName,
+    PlaylistOrderManual,
     // Group.
     ManageFavorites,
     ManageBlocked,
@@ -43,6 +51,7 @@ pub enum MenuItem {
     CopyChannels,
     CreateGroup,
     GroupOptions,
+    GroupSettings,
     SortGroups,
     ReorderGroups,
     ManageGroups,
@@ -66,6 +75,7 @@ pub enum MenuItem {
 /// Section headings (never focused).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Heading {
+    PlaylistOrder,
     Program,
     Channel,
     Group,
@@ -121,6 +131,11 @@ pub struct Menu {
     pub target: Target,
     pub list: ListId,
     pub group_offset: Option<i32>,
+    /// The compact context to return to after inspecting its full options.
+    pub parent: Option<Box<Menu>>,
+    /// The program menu was opened for the full-screen player's channel.
+    /// That target can be outside the guide list the viewer last browsed.
+    pub playing_context: bool,
 }
 
 impl Menu {
@@ -133,11 +148,21 @@ impl Menu {
             target,
             list,
             group_offset: None,
+            parent: None,
+            playing_context: false,
         }
     }
 
     pub fn focused(&self) -> Option<MenuItem> {
         self.action_at(self.focus)
+    }
+
+    /// Focuses an available action, including a checkbox selected by touch.
+    pub fn focus_on(&mut self, item: MenuItem) {
+        if let Some(index) = (0..self.rows.len()).find(|&index| self.action_at(index) == Some(item))
+        {
+            self.focus = index;
+        }
     }
 
     /// Updates the actions for the same target and keeps focus by action.
@@ -234,12 +259,10 @@ const CHANNEL_ACTIONS: [MenuItem; 6] = [
 ];
 
 /// Actions shared by the guide's program menu and a group's own menu.
-const GROUP_ACTIONS: [MenuItem; 12] = [
+const GROUP_ACTIONS: [MenuItem; 10] = [
     MenuItem::ManageFavorites,
     MenuItem::ManageBlocked,
     MenuItem::ManageHidden,
-    MenuItem::ReorderChannels,
-    MenuItem::SortChannels,
     MenuItem::CopyChannels,
     MenuItem::CreateGroup,
     MenuItem::BlockGroup,
@@ -249,11 +272,13 @@ const GROUP_ACTIONS: [MenuItem; 12] = [
     MenuItem::ManageParentalBlocks,
 ];
 
+const CHANNEL_ORDER_ACTIONS: [MenuItem; 2] = [MenuItem::ReorderChannels, MenuItem::SortChannels];
+
 /// The channel's fixed actions, with optional recording and desktop playback.
 pub fn channel_menu(
     recording: Option<MenuItem>,
     new_window: Option<bool>,
-    can_reorder: bool,
+    can_order: impl Fn(MenuItem) -> bool,
 ) -> Vec<Row> {
     use MenuItem::*;
     let action = |item| Row::Action {
@@ -268,9 +293,6 @@ pub fn channel_menu(
             enabled,
         });
     }
-    if can_reorder {
-        rows.push(action(ReorderChannels));
-    }
     rows.extend(
         [
             AssignEpg,
@@ -278,9 +300,14 @@ pub fn channel_menu(
             BlockChannel,
             HideChannel,
             ProtectChannel,
+            ProgramActions,
         ]
         .map(action),
     );
+    rows.extend(CHANNEL_ORDER_ACTIONS.map(|item| Row::Action {
+        item,
+        enabled: can_order(item),
+    }));
     rows
 }
 
@@ -289,17 +316,16 @@ pub fn group_options(available: impl Fn(MenuItem) -> bool) -> Vec<Row> {
     use MenuItem::*;
     standalone(
         [
+            ReorderPlaylists,
             RenameGroup,
             ResetGroupName,
-            SortChannels,
-            ReorderChannels,
-            ShowFavoritesOnly,
-            GroupExternalPlayer,
-            GroupEpgOffset,
             BlockGroup,
             HideGroup,
-            ReorderGroups,
             ManageGroups,
+            ReorderGroups,
+            SortGroups,
+            ReorderChannels,
+            SortChannels,
         ],
         available,
     )
@@ -380,6 +406,7 @@ pub fn program_menu(
     rows.push(action(ChannelActions));
     rows.push(Row::Heading(Heading::Group));
     rows.extend(GROUP_ACTIONS.map(action));
+    rows.extend(CHANNEL_ORDER_ACTIONS.map(action));
     rows
 }
 
@@ -401,7 +428,7 @@ mod tests {
 
     #[test]
     fn standalone_menus_focus_the_first_applicable_action() {
-        let rows = channel_menu(Some(RecordNow), Some(false), true);
+        let rows = channel_menu(Some(RecordNow), Some(false), |item| item == ReorderChannels);
         let mut menu = Menu::new(
             rows,
             Target::Channel {
@@ -411,13 +438,26 @@ mod tests {
             },
             ListId::All,
         );
+        assert_eq!(
+            menu.rows[menu.rows.len() - 2..],
+            [
+                Row::Action {
+                    item: ReorderChannels,
+                    enabled: true
+                },
+                Row::Action {
+                    item: SortChannels,
+                    enabled: false
+                },
+            ],
+        );
         assert_eq!(menu.focused(), Some(ToggleFavorite));
         menu.move_focus(1);
         assert_eq!(menu.focused(), Some(RecordNow));
         menu.move_focus(1);
         assert_eq!(
             menu.focused(),
-            Some(ReorderChannels),
+            Some(AssignEpg),
             "skips the unavailable window"
         );
         assert!(!menu.rows.iter().any(|row| matches!(
@@ -428,9 +468,21 @@ mod tests {
             }
         )));
 
-        let rows = group_options(|item| item != RenameGroup && item != ResetGroupName);
+        let rows = group_options(|item| matches!(item, SortChannels | ReorderChannels));
         let menu = Menu::new(rows, Target::Group, ListId::All);
-        assert_eq!(menu.focused(), Some(SortChannels));
+        assert_eq!(menu.focused(), Some(ReorderChannels));
+    }
+
+    #[test]
+    fn channel_order_controls_end_the_timeline_menu() {
+        let rows = program_menu(LIVE, 0, 0, Some(Record), |_| true);
+        assert_eq!(
+            rows[rows.len() - 2..],
+            [ReorderChannels, SortChannels].map(|item| Row::Action {
+                item,
+                enabled: true
+            })
+        );
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub enum Control {
     Details,
     Picture,
     Channels,
+    Cast,
     Multiview,
     Pip,
     Guide,

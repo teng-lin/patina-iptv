@@ -161,6 +161,7 @@ fn capture(ui: Ui) -> Option<Capture> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InputOwner {
     Overlay(crate::overlays::Overlay),
+    SettingsPlaylist(i64),
     ChannelList(iptv_presentation::channel_list::ListPane),
     Multiview,
     PlayBar,
@@ -178,6 +179,10 @@ fn surface(ui: &Ui) -> Surface {
             ui.channels
                 .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
                 .unwrap_or(InputOwner::Overlay(overlay))
+        } else if overlay == crate::overlays::Overlay::Settings
+            && let Some(id) = crate::settings_view::focused_playlist(*ui)
+        {
+            InputOwner::SettingsPlaylist(id)
         } else {
             InputOwner::Overlay(overlay)
         }
@@ -380,6 +385,12 @@ fn named_key_options(key: RemoteKey) -> KeyOptions {
     }
 }
 
+/// Actions that a held key may activate only once on the current surface.
+fn one_shot_action(action: Action, mode: ViewMode, context: Context) -> bool {
+    matches!(action, Action::ShowMenu | Action::ToggleFavorite)
+        || (action == Action::Select && mode == ViewMode::Guide && context == Context::Guide)
+}
+
 pub(crate) fn bind(ui: Ui) -> InputScope {
     focus_remote_root();
     number::bind(ui);
@@ -394,14 +405,11 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         .enumerate()
         .map(|(digit, name)| (name, RemoteKey::Digit(digit as u8)));
     let consumed = input.nav.borrow().consumed;
-    let guide_active =
-        computed(move || ui.mode.get() == ViewMode::Guide && context(&ui) == Context::Guide);
     // Named bindings omit the repeat phase. Ask NSH to suppress repeats
-    // of remapped Select keys while they activate the guide's preview.
-    let guide_select_keys = computed(move || {
-        if !guide_active.get() {
-            return Vec::new();
-        }
+    // according to the current action, including custom key bindings.
+    let one_shot_keys = computed(move || {
+        let mode = ui.mode.get();
+        let context = context(&ui);
         ui.app.settings.get();
         let keymap = crate::remote_editor::keymap();
         KEYS.iter()
@@ -409,7 +417,9 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
             .chain((0..DIGITS.len() as u8).map(RemoteKey::Digit))
             .filter(|&key| {
                 named_key_options(key).repeat
-                    && keymap.resolve(Context::Guide, key, Press::Short) == Some(Action::Select)
+                    && keymap
+                        .resolve(context, key, Press::Short)
+                        .is_some_and(|action| one_shot_action(action, mode, context))
             })
             .collect::<Vec<_>>()
     });
@@ -421,7 +431,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
             // auto-repeats), so only a fresh press reaches it.
             let held_off = computed(move || {
                 consumed.with(|c| c.contains(&key))
-                    || guide_select_keys.with(|keys| keys.contains(&key))
+                    || one_shot_keys.with(|keys| keys.contains(&key))
             });
             effect(move || {
                 let mut options = named_key_options(key);
@@ -597,6 +607,17 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         let mut nav = nav.borrow_mut();
         if phase == Phase::Down {
             nav.keymap = crate::remote_editor::keymap();
+            if key == RemoteKey::Ok
+                && matches!(here.1, InputOwner::SettingsPlaylist(_))
+                && !crate::remote_editor::overridden(ctx, key)
+            {
+                nav.keymap.set_override(iptv_nav::Binding {
+                    context: Some(ctx),
+                    key,
+                    press: Press::Long,
+                    action: Action::ShowMenu,
+                });
+            }
         }
         let now = ui.now_ms();
         // `remote.long_press`, taken up when a key goes down (a new press
@@ -788,14 +809,9 @@ fn keep_controls_until(ui: Ui, at: u64) {
 }
 
 fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
-    // A held key must not reopen a menu or turn a guide preview into
-    // fullscreen. A remapped remote button can repeat Select.
-    if repeat
-        && (action == Action::ShowMenu
-            || (action == Action::Select
-                && ui.mode.get_untracked() == ViewMode::Guide
-                && context(&ui) == Context::Guide))
-    {
+    // A held key must not reopen a menu, toggle a favorite repeatedly or
+    // turn a guide preview into fullscreen. Remapped keys can repeat too.
+    if repeat && one_shot_action(action, ui.mode.get_untracked(), context(&ui)) {
         return;
     }
     if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {
@@ -936,12 +952,13 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         match action {
             Action::MoveUp => crate::menu_view::scroll_description(ui, -1.0),
             Action::MoveDown => crate::menu_view::scroll_description(ui, 1.0),
-            Action::Back | Action::ShowMenu => crate::menu_view::close(ui),
+            Action::Back => crate::menu_view::back(ui),
+            Action::ShowMenu => crate::menu_view::close(ui),
             _ => {}
         }
         return;
     }
-    if top == Some(Overlay::Menu) {
+    if matches!(top, Some(Overlay::Menu | Overlay::PlaylistMenu)) {
         match action {
             Action::MoveUp => ui
                 .menu
@@ -959,7 +976,8 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
                     crate::menu_view::perform(ui, item);
                 }
             }
-            Action::Back | Action::ShowMenu => crate::menu_view::close(ui),
+            Action::Back => crate::menu_view::back(ui),
+            Action::ShowMenu => crate::menu_view::close(ui),
             _ => {}
         }
         return;
@@ -969,7 +987,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     if top == Some(Overlay::ChannelList) {
-        crate::channels_view::key(ui, key, action);
+        crate::channels_view::key(ui, action);
         return;
     }
     if top == Some(Overlay::Search) {
@@ -1033,12 +1051,26 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
             }
         }
         Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Rail => {}
+        Action::ShowMenu
+            if ui.mode.get() != ViewMode::Fullscreen
+                && ui.focus.with(|f| f.pane) == Pane::Guide =>
+        {
+            crate::menu_view::open_timeline_context(ui);
+        }
         Action::ShowMenu => crate::menu_view::open(ui),
         Action::MoveUp => mv(Move::Up),
         Action::MoveDown => mv(Move::Down),
         Action::MoveLeft => mv(Move::Left),
         Action::MoveRight => mv(Move::Right),
-        Action::Select => crate::lists::ok(ui),
+        Action::Select => {
+            if !ui
+                .focus
+                .with(|f| matches!(f.pane, Pane::Guide | Pane::Groups))
+                || !crate::menu_view::open_empty_group_settings(ui)
+            {
+                crate::lists::ok(ui);
+            }
+        }
         Action::ShowGuide => ui.mode.apply(crate::mode::Action::ShowGuide),
         Action::ShowGroups => crate::lists::open_groups(ui),
         Action::OpenSearch => crate::search_view::open(ui),

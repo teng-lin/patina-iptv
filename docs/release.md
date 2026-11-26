@@ -68,14 +68,16 @@ Linux x86_64 and macOS Apple silicon. Android produces one distribution-signed
 APK and AAB for tablets and TVs, each containing both ARM architectures.
 Packaging fails if either native library or the notices are missing. Both
 signing certificates are checked against the configured keystore before upload.
-The signed AAB carries the release's R8 mapping file. To symbolicate a crash,
-extract the map from the AAB for that exact release:
+The signed AAB for each release retains both R8 mapping files. For a direct APK
+crash, extract `BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map`.
+For a store install, extract the bundle's own map from the same release.
 
 ```sh
 unzip -p Patina-0.1.7-android-tablet-tv.aab \
   BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map > mapping.txt
 ```
- Manual runs also offer platforms=android
+
+Manual runs also offer platforms=android
 or platforms=desktop independently. platforms=all adds an iPad device IPA;
 only that option requires Apple signing secrets and still needs iPad validation.
 
@@ -438,8 +440,9 @@ How the per-release archives of the remaining system libraries are produced:
    Linux it runs `apt-get source --download-only <source>=<version>` after
    `tools/ci/enable-deb-src.sh` and checks every file against the checksums of
    the signed archive index. A version that has left the index (a newer update
-   was published after the runner image was built) is fetched from Launchpad,
-   which keeps every published version, and checked against its `.dsc`.
+   was published after the runner image was built) uses the historical `.dsc`
+   from the official Ubuntu HTTPS archive or Launchpad. Each source file must
+   match the size and checksum in that exact version’s description.
 3. **The archive and a `.json` manifest are released** next to the packages and
    listed in `SHA256SUMS`. The manifest names every file with its address and
    SHA-256; the archive contains the same manifest, `SOURCE.txt` and, on macOS,
@@ -644,6 +647,29 @@ Rehearsals verify the actual branch ref and remain drafts; they do not prove a
 later tag or signing configuration. Post-publication verification downloads and
 checks the public bytes again. Never bypass a failure by replacing public files.
 
+After verification, the same job retains `update-release.json` in the Actions
+artifact `verified-update-record-<run attempt>`. This is the per-release input
+for [Android and desktop updates](plans/2026-11-25-cross-platform-updates.md).
+It identifies the available viewer packages, their immutable URLs, exact sizes
+and hashes, and each desktop preview’s signing status from the signing job.
+Treat it as input to the future authenticated feed publisher. Clients require
+signed update metadata before offering an installer.
+
+For a staging signing event, run the following at the Patina checkout with a
+verified release record and a checkout of the TUF repository. Start from its
+latest accepted target, serialize signing events, and inspect the target diff
+before signing. The command creates the first index when the file is absent.
+
+```sh
+python3 tools/ci/update-index.py ../update-feed/targets/index.json update-release.json
+```
+
+A retry or an older record preserves newer package entries. A conflict for
+the same package and version, or different commits for one release across
+platforms, aborts before replacing the file. The resulting
+target is ready for the repository’s signing event. Publish the signed target
+and versioned metadata before the timestamp.
+
 Unsigned candidate packages and their checked evidence are retained for 30 days
 in Actions. A promoted release publishes `candidate-manifest.json` with checksums
 and final-workflow provenance, retaining the unsigned input/check record after
@@ -689,3 +715,45 @@ Desktop release artifacts also retain a `*-build-environment.json` beside their
 SBOMs: candidate commit, lock/pin file hashes, compiler/tool versions and installed
 apt/Homebrew package versions. These inventories aid reconstruction and diagnosis;
 they neither freeze the host repositories nor promise byte-identical rebuilds.
+
+
+### Native update checks
+
+For a rehearsal build, set `PATINA_UPDATE_FEED` to the HTTPS directory serving
+the staging repository and `PATINA_UPDATE_ROOT` to its out-of-band public TUF
+root file before compiling Patina. The feed serves `metadata/` and `targets/`.
+Disclose the selected host in the privacy notice before distributing a
+configured build. A build without that pair opens the manual release page from
+Settings → About. Existing installations need one manual upgrade to acquire
+the checker.
+
+To rehearse direct APK installation, compile the staging build with
+`PATINA_APK_HANDOFF=1` and the staging feed and root above. Gradle's
+`directRelease` variant carries the system installer permission and private
+handoff activity. The normal release bundle goes through the store. Use the
+About action to download the selected build and confirm installation. An
+active recording defers the handoff. Keep production activation gated on the
+signed install-over-previous exercises in the proposal.
+
+Set `PATINA_APPIMAGE_HANDOFF=1` for AppImage rehearsals with the staging
+feed. AppRun records its image path’s device and inode at startup. About can replace that
+file after confirmation or save the verified image to a new name on a writable
+filesystem. Patina keeps playing until the viewer restarts it. Each replacement
+preserves the old image beside the installation as
+`<file>.<previous-version>.previous`, adding its inode to the name if an earlier
+backup already occupies it. Keep that file until the new version
+opens the existing library, then remove the backup when it is no longer needed. Restoring the executable alone cannot reverse a
+database migration. A hard interruption can also leave a hidden
+`.patina-update-*` directory beside the chosen file. After restarting, inspect
+its contents before removing it. DEB, RPM and pacman users can download the corresponding
+package through About and apply it with their system package tool.
+
+For a signed Windows rehearsal, set `PATINA_WINDOWS_PUBLISHER` at compile
+time to the exact subject distinguished name of the approved Authenticode
+publisher. Obtain it independently from the signing administrator. About offers
+setup only when the verified release record also reports a signed installer.
+The verifier checks Authenticode, the timestamp and the authorized SHA-256
+while holding the EXE open against replacement. After confirmation the helper
+waits for Patina to exit before starting the per-user wizard. Setup cannot ask
+Restart Manager to close another Patina session. Preview releases continue to
+show their release notes.

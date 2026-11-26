@@ -1,6 +1,6 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use crate::commands::external_playback_check;
+use crate::commands::playback_handoff_check;
 use iptv_core::add_playlist::ImportId;
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
@@ -204,12 +204,27 @@ impl Runtime {
         crate::settings::load(self);
     }
 
+    /// Checks the current settings authorization and storage state before
+    /// starting an operation that will update this setting.
+    pub fn check_setting_write(&self, key: &str) -> Result<(), crate::settings::SaveError> {
+        crate::settings::check_setting_write(self, key)
+    }
+
     pub fn set_setting(
         self: &Rc<Self>,
         key: &str,
         value: iptv_settings::Value,
     ) -> Result<(), crate::settings::SaveError> {
         crate::settings::set(self, key, value)
+    }
+
+    /// Saves a global setting and returns after publication or rollback.
+    pub async fn set_setting_and_wait(
+        self: &Rc<Self>,
+        key: &str,
+        value: iptv_settings::Value,
+    ) -> Result<(), crate::settings::SaveError> {
+        crate::settings::set_and_wait(self, key, value).await
     }
 
     /// Stores `value` for `key` as playlist `source`'s own setting.
@@ -270,7 +285,7 @@ impl Runtime {
         Ok(self
             .services()
             .read(move |store| {
-                Ok(external_playback_check(store, &authority, &group, access)?.is_some())
+                Ok(playback_handoff_check(store, &authority, Some(&group), access)?.is_some())
             })
             .await?)
     }
@@ -285,7 +300,20 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .call(move |store| external_playback_check(store, &authority, &group, access))
+            .call(move |store| playback_handoff_check(store, &authority, Some(&group), access))
+            .await?)
+    }
+
+    /// Checks source identity and parental policy in store order before a Cast load
+    /// or opening the selected receiver's relay gate.
+    pub async fn authorize_cast_playback(
+        &self,
+        authority: ResolutionAuthority,
+    ) -> Result<Option<ExternalPlaybackAuthorization>, crate::Error> {
+        let access = self.parental_snapshot();
+        Ok(self
+            .services()
+            .call(move |store| playback_handoff_check(store, &authority, None, access))
             .await?)
     }
 

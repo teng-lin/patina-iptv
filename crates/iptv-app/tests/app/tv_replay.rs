@@ -90,6 +90,63 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_opens_the_play_bar() {
     step(app.wait_for_within("text:Show 0", IMPORT));
     step(app.set_environment("a TV", |e| e.idiom = Idiom::Tv));
 
+    // The compact context keeps live replay reachable using only D-pad
+    // keys. Inspecting the current program first opens no stream.
+    let pick_menu = |app: &mut Headless, label: &str| {
+        let selector = format!("id:menu-panel >> role:menuitem[{label}]");
+        for _ in 0..40 {
+            if app
+                .screen()
+                .accessibility_state(&selector)
+                .is_ok_and(|state| state.selected)
+            {
+                step(app.press_key("enter"));
+                return;
+            }
+            step(app.press_key("down"));
+        }
+        panic!("the D-pad did not reach {label}");
+    };
+    step(app.press_key("m"));
+    pick_menu(&mut app, "More options");
+    pick_menu(&mut app, "Details");
+    step(app.wait_for("id:description-layer >> text:/Show 0/"));
+    assert_eq!(iptv_app::player_opens(0), 0);
+    step(app.back());
+    step(app.press_key("m"));
+    pick_menu(&mut app, "More options");
+    pick_menu(&mut app, "Play from the beginning");
+    step(app.wait_for("text:CATCH-UP"));
+    let expected_start = ((now - 25 * 60).div_euclid(60) * 60).to_string();
+    step(app.wait_until(
+        "the native player opens the live program's archive",
+        Duration::from_secs(5),
+        |_| {
+            let archive = lifetime.lock().unwrap().iter().rev().find_map(|item| {
+                let MountItem::ComponentProps { props, .. } = item else {
+                    return None;
+                };
+                props.iter().find_map(|(name, value)| {
+                    let source = value.as_ref()?;
+                    (name.as_ref() == "source" && source["live"] == false)
+                        .then(|| crate::support::upstream_source(source))
+                })
+            });
+            iptv_app::player_opens(0) == 1
+                && archive.is_some_and(|source| {
+                    source["url"].as_str().is_some_and(|url| {
+                        url.split_once('?').is_some_and(|(_, query)| {
+                            query.split('&').any(|pair| {
+                                pair.strip_prefix("utc=") == Some(expected_start.as_str())
+                            })
+                        })
+                    })
+                })
+        },
+    ));
+    step(app.press_key("g"));
+    step(app.wait_for("id:guide-ui >> role:cell[Show 0]"));
+
     // Two programs back, OK replays it full screen: the card alone, its
     // time line the seek bar (position and length), no action cards.
     step(app.press_key("home"));
@@ -107,6 +164,27 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_opens_the_play_bar() {
     // Right chooses a seek a time-bar step on (5 min), shown on the bar;
     // OK opens the archive there at once.
     step(app.press_key("right"));
+    step(app.wait_for(&format!("{LINE} >> text:⇢ 5:00")));
+    // Native named-key repeats still seek: the one-shot action policy
+    // must not turn a held seek arrow into a single step.
+    let keys = lifetime
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            MountItem::Keymap(keys) => Some(keys.clone()),
+            _ => None,
+        })
+        .expect("mounted keymap");
+    assert!(
+        app.repeat_key_binding("right", &keys)
+            .unwrap()
+            .fired()
+            .is_some()
+    );
+    step(app.wait_for(&format!("{LINE} >> text:⇢ 10:00")));
+    step(app.press_key("left"));
     step(app.wait_for(&format!("{LINE} >> text:⇢ 5:00")));
     step(app.press_key("enter"));
     step(app.wait_for_gone("text:/^⇢/", Duration::from_secs(2)));
