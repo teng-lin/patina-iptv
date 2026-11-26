@@ -11,18 +11,29 @@ pub(crate) enum PackageAction {
     Install(iptv_runtime::app_updates::ReleaseAsset),
     #[cfg(target_os = "linux")]
     AppImage(iptv_runtime::app_updates::ReleaseAsset),
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android"
+    ))]
     Download(String),
 }
 
 impl PackageAction {
     pub(crate) fn label(&self) -> &'static str {
-        use crate::i18n::tr;
-        match self {
-            #[cfg(target_os = "android")]
-            Self::Install(_) => tr("Download and update"),
+        match *self {
             #[cfg(target_os = "linux")]
-            Self::AppImage(_) => tr("Update AppImage"),
-            Self::Download(_) => tr("Download package"),
+            Self::AppImage(_) => crate::i18n::tr("Update AppImage"),
+            #[cfg(target_os = "android")]
+            Self::Install(_) => crate::i18n::tr("Download and update"),
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "android"
+            ))]
+            Self::Download(_) => crate::i18n::tr("Download package"),
         }
     }
 
@@ -32,6 +43,12 @@ impl PackageAction {
         match self {
             #[cfg(target_os = "linux")]
             Self::AppImage(asset) => linux::update(_ui, asset).await,
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos",
+                target_os = "android"
+            ))]
             Self::Download(url) => {
                 crate::settings_view::updates::open(&url).await;
             }
