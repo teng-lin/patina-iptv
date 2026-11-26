@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic subprocess coverage of the smoke adb process-group deadline."""
+import io
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "tools/ci/android/adb.py"
@@ -215,7 +216,7 @@ class Integration(unittest.TestCase):
                 shutil.copyfile(GUARD.with_name("ci-emulator.py"), ci / "android/ci-emulator.py")
                 smoke = ci / "android-smoke.sh"
                 smoke.write_text('''#!/usr/bin/env bash
-if [ ! -e first-run ]; then touch first-run; exit 1; fi
+if [ ! -e first-run ]; then touch first-run; exit 255; fi
 touch second-run
 ''')
                 crash = root / "target/android-smoke/crash.log"
@@ -231,13 +232,90 @@ with open("adb-calls.jsonl", "a") as stream: stream.write(json.dumps(sys.argv[1:
                 result = subprocess.run([sys.executable, "-c", command], cwd=root, capture_output=True,
                                         env={"PATH": str(binary) + os.pathsep + os.environ["PATH"]},
                                         timeout=5, check=False)
-                self.assertEqual(result.returncode, 0 if system_crash else 1, result.stderr)
+                self.assertEqual(result.returncode, 0 if system_crash else 255, result.stderr)
                 self.assertEqual((root / "second-run").exists(), system_crash)
                 if system_crash:
                     calls = [json.loads(line) for line in (root / "adb-calls.jsonl").read_text().splitlines()]
                     self.assertEqual(calls, [["-s", "emulator-5554", "reboot"], ["-s", "emulator-5554", "wait-for-device"]])
                 else:
                     self.assertFalse((root / "adb-calls.jsonl").exists())
+
+
+@unittest.skipUnless(os.name == "posix", "the CI emulator requires a Unix host")
+class EmulatorBoot(unittest.TestCase):
+    def setUp(self):
+        with patch.object(sys, "path", [str(GUARD.parent), *sys.path]):
+            self.wait = runpy.run_path(str(GUARD.with_name("ci-emulator.py")))["wait_for_boot"]
+        self.process = Mock()
+        self.process.poll.return_value = None
+        self.adb = Mock()
+        self.log = io.StringIO()
+        self.elapsed = 0
+        clock = Mock()
+        clock.monotonic.side_effect = lambda: self.elapsed
+        clock.sleep.side_effect = self.advance
+        self.enterContext(patch.dict(self.wait.__globals__, adb=self.adb, time=clock))
+        self.enterContext(patch.object(sys, "stderr", self.log))
+
+    def advance(self, seconds):
+        self.elapsed += seconds
+
+    def test_setup_rechecks_owned_booted_device_after_transient_errors(self):
+        failures = [
+            subprocess.CalledProcessError(255, ["adb"]),
+            subprocess.CalledProcessError(1, ["adb"], output="cmd: Can't find service: settings"),
+            subprocess.CalledProcessError(1, ["adb"], stderr="adb: device offline"),
+        ]
+        for failure in failures:
+            with self.subTest(failure=failure):
+                self.adb.reset_mock()
+                self.adb.side_effect = ["generated", "1", "", failure, "generated", "1", "", "", "", ""]
+                self.wait(self.process, "generated", {})
+                commands = [c.args for c in self.adb.call_args_list]
+                self.assertEqual(commands[4:6], [("emu", "avd", "name"), ("shell", "getprop", "sys.boot_completed")])
+                self.assertEqual(commands[3], ("shell", "settings", "put", "global", "window_animation_scale", "0.0"))
+                self.assertEqual(commands[3], commands[7])
+                self.assertTrue(all(c.kwargs["phase"] == "boot" for c in self.adb.call_args_list))
+
+    def test_replaced_avd_never_receives_a_setup_retry(self):
+        offline = subprocess.CalledProcessError(255, ["adb"])
+        self.adb.side_effect = ["generated", "1", "", offline, "different-avd"]
+        with self.assertRaisesRegex(RuntimeError, "different AVD"):
+            self.wait(self.process, "generated", {})
+        self.assertEqual(self.adb.call_args.args, ("emu", "avd", "name"))
+        self.assertEqual(self.adb.call_count, 5)
+
+    def test_hard_setup_error_reports_the_command_and_both_output_streams(self):
+        denied = subprocess.CalledProcessError(1, ["adb"], output="generated context", stderr="permission denied")
+        self.adb.side_effect = ["generated", "1", "", denied]
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            self.wait(self.process, "generated", {})
+        self.assertIs(raised.exception, denied)
+        self.assertEqual(self.elapsed, 0)
+        self.assertIn("settings put global window_animation_scale 0.0 exited 1", self.log.getvalue())
+        self.assertIn("stdout='generated context', stderr='permission denied'", self.log.getvalue())
+
+    def test_persistent_255_raises_the_last_failure_at_the_attempt_limit(self):
+        attempts = self.wait.__globals__["SETUP_ATTEMPTS"]
+        results = []
+        for attempt in range(attempts):
+            error = subprocess.CalledProcessError(255, ["adb"], output=f"generated failure {attempt}")
+            results.extend(["generated", "1", "", error])
+        self.adb.side_effect = results
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            self.wait(self.process, "generated", {})
+        self.assertIs(raised.exception, error)
+        self.assertIn(f"attempt {attempts}/{attempts}", self.log.getvalue())
+        self.assertIn(error.stdout, self.log.getvalue())
+
+    def test_boot_deadline_bounds_commands_and_keeps_the_last_probe_error(self):
+        offline = subprocess.CalledProcessError(1, ["adb"], stderr="generated connection error")
+        self.adb.side_effect = [offline, offline]
+        with patch.dict(self.wait.__globals__, BOOT_TIMEOUT=3), self.assertRaisesRegex(
+                RuntimeError, "boot timed out; adb emu avd name exited 1.*generated connection error"):
+            self.wait(self.process, "generated", {})
+        self.assertEqual([c.kwargs["timeout"] for c in self.adb.call_args_list], [3, 1])
+        self.assertEqual(self.elapsed, 3)
 
 
 @unittest.skipUnless(shutil.which("javac") and shutil.which("java"), "requires a JDK")
