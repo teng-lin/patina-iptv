@@ -19,7 +19,7 @@ rm -rf hosts/android/app/build/nsh/assets/notices
 mkdir -p hosts/android/app/build/nsh/assets/notices
 cp -R "$notices/." hosts/android/app/build/nsh/assets/notices/
 cp -R hosts/android/app/build/reports/dependency-license hosts/android/app/build/nsh/assets/notices/gradle
-(cd hosts/android && ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease bundleRelease)
+(cd hosts/android && ./gradlew --no-daemon testReleaseUnitTest lintRelease lintDirectRelease assembleDirectRelease bundleRelease)
 # The signed AAB retains the exact R8 map for this build.
 mapping=hosts/android/app/build/outputs/mapping/release/mapping.txt
 bundle=hosts/android/app/build/outputs/bundle/release/app-release.aab
@@ -30,7 +30,22 @@ mkdir -p target/android-unsigned
 python3 tools/ci/sbom.py android-classpath \
   hosts/android/app/build/reports/dependency-license/index.json \
   "target/android-unsigned/Patina-$VERSION-android-classpath-sbom.cdx.json" "$VERSION"
-cp hosts/android/app/build/outputs/apk/release/app-release-unsigned.apk target/android-unsigned/
+cp hosts/android/app/build/outputs/apk/directRelease/app-directRelease-unsigned.apk target/android-unsigned/app-release-unsigned.apk
 cp hosts/android/app/build/outputs/bundle/release/app-release.aab target/android-unsigned/
+# Keep both independent mapping files for the lifetime of the signed release.
+# BUNDLE-METADATA entries are available to maintainers and excluded from APKs.
+direct_mapping=hosts/android/app/build/outputs/mapping/directRelease/mapping.txt
+test -s "$direct_mapping"
+python3 - target/android-unsigned/app-release.aab "$direct_mapping" <<'PY'
+import sys
+import zipfile
+
+name = "BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map"
+with zipfile.ZipFile(sys.argv[1], "a", compression=zipfile.ZIP_DEFLATED) as bundle:
+    if name in bundle.namelist():
+        raise SystemExit("direct APK mapping already present")
+    bundle.write(sys.argv[2], name)
+PY
+unzip -p target/android-unsigned/app-release.aab BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map | cmp "$direct_mapping" -
 python3 tools/ci/check-android-artifacts.py \
   target/android-unsigned/app-release-unsigned.apk target/android-unsigned/app-release.aab

@@ -104,8 +104,8 @@ pub static COMMANDS: &[Command] = &[
         key("Send a diagnostic log, redacted of credentials."),
     ),
     Command::new(
-        S::General,
-        "updates",
+        S::About,
+        "",
         "general.check_updates",
         key("Look for a newer version now."),
     ),
