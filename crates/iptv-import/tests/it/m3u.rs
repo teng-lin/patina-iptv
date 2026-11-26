@@ -441,7 +441,10 @@ fn picked_loopback_playlist_accepts_only_its_own_origin() {
         if accepted {
             assert_eq!(result.unwrap().channels.len(), 1, "{url}");
         } else {
-            assert!(matches!(result, Err(ImportError::InvalidConfig(_))), "{url}");
+            assert!(
+                matches!(result, Err(ImportError::InvalidConfig(_))),
+                "{url}"
+            );
         }
 
         let mut fetch = FakeFetch::body(format!("{text}\n"));
