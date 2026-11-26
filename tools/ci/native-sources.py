@@ -27,7 +27,8 @@ pairs name the upstream archive, patches and resources.
 Linux: `apt-get source --download-only <source>=<version>` for the exact
 version `dpkg-query` reports (needs deb-src entries: enable-deb-src.sh). A
 version that has left the archive index is fetched from Launchpad, which
-keeps every published version, and checked against its .dsc.
+keeps every published version. Unchanged files still in the configured
+archive can be fetched there. The exact version's .dsc checks each file.
 
 Usage:
   native-sources.py macos APP OUTPUT.tar
@@ -294,7 +295,7 @@ def ubuntu_components(inventory):
             for (name, version), packages in sorted(grouped.items())]
 
 
-def print_uris(output):
+def print_uris(output, *, require_description=True):
     """`apt-get source --print-uris`: 'URL' name size ALGORITHM:hex, one file per line."""
     files = []
     for line in output.splitlines():
@@ -302,7 +303,7 @@ def print_uris(output):
         if match:
             files.append({"url": match[1], "name": match[2], "size": int(match[3]),
                           "algorithm": match[4].lower(), "checksum": match[5]})
-    if not any(row["name"].endswith(".dsc") for row in files):
+    if require_description and not any(row["name"].endswith(".dsc") for row in files):
         raise ValueError("apt named no source description (.dsc)")
     return files
 
@@ -350,6 +351,8 @@ def download(url, destination):
         "curl", "--fail", "--location", "--silent", "--show-error", "--retry", "3",
         # Also refused and reset connections; the checksum guards what arrives.
         "--retry-all-errors", "--connect-timeout", "20", "--max-time", "120", "--retry-max-time", "120",
+        # Leave time for a retry when a connected server stops sending bytes.
+        "--speed-limit", "1", "--speed-time", "20",
         "--proto", "=https,http", "--proto-redir", "=https,http", "--output", str(destination), url,
     ]
     try:
@@ -483,10 +486,20 @@ def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
                   "checksum": digest(directory / description)}, *dsc_files((directory / description).read_text())]
         for row in files:
             row["url"] = launchpad_url(name, version, row["name"])
-        # Fetch the .dsc from Launchpad. Its checksums also authenticate any cached members.
-        for row in files[1:]:
+        # A newer distro revision often reuses the same upstream tarball and
+        # detached signature. APT names their current archive URLs directly.
+        missing = [row for row in files[1:] if not cached_source(cache, row, directory / row["name"])]
+        archive_urls = {}
+        if missing:
+            current = run(["apt-get", "source", "--print-uris", name])
+            if current.returncode == 0:
+                archive_urls = {row["name"]: row["url"] for row in print_uris(current.stdout, require_description=False)}
+        for row in missing:
             destination = directory / row["name"]
-            if not cached_source(cache, row, destination) and not download(row["url"], destination):
+            archive_url = archive_urls.get(row["name"])
+            if archive_url and download(archive_url, destination):
+                continue
+            if not download(row["url"], destination):
                 raise SystemExit(f"cannot fetch source of {label}: {row['name']}")
         component["origin"] = "launchpad"
     component["sources"] = []
