@@ -428,7 +428,23 @@ fn picked_loopback_playlist_accepts_only_its_own_origin() {
         (true, "https://media.example.test/live.ts", true),
         (false, "http://127.0.0.1:18097/live.ts", false),
     ] {
-        let mut fetch = FakeFetch::body(format!("#EXTM3U\n#EXTINF:-1,Synthetic\n{url}\n"));
+        let text = format!("#EXTM3U\n#EXTINF:-1,Synthetic\n{url}");
+        let mut buffered = FakeFetch::body(text.clone());
+        buffered.same_request_origin = same_request_origin;
+        let result = block_on(import_source(
+            &buffered,
+            &picked,
+            &ImportOptions::new(synth::NOW),
+            &mut NoProgress,
+            &CancelToken::new(),
+        ));
+        if accepted {
+            assert_eq!(result.unwrap().channels.len(), 1, "{url}");
+        } else {
+            assert!(matches!(result, Err(ImportError::InvalidConfig(_))), "{url}");
+        }
+
+        let mut fetch = FakeFetch::body(format!("{text}\n"));
         fetch.same_request_origin = same_request_origin;
         let mut stage = Stage::default();
         let result = block_on(iptv_import::import_source_into(
