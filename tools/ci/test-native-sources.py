@@ -549,6 +549,13 @@ class Collecting(unittest.TestCase):
         component = description["components"][0]
         self.assertEqual(component["origin"], "launchpad")
         self.assertEqual([row["url"] for row in component["sources"]], [base + name for name in files])
+        # An empty optional APT hint must not block the working historical path.
+        def no_hints(arguments):
+            if arguments[-1] == "synthetic-media":
+                return subprocess.CompletedProcess(arguments, 0, "no downloadable source URIs", "")
+            return Missing()
+
+        self.collect_linux(no_hints)
         # A file that does not match the description is refused.
         self.setUp()
         self.files = {base + name: data for name, data in files.items()}
@@ -559,6 +566,35 @@ class Collecting(unittest.TestCase):
         self.setUp()
         with self.assertRaisesRegex(SystemExit, "neither the configured deb-src indexes nor Launchpad"):
             self.collect_linux(lambda arguments, cwd=None: Missing)
+
+    def test_superseded_release_uses_shared_archive_files_and_retains_its_own_checksums(self):
+        files = self.source_files()
+        original = "synthetic-media_1.2.orig.tar.xz"
+        base = "https://launchpad.net/ubuntu/+archive/primary/+sourcefiles/synthetic-media/7:1.2-3/"
+        archive = "https://archive.example.test/pool/" + original
+        self.files = {base + name: data for name, data in files.items() if name != original}
+        self.files[archive] = files[original]
+
+        def apt(arguments):
+            if arguments[-1] != "synthetic-media":
+                return subprocess.CompletedProcess(arguments, 100, "", "Version not found")
+            current = {"synthetic-media_1.2-4.dsc": b"current dsc", original: files[original]}
+            listing = "".join(f"'https://archive.example.test/pool/{name}' {name} {len(data)} "
+                              f"SHA256:{hashlib.sha256(data).hexdigest()}\n" for name, data in current.items())
+            return subprocess.CompletedProcess(arguments, 0, listing, "")
+
+        description, _ = self.collect_linux(apt)
+        source = next(row for row in description["components"][0]["sources"] if row["file"].endswith(original))
+        self.assertEqual(source["url"], base + original, "stable canonical URL regardless of fetch mirror")
+        self.assertIn(archive, self.attempts)
+        self.assertNotIn(base + original, self.attempts)
+        self.files[archive] = b"x" * len(files[original])
+        with self.assertRaisesRegex(SystemExit, "checksum mismatch"):
+            self.collect_linux(apt)
+        del self.files[archive]
+        self.files[base + original] = files[original]
+        description, _ = self.collect_linux(apt)
+        self.assertIn(base + original, [row["url"] for row in description["components"][0]["sources"]])
 
     def test_missing_deb_src_configuration_is_not_papered_over(self):
         class Unconfigured:
