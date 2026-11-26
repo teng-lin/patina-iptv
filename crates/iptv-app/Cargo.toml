@@ -80,15 +80,16 @@ iptv-cast.workspace = true
 dbus-secret-service = { version = "4.1", features = ["crypto-rust"] }
 # The logind and portal sleep inhibitors while recording (host/native/keep_awake.rs).
 dbus = "0.9"
-nsh-platform-linux.workspace = true
+# Direct Cargo builds need SVG rendering for the desktop controls.
+nsh-platform-linux = { workspace = true, features = ["svg"] }
 tempfile = "3"
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nsh-platform-macos.workspace = true
+nsh-platform-macos = { workspace = true, features = ["svg"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-nsh-platform-ios.workspace = true
+nsh-platform-ios = { workspace = true, features = ["svg"] }
 objc2 = "0.6.5"
 block2 = "0.6.2"
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIView", "UIResponder", "UIAccessibility", "UIApplication", "UIScene"] }
