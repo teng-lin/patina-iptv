@@ -2,6 +2,7 @@
 """The tier workflows keep required checks, exact-SHA releases and native coverage."""
 import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -436,6 +437,27 @@ class FuzzCommand(unittest.TestCase):
 
 
 class PublicArtifacts(unittest.TestCase):
+    def test_record_uses_tagged_candidate_after_verifying_publisher_provenance(self):
+        verifier = module("verify-public-release")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            candidate, publisher = "a" * 40, "b" * 40
+            repo, tag, ref = "synthetic/repo", "v1.0.0", "refs/heads/master"
+            self.assertEqual(verifier.release_commit(directory, repo, tag, candidate, f"refs/tags/{tag}"), candidate)
+            (directory / "Patina-1.0.0-android-tablet-tv.apk").write_bytes(b"synthetic")
+            manifest = {"repository": repo, "tag": tag, "sha": candidate, "publisher": {"ref": ref, "sha": publisher}}
+            (directory / "candidate-manifest.json").write_text(json.dumps(manifest))
+            verifier.release.write_checksums(directory)
+            runner = Mock()
+            verifier.verify(directory, repo, publisher, ref, runner)
+            for call in runner.call_args_list:
+                self.assertIn(publisher, call.args[0])
+            commit = verifier.release_commit(directory, repo, tag, publisher, ref)
+            record = verifier.package_record(directory, repo, tag, commit, directory)
+            self.assertEqual(record["commit"], candidate)
+            with self.assertRaisesRegex(ValueError, "promotion manifest"):
+                verifier.release_commit(directory, repo, tag, candidate, ref)
+
     def test_update_record_only_lists_available_viewer_packages_for_the_exact_version(self):
         verifier = module("verify-public-release")
         with tempfile.TemporaryDirectory() as temporary:
