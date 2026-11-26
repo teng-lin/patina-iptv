@@ -129,8 +129,14 @@ open class TvActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (!hostMounted) return
+        UpdateHost.resumed(this)
         // The backup rows follow the document pickers that resolve now.
         backups.resumed()
+    }
+
+    override fun onPause() {
+        UpdateHost.paused(this)
+        super.onPause()
     }
 
     override fun onStop() {

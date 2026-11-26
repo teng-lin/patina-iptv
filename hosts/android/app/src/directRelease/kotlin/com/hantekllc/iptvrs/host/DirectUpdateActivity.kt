@@ -23,7 +23,7 @@ class DirectUpdateActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         val path = intent.getStringExtra("path")?.let(::File)
-        if (path == null || !UpdateHost.active() || !UpdateHost.owns(this, path) || !path.isFile) {
+        if (path == null || !UpdateHost.pending(this, path, intent.getLongExtra("code", -1))) {
             finish()
             return
         }
@@ -41,16 +41,6 @@ class DirectUpdateActivity : Activity() {
     private fun proceed() {
         if (RecordingHost.updateMustWait()) return stop(R.string.update_recording_active)
         val apk = file ?: return finish()
-        if (!packageManager.canRequestPackageInstalls()) {
-            waiting = 1
-            try {
-                startActivityForResult(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.fromParts("package", packageName, null)), waiting)
-            } catch (_: RuntimeException) {
-                stop(R.string.update_install_unavailable)
-            }
-            return
-        }
         val code = intent.getLongExtra("code", -1)
         worker.execute {
             val valid = runCatching { matchesInstalled(apk, code) }.getOrDefault(false)
@@ -58,19 +48,43 @@ class DirectUpdateActivity : Activity() {
                 if (isDestroyed || isFinishing) return@runOnUiThread
                 if (!valid) return@runOnUiThread stop(R.string.update_invalid_apk)
                 if (RecordingHost.updateMustWait()) return@runOnUiThread stop(R.string.update_recording_active)
+                if (!packageManager.canRequestPackageInstalls()) {
+                    waiting = 1
+                    try {
+                        startActivityForResult(
+                            Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.fromParts("package", packageName, null),
+                            ),
+                            waiting,
+                        )
+                    } catch (_: RuntimeException) {
+                        stop(R.string.update_install_unavailable)
+                    }
+                    return@runOnUiThread
+                }
                 try {
                     val uri = FilesProvider.uriFor(this, apk) ?: return@runOnUiThread stop(R.string.update_invalid_apk)
-                    val install = Intent(Intent.ACTION_INSTALL_PACKAGE).setDataAndType(uri, "application/vnd.android.package-archive")
-                        .putExtra(Intent.EXTRA_RETURN_RESULT, true)
-                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    val install =
+                        Intent(Intent.ACTION_INSTALL_PACKAGE)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     // Grant access only to the OS package installer.
-                    val handler = packageManager.queryIntentActivities(install,
-                        PackageManager.MATCH_SYSTEM_ONLY or PackageManager.MATCH_DEFAULT_ONLY)
-                        .map { it.activityInfo }
-                        .firstOrNull { it.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 &&
-                            packageManager.checkPermission(android.Manifest.permission.INSTALL_PACKAGES,
-                                it.packageName) == PackageManager.PERMISSION_GRANTED }
-                        ?: return@runOnUiThread stop(R.string.update_install_unavailable)
+                    val handler =
+                        packageManager
+                            .queryIntentActivities(
+                                install,
+                                PackageManager.MATCH_SYSTEM_ONLY or PackageManager.MATCH_DEFAULT_ONLY,
+                            ).map { it.activityInfo }
+                            .firstOrNull {
+                                it.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0 &&
+                                    packageManager.checkPermission(
+                                        android.Manifest.permission.INSTALL_PACKAGES,
+                                        it.packageName,
+                                    ) == PackageManager.PERMISSION_GRANTED
+                            }
+                            ?: return@runOnUiThread stop(R.string.update_install_unavailable)
                     install.setClassName(handler.packageName, handler.name)
                     waiting = 2
                     startActivityForResult(install, waiting)
@@ -82,10 +96,16 @@ class DirectUpdateActivity : Activity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun matchesInstalled(apk: File, expected: Long): Boolean {
+    private fun matchesInstalled(
+        apk: File,
+        expected: Long,
+    ): Boolean {
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
         val old = packageManager.getPackageInfo(packageName, flags)
-        val next = packageManager.getPackageArchiveInfo(apk.absolutePath, flags) ?: return false
+        // Android 9's archive parser only collects certificates with GET_SIGNATURES.
+        val archiveFlags = if (Build.VERSION.SDK_INT == 28) flags or PackageManager.GET_SIGNATURES else flags
+        val next = packageManager.getPackageArchiveInfo(apk.absolutePath, archiveFlags) ?: return false
+
         fun code(p: PackageInfo) = if (Build.VERSION.SDK_INT >= 28) p.longVersionCode else p.versionCode.toLong()
         if (next.packageName != packageName || code(next) != expected || expected <= code(old)) return false
         if (Build.VERSION.SDK_INT < 28) {
@@ -101,11 +121,19 @@ class DirectUpdateActivity : Activity() {
     }
 
     @Deprecated("System installer and settings results for API 26+")
-    override fun onActivityResult(request: Int, result: Int, data: Intent?) {
+    override fun onActivityResult(
+        request: Int,
+        result: Int,
+        data: Intent?,
+    ) {
         super.onActivityResult(request, result, data)
         if (request != waiting) return
         waiting = 0
-        if (request == 1 && packageManager.canRequestPackageInstalls()) proceed() else finish()
+        when {
+            request == 1 && packageManager.canRequestPackageInstalls() -> proceed()
+            request == 2 && result == Activity.RESULT_FIRST_USER -> stop(R.string.update_install_unavailable)
+            else -> finish()
+        }
     }
 
     private fun stop(message: Int) {

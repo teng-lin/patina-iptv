@@ -16,6 +16,7 @@ const FILES: &[&str] = &[
     "latest_known_time.json",
 ];
 
+#[derive(Debug)]
 pub(super) struct Session {
     _lock: File,
     directory: PathBuf,
@@ -39,13 +40,17 @@ impl Session {
             Ok(bytes) => {
                 let files: BTreeMap<String, String> = serde_json::from_slice(&bytes)?;
                 for &name in FILES {
-                    let contents = files
-                        .get(name)
-                        .ok_or_else(|| io::Error::other("incomplete update state"))?;
+                    let Some(contents) = files.get(name) else {
+                        // First refresh or a role removed during key rotation.
+                        continue;
+                    };
                     if name == "root.json" && version(contents.as_bytes())? > version(embedded)? {
                         root = contents.as_bytes().to_vec();
                     }
                     fs::write(work.path().join(name), contents)?;
+                    if name == "latest_known_time.json" {
+                        fs::write(work.path().join("verified-time.json"), contents)?;
+                    }
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -59,10 +64,31 @@ impl Session {
         })
     }
 
+    /// Advance the durable clock floor only after authenticating unexpired metadata.
+    pub(super) fn accept_clock(&self) -> io::Result<()> {
+        fs::copy(
+            self.work.path().join("latest_known_time.json"),
+            self.work.path().join("verified-time.json"),
+        )?;
+        Ok(())
+    }
+
     pub(super) fn commit(&self) -> io::Result<()> {
         let mut files = BTreeMap::new();
         for &name in FILES {
-            files.insert(name, fs::read_to_string(self.work.path().join(name))?);
+            let source = if name == "latest_known_time.json" {
+                "verified-time.json"
+            } else {
+                name
+            };
+            match fs::read_to_string(self.work.path().join(source)) {
+                Ok(contents) => {
+                    serde_json::from_str::<serde_json::Value>(&contents)?;
+                    files.insert(name, contents);
+                }
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
         }
         let mut state = NamedTempFile::new_in(&self.directory)?;
         serde_json::to_writer(&mut state, &files)?;

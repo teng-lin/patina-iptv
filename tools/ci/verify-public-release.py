@@ -5,9 +5,11 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import update_packages
+import re
 import subprocess
 import tempfile
+
+import update_packages
 
 SPEC = importlib.util.spec_from_file_location("publish_release", Path(__file__).with_name("publish-release.py"))
 release = importlib.util.module_from_spec(SPEC)
@@ -20,12 +22,25 @@ versioning = importlib.util.module_from_spec(VERSION_SPEC)
 VERSION_SPEC.loader.exec_module(versioning)
 
 
+def release_commit(directory, repository, tag, publisher, ref):
+    if ref == f"refs/tags/{tag}":
+        return publisher
+    # A manual promotion attests with the current master workflow. Its verified
+    # manifest names the older tagged commit that supplied the package bytes.
+    manifest = json.loads((directory / "candidate-manifest.json").read_text())
+    if (ref != "refs/heads/master" or manifest.get("repository") != repository
+            or manifest.get("tag") != tag or manifest.get("publisher") != {"sha": publisher, "ref": ref}
+            or not re.fullmatch(r"[0-9a-f]{40}", manifest.get("sha", ""))):
+        raise ValueError("release identity does not match the verified promotion manifest")
+    return manifest["sha"]
+
+
 def package_record(directory, repository, tag, commit, signing_directory):
     """Describe only supported viewer downloads from a verified public release."""
     version = tag.removeprefix("v")
-    code = versioning.android_version_code(version)
     if tag != f"v{version}":
         raise ValueError("expected a versioned release tag")
+    code = versioning.android_version_code(version)
     base = f"https://github.com/{repository}/releases"
     packages = []
     for platform, kind, suffix, architectures, minimum in update_packages.formats():
@@ -70,7 +85,8 @@ def main():
                         "--dir", str(directory)], check=True)
         verify(directory, repository, args.commit, args.ref)
         if args.update_record:
-            record = package_record(directory, repository, args.tag, args.commit, args.signing_directory)
+            commit = release_commit(directory, repository, args.tag, args.commit, args.ref)
+            record = package_record(directory, repository, args.tag, commit, args.signing_directory)
             args.update_record.write_text(json.dumps(record, indent=2) + "\n")
     return 0
 

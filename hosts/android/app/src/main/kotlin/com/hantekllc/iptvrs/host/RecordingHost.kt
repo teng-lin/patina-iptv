@@ -21,6 +21,7 @@ import android.os.PowerManager
  * credentials stay in Rust. */
 object RecordingHost {
     @Volatile private var desiredActive = false
+
     fun updateMustWait(): Boolean = desiredActive
 
     @Volatile private lateinit var context: Context
