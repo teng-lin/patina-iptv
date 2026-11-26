@@ -942,6 +942,11 @@ fn playlist_popup_hides_and_settings_restores_the_original_playlist() {
     step(app.long_press(&row("Gamma")));
     step(app.press(hide));
     hidden(&mut app);
+    step(app.wait_until(
+        "Gamma hidden in the saved playlist policy",
+        Duration::from_secs(5),
+        |_| !load().source_policy(gamma).unwrap().enabled,
+    ));
     step(app.back());
     let settings_delete = "id:settings-content >> role:button[Delete “Gamma”]";
     step(app.press(settings_delete));
@@ -1290,8 +1295,34 @@ fn playlist_reorder_from_settings_and_guide_restores_expansion_and_visibility() 
     assert_eq!(persisted(), [alpha, beta, gamma]);
     step(app.wait_for("id:organization-row-0 >> text:Beta"));
     writer.execute_batch("DROP TRIGGER fail_reorder").unwrap();
+
+    let settings_path = dir.join("settings.json");
+    let sort_is = |method| {
+        move |settings: &iptv_settings::Settings| {
+            settings.choice(
+                iptv_settings::keys::PLAYLIST_SORT,
+                &iptv_settings::Target::Global,
+            ) == method
+        }
+    };
+    crate::personalization::saved_settings(&mut app, &settings_path, sort_is("name"));
+    let blocked_settings = settings_path.with_extension("json.tmp");
+    std::fs::create_dir(&blocked_settings).unwrap();
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for(
+        "id:app-notice >> text:Playlist positions saved. Could not switch to Custom order. Try saving again.",
+    ));
+    assert_eq!(persisted(), [beta, alpha, gamma]);
+    step(app.wait_for("id:organization-row-0 >> text:Beta"));
+    crate::personalization::saved_settings(&mut app, &settings_path, sort_is("name"));
+
+    // Retrying only needs the settings write. A new position write would fail.
+    writer.execute_batch("CREATE TRIGGER fail_reorder BEFORE UPDATE OF position ON sources BEGIN SELECT RAISE(ABORT,'synthetic order failure'); END;").unwrap();
+    std::fs::remove_dir(&blocked_settings).unwrap();
     step(app.press("id:organization-screen >> text:Save"));
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    writer.execute_batch("DROP TRIGGER fail_reorder").unwrap();
+    crate::personalization::saved_settings(&mut app, &settings_path, sort_is("manual"));
     restored(&mut app);
     assert_eq!(persisted(), [beta, alpha, gamma]);
     step(app.right_click("id:guide-groups >> role:tab[Alpha]"));

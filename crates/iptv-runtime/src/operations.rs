@@ -218,6 +218,15 @@ impl Runtime {
         crate::settings::set(self, key, value)
     }
 
+    /// Saves a global setting and returns after publication or rollback.
+    pub async fn set_setting_and_wait(
+        self: &Rc<Self>,
+        key: &str,
+        value: iptv_settings::Value,
+    ) -> Result<(), crate::settings::SaveError> {
+        crate::settings::set_and_wait(self, key, value).await
+    }
+
     /// Stores `value` for `key` as playlist `source`'s own setting.
     pub fn set_playlist_setting(
         self: &Rc<Self>,
