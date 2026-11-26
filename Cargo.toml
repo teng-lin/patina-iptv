@@ -26,7 +26,7 @@ members = [
 exclude = ["crates/iptv-app/.nsh"]
 
 [workspace.package]
-version = "0.1.10"
+version = "0.1.11"
 edition = "2024"
 # The toolchain pinned in rust-toolchain.toml: the only one CI builds and tests.
 rust-version = "1.99.1"
