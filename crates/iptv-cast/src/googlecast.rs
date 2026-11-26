@@ -128,7 +128,8 @@ impl Session {
         };
         session.connect_channel(&session.transport).await?;
         if !launch {
-            session.media(json!({"type":"GET_STATUS"})).await?;
+            let reply = session.media(json!({"type":"GET_STATUS"})).await?;
+            media_entries(&reply)?;
         }
         Ok(session)
     }
@@ -172,7 +173,8 @@ impl Session {
     /// Loads live HLS at the live edge. Only a reply for this URL establishes ownership.
     pub async fn load(&self, url: &str) -> Result<i64> {
         let reply=self.media(json!({"type":"LOAD","autoplay":true,"media":{"contentId":url,"contentType":"application/x-mpegURL","streamType":"LIVE"}})).await?;
-        media_entries(&reply)
+        media_entries(&reply)?
+            .iter()
             .find(|item| item.pointer("/media/contentId").and_then(Value::as_str) == Some(url))
             .and_then(|item| item["mediaSessionId"].as_i64())
             .ok_or(Error::Unknown)
@@ -180,14 +182,24 @@ impl Session {
     /// Returns the receiver's current ownership of one opaque relay capability.
     pub async fn lookup(&self, url: &str) -> Result<Option<i64>> {
         let reply = self.media(json!({"type":"GET_STATUS"})).await?;
-        Ok(media_entries(&reply)
-            .find(|item| item.pointer("/media/contentId").and_then(Value::as_str) == Some(url))
-            .and_then(|item| item["mediaSessionId"].as_i64()))
+        let mut unidentified = false;
+        for item in media_entries(&reply)? {
+            match item.pointer("/media/contentId").and_then(Value::as_str) {
+                Some(content) if content == url => return Ok(item["mediaSessionId"].as_i64()),
+                Some(_) => {}
+                // The receiver may omit unchanged media metadata.
+                None => unidentified = true,
+            }
+        }
+        if unidentified {
+            return Err(Error::Unknown);
+        }
+        Ok(None)
     }
 
     pub async fn status(&self, id: i64) -> Result<Status> {
         let reply = self.media(json!({"type":"GET_STATUS"})).await?;
-        state(&reply, id).ok_or(Error::Ended)
+        state(&reply, id)
     }
     pub async fn command(&self, id: i64, cmd: Command) -> Result<()> {
         let value = match cmd {
@@ -222,11 +234,19 @@ impl Session {
             Command::Stop => "STOP",
             _ => return Err(Error::Refused),
         };
-        self.media(json!({"type":verb,"mediaSessionId":id})).await?;
-        if cmd == Command::Stop {
-            timeout(DEADLINE, async {
-                loop {
-                    match self.status(id).await {
+        let reply = self.media(json!({"type":verb,"mediaSessionId":id})).await?;
+        timeout(DEADLINE, async {
+            let mut observed = if cmd == Command::Stop {
+                self.status(id).await
+            } else {
+                state(&reply, id)
+            };
+            loop {
+                match (cmd, observed) {
+                    (Command::Play, Ok(Status::Playing | Status::Buffering))
+                    | (Command::Pause, Ok(Status::Paused))
+                    | (
+                        Command::Stop,
                         Err(Error::Ended)
                         | Ok(
                             Status::Idle
@@ -234,28 +254,50 @@ impl Session {
                             | Status::Interrupted
                             | Status::Canceled
                             | Status::Failed,
-                        ) => return Ok(()),
-                        Err(error) => return Err(error),
-                        Ok(_) => tokio::time::sleep(Duration::from_millis(250)).await,
-                    }
+                        ),
+                    ) => return Ok(()),
+                    (
+                        _,
+                        Ok(
+                            Status::Finished
+                            | Status::Interrupted
+                            | Status::Canceled
+                            | Status::Failed,
+                        ),
+                    ) => return Err(Error::Ended),
+                    (_, Err(error)) => return Err(error),
+                    (_, Ok(_)) => {}
                 }
-            })
-            .await
-            .map_err(|_| Error::Unknown)??;
-        }
-        Ok(())
+                // The acknowledgement can precede the actual playback change.
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                observed = self.status(id).await;
+            }
+        })
+        .await
+        .map_err(|_| Error::Unknown)?
     }
 }
-fn media_entries(v: &Value) -> impl Iterator<Item = &Value> {
-    v["status"].as_array().into_iter().flatten()
+fn media_entries(reply: &Value) -> Result<&[Value]> {
+    let entries = reply["status"].as_array().ok_or(Error::Unknown)?;
+    // A malformed entry could represent the session we were asked to find.
+    if entries
+        .iter()
+        .any(|entry| entry["mediaSessionId"].as_i64().is_none())
+    {
+        return Err(Error::Unknown);
+    }
+    Ok(entries)
 }
-fn state(v: &Value, id: i64) -> Option<Status> {
-    let item = media_entries(v).find(|v| v["mediaSessionId"].as_i64() == Some(id))?;
-    Some(match item["playerState"].as_str() {
-        Some("PLAYING") => Status::Playing,
-        Some("PAUSED") => Status::Paused,
-        Some("BUFFERING") => Status::Buffering,
-        Some("IDLE") => match item["idleReason"].as_str() {
+fn state(reply: &Value, id: i64) -> Result<Status> {
+    let item = media_entries(reply)?
+        .iter()
+        .find(|entry| entry["mediaSessionId"].as_i64() == Some(id))
+        .ok_or(Error::Ended)?;
+    Ok(match item["playerState"].as_str().ok_or(Error::Unknown)? {
+        "PLAYING" => Status::Playing,
+        "PAUSED" => Status::Paused,
+        "BUFFERING" => Status::Buffering,
+        "IDLE" => match item["idleReason"].as_str() {
             Some("FINISHED") => Status::Finished,
             Some("INTERRUPTED") => Status::Interrupted,
             Some("CANCELLED") => Status::Canceled,
@@ -317,10 +359,10 @@ async fn drive(
                     if let Some(id)=v["requestId"].as_u64()
                         && pending.get(&id).is_some_and(|p|p.namespace==m.namespace && p.destination==m.source)
                         && let Some(p)=pending.remove(&id) {
-                        let result=match v["type"].as_str(){
-                            Some("LOAD_FAILED")=>Err(Error::LoadFailed),
-                            Some("LOAD_CANCELLED"|"INVALID_REQUEST"|"LAUNCH_ERROR"|"INVALID_PLAYER_STATE")=>Err(Error::Refused),
-                            Some("MEDIA_STATUS"|"RECEIVER_STATUS")=>Ok(v),
+                        let result=match (m.namespace.as_str(), v["type"].as_str()){
+                            (_, Some("LOAD_FAILED"))=>Err(Error::LoadFailed),
+                            (_, Some("LOAD_CANCELLED"|"INVALID_REQUEST"|"LAUNCH_ERROR"|"INVALID_PLAYER_STATE"))=>Err(Error::Refused),
+                            (MEDIA, Some("MEDIA_STATUS")) | (RECEIVER, Some("RECEIVER_STATUS"))=>Ok(v),
                             _=>Err(Error::Unknown)
                         };
                         let _=p.reply.send(result);

@@ -91,3 +91,6 @@ pub(crate) fn connector() -> Result<TlsConnector, rustls::Error> {
         .with_no_client_auth();
     Ok(TlsConnector::from(Arc::new(config)))
 }
+
+#[cfg(test)]
+mod tests;

@@ -84,3 +84,25 @@ async fn empty_mdns_scan_returns_at_its_deadline_and_stops_the_daemon() {
     .await
     .expect("the scan and its mDNS worker should both finish");
 }
+
+#[tokio::test]
+async fn dropping_a_pending_scan_stops_its_daemon() {
+    let daemon = ServiceDaemon::new_with_port(0).unwrap();
+    daemon.disable_interface(mdns_sd::IfKind::All).unwrap();
+    let monitor = daemon.monitor().unwrap();
+    {
+        let scan = browse_mdns(daemon.clone(), Duration::from_secs(30));
+        tokio::pin!(scan);
+        tokio::select! {
+            biased;
+            result = &mut scan => panic!("the scan should still be waiting: {result:?}"),
+            () = std::future::ready(()) => {}
+        }
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while monitor.recv_async().await.is_ok() {}
+    })
+    .await
+    .expect("dropping the scan should turn off the mDNS daemon");
+    drop(daemon);
+}
