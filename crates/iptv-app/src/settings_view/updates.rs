@@ -5,25 +5,22 @@ use nsh_core::prelude::open_url;
 
 pub(super) use crate::host::updates::RELEASES;
 
-thread_local! {
-    static ACTIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
 /// Hold the action through its result dialog. Dropping a cancelled UI task
-/// also makes the row available to the next app owner on this thread.
-struct UpdateDialog;
+/// also makes the row available again while its app owner still exists.
+struct UpdateDialog(nsh_core::prelude::Signal<bool>);
 
 impl Drop for UpdateDialog {
     fn drop(&mut self) {
-        ACTIVE.set(false);
+        self.0.try_set(false);
     }
 }
 
 pub(super) fn run(ui: crate::Ui) {
-    if ACTIVE.replace(true) {
+    if ui.update_dialog_open.get_untracked() {
         return;
     }
-    let dialog = UpdateDialog;
+    ui.update_dialog_open.set(true);
+    let dialog = UpdateDialog(ui.update_dialog_open);
     crate::tasks::spawn_in_app(async move {
         let _dialog = dialog;
         show(ui).await;
