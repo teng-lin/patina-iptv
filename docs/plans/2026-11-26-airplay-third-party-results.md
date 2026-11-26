@@ -1,19 +1,19 @@
 # Third-party AirPlay video feasibility · 26 November 2026
 
-Neither upstream sender started URL playback on the available Mac receiver, including after the owner allowed everyone on the same network. **M8a did not pass, so M8b stays closed.** Patina should keep third-party AirPlay video unavailable on Android, Windows and Linux. Native AirPlay from Apple apps uses a separate AVFoundation route and has its own acceptance tests.
+The Linux builds of both upstream senders failed to start URL playback on the one Mac tested. Castor declined the Mac model locally. pyatv reached the receiver but did not establish a playback session. **M8a requires a working play queue on at least one receiver. M8b stays closed until that happens.** The production third-party sender on Android, Windows and Linux remains pending. Native AirPlay from Apple apps uses a separate AVFoundation route.
 
 ## Receiver and method
 
 A Linux workstation targeted one Apple silicon Mac running macOS 26.6.2 (25G83). Its `_airplay._tcp.local.` service resolved on port 7000 and advertised model `Mac16,12`. Each run generated a 12-second H.264 Baseline and AAC MP4 and served it from a temporary LAN HTTP origin. Each client received a fresh URL. The origin counted requests, and the test closed it after each attempt.
 
-- **Castor.** Built the unmodified desktop `castor` CLI with Go 1.27.4 and its pinned Whisper submodule. Ran `castor --config <temporary-config> cast url <synthetic-url>` with `device.type` set to `airplay` and `device.host` set to the Mac. [Castor Android source at `2d81b038`](https://github.com/kdpkke/castor-android/tree/2d81b038293d0b039d73bb2c6d708900931e1e36)
+- **Castor.** Built the unmodified desktop `castor` CLI from commit `2d81b038` with Go 1.27.4 and its pinned Whisper submodule. Ran `castor --config <temporary-config> cast url <synthetic-url>` with `device.type` set to `airplay` and `device.host` set to the Mac. [Castor Android source at `2d81b038`](https://github.com/kdpkke/castor-android/tree/2d81b038293d0b039d73bb2c6d708900931e1e36)
 - **pyatv.** The handoff specifies open PR #2846. Both runs used its unmodified head `8848ad3f` and Python 3.13.17. Called `pyatv.scan` with the Mac as the sole host and `Protocol.AirPlay` as the sole protocol, then `pyatv.connect` and `stream.play_url` with in-memory storage. [PR #2846](https://github.com/postlund/pyatv/pull/2846) · [Exact checkout](https://github.com/postlund/pyatv/tree/8848ad3fd9ae46b8eb733bfc667b536a28f04c5a)
 
 ## Results
 
-The initial access setting was unknown. Before the second run, the owner reported changing the Mac's AirPlay Receiver access to allow everyone on the same network. The sender tests used no stored credentials and made no receiver configuration changes.
+The initial access setting was unknown. For the second run, the owner reported enabling access for anyone on the same network and later confirmed in System Settings that Require Password was off. The sender tests used no stored credentials and made no receiver configuration changes.
 
-| Sender and observation | Initial run | After owner changed access |
+| Sender and observation | Initial run | Same-network access reported by owner |
 | --- | --- | --- |
 | Castor direct connection | Exited 1 with `the receiver plays no video over AirPlay` | Same exit and message |
 | pyatv targeted discovery | Found service, reported pairing `Unsupported` | Same result |
