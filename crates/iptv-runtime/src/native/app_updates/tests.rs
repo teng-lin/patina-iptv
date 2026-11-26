@@ -234,3 +234,23 @@ fn a_newer_desktop_requirement_needs_manual_confirmation() {
         Some(UpdateResult::RequirementsUnconfirmed)
     );
 }
+
+#[test]
+fn a_failed_refresh_cannot_pin_an_incorrect_future_clock() {
+    let state = tempfile::tempdir().unwrap();
+    let root = include_bytes!("../../../tests/fixtures/updates/1.root.json");
+    let session = trust::Session::open(state.path(), root).unwrap();
+    let accepted = br#""2026-01-01T00:00:00Z""#;
+    let time = session.work.path().join("latest_known_time.json");
+    fs::write(&time, accepted).unwrap();
+    session.accept_clock().unwrap();
+    session.commit().unwrap();
+    fs::write(time, br#""2099-01-01T00:00:00Z""#).unwrap();
+    session.commit().unwrap();
+    drop(session);
+    let restored = trust::Session::open(state.path(), root).unwrap();
+    assert_eq!(
+        fs::read(restored.work.path().join("latest_known_time.json")).unwrap(),
+        accepted
+    );
+}

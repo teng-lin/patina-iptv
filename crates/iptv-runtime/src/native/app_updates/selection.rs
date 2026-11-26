@@ -33,7 +33,7 @@ impl InstalledPackage {
             platform,
             architecture,
             format: match platform {
-                "windows" | "macos" => option_env!("PATINA_UPDATE_PACKAGE").map(str::to_owned),
+                "macos" => option_env!("PATINA_UPDATE_PACKAGE").map(str::to_owned),
                 _ => None,
             },
             version,
@@ -43,7 +43,7 @@ impl InstalledPackage {
     }
 
     pub(super) fn packaged(mut self) -> Self {
-        if self.platform == "linux" && self.format.is_none() {
+        if matches!(self.platform, "linux" | "windows") && self.format.is_none() {
             self.format = std::env::current_exe()
                 .ok()
                 .and_then(|exe| std::fs::read_to_string(exe.parent()?.join("patina-package")).ok())

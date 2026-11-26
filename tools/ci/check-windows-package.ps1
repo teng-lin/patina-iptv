@@ -53,6 +53,9 @@ try {
     foreach ($file in @('Patina.exe', 'libmpv-2.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'LICENSE', 'notices/THIRD-PARTY.html', 'notices/components.json', 'notices/libmpv/licenses', 'notices/libmpv/components.json', 'notices/libmpv/sources.lock.json', 'notices/libmpv/SOURCE.txt', 'notices/libmpv/NOTICE.txt', 'notices/libmpv/build-config')) {
         if (!(Test-Path -LiteralPath (Join-Path $installed $file))) { throw "Installed file missing: $file" }
     }
+    if ((Get-Content -LiteralPath (Join-Path $installed 'patina-package') -Raw) -cne 'exe') {
+        throw 'Installed package format marker is missing or incorrect.'
+    }
     $runtimePin = Get-Content -LiteralPath "$root/tools/mpv-runtime/runtime.json" -Raw | ConvertFrom-Json
     $runtimeInventory = Get-Content -LiteralPath (Join-Path $installed 'notices/libmpv/components.json') -Raw | ConvertFrom-Json
     $dllHash = (Get-FileHash -LiteralPath (Join-Path $installed 'libmpv-2.dll') -Algorithm SHA256).Hash.ToLowerInvariant()

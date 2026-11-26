@@ -48,6 +48,9 @@ impl Session {
                         root = contents.as_bytes().to_vec();
                     }
                     fs::write(work.path().join(name), contents)?;
+                    if name == "latest_known_time.json" {
+                        fs::write(work.path().join("verified-time.json"), contents)?;
+                    }
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -61,10 +64,24 @@ impl Session {
         })
     }
 
+    /// Advance the durable clock floor only after authenticating unexpired metadata.
+    pub(super) fn accept_clock(&self) -> io::Result<()> {
+        fs::copy(
+            self.work.path().join("latest_known_time.json"),
+            self.work.path().join("verified-time.json"),
+        )?;
+        Ok(())
+    }
+
     pub(super) fn commit(&self) -> io::Result<()> {
         let mut files = BTreeMap::new();
         for &name in FILES {
-            match fs::read_to_string(self.work.path().join(name)) {
+            let source = if name == "latest_known_time.json" {
+                "verified-time.json"
+            } else {
+                name
+            };
+            match fs::read_to_string(self.work.path().join(source)) {
                 Ok(contents) => {
                     serde_json::from_str::<serde_json::Value>(&contents)?;
                     files.insert(name, contents);

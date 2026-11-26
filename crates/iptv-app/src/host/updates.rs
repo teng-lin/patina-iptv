@@ -152,7 +152,10 @@ pub(crate) async fn check(
     let mut action = None;
     let (message, url) = match result {
         UpdateResult::Current => (tr("Patina is up to date.").to_owned(), None),
-        UpdateResult::Unavailable => (tr("Update check failed. Try again.").to_owned(), None),
+        UpdateResult::Unavailable => (
+            tr("Update check failed. Try again.").to_owned(),
+            Some(RELEASES.to_owned()),
+        ),
         UpdateResult::RequirementsUnconfirmed => (
             tr("Check the system requirements in the release notes.").to_owned(),
             Some(RELEASES.to_owned()),
