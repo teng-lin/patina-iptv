@@ -106,3 +106,25 @@ fn respects_version_package_architecture_and_minimums() {
     package.version = "10.0.0";
     assert_eq!(select(package), UpdateResult::Current);
 }
+
+#[tokio::test]
+async fn download_rejects_truncated_oversized_or_changed_bytes_and_cleans_up() {
+    use iptv_import::MemoryBody;
+    let dir = tempfile::tempdir().unwrap();
+    let payload = b"synthetic";
+    let digest = format!("{:x}", Sha256::digest(payload));
+    for bytes in [b"change-me".as_slice(), b"short", b"extra bytes"] {
+        assert!(
+            download::receive(MemoryBody::new(bytes, 2), dir.path().into(), 9, &digest)
+                .await
+                .is_none()
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+    let file = download::receive(MemoryBody::new(payload, 3), dir.path().into(), 9, &digest)
+        .await
+        .unwrap();
+    assert_eq!(fs::read(&file).unwrap(), payload);
+    drop(file);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+}

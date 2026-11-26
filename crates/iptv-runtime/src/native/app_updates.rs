@@ -1,8 +1,9 @@
 //! User-requested checks against the update repository embedded by the app build.
 
+mod download;
 mod selection;
 mod trust;
-pub use selection::{InstalledPackage, UpdateResult};
+pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};
 
 use std::time::Duration;
 
@@ -13,6 +14,8 @@ use tough::{
     TransportStream,
 };
 use url::Url;
+
+const USER_AGENT: &str = "Patina";
 
 #[derive(Clone, Debug)]
 struct FeedTransport(NetClient);
@@ -69,7 +72,7 @@ impl crate::Runtime {
                         return None;
                     }
                     let client = NetClient::new(NetConfig {
-                        user_agent: "Patina".into(),
+                        user_agent: USER_AGENT.into(),
                         allow_files: false,
                         max_buffered_bytes: 1 << 20,
                         max_streamed_bytes: 1 << 20,

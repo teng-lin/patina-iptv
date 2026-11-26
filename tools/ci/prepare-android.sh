@@ -34,3 +34,5 @@ cp hosts/android/app/build/outputs/apk/directRelease/app-directRelease-unsigned.
 cp hosts/android/app/build/outputs/bundle/release/app-release.aab target/android-unsigned/
 python3 tools/ci/check-android-artifacts.py \
   target/android-unsigned/app-release-unsigned.apk target/android-unsigned/app-release.aab
+python3 tools/ci/check-update-manifests.py \
+  target/android-unsigned/app-release-unsigned.apk target/android-unsigned/app-release.aab

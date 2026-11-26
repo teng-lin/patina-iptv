@@ -18,7 +18,7 @@ use crate::input::dismiss_keyboard;
 
 mod editors;
 pub(crate) mod remote_keys;
-mod updates;
+pub(crate) mod updates;
 mod view;
 mod words;
 
