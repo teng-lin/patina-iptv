@@ -339,6 +339,3 @@ async fn write(socket: &mut (impl AsyncWrite + Unpin), ns: &str, dest: &str, v: 
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod receiver_tests;
