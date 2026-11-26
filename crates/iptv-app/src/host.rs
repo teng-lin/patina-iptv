@@ -12,9 +12,9 @@
 //!   threads, the OS key stores and the OS schedulers.
 //! - `web`: a browser TV, over `iptv-web`'s adapters and the cooperative
 //!   executor.
-pub(crate) mod updates;
 #[cfg(not(target_family = "wasm"))]
 mod native;
+pub(crate) mod updates;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use native::*;
 
