@@ -742,8 +742,10 @@ pub(crate) fn require_settings_write(
     require_admin(store, snapshot)
 }
 
+pub(crate) const SETTINGS_LOCKED_REASON: &str = "Unlock parental controls before changing settings";
+
 fn settings_locked() -> iptv_store_sqlite::StoreError {
-    iptv_store_sqlite::StoreError::Unavailable("Unlock parental controls before changing settings")
+    iptv_store_sqlite::StoreError::Unavailable(SETTINGS_LOCKED_REASON)
 }
 
 /// Administrative changes are gated against the credential that exists at
@@ -794,9 +796,7 @@ pub(crate) fn require_group_edit(
         && (snapshot.epoch.load(Ordering::SeqCst) != snapshot.at
             || !snapshot.access.granted(&Target::settings(), now_ms()))
     {
-        return Err(iptv_store_sqlite::StoreError::Unavailable(
-            "Unlock parental controls before changing settings",
-        ));
+        return Err(settings_locked());
     }
     Ok(())
 }

@@ -12,7 +12,7 @@ impl Error {
     }
     /// A settings-protected write lost its parental authorization.
     pub fn settings_locked(&self) -> bool {
-        self.unavailable_reason() == Some("Unlock parental controls before changing settings")
+        self.unavailable_reason() == Some(crate::parental::SETTINGS_LOCKED_REASON)
     }
 
     /// The database and supported schema versions, if the file is too new.
