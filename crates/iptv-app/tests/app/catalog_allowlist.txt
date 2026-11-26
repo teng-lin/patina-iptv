@@ -10,6 +10,9 @@
 [untranslated]
 
 [not-shown]
+# Fixed Windows system interpreter and module paths.
+iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\Modules
+iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\powershell.exe
 # Transport identifier, invariant product name and internal verification diagnostics.
 iptv-app/src/host/updates.rs	Patina
 iptv-runtime/src/native/app_updates.rs	Patina
