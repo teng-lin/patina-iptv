@@ -7,7 +7,7 @@ use iptv_providers::{
 };
 use std::{
     task::{Context, Wake, Waker},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -68,6 +68,27 @@ impl Remote for Relay {
 }
 
 type Admission<'a> = Pin<Box<dyn Future<Output = Result<bool, Error>> + 'a>>;
+
+fn wait_for_admission(
+    mut admission: Admission<'_>,
+    waker: &Waker,
+    notified: &mpsc::Receiver<()>,
+) -> Result<bool, Error> {
+    // Draining joins retirement; delivering the worker's Join result can wake us later.
+    let deadline = Instant::now() + WAIT;
+    let mut cx = Context::from_waker(waker);
+    loop {
+        if let std::task::Poll::Ready(result) = admission.as_mut().poll(&mut cx) {
+            return result;
+        }
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .expect("cast admission timed out");
+        notified
+            .recv_timeout(remaining)
+            .expect("cast admission wake");
+    }
+}
 
 struct Trial<'a> {
     admission: Option<Admission<'a>>,
@@ -229,14 +250,11 @@ fn revoked_grant_cannot_publish_an_offered_relay() {
     trial.offer();
     owner.parental_lock();
     assert!(trial.poll().is_pending());
-    let mut admission = trial.admission.take().unwrap();
+    let admission = trial.admission.take().unwrap();
     trial.retirement.finish();
-    trial.notified.recv_timeout(WAIT).unwrap();
     assert_eq!(
-        admission
-            .as_mut()
-            .poll(&mut Context::from_waker(&trial.waker)),
-        std::task::Poll::Ready(Err(Error::Denied))
+        wait_for_admission(admission, &trial.waker, &trial.notified),
+        Err(Error::Denied)
     );
     assert!(owner.cast_target().is_none());
     assert!(owner.drain_services());
@@ -247,17 +265,15 @@ fn owner_shutdown_retires_a_suspended_cast_admission() {
     let owner = owner();
     let mut trial = Trial::begin(&owner);
     trial.offer();
-    let mut admission = trial.admission.take().unwrap();
+    let admission = trial.admission.take().unwrap();
     std::thread::scope(|scope| {
         scope.spawn(move || trial.retirement.finish());
         assert!(owner.drain_services());
     });
     assert!(owner.cast_target().is_none());
     assert_eq!(
-        admission
-            .as_mut()
-            .poll(&mut Context::from_waker(&trial.waker)),
-        std::task::Poll::Ready(Err(Error::Denied))
+        wait_for_admission(admission, &trial.waker, &trial.notified),
+        Err(Error::Denied)
     );
 }
 
