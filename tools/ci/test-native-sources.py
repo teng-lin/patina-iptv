@@ -549,6 +549,13 @@ class Collecting(unittest.TestCase):
         component = description["components"][0]
         self.assertEqual(component["origin"], "launchpad")
         self.assertEqual([row["url"] for row in component["sources"]], [base + name for name in files])
+        # An empty optional APT hint must not block the working historical path.
+        def no_hints(arguments):
+            if arguments[-1] == "synthetic-media":
+                return subprocess.CompletedProcess(arguments, 0, "no downloadable source URIs", "")
+            return Missing()
+
+        self.collect_linux(no_hints)
         # A file that does not match the description is refused.
         self.setUp()
         self.files = {base + name: data for name, data in files.items()}

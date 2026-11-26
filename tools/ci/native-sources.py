@@ -295,7 +295,7 @@ def ubuntu_components(inventory):
             for (name, version), packages in sorted(grouped.items())]
 
 
-def print_uris(output):
+def print_uris(output, *, require_description=True):
     """`apt-get source --print-uris`: 'URL' name size ALGORITHM:hex, one file per line."""
     files = []
     for line in output.splitlines():
@@ -303,7 +303,7 @@ def print_uris(output):
         if match:
             files.append({"url": match[1], "name": match[2], "size": int(match[3]),
                           "algorithm": match[4].lower(), "checksum": match[5]})
-    if not any(row["name"].endswith(".dsc") for row in files):
+    if require_description and not any(row["name"].endswith(".dsc") for row in files):
         raise ValueError("apt named no source description (.dsc)")
     return files
 
@@ -493,7 +493,7 @@ def fetch_ubuntu(component, stage, run=run, download=download, cache=None):
         if missing:
             current = run(["apt-get", "source", "--print-uris", name])
             if current.returncode == 0:
-                archive_urls = {row["name"]: row["url"] for row in print_uris(current.stdout)}
+                archive_urls = {row["name"]: row["url"] for row in print_uris(current.stdout, require_description=False)}
         for row in missing:
             destination = directory / row["name"]
             archive_url = archive_urls.get(row["name"])
