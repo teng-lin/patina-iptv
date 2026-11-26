@@ -745,8 +745,11 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
     observation.observe("before start press", app.screen());
     step(app.press("label:Record"));
     assert!(!app.screen().matches("id:recordings-screen").unwrap());
+    let start_timeout = Duration::from_secs(15);
+    let start_deadline =
+        std::time::Instant::now() + crate::isolated::scaled_duration(start_timeout);
     step(
-        app.wait_until("active record toggle", Duration::from_secs(15), |screen| {
+        app.wait_until("active record toggle", start_timeout, |screen| {
             observation.observe("await active toggle", screen);
             screen
                 .accessibility_state("id:play-bar-record")
@@ -761,6 +764,26 @@ fn play_bar_records_immediately_without_a_form_or_reopening_the_player() {
             .iter()
             .any(|n| n.id == surface && n.kind == nsh_core::ViewKind::Native)
     );
+    // The toggle acknowledges an active job before its capture owns any media.
+    // Exercise Stop on a real capture, using the rest of the existing start budget.
+    let active_jobs = jobs(&path);
+    let [job] = active_jobs.as_slice() else {
+        panic!("one recording job after Start; {}", observation.report());
+    };
+    let spool = iptv_runtime::recordings::media_directory(&home.data_dir())
+        .join(format!("{}.part", job.id.0));
+    while !std::fs::metadata(&spool).is_ok_and(|file| file.is_file() && file.len() >= 188) {
+        let remaining = start_deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "no captured media before Stop; {}",
+            observation.report()
+        );
+        step(app.wait(remaining.min(Duration::from_millis(50))));
+    }
+    if !app.shows("id:play-bar-record") {
+        step(app.press("label:Video"));
+    }
     observation.observe("before stop press", app.screen());
     step(app.press("id:play-bar-record"));
     step(
