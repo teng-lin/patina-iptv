@@ -2,6 +2,7 @@
 use super::file_writer::WriteError;
 pub use crate::model::SaveFailure;
 use crate::network::NetworkConfig;
+use futures_channel::oneshot;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
 use std::path::{Path, PathBuf};
@@ -219,6 +220,20 @@ pub(crate) fn set(
     set_in(owner, key, &Target::Global, value)
 }
 
+/// Sets a global preference and waits until its file write has settled.
+pub(crate) async fn set_and_wait(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    value: Value,
+) -> Result<(), SaveError> {
+    check_setting_write(owner, key)?;
+    let (reply, done) = oneshot::channel();
+    apply_with_reply(owner, key, |next| next.set(key, value), Some(reply))?;
+    done.await
+        .unwrap_or(Err(WriteError::Storage(std::io::ErrorKind::Interrupted)))
+        .map_err(SaveError::from)
+}
+
 /// [`set`] at `at`: a playlist's own value overrides the global one there.
 /// A value equal to what `at` would inherit removes its own value instead,
 /// so later global changes apply to it again.
@@ -370,6 +385,17 @@ fn apply(
     key: &str,
     edit: impl FnOnce(&mut Settings) -> Result<Vec<iptv_settings::Change>, SettingsError>,
 ) -> Result<(), SaveError> {
+    apply_with_reply(owner, key, edit, None)
+}
+
+type SaveReply = oneshot::Sender<Result<(), WriteError>>;
+
+fn apply_with_reply(
+    owner: &std::rc::Rc<super::Runtime>,
+    key: &str,
+    edit: impl FnOnce(&mut Settings) -> Result<Vec<iptv_settings::Change>, SettingsError>,
+    reply: Option<SaveReply>,
+) -> Result<(), SaveError> {
     check_writable(owner)?;
     let services = owner.services();
     let before = services.settings();
@@ -391,6 +417,9 @@ fn apply(
         // Neither a file writer nor a host keeps the files here: the
         // settings apply for this session.
         owner.note_session_only();
+        if let Some(reply) = reply {
+            let _ = reply.send(Ok(()));
+        }
         return Ok(());
     }
     let saved = services
@@ -417,9 +446,12 @@ fn apply(
             }
             Settled::Failed => {}
         }
+        let handled = reply.is_some_and(|reply| reply.send(result).is_ok());
         if let Err(error) = result {
             log::warn!("iptv settings: {}", SaveError::from(error));
-            owner.emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
+            if !handled {
+                owner.emit(super::RuntimeEvent::SettingsSaveFailed(error.into()));
+            }
         }
     });
     Ok(())

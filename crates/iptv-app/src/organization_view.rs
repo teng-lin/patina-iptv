@@ -15,7 +15,7 @@ use iptv_presentation::organization::{
 };
 use iptv_presentation::reorder::{Key, LeaveChoice, Outcome};
 use nsh_core::{Checked, prelude::*};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use iptv_library::OrganizationScope as Kind;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -43,12 +43,16 @@ pub struct Open {
     blocks: Blocks,
     placement: Placement,
     custom_from: Option<Sort>,
+    saved_playlist_positions: Option<Vec<SourceId>>,
     bulk_visibility: Option<(Edit, bool)>,
     dragging: bool,
 }
 enum OrderSave {
     Unchanged,
-    Playlists(Vec<SourceId>),
+    Playlists {
+        ids: Vec<SourceId>,
+        already_saved: bool,
+    },
     Pending {
         source: SourceId,
         kind: Kind,
@@ -74,6 +78,7 @@ impl Open {
             blocks: Blocks::default(),
             placement,
             custom_from: None,
+            saved_playlist_positions: None,
             bulk_visibility: None,
             dragging: false,
         }
@@ -235,7 +240,9 @@ impl Open {
         };
         let outcome = if key == Key::Back {
             order.leave_with_changes(
-                !drag_editing && self.custom_from.is_some_and(|sort| sort != Sort::Manual),
+                !drag_editing
+                    && (self.custom_from.is_some_and(|sort| sort != Sort::Manual)
+                        || self.saved_playlist_positions.is_some()),
             )
         } else {
             order.key(key)
@@ -261,7 +268,10 @@ impl Open {
             return None;
         }
         let (original, order) = self.editor.order_ids()?;
-        if original == order && self.custom_from.is_none_or(|sort| sort == Sort::Manual) {
+        if original == order
+            && self.saved_playlist_positions.is_none()
+            && self.custom_from.is_none_or(|sort| sort == Sort::Manual)
+        {
             return Some(OrderSave::Unchanged);
         }
         let Some((source, kind)) = self.scope.clone() else {
@@ -269,8 +279,9 @@ impl Open {
                 .iter()
                 .map(|id| id.parse().ok().map(SourceId))
                 .collect::<Option<_>>()?;
+            let already_saved = self.saved_playlist_positions.as_ref() == Some(&ids);
             self.begin_save();
-            return Some(OrderSave::Playlists(ids));
+            return Some(OrderSave::Playlists { ids, already_saved });
         };
         self.begin_save();
         Some(OrderSave::Pending {
@@ -770,6 +781,34 @@ fn save_order(ui: Ui) {
     }
 }
 
+fn check_playlist_order_catalog(ui: Ui) -> bool {
+    let valid = crate::runtime().playlists().is_ok_and(|rows| {
+        untracked(|| {
+            state(ui, |s| {
+                if let Some(saved) = &s.saved_playlist_positions {
+                    // The saved positions can change the tie order of equal names.
+                    // The draft can still be retried while its playlists all exist.
+                    let saved: HashSet<_> = saved.iter().copied().collect();
+                    rows.len() == saved.len() && rows.iter().all(|p| saved.contains(&p.id))
+                } else {
+                    rows.iter().map(|p| p.id.0.to_string()).eq(s
+                        .editor
+                        .items
+                        .iter()
+                        .map(|item| item.id.clone()))
+                }
+            })
+        }) == Some(true)
+    });
+    if !valid {
+        untracked(|| close(ui));
+        crate::settings_view::notify(tr(
+            "The list could not be reloaded. Reopen it and try again.",
+        ));
+    }
+    valid
+}
+
 fn persist_order(ui: Ui) {
     let mut draft = None;
     update(ui, |s| draft = s.begin_order_save());
@@ -777,12 +816,29 @@ fn persist_order(ui: Ui) {
     if matches!(draft, OrderSave::Unchanged) {
         return close(ui);
     }
+    let playlists = matches!(&draft, OrderSave::Playlists { .. });
+    if playlists && !check_playlist_order_catalog(ui) {
+        return;
+    }
     let generation = ui.organization_generation.get_untracked();
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
-        let playlists = matches!(&draft, OrderSave::Playlists(_));
+        let mut saved_positions = None;
         let result = match draft {
-            OrderSave::Playlists(ids) => data::reorder(&owner, ids).await,
+            OrderSave::Playlists {
+                already_saved: true,
+                ..
+            } => Ok(()),
+            OrderSave::Playlists {
+                ids,
+                already_saved: false,
+            } => {
+                let result = data::reorder(&owner, ids.clone()).await;
+                if result.is_ok() {
+                    saved_positions = Some(ids);
+                }
+                result
+            }
             OrderSave::Pending {
                 source,
                 kind: Kind::Favorites,
@@ -818,16 +874,43 @@ fn persist_order(ui: Ui) {
         if result.is_ok()
             && playlists
             && !crate::settings::playlists_by_hand()
-            && let Err(error) = crate::settings_view::save_setting(
-                iptv_settings::keys::PLAYLIST_SORT.as_str(),
-                iptv_settings::Value::Enum("manual".to_owned()),
-            )
+            && let Err(error) = owner
+                .set_setting_and_wait(
+                    iptv_settings::keys::PLAYLIST_SORT.as_str(),
+                    iptv_settings::Value::choice("manual"),
+                )
+                .await
         {
-            if still_open(ui, generation) {
-                update(ui, Open::finish_save);
-                crate::settings_view::notify_setting_error(error);
+            if !still_open(ui, generation) {
+                return;
             }
-            return;
+            match error {
+                error @ crate::settings::SaveError::Durability(_) => {
+                    crate::settings_view::notify_setting_error(error);
+                }
+                error => {
+                    update(ui, |s| {
+                        if let Some(positions) = saved_positions {
+                            s.saved_playlist_positions = Some(positions);
+                            if let Some(order) = &mut s.editor.reorder {
+                                order.mark_saved();
+                            }
+                        }
+                        s.finish_save();
+                    });
+                    if !check_playlist_order_catalog(ui) {
+                        return;
+                    }
+                    if matches!(error, crate::settings::SaveError::Storage(_)) {
+                        crate::settings_view::notify(tr(
+                            "Playlist positions saved. Could not switch to Custom order. Try saving again.",
+                        ));
+                    } else {
+                        crate::settings_view::notify_setting_error(error);
+                    }
+                    return;
+                }
+            }
         }
         if !still_open(ui, generation) {
             return;
@@ -1860,7 +1943,15 @@ fn inline_order(ui: Ui, size: Scale) -> impl IntoElement {
                             .child(ui_kit::action(
                                 ui,
                                 size,
-                                tr("Cancel"),
+                                move || {
+                                    if state(ui, |s| s.saved_playlist_positions.is_some())
+                                        == Some(true)
+                                    {
+                                        tr("Close")
+                                    } else {
+                                        tr("Cancel")
+                                    }
+                                },
                                 || false,
                                 0xFFFFFF,
                                 move || {
@@ -1971,23 +2062,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         ui.app.library.version.get();
         ui.app.settings.get();
         if untracked(|| state(ui, |s| s.scope.is_none() && !s.saving)) == Some(true) {
-            let valid = crate::runtime().playlists().is_ok_and(|rows| {
-                untracked(|| {
-                    state(ui, |s| {
-                        rows.iter().map(|p| p.id.0.to_string()).eq(s
-                            .editor
-                            .items
-                            .iter()
-                            .map(|item| item.id.clone()))
-                    })
-                }) == Some(true)
-            });
-            if !valid {
-                untracked(|| close(ui));
-                crate::settings_view::notify(tr(
-                    "The list could not be reloaded. Reopen it and try again.",
-                ));
-            }
+            check_playlist_order_catalog(ui);
             return;
         }
         if let Some((source, kind)) = untracked(|| {
