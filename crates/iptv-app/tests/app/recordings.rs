@@ -586,7 +586,7 @@ fn serve_capture(
     mut stream: std::net::TcpStream,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
-    use std::io::{Read, Write};
+    use std::io::{ErrorKind, Read, Write};
     stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
@@ -609,11 +609,26 @@ fn serve_capture(
         packet[0] = 0x47;
         packet[3] = 0x10;
     }
+    let mut pending = packets.as_slice();
     while !stop.load(std::sync::atomic::Ordering::Acquire) {
-        if stream.write_all(&packets).is_err() {
-            return;
+        match stream.write(pending) {
+            Ok(0) => return,
+            Ok(written) => {
+                pending = &pending[written..];
+                if pending.is_empty() {
+                    pending = &packets;
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            // The shared input pauses reads until a headless consumer attaches.
+            // Preserve packet alignment when the socket buffers fill in the meantime.
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return,
         }
-        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
