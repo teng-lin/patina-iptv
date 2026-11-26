@@ -15,31 +15,42 @@ impl crate::Runtime {
         asset: ReleaseAsset,
         directory: PathBuf,
     ) -> Option<TempPath> {
+        // Dropping the caller while its dialog closes must stop the background
+        // request and let the private partial file's guard clean up.
+        let (_cancel_on_drop, cancel) = tokio::sync::oneshot::channel::<()>();
         self.services()
             .spawn(async move {
-                let client = NetClient::new(NetConfig {
-                    user_agent: super::USER_AGENT.into(),
-                    allow_files: false,
-                    max_streamed_bytes: asset.length,
-                    ..Default::default()
-                })
-                .ok()?;
-                let mut request = HttpRequest::get(&asset.url);
-                request.public_only = true;
-                let response = client.fetch_stream(request).await.ok()?;
-                if response.status != 200
-                    || response
-                        .content_length
-                        .is_some_and(|len| len != asset.length)
-                {
-                    return None;
+                tokio::select! {
+                    biased;
+                    _ = cancel => None,
+                    path = fetch(asset, directory) => path,
                 }
-                receive(response.body, directory, asset.length, &asset.sha256).await
             })
             .await
             .ok()
             .flatten()
     }
+}
+
+async fn fetch(asset: ReleaseAsset, directory: PathBuf) -> Option<TempPath> {
+    let client = NetClient::new(NetConfig {
+        user_agent: super::USER_AGENT.into(),
+        allow_files: false,
+        max_streamed_bytes: asset.length,
+        ..Default::default()
+    })
+    .ok()?;
+    let mut request = HttpRequest::get(&asset.url);
+    request.public_only = true;
+    let response = client.fetch_stream(request).await.ok()?;
+    if response.status != 200
+        || response
+            .content_length
+            .is_some_and(|len| len != asset.length)
+    {
+        return None;
+    }
+    receive(response.body, directory, asset.length, &asset.sha256).await
 }
 
 pub(super) async fn receive(

@@ -50,8 +50,26 @@ impl PackageAction {
                 let Some((code, directory)) = asset.android_code().zip(android::directory()) else {
                     return crate::settings_view::notify(tr("Update check failed. Try again."));
                 };
-                crate::settings_view::notify(tr("Downloading…"));
-                let Some(path) = owner.download_update(asset, directory).await else {
+                if owner.recording_background_needed() {
+                    return crate::settings_view::notify(tr(
+                        "Finish recording before installing the update.",
+                    ));
+                }
+                let progress = nsh_base::alert_dialog()
+                    .title(tr("Downloading…"))
+                    .cancel("cancel", tr("Cancel"))
+                    .close_on_escape(true)
+                    .show();
+                let closer = progress.closer();
+                let path = tokio::select! {
+                    biased;
+                    _ = progress => return,
+                    path = owner.download_update(asset, directory) => path,
+                };
+                if let Some(closer) = closer {
+                    closer.close();
+                }
+                let Some(path) = path else {
                     return crate::settings_view::notify(tr("Update download failed. Try again."));
                 };
                 if !crate::settings_view::updates::is_open(_ui) {
@@ -84,7 +102,11 @@ impl PackageAction {
                     }
                     let _ = std::fs::remove_file(owned);
                 }
-                crate::settings_view::notify(tr("Update download failed. Try again."));
+                crate::settings_view::notify(if owner.recording_background_needed() {
+                    tr("Finish recording before installing the update.")
+                } else {
+                    tr("Android could not open the installer. Try again from Settings.")
+                });
             }
         }
     }
