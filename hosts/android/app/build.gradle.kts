@@ -81,6 +81,10 @@ android {
         // Same package identity and signing pipeline, distinct distribution actions.
         create("directRelease") {
             initWith(getByName("release"))
+            if (validationAppId != null) {
+                require(releaseSigning == "debug") { "Direct APK rehearsals require local debug signing" }
+                applicationIdSuffix = ".validation"
+            }
             matchingFallbacks += listOf("release")
         }
         // `release` for measuring (tools/perf-android.sh): profileable from
