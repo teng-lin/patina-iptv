@@ -181,9 +181,9 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 ui.guide_data();
                 crate::lists::browser_entry_name(at.index(), &*crate::runtime_owner::schedule())
             };
-            let arrow = move || {
+            let expanded = move || {
                 ui.guide_data();
-                crate::lists::playlist_arrow(at.index(), &*crate::runtime_owner::schedule())
+                crate::lists::playlist_expanded(at.index(), &*crate::runtime_owner::schedule())
             };
             let color = move || match mark() {
                 Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
@@ -197,6 +197,7 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 .label(move || name().trim_start().to_owned())
                 .accessibility_state(move || AccessibilityState {
                     selected: current(),
+                    expanded: expanded(),
                     ..Default::default()
                 })
                 .mx(px(8.0))
@@ -218,9 +219,9 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 })
                 .child(list_rows::name(size, name).flex_1().text_color(color))
                 .child(when(
-                    move || !arrow().is_empty(),
+                    move || expanded().is_some(),
                     move || {
-                        list_rows::triangle(size, arrow)
+                        list_rows::triangle(size, move || crate::lists::playlist_arrow(expanded()))
                             .test_id("playlist-disclosure")
                             .flex_shrink_0()
                             .text_color(color)

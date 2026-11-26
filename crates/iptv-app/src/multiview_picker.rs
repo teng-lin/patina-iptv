@@ -380,9 +380,9 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
         ui.app.data_version.get();
         crate::lists::browser_entry_name(at.index(), &*catalog(ui))
     };
-    let arrow = move || {
+    let expanded = move || {
         ui.app.data_version.get();
-        crate::lists::playlist_arrow(at.index(), &*catalog(ui))
+        crate::lists::playlist_expanded(at.index(), &*catalog(ui))
     };
     list_rows::row(size, ROW, mark)
         .flex_row()
@@ -392,6 +392,7 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
         .label(move || name().trim_start().to_owned())
         .accessibility_state(move || AccessibilityState {
             selected: entry.get() == at.index(),
+            expanded: expanded(),
             ..Default::default()
         })
         .on_press(move || {
@@ -404,9 +405,9 @@ fn group_row(ui: Ui, at: Position, size: Scale, entry: Memo<usize>) -> impl Into
                 .text_color(move || mark().text()),
         )
         .child(when(
-            move || !arrow().is_empty(),
+            move || expanded().is_some(),
             move || {
-                list_rows::triangle(size, arrow)
+                list_rows::triangle(size, move || crate::lists::playlist_arrow(expanded()))
                     .test_id("playlist-disclosure")
                     .flex_shrink_0()
                     .text_color(move || mark().text())

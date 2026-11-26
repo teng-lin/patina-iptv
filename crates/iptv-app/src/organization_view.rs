@@ -750,6 +750,27 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 }
 
 fn save_order(ui: Ui) {
+    if state(ui, |s| s.scope.is_none()) == Some(true) {
+        let generation = ui.organization_generation.get_untracked();
+        crate::settings_view::settings_guarded(ui, move || {
+            if !still_open(ui, generation) {
+                return;
+            }
+            if !crate::settings::playlists_by_hand()
+                && let Err(error) = crate::runtime()
+                    .check_setting_write(iptv_settings::keys::PLAYLIST_SORT.as_str())
+            {
+                crate::settings_view::notify_setting_error(error);
+                return;
+            }
+            persist_order(ui);
+        });
+    } else {
+        persist_order(ui);
+    }
+}
+
+fn persist_order(ui: Ui) {
     let mut draft = None;
     update(ui, |s| draft = s.begin_order_save());
     let Some(draft) = draft else { return };

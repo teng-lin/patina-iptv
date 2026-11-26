@@ -240,6 +240,14 @@ pub(crate) fn startup_source(store: &Store) -> Result<Option<StoredSource>, Stor
 }
 
 pub fn newest(owner: &super::Runtime) -> Result<Option<StoredSource>, StoreError> {
+    newest_excluding(owner, None)
+}
+
+pub(crate) fn newest_excluding(
+    owner: &super::Runtime,
+    excluded: Option<SourceId>,
+) -> Result<Option<StoredSource>, StoreError> {
+    let eligible = |p: &Playlist| Some(p.id) != excluded && p.policy.enabled;
     owner.library.with(|snapshot| {
         let snapshot = snapshot.borrow();
         let snapshot = snapshot
@@ -249,14 +257,14 @@ pub fn newest(owner: &super::Runtime) -> Result<Option<StoredSource>, StoreError
             snapshot
                 .playlists
                 .iter()
-                .any(|p| p.id == *id && p.policy.enabled)
+                .any(|p| p.id == *id && eligible(p))
         });
         let selected = active.or_else(|| {
             snapshot
                 .playlists
                 .iter()
                 .rev()
-                .find(|p| p.policy.enabled)
+                .find(|p| eligible(p))
                 .map(|p| p.id)
         });
         Ok(selected.and_then(|id| snapshot.details.get(&id).cloned()))

@@ -266,7 +266,8 @@ pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organiz
         .collect();
     let mut group_preferences = std::collections::HashMap::new();
     let mut groups = Vec::new();
-    for item in store.guide_groups(source)? {
+    let group_sort = store.guide_sort(source, &Kind::Groups)?;
+    for item in store.guide_groups_with_sort(source, group_sort)? {
         group_preferences.insert(
             item.id.clone(),
             store.guide_group_preferences(source, &item.id)?,
@@ -285,7 +286,7 @@ pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organiz
         blocks: store.guide_blocks(source)?,
         group_preferences,
         renamed_groups: store.renamed_groups(source)?,
-        group_sort: store.guide_sort(source, &Kind::Groups)?,
+        group_sort,
         channel_sort: store.guide_sort(source, &Kind::Channels)?,
     })
 }

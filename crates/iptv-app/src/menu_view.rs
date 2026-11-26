@@ -648,36 +648,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
         MenuItem::GroupOptions => {
             show_group_options(ui, list, GroupMenuEntry::Program);
         }
-        MenuItem::GroupSettings => {
-            let named = group_target(scope.as_ref()).is_some();
-            let mut rows = Vec::new();
-            if named {
-                let preferences = list_preferences(&list);
-                rows.extend([
-                    Row::Action {
-                        item: MenuItem::ShowFavoritesOnly,
-                        enabled: true,
-                    },
-                    Row::Action {
-                        item: MenuItem::GroupExternalPlayer,
-                        enabled: crate::host::EXTERNAL_PLAYER
-                            && (preferences.external_player
-                                || crate::host::external_player_available()),
-                    },
-                    Row::Action {
-                        item: MenuItem::GroupEpgOffset,
-                        enabled: true,
-                    },
-                ]);
-            }
-            rows.push(Row::Action {
-                item: MenuItem::ManageGroups,
-                enabled: true,
-            });
-            let mut menu = Menu::new(rows, Target::Group, list);
-            menu.parent = parent.map(Box::new);
-            ui.menu.set(Some(menu));
-        }
+        MenuItem::GroupSettings => open_group_settings(ui, list, parent),
         MenuItem::ShowFavoritesOnly
         | MenuItem::GroupExternalPlayer
         | MenuItem::StopExternalPlayer
@@ -707,7 +678,10 @@ pub fn perform(ui: Ui, item: MenuItem) {
             ui.menu.set(Some(menu));
         }
         MenuItem::ReorderPlaylists => {
-            organization_view::open_playlist_reorder(ui, heading_playlist(&list));
+            let preferred = heading_playlist(&list);
+            crate::settings_view::settings_guarded(ui, move || {
+                organization_view::open_playlist_reorder(ui, preferred);
+            });
         }
         MenuItem::RenameGroup => {
             if let Some(target) = group_target(scope.as_ref()) {
@@ -1009,6 +983,54 @@ fn show_group_options(ui: Ui, list: ListId, entry: GroupMenuEntry) -> bool {
     }
     ui.menu.set(Some(Menu::new(rows, Target::Group, list)));
     true
+}
+
+/// An empty named group cannot open preferences through a channel's menu.
+fn empty_group_list(ui: Ui) -> Option<ListId> {
+    if !ui.list.with(|list| list.is_empty()) {
+        return None;
+    }
+    ui.guide_data();
+    let list = current_list(ui);
+    group_target(channel_scope(ui, &list).as_ref()).map(|_| list)
+}
+
+pub(crate) fn empty_group_settings_available(ui: Ui) -> bool {
+    empty_group_list(ui).is_some()
+}
+
+pub(crate) fn open_empty_group_settings(ui: Ui) -> bool {
+    let Some(list) = empty_group_list(ui) else {
+        return false;
+    };
+    open_group_settings(ui, list, None);
+    true
+}
+
+fn open_group_settings(ui: Ui, list: ListId, parent: Option<Menu>) {
+    let preferences = list_preferences(&list);
+    let rows = vec![
+        Row::Action {
+            item: MenuItem::ShowFavoritesOnly,
+            enabled: true,
+        },
+        Row::Action {
+            item: MenuItem::GroupExternalPlayer,
+            enabled: crate::host::EXTERNAL_PLAYER
+                && (preferences.external_player || crate::host::external_player_available()),
+        },
+        Row::Action {
+            item: MenuItem::GroupEpgOffset,
+            enabled: true,
+        },
+        Row::Action {
+            item: MenuItem::ManageGroups,
+            enabled: true,
+        },
+    ];
+    let mut menu = Menu::new(rows, Target::Group, list);
+    menu.parent = parent.map(Box::new);
+    ui.menu.set(Some(menu));
 }
 
 fn group_option_rows(ui: Ui, list: &ListId) -> Option<Vec<Row>> {
@@ -1460,7 +1482,22 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
                 format!("{} · {}", title(), subtitle)
             }
         };
+        let wraps = move || {
+            matches!(
+                row(),
+                Some(Row::Action {
+                    item: MenuItem::SortGroups
+                        | MenuItem::SortChannels
+                        | MenuItem::ShowFavoritesOnly
+                        | MenuItem::GroupExternalPlayer
+                        | MenuItem::GroupEpgOffset,
+                    ..
+                })
+            )
+        };
         let name = list_rows::name(size, title)
+            .number_of_lines(move || if wraps() { 0_u32 } else { 1 })
+            .min_w(px(0.0))
             // Headings in the lists' heading size.
             .text_size(move || size.text_px(if heading() { SECTION } else { LIST_ITEM }))
             .text_color(move || match row() {
@@ -1468,7 +1505,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
                 Some(Row::Heading(_)) => mark().secondary(),
                 _ => mark().disabled(),
             });
-        list_rows::row_with(
+        list_rows::row_minimum(
             size,
             move || {
                 if subtitle().is_empty() {
@@ -1480,6 +1517,7 @@ fn menu_layer(ui: Ui, overlay: crate::overlays::Overlay) -> impl IntoElement {
             mark,
         )
         .justify_center()
+        .py(move || size.px(if wraps() { 5.0 } else { 0.0 }))
         .role(move || match row() {
             Some(Row::Heading(_)) => AccessibilityRole::Header,
             Some(Row::Action {
@@ -1780,6 +1818,8 @@ pub fn open_timeline_context(ui: Ui) {
     if let Some(channel) = crate::lists::focused_channel(ui) {
         let minute = ui.focus.with_untracked(|focus| focus.cursor);
         open_channel_at(ui, channel, minute, current_list(ui), false);
+    } else {
+        open_empty_group_settings(ui);
     }
 }
 

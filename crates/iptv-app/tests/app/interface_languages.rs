@@ -664,6 +664,57 @@ fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
 }
 
 #[test]
+fn long_channel_order_values_fit_the_menu_at_large_text_sizes() {
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+    use nsh_core::{ApproxTextEngine, TextEngine};
+
+    let Some(home) = isolated!() else { return };
+    let es = Words::of("es");
+    let mut settings = Settings::new();
+    settings.set("general.language", Value::text("es")).unwrap();
+    let mut fixture = personalization::launch_prepared(
+        home,
+        settings,
+        false,
+        |path, source| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_guide_sort(source, &OrganizationScope::Channels, Sort::LastWatched)
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut fixture.app;
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(560.0),
+        nsh_core::prelude::px(860.0),
+    )));
+    step(app.set_environment("large text", |env| env.font_scale = 1.5));
+    step(app.long_press("id:guide-channel-name >> nth=0"));
+    let value = es.t("Last watched (newest first)");
+    let label = es.f("Channel order: {method}", &[("method", (&value).into())]);
+    step(app.wait_for(&format!("id:menu-panel >> label:/{}/", pattern(&label))));
+    let screen = app.screen();
+    let node = screen
+        .layout_nodes()
+        .into_iter()
+        .find_map(|node| node.text.filter(|text| text.text.text.as_str() == label))
+        .expect("visible order and its value");
+    let mut full = (*node.text).clone();
+    full.max_lines = 0;
+    let engine = ApproxTextEngine;
+    let needed = engine.measure(&engine.prepare(&full), Some(node.content.size.width));
+    assert_eq!(node.text.max_lines, 0);
+    assert!(
+        needed.height.0 <= node.content.size.height.0 + 1.0,
+        "{needed:?} exceeds {:?}",
+        node.content
+    );
+}
+
+#[test]
 fn cjk_settings_help_and_live_language_labels_do_not_fall_back_to_english() {
     let Some(home) = isolated!() else { return };
     let mut fixture = start_in(home, "ja", "auto");

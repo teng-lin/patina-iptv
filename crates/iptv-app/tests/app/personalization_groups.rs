@@ -529,6 +529,36 @@ fn standalone_group_preferences_apply_to_the_selected_group() {
     ));
 }
 
+#[test]
+fn the_empty_guide_group_can_turn_off_favorites_only() {
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    group(app, "News");
+    for channel in ["Local A", "Local B"] {
+        step(app.long_press(&format!("id:guide-row >> text:/ {channel}$/")));
+        step(app.press("id:menu-panel >> text:Remove from favorites"));
+        step(app.wait_for(&format!("id:guide-row >> text:{channel}")));
+    }
+
+    menu(app, "Group options…");
+    step(app.press("id:menu-panel >> text:Group settings"));
+    step(app.press("id:menu-panel >> text:Show favorites only: Off"));
+    step(app.wait_for("text:This group has no channels."));
+    let settings = "id:guide-ui >> role:button[Group settings]";
+    step(app.wait_for(settings));
+
+    step(app.press_key("right"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:menu-panel >> text:Show favorites only: On"));
+    step(app.back());
+    step(app.press(settings));
+    step(app.press("id:menu-panel >> text:Show favorites only: On"));
+    step(app.wait_for("id:guide-row >> text:Local A"));
+    step(app.wait_for("id:guide-row >> text:Local B"));
+    assert!(!app.shows(settings));
+}
+
 /// The group option is disabled without a player to hand streams to; a
 /// player removed after it was chosen plays the channel here and offers to
 /// turn the option off. Linux is the headless host that has the handoff.

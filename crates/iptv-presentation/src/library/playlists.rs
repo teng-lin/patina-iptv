@@ -672,7 +672,7 @@ impl Screen {
             || (delete
                 && !matches!(
                     self.opened_for(),
-                    Some(Only::Actions { .. } | Only::GuideActions)
+                    Some(Only::Actions { .. } | Only::GuideActions | Only::Management)
                 ))
         {
             self.layer = Layer::List;
@@ -935,6 +935,26 @@ mod tests {
         s.key(Key::Down);
         assert_eq!(s.key(Key::Ok), Some(Effect::Delete(A)));
         assert_eq!(s.layer(), Layer::List);
+    }
+
+    #[test]
+    fn management_keeps_delete_available_until_the_source_is_removed() {
+        let mut screen = Screen::only(rows(), B, Only::Management).unwrap();
+        screen.act(B, Act::Delete);
+        assert_eq!(screen.confirm(B, true), Some(Effect::Delete(B)));
+        assert!(!screen.finished());
+        assert_eq!(
+            screen.layer(),
+            Layer::Actions {
+                id: B,
+                focus: Act::Delete,
+            },
+        );
+
+        screen.key(Key::Ok);
+        assert_eq!(screen.confirm(B, true), Some(Effect::Delete(B)));
+        screen.set_rows(vec![row(A, "First")]);
+        assert!(screen.finished());
     }
 
     #[test]

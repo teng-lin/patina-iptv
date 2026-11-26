@@ -333,13 +333,9 @@ fn store(key: &'static str, value: Value) {
     }
 }
 
-/// Stores the setting and publishes playlist order changes to the guide.
+/// Stores the setting through the runtime.
 pub(crate) fn save_setting(key: &str, value: Value) -> Result<(), crate::settings::SaveError> {
-    crate::settings::set(key, value)?;
-    if key == iptv_settings::keys::PLAYLIST_SORT.as_str() {
-        crate::data::order_changed(&crate::runtime());
-    }
-    Ok(())
+    crate::settings::set(key, value)
 }
 
 /// Runs `then` now, or after the PIN while the settings are protected

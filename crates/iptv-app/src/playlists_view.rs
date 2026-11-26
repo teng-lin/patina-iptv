@@ -883,31 +883,35 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
 }
 
 fn confirm_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
-    let (title, body) = state(ui, |s| {
-        let Some(p) = s.row(id) else {
-            return (String::new(), String::new());
-        };
-        let next = s
-            .rows()
-            .iter()
-            .rev()
-            .find(|r| r.id != id)
-            .map(|r| r.name.as_str());
-        let shown =
-            !ui.app.library.all.get_untracked() && ui.app.library.shown.get_untracked() == Some(id);
-        (
-            trf("Delete “{name}”?", &[("name", (&p.name).into())]),
-            words::delete_consequences(p, next, shown),
-        )
-    })
-    .unwrap_or_default();
+    let copy = computed(move || {
+        state(ui, |s| {
+            let Some(p) = s.row(id) else {
+                return (String::new(), String::new());
+            };
+            let shown = !ui.app.library.all.get() && ui.app.library.shown.get() == Some(id);
+            let next = shown
+                .then(|| crate::runtime::data::next_playlist_after_deletion(&crate::runtime(), id))
+                .flatten();
+            (
+                trf("Delete “{name}”?", &[("name", (&p.name).into())]),
+                words::delete_consequences(
+                    p,
+                    next.as_deref(),
+                    s.rows().iter().any(|row| row.id != id),
+                ),
+            )
+        })
+        .unwrap_or_default()
+    });
     let focused = move |delete: bool| {
         move || state(ui, |s| s.layer() == Layer::Confirm { id, delete }).unwrap_or(false)
     };
     card(ui, size)
         .test_id("playlist-delete-confirmation")
-        .child(ui_kit::title(size, title))
-        .child(ui_kit::body(size, body))
+        .child(ui_kit::title(size, move || {
+            copy.with(|copy| copy.0.clone())
+        }))
+        .child(ui_kit::body(size, move || copy.with(|copy| copy.1.clone())))
         .child(view().h(move || size.px(8.0)))
         .child(ui_kit::action(
             ui,

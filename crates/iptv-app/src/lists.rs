@@ -504,17 +504,22 @@ fn toggle_playlist(entry: usize) -> bool {
     }
 }
 
-/// The disclosure triangle of a playlist heading: ▶ folded, ▼ open.
-pub(crate) fn playlist_arrow(entry: usize, schedule: &dyn Schedule) -> &'static str {
+/// Expansion state of a playlist heading in a combined guide.
+pub(crate) fn playlist_expanded(entry: usize, schedule: &dyn Schedule) -> Option<bool> {
     match Entry::at(entry) {
         Entry::Group(group) if schedule.group_is_playlist(group) => {
-            if schedule.group_is_collapsed(group) {
-                "▶"
-            } else {
-                "▼"
-            }
+            Some(!schedule.group_is_collapsed(group))
         }
-        _ => "",
+        _ => None,
+    }
+}
+
+/// The disclosure triangle of a playlist heading: ▶ folded, ▼ open.
+pub(crate) fn playlist_arrow(expanded: Option<bool>) -> &'static str {
+    match expanded {
+        Some(false) => "▶",
+        Some(true) => "▼",
+        None => "",
     }
 }
 

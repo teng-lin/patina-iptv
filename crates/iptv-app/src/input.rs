@@ -1062,7 +1062,15 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         Action::MoveDown => mv(Move::Down),
         Action::MoveLeft => mv(Move::Left),
         Action::MoveRight => mv(Move::Right),
-        Action::Select => crate::lists::ok(ui),
+        Action::Select => {
+            if !ui
+                .focus
+                .with(|f| matches!(f.pane, Pane::Guide | Pane::Groups))
+                || !crate::menu_view::open_empty_group_settings(ui)
+            {
+                crate::lists::ok(ui);
+            }
+        }
         Action::ShowGuide => ui.mode.apply(crate::mode::Action::ShowGuide),
         Action::ShowGroups => crate::lists::open_groups(ui),
         Action::OpenSearch => crate::search_view::open(ui),

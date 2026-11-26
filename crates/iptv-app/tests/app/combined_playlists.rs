@@ -444,6 +444,17 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.open_guide_groups());
     step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▶"));
+    let expansion =
+        |app: &Headless, tab: &str| app.screen().accessibility_state(tab).unwrap().expanded;
+    assert_eq!(
+        expansion(&app, "id:guide-groups >> role:tab[Alpha]"),
+        Some(true)
+    );
+    assert_eq!(
+        expansion(&app, "id:guide-groups >> role:tab[Beta]"),
+        Some(false)
+    );
+    assert_eq!(expansion(&app, "id:guide-groups >> role:tab[News]"), None);
     step(app.press("id:guide-groups >> text:    News"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[News]"));
@@ -463,12 +474,20 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     // not remove the guide's selected News category from its own catalog.
     step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
     step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
+    assert_eq!(
+        expansion(&app, &format!("{picker} >> role:tab[Alpha]")),
+        Some(false)
+    );
     step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
     step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
     step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
     step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
     step(app.press(&format!("{picker} >> role:tab[Beta] >> text:▶")));
     step(app.wait_for(&format!("{picker} >> role:tab[Beta] >> text:▼")));
+    assert_eq!(
+        expansion(&app, &format!("{picker} >> role:tab[Beta]")),
+        Some(true)
+    );
     // Give any erroneously queued preference writes or catalog rebuilds a
     // chance to finish before checking that the stored guide choice is intact.
     step(app.run_for(Duration::from_secs(1)));
@@ -997,6 +1016,108 @@ fn playlist_order_options_apply_distinct_guide_orders_and_keep_the_custom_order(
             .collect::<Vec<_>>(),
         [mike, zulu, alpha]
     );
+}
+
+#[test]
+fn saving_a_playlist_order_draft_rechecks_settings_access() {
+    use nsh_core::{
+        EventKind, EventPayload, ViewKind,
+        platform::{Idiom, Os},
+    };
+
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let alpha = seed(&mut store, home.path(), "Alpha");
+    let zulu = seed(&mut store, home.path(), "Zulu");
+    store.set_all_playlists(true).unwrap();
+    store
+        .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+            salt: [0x63; 16],
+            verifier: [
+                108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236, 123, 169,
+                134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+            ],
+            recovery_verifier: [0; 32],
+            failures: 0,
+            retry_after: 0,
+        })
+        .unwrap();
+    drop(store);
+    let mut settings = Settings::new();
+    for (key, value) in [
+        ("playlists.sort", "name"),
+        ("parental.require_pin_for", "blocked_content_and_settings"),
+        ("parental.unlock_window", "every_time"),
+    ] {
+        settings.set(key, Value::choice(value)).unwrap();
+    }
+    std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    step(app.set_environment("desktop", |env| env.os = Os::Linux));
+    step(app.open_guide_groups());
+    let unlock = |app: &mut Headless| {
+        step(app.wait_for("id:parental-continue"));
+        // This synthetic verifier is for 2468.
+        for digit in ["2", "4", "6", "8"] {
+            step(app.press_key(digit));
+        }
+        step(app.press("id:parental-continue"));
+        step(app.wait_for_gone("id:parental-continue", Duration::from_secs(10)));
+    };
+    step(app.right_click("id:guide-groups >> role:tab[Zulu]"));
+    unlock(&mut app);
+    step(app.press("id:playlist-menu-panel >> text:Reorder playlist"));
+    step(app.wait_for("id:organization-row-1 >> text:Zulu"));
+    step(app.press_key("enter"));
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:organization-row-0 >> text:Zulu"));
+    let surface = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: serde_json::Value::Null,
+        },
+    );
+    app.settle();
+    let saved = || {
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .sources()
+            .unwrap()
+            .into_iter()
+            .map(|source| source.id)
+            .collect::<Vec<_>>()
+    };
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for("id:parental-continue"));
+    assert_eq!(saved(), [alpha, zulu]);
+    unlock(&mut app);
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    assert_eq!(saved(), [zulu, alpha]);
+    crate::personalization::saved_settings(&mut app, &dir.join("settings.json"), |settings| {
+        settings.choice(
+            iptv_settings::keys::PLAYLIST_SORT,
+            &iptv_settings::Target::Global,
+        ) == "manual"
+    });
 }
 
 #[test]
