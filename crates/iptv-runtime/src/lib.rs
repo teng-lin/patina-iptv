@@ -757,6 +757,16 @@ pub mod settings;
 
 #[cfg(feature = "native")]
 mod native;
+#[cfg(all(
+    feature = "native",
+    any(
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "android"
+    )
+))]
+pub use native::app_updates;
 #[cfg(feature = "native")]
 pub use native::network::adapter_config;
 pub mod network;

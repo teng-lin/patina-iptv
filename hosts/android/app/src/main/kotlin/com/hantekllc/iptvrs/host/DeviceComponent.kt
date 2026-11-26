@@ -178,6 +178,9 @@ internal class DeviceComponent(
         val next =
             buildMap {
                 put("form", form)
+                put("directApk", BuildConfig.BUILD_TYPE == "directRelease")
+                put("versionCode", BuildConfig.VERSION_CODE)
+                put("androidApi", Build.VERSION.SDK_INT)
                 put("keyboard", keys.keyboard)
                 put("dpad", keys.dpad)
                 decoders?.let { put("decoders", it) }

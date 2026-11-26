@@ -5,6 +5,40 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build_version.rs");
     build_version::emit();
+    println!("cargo:rerun-if-env-changed=PATINA_UPDATE_ROOT");
+    println!("cargo:rerun-if-env-changed=PATINA_UPDATE_FEED");
+    let root = std::env::var_os("PATINA_UPDATE_ROOT");
+    let feed = std::env::var("PATINA_UPDATE_FEED").ok();
+    assert_eq!(
+        root.is_some(),
+        feed.is_some(),
+        "set both PATINA_UPDATE_ROOT and PATINA_UPDATE_FEED"
+    );
+    if let Some(feed) = feed {
+        assert!(
+            feed.starts_with("https://") && feed.ends_with('/'),
+            "the update repository requires an HTTPS directory URL"
+        );
+    }
+    let bytes = root.map_or_else(Vec::new, |path| {
+        let path = std::path::PathBuf::from(path)
+            .canonicalize()
+            .expect("resolve public TUF root");
+        println!("cargo:rerun-if-changed={}", path.display());
+        let bytes = std::fs::read(path).expect("read public TUF root");
+        let root: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("parse public TUF root JSON");
+        assert!(
+            root["signed"]["_type"] == "root"
+                && root["signed"]["version"].as_u64().is_some_and(|v| v > 0)
+                && root["signatures"].as_array().is_some_and(|s| !s.is_empty()),
+            "expected signed, versioned public TUF root"
+        );
+        bytes
+    });
+    let out =
+        std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"));
+    std::fs::write(out.join("update-root.json"), bytes).expect("embed update trust root");
     if let Ok("windows") = std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         println!("cargo:rerun-if-changed=windows.rc");
         println!("cargo:rerun-if-changed=icon.ico");

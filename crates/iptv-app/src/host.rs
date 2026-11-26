@@ -14,6 +14,7 @@
 //!   executor.
 #[cfg(not(target_family = "wasm"))]
 mod native;
+pub(crate) mod updates;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use native::*;
 

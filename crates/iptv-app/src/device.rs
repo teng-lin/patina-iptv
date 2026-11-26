@@ -46,6 +46,7 @@ struct Report {
     form_factor: Option<FormFactor>,
     input: Option<Input>,
     decoders: Option<usize>,
+    direct_android_build: Option<(u64, u64)>,
 }
 
 /// How long the system asks panels that hide by themselves to stay, at
@@ -130,6 +131,13 @@ pub(crate) fn reported_android_form() -> Option<FormFactor> {
         return None;
     }
     REPORTED.with(Cell::get)?.with(|report| report.form_factor)
+}
+
+pub(crate) fn direct_android_build() -> Option<(u64, u64)> {
+    REPORTED
+        .with(Cell::get)?
+        .get_untracked()
+        .direct_android_build
 }
 
 /// The current surface's size class (reactive: its size, the guide's
@@ -218,6 +226,13 @@ fn parse(data: &nsh_core::JsonValue, before: Report) -> Report {
         form_factor,
         input,
         decoders,
+        direct_android_build: match data["directApk"].as_bool() {
+            Some(true) => data["versionCode"]
+                .as_u64()
+                .zip(data["androidApi"].as_u64()),
+            Some(false) => None,
+            None => before.direct_android_build,
+        },
     }
 }
 

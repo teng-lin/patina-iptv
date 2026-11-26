@@ -18,6 +18,7 @@ use crate::input::dismiss_keyboard;
 
 mod editors;
 pub(crate) mod remote_keys;
+pub(crate) mod updates;
 mod view;
 mod words;
 
@@ -119,7 +120,11 @@ pub static PAGES: &[Page] = &[
     },
     Page {
         key: "about",
-        parts: &[Part::Keys(&["general.about", "about.privacy_policy"])],
+        parts: &[
+            Part::Keys(&["general.about"]),
+            Part::Offered(&["general.check_updates"]),
+            Part::Keys(&["about.privacy_policy"]),
+        ],
     },
 ];
 
@@ -401,6 +406,7 @@ fn run(ui: Ui, key: &'static str) {
         }
         "search.clear_history" => crate::search_view::clear_history(ui),
         "parental.change_pin" => crate::parental_view::change_pin(ui),
+        "general.check_updates" => updates::run(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
             crate::tasks::spawn_in_app(async move {

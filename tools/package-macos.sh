@@ -33,7 +33,7 @@ rm -rf "$out/Patina.app"
 # when it starts a protected program such as bash. The bundled app gets its
 # own rpath, @executable_path/../Frameworks, from tools/bundle-macos.py.)
 export DYLD_FALLBACK_LIBRARY_PATH="$runtime/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
-(cd "$root/crates/iptv-app" && "$nsh" package --target macos -o "$out" .)
+(cd "$root/crates/iptv-app" && PATINA_UPDATE_PACKAGE=dmg "$nsh" package --target macos -o "$out" .)
 unset DYLD_FALLBACK_LIBRARY_PATH
 bash "$root/tools/ci/notices.sh"
 cp "$root/LICENSE" "$out/Patina.app/Contents/Resources/LICENSE"

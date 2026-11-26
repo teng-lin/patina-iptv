@@ -1,0 +1,5 @@
+<resources>
+    <string name="update_recording_active">請先結束錄影，再安裝更新。</string>
+    <string name="update_install_unavailable">Android 無法開啟安裝程式。請從設定重試。</string>
+    <string name="update_invalid_apk">此 APK 無法更新已安裝的 Patina。</string>
+</resources>

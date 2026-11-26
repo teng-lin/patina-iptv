@@ -27,6 +27,7 @@ def main():
     records = []
     for name, relative, destination in [
         ("sqlcipher-src", "sqlcipher/sqlcipher.c", "SQLCipher-SQLite-NOTICES.txt"),
+        ("aws-lc-sys", "aws-lc/LICENSE", "AWS-LC-LICENSE.txt"),
         ("openssl-src", "openssl/LICENSE.txt", "OpenSSL-LICENSE.txt"),
     ]:
         packages = [package for package in metadata["packages"] if package["name"] == name]

@@ -56,6 +56,7 @@ for format in deb rpm pacman; do
     rpm) deps=(--depends 'glibc >= 2.39' --depends 'gtk4 >= 4.14' --depends dbus-libs --depends 'libfontconfig.so.1()(64bit)' --depends 'libva-drm.so.2()(64bit)' --depends 'libssl.so.3()(64bit)' --depends 'libva.so.2()(64bit)' --depends 'libasound.so.2()(64bit)' --depends 'libpipewire-0.3.so.0()(64bit)' --depends 'libpulse.so.0()(64bit)' --depends 'libstdc++.so.6()(64bit)' --depends libglvnd-gles --depends gstreamer1 --depends gstreamer1-plugins-base); extension=rpm;;
     pacman) deps=(--depends 'glibc>=2.39' --depends 'gtk4>=4.14' --depends dbus --depends fontconfig --depends libva --depends openssl --depends alsa-lib --depends libpipewire --depends libpulse --depends libstdc++ --depends libglvnd --depends gstreamer --depends gst-plugins-base-libs --pacman-compression zstd); extension=pkg.tar.zst;;
   esac
+  printf '%s\n' "$format" > "$stage/opt/patina/patina-package"
   fpm --force -s dir -t "$format" -n patina -v "$VERSION" --license "$license" \
     --url https://github.com/teng-lin/patina-iptv \
     --description 'Patina IPTV player' --maintainer 'Patina maintainers' \
@@ -63,6 +64,7 @@ for format in deb rpm pacman; do
 done
 mkdir -p "$appdir/usr/bin"
 cp -a "$native/." "$appdir/usr/bin/"
+printf 'appimage\n' > "$appdir/usr/bin/patina-package"
 cp "$native/$id.desktop" "$appdir/"
 cp "$native/$id.png" "$appdir/"
 cat > "$appdir/AppRun" <<'RUN'
@@ -73,6 +75,11 @@ export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 for hook in "$APPDIR"/apprun-hooks/*.sh; do
   [ ! -f "$hook" ] || source "$hook"
 done
+# Record the launch path's identity without leaking a file descriptor to helpers.
+unset PATINA_APPIMAGE_ID
+if [[ -n ${APPIMAGE:-} && -f $APPIMAGE ]] && image_id=$(stat -Lc '%d:%i' -- "$APPIMAGE"); then
+  export PATINA_APPIMAGE_ID=$image_id
+fi
 cd "$APPDIR/usr/bin"
 RUN
 printf 'exec "./%s" "$@"\n' "$exe" >> "$appdir/AppRun"

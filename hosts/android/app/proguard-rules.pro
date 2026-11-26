@@ -54,3 +54,8 @@
     static boolean available();
     static void released();
 }
+
+-keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.UpdateHost {
+    static java.lang.String cacheDirectory();
+    static boolean open(java.lang.String, long);
+}

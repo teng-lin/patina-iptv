@@ -378,7 +378,11 @@ class Plan(unittest.TestCase):
     def test_native_tier_compiles_tests_and_builds_production_without_shared_execution(self):
         for host in ("macos", "windows"):
             native = {step["name"]: step["argv"] for step in checks.plan(tier="native", host=host)}
-            self.assertEqual(set(native), {"native-test-compilation", "native-player-tests", "app-build"})
+            expected = {"native-test-compilation", "native-player-tests", "app-build"}
+            if host == "windows":
+                expected.add("windows-updater-tests")
+                self.assertIn("app_updates::windows::tests", native["windows-updater-tests"])
+            self.assertEqual(set(native), expected)
             self.assertIn("--all-targets", native["native-test-compilation"])
             self.assertNotIn("--features", native["app-build"])
             full = checks.plan(tier="full", host=host)

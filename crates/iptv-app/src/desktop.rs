@@ -390,16 +390,20 @@ thread_local! {
 /// Explicit quit preserves future recording intent but stops the native host.
 pub(crate) fn quit(ui: Ui) {
     if crate::runtime_owner::runtime().shutdown_recording_host() {
-        crate::player::watch_time::flush(ui);
-        with_window(WindowRef::close);
-        // The window may be hidden (macOS), and closing it alone would
-        // leave the app running: quit the app too.
-        nsh_core::element::desktop::quit();
+        close_after_shutdown(ui);
     } else {
         crate::settings_view::notify(tr(
             "The recording host is still closing; try quitting again",
         ));
     }
+}
+
+pub(crate) fn close_after_shutdown(ui: Ui) {
+    crate::player::watch_time::flush(ui);
+    with_window(WindowRef::close);
+    // The window may be hidden (macOS), and closing it alone would
+    // leave the app running: quit the app too.
+    nsh_core::element::desktop::quit();
 }
 
 #[cfg(test)]
