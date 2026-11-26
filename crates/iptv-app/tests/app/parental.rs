@@ -53,6 +53,177 @@ fn settings_menu(app: &mut Headless) {
 }
 
 #[test]
+fn aggregate_playlist_reorder_requires_the_settings_pin() {
+    use iptv_store_sqlite::parental::ParentalCredential;
+
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set(
+            "parental.require_pin_for",
+            Value::choice("blocked_content_and_settings"),
+        )
+        .unwrap();
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
+    let playlist = home.path().join("synthetic.m3u");
+    std::fs::write(&playlist, personalization::M3U).unwrap();
+    let mut store = crate::isolated::open_database(dir.join("iptv.sqlite")).unwrap();
+    let parsed = iptv_providers::m3u::parse_m3u(personalization::M3U);
+    for name in ["First playlist", "Second playlist"] {
+        let source = store
+            .add_source(&iptv_providers::model::Source {
+                name: name.to_owned(),
+                config: iptv_providers::model::SourceConfig::M3u(
+                    iptv_providers::model::M3uSourceConfig {
+                        location: iptv_providers::SecretUrl::new(playlist.to_string_lossy()),
+                        user_agent: None,
+                        referrer: None,
+                    },
+                ),
+            })
+            .unwrap();
+        store
+            .set_source_policy(
+                source,
+                iptv_store_sqlite::SourcePolicy {
+                    refresh_on_start: false,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .replace_catalog(source, &parsed.groups, &parsed.channels.items, &[], &[])
+            .unwrap();
+    }
+    store.set_all_playlists(true).unwrap();
+    store
+        .set_parental_credential(&ParentalCredential {
+            salt: [0x63; 16],
+            verifier: [
+                108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236, 123, 169,
+                134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+            ],
+            recovery_verifier: [0; 32],
+            failures: 0,
+            retry_after: 0,
+        })
+        .unwrap();
+    drop(store);
+    let mut app = Headless::start(nsh_engine::EngineConfig {
+        viewport: nsh_core::Size::new(nsh_core::prelude::px(1920.0), nsh_core::prelude::px(1080.0)),
+        ..nsh_engine::EngineConfig::new(nsh_core::element::Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    step(app.wait_for("id:guide-header-details >> text:First playlist · News"));
+    let app = &mut app;
+    step(app.open_guide_groups());
+    let reorder = |app: &mut Headless| {
+        step(app.long_press("id:guide-groups >> role:tab[All playlists]"));
+        step(app.press("id:menu-panel >> text:Reorder playlists"));
+        wait(app, "Enter parental PIN");
+        assert!(!app.shows("id:organization-screen"));
+    };
+
+    reorder(app);
+    step(app.back());
+    step(app.wait_for_gone("text:Enter parental PIN", Duration::from_secs(5)));
+    assert!(!app.shows("id:organization-screen"));
+
+    reorder(app);
+    digits(app, "2468");
+    continue_entry(app);
+    step(app.wait_for("id:organization-screen >> text:Reorder playlists"));
+}
+
+#[test]
+fn an_open_playlist_menu_checks_the_settings_pin_again_before_changing_policy() {
+    use nsh_core::{EventKind, EventPayload, ViewKind};
+
+    let Some(home) = isolated!() else { return };
+    let mut settings = Settings::new();
+    settings
+        .set(
+            "parental.require_pin_for",
+            Value::choice("blocked_content_and_settings"),
+        )
+        .unwrap();
+    let fixture = personalization::launch_prepared(
+        home,
+        settings,
+        false,
+        |path, _| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+                    salt: [0x63; 16],
+                    verifier: [
+                        108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236,
+                        123, 169, 134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+                    ],
+                    recovery_verifier: [0; 32],
+                    failures: 0,
+                    retry_after: 0,
+                })
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let (mut app, path, source) = (fixture.app, fixture.path, fixture.source);
+    step(app.open_guide_groups());
+    step(app.press("id:navigation-rail >> label:Settings"));
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    step(app.wait_for("id:settings-screen"));
+    step(app.open_settings_playlists());
+    step(
+        app.press("id:settings-content >> role:button[More options for Synthetic personalization]"),
+    );
+
+    let refresh = "id:playlist-menu-panel >> text:Automatic refresh: Off";
+    step(app.wait_for(refresh));
+    let player = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    app.engine().control().dispatch_event(
+        player,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: serde_json::Value::Null,
+        },
+    );
+    app.settle();
+
+    let interval = || {
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .source_policy(source)
+            .unwrap()
+            .refresh_seconds
+    };
+    step(app.press(refresh));
+    wait(&mut app, "Enter parental PIN");
+    step(app.press("id:parental-cancel"));
+    step(app.wait_for(refresh));
+    assert_eq!(interval(), 0);
+
+    step(app.press(refresh));
+    wait(&mut app, "Enter parental PIN");
+    digits(&mut app, "2468");
+    continue_entry(&mut app);
+    step(app.wait_for("id:playlist-menu-panel >> text:Automatic refresh: every hour"));
+    assert_eq!(interval(), 3600);
+}
+
+#[test]
 fn guide_data_mutations_wait_for_pin_and_cancel_keeps_the_store() {
     let Some(home) = isolated!() else { return };
     let guide = home.path().join("generated-guide.xml");

@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use crate::headless::Headless;
+use crate::headless::{Headless, KeyPhase};
 use iptv_providers::{
     SecretUrl,
     model::{M3uSourceConfig, Source, SourceConfig},
@@ -122,9 +122,7 @@ fn row(name: &str) -> String {
 
 /// Playlist `name`'s actions: a long press on its settings row.
 fn actions(app: &mut Headless, name: &str) {
-    step(app.wait_for(&row(name)));
-    step(app.long_press(&row(name)));
-    step(app.wait_for("id:playlist-actions-list"));
+    step(app.open_playlist_actions(name));
 }
 
 #[test]
@@ -188,16 +186,35 @@ fn recycled_playlist_and_guide_rows_keep_their_content_and_actions() {
     step(app.wait_for(&row("Playlist 35")));
     step(app.press_remote(nsh_tv::RemoteKey::Menu));
     step(app.wait_for("id:playlist-actions-list"));
-    // Reach the last action after cells have represented earlier actions.
+    // Scroll down and back to the destructive action after cells are recycled.
     for _ in 0..30 {
         step(app.press_key("down"));
     }
-    step(app.wait_for("id:playlist-actions-list >> text:Delete"));
+    for _ in 0..25 {
+        if app
+            .screen()
+            .matches("id:playlist-actions-list >> text:Delete")
+            .unwrap()
+        {
+            break;
+        }
+        step(app.press_key("up"));
+    }
     step(app.press("id:playlist-actions-list >> text:Delete"));
     step(app.wait_for("text:Delete “Playlist 35”?"));
     step(app.press("text:Keep it"));
-    step(app.press_key("up"));
-    step(app.press_key("up"));
+    step(app.back());
+    step(app.open_playlist_actions("Playlist 35"));
+    for _ in 0..25 {
+        if app
+            .screen()
+            .matches("id:playlist-actions-list >> text:Guide data")
+            .unwrap()
+        {
+            break;
+        }
+        step(app.press_key("down"));
+    }
     step(app.press("id:playlist-actions-list >> text:Guide data"));
     step(app.wait_for("text:Guide data · Playlist 35"));
     for _ in 0..19 {
@@ -425,8 +442,19 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     .unwrap();
     step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Beta  ▶"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▶"));
+    let expansion =
+        |app: &Headless, tab: &str| app.screen().accessibility_state(tab).unwrap().expanded;
+    assert_eq!(
+        expansion(&app, "id:guide-groups >> role:tab[Alpha]"),
+        Some(true)
+    );
+    assert_eq!(
+        expansion(&app, "id:guide-groups >> role:tab[Beta]"),
+        Some(false)
+    );
+    assert_eq!(expansion(&app, "id:guide-groups >> role:tab[News]"), None);
     step(app.press("id:guide-groups >> text:    News"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[News]"));
@@ -444,14 +472,22 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.wait_for(picker));
     // The picker's expansion is temporary. In particular, folding Alpha must
     // not remove the guide's selected News category from its own catalog.
-    step(app.press(&format!("{picker} >> text:Alpha  ▼")));
-    step(app.wait_for(&format!("{picker} >> text:Alpha  ▶")));
-    step(app.press(&format!("{picker} >> text:Alpha  ▶")));
-    step(app.wait_for(&format!("{picker} >> text:Alpha  ▼")));
-    step(app.press(&format!("{picker} >> text:Alpha  ▼")));
-    step(app.wait_for(&format!("{picker} >> text:Alpha  ▶")));
-    step(app.press(&format!("{picker} >> text:Beta  ▶")));
-    step(app.wait_for(&format!("{picker} >> text:Beta  ▼")));
+    step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
+    step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
+    assert_eq!(
+        expansion(&app, &format!("{picker} >> role:tab[Alpha]")),
+        Some(false)
+    );
+    step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
+    step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
+    step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
+    step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
+    step(app.press(&format!("{picker} >> role:tab[Beta] >> text:▶")));
+    step(app.wait_for(&format!("{picker} >> role:tab[Beta] >> text:▼")));
+    assert_eq!(
+        expansion(&app, &format!("{picker} >> role:tab[Beta]")),
+        Some(true)
+    );
     // Give any erroneously queued preference writes or catalog rebuilds a
     // chance to finish before checking that the stored guide choice is intact.
     step(app.run_for(Duration::from_secs(1)));
@@ -474,8 +510,8 @@ fn multiview_picker_expansion_preserves_the_guides_category_and_saved_expansion(
     step(app.wait_for("text:/^Only Alpha · Alpha/"));
     assert!(!app.screen().matches("text:/^Only Beta · Beta/").unwrap());
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Beta  ▶"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▶"));
     assert_eq!(
         app.screen()
             .count("id:guide-groups >> text:    News")
@@ -612,6 +648,30 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
                 .any(|url| url == "http://stream.example.test/Beta")
         }),
     );
+    step(app.open_guide_groups());
+    let nodes = app.screen().layout_nodes();
+    let playing = nodes
+        .iter()
+        .filter(|node| node.test_id.as_deref() == Some("guide-playing-marker"))
+        .filter_map(|node| node.text.as_ref())
+        .find(|text| text.text.text == "▶")
+        .expect("the playing channel has a marker");
+    let disclosures: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.test_id.as_deref() == Some("playlist-disclosure"))
+        .collect();
+    assert_eq!(disclosures.len(), 2);
+    assert!((right(disclosures[0].bounds) - right(disclosures[1].bounds)).abs() < 1.0);
+    for node in disclosures {
+        let text = node.text.as_ref().unwrap();
+        assert_eq!(
+            text.text.spans[0].style.font_size,
+            playing.text.spans[0].style.font_size
+        );
+        let row = nodes.iter().find(|row| row.id == node.parent).unwrap();
+        let inset = right(row.bounds) - right(node.bounds);
+        assert!((inset - 14.0).abs() < 1.0, "right inset was {inset}");
+    }
 
     step(app.press_key("/"));
     step(app.wait_for("id:search-field"));
@@ -637,8 +697,7 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
     assert!(!app.screen().matches("text:/^★ Shared/").unwrap());
 
     playlists(&mut app);
-    actions(&mut app, "Alpha");
-    step(app.press("text:Show all playlists"));
+    step(app.press("id:settings-content >> text:Show all playlists"));
     step(app.wait_for_within("text:/^Only Beta/", Duration::from_secs(20)));
     assert!(
         crate::isolated::open_database(&path)
@@ -671,6 +730,614 @@ fn combined_browsing_routes_duplicate_keys_favorites_search_and_playback() {
             .all_playlists()
             .unwrap()
     );
+}
+
+#[test]
+fn playlist_popup_hides_and_settings_restores_the_original_playlist() {
+    use nsh_core::Checked;
+    use nsh_core::platform::{Idiom, Os};
+    use nsh_tv::RemoteKey;
+
+    let Some(home) = isolated!() else { return };
+    iptv_app::use_remote_key_phases();
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let alpha = seed(&mut store, home.path(), "Alpha");
+    let beta = seed(&mut store, home.path(), "Beta");
+    let gamma = seed(&mut store, home.path(), "Gamma");
+    store
+        .set_source_policy(
+            gamma,
+            SourcePolicy {
+                enabled: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+    let mut app = Headless::start(EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    })
+    .unwrap();
+    let alpha_heading = "id:guide-groups >> role:tab[Alpha]";
+    let beta_heading = "id:guide-groups >> role:tab[Beta]";
+    let checkbox = |name| format!("id:menu-panel >> role:checkbox[{name}]");
+    let delete = "id:playlist-menu-panel >> text:Delete playlist";
+    let confirmation = "id:playlist-delete-confirmation";
+    let check = |app: &mut Headless, name, on| {
+        step(app.wait_until(
+            &format!("playlist checkbox {name} is {on}"),
+            Duration::from_secs(8),
+            |screen| {
+                screen
+                    .accessibility_state(&checkbox(name))
+                    .is_ok_and(|state| {
+                        state.checked == Some(if on { Checked::True } else { Checked::False })
+                    })
+            },
+        ));
+    };
+    let load = || crate::isolated::open_database(&path).unwrap();
+
+    let hide = "id:playlist-menu-panel >> text:Hide playlist";
+    let hidden = |app: &mut Headless| {
+        step(app.wait_for_gone(hide, Duration::from_secs(5)));
+        assert!(!app.shows("id:playlist-menu-panel >> text:Show"));
+    };
+    let interval_off = "id:playlist-menu-panel >> text:Automatic refresh: Off";
+    let interval_hour = "id:playlist-menu-panel >> text:Automatic refresh: every hour";
+    let startup = "id:playlist-menu-panel >> text:Refresh on startup: Yes";
+    let no_startup = "id:playlist-menu-panel >> text:Refresh on startup: No";
+    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.open_guide_groups());
+    step(app.long_press(alpha_heading));
+    step(app.wait_for(hide));
+    for unexpected in [
+        "role:checkbox",
+        "text:Beta",
+        "text:Gamma",
+        "text:Playlist settings",
+        "text:Reorder channel",
+        "text:Show all playlists",
+    ] {
+        assert!(
+            !app.screen()
+                .matches(&format!("id:playlist-menu-panel >> {unexpected}"))
+                .unwrap()
+        );
+    }
+    step(app.back());
+    step(app.set_environment("desktop", |env| {
+        env.idiom = Idiom::Desktop;
+        env.os = Os::Linux;
+    }));
+    step(app.right_click(beta_heading));
+    step(app.wait_for("id:playlist-menu-panel >> role:header[Beta]"));
+    step(app.press(interval_off));
+    step(app.press(no_startup));
+    step(app.wait_for(interval_hour));
+    step(app.wait_for(startup));
+    assert_eq!(load().source_policy(beta).unwrap().refresh_seconds, 3600);
+    assert!(load().source_policy(beta).unwrap().refresh_on_start);
+    assert_eq!(
+        load().source_policy(alpha).unwrap(),
+        SourcePolicy {
+            refresh_on_start: false,
+            ..Default::default()
+        }
+    );
+    let writer = rusqlite::Connection::open(&path).unwrap();
+    writer
+        .pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
+        .unwrap();
+    writer
+        .execute_batch(
+            "CREATE TRIGGER fail_visibility BEFORE UPDATE OF enabled ON source_policy
+             BEGIN SELECT RAISE(ABORT,'synthetic visibility failure'); END;
+             CREATE TRIGGER fail_deletion BEFORE DELETE ON sources
+             BEGIN SELECT RAISE(ABORT,'synthetic deletion failure'); END;",
+        )
+        .unwrap();
+    let failure =
+        "id:app-notice >> text:The change could not be saved. Reopen the list and try again.";
+    step(app.press(hide));
+    step(app.wait_for(failure));
+    step(app.wait_for(hide));
+    assert!(load().source_policy(beta).unwrap().enabled);
+    writer
+        .execute_batch("DROP TRIGGER fail_visibility")
+        .unwrap();
+    step(app.wait_for_gone(failure, Duration::from_secs(5)));
+    step(app.press(hide));
+    hidden(&mut app);
+    assert!(!load().source_policy(beta).unwrap().enabled);
+    assert!(load().source(beta).unwrap().is_some());
+    assert!(!load().source_policy(gamma).unwrap().enabled);
+    step(app.press(delete));
+    step(app.wait_for("id:playlist-delete-confirmation >> text:Delete “Beta”?"));
+    step(app.press(&format!("{confirmation} >> text:Keep it")));
+    hidden(&mut app);
+    assert!(load().source(beta).unwrap().is_some());
+    step(app.press(delete));
+    step(app.press(&format!("{confirmation} >> text:Delete")));
+    step(app.wait_for(failure));
+    hidden(&mut app);
+    assert!(load().source(beta).unwrap().is_some());
+    writer.execute_batch("DROP TRIGGER fail_deletion").unwrap();
+    step(app.press(delete));
+    step(app.press(&format!("{confirmation} >> text:Delete")));
+    step(app.wait_for_gone("id:playlist-menu-panel", Duration::from_secs(8)));
+    assert!(load().source(beta).unwrap().is_none());
+    assert!(load().source(alpha).unwrap().is_some());
+    assert!(load().source(gamma).unwrap().is_some());
+
+    // Holding OK opens Alpha's menu without a second action on key-up.
+    step(app.open_guide_groups());
+    step(app.press(alpha_heading));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.wait(Duration::from_millis(700)));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.wait_for(hide));
+    for _ in 0..2 {
+        step(app.remote_tap(RemoteKey::Down));
+    }
+    step(app.remote_tap(RemoteKey::Ok));
+    hidden(&mut app);
+    assert!(load().all_playlists().unwrap());
+    step(app.back());
+    step(app.wait_for("text:This group has no channels."));
+
+    // The aggregate reports hidden sources; Settings restores them by checkbox.
+    step(app.open_guide_groups());
+    step(app.right_click("id:guide-groups >> role:tab[All playlists]"));
+    check(&mut app, "Alpha", false);
+    check(&mut app, "Gamma", false);
+    assert!(
+        app.screen()
+            .accessibility_state(&checkbox("Alpha"))
+            .unwrap()
+            .disabled
+    );
+    step(app.back());
+    playlists(&mut app);
+    step(app.press(&row("Alpha")));
+    step(app.wait_for("id:settings-content >> role:checkbox[/^Alpha · /]"));
+    step(app.wait_until(
+        "Alpha restored from Settings",
+        Duration::from_secs(5),
+        |_| load().source_policy(alpha).unwrap().enabled,
+    ));
+    step(app.press("id:settings-content >> role:button[Close]"));
+    step(app.wait_for("text:/^Only Alpha · Alpha/"));
+    assert!(!load().source_policy(gamma).unwrap().enabled);
+
+    // Settings exposes a direct delete control for hidden sources, too.
+    let hide = "id:playlist-menu-panel >> text:Hide";
+    let hidden = |app: &mut Headless| {
+        step(app.wait_for_gone(hide, Duration::from_secs(5)));
+        assert!(!app.shows("id:playlist-menu-panel >> text:Show"));
+    };
+    playlists(&mut app);
+    step(app.remote_tap(RemoteKey::Right));
+    step(app.wait_for("text:▲▼ move   OK show or hide   Menu its settings   ◀ Back pages"));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Down));
+    step(app.wait(Duration::from_millis(700)));
+    step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
+    step(app.wait_for(hide));
+    step(app.back());
+    step(app.long_press(&row("Gamma")));
+    step(app.wait_for("id:playlist-menu-panel >> role:header[Gamma]"));
+    hidden(&mut app);
+    step(app.back());
+    step(app.press(&row("Gamma")));
+    step(app.wait_until(
+        "Gamma restored from Settings",
+        Duration::from_secs(5),
+        |_| load().source_policy(gamma).unwrap().enabled,
+    ));
+    step(app.long_press(&row("Gamma")));
+    step(app.press(hide));
+    hidden(&mut app);
+    step(app.back());
+    let settings_delete = "id:settings-content >> role:button[Delete “Gamma”]";
+    step(app.press(settings_delete));
+    step(app.wait_for("id:playlist-delete-confirmation >> text:Delete “Gamma”?"));
+    step(app.press(&format!("{confirmation} >> text:Keep it")));
+    assert!(load().source(gamma).unwrap().is_some());
+    step(app.press(settings_delete));
+    step(app.press(&format!("{confirmation} >> text:Delete")));
+    step(app.wait_for_gone(settings_delete, Duration::from_secs(8)));
+    step(app.wait_for_gone(&row("Gamma"), Duration::from_secs(8)));
+    assert!(!app.screen().matches(&row("Beta")).unwrap());
+    step(app.wait_for(&row("Alpha")));
+    assert!(load().source(gamma).unwrap().is_none());
+    assert_eq!(load().sources().unwrap()[0].id, alpha);
+    step(app.press("id:settings-content >> role:button[Close]"));
+    step(app.open_guide_groups());
+    step(app.right_click("id:guide-groups >> role:tab[All playlists]"));
+    check(&mut app, "Alpha", true);
+    assert_eq!(
+        app.screen()
+            .count("id:menu-panel >> role:checkbox")
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn playlist_order_options_apply_distinct_guide_orders_and_keep_the_custom_order() {
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let zulu = seed(&mut store, home.path(), "Zulu");
+    let alpha = seed(&mut store, home.path(), "Alpha");
+    let mike = seed(&mut store, home.path(), "Mike");
+    store.set_source_order(&[mike, zulu, alpha]).unwrap();
+    store
+        .set_collapsed_playlists(&[zulu.0, alpha.0, mike.0])
+        .unwrap();
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = nsh_core::platform::Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    step(app.set_environment("desktop", |env| env.os = nsh_core::platform::Os::Linux));
+    step(app.open_guide_groups());
+    let mut method = "Custom order";
+    for (next, order) in [
+        ("By date added", ["Zulu", "Alpha", "Mike"]),
+        ("By name", ["Alpha", "Mike", "Zulu"]),
+        ("Custom order", ["Mike", "Zulu", "Alpha"]),
+    ] {
+        step(app.right_click("id:guide-groups >> role:tab[Zulu]"));
+        step(app.press(&format!(
+            "id:playlist-menu-panel >> text:Playlist order: {method}"
+        )));
+        step(app.press(&format!("id:menu-panel >> text:{next}")));
+        crate::personalization_order::wait_visible_order(&mut app, &order);
+        method = next;
+    }
+    let store = crate::isolated::open_database(&path).unwrap();
+    assert_eq!(
+        store
+            .sources()
+            .unwrap()
+            .iter()
+            .map(|source| source.id)
+            .collect::<Vec<_>>(),
+        [mike, zulu, alpha]
+    );
+}
+
+#[test]
+fn saving_a_playlist_order_draft_rechecks_settings_access() {
+    use nsh_core::{
+        EventKind, EventPayload, ViewKind,
+        platform::{Idiom, Os},
+    };
+
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let mut store = crate::isolated::open_database(&path).unwrap();
+    let alpha = seed(&mut store, home.path(), "Alpha");
+    let zulu = seed(&mut store, home.path(), "Zulu");
+    store.set_all_playlists(true).unwrap();
+    store
+        .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+            salt: [0x63; 16],
+            verifier: [
+                108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236, 123, 169,
+                134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+            ],
+            recovery_verifier: [0; 32],
+            failures: 0,
+            retry_after: 0,
+        })
+        .unwrap();
+    drop(store);
+    let mut settings = Settings::new();
+    for (key, value) in [
+        ("playlists.sort", "name"),
+        ("parental.require_pin_for", "blocked_content_and_settings"),
+        ("parental.unlock_window", "every_time"),
+    ] {
+        settings.set(key, Value::choice(value)).unwrap();
+    }
+    std::fs::write(dir.join("settings.json"), settings.to_json_string()).unwrap();
+
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    step(app.set_environment("desktop", |env| env.os = Os::Linux));
+    step(app.open_guide_groups());
+    let unlock = |app: &mut Headless| {
+        step(app.wait_for("id:parental-continue"));
+        // This synthetic verifier is for 2468.
+        for digit in ["2", "4", "6", "8"] {
+            step(app.press_key(digit));
+        }
+        step(app.press("id:parental-continue"));
+        step(app.wait_for_gone("id:parental-continue", Duration::from_secs(10)));
+    };
+    step(app.right_click("id:guide-groups >> role:tab[Zulu]"));
+    unlock(&mut app);
+    step(app.press("id:playlist-menu-panel >> text:Reorder playlist"));
+    step(app.wait_for("id:organization-row-1 >> text:Zulu"));
+    step(app.press_key("enter"));
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:organization-row-0 >> text:Zulu"));
+    let surface = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.kind == ViewKind::Native)
+        .unwrap()
+        .id;
+    app.engine().control().dispatch_event(
+        surface,
+        EventKind::NativeEvent,
+        EventPayload::Native {
+            name: "test.parental.lock".into(),
+            data: serde_json::Value::Null,
+        },
+    );
+    app.settle();
+    let saved = || {
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .sources()
+            .unwrap()
+            .into_iter()
+            .map(|source| source.id)
+            .collect::<Vec<_>>()
+    };
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for("id:parental-continue"));
+    assert_eq!(saved(), [alpha, zulu]);
+    unlock(&mut app);
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    assert_eq!(saved(), [zulu, alpha]);
+    crate::personalization::saved_settings(&mut app, &dir.join("settings.json"), |settings| {
+        settings.choice(
+            iptv_settings::keys::PLAYLIST_SORT,
+            &iptv_settings::Target::Global,
+        ) == "manual"
+    });
+}
+
+#[test]
+fn playlist_reorder_from_settings_and_guide_restores_expansion_and_visibility() {
+    use nsh_core::geometry::point;
+    use nsh_core::platform::Idiom;
+
+    let Some(home) = isolated!() else { return };
+    let dir = home.data_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("iptv.sqlite");
+    let load = || crate::isolated::open_database(&path).unwrap();
+    let mut store = load();
+    let alpha = seed(&mut store, home.path(), "Alpha");
+    let beta = seed(&mut store, home.path(), "Beta");
+    let gamma = seed(&mut store, home.path(), "Gamma");
+    store
+        .set_source_policy(
+            gamma,
+            SourcePolicy {
+                enabled: false,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    store.set_collapsed_playlists(&[beta.0]).unwrap();
+    store.set_all_playlists(true).unwrap();
+    drop(store);
+    let mut config = EngineConfig {
+        viewport: Size::new(px(1920.0), px(1080.0)),
+        ..EngineConfig::new(Root::of::<iptv_app::App>())
+    };
+    config.environment.idiom = Idiom::Desktop;
+    let mut app = Headless::start(config).unwrap();
+    step(app.set_environment("desktop", |env| {
+        env.idiom = Idiom::Desktop;
+        env.os = nsh_core::platform::Os::Linux;
+    }));
+    let persisted = || {
+        load()
+            .sources()
+            .unwrap()
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>()
+    };
+    let restored = |app: &mut Headless| {
+        step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+        step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▶"));
+        assert_eq!(
+            app.screen()
+                .count("id:guide-groups >> text:    News")
+                .unwrap(),
+            1
+        );
+        assert!(
+            !app.screen()
+                .matches("id:guide-groups >> role:tab[Gamma]")
+                .unwrap()
+        );
+        assert_eq!(load().collapsed_playlists().unwrap(), [beta.0]);
+        assert!(!load().source_policy(gamma).unwrap().enabled);
+    };
+    let order_screen = |app: &mut Headless| {
+        step(app.wait_for("id:organization-screen >> text:Reorder playlists"));
+        assert!(!app.screen().matches("id:settings-screen").unwrap());
+        assert!(!app.screen().matches("id:guide-groups").unwrap());
+        assert_eq!(
+            app.screen()
+                .count("id:organization-screen >> role:row")
+                .unwrap(),
+            3
+        );
+        for index in 0..3 {
+            step(app.wait_for(&format!(
+                "id:organization-row-{index} >> id:reorder-handle-{index}"
+            )));
+        }
+        assert_eq!(load().collapsed_playlists().unwrap(), [beta.0]);
+    };
+    step(app.wait_for("text:/^Only Beta · Beta/"));
+    step(app.open_guide_groups());
+    restored(&mut app);
+    let command = "id:playlist-menu-panel >> text:Reorder playlist";
+    step(app.right_click("id:guide-groups >> role:tab[Beta]"));
+    assert_eq!(
+        app.panel_texts("playlist-actions-list"),
+        [
+            "Rename playlist",
+            "Delete playlist",
+            "Hide playlist",
+            "Refresh Now",
+            "Automatic refresh: Off",
+            "Refresh on startup: No",
+            "Reorder playlist",
+            "Playlist order: Custom order",
+            "Reorder group",
+            "Group order: Custom order",
+        ]
+    );
+    step(app.press("id:playlist-menu-panel >> text:Reorder group"));
+    step(app.wait_for("id:organization-screen >> text:Reorder groups"));
+    step(app.wait_for("id:organization-row-0 >> text:News"));
+    step(app.press("id:organization-screen >> text:Cancel"));
+    step(app.open_guide_groups());
+    step(app.right_click("id:guide-groups >> role:tab[Beta]"));
+    step(app.press("id:playlist-menu-panel >> text:Group order: Custom order"));
+    step(app.press("id:organization-sort >> text:Name (A–Z)"));
+    step(app.wait_for_gone("id:organization-sort", Duration::from_secs(5)));
+    step(app.open_guide_groups());
+    step(app.right_click("id:guide-groups >> role:tab[Beta]"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Group order: Name (A–Z)"));
+    step(app.back());
+    playlists(&mut app);
+    step(app.press("id:settings-content >> role:button[More options for Beta]"));
+    step(app.wait_for(command));
+    assert_eq!(
+        app.panel_texts("playlist-actions-list"),
+        [
+            "Rename",
+            "Delete",
+            "Refresh now",
+            "Hide",
+            "Automatic refresh: Off",
+            "Refresh on startup: No",
+            "Reorder playlist",
+        ]
+    );
+    step(app.press(command));
+    order_screen(&mut app);
+    // The heading chosen in Settings is focused. OK picks it up, Up moves it.
+    step(app.press_key("enter"));
+    step(app.press_key("up"));
+    step(app.wait_for("id:organization-row-0 >> text:Beta"));
+    step(app.press_key("enter"));
+    step(app.back());
+    step(app.press("text:Keep editing"));
+    step(app.wait_for("id:organization-row-0 >> text:Beta"));
+    step(app.back());
+    step(app.press("text:Discard changes"));
+    restored(&mut app);
+    assert_eq!(persisted(), [alpha, beta, gamma]);
+
+    // The guide offers reorder even while the list is sorted by name.
+    step(app.right_click("id:guide-groups >> role:tab[Alpha]"));
+    step(app.press("id:playlist-menu-panel >> text:Playlist order: Custom order"));
+    step(app.wait_for("id:menu-panel >> text:Custom order"));
+    step(app.press("id:menu-panel >> text:By name"));
+    playlists(&mut app);
+    assert!(!app.shows("id:settings-content >> text:Reorder playlists"));
+    step(app.press("id:settings-content >> role:button[Close]"));
+    step(app.open_guide_groups());
+
+    // A failed save from the guide keeps the manual order draft available.
+    step(app.right_click("id:guide-groups >> role:tab[Alpha]"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Playlist order: By name"));
+    step(app.press(command));
+    order_screen(&mut app);
+    step(app.drag("id:reorder-handle-1", point(px(0.0), px(-55.0))));
+    step(app.wait_for("id:organization-row-0 >> text:Beta"));
+    let writer = rusqlite::Connection::open(&path).unwrap();
+    writer
+        .pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
+        .unwrap();
+    writer.execute_batch("CREATE TRIGGER fail_reorder BEFORE UPDATE OF position ON sources BEGIN SELECT RAISE(ABORT,'synthetic order failure'); END;").unwrap();
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for(
+        "id:app-notice >> text:The change could not be saved. Reopen the list and try again.",
+    ));
+    assert_eq!(persisted(), [alpha, beta, gamma]);
+    step(app.wait_for("id:organization-row-0 >> text:Beta"));
+    writer.execute_batch("DROP TRIGGER fail_reorder").unwrap();
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    restored(&mut app);
+    assert_eq!(persisted(), [beta, alpha, gamma]);
+    step(app.right_click("id:guide-groups >> role:tab[Alpha]"));
+    step(app.wait_for("id:playlist-menu-panel >> role:header[Alpha]"));
+    step(app.wait_for("id:playlist-menu-panel >> text:Playlist order: Custom order"));
+    step(app.back());
+    step(app.right_click("id:guide-groups >> role:tab[All playlists]"));
+    let position = |app: &Headless, name| {
+        app.panel_texts("menu-panel")
+            .iter()
+            .position(|text| text == name)
+            .unwrap()
+    };
+    assert!(position(&app, "Beta") < position(&app, "Alpha"));
+    step(app.back());
+
+    let alpha_heading = "id:guide-groups >> role:tab[Alpha]";
+    step(app.right_click(alpha_heading));
+    step(app.press("id:playlist-menu-panel >> text:Playlist order: Custom order"));
+    step(app.press("id:menu-panel >> text:By date added"));
+    step(app.right_click(alpha_heading));
+    step(app.press("id:playlist-menu-panel >> text:Playlist order: By date added"));
+    step(app.back());
+    step(app.right_click("id:guide-groups >> role:tab[All playlists]"));
+    assert!(position(&app, "Alpha") < position(&app, "Beta"));
+    assert_eq!(persisted(), [beta, alpha, gamma]);
+    step(app.back());
+    step(app.right_click(alpha_heading));
+    step(app.press("id:playlist-menu-panel >> text:Playlist order: By date added"));
+    step(app.press("id:menu-panel >> text:Custom order"));
+    restored(&mut app);
+
+    // A TV remote can pick any heading even when it has no pointer.
+    step(app.set_environment("tv", |env| env.idiom = Idiom::Tv));
+    playlists(&mut app);
+    step(app.press("id:settings-content >> text:Reorder playlists"));
+    order_screen(&mut app);
+    step(app.press_key("down"));
+    step(app.press_key("enter"));
+    step(app.press_key("up"));
+    step(app.press_key("enter"));
+    step(app.back());
+    step(app.wait_for("text:Save the new order?"));
+    step(app.press_key("enter"));
+    restored(&mut app);
+    assert_eq!(persisted(), [alpha, beta, gamma]);
 }
 
 #[test]
@@ -726,12 +1393,30 @@ fn persisted_combined_mode_recovers_disabled_and_failed_sources_and_deletion() {
         },
     ));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
-    playlists(&mut app);
-    actions(&mut app, "Alpha");
-    step(app.press("id:playlist-actions-list >> text:Delete"));
-    step(app.wait_for("text:Delete “Alpha”?"));
-    step(app.press("text:Delete >> nth=0"));
-    step(app.back());
+    step(app.open_guide_groups());
+    let heading = "id:guide-groups >> role:tab[Alpha] >> text:▼";
+    let delete = "id:playlist-menu-panel >> text:Delete playlist";
+    let confirmation = "id:playlist-delete-confirmation";
+    step(app.wait_for(heading));
+    step(app.long_press(heading));
+    step(app.press("id:playlist-menu-panel >> text:Reorder playlist"));
+    step(app.wait_for("id:organization-row-0 >> id:reorder-handle-0"));
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for(heading));
+    step(app.long_press(heading));
+    step(app.press(delete));
+    step(app.wait_for("id:playlist-delete-confirmation >> text:Delete “Alpha”?"));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone(confirmation, Duration::from_secs(3)));
+    assert!(
+        crate::isolated::open_database(&path)
+            .unwrap()
+            .source(source)
+            .unwrap()
+            .is_some()
+    );
+    step(app.press(delete));
+    step(app.press("id:playlist-delete-confirmation >> text:Delete"));
     step(app.wait_until(
         "deleted source removed from aggregate",
         Duration::from_secs(10),
@@ -812,8 +1497,7 @@ fn leaving_combined_mode_cancels_a_missing_startup_channel_before_manual_return(
         }
     });
     playlists(&mut app);
-    actions(&mut app, "Alpha");
-    step(app.press("text:Show all playlists"));
+    step(app.press("id:settings-content >> text:Show all playlists"));
     step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
     step(app.wait_for_within("text:Beta bulletin", Duration::from_secs(20)));
     assert!(
@@ -854,18 +1538,18 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
     let mut app = start();
     step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Beta  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
     assert_eq!(
         app.screen()
             .count("id:guide-groups >> text:    News")
             .unwrap(),
         2
     );
-    assert_eq!(app.screen().count("text:▾  Disabled").unwrap(), 0);
+    assert!(!app.shows("id:guide-groups >> role:tab[Disabled]"));
     // A parent previews only that playlist, and a tap folds its children.
-    step(app.press("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▶"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▶"));
     assert_eq!(
         app.screen()
             .count("id:guide-groups >> text:    News")
@@ -883,7 +1567,7 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
     );
     // OK expands in place; Right enters that source's complete channel list.
     step(app.press_key("enter"));
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.press_key("right"));
     step(app.wait_for_gone("id:guide-groups", Duration::from_secs(3)));
     step(app.wait_for("role:grid[Alpha]"));
@@ -893,7 +1577,7 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
     step(app.wait_for("text:/^Only Beta · Beta/"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 2);
     // Fold Alpha again, then move down: Beta's header is the very next row.
-    step(app.press("id:guide-groups >> text:Alpha  ▼"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.press_key("down"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[Beta]"));
@@ -903,8 +1587,8 @@ fn guide_browses_playlist_sections_by_touch_and_remote_and_remembers_expansion()
     let mut app = start();
     step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▶"));
-    step(app.wait_for("id:guide-groups >> text:Beta  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▶"));
+    step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
     assert_eq!(app.screen().count("id:guide-channel-name").unwrap(), 4);
     assert_eq!(
         app.screen()
@@ -934,15 +1618,15 @@ fn playlist_section_navigation_does_not_wait_for_the_expansion_writer() {
     .unwrap();
     step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Beta  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
 
     let writer = rusqlite::Connection::open(&path).unwrap();
     writer
         .pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
         .unwrap();
     writer.execute_batch("BEGIN IMMEDIATE").unwrap();
-    step(app.press("id:guide-groups >> text:Alpha  ▼"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     // These keys immediately follow the tap, just as on a fast remote.
     step(app.press_key("down"));
     step(app.press_key("right"));
@@ -952,9 +1636,9 @@ fn playlist_section_navigation_does_not_wait_for_the_expansion_writer() {
     // More folds queue before any save can finish; each uses the immediately
     // preceding projection, and the final fold is the one persisted.
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▶"));
-    step(app.press("id:guide-groups >> text:Alpha  ▶"));
-    step(app.press("id:guide-groups >> text:Alpha  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▶"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▶"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     step(app.press_key("down"));
     step(app.press_key("right"));
     step(app.wait_for("role:grid[Beta]"));
@@ -1005,7 +1689,7 @@ fn a_failed_expansion_save_preserves_a_newer_choice_and_recovers_the_last_failur
     .unwrap();
     step(app.wait_for_within("text:/^Only Beta · Beta/", Duration::from_secs(20)));
     step(app.open_guide_groups());
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     let writer = rusqlite::Connection::open(&path).unwrap();
     writer
         .pragma_update(None, "key", format!("x'{}'", "54".repeat(32)))
@@ -1019,9 +1703,9 @@ fn a_failed_expansion_save_preserves_a_newer_choice_and_recovers_the_last_failur
              BEGIN IMMEDIATE;",
         )
         .unwrap();
-    step(app.press("id:guide-groups >> text:Alpha  ▼"));
-    step(app.press("id:guide-groups >> text:Alpha  ▶"));
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▶"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     writer.execute_batch("ROLLBACK").unwrap();
     step(crate::isolated::wait_outside(
         &mut app,
@@ -1038,8 +1722,8 @@ fn a_failed_expansion_save_preserves_a_newer_choice_and_recovers_the_last_failur
         },
     ));
     step(app.wait_for("text:The change could not be saved. Reopen the list and try again."));
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Beta  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Beta] >> text:▼"));
     assert_eq!(
         app.screen()
             .count("id:guide-groups >> text:    News")
@@ -1050,10 +1734,10 @@ fn a_failed_expansion_save_preserves_a_newer_choice_and_recovers_the_last_failur
     // A last failed choice rolls back to persisted state, with no newer
     // choice for its recovery to overwrite.
     writer.execute_batch("BEGIN IMMEDIATE").unwrap();
-    step(app.press("id:guide-groups >> text:Alpha  ▼"));
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▶"));
+    step(app.press("id:guide-groups >> role:tab[Alpha] >> text:▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▶"));
     writer.execute_batch("ROLLBACK").unwrap();
-    step(app.wait_for("id:guide-groups >> text:Alpha  ▼"));
+    step(app.wait_for("id:guide-groups >> role:tab[Alpha] >> text:▼"));
     assert_eq!(
         app.screen()
             .count("id:guide-groups >> text:    News")
@@ -1346,10 +2030,10 @@ fn automatic_join_keeps_account_format_limit_and_the_original_guide_job_and_time
     // Playlist parents in the picker expand their categories without closing
     // it or changing the guide's list. The source filter survives both toggles.
     let picker = "id:multiview-picker";
-    step(app.press(&format!("{picker} >> text:Alpha  ▼")));
-    step(app.wait_for(&format!("{picker} >> text:Alpha  ▶")));
-    step(app.press(&format!("{picker} >> text:Alpha  ▶")));
-    step(app.wait_for(&format!("{picker} >> text:Alpha  ▼")));
+    step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
+    step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
+    step(app.press(&format!("{picker} >> role:tab[Alpha] >> text:▶")));
+    step(app.wait_for(&format!("{picker} >> role:tab[Alpha] >> text:▼")));
     step(app.press(&format!("{picker} >> text:/^    News$/ >> nth=0")));
     step(app.type_text("id:multiview-channel-search", "Imported Beta"));
     step(app.wait_for("text:No matching channels. Clear the search or choose another group."));

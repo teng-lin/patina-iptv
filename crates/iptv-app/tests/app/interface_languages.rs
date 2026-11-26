@@ -226,41 +226,43 @@ fn playlists_organization_and_failures_speak_the_interface_language() {
     assert!(!app.shows("3 channels"));
     // Its actions (a long press on its row).
     step(app.long_press("role:checkbox[/^Synthetic personalization/]"));
-    let yes = de.t("Yes");
-    shown(
-        app,
-        &de.f(
-            "Playlist enabled: {answer}",
-            &[("answer", yes.as_str().into())],
-        ),
-    );
+    shown(app, &de.t("Hide"));
     shown(app, &de.t("Refresh now"));
-    shown(app, &de.t("Custom groups"));
-    // Organization (the seventh action, by remote as it is below the fold).
-    for _ in 0..6 {
-        step(app.press_key("down"));
-    }
-    step(app.press_key("enter"));
+    step(app.back());
+    step(app.press(&format!(
+        "id:settings-content >> text:{}",
+        de.t("Manage playlists")
+    )));
+    step(app.press("id:playlists-list >> text:Synthetic personalization"));
+    step(app.press(&format!(
+        "id:playlist-actions-list >> text:{}",
+        de.t("Organize groups")
+    )));
     step(app.wait_for("id:organization-screen"));
-    shown(app, &de.t("Organize channels"));
+    shown(app, &de.t("Organize groups"));
     shown(
         app,
         &de.t("Includes hidden items. OK opens actions; select items for bulk hide/show. Back returns."),
     );
     shown(app, &format!("{} >> nth=0", de.t("Visible")));
     step(app.press("id:organization-row-0"));
-    shown(app, &de.t("Hide channel"));
+    shown(app, &de.t("Hide group"));
     shown(app, &de.t("Move to first"));
     shown(app, &de.t("Use provider name"));
-    press(app, &de.t("Hide channel"));
+    press(app, &de.t("Hide group"));
     shown(app, &de.t("Hidden"));
     step(app.press("id:organization-row-0"));
-    press(app, &de.t("Show channel"));
+    press(app, &de.t("Show group"));
     step(app.back());
     step(app.wait_for_gone("id:organization-screen", Duration::from_secs(3)));
-    // A refresh that fails says so, and why, in German.
+    // A refresh that fails says so, and why, in German. Refresh returns
+    // from this playlist's management task to Settings.
     std::fs::remove_file(&playlist).unwrap();
-    press(app, &de.t("Refresh now"));
+    step(app.press(&format!(
+        "id:playlist-actions-list >> text:{}",
+        de.t("Refresh now")
+    )));
+    step(app.wait_for_gone("id:playlists-list", Duration::from_secs(3)));
     let failed = de.f("Refresh failed: {reason}", &[("reason", "".into())]);
     step(app.wait_for_within(&format!("text:/ · {}/", pattern(&failed)), IMPORT));
     assert!(!app.shows("Refresh failed"));
@@ -664,6 +666,57 @@ fn pseudolocalized_labels_keep_their_accessible_name_at_large_text_sizes() {
         step(app.wait_for(&format!("label:/{}/", pattern(wanted))));
         step(app.wait_for(&format!("label:{}", expanded("Video"))));
     }
+}
+
+#[test]
+fn long_channel_order_values_fit_the_menu_at_large_text_sizes() {
+    use iptv_core::organization::Sort;
+    use iptv_library::OrganizationScope;
+    use nsh_core::{ApproxTextEngine, TextEngine};
+
+    let Some(home) = isolated!() else { return };
+    let es = Words::of("es");
+    let mut settings = Settings::new();
+    settings.set("general.language", Value::text("es")).unwrap();
+    let mut fixture = personalization::launch_prepared(
+        home,
+        settings,
+        false,
+        |path, source| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_guide_sort(source, &OrganizationScope::Channels, Sort::LastWatched)
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut fixture.app;
+    step(app.set_viewport(nsh_core::Size::new(
+        nsh_core::prelude::px(560.0),
+        nsh_core::prelude::px(860.0),
+    )));
+    step(app.set_environment("large text", |env| env.font_scale = 1.5));
+    step(app.long_press("id:guide-channel-name >> nth=0"));
+    let value = es.t("Last watched (newest first)");
+    let label = es.f("Channel order: {method}", &[("method", (&value).into())]);
+    step(app.wait_for(&format!("id:menu-panel >> label:/{}/", pattern(&label))));
+    let screen = app.screen();
+    let node = screen
+        .layout_nodes()
+        .into_iter()
+        .find_map(|node| node.text.filter(|text| text.text.text.as_str() == label))
+        .expect("visible order and its value");
+    let mut full = (*node.text).clone();
+    full.max_lines = 0;
+    let engine = ApproxTextEngine;
+    let needed = engine.measure(&engine.prepare(&full), Some(node.content.size.width));
+    assert_eq!(node.text.max_lines, 0);
+    assert!(
+        needed.height.0 <= node.content.size.height.0 + 1.0,
+        "{needed:?} exceeds {:?}",
+        node.content
+    );
 }
 
 #[test]

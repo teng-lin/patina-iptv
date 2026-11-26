@@ -275,9 +275,10 @@ iptv-app/src/playlists_view.rs	details of {}
 iptv-app/src/playlists_view.rs	guide sources of {}
 iptv-app/src/playlists_view.rs	movie and series import of {}
 iptv-app/src/playlists_view.rs	streams at once of {}
+iptv-app/src/playlists_view.rs	playlist order
 iptv-app/src/playlists_view.rs	playlist policy {}
+iptv-app/src/playlists_view.rs	reorder playlist {}
 iptv-app/src/playlists_view.rs	refresh all
-iptv-app/src/playlists_view.rs	reorder {} playlists
 iptv-app/src/playlists_view.rs	show all playlists
 iptv-app/src/playlists_view.rs	try new details of {}
 # Internal store refusal classes: the shell logs the reason and presents a

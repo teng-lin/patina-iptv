@@ -88,17 +88,71 @@ impl Headless {
         })
     }
 
-    /// Playlist `name`'s own actions, from its Settings → Playlists row (a
-    /// long press there, as Menu or a right-click).
+    /// Open a source's full management controls in Settings → Playlists.
     pub fn open_playlist_actions(&mut self, name: &str) -> Result<(), String> {
-        self.open_settings_playlists()?;
-        let row = format!(
-            "id:settings-content >> role:checkbox[/^{}/]",
-            regex_escape(name)
-        );
-        self.wait_for(&row)?;
-        self.long_press(&row)?;
+        if !self.screen().matches("id:playlists-screen")? {
+            self.open_settings_playlists()?;
+            let manage = "id:settings-content >> text:Manage playlists";
+            if !self.screen().matches(manage)? {
+                self.press_key("right")?;
+                while !self.screen().matches(manage)? {
+                    let previous = self.panel_texts("settings-content");
+                    self.press_key("pagedown")?;
+                    if previous == self.panel_texts("settings-content") {
+                        break;
+                    }
+                }
+            }
+            self.press(manage)?;
+        }
+        let list = "id:playlists-list";
+        let source = format!("{list} >> text:{name}");
+        self.wait_for(list)?;
+        if !self.screen().matches(&source)? {
+            let half_page = self
+                .screen()
+                .layout_nodes()
+                .into_iter()
+                .find(|node| node.test_id.as_deref() == Some("playlists-list"))
+                .map(|node| nsh_core::prelude::px(node.bounds.size.height.0 / 2.0))
+                .ok_or_else(|| "the playlist picker has no scroll viewport".to_owned())?;
+            while !self.screen().matches(&source)? {
+                self.0
+                    .scroll(list, half_page)
+                    .map_err(|err| format!("could not find playlist {name}: {err}"))?;
+            }
+        }
+        self.press(&source)?;
         self.wait_for("id:playlist-actions-list")
+    }
+
+    pub fn panel_texts(&self, panel_id: &str) -> Vec<String> {
+        let nodes = self.screen().layout_nodes();
+        let Some(panel) = nodes
+            .iter()
+            .find(|n| n.test_id.as_deref() == Some(panel_id))
+            .map(|n| n.id)
+        else {
+            return Vec::new();
+        };
+        let parent: std::collections::HashMap<_, _> =
+            nodes.iter().map(|n| (n.id, n.parent)).collect();
+        let inside = |mut id| {
+            while let Some(&up) = parent.get(&id) {
+                if up == panel {
+                    return true;
+                }
+                id = up;
+            }
+            false
+        };
+        let mut found: Vec<(String, f32)> = nodes
+            .iter()
+            .filter(|n| inside(n.id))
+            .filter_map(|n| Some((n.text.as_ref()?.text.text.to_string(), n.bounds.origin.y.0)))
+            .collect();
+        found.sort_by(|a, b| a.1.total_cmp(&b.1));
+        found.into_iter().map(|t| t.0).collect()
     }
 
     /// Closes the settings (after a playlist's task there ended): their
@@ -361,17 +415,4 @@ impl DerefMut for Headless {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
-}
-
-/// `text` as a selector regex that matches it literally.
-fn regex_escape(text: &str) -> String {
-    text.chars()
-        .flat_map(|c| {
-            let special = "\\.+*?()|[]{}^$/".contains(c);
-            special
-                .then_some('\\')
-                .into_iter()
-                .chain(std::iter::once(c))
-        })
-        .collect()
 }

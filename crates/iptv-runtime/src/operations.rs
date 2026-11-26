@@ -204,6 +204,12 @@ impl Runtime {
         crate::settings::load(self);
     }
 
+    /// Checks the current settings authorization and storage state before
+    /// starting an operation that will update this setting.
+    pub fn check_setting_write(&self, key: &str) -> Result<(), crate::settings::SaveError> {
+        crate::settings::check_setting_write(self, key)
+    }
+
     pub fn set_setting(
         self: &Rc<Self>,
         key: &str,

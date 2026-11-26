@@ -27,6 +27,14 @@ fn replace(shared: &Shared, settings: Arc<Settings>) {
     *shared.write().unwrap_or_else(PoisonError::into_inner) = Some(settings);
 }
 
+fn publish(owner: &std::rc::Rc<super::Runtime>, before: &Settings, next: Arc<Settings>) {
+    let order_changed = choice(before, keys::PLAYLIST_SORT) != choice(&next, keys::PLAYLIST_SORT);
+    replace(owner.services().shared_settings(), next);
+    if order_changed {
+        crate::data::order_changed(owner);
+    }
+}
+
 fn path(directory: &Path) -> PathBuf {
     directory.join(FILE)
 }
@@ -183,6 +191,22 @@ impl std::fmt::Display for SaveError {
 
 impl std::error::Error for SaveError {}
 
+pub(crate) fn check_setting_write(owner: &super::Runtime, key: &str) -> Result<(), SaveError> {
+    let protect_all = owner.settings().get("parental.require_pin_for").ok()
+        == Some(Value::Enum("blocked_content_and_settings".into()));
+    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
+        return Err(SaveError::ParentalLocked);
+    }
+    check_writable(owner)
+}
+
+fn check_writable(owner: &super::Runtime) -> Result<(), SaveError> {
+    match owner.settings_read_only.get() {
+        Some(error) => Err(SaveError::Storage(error)),
+        None => Ok(()),
+    }
+}
+
 /// Stores `value` for `key` (globally), tells the views, and saves in the
 /// background. Only an invalid value is an error here; a save that fails
 /// later is reported, and the settings go back to the saved ones unless a
@@ -204,11 +228,7 @@ pub(crate) fn set_in(
     at: &Target,
     value: Value,
 ) -> Result<(), SaveError> {
-    let protect_all = owner.settings().get("parental.require_pin_for").ok()
-        == Some(Value::Enum("blocked_content_and_settings".into()));
-    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
-        return Err(SaveError::ParentalLocked);
-    }
+    check_setting_write(owner, key)?;
     apply(owner, key, |next| {
         if *at != Target::Global {
             let mut inheriting = next.clone();
@@ -323,11 +343,7 @@ pub(crate) fn set_own(
     at: &Target,
     value: Option<Value>,
 ) -> Result<(), SaveError> {
-    let protect_all = owner.settings().get("parental.require_pin_for").ok()
-        == Some(Value::Enum("blocked_content_and_settings".into()));
-    if (key.starts_with("parental.") || protect_all) && !owner.parental_settings_allowed() {
-        return Err(SaveError::ParentalLocked);
-    }
+    check_setting_write(owner, key)?;
     apply(owner, key, |next| {
         let before = next.stored(key, at).cloned();
         let mut changes = match value {
@@ -354,15 +370,14 @@ fn apply(
     key: &str,
     edit: impl FnOnce(&mut Settings) -> Result<Vec<iptv_settings::Change>, SettingsError>,
 ) -> Result<(), SaveError> {
-    if let Some(error) = owner.settings_read_only.get() {
-        return Err(SaveError::Storage(error));
-    }
+    check_writable(owner)?;
     let services = owner.services();
-    let mut next = (*services.settings()).clone();
+    let before = services.settings();
+    let mut next = (*before).clone();
     let changes = edit(&mut next).map_err(SaveError::Invalid)?;
     let json = next.to_json_string();
     let next = Arc::new(next);
-    replace(services.shared_settings(), next.clone());
+    publish(owner, &before, next.clone());
     if key.starts_with("parental.") {
         owner.parental_policy_changed();
     }
@@ -396,7 +411,7 @@ fn apply(
                 if let Some((_, previous)) =
                     owner.settings_saved.with(|saved| saved.borrow().clone())
                 {
-                    replace(services.shared_settings(), previous);
+                    publish(&owner, &services.settings(), previous);
                     owner.emit(super::RuntimeEvent::SettingsChanged);
                 }
             }

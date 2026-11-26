@@ -155,19 +155,21 @@ fn playlists_native(owner: &super::Runtime) -> Result<Vec<Playlist>, StoreError>
             .map(|snapshot| snapshot.playlists.clone())
             .ok_or(StoreError::Unavailable("library is loading"))
     })?;
-    let by_name = owner.settings().choice(
+    let order = owner.settings().choice(
         iptv_settings::keys::PLAYLIST_SORT,
         &iptv_settings::Target::Global,
-    ) == "name";
-    sort_playlists(&mut playlists, by_name);
+    );
+    sort_playlists(&mut playlists, order);
     Ok(playlists)
 }
 
-/// Playlists in the order lists show them: as stored (the manual order),
-/// or by name (stable: equal names keep the manual order).
-pub(crate) fn sort_playlists(playlists: &mut [Playlist], by_name: bool) {
-    if by_name {
-        playlists.sort_by_cached_key(|p| p.name.to_lowercase());
+/// The source IDs are assigned on insertion. They retain the order the
+/// surviving playlists were added in, even after changes to manual positions.
+fn sort_playlists(playlists: &mut [Playlist], order: &str) {
+    match order {
+        "added" => playlists.sort_by_key(|p| p.id),
+        "name" => playlists.sort_by_cached_key(|p| p.name.to_lowercase()),
+        _ => {}
     }
 }
 
@@ -175,9 +177,13 @@ pub fn reorder_sources(
     owner: &super::Runtime,
     order: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    owner
-        .services()
-        .call(move |store| store.set_source_order(&order))
+    let services = owner.services();
+    let current = services.clone();
+    let authorization = owner.parental_snapshot();
+    services.call(move |store| {
+        crate::parental::require_settings_write(store, &authorization, &current.settings())?;
+        store.set_source_order(&order)
+    })
 }
 pub(crate) fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
     store
@@ -238,6 +244,14 @@ pub(crate) fn startup_source(store: &Store) -> Result<Option<StoredSource>, Stor
 }
 
 pub fn newest(owner: &super::Runtime) -> Result<Option<StoredSource>, StoreError> {
+    newest_excluding(owner, None)
+}
+
+pub(crate) fn newest_excluding(
+    owner: &super::Runtime,
+    excluded: Option<SourceId>,
+) -> Result<Option<StoredSource>, StoreError> {
+    let eligible = |p: &Playlist| Some(p.id) != excluded && p.policy.enabled;
     owner.library.with(|snapshot| {
         let snapshot = snapshot.borrow();
         let snapshot = snapshot
@@ -247,14 +261,14 @@ pub fn newest(owner: &super::Runtime) -> Result<Option<StoredSource>, StoreError
             snapshot
                 .playlists
                 .iter()
-                .any(|p| p.id == *id && p.policy.enabled)
+                .any(|p| p.id == *id && eligible(p))
         });
         let selected = active.or_else(|| {
             snapshot
                 .playlists
                 .iter()
                 .rev()
-                .find(|p| p.policy.enabled)
+                .find(|p| eligible(p))
                 .map(|p| p.id)
         });
         Ok(selected.and_then(|id| snapshot.details.get(&id).cloned()))
@@ -318,14 +332,22 @@ pub fn snapshot(
     owner.services().read(snapshot_in)
 }
 
-pub fn save_policy(
+pub fn update_policy(
     owner: &super::Runtime,
     id: SourceId,
-    policy: iptv_library::SourcePolicy,
-) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    owner
-        .services()
-        .call(move |store| store.set_source_policy(id, policy))
+    edit: impl FnOnce(&mut iptv_library::SourcePolicy) + Send + 'static,
+) -> impl std::future::Future<Output = Result<(iptv_library::SourcePolicy, bool), StoreError>> {
+    let services = owner.services();
+    let current = services.clone();
+    let authorization = owner.parental_snapshot();
+    services.call(move |store| {
+        crate::parental::require_settings_write(store, &authorization, &current.settings())?;
+        let mut policy = store.source_policy(id)?;
+        let was_enabled = policy.enabled;
+        edit(&mut policy);
+        store.set_source_policy(id, policy)?;
+        Ok((policy, was_enabled != policy.enabled))
+    })
 }
 
 pub fn remember_shown(
@@ -480,15 +502,17 @@ mod order_tests {
     }
 
     #[test]
-    fn playlists_sort_by_name_only_when_asked() {
-        let manual = vec![named(1, "Zeta"), named(2, "alpha"), named(3, "Beta")];
-        let mut kept = manual.clone();
-        sort_playlists(&mut kept, false);
-        assert_eq!(kept, manual);
-        let mut sorted = manual;
-        sort_playlists(&mut sorted, true);
-        let ids: Vec<i64> = sorted.iter().map(|p| p.id.0).collect();
-        assert_eq!(ids, [2, 3, 1]);
+    fn playlist_sort_supports_insertion_name_and_manual_order() {
+        let manual = [named(3, "Beta"), named(1, "Zeta"), named(2, "alpha")];
+        for (mode, expected) in [
+            ("added", [1, 2, 3]),
+            ("name", [2, 3, 1]),
+            ("manual", [3, 1, 2]),
+        ] {
+            let mut sorted = manual.clone();
+            sort_playlists(&mut sorted, mode);
+            assert_eq!(sorted.map(|p| p.id.0), expected, "{mode}");
+        }
     }
 }
 

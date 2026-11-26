@@ -57,7 +57,7 @@ pub static BACKGROUND: Choices = Choices {
 
 pub static PLAYLIST_SORT: Choices = Choices {
     family: "sort",
-    variants: &["manual", "name"],
+    variants: &["added", "name", "manual"],
 };
 
 pub static GROUP_SORT: Choices = Choices {

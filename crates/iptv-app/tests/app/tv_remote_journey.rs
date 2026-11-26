@@ -139,7 +139,7 @@ fn long_ok_on_a_group_reorders_it_in_the_guide() {
     step(app.press("id:guide-groups >> text:Sport"));
     hold(app, RemoteKey::Ok, 700, true);
     step(app.wait_for("id:menu-panel >> role:header[Sport]"));
-    step(app.press("id:menu-panel >> text:Reorder groups"));
+    step(app.press("id:menu-panel >> text:Reorder group"));
     step(app.wait_for("id:organization-row-1 >> text:Sport"));
     step(app.remote_tap(RemoteKey::Ok));
     step(app.remote_tap(RemoteKey::Up));
@@ -749,20 +749,23 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     hold(app, RemoteKey::Left, 600, true);
     step(app.wait_for("id:guide-groups >> text:Favorites"));
     hold(app, RemoteKey::Ok, 600, false);
-    step(app.wait_for("id:menu-panel >> text:Channel order"));
-    assert!(!shows(app, "id:menu-panel >> text:Rename group"));
+    step(app.wait_for("id:menu-panel >> text:/^Channel order:/"));
+    assert!(!shows(app, "id:menu-panel >> text:Rename group name"));
     step(app.back());
     step(app.wait_for_gone(
-        "id:menu-panel >> text:Channel order",
+        "id:menu-panel >> text:/^Channel order:/",
         Duration::from_secs(2),
     ));
     assert!(shows(app, "id:guide-groups >> text:Favorites"));
     step(app.remote_tap(RemoteKey::Down));
     hold(app, RemoteKey::Ok, 600, true);
     step(app.wait_for("id:menu-panel >> role:header[News]"));
-    assert!(shows(app, "id:menu-panel >> text:Rename group"));
+    assert!(shows(app, "id:menu-panel >> text:Rename group name"));
     step(app.back());
-    step(app.wait_for_gone("id:menu-panel >> text:Rename group", Duration::from_secs(2)));
+    step(app.wait_for_gone(
+        "id:menu-panel >> text:Rename group name",
+        Duration::from_secs(2),
+    ));
     step(app.remote_tap(RemoteKey::Up));
     step(app.remote_tap(RemoteKey::Right));
     assert_eq!(iptv_app::player_opens(0), 0, "browsing never plays");
@@ -810,7 +813,7 @@ fn the_remote_journey_browses_without_retuning_and_returns_to_the_guide() {
     step(app.wait_for("id:channel-list-groups >> text:News"));
     step(app.run_for(Duration::from_millis(600)));
     step(app.remote_phase(RemoteKey::Ok, KeyPhase::Up));
-    assert!(!shows(app, "id:menu-panel >> text:Channel order"));
+    assert!(!shows(app, "id:menu-panel >> text:/^Channel order:/"));
     assert!(!shows(app, "id:menu-panel >> text:Channel options…"));
     step(app.back());
     step(app.run_for(Duration::from_secs(3)));
