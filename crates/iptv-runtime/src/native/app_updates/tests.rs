@@ -116,6 +116,104 @@ fn respects_version_package_architecture_and_minimums() {
     assert_eq!(select(package), UpdateResult::Current);
 }
 
+#[tokio::test]
+async fn download_rejects_truncated_oversized_or_changed_bytes_and_cleans_up() {
+    use iptv_import::MemoryBody;
+    let dir = tempfile::tempdir().unwrap();
+    let payload = b"synthetic";
+    let digest = format!("{:x}", Sha256::digest(payload));
+    for bytes in [b"change-me".as_slice(), b"short", b"extra bytes"] {
+        assert!(
+            download::receive(MemoryBody::new(bytes, 2), dir.path().into(), 9, &digest)
+                .await
+                .is_none()
+        );
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+    let file = download::receive(MemoryBody::new(payload, 3), dir.path().into(), 9, &digest)
+        .await
+        .unwrap();
+    assert_eq!(fs::read(&file).unwrap(), payload);
+    drop(file);
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn desktop_packages_require_the_matching_artifact_and_report_publisher_status() {
+    let cases = [
+        (
+            "windows",
+            "x86_64",
+            "exe",
+            "windows-x86_64-setup.exe",
+            json!({"windows":"10.0.0"}),
+        ),
+        (
+            "macos",
+            "arm64",
+            "dmg",
+            "macos-arm64.dmg",
+            json!({"macos":"14.0"}),
+        ),
+        (
+            "linux",
+            "x86_64",
+            "deb",
+            "linux-x86_64.deb",
+            json!({"glibc":"2.39"}),
+        ),
+        (
+            "linux",
+            "x86_64",
+            "rpm",
+            "linux-x86_64.rpm",
+            json!({"glibc":"2.39"}),
+        ),
+        (
+            "linux",
+            "x86_64",
+            "pacman",
+            "linux-x86_64.pkg.tar.zst",
+            json!({"glibc":"2.39"}),
+        ),
+        (
+            "linux",
+            "x86_64",
+            "appimage",
+            "linux-x86_64.AppImage",
+            json!({"glibc":"2.39"}),
+        ),
+    ];
+    for (platform, arch, format, suffix, minimum) in cases {
+        let mut installed = InstalledPackage::native("0.9.9");
+        installed.platform = platform;
+        installed.architecture = arch;
+        installed.format = Some(format.into());
+        installed.minimum = json!({"windows":"10.0","macos":"14.0","glibc":"2.39","gtk":"4.14"});
+        let url = format!(
+            "https://github.com/teng-lin/patina-iptv/releases/download/v0.10.0/Patina-0.10.0-{suffix}"
+        );
+        let mut index = json!({"schema":1, "packages":[{
+            "source":"github-release", "platform":platform, "format":format, "architectures":[arch],
+            "version":"0.10.0", "minimum":minimum, "notes":"https://github.com/teng-lin/patina-iptv/releases/tag/v0.10.0",
+            "url":url, "length":9, "sha256":"0".repeat(64), "signing":"preview",
+        }]});
+        let select = |index: &serde_json::Value| {
+            selection::select(&serde_json::to_vec(index).unwrap(), installed.clone())
+        };
+        for status in ["preview", "signed"] {
+            index["packages"][0]["signing"] = json!(status);
+            let Some(UpdateResult::Available { asset, preview, .. }) = select(&index) else {
+                panic!("{platform} {format}");
+            };
+            assert_eq!(asset.url(), url);
+            assert_eq!(preview, platform != "linux" && status == "preview");
+        }
+        index["packages"][0]["url"] = json!("https://example.invalid/other");
+        assert!(select(&index).is_none());
+    }
+}
+
 #[test]
 fn a_newer_desktop_requirement_needs_manual_confirmation() {
     let mut index: serde_json::Value =

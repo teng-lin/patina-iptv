@@ -49,3 +49,5 @@ PY
 unzip -p target/android-unsigned/app-release.aab BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map | cmp "$direct_mapping" -
 python3 tools/ci/check-android-artifacts.py \
   target/android-unsigned/app-release-unsigned.apk target/android-unsigned/app-release.aab
+python3 tools/ci/check-update-manifests.py \
+  target/android-unsigned/app-release-unsigned.apk target/android-unsigned/app-release.aab

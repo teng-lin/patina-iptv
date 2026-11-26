@@ -726,3 +726,11 @@ Disclose the selected host in the privacy notice before distributing a
 configured build. A build without that pair opens the manual release page from
 Settings → About. Existing installations need one manual upgrade to acquire
 the checker.
+
+To rehearse direct APK installation, compile the staging build with
+`PATINA_APK_HANDOFF=1` and the staging feed and root above. Gradle's
+`directRelease` variant carries the system installer permission and private
+handoff activity. The normal release bundle goes through the store. Use the
+About action to download the selected build and confirm installation. An
+active recording defers the handoff. Keep production activation gated on the
+signed install-over-previous exercises in the proposal.

@@ -53,6 +53,23 @@ impl InstalledPackage {
     }
 }
 
+/// Immutable package named by a verified release. Only the selector creates one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseAsset {
+    pub(super) url: String,
+    pub(super) sha256: String,
+    pub(super) length: u64,
+    android_code: Option<u64>,
+}
+impl ReleaseAsset {
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+    pub fn android_code(&self) -> Option<u64> {
+        self.android_code
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum UpdateResult {
     Current,
@@ -60,6 +77,7 @@ pub enum UpdateResult {
         version: String,
         notes: String,
         preview: bool,
+        asset: ReleaseAsset,
     },
     RequirementsUnconfirmed,
     NoCompatiblePackage,
@@ -166,9 +184,40 @@ pub(super) fn select(bytes: &[u8], installed: InstalledPackage) -> Option<Update
         },
         _ => false,
     };
+    let suffix = match (installed.platform, format.as_str()) {
+        ("android", "apk") if package["signing"] == "apk" => "android-tablet-tv.apk",
+        ("windows", "exe") => "windows-x86_64-setup.exe",
+        ("macos", "dmg") => "macos-arm64.dmg",
+        ("linux", "appimage") => "linux-x86_64.AppImage",
+        ("linux", "deb") => "linux-x86_64.deb",
+        ("linux", "rpm") => "linux-x86_64.rpm",
+        ("linux", "pacman") => "linux-x86_64.pkg.tar.zst",
+        _ => return None,
+    };
+    let url = format!(
+        "https://github.com/teng-lin/patina-iptv/releases/download/v{text}/Patina-{text}-{suffix}"
+    );
+    let sha256 = package["sha256"].as_str()?;
+    let length = package["length"].as_u64()?;
+    if package["url"] != url
+        || !(1..=2_147_483_648).contains(&length)
+        || sha256.len() != 64
+        || !sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return None;
+    }
+    let asset = ReleaseAsset {
+        url,
+        length,
+        sha256: sha256.into(),
+        android_code: package["versionCode"].as_u64(),
+    };
     Some(UpdateResult::Available {
         version: text.to_owned(),
         notes,
         preview,
+        asset,
     })
 }
