@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = ROOT / "tools/ci/android/adb.py"
@@ -197,6 +197,27 @@ class Integration(unittest.TestCase):
             run.reset_mock()
             prepare(sdk, "android-tv", {})
             run.assert_not_called()
+
+    @unittest.skipUnless(os.name == "posix", "the CI emulator requires a Unix host")
+    def test_boot_rechecks_avd_after_offline_settings_write(self):
+        with patch.object(sys, "path", [str(GUARD.parent), *sys.path]):
+            wait = runpy.run_path(str(GUARD.with_name("ci-emulator.py")))["wait_for_boot"]
+        # Lose ADB at the final settings write, then recover on the same AVD.
+        before_drop = ["generated", "1", "", "", ""]
+        offline = subprocess.CalledProcessError(1, ["adb"], stderr="adb: device offline")
+        adb = Mock(side_effect=[*before_drop, offline, *before_drop, ""])
+        process = Mock()
+        process.poll.return_value = None
+        with patch.dict(wait.__globals__, adb=adb), patch.object(time, "sleep") as delay:
+            wait(process, "generated", {})
+            delay.assert_called_once()
+            self.assertEqual(adb.call_args_list[6].args, ("emu", "avd", "name"))
+
+        denied = subprocess.CalledProcessError(1, ["adb"], stderr="permission denied")
+        with patch.dict(wait.__globals__, adb=Mock(side_effect=[*before_drop, denied])), \
+                self.assertRaises(subprocess.CalledProcessError) as raised:
+            wait(process, "generated", {})
+        self.assertIs(raised.exception, denied)
 
     @unittest.skipUnless(os.name == "posix", "the CI emulator requires a Unix host")
     def test_emulator_system_recovery_is_guarded(self):

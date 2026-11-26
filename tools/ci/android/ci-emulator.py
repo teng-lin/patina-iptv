@@ -53,12 +53,24 @@ def wait_for_boot(process, name, env):
             owned = adb("emu", "avd", "name", phase="boot", env=env, timeout=5, capture=True).splitlines()
             if owned and owned[0] != name:
                 raise RuntimeError("ADB serial belongs to a different AVD")
-            if owned and adb("shell", "getprop", "sys.boot_completed", phase="boot", env=env,
-                             timeout=5, capture=True).strip() == "1":
+            ready = owned and adb("shell", "getprop", "sys.boot_completed", phase="boot", env=env,
+                                  timeout=5, capture=True).strip() == "1"
+        except subprocess.CalledProcessError:
+            ready = False
+        if ready:
+            # A TV AVD can briefly drop ADB even after sys.boot_completed.
+            # Only hand it to smoke after its idempotent setup also succeeds.
+            try:
+                adb("shell", "input", "keyevent", "82", phase="boot", env=env, capture=True)
+                for setting in ("window_animation_scale", "transition_animation_scale", "animator_duration_scale"):
+                    adb("shell", "settings", "put", "global", setting, "0.0", phase="boot", env=env, capture=True)
+            except subprocess.CalledProcessError as error:
+                if "device offline" not in (error.stderr or ""):
+                    print(error.stderr or str(error), file=sys.stderr)
+                    raise
+            else:
                 print(f"Emulator booted in {time.monotonic() - start:.1f}s", flush=True)
                 return
-        except subprocess.CalledProcessError:
-            pass
         time.sleep(2)
     raise RuntimeError("emulator boot timed out")
 
@@ -116,9 +128,6 @@ def main():
                                         stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
             try:
                 wait_for_boot(emulator, name, env)
-                adb("shell", "input", "keyevent", "82", phase="boot", env=env)
-                for setting in ("window_animation_scale", "transition_animation_scale", "animator_duration_scale"):
-                    adb("shell", "settings", "put", "global", setting, "0.0", phase="boot", env=env)
                 return run_smoke(args.apk, env, output)
             finally:
                 stop(emulator, 3)
