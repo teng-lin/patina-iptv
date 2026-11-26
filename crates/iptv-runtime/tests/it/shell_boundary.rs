@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 /// shell holds one `Runtime` handle and passes it to every call; it names no
 /// store service, worker pool, executor, file writer or owner lookup.
 const SHELL_MAY_NAME: &[&str] = &[
+    // About supplies the installed package and renders the verified release result.
+    "app_updates",
     // The owner, how it is built, and what crosses its boundary.
     "BrowserState",
     "Error",
