@@ -28,12 +28,26 @@ impl Prepared for Handoff {
     fn load(&mut self) -> Task<'_, ()> {
         unreachable!()
     }
-    fn allow(self: Box<Self>) -> Task<'static, Admitted> {
+    fn allow(self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted> {
         Box::pin(async move {
-            self.started.send(()).unwrap();
-            self.allow.await.unwrap();
+            let Handoff {
+                started,
+                allow,
+                remote,
+            } = *self;
+            let result = authorization
+                .while_current(async {
+                    started.send(()).unwrap();
+                    allow.await.unwrap();
+                    Ok(())
+                })
+                .await;
+            if let Err(error) = result {
+                remote.retire().await;
+                return Err(error);
+            }
             Ok(Admitted {
-                remote: self.remote,
+                remote,
                 paused: false,
             })
         })
@@ -212,6 +226,16 @@ impl<'a> Trial<'a> {
             .poll(&mut Context::from_waker(&self.waker))
     }
 
+    fn verify_denied(self, owner: &Runtime) {
+        self.retirement.finish();
+        assert_eq!(
+            wait_for_admission(self.admission.unwrap(), &self.waker, &self.notified),
+            Err(Error::Denied)
+        );
+        assert!(owner.cast_target().is_none());
+        assert!(owner.drain_services());
+    }
+
     fn offer(&mut self) {
         self.allow.take().unwrap().send(()).unwrap();
         self.notified.recv_timeout(WAIT).unwrap();
@@ -250,14 +274,24 @@ fn revoked_grant_cannot_publish_an_offered_relay() {
     trial.offer();
     owner.parental_lock();
     assert!(trial.poll().is_pending());
-    let admission = trial.admission.take().unwrap();
-    trial.retirement.finish();
-    assert_eq!(
-        wait_for_admission(admission, &trial.waker, &trial.notified),
-        Err(Error::Denied)
-    );
-    assert!(owner.cast_target().is_none());
-    assert!(owner.drain_services());
+    trial.verify_denied(&owner);
+}
+
+#[test]
+fn relock_retires_the_relay_while_receiver_settlement_is_pending() {
+    let owner = owner();
+    let trial = Trial::begin(&owner);
+    owner.parental_lock();
+    trial.verify_denied(&owner);
+}
+
+#[test]
+fn relock_retires_an_offer_while_its_owner_is_suspended() {
+    let owner = owner();
+    let mut trial = Trial::begin(&owner);
+    trial.offer();
+    owner.parental_lock();
+    trial.verify_denied(&owner);
 }
 
 #[test]

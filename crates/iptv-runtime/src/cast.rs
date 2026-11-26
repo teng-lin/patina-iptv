@@ -21,8 +21,29 @@ pub trait Port: Send + Sync {
 pub trait Prepared: Send {
     /// Sends LOAD and waits for the selected TV's first authorized HTTP request.
     fn load(&mut self) -> Task<'_, ()>;
-    /// Opens the upstream and confirms the initial playback state.
-    fn allow(self: Box<Self>) -> Task<'static, Admitted>;
+    /// Open and settle under the grant, joining relay retirement on denial.
+    fn allow(self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted>;
+}
+/// Monitors the playback grant while the receiver owns an unpublished relay.
+pub struct Authorization {
+    grant: ExternalPlaybackAuthorization,
+    services: crate::store_service::Services,
+}
+impl Authorization {
+    /// Drop the pending operation on revocation, including while a LOAD reply is outstanding.
+    pub async fn while_current<T>(
+        &self,
+        work: impl Future<Output = Result<T, Error>>,
+    ) -> Result<T, Error> {
+        let mut work = std::pin::pin!(work);
+        while self.grant.is_current() {
+            let deadline = crate::time::Instant::now() + std::time::Duration::from_millis(250);
+            if let Ok(result) = self.services.timeout_at(deadline, work.as_mut()).await {
+                return result;
+            }
+        }
+        Err(Error::Denied)
+    }
 }
 pub struct Admitted {
     pub remote: Arc<dyn Remote>,
@@ -172,24 +193,36 @@ impl Runtime {
         let signal = cancel.0.clone();
         let (offer, offered) = oneshot::channel();
         let services = self.services();
+        let authorization = Arc::new(Authorization {
+            grant,
+            services: services.clone(),
+        });
+        let worker_authorization = authorization.clone();
         let admission = async move {
             // Even if the UI drops its future, allow() must finish on this executor:
             // it may have opened the upstream already and must join its retirement.
             if signal.is_canceled()
                 || generation.load(std::sync::atomic::Ordering::Acquire) != ticket
-                || !grant.is_current()
+                || !worker_authorization.grant.is_current()
             {
                 return Err(Error::Denied);
             }
-            let admitted = prepared.allow().await?;
+            let admitted = prepared.allow(&worker_authorization).await?;
             let remote = admitted.remote.clone();
             let claim = Arc::new(Mutex::new(Some(claim)));
             if !signal.is_canceled()
                 && generation.load(std::sync::atomic::Ordering::Acquire) == ticket
-                && grant.is_current()
-                && offer.send((admitted, grant, claim.clone())).is_ok()
+                && worker_authorization.grant.is_current()
+                && offer.send((admitted, claim.clone())).is_ok()
             {
-                signal.canceled().await;
+                // The owner may be suspended after the offer. Keep watching its grant
+                // until the owner has taken the claim or the relay must be retired.
+                let _ = worker_authorization
+                    .while_current(async {
+                        signal.canceled().await;
+                        Ok(())
+                    })
+                    .await;
             }
             // Publication takes the claim without yielding. Every other path
             // leaves it here until the admitted relay has actually closed.
@@ -201,17 +234,15 @@ impl Runtime {
             Ok(())
         };
         let job = self.spawn_cast_worker(cancel.0.clone(), admission);
-        if let Ok((admitted, grant, claim)) = offered.await
+        if let Ok((admitted, claim)) = offered.await
             && self.cast_intent_current(ticket)
             && !self.shutdown_requested.get()
             && self.cast.borrow().is_none()
-            && grant.is_current()
-        {
-            let claim = claim
+            && let Some(claim) = claim
                 .lock()
                 .expect("cast claim poisoned")
-                .take()
-                .expect("current cast offer");
+                .take_if(|_| authorization.grant.is_current())
+        {
             *self.cast.borrow_mut() = Some(Active {
                 receiver: destination.receiver,
                 key: destination.key,

@@ -4,7 +4,7 @@ use iptv_core::{
     cast::{Command, Error, Receiver, RemoteState},
     playback::PlaySource,
 };
-use iptv_runtime::cast::{Admitted, Port, Prepared, Remote, Retirement, Task};
+use iptv_runtime::cast::{Admitted, Authorization, Port, Prepared, Remote, Retirement, Task};
 use iptv_settings::{Settings, Value};
 use personalization::step;
 use std::{
@@ -52,8 +52,8 @@ impl Prepared for FakeCast {
             self.load_error.map_or(Ok(()), Err)
         })
     }
-    fn allow(self: Box<Self>) -> Task<'static, Admitted> {
-        Box::pin(async move {
+    fn allow(self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted> {
+        Box::pin(authorization.while_current(async move {
             self.events.lock().unwrap().push("allow");
             if let Some(error) = self.allow_error {
                 return Err(error);
@@ -62,7 +62,7 @@ impl Prepared for FakeCast {
                 paused: self.initially_paused,
                 remote: Arc::new(*self),
             })
-        })
+        }))
     }
 }
 impl Remote for FakeCast {
