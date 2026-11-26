@@ -31,6 +31,7 @@
 //! use iptv_runtime::stored::configs_from_sources;
 //! ```
 pub mod build_config;
+pub mod cast;
 pub mod data;
 mod error;
 mod events;
@@ -107,6 +108,9 @@ type Updates = Vec<(SourceId, Rc<ImportWork>)>;
 type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
+    cast: RefCell<Option<cast::Active>>,
+    cast_workers: RefCell<Vec<cast::Worker>>,
+    cast_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     parental: RefCell<parental::State>,
     recordings: std::sync::Arc<recordings::State>,
     recordings_detached: Cell<bool>,
@@ -180,6 +184,9 @@ impl Runtime {
         let guide_checks = guide_checks::GuideChecks::default();
         let schedule = Rc::new(SyntheticSchedule);
         Self {
+            cast: RefCell::default(),
+            cast_workers: RefCell::default(),
+            cast_generation: Default::default(),
             parental: RefCell::default(),
             recordings,
             recordings_detached: Cell::new(false),
@@ -310,18 +317,20 @@ impl Runtime {
         // lane's teardown barrier.
         self.vod.cancel_discovery();
         self.shutdown_requested.set(true);
+        self.close_cast();
         let drained = self
             .store
             .drain_on_shutdown_with(|| self.inspection.cancel_requests());
         let probes_drained = self
             .inspection
             .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));
+        let cast_drained = self.drain_cast(deadline);
         // Detached local tasks can retain this Runtime after the root closes.
         // Retire services now, rather than waiting for its last Rc to drop.
         self.store.retire();
         self.inspection.clear();
         self.repairs.borrow_mut().clear();
-        drained && probes_drained
+        drained && probes_drained && cast_drained
     }
 
     pub fn bind_browser(&self, observe: impl Fn() -> BrowserState + 'static) {
@@ -409,12 +418,18 @@ impl Drop for Runtime {
         // the independent native recording host retains its own services.
         // An explicit attempt already spent its bounded shutdown budget, even
         // if a noncooperative lane did not close. Do not spend it again in Drop.
-        if !self.shutdown_requested.replace(true)
-            && !self
+        if !self.shutdown_requested.replace(true) {
+            let deadline = crate::time::Instant::now() + self.store.drain_limit();
+            self.close_cast();
+            if !self
                 .store
                 .drain_on_shutdown_with(|| self.inspection.cancel_requests())
-        {
-            log::error!("iptv persistence: fallback store drain did not finish at disposal");
+            {
+                log::error!("iptv persistence: fallback store drain did not finish at disposal");
+            }
+            if !self.drain_cast(deadline) {
+                log::error!("iptv cast: relay shutdown exceeded the owner's drain deadline");
+            }
         }
         if !self.store.files().flush(std::time::Duration::from_secs(2)) {
             log::error!("iptv persistence: fallback file flush did not finish at disposal");

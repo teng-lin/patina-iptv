@@ -7,6 +7,8 @@ mod ios_device;
 
 #[cfg(target_os = "android")]
 mod android_transport;
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+mod casting;
 mod clock;
 mod external_player;
 pub(crate) use external_player::*;
@@ -60,9 +62,21 @@ pub(crate) const REMOTE_ONLY: bool = false;
 /// Imports and guide downloads run on the refresh pool's workers.
 pub(crate) const IMPORTS: bool = true;
 
+#[cfg(feature = "test-support")]
+static TEST_CAST: std::sync::OnceLock<std::sync::Arc<dyn iptv_runtime::cast::Port>> =
+    std::sync::OnceLock::new();
+
 /// The runtime's ports on this host.
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    {
+        ports.cast = Some(std::sync::Arc::new(casting::Sender));
+    }
+    #[cfg(feature = "test-support")]
+    if let Some(port) = TEST_CAST.get() {
+        ports.cast = Some(port.clone());
+    }
     ports.background_recordings = crate::host::BUILT.background_recordings();
     ports.recording_schedule = recording_host::schedule;
     #[cfg(target_os = "android")]
@@ -113,6 +127,12 @@ pub(crate) fn language_changed(tag: &str) {
 
 /// Public entry points of the native hosts.
 pub mod exports {
+    /// Installs a generated receiver for an isolated headless app journey.
+    #[cfg(feature = "test-support")]
+    pub fn install_test_cast_port(port: std::sync::Arc<dyn iptv_runtime::cast::Port>) {
+        assert!(super::TEST_CAST.set(port).is_ok());
+    }
+
     /// Explicit synthetic-key injection for the headless test binary only.
     #[cfg(feature = "test-support")]
     pub use super::credential_key::install_test_key;

@@ -117,6 +117,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.105"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cb931c189b85683d69a5cfad41d4d418671e1ac413dd209f3f2fc31e3cfd902"
+
+[[package]]
 name = "approx"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1071,7 +1077,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb"
 dependencies = [
  "const-oid",
+ "der_derive",
+ "flagset",
  "zeroize",
+]
+
+[[package]]
+name = "der_derive"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8034092389675178f570469e6c3b0465d3d30b4505c294a6550db47f3c17ad18"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1390,6 +1409,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
+name = "flagset"
+version = "0.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7ac824320a75a52197e8f2d787f6a38b6718bb6897a35142d749af3c0e8f4fe"
+
+[[package]]
 name = "flate2"
 version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1405,6 +1430,17 @@ name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+
+[[package]]
+name = "flume"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "spin",
+]
 
 [[package]]
 name = "fnv"
@@ -2290,6 +2326,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ignore"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2421,7 +2467,7 @@ checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "iptv-app"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2433,6 +2479,7 @@ dependencies = [
  "futures-channel",
  "getrandom 0.4.3",
  "imagesize",
+ "iptv-cast",
  "iptv-core",
  "iptv-epg",
  "iptv-guide",
@@ -2473,15 +2520,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "iptv-cast"
+version = "0.1.11"
+dependencies = [
+ "dbus",
+ "mdns-sd",
+ "prost",
+ "rcgen",
+ "rustls-webpki",
+ "serde_json",
+ "tokio",
+ "tokio-rustls",
+ "x509-cert",
+]
+
+[[package]]
 name = "iptv-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "zeroize",
 ]
 
 [[package]]
 name = "iptv-epg"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "flate2",
  "iptv-core",
@@ -2492,7 +2554,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-guide"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2501,7 +2563,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-import"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "flate2",
  "iptv-core",
@@ -2516,7 +2578,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-library"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "iptv-epg",
  "iptv-providers",
@@ -2524,11 +2586,11 @@ dependencies = [
 
 [[package]]
 name = "iptv-nav"
-version = "0.1.10"
+version = "0.1.11"
 
 [[package]]
 name = "iptv-net"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "cookie_store",
  "flate2",
@@ -2551,7 +2613,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-player-mpv"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "dispatch2",
  "iptv-core",
@@ -2578,7 +2640,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-presentation"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2592,7 +2654,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-providers"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "iptv-core",
  "percent-encoding",
@@ -2606,7 +2668,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-runtime"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "chrono",
  "futures-channel",
@@ -2639,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-search"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2648,21 +2710,21 @@ dependencies = [
 
 [[package]]
 name = "iptv-settings"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "iptv-sqlcipher-init"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "rusqlite",
 ]
 
 [[package]]
 name = "iptv-store-sqlite"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "iptv-core",
  "iptv-epg",
@@ -2685,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-tui"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64 0.22.1",
  "crossterm",
@@ -2709,7 +2771,7 @@ dependencies = [
 
 [[package]]
 name = "iptv-web"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "futures-channel",
  "iptv-core",
@@ -3072,6 +3134,21 @@ name = "maybe-owned"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
+
+[[package]]
+name = "mdns-sd"
+version = "0.21.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6743ed743ff2bada2b8651ef298d3f98addb0b74844f19cdd57137d8bd0219e"
+dependencies = [
+ "fastrand",
+ "flume",
+ "if-addrs",
+ "log",
+ "mio",
+ "socket-pktinfo",
+ "socket2",
+]
 
 [[package]]
 name = "memchr"
@@ -4186,6 +4263,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ef0b569d1d907ab3a28596aee62cf1f61dacb0529a4bedcd8e7460e2d5228b4"
+dependencies = [
+ "bytes",
+ "prost-derive",
+]
+
+[[package]]
+name = "prost-derive"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad9c5423459fa2f729b8d9235fab810aa29628b171467744fc86d21460ad70d"
+dependencies = [
+ "anyhow",
+ "itertools 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "psl-types"
 version = "2.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5118,6 +5218,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "socket-pktinfo"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "512f5c35377cf69f350b106df2366c3a1df6bd01b047a7a58c8390b70d28838d"
+dependencies = [
+ "libc",
+ "socket2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5125,6 +5236,15 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "spin"
+version = "0.9.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
+dependencies = [
+ "lock_api",
 ]
 
 [[package]]
@@ -6665,6 +6785,17 @@ dependencies = [
  "brotli-decompressor",
  "bytes",
  "flate2",
+]
+
+[[package]]
+name = "x509-cert"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1301e935010a701ae5f8655edc0ad17c44bad3ac5ce8c39185f75453b720ae94"
+dependencies = [
+ "const-oid",
+ "der",
+ "spki",
 ]
 
 [[package]]

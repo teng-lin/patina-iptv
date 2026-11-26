@@ -66,6 +66,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("clock.rs", "SHOWN"),                                     // Visible guide clock origin.
     ("video.rs", "OPENS"),   // Native player open instrumentation.
     ("video.rs", "SOURCED"), // Native player source projection.
+    // Synthetic receiver for headless Cast journeys.
+    ("host/native.rs", "TEST_CAST"),
 ];
 
 /// Platform `cfg` outside `src/host/`, the host glue: what is still to

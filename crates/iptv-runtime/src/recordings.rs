@@ -146,6 +146,7 @@ struct Data {
     provider_limits: HashMap<i64, u32>,
     viewers: HashMap<usize, Lease>,
     external_viewer: Option<Lease>,
+    cast_viewers: HashMap<u64, Lease>,
     inputs: HashMap<u64, shared::Registered>,
     suspended_viewers: HashMap<usize, Lease>,
     active: HashMap<JobId, (Lease, CancelToken)>,
@@ -227,6 +228,7 @@ impl Data {
             .map(|(_, lease)| lease)
             .chain(self.active.values().map(|(lease, _)| lease))
             .chain(self.external_viewer.iter())
+            .chain(self.cast_viewers.values())
             .chain(
                 self.inputs
                     .values()
@@ -581,6 +583,28 @@ impl Runtime {
         Some(Box::new(ExternalViewer(self.recordings.clone())))
     }
 
+    /// Reserves a Cast session's upstream slot while replacing the main viewer.
+    /// The HLS relay opens its input after the local transport has retired.
+    pub fn reserve_cast_viewing(&self, source: SourceId) -> Option<Box<dyn Send>> {
+        if self.recordings_detached.get() {
+            return None;
+        }
+        struct Claim(Arc<State>, u64);
+        impl Drop for Claim {
+            fn drop(&mut self) {
+                self.0.lock().cast_viewers.remove(&self.1);
+            }
+        }
+        let mut data = self.recordings.lock();
+        if !data.capacity(source.0, Some(0)) {
+            return None;
+        }
+        let id = self.recordings.next_input.fetch_add(1, Ordering::Relaxed);
+        let lease = data.lease(source.0);
+        data.cast_viewers.insert(id, lease);
+        Some(Box::new(Claim(self.recordings.clone(), id)))
+    }
+
     /// Called before changing a viewing surface, including multiview. A retry of
     /// an existing surface retains its reservation; PiP adds no reservation.
     pub fn reserve_viewing(&self, surface: usize, source: SourceId) -> bool {
@@ -588,7 +612,9 @@ impl Runtime {
             return false;
         }
         let mut data = self.recordings.lock();
-        if (!data.active.is_empty() || data.external_viewer.is_some())
+        if (!data.active.is_empty()
+            || data.external_viewer.is_some()
+            || !data.cast_viewers.is_empty())
             && !data.capacity(source.0, Some(surface))
         {
             return false;

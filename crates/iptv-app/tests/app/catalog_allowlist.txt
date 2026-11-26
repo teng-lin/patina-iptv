@@ -123,6 +123,7 @@ iptv-app/src/ui_kit/icons.rs	<circle cx='12' cy='12' r='9'/><path d='M12 11v6'/>
 iptv-app/src/ui_kit/icons.rs	<circle fill='currentColor' stroke='none' cx='5' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='12' cy='12' r='2'/><circle fill='currentColor' stroke='none' cx='19' cy='12' r='2'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M3 4h18v5H3zM5 9v11h14V9m-9 5h4'/>
+iptv-app/src/ui_kit/icons.rs	<path d='M3 7.5V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-4'/><path d='M3 11a9 9 0 0 1 9 9M3 15.5a4.5 4.5 0 0 1 4.5 4.5'/><circle cx='3' cy='20' r='1.25' fill='currentColor' stroke='none'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M6 15l6-6 6 6'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M6 9l6 6 6-6'/>

@@ -63,7 +63,7 @@ runs:
         PREREQUISITES: ${{ inputs.prerequisites }}
         EXTRA_PACKAGES: ${{ inputs.apt-packages }}
       run: |
-        host='libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev
+        host='libgtk-4-dev libmpv-dev libssl-dev libdbus-1-dev dbus-daemon
           libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
           pkg-config clang cmake ninja-build ffmpeg libpipewire-0.3-0t64 libva-drm2'
         case "$PREREQUISITES" in

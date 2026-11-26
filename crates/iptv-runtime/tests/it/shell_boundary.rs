@@ -28,6 +28,7 @@ const SHELL_MAY_NAME: &[&str] = &[
     "build_config",
     // Named library operations, each given the owner.
     "commands",
+    "cast",
     "inspection",
     // Import, library, combined-browser and guide orchestration.
     "data",

@@ -6,6 +6,7 @@
 
 pub mod add_playlist;
 pub mod capabilities;
+pub mod cast;
 pub mod favorites;
 pub mod guide;
 pub mod import_limits;

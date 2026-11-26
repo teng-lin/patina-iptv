@@ -334,6 +334,7 @@ const LEFT: &[Control] = &[
 const CENTER: &[Control] = &[Control::Rewind, Control::PlayPause, Control::Forward];
 const RIGHT: &[Control] = &[
     Control::Favorite,
+    Control::Cast,
     Control::Pip,
     Control::Multiview,
     Control::Picture,
@@ -399,7 +400,7 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
     let phone = phone_form();
     let under_more = |c: &Control| match c {
         Record => record != RecordNow::Direct,
-        Multiview => phone,
+        Cast | Multiview => phone,
         _ => false,
     };
     let candidates: Vec<_> = LEFT
@@ -532,8 +533,9 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
-        .disabled(move || !shown(ui, control))
+        .disabled(move || !shown(ui, control) || (control == Control::Cast && ui.cast_busy.get()))
         .accessibility_state(move || AccessibilityState {
+            busy: control == Control::Cast && ui.cast_busy.get(),
             selected: focused(ui, control),
             has_popup: control == Control::More,
             expanded: (control == Control::More).then(|| {
@@ -615,6 +617,7 @@ fn control_label(control: Control) -> &'static str {
         Control::Picture => crate::i18n::key("Display"),
         Control::Channels => crate::i18n::key("Channel list"),
         Control::Multiview => crate::i18n::key("Multiview"),
+        Control::Cast => crate::i18n::key("Cast to TV"),
         Control::Pip => crate::i18n::key("Picture in picture"),
         Control::Guide => crate::i18n::key("TV guide"),
         Control::Search => crate::i18n::key("Search"),
@@ -638,6 +641,7 @@ fn control_id(control: Control) -> &'static str {
         Control::Picture => "play-bar-picture",
         Control::Channels => "play-bar-channels",
         Control::Multiview => "play-bar-multiview",
+        Control::Cast => "play-bar-cast",
         Control::Pip => "play-bar-pip",
         Control::Guide => "play-bar-guide",
         Control::Search => "play-bar-search",
@@ -683,8 +687,11 @@ fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
-        Control::Multiview => crate::multiview::availability(ui).available(),
-        Control::Pip => crate::pip::can_enter(ui),
+        Control::Multiview => {
+            !ui.cast_remote.get() && crate::multiview::availability(ui).available()
+        }
+        Control::Cast => crate::casting::available(ui),
+        Control::Pip => !ui.cast_remote.get() && crate::pip::can_enter(ui),
         Control::Volume | Control::Fullscreen => desktop_controls(),
         Control::Listen => crate::listen::choice(ui) && !crate::listen::heard(ui),
         _ => true,
@@ -785,6 +792,7 @@ pub(super) fn activate(
             ui.play_bar.update(PlayBar::hide);
             crate::multiview::open(ui);
         }
+        Control::Cast => crate::casting::open(ui),
         Control::Pip => {
             ui.play_bar.update(PlayBar::hide);
             crate::pip::enter(ui);
@@ -954,6 +962,7 @@ fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRe
             Icon::StarFilled
         }
         Control::Favorite => Icon::Star,
+        Control::Cast => Icon::Cast,
         Control::Pip => Icon::PictureInPicture,
         Control::Multiview => Icon::Multiview,
         Control::Record => Icon::Record,

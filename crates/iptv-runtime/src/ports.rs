@@ -22,6 +22,7 @@ pub enum RecordingFailure {
 
 #[derive(Clone)]
 pub struct Ports {
+    pub cast: Option<Arc<dyn crate::cast::Port>>,
     pub directory: PathBuf,
     /// Native host keeps recording independently of UI engine ownership.
     pub background_recordings: bool,
@@ -69,6 +70,7 @@ impl Ports {
         entropy: Entropy,
     ) -> Self {
         Self {
+            cast: None,
             directory,
             background_recordings: false,
             recording_schedule: |_| {},

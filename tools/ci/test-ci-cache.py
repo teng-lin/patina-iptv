@@ -384,6 +384,39 @@ class AptInstall(unittest.TestCase):
         self.assertEqual(self.ubuntu.read_text(), original)
         self.assertFalse((self.root / "state/ubuntu-archive").exists())
 
+    def test_ubuntu_only_fetch_and_retry_use_the_signed_distro_source(self):
+        self.environment["PATINA_APT_UBUNTU_ONLY"] = "true"
+        original = self.ubuntu.read_text(), self.legacy.read_text(), self.other.read_text()
+        result, calls, _ = self.install("false", fail="1", github_actions="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        apt = f"apt-get -o Dir::Etc::sourcelist={self.ubuntu} -o Dir::Etc::sourceparts=-"
+        self.assertEqual(calls, [
+            f"{apt} update -q -o APT::Update::Error-Mode=any",
+            f"{apt} update -q -o APT::Update::Error-Mode=any",
+            f"{apt} install -q --download-only generated-a generated-b",
+            f"{apt} install -q --no-download generated-a generated-b",
+        ])
+        self.assertIn(f"Using archive.ubuntu.com for {self.ubuntu}", result.stdout)
+        self.assertNotIn(f"Using archive.ubuntu.com for {self.legacy}", result.stdout.splitlines())
+        self.assertEqual((self.ubuntu.read_text(), self.legacy.read_text(), self.other.read_text()), original)
+
+    def test_ubuntu_only_cache_hit_still_installs_offline(self):
+        self.environment["PATINA_APT_UBUNTU_ONLY"] = "true"
+        result, calls, _ = self.install("true", github_actions="true")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, [
+            f"apt-get -o Dir::Etc::sourcelist={self.ubuntu} -o Dir::Etc::sourceparts=-"
+            " install -q --no-download generated-a generated-b",
+        ])
+
+    def test_ubuntu_only_fails_before_apt_if_its_source_is_missing(self):
+        self.environment["PATINA_APT_UBUNTU_ONLY"] = "true"
+        self.ubuntu.unlink()
+        result, calls, _ = self.install("false", github_actions="true")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(self.ubuntu), result.stderr)
+        self.assertEqual(calls, [])
+
     def test_an_archive_cache_reuses_its_source_and_installs_offline(self):
         marker = self.root / "state/ubuntu-archive"
         marker.parent.mkdir()

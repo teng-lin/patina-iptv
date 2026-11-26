@@ -17,6 +17,7 @@ LAYERS = {
     "iptv-providers": "domain",
     "iptv-search": "domain",
     "iptv-settings": "domain",
+    "iptv-cast": "adapters",
     "iptv-net": "adapters",
     "iptv-player-mpv": "adapters",
     "iptv-sqlcipher-init": "adapters",

@@ -31,6 +31,9 @@ const MAX_ROWS: usize = 7;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Picture,
+    Cast,
+    CastRemote,
+    CastEnded,
     More,
     Volume,
     Sleep,
@@ -81,6 +84,18 @@ pub(super) fn open_more(
     }));
 }
 
+pub(crate) fn show_receivers(ui: Ui, receivers: Vec<iptv_core::cast::Receiver>) {
+    let len = receivers.len();
+    ui.chooser.set(Some(Open {
+        kind: Kind::Cast,
+        list: Chooser::new(len, 0),
+        labels: receivers.iter().map(|r| r.name.clone()).collect(),
+        values: receivers.iter().map(|r| r.address.to_string()).collect(),
+        tracks: None,
+        more: None,
+    }));
+}
+
 fn picture_label(size: PictureSize) -> &'static str {
     match size {
         PictureSize::Normal => tr("Normal"),
@@ -123,6 +138,9 @@ fn title(kind: Kind) -> &'static str {
         Kind::Track(Track::Text) => tr("Subtitles"),
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
+        Kind::Cast => tr("Cast to TV"),
+        Kind::CastRemote => tr("Casting through this device"),
+        Kind::CastEnded => tr("Casting ended."),
         Kind::Leave => tr("Close Patina?"),
     }
 }
@@ -189,7 +207,20 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             Vec::new(),
             0,
         ),
-        Kind::More => (Vec::new(), Vec::new(), 0),
+        Kind::CastEnded => (
+            vec![tr("Play here").to_owned(), tr("Close").to_owned()],
+            ui.player.main().key.get_untracked().into_iter().collect(),
+            0,
+        ),
+        Kind::CastRemote => (
+            [tr("Pause"), tr("Play"), tr("Play here"), tr("Stop casting")]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            Vec::new(),
+            0,
+        ),
+        Kind::Cast | Kind::More => (Vec::new(), Vec::new(), 0),
         Kind::Volume => (
             (0..=10).map(|n| format!("{}%", n * 10)).collect(),
             Vec::new(),
@@ -305,6 +336,10 @@ pub fn pick(ui: Ui, index: usize) {
     let Some(open) = ui.chooser.get_untracked() else {
         return;
     };
+    if open.kind == Kind::CastRemote && index == 2 && ui.cast_busy.get_untracked() {
+        crate::settings_view::notify(tr("Wait for the current cast request to finish."));
+        return;
+    }
     let value = open.values.get(index).cloned().unwrap_or_default();
     close(ui);
     match open.kind {
@@ -339,6 +374,26 @@ pub fn pick(ui: Ui, index: usize) {
                 && let Some(&control) = more.controls.get(index)
             {
                 crate::play_bar::activate(ui, control, more.window);
+            }
+        }
+        Kind::Cast => {
+            if let (Some(name), Ok(address)) = (open.labels.get(index), value.parse()) {
+                crate::casting::select(
+                    ui,
+                    iptv_core::cast::Receiver {
+                        name: name.clone(),
+                        address,
+                    },
+                );
+            }
+        }
+        Kind::CastRemote => crate::casting::remote(ui, index),
+        Kind::CastEnded => {
+            if index == 0
+                && ui.playing.get_untracked().is_none()
+                && let Some(channel) = crate::runtime_owner::schedule().find_channel(&value)
+            {
+                ui.play(channel, Playback::Live);
             }
         }
         Kind::History => play_recent(ui, &value),
@@ -462,7 +517,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                             crate::play_bar::label(ui, *c.more.as_ref()?.controls.get(index)?)
                                 .to_owned()
                         }
-                        Kind::History | Kind::Volume => c.labels.get(index)?.clone(),
+                        Kind::Cast | Kind::History | Kind::Volume => c.labels.get(index)?.clone(),
                         Kind::Track(_) => c
                             .track_labels_in(crate::i18n::language())
                             .get(index)?
@@ -470,7 +525,12 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
                     let checked = match c.kind {
-                        Kind::History | Kind::More | Kind::Leave => false,
+                        Kind::History
+                        | Kind::Cast
+                        | Kind::CastRemote
+                        | Kind::CastEnded
+                        | Kind::More
+                        | Kind::Leave => false,
                         Kind::Volume => volume_index(ui) == index,
                         _ => c.list.selected == index,
                     };
@@ -482,8 +542,12 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
         let mark = move || Mark::of(ui.keys_shown() && entry().is_some_and(|(_, _, f)| f), false);
         let action = move || {
             ui.chooser.with(|c| {
-                c.as_ref()
-                    .is_some_and(|c| matches!(c.kind, Kind::More | Kind::Leave))
+                c.as_ref().is_some_and(|c| {
+                    matches!(
+                        c.kind,
+                        Kind::Cast | Kind::CastRemote | Kind::CastEnded | Kind::More | Kind::Leave
+                    )
+                })
             })
         };
         list_rows::row(size, ROW, mark)
