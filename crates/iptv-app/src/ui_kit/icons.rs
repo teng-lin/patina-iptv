@@ -48,7 +48,11 @@ pub enum Icon {
 /// Strokes and fills, as SVG markup.
 fn body(icon: Icon) -> &'static str {
     match icon {
-        Icon::Cast => "<rect x='3' y='4' width='18' height='12' rx='2'/><path d='M8 20h8m-4-4v4'/>",
+        Icon::Cast => {
+            "<path d='M3 7.5V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-4'/>\
+             <path d='M3 11a9 9 0 0 1 9 9M3 15.5a4.5 4.5 0 0 1 4.5 4.5'/>\
+             <circle cx='3' cy='20' r='1.25' fill='currentColor' stroke='none'/>"
+        }
         Icon::Volume => {
             "<path fill='currentColor' stroke='none' d='M3 9h4l5-4v14l-5-4H3z'/>\
              <path d='M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'/>"
