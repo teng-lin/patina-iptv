@@ -25,7 +25,16 @@ fn main() {
             .canonicalize()
             .expect("resolve public TUF root");
         println!("cargo:rerun-if-changed={}", path.display());
-        std::fs::read(path).expect("read public TUF root")
+        let bytes = std::fs::read(path).expect("read public TUF root");
+        let root: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("parse public TUF root JSON");
+        assert!(
+            root["signed"]["_type"] == "root"
+                && root["signed"]["version"].as_u64().is_some_and(|v| v > 0)
+                && root["signatures"].as_array().is_some_and(|s| !s.is_empty()),
+            "expected signed, versioned public TUF root"
+        );
+        bytes
     });
     let out =
         std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"));

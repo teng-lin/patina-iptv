@@ -1,6 +1,13 @@
 //! Release information for the installed native package.
 pub(crate) const RELEASES: &str = "https://github.com/teng-lin/patina-iptv/releases";
 
+pub(crate) fn feed(android_build: Option<(u64, u64)>) -> Option<&'static str> {
+    if cfg!(target_os = "android") && android_build.is_none() {
+        return None;
+    }
+    option_env!("PATINA_UPDATE_FEED")
+}
+
 #[cfg(any(
     target_os = "android",
     target_os = "linux",
@@ -12,7 +19,7 @@ pub(crate) async fn check(android_build: Option<(u64, u64)>) -> (String, Option<
     const PRODUCT: &str = "Patina";
     use iptv_runtime::app_updates::{InstalledPackage, UpdateResult};
     let version = env!("CARGO_PKG_VERSION");
-    let Some(feed) = option_env!("PATINA_UPDATE_FEED") else {
+    let Some(feed) = feed(android_build) else {
         return (
             format!("{PRODUCT} {version}\n{RELEASES}"),
             Some(RELEASES.to_owned()),
@@ -31,6 +38,10 @@ pub(crate) async fn check(android_build: Option<(u64, u64)>) -> (String, Option<
     let (message, url) = match result {
         UpdateResult::Current => (tr("Patina is up to date.").to_owned(), None),
         UpdateResult::Unavailable => (tr("Update check failed. Try again.").to_owned(), None),
+        UpdateResult::RequirementsUnconfirmed => (
+            tr("Check the system requirements in the release notes.").to_owned(),
+            Some(RELEASES.to_owned()),
+        ),
         UpdateResult::NoCompatiblePackage => (
             tr("No compatible package found.").to_owned(),
             Some(RELEASES.to_owned()),

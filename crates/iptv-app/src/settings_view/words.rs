@@ -150,7 +150,9 @@ pub fn label(key: &str) -> &'static str {
         "general.reset_watch_time" => tr("Forget viewing time"),
         "general.restart" => tr("Restart the app"),
         "general.send_logs" => tr("Send a diagnostic log"),
-        "general.check_updates" if option_env!("PATINA_UPDATE_FEED").is_none() => {
+        "general.check_updates"
+            if crate::host::updates::feed(crate::device::direct_android_build()).is_none() =>
+        {
             tr("Release notes and downloads")
         }
         "general.check_updates" => tr("Check for updates"),
