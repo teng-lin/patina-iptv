@@ -37,7 +37,10 @@ pub(crate) async fn check(android_build: Option<(u64, u64)>) -> (String, Option<
     let result = owner.check_app_update(feed, root, installed).await;
     let (message, url) = match result {
         UpdateResult::Current => (tr("Patina is up to date.").to_owned(), None),
-        UpdateResult::Unavailable => (tr("Update check failed. Try again.").to_owned(), None),
+        UpdateResult::Unavailable => (
+            tr("Update check failed. Try again.").to_owned(),
+            Some(RELEASES.to_owned()),
+        ),
         UpdateResult::RequirementsUnconfirmed => (
             tr("Check the system requirements in the release notes.").to_owned(),
             Some(RELEASES.to_owned()),

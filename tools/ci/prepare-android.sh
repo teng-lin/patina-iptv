@@ -32,5 +32,20 @@ python3 tools/ci/sbom.py android-classpath \
   "target/android-unsigned/Patina-$VERSION-android-classpath-sbom.cdx.json" "$VERSION"
 cp hosts/android/app/build/outputs/apk/directRelease/app-directRelease-unsigned.apk target/android-unsigned/app-release-unsigned.apk
 cp hosts/android/app/build/outputs/bundle/release/app-release.aab target/android-unsigned/
+# Keep both independent mapping files for the lifetime of the signed release.
+# BUNDLE-METADATA entries are available to maintainers and excluded from APKs.
+direct_mapping=hosts/android/app/build/outputs/mapping/directRelease/mapping.txt
+test -s "$direct_mapping"
+python3 - target/android-unsigned/app-release.aab "$direct_mapping" <<'PY'
+import sys
+import zipfile
+
+name = "BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map"
+with zipfile.ZipFile(sys.argv[1], "a", compression=zipfile.ZIP_DEFLATED) as bundle:
+    if name in bundle.namelist():
+        raise SystemExit("direct APK mapping already present")
+    bundle.write(sys.argv[2], name)
+PY
+unzip -p target/android-unsigned/app-release.aab BUNDLE-METADATA/com.hantekllc.patina.direct-apk/proguard.map | cmp "$direct_mapping" -
 python3 tools/ci/check-android-artifacts.py \
   target/android-unsigned/app-release-unsigned.apk target/android-unsigned/app-release.aab

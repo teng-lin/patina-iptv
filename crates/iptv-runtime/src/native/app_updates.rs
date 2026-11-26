@@ -144,10 +144,16 @@ async fn verified_index(
     .load()
     .await;
     // Keep the latest role accepted during a partial refresh, too.
-    tokio::task::spawn_blocking(move || session.commit())
-        .await
-        .ok()?
-        .ok()?;
+    let loaded = repository.is_ok();
+    tokio::task::spawn_blocking(move || {
+        if loaded {
+            session.accept_clock()?;
+        }
+        session.commit()
+    })
+    .await
+    .ok()?
+    .ok()?;
     let repository = repository.ok()?;
     let name = TargetName::new("index.json").ok()?;
     let bytes = repository
