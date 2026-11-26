@@ -23,5 +23,9 @@ bash tools/check-ios-simulator-entitlements.sh target/aarch64-apple-ios-sim/debu
 
 # The dedicated probe opts into a native view that normal builds do not compile.
 PATINA_AIRPLAY_PROBE=1 cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
-xcrun --sdk macosx clang -fsyntax-only -fobjc-arc -mmacosx-version-min=14.0 \
-  -isysroot "$(xcrun --sdk macosx --show-sdk-path)" crates/iptv-app/src/host/native/apple_airplay.m
+probe_test=$(mktemp -d)
+trap 'rm -rf "$probe_test"' EXIT
+xcrun --sdk macosx clang -fobjc-arc -mmacosx-version-min=14.0 \
+  -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -framework AppKit -framework Foundation \
+  -framework AVFoundation -framework AVKit tools/apple-airplay-probe/retry-test.m -o "$probe_test/retry"
+"$probe_test/retry"
