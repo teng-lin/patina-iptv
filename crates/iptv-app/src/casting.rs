@@ -1,7 +1,7 @@
 //! Intent handling for the Cast picker and remote.
 use crate::{
     Playback, Ui, chooser,
-    i18n::tr,
+    i18n::{tr, trf},
     runtime_owner::{runtime, schedule},
     settings_view::notify,
 };
@@ -332,15 +332,18 @@ pub(crate) fn volume(ui: Ui, command: Command) -> bool {
     true
 }
 fn report(error: Error) {
-    notify(tr(match error {
-        Error::Unavailable => "Could not connect to the Chromecast or open the relay port.",
-        Error::Refused => "The Chromecast refused this stream.",
-        Error::Unknown => "Could not confirm playback on the Chromecast.",
-        Error::NoRequest => {
-            "The TV did not request the stream. Check the firewall and Wi-Fi client isolation."
-        }
-        Error::Busy => "No provider connection is available.",
-        Error::Denied => "Playback is no longer authorized.",
-        Error::Unsupported => "Casting requires a live HLS channel.",
-    }));
+    match error {
+        Error::Unavailable => notify(tr(
+            "Could not connect to the Chromecast or open the relay port.",
+        )),
+        Error::Refused => notify(tr("The Chromecast refused this stream.")),
+        Error::Unknown => notify(tr("Could not confirm playback on the Chromecast.")),
+        Error::NoRequest { relay_port } => notify(&trf(
+            "The TV did not request the stream. Allow TCP port {port} from the TV in your firewall and check Wi-Fi client isolation.",
+            &[("port", relay_port.into())],
+        )),
+        Error::Busy => notify(tr("No provider connection is available.")),
+        Error::Denied => notify(tr("Playback is no longer authorized.")),
+        Error::Unsupported => notify(tr("Casting requires a live HLS channel.")),
+    }
 }

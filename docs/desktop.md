@@ -91,6 +91,38 @@ Windows and Command on macOS.
   [class](interaction.md#layout-classes); collapsing the rail and groups
   column by class is still Planned there.
 
+## Cast live TV
+
+On Linux, macOS, or Windows, play a live HLS channel and select **Cast to TV** in
+the playback bar. Select your Chromecast. **Play here** brings playback back
+to the desktop.
+
+The desktop sends the play command, then the receiver opens an HTTP connection
+back to Patina to fetch the video. If the receiver appears in the picker but
+Patina reports that the TV did not request the stream, allow the inbound TCP
+port named in that message from the receiver's IP. The default is TCP 49152.
+Check that Wi-Fi client isolation allows devices on the network to reach the
+desktop.
+
+For example, on Linux with UFW, replace the example IP with your receiver's
+address:
+
+```sh
+sudo ufw allow from 192.0.2.10 to any port 49152 proto tcp
+```
+
+If your firewall already permits a different port from the receiver, quit
+Patina and launch it with that port. For example, if TCP 53317 is available
+and allowed:
+
+```sh
+PATINA_CAST_RELAY_PORT=53317 patina
+```
+
+Use the same environment variable with your desktop launcher if you want it
+applied on subsequent launches. See [Casting on the local network](security.md#casting-on-the-local-network)
+for what the relay shares with the receiver.
+
 ## Several players
 
 A guide channel's menu has **Open in new window** (Linux and macOS): a

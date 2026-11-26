@@ -6,12 +6,23 @@ use iptv_core::{
 };
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
 use iptv_runtime::cast::{Admitted, Authorization, Port, Prepared, Remote, Retirement, Task};
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{ffi::OsStr, net::SocketAddr, num::NonZeroU16, sync::Arc, time::Duration};
 use tokio::time::{Instant, timeout};
 
 pub(super) struct Sender;
 const DEFAULT_PORT: u16 = 49152;
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
+fn configured_relay_port(value: Option<&OsStr>) -> Result<u16, Error> {
+    let Some(value) = value else {
+        return Ok(DEFAULT_PORT);
+    };
+    value
+        .to_str()
+        .and_then(|port| port.parse::<NonZeroU16>().ok())
+        .map(NonZeroU16::get)
+        .ok_or(Error::Unavailable)
+}
+
 fn map_error(error: googlecast::Error) -> Error {
     match error {
         googlecast::Error::Unreachable => Error::Unavailable,
@@ -35,17 +46,12 @@ impl Port for Sender {
     }
     fn prepare(&self, receiver: Receiver, source: PlaySource) -> Task<'_, Box<dyn Prepared>> {
         Box::pin(async move {
+            let relay_port =
+                configured_relay_port(std::env::var_os("PATINA_CAST_RELAY_PORT").as_deref())?;
             let session = Session::connect(receiver.address)
                 .await
                 .map_err(map_error)?;
-            let port = match std::env::var("PATINA_CAST_RELAY_PORT") {
-                Ok(s) => s
-                    .parse::<std::num::NonZeroU16>()
-                    .map_err(|_| Error::Unavailable)?
-                    .get(),
-                Err(_) => DEFAULT_PORT,
-            };
-            let listen = SocketAddr::new(session.local_ip(), port);
+            let listen = SocketAddr::new(session.local_ip(), relay_port);
             let (relay, gate) = tokio::task::spawn_blocking(move || {
                 PlaybackRelay::start_cast(
                     &source.url,
@@ -62,6 +68,7 @@ impl Port for Sender {
                 address: receiver.address,
                 session,
                 relay,
+                relay_port,
                 gate,
                 reply: None,
                 release: None,
@@ -73,6 +80,7 @@ struct Handoff {
     address: SocketAddr,
     session: Session,
     relay: PlaybackRelay,
+    relay_port: u16,
     gate: ExternalAdmission,
     reply: Option<tokio::sync::oneshot::Receiver<Result<i64, googlecast::Error>>>,
     release: Option<tokio::sync::oneshot::Sender<()>>,
@@ -80,6 +88,9 @@ struct Handoff {
 impl Prepared for Handoff {
     fn load(&mut self) -> Task<'_, ()> {
         Box::pin(async move {
+            let no_request = Error::NoRequest {
+                relay_port: self.relay_port,
+            };
             let session = self.session.clone();
             let url = self.relay.url().to_owned();
             let (loaded, mut reply) = tokio::sync::oneshot::channel();
@@ -100,7 +111,7 @@ impl Prepared for Handoff {
             let early_reply = tokio::select! {
                 connected = tokio::time::timeout_at(deadline, self.gate.connected()) => {
                     if connected != Ok(true) {
-                        return Err(Error::NoRequest);
+                        return Err(no_request);
                     }
                     None
                 }
@@ -109,12 +120,12 @@ impl Prepared for Handoff {
             if let Some(result) = early_reply {
                 let id = match result {
                     Err(googlecast::Error::LoadFailed) if !self.gate.received_request() => {
-                        return Err(Error::NoRequest);
+                        return Err(no_request);
                     }
                     other => other.map_err(map_error)?,
                 };
                 if tokio::time::timeout_at(deadline, self.gate.connected()).await != Ok(true) {
-                    return Err(Error::NoRequest);
+                    return Err(no_request);
                 }
                 let (send, ready) = tokio::sync::oneshot::channel();
                 let _ = send.send(Ok(id));
@@ -133,6 +144,7 @@ impl Prepared for Handoff {
                 gate,
                 reply,
                 release,
+                ..
             } = *self;
             let outcome = authorization
                 .while_current(async {
