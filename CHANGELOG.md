@@ -11,29 +11,29 @@ is below 1.0, a minor release may change behavior.
 
 ### Changed
 
-- Manage playlists directly in **Settings → Playlists**. Show or hide each
-  playlist, open its actions, and choose manual or alphabetical order. The
-  guide's playlist headings also offer rename and reorder actions.
-- Returning to the guide when a channel or multiview session ends follows the
-  selected guide layout. Opening Playlists or Organization from the player
-  also uses the selected layout.
+- Open **Settings → Playlists** to choose which playlists appear in the guide.
+  Arrange them yourself or sort them by name. You can also rename or reorder
+  playlists from their headings in the guide.
+- When a channel or multiview session ends, Patina returns to the guide in
+  your chosen layout. Opening Playlists or Organization from the player also
+  uses that layout.
 
 ### Fixed
 
-- TV Guide timeline context actions now open the same compact channel menu
-  for remote Long OK and Menu, touch holds, and desktop right-clicks. Menu
-  in the player's channel list also opens that row's compact actions.
-  **More options** retains access to full program and group actions.
-- Holding a favorite key changes the favorite once, including custom
-  remote and desktop keyboard bindings.
-- Archive programs' **Play from the beginning** action follows the same
-  group external-player preference as choosing the program directly.
-- Restored the play bar, back arrow, and other control icons on Windows.
-- A locally served M3U playlist can play streams from the same loopback origin.
-- Screen readers announce the full names of Settings tabs even when the
-  visible labels are shortened.
-- On Samsung Tizen, canceling a new playlist import before it commits also
-  cancels its typed guide URL, so neither is added on its own.
+- Open quick channel actions in the TV Guide by holding OK, pressing Menu,
+  touching and holding, or right-clicking. Press Menu in the player's channel
+  list for the same quick actions. Choose **More options** for the full menu.
+- Holding a favorite shortcut adds or removes the favorite once. This also
+  works with custom remote and keyboard shortcuts.
+- **Play from the beginning** uses the external player you chose for that
+  group, just like selecting the program from the guide.
+- The play bar, back arrow, and other control icons display correctly on Windows.
+- If you run an M3U playlist server on the same device as Patina, you can play
+  streams served from the playlist's own address and port.
+- Screen readers announce the full names of Settings tabs when there is only
+  room to show shortened labels.
+- On Samsung TVs, canceling a new playlist while it's saving also cancels the
+  guide address you entered with it.
 
 ## [0.1.9] - 2026-11-25
 
