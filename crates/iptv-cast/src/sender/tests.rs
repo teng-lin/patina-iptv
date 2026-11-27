@@ -566,6 +566,8 @@ async fn discovers_independent_protocols_under_one_deadline() {
     };
     assert_eq!(stable.name(), partial.name());
     assert_eq!(stable.name(), ephemeral.name());
+    assert!(stable.has_stable_identity());
+    assert!(!ephemeral.has_stable_identity());
     let debug = format!("{stable:?}");
     assert!(debug.contains(stable.id().as_str()));
     assert!(!debug.contains(stable.name()));

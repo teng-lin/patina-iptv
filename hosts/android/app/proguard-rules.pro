@@ -59,3 +59,14 @@
     static java.lang.String cacheDirectory();
     static boolean open(java.lang.String, long);
 }
+
+-keepclassmembers,allowoptimization class com.hantekllc.iptvrs.host.CastHost {
+    static android.net.wifi.WifiManager$MulticastLock multicast();
+    static java.lang.String topology();
+    static boolean start(long, java.lang.String, java.lang.String);
+    static void release(long);
+    static void playback(long, int, int);
+    static byte[] loadCredential(java.lang.String);
+    static void saveCredential(java.lang.String, byte[]);
+    static void forgetCredential(java.lang.String);
+}

@@ -3,4 +3,8 @@
     <string name="external_channel">Wiedergabe in einer anderen App</string>
     <string name="external_title">Patina überträgt einen Sender</string>
     <string name="external_background">Eine andere App spielt einen Sender aus Patina ab</string>
+    <string name="cast_playback">Übertragung von Patina</string>
+    <string name="cast_stop">Übertragung beenden</string>
+    <string name="cast_play">Wiedergabe</string>
+    <string name="cast_pause">Pause</string>
 </resources>

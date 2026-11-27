@@ -14,6 +14,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::oneshot,
     task::JoinHandle,
 };
 use tokio_rustls::{TlsAcceptor, rustls};
@@ -58,6 +59,23 @@ pub struct Receiver {
 
 impl Receiver {
     pub async fn start(load: Load, certificate: Vec<u8>, private_key: Vec<u8>) -> Self {
+        Self::start_inner(load, certificate, private_key, None).await
+    }
+
+    pub async fn start_with_rejected_stop(
+        certificate: Vec<u8>,
+        private_key: Vec<u8>,
+        release: oneshot::Receiver<()>,
+    ) -> Self {
+        Self::start_inner(Load::Immediate, certificate, private_key, Some(release)).await
+    }
+
+    async fn start_inner(
+        load: Load,
+        certificate: Vec<u8>,
+        private_key: Vec<u8>,
+        reject_stop: Option<oneshot::Receiver<()>>,
+    ) -> Self {
         let config = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
         ))
@@ -73,7 +91,9 @@ impl Receiver {
         let driver = tokio::spawn(async move {
             let (socket, _) = listener.accept().await?;
             let socket = TlsAcceptor::from(Arc::new(config)).accept(socket).await?;
-            ReceiverState::new(load, observations).serve(socket).await
+            let mut receiver = ReceiverState::new(load, observations);
+            receiver.reject_stop = reject_stop;
+            receiver.serve(socket).await
         });
         Self {
             address,
@@ -108,6 +128,7 @@ struct ReceiverState {
     load: Load,
     events: Arc<Mutex<Vec<Event>>>,
     running: bool,
+    reject_stop: Option<oneshot::Receiver<()>>,
     state: Option<&'static str>,
     media: Value,
     volume: Value,
@@ -119,6 +140,7 @@ impl ReceiverState {
             load,
             events,
             running: false,
+            reject_stop: None,
             state: None,
             media: Value::Null,
             volume: json!({"level":0.5,"muted":false}),
@@ -209,6 +231,10 @@ impl ReceiverState {
             Some("STOP") => {
                 assert_eq!(request["mediaSessionId"], MEDIA_ID);
                 self.note(Event::Stop);
+                if let Some(release) = self.reject_stop.take() {
+                    let _ = release.await;
+                    return Ok(json!({"type":"INVALID_REQUEST"}));
+                }
                 self.state = None;
             }
             Some("GET_STATUS") => {}

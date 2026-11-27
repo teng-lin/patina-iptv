@@ -81,6 +81,11 @@ impl Route {
         &self.protocol
     }
 
+    /// Whether discovery supplied an identifier the sender can resolve again.
+    pub fn has_stable_identity(&self) -> bool {
+        self.candidate.stable_id.is_some()
+    }
+
     pub fn availability(&self, feature: Feature) -> Availability {
         self.candidate.hints.availability(feature)
     }

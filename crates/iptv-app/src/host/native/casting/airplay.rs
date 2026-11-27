@@ -1,20 +1,25 @@
-//! Linux host configuration and receiver-owned PIN approval.
-use iptv_cast::{CastBuilder, Connection, Pairing, PinCode};
+//! Receiver-owned PIN approval and Linux host configuration.
+#[cfg(target_os = "linux")]
+use iptv_cast::CastBuilder;
+use iptv_cast::{Connection, Pairing, PinCode};
 use iptv_core::cast::Error;
 use iptv_runtime::cast::PairingPrompt;
+use std::time::Duration;
+#[cfg(target_os = "linux")]
 use std::{
     ffi::{OsStr, OsString},
     num::NonZeroU16,
     path::{Path, PathBuf},
-    time::Duration,
 };
 use tokio::time::{Instant, timeout_at};
 
+#[cfg(target_os = "linux")]
 pub(super) struct Configuration {
     directory: PathBuf,
     timing_port: Option<OsString>,
 }
 
+#[cfg(target_os = "linux")]
 impl Configuration {
     pub(super) fn from_env(directory: &Path) -> Option<Self> {
         (std::env::var_os("PATINA_RUST_AIRPLAY").as_deref() == Some(OsStr::new("1"))).then(|| {
@@ -48,6 +53,7 @@ impl Configuration {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn timing_port(value: Option<&OsStr>) -> Result<Option<NonZeroU16>, Error> {
     value
         .map(|value| {
@@ -59,7 +65,11 @@ fn timing_port(value: Option<&OsStr>) -> Result<Option<NonZeroU16>, Error> {
         .transpose()
 }
 
-pub(super) async fn pair(pairing: Pairing, prompt: PairingPrompt) -> Result<Connection, Error> {
+pub(super) async fn pair(
+    pairing: Pairing,
+    prompt: PairingPrompt,
+    current: impl FnOnce() -> Result<(), Error>,
+) -> Result<Connection, Error> {
     let deadline = pairing.expires_at().map_or_else(
         || Instant::now() + Duration::from_secs(30),
         Instant::from_std,
@@ -82,13 +92,17 @@ pub(super) async fn pair(pairing: Pairing, prompt: PairingPrompt) -> Result<Conn
             return Err(super::map_error(&error));
         }
     };
+    if let Err(error) = current() {
+        pairing.cancel().await;
+        return Err(error);
+    }
     pairing
         .submit(pin)
         .await
         .map_err(|error| super::map_error(&error))
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

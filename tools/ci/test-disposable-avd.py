@@ -50,6 +50,77 @@ class Profiles(unittest.TestCase):
             with self.assertRaises(ValueError):
                 a.validate_apk(package, debug, release)
 
+    def test_cast_test_apk_targets_only_the_disposable_app(self):
+        valid = f"""
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{a.CAST_TEST_PACKAGE}">
+            <instrumentation android:name="{a.CAST_TEST_RUNNER}" android:targetPackage="{a.PACKAGE}" />
+        </manifest>"""
+        a.validate_cast_test(valid)
+        for manifest in (
+            valid.replace(f'package="{a.CAST_TEST_PACKAGE}"', 'package="other.test"'),
+            valid.replace(a.CAST_TEST_RUNNER, "OtherRunner"),
+            valid.replace(f'targetPackage="{a.PACKAGE}"', f'targetPackage="{a.RELEASE_PACKAGE}"'),
+        ):
+            with self.assertRaises(ValueError):
+                a.validate_cast_test(manifest)
+
+    def test_cast_validation_uses_snapshots_even_when_build_outputs_are_replaced(self):
+        build = self.root / "build"
+        build.mkdir()
+        run = self.root / "owned-run"
+        run.mkdir()
+        app = build / "app.apk"
+        probe = build / "probe.apk"
+        app.write_bytes(b"synthetic validation APK")
+        probe.write_bytes(b"synthetic validation test APK")
+
+        def inspect(path, attribute):
+            self.assertEqual(path.parent, run)
+            if attribute == "application-id":
+                self.assertEqual(path.read_bytes(), b"synthetic validation APK")
+                # Simulate a new build publishing both artifacts before boot.
+                app.write_bytes(b"ordinary application")
+                probe.write_bytes(b"new test output")
+                return a.PACKAGE
+            if attribute == "debuggable":
+                return "true"
+            self.assertEqual(attribute, "print")
+            self.assertEqual(path.read_bytes(), b"synthetic validation test APK")
+            return f"""
+                <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{a.CAST_TEST_PACKAGE}">
+                    <instrumentation android:name="{a.CAST_TEST_RUNNER}" android:targetPackage="{a.PACKAGE}" />
+                </manifest>"""
+
+        with patch.object(a, "apk_manifest", side_effect=inspect):
+            app_copy, test_copy = a.stage_cast_apks(run, app, probe)
+        self.assertEqual(app_copy.read_bytes(), b"synthetic validation APK")
+        self.assertEqual(test_copy.read_bytes(), b"synthetic validation test APK")
+        self.assertEqual(app.read_bytes(), b"ordinary application")
+        self.assertEqual(probe.read_bytes(), b"new test output")
+
+    def test_cast_runner_requires_and_passes_the_owned_run_token(self):
+        app = self.root / "app.apk"
+        probe = self.root / "probe.apk"
+        serial = "emulator-5580"
+        token = "01ab" * 8
+
+        def instrument(command, *, stdout, stderr, timeout):
+            self.assertEqual(command, [
+                "adb", "-s", serial, "shell", "am", "instrument", "-w", "-r",
+                "-e", "patinaOwnedRun", token, f"{a.CAST_TEST_PACKAGE}/{a.CAST_TEST_RUNNER}",
+            ])
+            stdout.write("INSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_CODE: -1\n")
+            return subprocess.CompletedProcess(command, 0)
+
+        with patch.object(a, "adb") as adb, patch.object(a.subprocess, "run", side_effect=instrument):
+            for invalid in ("", token[:-1], token.upper()):
+                with self.assertRaisesRegex(ValueError, "owned-run token"):
+                    a.run_cast_test(serial, app, probe, self.root, invalid, collect=False)
+            adb.assert_not_called()
+            a.run_cast_test(serial, app, probe, self.root, token, collect=False)
+            adb.assert_any_call(serial, "install", "-r", str(app))
+            adb.assert_any_call(serial, "install", "-t", "-r", str(probe))
+
     def test_release_startup_markers_cannot_replace_process_and_foreground_checks(self):
         component = a.RELEASE_PACKAGE + "/.host.TvActivity"
         with patch.dict(RELEASE["AVD"], {"adb": lambda *args: ""}):

@@ -101,17 +101,27 @@ object CredentialKey {
     }
 
     /** `key` encrypted with `wrapping` (AES-GCM): IV, ciphertext and tag. */
-    internal fun wrap(wrapping: SecretKey, key: ByteArray): ByteArray {
+    internal fun wrap(
+        wrapping: SecretKey,
+        key: ByteArray,
+        associatedData: ByteArray? = null,
+    ): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, wrapping)
         require(cipher.iv.size == 12)
+        associatedData?.let(cipher::updateAAD)
         return cipher.iv + cipher.doFinal(key)
     }
 
     /** The key [wrap] wrapped; throws if `payload` was altered or another key wrapped it. */
-    internal fun unwrap(wrapping: SecretKey, payload: ByteArray): ByteArray =
+    internal fun unwrap(
+        wrapping: SecretKey,
+        payload: ByteArray,
+        associatedData: ByteArray? = null,
+    ): ByteArray =
         Cipher.getInstance("AES/GCM/NoPadding").run {
             init(Cipher.DECRYPT_MODE, wrapping, GCMParameterSpec(128, payload.copyOfRange(0, 12)))
+            associatedData?.let(::updateAAD)
             doFinal(payload, 12, payload.size - 12)
         }
 }

@@ -79,4 +79,30 @@ class CredentialKeyTest {
             }
         }
     }
+
+    @Test fun aReceiverCredentialCannotBeMovedToAnotherReceiver() {
+        val wrapping = aes()
+        val credential = ByteArray(256) { it.toByte() }
+        val receiver = "generated-receiver-1".toByteArray()
+        val sealed = CredentialKey.wrap(wrapping, credential, receiver)
+        assertArrayEquals(credential, CredentialKey.unwrap(wrapping, sealed, receiver))
+        assertThrows(AEADBadTagException::class.java) {
+            CredentialKey.unwrap(wrapping, sealed, "generated-receiver-2".toByteArray())
+        }
+        assertThrows(AEADBadTagException::class.java) {
+            CredentialKey.unwrap(wrapping, sealed)
+        }
+    }
+
+    @Test fun aPairingFileHasABoundedAuthenticatedPayload() {
+        val wrapping = aes()
+        val receiver = "generated-receiver".toByteArray()
+        for (size in listOf(1, CastCredentials.MAX_CREDENTIAL_SIZE)) {
+            val sealed = CredentialKey.wrap(wrapping, ByteArray(size), receiver)
+            assertArrayEquals(sealed, CastCredentials.readSealed(ByteArrayInputStream(sealed)))
+        }
+        for (size in listOf(0, 28, CastCredentials.MAX_SEALED_SIZE + 1, 8192)) {
+            assertNull(CastCredentials.readSealed(ByteArrayInputStream(ByteArray(size))))
+        }
+    }
 }

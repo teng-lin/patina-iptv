@@ -517,6 +517,75 @@ fn play_here_restores_local_playback_and_reports_unconfirmed_stop() {
 }
 
 #[test]
+fn an_unconfirmed_system_stop_reports_the_receiver_result_and_releases_the_cast() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    fake.states
+        .lock()
+        .unwrap()
+        .push_back(Err(Error::StopUnconfirmed));
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(app.wait_for("text:Could not confirm that the TV stopped playback."));
+    step(app.wait_for("text:Casting ended."));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(*fake.events.lock().unwrap(), ["load", "allow", "retire"]);
+    step(app.press("id:chooser-items >> text:Play here"));
+    step(app.wait_until(
+        "reopen after unconfirmed system stop",
+        Duration::from_secs(10),
+        |_| iptv_app::player_has_source(0),
+    ));
+}
+
+#[test]
+fn an_unconfirmed_system_stop_is_reported_while_forgetting_another_pairing() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        changed_identity: Arc::new(AtomicBool::new(true)),
+        extra_airplay: true,
+        ..Default::default()
+    };
+    let (release, wait) = tokio::sync::oneshot::channel();
+    *fake.pending_forget.lock().unwrap() = Some(wait);
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    step(app.wait_for("id:chooser-items >> text:Generated AirPlay · AirPlay"));
+    step(app.press("id:chooser-items >> text:Generated AirPlay · AirPlay"));
+    step(app.wait_for("text:Forget pairing"));
+    step(app.press("text:Forget pairing"));
+    step(
+        app.wait_until("forget is pending", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"forget pending")
+        }),
+    );
+    fake.states
+        .lock()
+        .unwrap()
+        .push_back(Err(Error::StopUnconfirmed));
+    step(app.wait_for("text:Could not confirm that the TV stopped playback."));
+    assert!(!iptv_app::player_has_source(0));
+    release.send(()).unwrap();
+    step(
+        app.wait_until("pairing removed", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"forgot pairing")
+        }),
+    );
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        [
+            "load",
+            "allow",
+            "identity changed",
+            "forget pending",
+            "retire",
+            "forgot pairing"
+        ]
+    );
+}
+
+#[test]
 fn play_pause_uses_the_receivers_confirmed_pause_state_at_handoff() {
     let Some(home) = isolated!() else { return };
     let fake = FakeCast {
@@ -696,6 +765,48 @@ fn play_here_keeps_its_chooser_open_while_a_remote_command_finishes() {
     assert_eq!(
         *fake.events.lock().unwrap(),
         ["load", "allow", "pause", "retire", "disconnected at stop"]
+    );
+}
+
+#[test]
+fn queued_play_here_resumes_locally_after_an_unconfirmed_system_stop() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    let reply = fake.hold_next_command();
+    step(app.press("id:play-bar-play-pause"));
+    step(
+        app.wait_until("remote pause is pending", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"pause")
+        }),
+    );
+    let here = "id:chooser-items >> text:This device";
+    step(app.press(here));
+    assert!(app.screen().matches(here).unwrap());
+
+    fake.states
+        .lock()
+        .unwrap()
+        .push_back(Err(Error::StopUnconfirmed));
+    step(app.wait_for("text:Could not confirm that the TV stopped playback."));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire"]
+    );
+
+    reply.send(()).unwrap();
+    step(app.wait_until(
+        "queued Play here reopens the local channel",
+        Duration::from_secs(10),
+        |_| iptv_app::player_has_source(0),
+    ));
+    step(app.wait_for_gone(here, Duration::from_secs(3)));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire"]
     );
 }
 

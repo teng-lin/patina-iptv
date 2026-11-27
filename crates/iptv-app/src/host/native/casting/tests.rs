@@ -31,6 +31,85 @@ fn cast_relay_uses_a_fixed_default_or_an_explicit_tcp_port() {
     }
 }
 
+#[cfg(all(feature = "test-support", not(target_os = "android")))]
+#[tokio::test]
+async fn dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and_relay() {
+    use iptv_cast::test_support::{self, Event};
+
+    let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let receiver = test_support::Receiver::start(
+        test_support::Load::Immediate,
+        key_pair.cert.der().to_vec(),
+        key_pair.key_pair.serialize_der(),
+    )
+    .await;
+    let peer = receiver.address();
+    let cast = test_support::sender(peer).unwrap();
+    let routes = cast.discover(Duration::from_secs(1)).await.unwrap();
+    let Connect::Ready(connection) = cast.connect(&routes.routes()[0]).await.unwrap() else {
+        panic!("expected a loopback Chromecast connection");
+    };
+    let mut handoff = Handoff {
+        ready: Some(Ready {
+            connection,
+            source: PlaySource {
+                public_only: false,
+                url: "http://127.0.0.1:9/generated.m3u8".into(),
+                headers: Vec::new(),
+            },
+            listen: SocketAddr::new(peer.ip(), 0),
+            remote: peer,
+            protocol: NetworkProtocol::GoogleCast,
+        }),
+        pending: None,
+        handle: Handle::current(),
+        guard: None,
+    };
+
+    let mut loading = handoff.load();
+    tokio::select! {
+        result = &mut loading => panic!("load returned before the receiver fetched the relay: {result:?}"),
+        observed = timeout(Duration::from_secs(5), async {
+            while !receiver.events().contains(&Event::Load) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }) => observed.unwrap(),
+    }
+    drop(loading);
+
+    let pending = handoff.pending.as_ref().unwrap();
+    let listen: SocketAddr = pending
+        .relay
+        .url()
+        .split('/')
+        .nth(2)
+        .unwrap()
+        .parse()
+        .unwrap();
+    timeout(
+        Duration::from_secs(5),
+        initial_playback(&mut pending.session.subscribe()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    std::thread::spawn(move || drop(handoff)).join().unwrap();
+    timeout(Duration::from_secs(5), async {
+        while !receiver.events().contains(&Event::Stop) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(receiver.events(), [Event::Load, Event::Stop]);
+    drop(std::net::TcpListener::bind(listen).expect("dropped handoff frees its relay port"));
+    timeout(Duration::from_secs(5), receiver.finish())
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 #[cfg(feature = "test-support")]
 #[tokio::test]
 async fn locally_rejected_loads_release_the_relay_port_before_returning() {
@@ -75,4 +154,102 @@ async fn locally_rejected_loads_release_the_relay_port_before_returning() {
             .unwrap()
             .unwrap();
     }
+}
+
+#[cfg(feature = "test-support")]
+#[tokio::test(flavor = "current_thread")]
+async fn canceled_retirement_and_stop_waiters_share_one_relay_shutdown() {
+    use iptv_cast::test_support::{self, Event};
+    use std::{future::poll_fn, task::Poll};
+
+    let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let (release, stop) = tokio::sync::oneshot::channel();
+    let receiver = test_support::Receiver::start_with_rejected_stop(
+        key_pair.cert.der().to_vec(),
+        key_pair.key_pair.serialize_der(),
+        stop,
+    )
+    .await;
+    let cast = test_support::sender(receiver.address()).unwrap();
+    let routes = cast.discover(Duration::from_secs(1)).await.unwrap();
+    let Connect::Ready(connection) = cast.connect(&routes.routes()[0]).await.unwrap() else {
+        panic!("expected loopback Chromecast connection");
+    };
+    let loopback = receiver.address().ip();
+    let (relay, gate) = PlaybackRelay::start_cast(
+        "http://example.test/generated.m3u8",
+        &[],
+        Default::default(),
+        SocketAddr::new(loopback, 0),
+        loopback,
+    )
+    .unwrap();
+    let listen: SocketAddr = relay.url().split('/').nth(2).unwrap().parse().unwrap();
+    let media = Media::live(relay.url())
+        .unwrap()
+        .with_content_type("application/x-mpegURL")
+        .unwrap();
+    let session = connection.load(media).unwrap();
+    timeout(
+        Duration::from_secs(5),
+        initial_playback(&mut session.subscribe()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let playing = Arc::new(Playing::new(session, relay));
+
+    let mut joined_retirement = playing.retire();
+    poll_fn(|cx| {
+        // There is no executor turn between starting shutdown, canceling the
+        // waiter, and joining it again. The real listener is still bound.
+        let mut abandoned_retirement = playing.retire();
+        assert!(abandoned_retirement.as_mut().poll(cx).is_pending());
+        drop(abandoned_retirement);
+        assert!(joined_retirement.as_mut().poll(cx).is_pending());
+        assert_eq!(
+            std::net::TcpListener::bind(listen).unwrap_err().kind(),
+            std::io::ErrorKind::AddrInUse,
+        );
+        Poll::Ready(())
+    })
+    .await;
+
+    let first = tokio::spawn({
+        let playing = playing.clone();
+        async move { playing.stop_checked().await }
+    });
+    timeout(Duration::from_secs(5), joined_retirement)
+        .await
+        .unwrap();
+    drop(std::net::TcpListener::bind(listen).expect("retirement must close the listener"));
+    timeout(Duration::from_secs(5), async {
+        while !receiver.events().contains(&Event::Stop) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+    // Retirement was joined before even the first STOP reached the receiver.
+    drop(std::net::TcpListener::bind(listen).expect("cast relay must already be retired"));
+    drop(gate);
+
+    let mut second = playing.stop_checked();
+    poll_fn(|cx| {
+        assert!(second.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert_eq!(playing.state().await, Ok(RemoteState::Loading));
+    release.send(()).unwrap();
+    assert_eq!(second.await, Err(Error::StopUnconfirmed));
+    assert_eq!(playing.stop_checked().await, Err(Error::StopUnconfirmed));
+    assert_eq!(playing.state().await, Err(Error::StopUnconfirmed));
+    assert_eq!(receiver.events(), [Event::Load, Event::Stop]);
+    timeout(Duration::from_secs(5), receiver.finish())
+        .await
+        .unwrap()
+        .unwrap();
 }

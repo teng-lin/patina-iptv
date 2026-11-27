@@ -18,9 +18,13 @@ import subprocess
 import tempfile
 import time
 import uuid
+from xml.etree import ElementTree
 
 PACKAGE = "com.hantekllc.iptvrs.validation"
 RELEASE_PACKAGE = "com.hantekllc.iptvrs"
+CAST_TEST_PACKAGE = PACKAGE + ".test"
+CAST_TEST_RUNNER = "com.hantekllc.iptvrs.host.CastPlatformInstrumentation"
+ANDROID_ATTRIBUTE = "{http://schemas.android.com/apk/res/android}"
 MARKER = ".patina-owned-avd.json"
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -201,12 +205,78 @@ def validate_apk(package, debuggable, release):
         raise ValueError("release smoke requires a non-debuggable APK")
 
 
+
+def validate_cast_test(manifest):
+    root = ElementTree.fromstring(manifest)
+    entries = root.findall("instrumentation")
+    if (root.get("package") != CAST_TEST_PACKAGE or len(entries) != 1
+            or entries[0].get(ANDROID_ATTRIBUTE + "targetPackage") != PACKAGE
+            or entries[0].get(ANDROID_ATTRIBUTE + "name") != CAST_TEST_RUNNER):
+        raise ValueError("expected the disposable Patina Cast instrumentation APK")
+
+
+def apk_manifest(apk, attribute):
+    return subprocess.check_output(
+        ["apkanalyzer", "manifest", attribute, str(apk)], text=True, timeout=30).strip()
+
+
+def stage_cast_apks(root, apk, cast_test):
+    # The build outputs may change while the emulator boots. Validate and install
+    # the same copies from the private disposable run.
+    app_copy = root / "app.apk"
+    test_copy = root / "cast-platform-test.apk"
+    for source, copy in ((apk, app_copy), (cast_test, test_copy)):
+        shutil.copyfile(source, copy)
+        copy.chmod(0o400)
+    package = apk_manifest(app_copy, "application-id")
+    debuggable = apk_manifest(app_copy, "debuggable")
+    validate_apk(package, debuggable, release=False)
+    if debuggable != "true":
+        raise ValueError("Cast platform tests require a debuggable validation APK")
+    validate_cast_test(apk_manifest(test_copy, "print"))
+    return app_copy, test_copy
+
+
+def run_cast_test(serial, apk, test_apk, output, token, collect):
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise ValueError("Cast platform tests require an owned-run token")
+    adb(serial, "install", "-r", str(apk))
+    adb(serial, "install", "-t", "-r", str(test_apk))
+    adb(serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP")
+    adb(serial, "shell", "wm", "dismiss-keyguard")
+    adb(serial, "shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed")
+    command = ["adb", "-s", serial, "shell", "am", "instrument", "-w", "-r", "-e", "patinaOwnedRun", token]
+    if collect:
+        command += ["-e", "coverage", "true"]
+    command.append(f"{CAST_TEST_PACKAGE}/{CAST_TEST_RUNNER}")
+    trace = output / "instrumentation.txt"
+    with trace.open("w") as log:
+        status = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, timeout=120).returncode
+    result = trace.read_text()
+    print(result)
+    if status or "INSTRUMENTATION_CODE: -1" not in result or "INSTRUMENTATION_STATUS_CODE: 0" not in result:
+        raise RuntimeError(f"Android Cast platform test failed: {trace}")
+    if collect:
+        data = subprocess.check_output([
+            "adb", "-s", serial, "exec-out", "run-as", PACKAGE,
+            "cat", "files/cast-platform.exec",
+        ], timeout=15)
+        if not data:
+            raise RuntimeError("empty Android Cast platform coverage data")
+        (output / "cast-platform.exec").write_bytes(data)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="existing source .avd directory; never modified")
     parser.add_argument("apk", type=Path, help="synthetic validation-ID debug APK")
-    parser.add_argument("--release", action="store_true",
-                        help="launch a non-debuggable production-ID APK; remaining journeys stay pending")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--release", action="store_true",
+                      help="launch a non-debuggable production-ID APK; remaining journeys stay pending")
+    mode.add_argument("--cast-platform-test", type=Path,
+                      help="run the synthetic Cast platform test APK instead of the standard smoke")
+    parser.add_argument("--cast-platform-coverage", action="store_true",
+                        help="collect JaCoCo data from an instrumented Cast platform test run")
     parser.add_argument("--artifact-commit", help="verified compiled source SHA; separate from harness checkout")
     parser.add_argument("--artifact-nsh", help="verified compiled NSH SHA; separate from harness checkout")
     parser.add_argument("--scratch", type=Path, default=ROOT / "target/disposable-avds")
@@ -217,6 +287,8 @@ def main():
                         default="swiftshader", help="renderer to record and compare during emulator diagnostics")
     parser.add_argument("--qemu-img", default=shutil.which("qemu-img"), help="SDK qemu-img or a compatible host tool")
     args = parser.parse_args()
+    if args.cast_platform_coverage and not args.cast_platform_test:
+        parser.error("--cast-platform-coverage requires --cast-platform-test")
     for revision in (args.artifact_commit, args.artifact_nsh):
         if revision is not None and not re.fullmatch(r"[0-9a-f]{40}", revision):
             parser.error("artifact source revisions must be full lowercase Git SHAs")
@@ -231,14 +303,16 @@ def main():
     if output == source or source in output.parents or ".android" in output.parts:
         parser.error("evidence output must be outside the original Android profile")
     apk = args.apk.resolve(strict=True)
-    # Refuse a normal app APK before any device action, including uninstall/install.
-    package = subprocess.check_output(["apkanalyzer", "manifest", "application-id", str(apk)], text=True, timeout=30).strip()
-    debuggable = subprocess.check_output(["apkanalyzer", "manifest", "debuggable", str(apk)],
-                                        text=True, timeout=30).strip()
-    try:
-        validate_apk(package, debuggable, args.release)
-    except ValueError as error:
-        parser.error(str(error))
+    cast_test = args.cast_platform_test.resolve(strict=True) if args.cast_platform_test else None
+    package = PACKAGE
+    if not cast_test:
+        # Refuse a normal app APK before any device action, including uninstall/install.
+        package = apk_manifest(apk, "application-id")
+        debuggable = apk_manifest(apk, "debuggable")
+        try:
+            validate_apk(package, debuggable, args.release)
+        except ValueError as error:
+            parser.error(str(error))
     for port in (args.port, args.port + 1):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", port))
@@ -253,6 +327,11 @@ def main():
     log = None
     smoke = None
     try:
+        if cast_test:
+            try:
+                apk, cast_test = stage_cast_apks(root, apk, cast_test)
+            except (ValueError, ElementTree.ParseError) as error:
+                parser.error(str(error))
         output.mkdir(parents=True, exist_ok=True)
         output = Path(tempfile.mkdtemp(prefix="run-", dir=output))
         serial = f"emulator-{args.port}"
@@ -267,6 +346,9 @@ def main():
                      "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
                      "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                      "result": "incomplete"}
+        if cast_test:
+            operation["mode"] = "cast-platform-test"
+            operation["test_apk_sha256"] = hashlib.sha256(cast_test.read_bytes()).hexdigest()
         manifest = output / "operation.json"
         manifest.write_text(json.dumps(operation, indent=2) + "\n")
         command, env = boot_config(root, args.scratch, token, name, args.emulator, args.port, args.gpu)
@@ -291,12 +373,15 @@ def main():
             time.sleep(1)
         else:
             raise RuntimeError("owned emulator boot timed out")
-        command = (["python3", str(ROOT / "tools/ci/android-release-smoke.py")] if args.release else
-                   ["bash", str(ROOT / "tools/ci/android-smoke.sh")])
-        smoke = subprocess.Popen([*command, serial, str(apk)],
-                                 env=env, start_new_session=True)
-        if smoke.wait(timeout=budget):
-            raise RuntimeError("synthetic smoke failed; evidence retained")
+        if cast_test:
+            run_cast_test(serial, apk, cast_test, output, token, args.cast_platform_coverage)
+        else:
+            command = (["python3", str(ROOT / "tools/ci/android-release-smoke.py")] if args.release else
+                       ["bash", str(ROOT / "tools/ci/android-smoke.sh")])
+            smoke = subprocess.Popen([*command, serial, str(apk)],
+                                     env=env, start_new_session=True)
+            if smoke.wait(timeout=budget):
+                raise RuntimeError("synthetic smoke failed; evidence retained")
         operation["result"] = "launch-passed-journeys-pending" if args.release else "passed"
         manifest.write_text(json.dumps(operation, indent=2) + "\n")
         print(f"Evidence: {output}")

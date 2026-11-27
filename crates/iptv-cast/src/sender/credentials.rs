@@ -14,6 +14,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
+use zeroize::Zeroizing;
 
 use super::{
     BoxFuture, Connection, Delivery, Error, ErrorKind, PairDriver, PeerTrust, Stage,
@@ -36,13 +37,14 @@ impl CredentialKey {
     }
 }
 
-/// Opaque backend-owned credential material. Debug output is redacted.
+/// Opaque backend-owned credential material. Debug output is redacted and
+/// credential bytes are cleared when the owner is dropped.
 #[derive(Clone)]
-pub struct Credential(Vec<u8>);
+pub struct Credential(Zeroizing<Vec<u8>>);
 
 impl Credential {
     pub fn from_bytes(bytes: Vec<u8>) -> Self {
-        Self(bytes)
+        Self(Zeroizing::new(bytes))
     }
 
     pub fn as_bytes(&self) -> &[u8] {

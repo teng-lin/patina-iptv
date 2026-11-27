@@ -349,11 +349,14 @@ fn monitor(ui: Ui, ticket: u64) {
         }
         crate::tasks::spawn_in_app(async move {
             match runtime().poll_cast(ticket).await {
-                Ok(RemoteState::Ended)
+                ended @ (Ok(RemoteState::Ended) | Err(Error::StopUnconfirmed))
                     if runtime().cast_target().is_none() && ui.cast_remote.get_untracked() =>
                 {
                     ui.cast_remote.set(false);
                     ui.playing.set(None);
+                    if let Err(error) = ended {
+                        report(error);
+                    }
                     if !ui.cast_busy.get_untracked() {
                         chooser::open(ui, chooser::Kind::CastEnded);
                     }
@@ -407,7 +410,10 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
         ui.cast_busy.set(false);
         match result {
             Ok(()) | Err(Error::StopUnconfirmed) if command == Command::Stop => {
-                if let Err(error) = result {
+                // The monitor may already have reported this result and cleared the cast.
+                if ui.cast_remote.get_untracked()
+                    && let Err(error) = result
+                {
                     report(error);
                 }
                 ui.cast_remote.set(false);
@@ -419,6 +425,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                     ui.play(ch, Playback::Live);
                 }
             }
+            _ if command != Command::Stop && !ui.cast_remote.get_untracked() => {}
             Ok(()) => ui.paused.set(command == Command::Pause),
             Err(e) => report(e),
         }
@@ -447,6 +454,24 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
             chooser::close(ui);
             control(ui, Command::Stop, true);
         }
+    } else if local
+        && !stop_requested
+        && ui.playing.get_untracked().is_none()
+        && let Some(key) = ui.player.main().key.get_untracked()
+        && let Some(channel) = schedule().find_channel(&key)
+    {
+        // The monitor retired the cast while its last command was still pending.
+        if ui.chooser.with_untracked(|open| {
+            open.as_ref().is_some_and(|open| {
+                matches!(
+                    open.kind,
+                    chooser::Kind::Cast | chooser::Kind::AirPlay | chooser::Kind::CastEnded
+                )
+            })
+        }) {
+            chooser::close(ui);
+        }
+        ui.play(channel, Playback::Live);
     }
 }
 pub(crate) fn volume(ui: Ui, command: Command) -> bool {

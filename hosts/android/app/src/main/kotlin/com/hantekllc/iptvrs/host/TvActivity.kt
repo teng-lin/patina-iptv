@@ -72,6 +72,7 @@ open class TvActivity : Activity() {
         CredentialKey.initialize(this)
         RecordingHost.attach(this)
         ExternalPlayerHost.attach(this)
+        if (!CaptureLimits.tv(this)) CastHost.attach(this)
         UpdateHost.attach(this)
         // Use large ceilings for Patina's own Rust root. The 4095 MiB
         // heap ceiling fits 32-bit Android, and zero keeps the default stack.
@@ -122,6 +123,7 @@ open class TvActivity : Activity() {
         super.onStart()
         if (!hostMounted) return
         started = true
+        if (!CaptureLimits.tv(this)) CastHost.visible = true
         val allowed = RecordingHost.resumeViewing(filesDir.absolutePath)
         for (p in players.toList()) p.foreground(allowed)
     }
@@ -145,6 +147,7 @@ open class TvActivity : Activity() {
             return
         }
         started = false
+        if (!CaptureLimits.tv(this)) CastHost.visible = false
         for (p in players.toList()) p.background()
         RecordingHost.suspendViewing(filesDir.absolutePath)
         // The process may end in the background without a teardown: the

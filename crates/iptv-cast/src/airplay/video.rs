@@ -1,6 +1,6 @@
 //! AirPlay v2 URL playback on a verified, dedicated transport.
 use super::{
-    hap::{self, AuthFault, Verified},
+    hap::{self, AuthFault, SecureSession},
     wire::{Fault, Start, Version, Wire},
 };
 use plist::{
@@ -196,7 +196,7 @@ impl Drop for Task {
 }
 
 struct Rtsp {
-    wire: Verified,
+    wire: SecureSession,
     session: String,
     uri: String,
     instance: String,
@@ -205,7 +205,7 @@ struct Rtsp {
 }
 
 impl Rtsp {
-    fn new(wire: Verified, address: SocketAddr) -> Result<Self> {
+    fn new(wire: SecureSession, address: SocketAddr) -> Result<Self> {
         let session = hap::uuid()?;
         let instance = session[..8].to_owned();
         let active_remote = u32::from_str_radix(&instance, 16)
@@ -442,7 +442,11 @@ async fn event_loop(
     }
 }
 
-async fn event_connection(mut address: SocketAddr, port: u16, verified: &Verified) -> Result<Wire> {
+async fn event_connection(
+    mut address: SocketAddr,
+    port: u16,
+    verified: &SecureSession,
+) -> Result<Wire> {
     address.set_port(port);
     let mut wire = timeout(EVENT_TIMEOUT, async {
         // The event listener can become ready slightly after the SETUP reply.
@@ -559,7 +563,7 @@ fn timing_address(
 }
 
 impl Video {
-    pub(super) fn new(verified: Verified) -> Result<Self> {
+    pub(super) fn new(verified: SecureSession) -> Result<Self> {
         let addresses = verified.wire.addresses()?;
         let control = Rtsp::new(verified, addresses.0)?;
         Ok(Self {

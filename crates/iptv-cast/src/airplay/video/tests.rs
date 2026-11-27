@@ -19,7 +19,7 @@ pub(in crate::airplay) enum ReceiverEnding {
 
 pub(in crate::airplay) async fn serve(
     mut control: Wire,
-    shared: &[u8; 32],
+    shared: &[u8],
     origin: SocketAddr,
     expected_timing_port: u16,
     ending: ReceiverEnding,

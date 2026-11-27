@@ -13,7 +13,7 @@ use crate::sender::{
     Observation, PairDriver, PeerTrust, PinCode, Playback, ProtocolId, Route, ScanSink, Stage,
     StopOutcome, VerifiedConnection,
 };
-use hap::{AuthFailure, AuthFault, Challenge, StoredKeys, Verified};
+use hap::{AuthFailure, AuthFault, Challenge, SecureSession, StoredKeys};
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent};
 use std::{
     collections::BTreeMap,
@@ -82,12 +82,14 @@ impl AirPlay {
         let record = records
             .resolve_unique(identity)
             .map_err(|kind| failure(kind, Stage::Connect))?;
-        self.connect_addresses(&record.addresses, credential).await
+        self.connect_addresses(&record.addresses, record.pin_hint, credential)
+            .await
     }
 
     async fn connect_addresses(
         &self,
         addresses: &[SocketAddr],
+        pin_hint: PinHint,
         credential: Option<Credential>,
     ) -> Result<BackendConnect, Error> {
         let keys = credential
@@ -109,9 +111,31 @@ impl AirPlay {
             )?)));
         }
 
-        let wire = hap::start_pairing_on_wire(wire)
-            .await
-            .map_err(|fault| auth_error(fault, Stage::Pair))?;
+        let pairing = if pin_hint == PinHint::Required {
+            hap::start_pairing_on_wire(wire).await
+        } else {
+            match hap::transient_on_wire(wire).await {
+                Ok(secure) => {
+                    return Ok(BackendConnect::Ready(Box::new(AirDriver::new(
+                        secure,
+                        self.timing_port,
+                    )?)));
+                }
+                Err(AuthFailure(AuthFault::ApprovalDenied, Delivery::Acknowledged)) => {
+                    if pin_hint == PinHint::Suppressed {
+                        return Err(Error::new(
+                            ErrorKind::ReceiverRefused,
+                            Stage::Connect,
+                            Delivery::Acknowledged,
+                        ));
+                    }
+                    // Restart approval only at the chosen endpoint that asked for it.
+                    hap::start_pairing(address).await
+                }
+                Err(fault) => return Err(auth_error(fault, Stage::Connect)),
+            }
+        };
+        let wire = pairing.map_err(|fault| auth_error(fault, Stage::Pair))?;
         let expires = Instant::now() + APPROVAL_WINDOW;
         let challenge = tokio::spawn(Challenge::receive(wire, address, expires));
         Ok(BackendConnect::PinRequired(Box::new(AirPairing {
@@ -155,11 +179,60 @@ impl Backend for AirPlay {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PinHint {
+    Unspecified,
+    Required,
+    Suppressed,
+}
+
+impl PinHint {
+    fn from_service(info: &ResolvedService) -> Self {
+        const PIN_REQUIRED: u32 = 0x8;
+        const PASSWORD_REQUIRED: u32 = 0x80;
+        let flags = ["sf", "flags"].map(|name| {
+            let value = info.get_property_val_str(name)?;
+            let digits = value
+                .strip_prefix("0x")
+                .or_else(|| value.strip_prefix("0X"))
+                .unwrap_or(value);
+            if digits.len() > 8 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return None;
+            }
+            u32::from_str_radix(digits, 16).ok()
+        });
+        // TXT access hints only choose the on-screen flow. Authentication
+        // still depends on the handshake on the selected connection.
+        if info.get_property_val_str("act") == Some("2")
+            || info.get_property_val_str("acl") == Some("1")
+            || info
+                .get_property_val_str("pw")
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"))
+            || flags
+                .iter()
+                .flatten()
+                .any(|value| value & PASSWORD_REQUIRED != 0)
+        {
+            Self::Suppressed
+        } else if flags.iter().any(Option::is_some)
+            && flags
+                .iter()
+                .flatten()
+                .all(|value| value & PIN_REQUIRED != 0)
+        {
+            Self::Required
+        } else {
+            Self::Unspecified
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Record {
     identity: Option<String>,
     name: String,
     addresses: Vec<SocketAddr>,
+    pin_hint: PinHint,
 }
 
 impl Record {
@@ -220,6 +293,7 @@ impl Record {
                 name
             },
             addresses,
+            pin_hint: PinHint::from_service(info),
         })
     }
 
@@ -379,6 +453,7 @@ fn auth_error(AuthFailure(fault, delivery): AuthFailure, stage: Stage) -> Error 
         AuthFault::Wire(fault) => wire_kind(fault),
         AuthFault::TimedOut => ErrorKind::TimedOut,
         AuthFault::ApprovalDenied => ErrorKind::ApprovalDenied,
+        AuthFault::GuestRefused => ErrorKind::ReceiverRefused,
         AuthFault::InvalidPin => ErrorKind::InvalidPin,
         AuthFault::IdentityMismatch => ErrorKind::IdentityMismatch,
         AuthFault::InvalidCredential => ErrorKind::InvalidCredential,
@@ -458,14 +533,20 @@ impl PairDriver for AirPairing {
 
 struct AirDriver {
     video: Video,
+    trust: PeerTrust,
     timing_port: Option<NonZeroU16>,
 }
 
 impl AirDriver {
-    fn new(verified: Verified, timing_port: Option<NonZeroU16>) -> Result<Self, Error> {
-        let video = Video::new(verified)
+    fn new(secure: SecureSession, timing_port: Option<NonZeroU16>) -> Result<Self, Error> {
+        let trust = secure.trust;
+        let video = Video::new(secure)
             .map_err(|fault| video_error(fault, Stage::Connect, Delivery::NotSent))?;
-        Ok(Self { video, timing_port })
+        Ok(Self {
+            video,
+            trust,
+            timing_port,
+        })
     }
 }
 
@@ -481,7 +562,7 @@ impl Driver for AirDriver {
     }
 
     fn peer_trust(&self) -> PeerTrust {
-        PeerTrust::VerifiedPairing
+        self.trust
     }
 
     fn validate(&self, _media: &Media) -> Result<(), Error> {

@@ -9,7 +9,12 @@ mod ios_device;
 mod android_transport;
 #[cfg(any(target_os = "ios", target_os = "macos"))]
 mod apple_airplay;
-#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "macos",
+    windows
+))]
 mod casting;
 mod clock;
 mod external_player;
@@ -76,9 +81,15 @@ static TEST_NATIVE_CAST: std::sync::OnceLock<std::sync::Arc<dyn iptv_runtime::ca
 pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     let sender = casting::Sender::new(&directory);
+    #[cfg(target_os = "android")]
+    let sender = casting::android::registered().then(|| casting::Sender::new(&directory));
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
+        ports.cast = Some(std::sync::Arc::new(sender));
+    }
+    #[cfg(target_os = "android")]
+    if let Some(sender) = sender {
         ports.cast = Some(std::sync::Arc::new(sender));
     }
     #[cfg(feature = "test-support")]
