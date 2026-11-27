@@ -101,7 +101,7 @@ pub fn flush(ui: Ui, ended: bool) {
         stream.resume_ms.set(None);
     }
     let progress = stream.timeline.get_untracked().progress(ended);
-    crate::vod_view::observe(ui, progress.position_ms, progress.duration_ms, ended);
+    crate::screens::vod_view::observe(ui, progress.position_ms, progress.duration_ms, ended);
     if let Some((job, source)) = ui.playback.player.recorded.get_untracked() {
         // This method queues the write immediately; disposal cannot lose the last point.
         crate::wiring::runtime_owner::runtime().save_recording_progress(job.id, &source, progress);
@@ -113,5 +113,5 @@ pub fn title(ui: Ui) -> Option<String> {
         .player
         .recorded
         .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
-        .or_else(|| crate::vod_view::title(ui))
+        .or_else(|| crate::screens::vod_view::title(ui))
 }

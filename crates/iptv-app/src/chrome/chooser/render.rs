@@ -155,7 +155,7 @@ fn row(ui: Ui, size: Scale, at: Position) -> View {
                     Kind::Cast => c
                         .values
                         .get(index)
-                        .is_some_and(|value| crate::casting::destination_selected(value)),
+                        .is_some_and(|value| crate::screens::casting::destination_selected(value)),
                     Kind::History | Kind::AirPlay | Kind::CastEnded | Kind::More | Kind::Leave => {
                         false
                     }
@@ -252,7 +252,7 @@ fn panel(
         .child(if leave {
             view()
         } else {
-            crate::airplay::picker(ui, move || kind() == Some(Kind::AirPlay))
+            crate::screens::airplay::picker(ui, move || kind() == Some(Kind::AirPlay))
         })
         .child(
             virtual_list(count, move |at| row(ui, size, at))
@@ -307,7 +307,7 @@ fn native_picker(
                 .items_center()
                 .gap(px(8.0))
                 .px(px(16.0))
-                .child(crate::airplay::button(
+                .child(crate::screens::airplay::button(
                     ui,
                     48.0,
                     "chooser-native-device-picker",

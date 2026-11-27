@@ -87,13 +87,16 @@ pub fn status(p: &Playlist, activity: Option<&Activity>, now: i64) -> (String, b
         }
     };
     match activity {
-        Some(Activity::Running(progress)) => (crate::wizard_view::words::stage(*progress), false),
+        Some(Activity::Running(progress)) => (
+            crate::library_ui::wizard_view::words::stage(*progress),
+            false,
+        ),
         Some(Activity::Checking(progress)) => (
             trf(
                 "Checking the new details: {stage}",
                 &[(
                     "stage",
-                    (&crate::wizard_view::words::stage(*progress)).into(),
+                    (&crate::library_ui::wizard_view::words::stage(*progress)).into(),
                 )],
             ),
             false,
@@ -265,14 +268,14 @@ pub fn details_title(kind: SourceKind) -> &'static str {
 }
 
 pub fn param(p: Param) -> &'static str {
-    crate::wizard_view::words::label(p.field())
+    crate::library_ui::wizard_view::words::label(p.field())
 }
 
 /// Text entry's placeholder: a value that is not shown stays when the
 /// field is left empty.
 pub fn param_placeholder(p: Param, prefilled: bool) -> &'static str {
     if prefilled {
-        crate::wizard_view::words::placeholder(p.field())
+        crate::library_ui::wizard_view::words::placeholder(p.field())
     } else {
         tr("Type the new value; left empty, the current one stays")
     }

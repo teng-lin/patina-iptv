@@ -73,7 +73,7 @@ pub fn bind(ui: Ui) {
             // window's playback, as quitting does. Only the recorder runs on.
             // The viewer's Stop, not only the stream's: nothing counts as
             // playing, so choosing the same channel after reopening plays it.
-            crate::parental_view::hidden(ui);
+            crate::screens::parental_view::hidden(ui);
             crate::playback::pip::exit(ui, iptv_presentation::pip_window::Exit::Close);
             player_windows::close_all(ui);
             crate::playback::player_keys::stop_playback(ui);
@@ -251,7 +251,7 @@ pub fn menus(ui: Ui) {
                     MenuItem::separator(),
                     MenuItem::new(tr("Settings…"))
                         .shortcut("mod+,")
-                        .on_select(move || crate::settings_view::open(ui)),
+                        .on_select(move || crate::screens::settings_view::open(ui)),
                     MenuItem::separator(),
                     role(MenuRole::Hide),
                     role(MenuRole::HideOthers),

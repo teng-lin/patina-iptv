@@ -14,7 +14,7 @@ pub(crate) fn start(ui: Ui) {
     runtime().bind_tasks(tasks::spawn_in_app, |duration| Box::pin(timer(duration)));
     runtime().bind(move |event| crate::wiring::runtime_events::apply(ui, event));
     runtime().start_services();
-    crate::recordings_view::bind(ui);
+    crate::screens::recordings_view::bind(ui);
     // NSH drops cleanup callbacks without invoking them when the entire Rust
     // runtime exits. Capture an RAII guard so both owner disposal and runtime
     // destruction drain accepted writes while the engine thread still exists.
@@ -59,7 +59,7 @@ pub(crate) fn start(ui: Ui) {
     });
     tasks::bind_owner();
     crate::wiring::data::stored::bind(ui);
-    crate::search_view::load_saved_history(ui);
+    crate::screens::search_view::load_saved_history(ui);
     let owner = runtime();
     owner.bind_browser(move || crate::runtime::BrowserState {
         focused_key: crate::wiring::runtime_events::focused_channel(ui)
@@ -70,6 +70,6 @@ pub(crate) fn start(ui: Ui) {
         let owner = runtime();
         let _ = owner.parental_refresh().await;
         crate::runtime::data::start(&owner);
-        crate::parental_view::bind(ui);
+        crate::screens::parental_view::bind(ui);
     });
 }

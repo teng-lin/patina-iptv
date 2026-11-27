@@ -72,7 +72,7 @@ pub fn offer_on(ui: Ui, device: Device) -> MultiviewOffer {
         device,
         w.width.0 > w.height.0,
         account_streams(ui),
-        crate::capture_limits::now().metered,
+        crate::screens::capture_limits::now().metered,
     )
 }
 
@@ -267,7 +267,7 @@ pub fn open(ui: Ui) {
     }
     ui.playback.paused.set(false);
     ui.playback.panels.update(|p| p.hide());
-    crate::channels_view::close(ui);
+    crate::screens::channels_view::close(ui);
     let limits = Limits {
         decoders: untracked(|| tiles(ui)),
         connections: crate::wiring::runtime_owner::runtime().account_limit(),
@@ -473,7 +473,7 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
         }
         Outcome::SearchChannel => {
             ui.playback.play_bar.update(PlayBar::hide);
-            crate::search_view::open_to_pick(ui);
+            crate::screens::search_view::open_to_pick(ui);
         }
         Outcome::Retry(surface) => crate::playback::player::retry_surface(ui, surface),
         Outcome::FullScreen => {

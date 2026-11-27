@@ -137,7 +137,7 @@ pub fn back(ui: Ui) -> bool {
         crate::wiring::runtime_owner::runtime().parental_content_closed();
     }
     let outcome = edit(ui, Screen::back);
-    crate::parental_view::enforce(ui);
+    crate::screens::parental_view::enforce(ui);
     match outcome {
         BackOutcome::Closed => crate::wiring::runtime_owner::runtime().vod_discovery_cancel(),
         BackOutcome::Reload { through } => load(ui, false, Some(through)),
@@ -615,7 +615,7 @@ fn toggle_block(ui: Ui) {
         .with_untracked(|s| s.details.as_ref().map(|d| Runtime::vod_target(&d.item.key)))
     {
         let blocked = !crate::wiring::runtime_owner::runtime().parental_explicitly_blocked(&target);
-        crate::parental_view::block(ui, target, blocked);
+        crate::screens::parental_view::block(ui, target, blocked);
     }
 }
 

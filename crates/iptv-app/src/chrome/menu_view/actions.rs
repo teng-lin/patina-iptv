@@ -29,11 +29,11 @@ pub fn perform(ui: Ui, item: MenuItem) {
     if let Some(value) = playlist_order {
         ui.screens.menu.set(None);
         crate::wiring::navigation::settings_guarded(ui, move || {
-            if let Err(error) = crate::settings_view::save_setting(
+            if let Err(error) = crate::screens::settings_view::save_setting(
                 iptv_settings::keys::PLAYLIST_SORT.as_str(),
                 iptv_settings::Value::Enum(value.to_owned()),
             ) {
-                crate::settings_view::notify_setting_error(error);
+                crate::screens::settings_view::notify_setting_error(error);
             }
         });
         return;
@@ -41,7 +41,7 @@ pub fn perform(ui: Ui, item: MenuItem) {
     if let MenuItem::TogglePlaylist(id) = item {
         focus_item(ui, item);
         if playlist_by_id(id).is_some_and(|p| p.policy.enabled) {
-            crate::settings_view::set_playlist_visibility(ui, id, false);
+            crate::screens::settings_view::set_playlist_visibility(ui, id, false);
         }
         return;
     }
@@ -134,7 +134,7 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
         let schedule = crate::wiring::runtime_owner::schedule();
         if crate::playback::player::guide_offset(&*schedule, origin.channel) != offset
             || origin_program(&*schedule, origin) != program
-            || !crate::recordings_view::perform_channel_action(ui, origin, item)
+            || !crate::screens::recordings_view::perform_channel_action(ui, origin, item)
         {
             open_channel_at(ui, origin.channel, program.start, list, playing_context);
         }
@@ -173,14 +173,14 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
         }
         MenuItem::ProtectChannel | MenuItem::ProtectGroup => {
             if let Some(target) = block_target(ui, item, channel, scope.as_ref()) {
-                crate::parental_view::block(ui, target, true);
+                crate::screens::parental_view::block(ui, target, true);
             }
         }
-        MenuItem::ManageParentalBlocks => crate::parental_view::manage(ui),
+        MenuItem::ManageParentalBlocks => crate::screens::parental_view::manage(ui),
         MenuItem::ReorderChannels => {
             if let Some((source, kind)) = scope {
                 let focus = channel
-                    .and_then(|ch| crate::parental_view::live_target(ui, ch))
+                    .and_then(|ch| crate::screens::parental_view::live_target(ui, ch))
                     .filter(|target| target.source == source.0)
                     .map(|target| target.id);
                 organization_view::open_context_reorder(ui, source, kind, focus, list);
@@ -213,8 +213,8 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
             }
         }
         MenuItem::ManageFavorites => crate::guide::fav_editor::open(ui, &list, channel),
-        MenuItem::Search => crate::search_view::open(ui),
-        MenuItem::Settings => crate::settings_view::open(ui),
+        MenuItem::Search => crate::screens::search_view::open(ui),
+        MenuItem::Settings => crate::screens::settings_view::open(ui),
         MenuItem::ToggleFavorite => {
             if let Some(channel) = channel {
                 crate::guide::favorites::toggle(ui, channel);
@@ -223,12 +223,12 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
         MenuItem::HideChannel => hide_channel(ui, channel),
         MenuItem::CreateGroup => {
             if let Some(source) = management_source(ui, &list, scope.as_ref()) {
-                crate::custom_groups::open(ui, source);
+                crate::library_ui::custom_groups::open(ui, source);
             }
         }
         MenuItem::CopyChannels => {
             if let Some((source, channels)) = copy_scope(ui, &list, scope.as_ref()) {
-                crate::custom_groups::open_copy(ui, source, channels);
+                crate::library_ui::custom_groups::open_copy(ui, source, channels);
             }
         }
         MenuItem::ChannelOptions => {
@@ -258,7 +258,7 @@ fn dispatch(ui: Ui, item: MenuItem, selection: Selection) {
         // The chooser opens over the guide; the guide's focus stays.
         MenuItem::AssignEpg => {
             if let Some(channel) = channel {
-                crate::guide_assign_view::open(ui, channel);
+                crate::library_ui::guide_assign_view::open(ui, channel);
             }
         }
         other => {
@@ -277,11 +277,11 @@ fn focus_item(ui: Ui, item: MenuItem) {
 
 fn perform_program(ui: Ui, item: MenuItem, origin: Origin, list: ListId, playing_context: bool) {
     match item {
-        MenuItem::Record => crate::recordings_view::record_origin(ui, origin),
+        MenuItem::Record => crate::screens::recordings_view::record_origin(ui, origin),
         MenuItem::StopRecording | MenuItem::CancelRecording => {
             let program = origin_program(&*crate::wiring::runtime_owner::schedule(), origin);
             if program.start == origin.program_start {
-                crate::recordings_view::perform_channel_action(ui, origin, item);
+                crate::screens::recordings_view::perform_channel_action(ui, origin, item);
             }
         }
         MenuItem::Description => ui.screens.description.set(Some(origin)),
@@ -351,7 +351,8 @@ fn open_child_program(
 }
 
 fn hide_channel(ui: Ui, channel: Option<usize>) {
-    if let Some(target) = channel.and_then(|ch| crate::parental_view::live_target(ui, ch)) {
+    if let Some(target) = channel.and_then(|ch| crate::screens::parental_view::live_target(ui, ch))
+    {
         let source = SourceId(target.source);
         let saved = crate::runtime::commands::hide_channel(
             &crate::wiring::runtime_owner::runtime(),

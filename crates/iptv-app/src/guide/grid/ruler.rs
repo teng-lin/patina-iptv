@@ -43,7 +43,7 @@ pub(super) fn ruler(
             .text_size(move || size.text_px(RULER))
     };
     // Back to now, once the view left it.
-    let timeline_controls = move || !crate::organization_view::guide_order_open(ui);
+    let timeline_controls = move || !crate::library_ui::organization_view::guide_order_open(ui);
     let now_button = when(
         move || timeline_controls() && pan.away(),
         move || button(|| tr("Now")).on_press(move || pan.to_now()),

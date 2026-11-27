@@ -4,7 +4,7 @@ use std::time::Duration;
 use iptv_nav::Action;
 use nsh_core::prelude::*;
 
-use crate::settings_view::updates as facade;
+use crate::screens::settings_view::updates as facade;
 use crate::{
     Ui, ViewMode,
     chrome::i18n::{tr, trf},

@@ -172,8 +172,8 @@ pub fn collapse(ui: Ui) {
     }
     // A list picking a tile (Search and add, the channel picker) goes
     // with the session: a pick would find none.
-    if untracked(|| crate::search_view::picking(ui)) {
-        crate::search_view::close(ui);
+    if untracked(|| crate::screens::search_view::picking(ui)) {
+        crate::screens::search_view::close(ui);
     }
     if untracked(|| crate::playback::multiview_picker::is_open(ui)) {
         crate::playback::multiview_picker::close(ui);

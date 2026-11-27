@@ -80,7 +80,7 @@ pub(crate) fn task_open(ui: Ui) -> bool {
 
 /// Opens the screen (the navigation rail's Playlists).
 pub fn open(ui: Ui) {
-    if is_open(ui) || crate::wizard_view::is_open(ui) {
+    if is_open(ui) || crate::library_ui::wizard_view::is_open(ui) {
         return;
     }
     let mut screen = Screen::new(load(), ui.app.library.shown.get_untracked());
@@ -103,7 +103,7 @@ pub(crate) fn choose_for_management(ui: Ui) {
 
 /// Opens a playlist task from Settings or a guide heading.
 pub fn open_only(ui: Ui, id: SourceId, only: Only) {
-    if is_open(ui) || crate::wizard_view::is_open(ui) {
+    if is_open(ui) || crate::library_ui::wizard_view::is_open(ui) {
         return;
     }
     if let Some(screen) = Screen::only(load(), id, only) {
@@ -246,7 +246,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
         let result = match effect {
             Effect::Reorder(id) => {
                 close(ui);
-                crate::organization_view::open_playlist_reorder(ui, Some(id));
+                crate::library_ui::organization_view::open_playlist_reorder(ui, Some(id));
                 Ok(())
             }
             Effect::PlaylistOrder(id) => {
@@ -256,12 +256,12 @@ fn apply_effect(ui: Ui, effect: Effect) {
             Effect::ReorderGroups(id) | Effect::GroupOrder(id) => {
                 let list = iptv_presentation::lists::ListId::Group(format!("playlist:{}", id.0));
                 if matches!(effect, Effect::ReorderGroups(_)) {
-                    crate::organization_view::open_group_reorder(ui, id, None, list);
+                    crate::library_ui::organization_view::open_group_reorder(ui, id, None, list);
                 } else {
-                    crate::organization_view::open_sort(
+                    crate::library_ui::organization_view::open_sort(
                         ui,
                         id,
-                        crate::organization_view::Kind::Groups,
+                        crate::library_ui::organization_view::Kind::Groups,
                         Some(list),
                     );
                 }
@@ -273,7 +273,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 Ok(())
             }
             Effect::Add => {
-                crate::wizard_view::open_add(ui);
+                crate::library_ui::wizard_view::open_add(ui);
                 Ok(())
             }
             Effect::Show(id) => {
@@ -298,7 +298,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                     iptv_settings::keys::PLAYLISTS_INCLUDE_VOD.as_str(),
                     iptv_settings::Value::Bool(!on),
                 ) {
-                    crate::settings_view::notify_setting_error(e);
+                    crate::screens::settings_view::notify_setting_error(e);
                 }
                 Ok(())
             }
@@ -307,22 +307,22 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 if let Err(e) =
                     crate::wiring::runtime_owner::runtime().set_connection_limit(id, next)
                 {
-                    crate::settings_view::notify_setting_error(e);
+                    crate::screens::settings_view::notify_setting_error(e);
                 }
                 Ok(())
             }
             Effect::CustomGroups(id) => {
-                crate::custom_groups::open(ui, id);
+                crate::library_ui::custom_groups::open(ui, id);
                 Ok(())
             }
             Effect::Organize(id, groups) => {
-                crate::organization_view::open(
+                crate::library_ui::organization_view::open(
                     ui,
                     id,
                     if groups {
-                        crate::organization_view::Kind::Groups
+                        crate::library_ui::organization_view::Kind::Groups
                     } else {
-                        crate::organization_view::Kind::Channels
+                        crate::library_ui::organization_view::Kind::Channels
                     },
                     None,
                 );
@@ -332,7 +332,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
                 data::rename(&crate::wiring::runtime_owner::runtime(), id, &name).await
             }
             Effect::Guides(id) => {
-                crate::epg_sources_view::open(ui, id);
+                crate::library_ui::epg_sources_view::open(ui, id);
                 Ok(())
             }
             Effect::Delete(id) => data::delete(&crate::wiring::runtime_owner::runtime(), id).await,
@@ -365,7 +365,7 @@ fn apply_effect(ui: Ui, effect: Effect) {
         if let Err(e) = result {
             log::warn!("iptv playlists: the store refused it: {e}");
             if e.settings_locked() {
-                crate::settings_view::notify_setting_error(
+                crate::screens::settings_view::notify_setting_error(
                     crate::wiring::settings::SaveError::ParentalLocked,
                 );
             } else if changes_library {
@@ -801,7 +801,7 @@ fn actions_card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                 (Act::PlaylistOrder, _) => {
                     ui.app.settings.get();
                     let order = crate::wiring::settings::choice(iptv_settings::keys::PLAYLIST_SORT);
-                    let method = crate::settings_view::choice_label("sort", order);
+                    let method = crate::screens::settings_view::choice_label("sort", order);
                     trf("Playlist order: {method}", &[("method", (&method).into())])
                 }
                 (Act::GroupOrder, _) => {

@@ -454,7 +454,7 @@ fn start(ui: Ui, mut request: Request) {
         match &result {
             // What can stop it, said as it starts (#275).
             Ok(_) => {
-                crate::chrome::toast::notify(&crate::capture_limits::start_notice());
+                crate::chrome::toast::notify(&crate::screens::capture_limits::start_notice());
                 if crate::host::ANDROID {
                     // The system prompt must not delay Start or Stop.
                     crate::wiring::tasks::spawn_in_app(
@@ -500,7 +500,7 @@ fn select_job(ui: Ui, id: JobId) {
     }
     ui.screens.recordings.update(|s| s.select_job(id));
 }
-pub(super) fn return_to_player(ui: Ui) {
+pub(crate) fn return_to_player(ui: Ui) {
     if ui.screens.recordings.with_untracked(|s| s.busy) {
         return;
     }

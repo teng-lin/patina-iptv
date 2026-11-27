@@ -31,7 +31,7 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
                     "Checking: {stage}",
                     &[(
                         "stage",
-                        (&crate::wizard_view::words::stage(progress)).into(),
+                        (&crate::library_ui::wizard_view::words::stage(progress)).into(),
                     )],
                 ),
                 false,
@@ -51,7 +51,7 @@ pub(super) fn card(ui: Ui, size: Scale, id: SourceId) -> impl IntoElement {
             state(ui, |s| s.details().and_then(|f| f.error))
                 .flatten()
                 .filter(|(at, _)| *at == p)
-                .map(|(_, e)| crate::wizard_view::words::field_error(e))
+                .map(|(_, e)| crate::library_ui::wizard_view::words::field_error(e))
         };
         let mark = move || mark(ui, focused().unwrap_or(false));
         // Two lines, and a third for a problem with the detail.

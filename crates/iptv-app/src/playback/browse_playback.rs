@@ -278,8 +278,8 @@ fn playing_live(ui: Ui, channel: usize) -> bool {
 }
 
 fn full(ui: Ui) {
-    if crate::channels_view::is_open(ui) {
-        crate::channels_view::close(ui);
+    if crate::screens::channels_view::is_open(ui) {
+        crate::screens::channels_view::close(ui);
     }
     ui.chrome
         .mode

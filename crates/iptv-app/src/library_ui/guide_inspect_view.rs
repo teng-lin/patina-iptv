@@ -317,7 +317,7 @@ fn activate(ui: Ui, row: Row) {
                         addition: None,
                     },
                 );
-                crate::guide_repair_view::add(ui, channel, target, window);
+                crate::library_ui::guide_repair_view::add(ui, channel, target, window);
             }
         }
         Row::AutomaticRepair | Row::NoGuideRepair => {
@@ -327,13 +327,13 @@ fn activate(ui: Ui, row: Row) {
                 } else {
                     iptv_library::guide_repair::Target::NoGuide
                 };
-                crate::guide_repair_view::add(ui, channel, target, window);
+                crate::library_ui::guide_repair_view::add(ui, channel, target, window);
             }
         }
-        Row::ReviewRepair => crate::guide_repair_view::reopen(ui),
+        Row::ReviewRepair => crate::library_ui::guide_repair_view::reopen(ui),
         Row::RepairHistory => {
             if let Some((source, window)) = state(ui, |s| (s.source, s.window)) {
-                crate::guide_repair_view::history(ui, source, window);
+                crate::library_ui::guide_repair_view::history(ui, source, window);
             }
         }
         Row::Search => update(ui, |s| s.typing = true),

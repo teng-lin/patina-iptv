@@ -6,7 +6,7 @@ use crate::runtime::model::{GuideSource, ImportErrorKind};
 use iptv_presentation::wizard::FieldError;
 
 use super::state::{Act, EditKind, Notice};
-use crate::playlists_view::masked_link;
+use crate::library_ui::playlists_view::masked_link;
 use crate::wiring::data::stored::SourceLine;
 
 /// A source's title: its name, else where it comes from.
@@ -128,7 +128,7 @@ pub fn act(act: Act, s: &GuideSource) -> String {
 pub fn notice(notice: Notice) -> &'static str {
     match notice {
         Notice::Link(FieldError::Required) => tr("Type the guide's link (XMLTV)."),
-        Notice::Link(e) => crate::wizard_view::words::field_error(e),
+        Notice::Link(e) => crate::library_ui::wizard_view::words::field_error(e),
         Notice::Duplicate => tr("This playlist has that guide already."),
     }
 }

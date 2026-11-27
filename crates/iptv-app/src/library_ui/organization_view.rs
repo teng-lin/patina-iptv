@@ -93,10 +93,10 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
     let mut editor = Editor::new(rows, preferred.map(|id| id.0.to_string()));
     editor.start_reorder(|_| true);
     batch(|| {
-        if crate::settings_view::is_open(ui) {
-            crate::settings_view::close(ui);
+        if crate::screens::settings_view::is_open(ui) {
+            crate::screens::settings_view::close(ui);
         }
-        crate::channels_view::close(ui);
+        crate::screens::channels_view::close(ui);
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
@@ -154,7 +154,7 @@ pub fn open_context_reorder(
 fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
     let from_player = ui.chrome.mode.get_untracked() == crate::ViewMode::Fullscreen;
     if from_player {
-        crate::channels_view::close(ui);
+        crate::screens::channels_view::close(ui);
         ui.playback.panels.update(|panels| panels.hide());
         ui.chrome
             .mode
@@ -491,7 +491,7 @@ fn save_order(ui: Ui) {
                 && let Err(error) = crate::runtime()
                     .check_setting_write(iptv_settings::keys::PLAYLIST_SORT.as_str())
             {
-                crate::settings_view::notify_setting_error(error);
+                crate::screens::settings_view::notify_setting_error(error);
                 return;
             }
             persist_order(ui);
@@ -606,7 +606,7 @@ fn persist_order(ui: Ui) {
             }
             match error {
                 error @ crate::wiring::settings::SaveError::Durability(_) => {
-                    crate::settings_view::notify_setting_error(error);
+                    crate::screens::settings_view::notify_setting_error(error);
                 }
                 error => {
                     update(ui, |s| {
@@ -626,7 +626,7 @@ fn persist_order(ui: Ui) {
                             "Playlist positions saved. Could not switch to Custom order. Try saving again.",
                         ));
                     } else {
-                        crate::settings_view::notify_setting_error(error);
+                        crate::screens::settings_view::notify_setting_error(error);
                     }
                     return;
                 }
@@ -641,7 +641,7 @@ fn persist_order(ui: Ui) {
                 log::warn!("iptv organization: {error}");
                 update(ui, Open::finish_save);
                 if playlists && error.settings_locked() {
-                    crate::settings_view::notify_setting_error(
+                    crate::screens::settings_view::notify_setting_error(
                         crate::wiring::settings::SaveError::ParentalLocked,
                     );
                 } else {
@@ -1461,7 +1461,7 @@ pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashM
             .channels()
             .iter()
             .filter_map(|&ch| {
-                let target = crate::parental_view::live_target(ui, ch)?;
+                let target = crate::screens::parental_view::live_target(ui, ch)?;
                 (target.source == source.0).then_some((target.id, ch))
             })
             .collect()

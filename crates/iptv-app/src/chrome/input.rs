@@ -150,13 +150,13 @@ struct Nav {
 /// waiting for a key.
 #[derive(Clone, PartialEq)]
 enum Capture {
-    Pin(crate::parental_view::Prompt),
+    Pin(crate::screens::parental_view::Prompt),
     Editor,
 }
 
 /// What takes the keys now, if anything (tracked).
 fn capture(ui: Ui) -> Option<Capture> {
-    crate::parental_view::prompt(ui)
+    crate::screens::parental_view::prompt(ui)
         .map(Capture::Pin)
         .or_else(|| crate::chrome::remote_editor::capturing(ui).then_some(Capture::Editor))
 }
@@ -187,7 +187,7 @@ fn surface(ui: &Ui) -> Surface {
                 .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
                 .unwrap_or(InputOwner::Overlay(overlay))
         } else if overlay == crate::chrome::overlays::Overlay::Settings
-            && let Some(id) = crate::settings_view::focused_playlist(*ui)
+            && let Some(id) = crate::screens::settings_view::focused_playlist(*ui)
         {
             InputOwner::SettingsPlaylist(id)
         } else {
@@ -596,7 +596,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
                 nav.consume(key);
                 drop(nav);
                 if pin {
-                    crate::parental_view::remote(ui, key);
+                    crate::screens::parental_view::remote(ui, key);
                 } else {
                     crate::chrome::remote_editor::capture(ui, key);
                 }

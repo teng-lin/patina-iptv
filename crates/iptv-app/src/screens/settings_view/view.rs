@@ -47,7 +47,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         state(ui, |s| {
             s.rows(&Ctx {
                 settings: &settings,
-                offer: &crate::settings_offer::offer_now,
+                offer: &crate::screens::settings_offer::offer_now,
             })
         })
         .unwrap_or_default()
@@ -68,7 +68,7 @@ fn screen(ui: Ui, size: Scale) -> impl IntoElement {
         let settings = crate::wiring::settings_wiring::read(ui);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings_offer::offer_now,
+            offer: &crate::screens::settings_offer::offer_now,
         };
         PAGES
             .iter()
@@ -149,8 +149,8 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
 
 fn hint(ui: Ui) -> &'static str {
     // A playlist's sheet over the page: its own keys.
-    if crate::playlists_view::task_open(ui) {
-        return crate::playlists_view::hint(ui);
+    if crate::library_ui::playlists_view::task_open(ui) {
+        return crate::library_ui::playlists_view::hint(ui);
     }
     if !ui.keys_shown() {
         return tr("Tap a page, then a setting to change it");
@@ -341,7 +341,7 @@ fn row_view(
     // Each binding reads the row once: a row that went answers one read.
     let note_of = move |row: Option<Row>| match row {
         Some(Row::Playlist(p)) => stored_playlist(ui, p.id)
-            .map(|p| crate::playlists_view::summary(ui, &p).0)
+            .map(|p| crate::library_ui::playlists_view::summary(ui, &p).0)
             .unwrap_or_default(),
         Some(r) => note(&crate::wiring::settings_wiring::read(ui), &r),
         None => String::new(),
@@ -511,10 +511,10 @@ fn row_view(
                             ui.touched();
                             if let Some(playlist) = playlist() {
                                 settings_guarded(ui, move || {
-                                    crate::playlists_view::open_only(
+                                    crate::library_ui::playlists_view::open_only(
                                         ui,
                                         crate::runtime::model::SourceId(playlist.id),
-                                        crate::playlists_view::Only::Delete,
+                                        crate::library_ui::playlists_view::Only::Delete,
                                     )
                                 });
                             }
@@ -534,7 +534,7 @@ fn footer(ui: Ui, size: Scale) -> impl IntoElement {
         ui.playback.pip.with(|p| p.supported);
         let ctx = Ctx {
             settings: &settings,
-            offer: &crate::settings_offer::offer_now,
+            offer: &crate::screens::settings_offer::offer_now,
         };
         state(ui, |s| match s.focused_row(&ctx) {
             Some(Row::Setting(st)) => tr(st.summary).replace('`', ""),

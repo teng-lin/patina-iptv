@@ -81,7 +81,7 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
         crate::playback::seek::key(ui, step, repeat);
     };
     match action {
-        Action::Record => crate::recordings_view::current(ui),
+        Action::Record => crate::screens::recordings_view::current(ui),
         Action::MoveLeft if buttons => ui.update_panels(|p, now| p.move_focus(-1, now)),
         Action::MoveRight if buttons => ui.update_panels(|p, now| p.move_focus(1, now)),
         Action::MoveUp | Action::MoveDown if buttons => {}
@@ -133,8 +133,8 @@ pub(crate) fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat
         Action::ChannelUp => zap(ui, -1),
         Action::ChannelDown => zap(ui, 1),
         Action::PreviousChannel => crate::playback::player::previous_channel(ui),
-        Action::ShowChannels => crate::channels_view::open(ui, ListMode::Overlay),
-        Action::ShowChannelsPreview => crate::channels_view::open(ui, ListMode::Preview),
+        Action::ShowChannels => crate::screens::channels_view::open(ui, ListMode::Overlay),
+        Action::ShowChannelsPreview => crate::screens::channels_view::open(ui, ListMode::Preview),
         Action::Stop => stop_playback(ui),
         Action::GoLive => crate::playback::player::go_live(ui),
         _ => return false,
@@ -167,7 +167,7 @@ pub(crate) fn stop_playback(ui: Ui) {
     crate::wiring::runtime_owner::runtime().next_cast_intent();
     crate::wiring::runtime_owner::runtime().cancel_pending_native_cast();
     if ui.cast.remote.get_untracked() {
-        crate::casting::stop(ui);
+        crate::screens::casting::stop(ui);
         return;
     }
     crate::playback::external_player::stop(ui);
@@ -247,7 +247,7 @@ pub fn press_quick(ui: Ui, action: QuickAction) {
         QuickAction::History => {
             crate::chrome::chooser::open(ui, crate::chrome::chooser::Kind::History)
         }
-        QuickAction::Channels => crate::channels_view::open(ui, ListMode::Overlay),
+        QuickAction::Channels => crate::screens::channels_view::open(ui, ListMode::Overlay),
         QuickAction::Favorite => press_control(ui, Control::Favorite),
         QuickAction::Multiview => press_control(ui, Control::Multiview),
         QuickAction::Controls => ui.update_panels(|p, now| p.show_controls(now)),
@@ -271,11 +271,11 @@ pub fn press_control(ui: Ui, control: Control) {
         return;
     }
     match control {
-        Control::Recordings => crate::recordings_view::open(ui),
-        Control::Record => crate::recordings_view::current(ui),
-        Control::Search => crate::search_view::open(ui),
+        Control::Recordings => crate::screens::recordings_view::open(ui),
+        Control::Record => crate::screens::recordings_view::current(ui),
+        Control::Search => crate::screens::search_view::open(ui),
         Control::Multiview => crate::playback::multiview::open(ui),
-        Control::ChannelList => crate::channels_view::open(ui, ListMode::Overlay),
+        Control::ChannelList => crate::screens::channels_view::open(ui, ListMode::Overlay),
         Control::Scaling => crate::chrome::chooser::open(ui, Kind::Picture),
         Control::SleepTimer => crate::chrome::chooser::open(ui, Kind::Sleep),
         Control::VideoTracks => crate::chrome::chooser::open(ui, Kind::Track(Track::Video)),

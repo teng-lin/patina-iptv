@@ -42,10 +42,10 @@ use crate::guide::{ProgramSelection, Schedule};
 use crate::runtime::Runtime;
 use crate::wiring::runtime_owner::runtime;
 use crate::{
-    Playback, Ui, ViewMode, guide::lists, parental_view, playback::browse_playback,
-    playback::external_player,
+    Playback, Ui, ViewMode, guide::lists, playback::browse_playback, playback::external_player,
+    screens::parental_view,
 };
-use crate::{playback::seek, recordings_view};
+use crate::{playback::seek, screens::recordings_view};
 
 mod recover;
 pub(crate) mod resume;
@@ -111,7 +111,7 @@ impl Ui {
             ));
             return;
         }
-        if playback != Playback::Live && crate::casting::local_blocked(*self) {
+        if playback != Playback::Live && crate::screens::casting::local_blocked(*self) {
             return;
         }
         external_player::cancel_pending(*self);
@@ -137,7 +137,7 @@ impl Ui {
         }
         if self.playback.player_surface == 0
             && playback == Playback::Live
-            && crate::casting::change(*self, channel)
+            && crate::screens::casting::change(*self, channel)
         {
             return;
         }
@@ -464,7 +464,7 @@ pub fn start(ui: &Ui, channel: usize) {
 pub(crate) fn set_paused(ui: Ui, paused: bool) {
     crate::playback::interruption::viewer_acted(ui);
     if ui.cast.remote.get_untracked() {
-        crate::casting::set_paused(ui, paused);
+        crate::screens::casting::set_paused(ui, paused);
     } else if !paused
         && crate::playback::on_demand::active(ui)
         && ui.playback.player.main().finished.get_untracked()
@@ -561,7 +561,7 @@ fn early_guide_blocked(early: &resume::Early) -> bool {
 pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
     if surface != 0
         && (!allow_guide_channel(channel)
-            || !crate::parental_view::allow_play(ui, channel, Playback::Live))
+            || !crate::screens::parental_view::allow_play(ui, channel, Playback::Live))
     {
         return false;
     }
@@ -569,7 +569,7 @@ pub fn start_surface(ui: Ui, surface: usize, channel: usize) -> bool {
         ui.play(channel, Playback::Live);
         return ui.playback.playing.get_untracked() == Some(channel);
     }
-    if !crate::recordings_view::reserve_viewing(ui, surface, channel, true) {
+    if !crate::screens::recordings_view::reserve_viewing(ui, surface, channel, true) {
         let previous = ui.playback.player.stream(surface).channel.get_untracked();
         ui.playback.multiview.update(|m| {
             if let Some(m) = m {
@@ -629,11 +629,11 @@ fn stop_current(ui: Ui, handoff: Option<&iptv_core::parental::Target>) {
 }
 
 pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource) {
-    if crate::casting::local_blocked(ui) {
+    if crate::screens::casting::local_blocked(ui) {
         return;
     }
     crate::playback::seek::cancel(ui);
-    crate::vod_view::flush(ui);
+    crate::screens::vod_view::flush(ui);
     ui.playback.player.vod.set(None);
     crate::playback::multiview::close(ui);
     cancel_resolve(0);
@@ -663,7 +663,7 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
 /// false) where the screen shows the player now, the preview behind a
 /// series' details for its next episode (#187).
 pub fn play_vod(ui: Ui, playing: iptv_core::vod::Playing, source: PlaySource, full_screen: bool) {
-    if crate::casting::local_blocked(ui) {
+    if crate::screens::casting::local_blocked(ui) {
         return;
     }
     crate::playback::interruption::viewer_acted(ui);
@@ -845,7 +845,7 @@ fn open(ui: Ui, surface: usize, session: u64) {
     }
 
     if let Some((channel, _)) = target(ui, surface)
-        && let Some(target) = crate::parental_view::live_target(ui, channel)
+        && let Some(target) = crate::screens::parental_view::live_target(ui, channel)
     {
         crate::wiring::tasks::spawn_in_app(async move {
             let owner = crate::wiring::runtime_owner::runtime();
@@ -960,7 +960,7 @@ fn open_allowed(ui: Ui, surface: usize, session: u64) {
         }
         return;
     };
-    if !crate::recordings_view::try_reserve_viewing(
+    if !crate::screens::recordings_view::try_reserve_viewing(
         surface,
         channel,
         matches!(playback, Playback::Live),
@@ -1098,7 +1098,7 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
     } else if let Some((channel, _)) = target(ui, surface) {
         crate::wiring::runtime_owner::schedule().channel_block(channel)
             == iptv_core::organization::Block::None
-            && crate::parental_view::live_target(ui, channel)
+            && crate::screens::parental_view::live_target(ui, channel)
                 .is_none_or(|t| owner.parental_allowed(&t))
     } else if let Some(early) = resume::source(ui) {
         !early_guide_blocked(&early)
@@ -1600,7 +1600,7 @@ pub fn source_ready(ui: Ui, refresh: bool) {
     // The guide's list follows only playback the parental lock admitted
     // (at once, or after its PIN): a canceled PIN leaves the guide as it
     // was.
-    crate::parental_view::admitted(ui, channel, move || {
+    crate::screens::parental_view::admitted(ui, channel, move || {
         ui.play(channel, Playback::Live);
         if ui.playback.playing.get_untracked() != Some(channel) {
             return;

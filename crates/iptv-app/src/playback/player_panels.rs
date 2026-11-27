@@ -71,7 +71,7 @@ fn label(ui: Ui, control: Control) -> String {
         Search => tr("Search").to_owned(),
         ChannelList => tr("Channels").to_owned(),
         Recordings => tr("Recordings").to_owned(),
-        Record => if crate::recordings_view::recording_active(ui) {
+        Record => if crate::screens::recordings_view::recording_active(ui) {
             tr("Stop recording")
         } else {
             tr("Record")
@@ -172,7 +172,7 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
         // `recordings_library`).
         Control::Record => {
             main && (crate::wiring::capabilities::record_now().offered()
-                || crate::recordings_view::recording_active(ui))
+                || crate::screens::recordings_view::recording_active(ui))
         }
         Control::Recordings => main && crate::wiring::capabilities::recordings_library(ui),
         Control::Search => main,
@@ -198,13 +198,13 @@ pub fn enabled(ui: Ui, control: Control) -> bool {
                     .screens
                     .recordings
                     .with(|s| s.busy || s.starting.is_some())
-                && (crate::recordings_view::recording_active(ui)
+                && (crate::screens::recordings_view::recording_active(ui)
                     || (crate::wiring::capabilities::record_now().offered()
                         && ui
                             .playback
                             .playing
                             .get()
-                            .is_some_and(crate::recordings_view::available)))
+                            .is_some_and(crate::screens::recordings_view::available)))
         }
         Control::Recordings => {
             ui.playback.player_surface == 0 && crate::wiring::capabilities::recordings_library(ui)
@@ -319,7 +319,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                         let size = crate::chrome::scale::Scale::new();
                         crate::chrome::ui_kit::card(ui, size, 620.0)
                             .child(crate::chrome::ui_kit::title(size, move || {
-                                if let Some(title) = crate::vod_view::title(ui) {
+                                if let Some(title) = crate::screens::vod_view::title(ui) {
                                     return title;
                                 }
                                 ui.playback.player.recorded.with(|r| {

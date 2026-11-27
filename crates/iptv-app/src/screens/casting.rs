@@ -94,7 +94,7 @@ mod projection_tests {
     }
 }
 
-pub(super) fn available(ui: Ui) -> bool {
+pub(crate) fn available(ui: Ui) -> bool {
     runtime().cast_available()
         && crate::wiring::device::host().form_factor != FormFactor::Tv
         && ui.playback.player_surface == 0
@@ -105,7 +105,7 @@ pub(super) fn available(ui: Ui) -> bool {
                 && ui.playback.playback.get() == Playback::Live))
 }
 
-pub(super) fn local_blocked(ui: Ui) -> bool {
+pub(crate) fn local_blocked(ui: Ui) -> bool {
     if ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked() {
         notify(tr("Stop casting before starting local playback."));
         true
@@ -114,7 +114,7 @@ pub(super) fn local_blocked(ui: Ui) -> bool {
     }
 }
 
-pub(super) fn open(ui: Ui) {
+pub(crate) fn open(ui: Ui) {
     discover(ui);
 }
 pub(super) fn discover(ui: Ui) {
@@ -144,14 +144,14 @@ pub(super) fn discover(ui: Ui) {
         }
     });
 }
-pub(super) fn destination_selected(value: &str) -> bool {
+pub(crate) fn destination_selected(value: &str) -> bool {
     match runtime().cast_target() {
         None => value == "local",
         Some((Target::Network(receiver), _)) => value == receiver.id,
         Some((Target::AirPlay, _)) => false, // Selection is shown by Apple's named-device picker.
     }
 }
-pub(super) fn play_here(ui: Ui) {
+pub(crate) fn play_here(ui: Ui) {
     if ui.cast.busy.get_untracked() {
         let owner = runtime();
         let ticket = if ui.cast.remote.get_untracked() {
@@ -171,7 +171,7 @@ pub(super) fn play_here(ui: Ui) {
         control(ui, Command::Stop, true);
     }
 }
-pub(super) fn select(ui: Ui, receiver: Receiver) {
+pub(crate) fn select(ui: Ui, receiver: Receiver) {
     if runtime().cast_target().is_some_and(
         |(target, _)| matches!(target, Target::Network(current) if current.id == receiver.id),
     ) {
@@ -182,7 +182,7 @@ pub(super) fn select(ui: Ui, receiver: Receiver) {
         start(ui, channel, Target::Network(receiver));
     }
 }
-pub(super) fn select_airplay(ui: Ui) {
+pub(crate) fn select_airplay(ui: Ui) {
     if runtime().native_cast_available()
         && !ui.cast.busy.get_untracked()
         && !runtime()
@@ -193,7 +193,7 @@ pub(super) fn select_airplay(ui: Ui) {
         start(ui, channel, Target::AirPlay);
     }
 }
-pub(super) fn change(ui: Ui, channel: usize) -> bool {
+pub(crate) fn change(ui: Ui, channel: usize) -> bool {
     if let Some((receiver, _)) = runtime().cast_target() {
         start(ui, channel, receiver);
         true
@@ -222,7 +222,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         crate::runtime::time::playback_clock(crate::guide::clock::wall_unix(), None),
     );
     let context = epg.shared_playback();
-    let Some(target) = crate::parental_view::live_target(ui, channel) else {
+    let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
         return;
     };
     let owner = runtime();
@@ -301,11 +301,11 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             // its relay. Preparing this connection does not bind the new relay.
             let prepared = if let Target::Network(network) = &receiver {
                 let grant = check().await?;
-                let pairing = crate::cast_pairing::prompt(ui, ticket);
+                let pairing = crate::screens::cast_pairing::prompt(ui, ticket);
                 let prepared = owner
                     .prepare_cast(ticket, network.clone(), source.clone(), grant, pairing)
                     .await;
-                crate::cast_pairing::close_for(ui, ticket);
+                crate::screens::cast_pairing::close_for(ui, ticket);
                 let prepared = prepared?;
                 check().await?;
                 Some(prepared)
@@ -386,7 +386,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 && current()
                 && let Target::Network(receiver) = receiver
             {
-                crate::cast_pairing::offer_forget(ui, ticket, receiver, e);
+                crate::screens::cast_pairing::offer_forget(ui, ticket, receiver, e);
             } else if !returning_local {
                 report(e);
             }
@@ -409,7 +409,8 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                     }
                     if transferred
                         && ui.playback.playing.get_untracked() == Some(ch)
-                        && crate::parental_view::live_target(ui, ch).as_ref() == Some(&target)
+                        && crate::screens::parental_view::live_target(ui, ch).as_ref()
+                            == Some(&target)
                     {
                         transferred = false;
                     }

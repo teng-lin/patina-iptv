@@ -54,8 +54,8 @@ iptv-runtime/src/native/app_updates/trust.rs	invalid trusted root version
 
 # The persisted fallback group name is also used to recognize the generated bucket.
 # CSS grid tracks for the wide and compact Search header.
-iptv-app/src/search_view/view.rs	auto minmax(0, 1fr) auto
-iptv-app/src/search_view/view.rs	minmax(0, 1fr) auto
+iptv-app/src/screens/search_view/view.rs	auto minmax(0, 1fr) auto
+iptv-app/src/screens/search_view/view.rs	minmax(0, 1fr) auto
 # Logical key name from the raw keyboard event.
 iptv-app/src/chrome/input/keys.rs	Escape
 # Privacy command returns a fixed localized failure at the shell, never this diagnostic.
@@ -86,8 +86,8 @@ iptv-presentation/src/library/epg_sources.rs	Rename
 iptv-presentation/src/library/guide_inspect.rs	Screen
 iptv-presentation/src/library/playlists.rs	Editing
 # Search build errors are logged; the screen uses translated Programs status labels.
-iptv-app/src/search_view/program_index.rs	Search guide is unavailable
-iptv-app/src/search_view/program_index.rs	Search source is unavailable
+iptv-app/src/screens/search_view/program_index.rs	Search guide is unavailable
+iptv-app/src/screens/search_view/program_index.rs	Search source is unavailable
 iptv-runtime/src/store_service/epg_repo.rs	search source changed while indexing
 # Guide identity diagnostics become typed failures in the import wizard;
 # guide edits log their error. Neither path displays the Display implementation.
@@ -298,24 +298,24 @@ iptv-app/src/chrome/desktop.rs	Patina
 iptv-app/src/main.rs	Patina
 iptv-app/src/chrome/startup_view.rs	Patina
 # What an edit or an effect is called in the log.
-iptv-app/src/epg_sources_view.rs	add (named {})
-iptv-app/src/epg_sources_view.rs	move {} by {step}
-iptv-app/src/epg_sources_view.rs	new link for {}
-iptv-app/src/epg_sources_view.rs	shift {} to {m} min
-iptv-app/src/guide_assign_view.rs	a guide channel
-iptv-app/src/guide_assign_view.rs	no guide
-iptv-app/src/playlists_view.rs	User-Agent of {}: set {}
-iptv-app/src/playlists_view.rs	custom groups {}
-iptv-app/src/playlists_view.rs	details of {}
-iptv-app/src/playlists_view.rs	guide sources of {}
-iptv-app/src/playlists_view.rs	movie and series import of {}
-iptv-app/src/playlists_view.rs	streams at once of {}
-iptv-app/src/playlists_view.rs	playlist order
-iptv-app/src/playlists_view.rs	playlist policy {}
-iptv-app/src/playlists_view.rs	reorder playlist {}
-iptv-app/src/playlists_view.rs	refresh all
-iptv-app/src/playlists_view.rs	show all playlists
-iptv-app/src/playlists_view.rs	try new details of {}
+iptv-app/src/library_ui/epg_sources_view.rs	add (named {})
+iptv-app/src/library_ui/epg_sources_view.rs	move {} by {step}
+iptv-app/src/library_ui/epg_sources_view.rs	new link for {}
+iptv-app/src/library_ui/epg_sources_view.rs	shift {} to {m} min
+iptv-app/src/library_ui/guide_assign_view.rs	a guide channel
+iptv-app/src/library_ui/guide_assign_view.rs	no guide
+iptv-app/src/library_ui/playlists_view.rs	User-Agent of {}: set {}
+iptv-app/src/library_ui/playlists_view.rs	custom groups {}
+iptv-app/src/library_ui/playlists_view.rs	details of {}
+iptv-app/src/library_ui/playlists_view.rs	guide sources of {}
+iptv-app/src/library_ui/playlists_view.rs	movie and series import of {}
+iptv-app/src/library_ui/playlists_view.rs	streams at once of {}
+iptv-app/src/library_ui/playlists_view.rs	playlist order
+iptv-app/src/library_ui/playlists_view.rs	playlist policy {}
+iptv-app/src/library_ui/playlists_view.rs	reorder playlist {}
+iptv-app/src/library_ui/playlists_view.rs	refresh all
+iptv-app/src/library_ui/playlists_view.rs	show all playlists
+iptv-app/src/library_ui/playlists_view.rs	try new details of {}
 # Internal store refusal classes: the shell logs the reason and presents a
 # translated generic edit failure; a superseded guide reply is never displayed.
 iptv-runtime/src/store_service/catalog_repo.rs	favorites use their ordered writer
@@ -361,9 +361,9 @@ iptv-app/src/chrome/input/keys.rs	Key
 iptv-app/src/chrome/input/keys.rs	Numpad
 
 # Inline recording action dispatch keys; labels are translated in rows.rs.
-iptv-app/src/recordings_view/rows.rs	Cancel recording
-iptv-app/src/recordings_view/rows.rs	Delete recording
-iptv-app/src/recordings_view/rows.rs	Stop recording
+iptv-app/src/screens/recordings_view/rows.rs	Cancel recording
+iptv-app/src/screens/recordings_view/rows.rs	Delete recording
+iptv-app/src/screens/recordings_view/rows.rs	Stop recording
 
 # Original SVG icon geometry.
 iptv-app/src/chrome/ui_kit/icons.rs	<path d='M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7'/>

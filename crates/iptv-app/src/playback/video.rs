@@ -125,7 +125,7 @@ pub fn layout_rect(ui: Ui, surface: usize) -> (f32, f32, f32, f32) {
     }
     let w = window();
     if ui.chrome.mode.get() != ViewMode::Guide {
-        crate::channels_view::preview_rect(ui, w.width.0, w.height.0)
+        crate::screens::channels_view::preview_rect(ui, w.width.0, w.height.0)
             .unwrap_or((0.0, 0.0, w.width.0, w.height.0))
     } else {
         crate::playback::panels::preview_rect()

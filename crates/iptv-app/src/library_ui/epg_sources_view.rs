@@ -69,7 +69,7 @@ fn screen(playlist: SourceId) -> Screen {
 pub fn close(ui: Ui) {
     if ui.screens.guide_sources.with_untracked(Option::is_some) {
         ui.screens.guide_sources.set(None);
-        if !crate::settings_view::is_open(ui) {
+        if !crate::screens::settings_view::is_open(ui) {
             crate::wiring::runtime_owner::runtime().parental_content_closed();
         }
         dismiss_keyboard();
@@ -147,11 +147,13 @@ fn perform(ui: Ui, playlist: SourceId, effect: Effect) {
             == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::parental_view::protected_settings(ui, move || perform(ui, playlist, effect));
+        crate::screens::parental_view::protected_settings(ui, move || {
+            perform(ui, playlist, effect)
+        });
         return;
     }
     match effect {
-        Effect::Inspect => crate::guide_inspect_view::open(ui, playlist),
+        Effect::Inspect => crate::library_ui::guide_inspect_view::open(ui, playlist),
         Effect::Edit(edit) => {
             log::info!("iptv guide sources of {}: {}", playlist.0, edit_name(&edit));
             crate::wiring::tasks::spawn_in_app(async move {

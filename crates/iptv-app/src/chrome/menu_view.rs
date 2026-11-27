@@ -9,7 +9,7 @@ pub use render::layer;
 pub(crate) use render::playlist_layer;
 
 use crate::chrome::i18n::{tr, trf};
-use crate::organization_view::{self, Kind};
+use crate::library_ui::organization_view::{self, Kind};
 use crate::runtime::model::SourceId;
 use iptv_core::guide::GroupName;
 use iptv_core::organization::{Block, BlockKind, GroupPreference, GroupPreferences};
@@ -169,7 +169,7 @@ fn open_program_at(ui: Ui, channel: usize, minute: i32, list: ListId, playing_co
         program_start: program.start,
     };
     let rows = program_rows(ui, origin, program, &list);
-    crate::recordings_view::remember(ui, origin);
+    crate::screens::recordings_view::remember(ui, origin);
     let target = Target::Program {
         channel: key,
         start: program.start,
@@ -184,13 +184,14 @@ fn program_rows(ui: Ui, origin: Origin, program: crate::guide::Program, list: &L
     let channel = origin.channel;
     let schedule = crate::wiring::runtime_owner::schedule();
     let scope = channel_scope(ui, list);
-    let recording = crate::recordings_view::channel_menu_action(ui, origin).map(|action| {
-        if action == MenuItem::RecordNow {
-            MenuItem::Record
-        } else {
-            action
-        }
-    });
+    let recording =
+        crate::screens::recordings_view::channel_menu_action(ui, origin).map(|action| {
+            if action == MenuItem::RecordNow {
+                MenuItem::Record
+            } else {
+                action
+            }
+        });
     let mut rows = program_menu(
         program,
         schedule.catchup_days(channel),
@@ -294,7 +295,7 @@ fn channel_rows(ui: Ui, origin: Origin, list: &ListId, current: bool) -> Vec<Row
     let scope = channel_scope(ui, list);
     let mut rows = channel_menu(
         current
-            .then(|| crate::recordings_view::channel_menu_action(ui, origin))
+            .then(|| crate::screens::recordings_view::channel_menu_action(ui, origin))
             .flatten(),
         new_window,
         |item| {
@@ -425,7 +426,7 @@ fn block_target(
 ) -> Option<iptv_core::parental::Target> {
     match item {
         MenuItem::BlockChannel | MenuItem::ProtectChannel => {
-            crate::parental_view::live_target(ui, channel?)
+            crate::screens::parental_view::live_target(ui, channel?)
         }
         MenuItem::BlockGroup | MenuItem::ProtectGroup => group_target(scope),
         _ => None,
@@ -501,7 +502,7 @@ fn channel_scope(ui: Ui, list: &ListId) -> Option<(SourceId, Kind)> {
 }
 
 fn open_channel_editor(ui: Ui, channel: usize, mode: Mode, scope: Option<(SourceId, Kind)>) {
-    let Some(target) = crate::parental_view::live_target(ui, channel) else {
+    let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
         return;
     };
     let scope = scope.filter(|(source, _)| source.0 == target.source);
@@ -535,10 +536,10 @@ pub fn open_group_options(ui: Ui, entry: usize) -> bool {
 }
 
 pub(crate) fn open_playlist_options(ui: Ui, id: SourceId) {
-    crate::playlists_view::open_only(
+    crate::library_ui::playlists_view::open_only(
         ui,
         id,
-        crate::playlists_view::Only::Actions {
+        crate::library_ui::playlists_view::Only::Actions {
             manual_order: crate::wiring::settings::playlists_by_hand(),
         },
     );
@@ -586,7 +587,11 @@ fn show_group_options(ui: Ui, list: ListId, entry: GroupMenuEntry) -> bool {
             return false;
         }
         crate::wiring::navigation::settings_guarded(ui, move || {
-            crate::playlists_view::open_only(ui, id, crate::playlists_view::Only::GuideActions)
+            crate::library_ui::playlists_view::open_only(
+                ui,
+                id,
+                crate::library_ui::playlists_view::Only::GuideActions,
+            )
         });
         return true;
     }
@@ -1113,9 +1118,9 @@ fn description(ui: Ui) -> impl IntoElement {
                                 ui.guide_data();
                                 let now = ui.guide.focus.with(|focus| focus.now);
                                 ui.playback.player_surface == 0
-                                    && crate::recordings_view::details_button()
+                                    && crate::screens::recordings_view::details_button()
                                     && ui.screens.description.get().is_some_and(|origin| {
-                                        crate::recordings_view::can_record_now(origin, now)
+                                        crate::screens::recordings_view::can_record_now(origin, now)
                                     })
                             },
                             move || {
@@ -1127,7 +1132,9 @@ fn description(ui: Ui) -> impl IntoElement {
                                     move || {
                                         if let Some(origin) = ui.screens.description.get_untracked()
                                         {
-                                            crate::recordings_view::record_details(ui, origin);
+                                            crate::screens::recordings_view::record_details(
+                                                ui, origin,
+                                            );
                                         }
                                     },
                                 )

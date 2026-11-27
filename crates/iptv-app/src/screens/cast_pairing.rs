@@ -89,7 +89,7 @@ fn forget(ui: Ui) {
             if result.is_err() {
                 crate::chrome::toast::notify(tr("Could not forget the AirPlay pairing."));
             }
-            crate::casting::finish_pending_stop(ui);
+            crate::screens::casting::finish_pending_stop(ui);
         }
     });
 }

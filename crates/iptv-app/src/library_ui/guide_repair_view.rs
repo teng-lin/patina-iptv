@@ -233,7 +233,7 @@ fn request_settings_pin(ui: Ui, retry: fn(Ui)) -> bool {
         == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed();
     if required {
-        crate::parental_view::protected_settings(ui, move || retry(ui));
+        crate::screens::parental_view::protected_settings(ui, move || retry(ui));
     }
     required
 }
@@ -424,7 +424,9 @@ fn error(error: &model::Error) -> &'static str {
         model::Error::PlanExpired | model::Error::PlanMissing | model::Error::WrongDigest => {
             tr("Guide evidence changed; inspect again")
         }
-        model::Error::Inspection(value) => crate::guide_inspect_view::error_text(value.clone()),
+        model::Error::Inspection(value) => {
+            crate::library_ui::guide_inspect_view::error_text(value.clone())
+        }
         model::Error::Canceled => tr("Canceled"),
         _ => tr("Guide changes could not be saved"),
     }

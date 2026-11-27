@@ -215,7 +215,7 @@ pub(crate) fn select(
             }
         }
     };
-    if let Some(target) = crate::parental_view::live_target(ui, channel) {
+    if let Some(target) = crate::screens::parental_view::live_target(ui, channel) {
         crate::wiring::navigation::request_if(ui, target, current, play);
     } else {
         // The built-in generated guide has no provider or protected target.

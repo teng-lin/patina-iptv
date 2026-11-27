@@ -80,7 +80,9 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
                     && t.id.starts_with("custom:")
             })
     {
-        crate::parental_view::protected_settings(ui, move || open_with(ui, source, members));
+        crate::screens::parental_view::protected_settings(ui, move || {
+            open_with(ui, source, members)
+        });
         return;
     }
     ui.screens.custom_groups.open(Open::new(source));
@@ -313,7 +315,7 @@ fn act(ui: Ui, index: usize) {
         if crate::wiring::runtime_owner::runtime().parental_explicitly_blocked(&target)
             && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
         {
-            crate::parental_view::protected_settings(ui, move || act(ui, index));
+            crate::screens::parental_view::protected_settings(ui, move || act(ui, index));
             return;
         }
     }
@@ -330,10 +332,10 @@ fn act(ui: Ui, index: usize) {
         Page::Detail(g) => match index {
             0 => show_members(ui, ChannelScope::Custom(g)),
             1 => begin_text(ui, Text::Rename(g)),
-            2 => crate::organization_view::open_mode(
+            2 => crate::library_ui::organization_view::open_mode(
                 ui,
                 s.source,
-                crate::organization_view::Kind::CustomChannels(g),
+                crate::library_ui::organization_view::Kind::CustomChannels(g),
                 None,
                 iptv_presentation::organization::Mode::Reorder,
             ),

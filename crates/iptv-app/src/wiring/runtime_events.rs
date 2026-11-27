@@ -11,7 +11,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
     match event {
         RuntimeEvent::ResumeChannel(channel) => {
             if ui.playback.playing.get_untracked().is_none() {
-                crate::parental_view::admitted(ui, channel, move || {
+                crate::screens::parental_view::admitted(ui, channel, move || {
                     ui.play(channel, crate::Playback::Live);
                     if ui.playback.playing.get_untracked() == Some(channel) {
                         crate::guide::lists::resumed(ui, channel);
@@ -26,7 +26,7 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
                 let _ = crate::wiring::runtime_owner::runtime()
                     .parental_refresh()
                     .await;
-                crate::parental_view::enforce(ui);
+                crate::screens::parental_view::enforce(ui);
             });
         }
         RuntimeEvent::EarlyResume { source, done } => {
@@ -36,7 +36,9 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             })
         }
         RuntimeEvent::Message(message) => crate::chrome::toast::notify(&message),
-        RuntimeEvent::SettingsSaveFailed(failure) => crate::settings_view::save_failed(failure),
+        RuntimeEvent::SettingsSaveFailed(failure) => {
+            crate::screens::settings_view::save_failed(failure)
+        }
         RuntimeEvent::BackupProgress(phase) => {
             log::debug!("iptv backup: {phase:?}");
             ui.app.settings.update(|version| *version += 1);
@@ -80,13 +82,13 @@ pub(crate) fn apply(ui: Ui, event: RuntimeEvent) {
             }
         }
         RuntimeEvent::ForgetSource(source) => crate::playback::player::forget_source(source),
-        RuntimeEvent::OpenPlaylists => crate::playlists_view::open(ui),
-        RuntimeEvent::ClosePlaylists => crate::playlists_view::close(ui),
-        RuntimeEvent::FirstRun => crate::wizard_view::open_first_run(ui),
+        RuntimeEvent::OpenPlaylists => crate::library_ui::playlists_view::open(ui),
+        RuntimeEvent::ClosePlaylists => crate::library_ui::playlists_view::close(ui),
+        RuntimeEvent::FirstRun => crate::library_ui::wizard_view::open_first_run(ui),
         RuntimeEvent::StoreStartupRecovered => crate::wiring::tasks::spawn_in_app(async move {
             // A failed initial read left recent searches unloaded. Reload
             // before unblocking input so a new search cannot overwrite them.
-            crate::search_view::refresh_saved_history(ui).await;
+            crate::screens::search_view::refresh_saved_history(ui).await;
             ui.chrome.store_startup_failure.set(None);
         }),
         RuntimeEvent::StoreStartupFailed { path, error } => {

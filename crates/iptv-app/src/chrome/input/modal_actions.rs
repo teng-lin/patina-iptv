@@ -9,27 +9,29 @@ pub(super) fn apply(ui: Ui, action: Action) -> bool {
         Some(Overlay::StoreStartupFailure) => {
             crate::chrome::startup_view::store_failure_key(ui, action)
         }
-        Some(Overlay::Vod) => crate::vod_view::key(ui, action),
-        Some(Overlay::Parental) => crate::parental_view::key(ui, action),
-        Some(Overlay::CastPairing) => crate::cast_pairing::key(ui, action),
-        Some(Overlay::RestoreReview) => crate::backup::key(ui, action),
-        Some(Overlay::Recordings) => crate::recordings_view::key(ui, action),
-        Some(Overlay::Wizard) => crate::wizard_view::key(ui, action),
-        Some(Overlay::GuideRepair) => crate::guide_repair_view::key(ui, action),
-        Some(Overlay::GuideInspection) => crate::guide_inspect_view::key(ui, action),
-        Some(Overlay::GuideSources) => crate::epg_sources_view::key(ui, action),
+        Some(Overlay::Vod) => crate::screens::vod_view::key(ui, action),
+        Some(Overlay::Parental) => crate::screens::parental_view::key(ui, action),
+        Some(Overlay::CastPairing) => crate::screens::cast_pairing::key(ui, action),
+        Some(Overlay::RestoreReview) => crate::library_ui::backup::key(ui, action),
+        Some(Overlay::Recordings) => crate::screens::recordings_view::key(ui, action),
+        Some(Overlay::Wizard) => crate::library_ui::wizard_view::key(ui, action),
+        Some(Overlay::GuideRepair) => crate::library_ui::guide_repair_view::key(ui, action),
+        Some(Overlay::GuideInspection) => crate::library_ui::guide_inspect_view::key(ui, action),
+        Some(Overlay::GuideSources) => crate::library_ui::epg_sources_view::key(ui, action),
         Some(Overlay::RemoteEditor) => crate::chrome::remote_editor::key(ui, action),
-        Some(Overlay::Organization) => crate::organization_view::key(ui, action),
-        Some(Overlay::CustomGroups) => crate::custom_groups::key(ui, action),
-        Some(Overlay::Playlists) => crate::playlists_view::key(ui, action),
-        Some(Overlay::AppUpdateNotice) => crate::settings_view::updates::notice_key(ui, action),
-        Some(Overlay::AppUpdate) => crate::settings_view::updates::key(ui, action),
-        Some(Overlay::Settings) => crate::settings_view::key(ui, action),
-        Some(Overlay::GuideAssign) => crate::guide_assign_view::key(ui, action),
+        Some(Overlay::Organization) => crate::library_ui::organization_view::key(ui, action),
+        Some(Overlay::CustomGroups) => crate::library_ui::custom_groups::key(ui, action),
+        Some(Overlay::Playlists) => crate::library_ui::playlists_view::key(ui, action),
+        Some(Overlay::AppUpdateNotice) => {
+            crate::screens::settings_view::updates::notice_key(ui, action)
+        }
+        Some(Overlay::AppUpdate) => crate::screens::settings_view::updates::key(ui, action),
+        Some(Overlay::Settings) => crate::screens::settings_view::key(ui, action),
+        Some(Overlay::GuideAssign) => crate::library_ui::guide_assign_view::key(ui, action),
         Some(Overlay::FavoritesEditor) => crate::guide::fav_editor::key(ui, action),
         Some(Overlay::ChannelPicker) => crate::playback::multiview_picker::key(ui, action),
-        Some(Overlay::ChannelList) => crate::channels_view::key(ui, action),
-        Some(Overlay::Search) => crate::search_view::key(ui, action),
+        Some(Overlay::ChannelList) => crate::screens::channels_view::key(ui, action),
+        Some(Overlay::Search) => crate::screens::search_view::key(ui, action),
         Some(Overlay::Chooser | Overlay::Leave) => chooser(ui, action, top == Some(Overlay::Leave)),
         Some(Overlay::Description) => description(ui, action),
         Some(Overlay::Menu | Overlay::PlaylistMenu) => menu(ui, action),
@@ -64,7 +66,7 @@ fn description(ui: Ui, action: Action) {
     if matches!(action, Action::Select | Action::Record)
         && let Some(origin) = ui.screens.description.get_untracked()
     {
-        crate::recordings_view::record_details(ui, origin);
+        crate::screens::recordings_view::record_details(ui, origin);
         return;
     }
     // Back (or Menu) closes program details.

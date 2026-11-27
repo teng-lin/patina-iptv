@@ -67,7 +67,7 @@ pub fn open(ui: Ui, channel: usize) {
             .map(|line| {
                 (
                     line.source.feed,
-                    crate::epg_sources_view::source_title(&line.source),
+                    crate::library_ui::epg_sources_view::source_title(&line.source),
                 )
             })
             .collect();

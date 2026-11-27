@@ -144,7 +144,7 @@ pub(crate) fn store_failure_key(ui: crate::Ui, action: iptv_nav::Action) {
 
 pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::IntoElement {
     use crate::chrome::i18n::tr;
-    use crate::{chrome::scale::Scale, chrome::ui_kit, setup_view};
+    use crate::{chrome::scale::Scale, chrome::ui_kit, library_ui::setup_view};
     use nsh_core::prelude::*;
 
     let size = Scale::new();

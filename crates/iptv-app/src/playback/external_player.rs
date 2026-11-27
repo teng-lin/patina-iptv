@@ -260,7 +260,7 @@ impl PreviousPlayback {
         if !crate::playback::player::allow_guide_channel(channel) {
             return;
         }
-        let Some(target) = crate::parental_view::live_target(ui, channel) else {
+        let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
             return;
         };
         if !pending.owner.parental_allowed(&target) {
@@ -360,7 +360,7 @@ fn open_from(
         return Outcome::Internal;
     }
     let owner = crate::wiring::runtime_owner::runtime();
-    let Some(target) = crate::parental_view::live_target(ui, channel) else {
+    let Some(target) = crate::screens::parental_view::live_target(ui, channel) else {
         return if choice.is_some() {
             Outcome::Handled
         } else {

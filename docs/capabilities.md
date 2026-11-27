@@ -173,7 +173,7 @@ free space for the requested length at 8 Mbit/s
 ([`check_space`](../crates/iptv-core/src/recording.rs)), then a free provider
 connection; a refusal says why. As it starts, the viewer is told what will stop
 it ([`record_now_notices`](../crates/iptv-presentation/src/capabilities.rs),
-[`capture_limits.rs`](../crates/iptv-app/src/capture_limits.rs)):
+[`capture_limits.rs`](../crates/iptv-app/src/screens/capture_limits.rs)):
 
 | Host | Signal | Told at start | When it happens |
 | --- | --- | --- | --- |

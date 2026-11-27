@@ -148,7 +148,7 @@ pub fn open(ui: Ui) {
     if !is_open(ui) {
         // A document picker may have been installed or removed since the
         // host last said which resolve (the backup rows follow).
-        crate::backup::probe_pickers();
+        crate::library_ui::backup::probe_pickers();
         let mut screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
         screen.set_playlists(playlist_rows());
         ui.screens.settings_screen.set(Some(screen));
@@ -270,7 +270,7 @@ fn with_ctx<R>(f: impl FnOnce(&Ctx) -> R) -> R {
     let settings = crate::wiring::settings::get();
     f(&Ctx {
         settings: &settings,
-        offer: &crate::settings_offer::offer_now,
+        offer: &crate::screens::settings_offer::offer_now,
     })
 }
 
@@ -298,7 +298,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
                 && (!crate::wiring::runtime_owner::runtime().parental_has_pin()
                     || !crate::wiring::runtime_owner::runtime().parental_settings_allowed())
             {
-                crate::parental_view::protected_settings(ui, move || store(key, value));
+                crate::screens::parental_view::protected_settings(ui, move || store(key, value));
             } else {
                 store(key, value);
             }
@@ -357,7 +357,7 @@ fn run(ui: Ui, key: &'static str) {
             == "blocked_content_and_settings"
         && !crate::wiring::runtime_owner::runtime().parental_settings_allowed()
     {
-        crate::parental_view::protected_settings(ui, move || run(ui, key));
+        crate::screens::parental_view::protected_settings(ui, move || run(ui, key));
         return;
     }
     match key {
@@ -378,8 +378,8 @@ fn run(ui: Ui, key: &'static str) {
                 }
             });
         }
-        "search.clear_history" => crate::search_view::clear_history(ui),
-        "parental.change_pin" => crate::parental_view::change_pin(ui),
+        "search.clear_history" => crate::screens::search_view::clear_history(ui),
+        "parental.change_pin" => crate::screens::parental_view::change_pin(ui),
         "general.check_updates" => updates::run(ui),
         "about.privacy_policy" => {
             let opened = open_url(PRIVACY_POLICY_URL);
@@ -392,9 +392,9 @@ fn run(ui: Ui, key: &'static str) {
         "general.backup" => request(
             ui,
             iptv_core::parental::Target::settings(),
-            crate::backup::export_ui,
+            crate::library_ui::backup::export_ui,
         ),
-        "general.restore" => crate::backup::request_restore(ui),
+        "general.restore" => crate::library_ui::backup::request_restore(ui),
         "epg.update_now" => {
             if stored::update_now(&crate::wiring::runtime_owner::runtime(), move || {
                 refresh(ui)
@@ -444,7 +444,7 @@ fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
 fn status(settings: &Settings, row: &Row) -> Status {
     Ctx {
         settings,
-        offer: &crate::settings_offer::offer_now,
+        offer: &crate::screens::settings_offer::offer_now,
     }
     .status(row)
 }
@@ -584,7 +584,7 @@ mod tests {
             page,
             &Ctx {
                 settings,
-                offer: &crate::settings_offer::offer_now,
+                offer: &crate::screens::settings_offer::offer_now,
             },
         )
         .into_iter()
@@ -632,7 +632,7 @@ mod tests {
     #[test]
     fn no_wired_setting_is_switched_off_by_another() {
         use iptv_settings::schema::Effect as DependencyEffect;
-        for key in crate::settings_offer::WIRED {
+        for key in crate::screens::settings_offer::WIRED {
             let s = catalog::setting(key).unwrap();
             assert!(
                 s.depends

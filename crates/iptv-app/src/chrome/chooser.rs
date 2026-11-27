@@ -323,7 +323,7 @@ pub fn close(ui: Ui) {
             .chooser
             .with_untracked(|open| open.as_ref().is_some_and(|open| open.kind == Kind::AirPlay))
     {
-        crate::casting::play_here(ui);
+        crate::screens::casting::play_here(ui);
     }
     ui.screens.chooser.set(None);
 }
@@ -357,7 +357,7 @@ pub fn pick(ui: Ui, index: usize) {
     };
     let value = open.values.get(index).cloned().unwrap_or_default();
     if open.kind == Kind::Cast && value == "local" && ui.cast.busy.get_untracked() {
-        crate::casting::play_here(ui);
+        crate::screens::casting::play_here(ui);
         return;
     }
     close(ui);
@@ -399,11 +399,11 @@ pub fn pick(ui: Ui, index: usize) {
         }
         Kind::Cast => {
             if value == "local" {
-                crate::casting::play_here(ui);
+                crate::screens::casting::play_here(ui);
                 return;
             }
             if value == "native" {
-                crate::casting::select_airplay(ui);
+                crate::screens::casting::select_airplay(ui);
                 return;
             }
             if let Some(receiver) = open
@@ -411,12 +411,12 @@ pub fn pick(ui: Ui, index: usize) {
                 .into_iter()
                 .find(|receiver| receiver.id == value)
             {
-                crate::casting::select(ui, receiver);
+                crate::screens::casting::select(ui, receiver);
             }
         }
         Kind::AirPlay => {
             if !ui.cast.busy.get_untracked() {
-                crate::casting::play_here(ui);
+                crate::screens::casting::play_here(ui);
             }
         }
         Kind::CastEnded => {

@@ -71,13 +71,14 @@ pub(super) fn cell(
     let show_logo = move || show_channel_logos(ui);
     let logo = move || channel_logo(ui, channel.get());
     let is_selected = move || {
-        if crate::organization_view::guide_order_open(ui) {
+        if crate::library_ui::organization_view::guide_order_open(ui) {
             editing.get() == Some(true)
         } else {
             ui.guide.focus.with(|f| f.channel == at.index())
         }
     };
-    let grips = move || crate::organization_view::guide_order_open(ui) && ui.drag_editing();
+    let grips =
+        move || crate::library_ui::organization_view::guide_order_open(ui) && ui.drag_editing();
     view()
         .accessible(true)
         .label(move || {
@@ -85,7 +86,7 @@ pub(super) fn cell(
             channel.get().map(channel_name).unwrap_or_default()
         })
         .on_long_press(move || {
-            if crate::organization_view::guide_order_open(ui) {
+            if crate::library_ui::organization_view::guide_order_open(ui) {
                 return;
             }
             if let Some(ch) = channel.get() {
@@ -95,14 +96,14 @@ pub(super) fn cell(
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
             // Every desktop: the menu itself leaves out what a platform
             // lacks (Open in new window is Linux and macOS only).
-            if !crate::organization_view::guide_order_open(ui)
+            if !crate::library_ui::organization_view::guide_order_open(ui)
                 && let Some(ch) = channel.get()
             {
                 crate::chrome::menu_view::open_at(ui, ch);
             }
         })
         .role(move || {
-            if crate::organization_view::guide_order_open(ui) {
+            if crate::library_ui::organization_view::guide_order_open(ui) {
                 AccessibilityRole::Row
             } else {
                 AccessibilityRole::Button
@@ -127,7 +128,7 @@ pub(super) fn cell(
         .gap(move || size.px(GAP))
         .on_press(move || {
             ui.touched();
-            if crate::organization_view::guide_order_open(ui)
+            if crate::library_ui::organization_view::guide_order_open(ui)
                 || crate::guide::grid::closed_columns(ui)
             {
                 return;
@@ -191,7 +192,9 @@ pub(super) fn cell(
                     name_width(column(), number_w.get(), playing(), scale)
                         + if show_logo() { 0.0 } else { size.whole(LOGO_W) }
                         - if grips() {
-                            size.whole(crate::organization_view::reorder_drag::GRIP_COLUMN)
+                            size.whole(
+                                crate::library_ui::organization_view::reorder_drag::GRIP_COLUMN,
+                            )
                         } else {
                             0.0
                         },
@@ -218,11 +221,17 @@ pub(super) fn cell(
                 .right(px(0.0))
                 .top(px(0.0))
                 .bottom(px(0.0))
-                .w(move || size.px(crate::organization_view::reorder_drag::GRIP_COLUMN))
+                .w(
+                    move || {
+                        size.px(crate::library_ui::organization_view::reorder_drag::GRIP_COLUMN)
+                    },
+                )
                 .items_center()
                 .justify_center()
                 .cursor(Cursor::Grab)
-                .child(crate::organization_view::reorder_drag::grip(size))
+                .child(crate::library_ui::organization_view::reorder_drag::grip(
+                    size,
+                ))
         }))
 }
 

@@ -302,7 +302,7 @@ fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
                         tr("Multiview")
                     } else if ui.playback.player.recorded.with(Option::is_some) {
                         tr("Recordings")
-                    } else if let Some(kind) = crate::vod_view::returns_to(ui) {
+                    } else if let Some(kind) = crate::screens::vod_view::returns_to(ui) {
                         if kind == iptv_core::vod::Kind::Movie {
                             tr("Movies")
                         } else {
@@ -570,8 +570,8 @@ fn bar_now(ui: Ui) -> impl IntoElement {
 /// An icon button shared by touch, pointer and D-pad. Admission and actions
 /// are resolved from the same stable identity on every input path.
 fn button(ui: Ui, control: Control, size: f32) -> View {
-    if control == Control::Cast && crate::airplay::direct() {
-        return crate::airplay::button(ui, size, control_id(control));
+    if control == Control::Cast && crate::screens::airplay::direct() {
+        return crate::screens::airplay::button(ui, size, control_id(control));
     }
     let target_window = matches!(control, Control::More | Control::Fullscreen)
         .then(nsh_core::element::desktop::current_window);
@@ -597,7 +597,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
                 } else {
                     Checked::True
                 }),
-                Control::Record => Some(if crate::recordings_view::recording_active(ui) {
+                Control::Record => Some(if crate::screens::recordings_view::recording_active(ui) {
                     Checked::True
                 } else {
                     Checked::False
@@ -638,7 +638,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
                 .text_color(move || {
                     tint(
                         if control == Control::Record
-                            && crate::recordings_view::recording_active(ui)
+                            && crate::screens::recordings_view::recording_active(ui)
                         {
                             crate::theme::RECORDING
                         } else {
@@ -750,9 +750,9 @@ fn enabled(ui: Ui, control: Control) -> bool {
         Control::Multiview => {
             !ui.cast.remote.get() && crate::playback::multiview::availability(ui).available()
         }
-        Control::Cast => crate::casting::available(ui),
+        Control::Cast => crate::screens::casting::available(ui),
         Control::Pip => !ui.cast.remote.get() && crate::playback::pip::can_enter(ui),
-        Control::PlayPause => crate::casting::supports(
+        Control::PlayPause => crate::screens::casting::supports(
             ui,
             if ui.playback.paused.get() {
                 Command::Play
@@ -760,8 +760,10 @@ fn enabled(ui: Ui, control: Control) -> bool {
                 Command::Pause
             },
         ),
-        Control::Mute => crate::casting::supports(ui, Command::ToggleMute),
-        Control::Volume => desktop_controls() && crate::casting::supports(ui, Command::Volume(0)),
+        Control::Mute => crate::screens::casting::supports(ui, Command::ToggleMute),
+        Control::Volume => {
+            desktop_controls() && crate::screens::casting::supports(ui, Command::Volume(0))
+        }
         Control::Fullscreen => desktop_controls(),
         Control::Listen => crate::wiring::listen::choice(ui) && !crate::wiring::listen::heard(ui),
         _ => true,
@@ -846,7 +848,7 @@ pub(crate) fn activate(
             );
         }
         Control::PlayPause => crate::playback::player::toggle_pause(ui),
-        Control::Record => crate::recordings_view::toggle_current(ui),
+        Control::Record => crate::screens::recordings_view::toggle_current(ui),
         Control::Favorite => {
             if let Some(ch) = ui.playback.playing.get_untracked() {
                 crate::guide::favorites::toggle(ui, ch);
@@ -860,20 +862,20 @@ pub(crate) fn activate(
         Control::Details => details(ui),
         Control::Picture => chooser::open(ui, Kind::Picture),
         Control::Channels => {
-            crate::channels_view::open(ui, ListMode::Overlay);
+            crate::screens::channels_view::open(ui, ListMode::Overlay);
             ui.playback.play_bar.update(PlayBar::hide);
         }
         Control::Multiview => {
             ui.playback.play_bar.update(PlayBar::hide);
             crate::playback::multiview::open(ui);
         }
-        Control::Cast => crate::casting::open(ui),
+        Control::Cast => crate::screens::casting::open(ui),
         Control::Pip => {
             ui.playback.play_bar.update(PlayBar::hide);
             crate::playback::pip::enter(ui);
         }
         Control::Guide => crate::playback::player_keys::press_quick(ui, QuickAction::Guide),
-        Control::Search => crate::search_view::open(ui),
+        Control::Search => crate::screens::search_view::open(ui),
         Control::Fullscreen => {
             let Some(window) = target_window else {
                 return;
@@ -1067,7 +1069,9 @@ fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRe
 
 pub(crate) fn label(ui: Ui, c: Control) -> &'static str {
     match c {
-        Control::Record if crate::recordings_view::recording_active(ui) => tr("Stop recording"),
+        Control::Record if crate::screens::recordings_view::recording_active(ui) => {
+            tr("Stop recording")
+        }
         Control::Multiview if crate::playback::multiview::detour(ui) => tr("Back to multiview"),
         Control::PlayPause if play_again(ui) => tr("Play again"),
         _ => tr(control_label(c)),
@@ -1110,7 +1114,7 @@ fn volume(ui: Ui) -> View {
 /// Open details for the programme currently on the bar.
 fn details(ui: Ui) {
     let (channel, p) = untracked(|| progress::program(ui));
-    crate::recordings_view::remember(
+    crate::screens::recordings_view::remember(
         ui,
         Origin {
             channel,

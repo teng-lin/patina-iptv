@@ -246,7 +246,9 @@ fn details(ui: Ui, program: Memo<Focused>, size: Scale) -> impl IntoElement {
     });
     let menu_label = computed(|| tr("More options").to_owned());
     let open_program_menu = move || {
-        if program.with(Option::is_some) && !crate::organization_view::inline_order_open(ui) {
+        if program.with(Option::is_some)
+            && !crate::library_ui::organization_view::inline_order_open(ui)
+        {
             ui.touched();
             crate::chrome::menu_view::open(ui);
         }
@@ -414,7 +416,7 @@ fn key_stats(ui: Ui) -> Option<Text> {
         .right(px(PREVIEW_MARGIN))
         .pointer_events(PointerEvents::None)
         .opacity(move || {
-            if crate::organization_view::inline_order_open(ui) {
+            if crate::library_ui::organization_view::inline_order_open(ui) {
                 0.0_f32
             } else {
                 1.0_f32
@@ -460,7 +462,9 @@ pub fn header(ui: Ui) -> impl IntoElement {
     view()
         .test_id("guide-header")
         .pt_safe_area()
-        .accessibility_elements_hidden(move || crate::organization_view::guide_order_open(ui))
+        .accessibility_elements_hidden(move || {
+            crate::library_ui::organization_view::guide_order_open(ui)
+        })
         .pointer_events(move || crate::guide_chrome_pointer_events(ui))
         .bg(move || ui.surface(ui.app.theme.with(|t| t.background.window)))
         .child(

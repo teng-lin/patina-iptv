@@ -48,12 +48,12 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
     ("host/backup_documents.rs", "REQUEST"),        // Android document picker signal.
     ("host/backup_documents.rs", "ANSWER"),         // Android document picker callback.
-    ("capture_limits.rs", "REPORTED"),              // The host's report of what can stop a capture.
+    ("screens/capture_limits.rs", "REPORTED"),      // The host's report of what can stop a capture.
     ("host/native/keep_awake.rs", "HELD"),          // The OS idle-sleep hold while a capture runs.
     ("host/native/keep_awake.rs", "FAILED"),        // That hold failed, for the start notice.
     ("host/backup_documents.rs", "PROBE"),          // Android document picker probe request.
-    ("backup.rs", "PICKERS"),                       // The document pickers the host reported.
-    ("backup.rs", "PICKERS_FOR_TEST"),              // Synthetic picker injection (headless tests).
+    ("library_ui/backup.rs", "PICKERS"),            // The document pickers the host reported.
+    ("library_ui/backup.rs", "PICKERS_FOR_TEST"),   // Synthetic picker injection (headless tests).
     ("chrome/content_image.rs", "CACHE"),           // Artwork cache.
     ("chrome/content_image.rs", "PERMITS"),         // Artwork concurrency limit.
     ("chrome/content_image.rs", "CLIENT"),          // Artwork transport cache.
@@ -95,8 +95,8 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("playback/seek.rs", "HOLD"),                      // Held-key gesture state.
     ("wiring/settings.rs", "REVISION"),                // Reactive settings subscription handle.
     ("playback/pip.rs", "PIP_SUPPORTED"), // The host's picture-in-picture report, for the settings offer.
-    ("settings_view.rs", "PAGES"),        // Immutable screen definitions.
-    ("settings_view.rs", "LAST"),         // Last selected settings tab.
+    ("screens/settings_view.rs", "PAGES"), // Immutable screen definitions.
+    ("screens/settings_view.rs", "LAST"), // Last selected settings tab.
     ("chrome/toast.rs", "NOTICE"),        // Toast signal handle.
     ("host/native/simulator_entitlements.rs", "ENTITLEMENTS"), // Immutable iOS simulator plist section.
     ("chrome/startup.rs", "MARKED"),                           // Startup phase instrumentation.

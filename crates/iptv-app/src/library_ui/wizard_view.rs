@@ -26,7 +26,7 @@ use crate::chrome::scale::Scale;
 use crate::chrome::ui_kit::icons::{self, Icon};
 use crate::chrome::ui_kit::{self, ERROR};
 use crate::guide::list_rows::Mark;
-use crate::setup_view;
+use crate::library_ui::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS, RESTING_ALPHA};
 use crate::wiring::data::{self, Job, Purpose, Update};
 use crate::{Ui, tint};
@@ -74,7 +74,7 @@ pub fn open_first_run(ui: Ui) {
     }
     open_with(
         ui,
-        Wizard::first_run().with_restore(crate::backup::available()),
+        Wizard::first_run().with_restore(crate::library_ui::backup::available()),
     );
 }
 
@@ -165,7 +165,7 @@ fn prefill(ui: Ui) {
 
 fn perform(ui: Ui, effect: WizardEffect) {
     match effect {
-        WizardEffect::RestoreBackup => crate::backup::request_restore(ui),
+        WizardEffect::RestoreBackup => crate::library_ui::backup::request_restore(ui),
         WizardEffect::EditField { field } => entry::begin(ui, field),
         WizardEffect::ReadClipboard { field } => crate::wiring::tasks::spawn_in_app(async move {
             let text = clipboard_string().await;
@@ -236,8 +236,8 @@ fn perform(ui: Ui, effect: WizardEffect) {
             if let WizardExit::Added { .. } = exit {
                 // Added from the playlists or settings screen: "Watch"
                 // goes to the guide.
-                crate::playlists_view::close(ui);
-                crate::settings_view::close(ui);
+                crate::library_ui::playlists_view::close(ui);
+                crate::screens::settings_view::close(ui);
             }
             ui.screens.wizard.set(None);
         }

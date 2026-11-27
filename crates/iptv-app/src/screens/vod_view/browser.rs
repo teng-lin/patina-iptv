@@ -34,7 +34,7 @@ pub(super) fn activate_navigation(ui: Ui) {
         }
         Destination::Recordings => {
             close(ui);
-            crate::recordings_view::open(ui);
+            crate::screens::recordings_view::open(ui);
         }
     }
 }

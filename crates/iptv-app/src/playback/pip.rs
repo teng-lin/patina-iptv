@@ -250,7 +250,7 @@ fn entered(ui: Ui) {
     crate::chrome::chooser::close(ui);
     crate::chrome::menu_view::close(ui);
     if ui.playback.channels.with_untracked(Option::is_some) {
-        crate::channels_view::close(ui);
+        crate::screens::channels_view::close(ui);
     }
     // The grid leaves to its active tile; a tile watched full screen ends
     // the session (its hidden tiles stop).

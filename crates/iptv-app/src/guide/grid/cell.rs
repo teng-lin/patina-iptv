@@ -145,7 +145,7 @@ pub(super) fn cell(
         match (channel.get(), program()) {
             (Some(ch), Some(p)) => format!(
                 "{}{}",
-                crate::recordings_view::badge(ui, ch, p),
+                crate::screens::recordings_view::badge(ui, ch, p),
                 crate::guide::listing_labels::listing(
                     crate::wiring::runtime_owner::schedule().listing(ch, p)
                 )

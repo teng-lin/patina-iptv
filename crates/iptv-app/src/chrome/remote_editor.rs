@@ -6,7 +6,7 @@
 use crate::chrome::i18n::{tr, trf};
 
 use crate::chrome::scale::Scale;
-use crate::settings_view::remote_keys::{action_name, context_name, editable, key_name};
+use crate::screens::settings_view::remote_keys::{action_name, context_name, editable, key_name};
 use crate::{Ui, chrome::ui_kit, wiring::settings};
 use iptv_nav::remap::{self, Confirm, Editor, FIELDS, Field};
 use iptv_nav::{Action, Binding, Context, Keymap, Press, RemoteKey};

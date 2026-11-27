@@ -14,7 +14,7 @@ use crate::chrome::overlays::Overlay;
 use crate::chrome::scale::Scale;
 use crate::chrome::ui_kit::icons::{self, Icon};
 use crate::chrome::ui_kit::{self, FocusScroll};
-use crate::setup_view;
+use crate::library_ui::setup_view;
 use crate::theme::{LIST_TEXT, RADIUS};
 
 #[derive(Clone, Copy, PartialEq, Eq)]

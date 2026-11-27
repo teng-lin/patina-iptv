@@ -37,7 +37,7 @@ pub(crate) fn request_if(
                 } else {
                     Phase::New
                 };
-                crate::parental_view::show(ui, target, phase, done);
+                crate::screens::parental_view::show(ui, target, phase, done);
             }
             Err(_) => crate::chrome::toast::notify(crate::chrome::i18n::tr(
                 "Parental settings are unavailable",
@@ -52,7 +52,7 @@ pub(crate) fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
         == "blocked_content_and_settings"
         && !crate::runtime().parental_settings_allowed()
     {
-        crate::parental_view::protected_settings(ui, then);
+        crate::screens::parental_view::protected_settings(ui, then);
     } else {
         then();
     }
@@ -62,27 +62,27 @@ pub(crate) fn settings_guarded(ui: Ui, then: impl FnOnce() + 'static) {
 // picker when no source is currently selected.
 pub(crate) fn guide_sources(ui: Ui, playlist: Option<SourceId>) {
     if let Some(playlist) = playlist {
-        crate::epg_sources_view::open(ui, playlist);
+        crate::library_ui::epg_sources_view::open(ui, playlist);
     } else {
-        crate::playlists_view::open(ui);
+        crate::library_ui::playlists_view::open(ui);
     }
 }
 
 pub(crate) fn add_playlist(ui: Ui) {
     if crate::runtime().parental_has_pin() && !crate::runtime().parental_settings_allowed() {
         request(ui, Target::settings(), move || {
-            crate::wizard_view::open_add(ui)
+            crate::library_ui::wizard_view::open_add(ui)
         });
     } else {
-        crate::wizard_view::open_add(ui);
+        crate::library_ui::wizard_view::open_add(ui);
     }
 }
 
 /// Opens the playlist manager above the Settings screen.
 pub(crate) fn manage_playlists(ui: Ui) {
-    crate::playlists_view::choose_for_management(ui);
+    crate::library_ui::playlists_view::choose_for_management(ui);
 }
 
 pub(crate) fn reorder_playlists(ui: Ui) {
-    crate::organization_view::open_playlist_reorder(ui, None);
+    crate::library_ui::organization_view::open_playlist_reorder(ui, None);
 }

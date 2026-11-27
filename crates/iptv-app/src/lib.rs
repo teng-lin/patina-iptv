@@ -12,127 +12,71 @@ mod airplay_probe;
 #[cfg(patina_airplay_probe)]
 pub use airplay_probe::AirPlayProbe;
 
-pub use host::set_tui_mode;
-
+mod chrome;
 /// Guide values and navigation used by the shell.
 pub mod guide;
-#[cfg(feature = "test-support")]
-use wiring::guide_window_walkthrough;
-mod playback;
-pub mod theme;
-
-mod airplay;
-
-mod backup;
-/// The document pickers a device has, and the ones headless apps get.
-#[cfg(feature = "test-support")]
-pub use backup::{Pickers, set_pickers_for_test};
-use playback::browse_playback;
-
-mod capture_limits;
-mod cast_pairing;
-mod casting;
-mod channels_view;
-use chrome::chooser;
-
-mod custom_groups;
-use chrome::desktop;
-use wiring::data;
-
-use wiring::device_wiring;
-mod epg_sources_view;
-use chrome::exit_confirmation;
-use chrome::fonts;
-use guide::fav_editor;
-use guide::favorites;
-use guide::grid;
-use playback::external_player;
-mod guide_assign_view;
-use guide::guide_clock;
-mod guide_inspect_view;
-mod guide_repair_view;
-use guide::header;
-mod chrome;
 mod host;
+mod library_ui;
+mod playback;
+mod screens;
+pub mod theme;
 mod wiring;
-pub use chrome::layout;
 
-pub use guide::timeline;
+use chrome::{
+    chooser, desktop, exit_confirmation, fonts, i18n, input, keyboard, menu_view, mode, overlays,
+    rail, remote_editor, scale, startup_view, toast, ui_kit,
+};
+use guide::{fav_editor, favorites, grid, guide_clock, header, lists};
+use iptv_runtime as runtime;
+use library_ui::{
+    backup, custom_groups, epg_sources_view, guide_assign_view, guide_inspect_view,
+    guide_repair_view, organization_view, playlists_view, wizard_view,
+};
+use playback::{
+    browse_playback, external_player, interruption, media, multiview, multiview_picker,
+    multiview_view, panels, pip, play_bar, player, player_panels, touch_zap, video,
+};
+use runtime_owner::runtime;
+use screens::{
+    cast_pairing, casting, channels_view, parental_view, recordings_view, search_view,
+    settings_view, vod_view,
+};
+use wiring::{
+    data, device_wiring, request_ui, runtime_owner, runtime_wiring, settings, settings_wiring,
+};
+#[cfg(feature = "test-support")]
+use wiring::{guide_window_walkthrough, performance_probe};
+
+pub use chrome::{layout, startup};
+pub use guide::{header::debug_overlay, timeline};
+pub use host::set_tui_mode;
 // A browser host exports nothing: the glob is empty there.
-use chrome::i18n;
-use chrome::input;
-use chrome::keyboard;
+#[cfg(feature = "test-support")]
+pub use chrome::i18n::pseudo_fixed_for_test;
+/// Whether a keyboard binding fires on auto-repeats now (headless tests).
+#[cfg(feature = "test-support")]
+pub use chrome::input::keyboard_repeats;
+/// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
+#[cfg(feature = "test-support")]
+pub use chrome::input::use_remote_key_phases;
 #[allow(unused_imports)]
 #[doc(inline)]
 pub use host::exports::*;
+/// The document pickers a device has, and the ones headless apps get.
 #[cfg(feature = "test-support")]
-pub use i18n::pseudo_fixed_for_test;
-/// Whether a keyboard binding fires on auto-repeats now (headless tests).
-#[cfg(feature = "test-support")]
-pub use input::keyboard_repeats;
-/// Take keys as an Android remote's raw Down/Repeat/Up phases (headless tests).
-#[cfg(feature = "test-support")]
-pub use input::use_remote_key_phases;
-use playback::interruption;
+pub use library_ui::backup::{Pickers, set_pickers_for_test};
+#[doc(hidden)]
+pub use playback::video::has_source as player_has_source;
+#[doc(hidden)]
+pub use playback::video::opens as player_opens;
+pub use time::clock;
+pub use wiring::runtime_owner::schedule;
 
-use chrome::menu_view;
-use chrome::mode;
-use guide::lists;
-use playback::media;
-pub(crate) mod parental_view;
-#[cfg(feature = "test-support")]
-use wiring::performance_probe;
-mod recordings_view;
-mod vod_view;
-use iptv_runtime as runtime;
-use playback::multiview;
-use playback::multiview_picker;
-use playback::multiview_view;
-
-mod organization_view;
-use chrome::overlays;
-use playback::panels;
-use playback::pip;
-use playback::play_bar;
-use playback::player;
-
-use playback::player_panels;
-mod playlists_view;
-use chrome::rail;
-use chrome::remote_editor;
-use wiring::request_ui;
-
-use chrome::scale;
-use runtime_owner::runtime;
-pub use runtime_owner::schedule;
-use wiring::runtime_owner;
-use wiring::runtime_wiring;
-mod search_view;
-
-use wiring::settings;
-mod settings_offer;
-mod settings_view;
-use wiring::settings_wiring;
-mod setup_view;
-pub use chrome::startup;
-use chrome::startup_view;
 /// The app's guide clock and its UI tick.
 pub mod time {
     pub use crate::guide::clock::{clock, date_only, label, now_minute, time_only, wall_unix};
     pub use crate::guide::guide_clock::{start, tick};
 }
-use chrome::toast;
-use chrome::ui_kit;
-use playback::touch_zap;
-use playback::video;
-mod wizard_view;
-
-pub use header::debug_overlay;
-pub use time::clock;
-#[doc(hidden)]
-pub use video::has_source as player_has_source;
-#[doc(hidden)]
-pub use video::opens as player_opens;
 
 /// iOS (an iPad): a tap beside the open columns or list closes them.
 pub(crate) const IOS: bool = crate::host::IPAD;

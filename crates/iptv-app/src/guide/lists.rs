@@ -565,15 +565,17 @@ fn follow(ui: Ui, outcome: Outcome) {
 
 fn open(ui: Ui, item: RailItem) {
     match item {
-        RailItem::Search => crate::search_view::open(ui),
+        RailItem::Search => crate::screens::search_view::open(ui),
         RailItem::Continue => {
-            crate::vod_view::open_shelf(ui, iptv_core::vod::Shelf::ContinueWatching)
+            crate::screens::vod_view::open_shelf(ui, iptv_core::vod::Shelf::ContinueWatching)
         }
-        RailItem::Recent => crate::vod_view::open_shelf(ui, iptv_core::vod::Shelf::RecentlyAdded),
-        RailItem::Movies => crate::vod_view::open(ui, iptv_core::vod::Kind::Movie),
-        RailItem::Shows => crate::vod_view::open(ui, iptv_core::vod::Kind::Series),
-        RailItem::Recordings => crate::recordings_view::open(ui),
-        RailItem::Settings => crate::settings_view::open(ui),
+        RailItem::Recent => {
+            crate::screens::vod_view::open_shelf(ui, iptv_core::vod::Shelf::RecentlyAdded)
+        }
+        RailItem::Movies => crate::screens::vod_view::open(ui, iptv_core::vod::Kind::Movie),
+        RailItem::Shows => crate::screens::vod_view::open(ui, iptv_core::vod::Kind::Series),
+        RailItem::Recordings => crate::screens::recordings_view::open(ui),
+        RailItem::Settings => crate::screens::settings_view::open(ui),
         other => log::info!("iptv rail: {other:?} not implemented yet"),
     }
 }

@@ -75,17 +75,17 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                             runtime().cast_intent_current(ticket)
                                 && channel.is_some()
                                 && channel == ui.playback.player.main().key.get_untracked()
-                                && crate::casting::available(ui)
+                                && crate::screens::casting::available(ui)
                         });
                         let started = if valid && !ui.cast.busy.get_untracked() {
-                            crate::casting::select_airplay(ui);
+                            crate::screens::casting::select_airplay(ui);
                             ui.cast.busy.get_untracked()
                         } else {
                             false
                         };
                         choice_reply.set(event.data.as_u64().map(|serial| (serial, started)));
                     }
-                    "local-selected" => crate::casting::play_here(ui),
+                    "local-selected" => crate::screens::casting::play_here(ui),
                     _ => {}
                 }),
         )

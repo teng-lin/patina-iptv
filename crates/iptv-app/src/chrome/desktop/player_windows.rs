@@ -520,10 +520,10 @@ fn player_content(
                     )
                     .child(crate::playback::player_panels::status(local))
                     .child(crate::playback::player_panels::layer(local))
-                    .child(crate::channels_view::layer(local))
-                    .child(crate::search_view::layer(local))
+                    .child(crate::screens::channels_view::layer(local))
+                    .child(crate::screens::search_view::layer(local))
                     .child(crate::chrome::menu_view::layer(local))
-                    .child(crate::organization_view::layer(local))
+                    .child(crate::library_ui::organization_view::layer(local))
                     .child(crate::chrome::chooser::layer(local, false))
                     .child(crate::playback::play_bar::layer(local, back_action))
             },

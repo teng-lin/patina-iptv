@@ -14,7 +14,7 @@
 //! with the ruler's times and the now line, by one animated offset.
 
 use crate::chrome::i18n::tr;
-use crate::organization_view;
+use crate::library_ui::organization_view;
 
 mod cell;
 mod channel;

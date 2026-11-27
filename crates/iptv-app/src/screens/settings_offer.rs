@@ -231,7 +231,9 @@ pub fn offer(device: Device, key: &str) -> Offer {
     if !crate::host::HAS_WORKERS && key.starts_with("recordings.") {
         return Offer::Hidden;
     }
-    if matches!(key, "general.backup" | "general.restore") && !crate::backup::offered(key) {
+    if matches!(key, "general.backup" | "general.restore")
+        && !crate::library_ui::backup::offered(key)
+    {
         return Offer::Hidden;
     }
     if !crate::host::IMPORTS

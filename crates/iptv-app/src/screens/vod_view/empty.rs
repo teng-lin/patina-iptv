@@ -163,11 +163,11 @@ pub(super) fn run(ui: Ui) {
     match action {
         EmptyAction::AddPlaylist => {
             close(ui);
-            crate::wizard_view::open_add(ui);
+            crate::library_ui::wizard_view::open_add(ui);
         }
         EmptyAction::PlaylistSettings(id) => {
             close(ui);
-            crate::playlists_view::open_on_demand(ui, SourceId(id));
+            crate::library_ui::playlists_view::open_on_demand(ui, SourceId(id));
         }
         EmptyAction::Retry(id) | EmptyAction::Refresh(id) => {
             crate::wiring::data::refresh(&crate::wiring::runtime_owner::runtime(), SourceId(id));

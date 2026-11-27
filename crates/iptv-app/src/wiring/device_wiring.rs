@@ -3,11 +3,11 @@
 use nsh_core::prelude::*;
 
 pub(crate) fn bridge() -> View {
-    crate::capture_limits::init();
+    crate::screens::capture_limits::init();
     #[cfg(feature = "test-support")]
     let probe = probe_enabled();
     let bridge = crate::wiring::device::bridge(move |event| match event.name.as_ref() {
-        "limits" => crate::capture_limits::report(&event.data),
+        "limits" => crate::screens::capture_limits::report(&event.data),
         // Simulate an import reporting its connection limit in headless tests.
         #[cfg(feature = "test-support")]
         "accountStreams" if probe => {
@@ -69,7 +69,7 @@ fn offered_rows(device: iptv_presentation::capabilities::Device) -> String {
     // A row on the Advanced page counts as offered.
     let offered = ROWS.iter().copied().filter(|key| {
         matches!(
-            crate::settings_offer::offer(device, key),
+            crate::screens::settings_offer::offer(device, key),
             Offer::Active | Offer::Advanced
         )
     });
