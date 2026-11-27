@@ -31,6 +31,85 @@ fn cast_relay_uses_a_fixed_default_or_an_explicit_tcp_port() {
     }
 }
 
+#[cfg(all(feature = "test-support", not(target_os = "android")))]
+#[tokio::test]
+async fn dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and_relay() {
+    use iptv_cast::test_support::{self, Event};
+
+    let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let receiver = test_support::Receiver::start(
+        test_support::Load::Immediate,
+        key_pair.cert.der().to_vec(),
+        key_pair.key_pair.serialize_der(),
+    )
+    .await;
+    let peer = receiver.address();
+    let cast = test_support::sender(peer).unwrap();
+    let routes = cast.discover(Duration::from_secs(1)).await.unwrap();
+    let Connect::Ready(connection) = cast.connect(&routes.routes()[0]).await.unwrap() else {
+        panic!("expected a loopback Chromecast connection");
+    };
+    let mut handoff = Handoff {
+        ready: Some(Ready {
+            connection,
+            source: PlaySource {
+                public_only: false,
+                url: "http://127.0.0.1:9/generated.m3u8".into(),
+                headers: Vec::new(),
+            },
+            listen: SocketAddr::new(peer.ip(), 0),
+            remote: peer,
+            protocol: NetworkProtocol::GoogleCast,
+        }),
+        pending: None,
+        handle: Handle::current(),
+        guard: None,
+    };
+
+    let mut loading = handoff.load();
+    tokio::select! {
+        result = &mut loading => panic!("load returned before the receiver fetched the relay: {result:?}"),
+        observed = timeout(Duration::from_secs(5), async {
+            while !receiver.events().contains(&Event::Load) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }) => observed.unwrap(),
+    }
+    drop(loading);
+
+    let pending = handoff.pending.as_ref().unwrap();
+    let listen: SocketAddr = pending
+        .relay
+        .url()
+        .split('/')
+        .nth(2)
+        .unwrap()
+        .parse()
+        .unwrap();
+    timeout(
+        Duration::from_secs(5),
+        initial_playback(&mut pending.session.subscribe()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    std::thread::spawn(move || drop(handoff)).join().unwrap();
+    timeout(Duration::from_secs(5), async {
+        while !receiver.events().contains(&Event::Stop) {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(receiver.events(), [Event::Load, Event::Stop]);
+    drop(std::net::TcpListener::bind(listen).expect("relay port is free before remote STOP"));
+    timeout(Duration::from_secs(5), receiver.finish())
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 #[cfg(feature = "test-support")]
 #[tokio::test]
 async fn locally_rejected_loads_release_the_relay_port_before_returning() {
