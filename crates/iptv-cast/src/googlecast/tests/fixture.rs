@@ -147,14 +147,28 @@ impl ReceiverState {
             if let Some(id) = request.get("requestId") {
                 response["requestId"] = id.clone();
             }
-            send(
+            let sent = send(
                 &mut socket,
                 &envelope.destination,
                 &envelope.namespace,
                 &envelope.source,
                 response,
             )
-            .await?;
+            .await;
+            // A PONG can race a close after the sender consumed its status.
+            if envelope.namespace == HEARTBEAT
+                && sent.as_ref().is_err_and(|error| {
+                    matches!(
+                        error.kind(),
+                        io::ErrorKind::ConnectionAborted
+                            | io::ErrorKind::ConnectionReset
+                            | io::ErrorKind::BrokenPipe
+                    )
+                })
+            {
+                break;
+            }
+            sent?;
         }
         Ok(())
     }
@@ -225,6 +239,40 @@ impl ReceiverState {
 
     fn note(&self, event: Event) {
         self.events.lock().unwrap().push(event);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn reply_after_peer_close(namespace: &str, kind: &str) -> io::Result<()> {
+        let (mut peer, socket) = tokio::io::duplex(1024);
+        send(
+            &mut peer,
+            "sender-0",
+            namespace,
+            "receiver-0",
+            json!({"type": kind}),
+        )
+        .await?;
+        drop(peer);
+        ReceiverState::new(Load::Immediate, Default::default())
+            .serve(socket)
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_peer_can_close_before_the_optional_pong_reply() {
+        reply_after_peer_close(HEARTBEAT, "PING").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_peer_close_still_fails_a_required_status_reply() {
+        let error = reply_after_peer_close(RECEIVER, "GET_STATUS")
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
     }
 }
 
