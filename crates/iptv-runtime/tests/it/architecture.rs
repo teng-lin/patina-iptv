@@ -93,6 +93,10 @@ const STORE_ADAPTER_USERS: &[&str] = &[
     "vod/recovery_tests.rs",
 ];
 
+/// Ratchet the owner shape as PR2 extracts domain state. Includes fields
+/// behind `test-support`, matching the source inventory rather than one build.
+const RUNTIME_FIELD_LIMIT: usize = 57;
+
 /// Process-lifetime facts and explicitly opted-in native recording services.
 /// UI Runtime owners are never discovered globally. The recording registry
 /// intentionally survives UI engine disposal and is keyed by protected storage
@@ -167,6 +171,35 @@ fn runtime_sources() -> Vec<(String, String)> {
             (name, code)
         })
         .collect()
+}
+
+fn runtime_fields() -> BTreeSet<String> {
+    let source =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
+    let body = source
+        .split_once("pub struct Runtime {")
+        .expect("Runtime declaration")
+        .1;
+    let mut depth = 1_i32;
+    let mut fields = BTreeSet::new();
+    for line in body.lines() {
+        if depth == 1 && line.starts_with("    ") && !line.starts_with("        ") {
+            let line = line.trim();
+            if !line.starts_with("#[")
+                && let Some((field, _)) = line.split_once(':')
+                && field.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_')
+                && !field.is_empty()
+            {
+                fields.insert(field.to_owned());
+            }
+        }
+        depth += line.matches('{').count() as i32;
+        depth -= line.matches('}').count() as i32;
+        if depth == 0 {
+            break;
+        }
+    }
+    fields
 }
 
 /// The dependency names of each manifest section.
@@ -263,6 +296,16 @@ fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
         .map(|(name, _)| name)
         .collect();
     exact(&users, STORE_ADAPTER_USERS, "store adapter user");
+}
+
+#[test]
+fn runtime_field_count_only_shrinks() {
+    let fields = runtime_fields();
+    assert_eq!(
+        fields.len(),
+        RUNTIME_FIELD_LIMIT,
+        "Runtime fields changed; extract them into cohesive per-domain owners and update the ratchet only as PR2 progresses: {fields:?}"
+    );
 }
 
 #[test]
