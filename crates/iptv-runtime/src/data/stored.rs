@@ -138,16 +138,15 @@ pub(super) fn download(
     visible: impl FnOnce() -> bool,
 ) -> (bool, UnboundedReceiver<Msg>) {
     let (tx, rx) = unbounded_channel();
-    let notify = |message| {
-        if current {
-            owner.emit(crate::RuntimeEvent::Notify(message));
-        }
-    };
     // Without a download (nothing to download, the store unreadable,
     // the workers busy) the update ends as soon as it began.
     let accepted = match guides {
         Ok(guides) if guides.is_empty() => {
-            notify("No guide sources are configured");
+            if current {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "No guide sources are configured",
+                ));
+            }
             // No worker holds the sender: the wait below ends at once.
             drop(tx);
             false
@@ -156,7 +155,11 @@ pub(super) fn download(
             // Downloads run on blocking workers, which this host has
             // none of (the shell hides the command there); a caller
             // that asks anyway hears why nothing happens.
-            notify("This device cannot download guides yet.");
+            if current {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "This device cannot download guides yet.",
+                ));
+            }
             drop(tx);
             false
         }
@@ -166,8 +169,10 @@ pub(super) fn download(
             let accepted = services.submit_import(visible, None, move |worker| async move {
                 download_now(&worker, source, guides, &tx, &cancel).await;
             });
-            if !accepted {
-                notify("Too many playlists are updating. Try again shortly.");
+            if !accepted && current {
+                owner.emit(crate::RuntimeEvent::Notify(
+                    "Too many playlists are updating. Try again shortly.",
+                ));
             }
             accepted
         }
