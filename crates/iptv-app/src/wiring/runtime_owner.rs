@@ -72,11 +72,14 @@ pub(crate) fn with_runtime<R>(owner: Rc<Runtime>, run: impl FnOnce() -> R) -> R 
 }
 
 pub(crate) fn new_runtime(directory: std::path::PathBuf) -> Runtime {
-    let mut ports = host::ports(
-        directory,
-        crate::chrome::i18n::system_text(crate::chrome::i18n::key("Patina AirPlay pairing"))
-            .to_owned(),
-    );
+    use crate::chrome::i18n::{key, system_text};
+
+    let pairing_label = if host::LINUX {
+        system_text(key("Patina AirPlay pairing")).to_owned()
+    } else {
+        String::new()
+    };
+    let mut ports = host::ports(directory, pairing_label);
     ports.startup_mark = crate::chrome::startup::mark_with;
     Runtime::new(ports)
 }
