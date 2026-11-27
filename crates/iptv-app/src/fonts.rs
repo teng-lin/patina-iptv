@@ -55,6 +55,12 @@ pub const OSD_TEXT: f32 = HEADER_BODY;
 pub const OSD_DETAIL: f32 = CAPTION;
 /// Badges over video (LIVE, FHD, 60 FPS) and a failure's detail line.
 pub const OSD_BADGE: f32 = 12.0;
+/// The slim play bar's single-line program title on desktop and touch.
+pub const OSD_COMPACT_TITLE: f32 = 15.0;
+/// The slim play bar's single-line program title on TV (10-foot viewing).
+pub const OSD_COMPACT_TV_TITLE: f32 = 18.0;
+/// The slim play bar's channel and Next text on desktop and touch.
+pub const OSD_COMPACT_DETAIL: f32 = 13.0;
 
 /// The font files the app registers itself, WOFF2 (NSH unpacks them when
 /// it registers them); none where the host's page loads them

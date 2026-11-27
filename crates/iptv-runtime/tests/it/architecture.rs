@@ -11,6 +11,7 @@ const DEPENDENCIES: &[&str] = &[
     // Native update metadata transport and verification, plus atomic trust-state replacement.
     "futures-util",
     "rustix", // Linux AppImage backup links, permission checks and atomic exchange.
+    "semver", // Native GitHub release discovery compares stable version precedence.
     "tempfile",
     "tough",
     "url",

@@ -37,8 +37,14 @@ iptv-runtime/src/native/execution.rs	network runtime initialization failed
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\Modules
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\powershell.exe
 # Transport identifier, invariant product name and internal verification diagnostics.
-iptv-app/src/host/updates.rs	Patina
 iptv-runtime/src/native/app_updates.rs	Patina
+iptv-runtime/src/native/app_updates/github.rs	Accept
+iptv-runtime/src/native/app_updates/github.rs	Patina
+iptv-runtime/src/native/app_updates/github.rs	Patina-{latest}-{suffix}
+iptv-runtime/src/native/app_updates/state.rs	invalid update schedule
+iptv-runtime/src/native/app_updates/state.rs	missing update schedule directory
+iptv-runtime/src/native/app_updates/state.rs	update schedule lock poisoned
+iptv-runtime/src/native/app_updates/state.rs	update schedule too large
 iptv-runtime/src/native/app_updates/trust.rs	invalid trusted root version
 
 # The persisted fallback group name is also used to recognize the generated bucket.

@@ -144,7 +144,19 @@ fn the_about_page_shows_the_privacy_address_before_opening_and_after_browser_fai
     settings(app);
     step(app.press("text:About"));
     step(app.press_key("right"));
-    step(app.press_key("down"));
+    // Reach the privacy row by its help text, independently of the number of
+    // update preferences that precede it. Focusing must not open the browser.
+    for _ in 0..8 {
+        if app
+            .screen()
+            .matches(&format!("id:settings-screen >> text:{URL}"))
+            .unwrap()
+        {
+            break;
+        }
+        step(app.press_key("down"));
+        app.idle(Duration::from_millis(20)).unwrap();
+    }
     step(app.wait_for(&format!("id:settings-screen >> text:{URL}")));
     assert!(app.screen().opened_urls().is_empty());
 
@@ -164,28 +176,60 @@ fn the_about_page_shows_the_privacy_address_before_opening_and_after_browser_fai
 
 #[test]
 fn the_about_update_action_keeps_manual_downloads_viewer_initiated() {
-    use nsh_testing::DialogAnswer;
-    if option_env!("PATINA_UPDATE_FEED").is_some() {
-        return;
-    }
+    use crate::app_updates::{Api, release};
     let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    // Keep the default weekly discovery in flight while navigating the actual
+    // About page; the manual check then joins or refreshes that owned request.
     let mut fixture = start(home, Settings::new(), false);
     let app = &mut fixture.app;
     settings(app);
     step(app.press("text:About"));
-    app.answer_dialogs_myself();
-    step(app.press("text:Release notes and downloads"));
-    step(
-        app.wait_until("update dialog", Duration::from_secs(3), |screen| {
-            !screen.dialogs().is_empty()
-        }),
-    );
+    step(app.wait_for("id:settings-content >> text:Weekly"));
     assert!(app.screen().opened_urls().is_empty());
-    step(app.answer_dialog(DialogAnswer::Press("Release notes and downloads".into())));
-    assert_eq!(
-        app.screen().opened_urls(),
-        ["https://github.com/teng-lin/patina-iptv/releases"]
+    api.serve(200, release("9.8.7", true));
+    step(app.press("id:settings-content >> text:Check for updates"));
+    step(app.wait_for("id:app-update-panel"));
+    step(app.wait_for("text:/Latest version: 9.8.7/"));
+    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
+    assert!(api.requests() > 0, "the actual HTTP discovery ran");
+    assert!(
+        app.screen().opened_urls().is_empty(),
+        "checking and reading notes do not start a browser download"
     );
+    assert!(
+        app.screen().dialogs().is_empty(),
+        "checking does not prompt an installer"
+    );
+
+    let published: serde_json::Value = serde_json::from_str(&release("9.8.7", true)).unwrap();
+    let (button, expected) = if app
+        .screen()
+        .matches("id:app-update-panel >> text:Download package")
+        .unwrap()
+    {
+        (
+            "Download package",
+            published[0]["assets"][0]["browser_download_url"]
+                .as_str()
+                .unwrap(),
+        )
+    } else {
+        // A development Linux executable has no installed package marker. Its
+        // explicit manual route is the release page, rather than an APK or a
+        // package from another installation channel.
+        (
+            "Release notes and downloads",
+            published[0]["html_url"].as_str().unwrap(),
+        )
+    };
+    step(app.press(&format!("id:app-update-panel >> text:{button}")));
+    step(app.wait_until(
+        "viewer-requested manual download opens",
+        Duration::from_secs(5),
+        |screen| !screen.opened_urls().is_empty(),
+    ));
+    assert_eq!(app.screen().opened_urls(), [expected]);
 }
 
 #[test]

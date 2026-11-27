@@ -32,10 +32,16 @@
     video files are unencrypted. Keep them in a location you trust.</p>
 
   <h2>Connections and sharing</h2>
-  <p>When you check for an app update, builds with update checking enabled
-    contact the configured Patina release feed. The host can see your IP
-    address. Patina compares package versions on your device. Opening release
-    notes or downloads in your browser connects to GitHub.</p>
+  <p>On Android, macOS, Windows and Linux, Patina checks GitHub for new app releases
+    weekly by default while the app
+    is in the foreground. You can choose Never, On launch, Daily, Weekly or
+    Monthly in Settings, and check manually at any time. GitHub can see your IP
+    address and the app's update request. Update requests do not include provider
+    credentials, playlists, viewing history or device identifiers. Version and
+    package selection happen on your device. Downloads and installation require
+    confirmation. Builds configured for automatic installation also contact the
+    configured authenticated release feed; macOS builds with Sparkle contact
+    their configured appcast. Those hosts can also see your IP address.</p>
   <p>Patina connects directly to the IPTV and program guide services you
     configure and to servers referenced by their content, such as servers
     supplying streams, subtitles or artwork. Those servers can see your IP

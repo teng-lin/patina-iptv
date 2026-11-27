@@ -16,6 +16,37 @@ fn installed() -> InstalledPackage {
 }
 
 #[tokio::test]
+async fn dropping_the_authorization_caller_cancels_the_held_worker_and_its_private_stage() {
+    let directory = tempfile::tempdir().unwrap();
+    let stage = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+    let path = stage.path().to_owned();
+    let (caller, cancelled) = tokio::sync::oneshot::channel::<()>();
+    let (started, waiting) = tokio::sync::oneshot::channel();
+    let worker = tokio::spawn(authorize_until_cancelled(
+        async move {
+            let _stage = stage;
+            started.send(()).unwrap();
+            std::future::pending().await
+        },
+        cancelled,
+    ));
+    waiting.await.unwrap();
+    assert!(path.exists());
+    drop(caller);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(1), worker)
+            .await
+            .unwrap()
+            .unwrap(),
+        UpdateResult::Unavailable
+    );
+    assert!(
+        !path.exists(),
+        "cancellation drops the worker's owned resources"
+    );
+}
+
+#[tokio::test]
 async fn verifies_targets_and_keeps_rotation_and_replay_state_across_checks() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/updates");
     let temp = tempfile::tempdir().unwrap();

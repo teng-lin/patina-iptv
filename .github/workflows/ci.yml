@@ -113,6 +113,9 @@ jobs:
           IPTV_CI_HARNESSES: ${{ matrix.part == 'app' && format('{0}/patina-harnesses.json', runner.temp) || '' }}
           IPTV_RS_TEST_JOBS: ${{ inputs.app-test-jobs || '6' }}
           IPTV_CI_TEST_THREADS: ${{ matrix.os == 'ubuntu-24.04' && inputs.app-test-jobs || '' }}
+      - name: Native macOS updater contracts
+        if: runner.os == 'macOS'
+        run: python3 tools/ci/test-macos-dmg.py
       - name: Reproducible performance journeys
         if: matrix.part == 'app'
         run: python3 tools/performance/journeys.py run --harness-manifest "$RUNNER_TEMP/patina-harnesses.json"

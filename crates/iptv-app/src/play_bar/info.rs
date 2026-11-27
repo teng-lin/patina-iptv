@@ -1,42 +1,41 @@
-//! Program metadata above the transport controls.
+//! Compact single-line program metadata above the transport controls.
 
 use iptv_core::guide::Listing;
 use iptv_presentation::touch_zap::Direction;
-use iptv_presentation::tracks::{fps_label, resolution_class};
+use iptv_presentation::tracks::fps_label;
+use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 
-use crate::fonts::{OSD_BADGE, OSD_DETAIL, OSD_TITLE};
+use crate::fonts::{
+    OSD_BADGE, OSD_COMPACT_DETAIL, OSD_COMPACT_TITLE, OSD_COMPACT_TV_TITLE, OSD_DETAIL,
+};
 use crate::i18n::tr;
 use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, channel_name, clock, tint};
 
 use super::{WHITE, progress};
 
-pub(super) const ESTIMATED_HEIGHT: f32 = 64.0;
+/// Estimated single-line header height including vertical padding.
+pub(super) const ESTIMATED_HEIGHT: f32 = 30.0;
 const LIVE_BG: u32 = 0xA93D42;
+/// Minimum viewport width to show the inline "Next" preview.
+const NEXT_MIN_WIDTH: f32 = 720.0;
+/// Minimum viewport width to show secondary stream quality badges (resolution, fps).
+const QUALITY_MIN_WIDTH: f32 = 480.0;
 
 #[derive(Clone, PartialEq, Eq)]
 struct ProgramInfo {
     channel: String,
     title: String,
-    synopsis: Option<String>,
     next: Option<(String, String)>,
 }
 
 fn program_info(ui: Ui) -> Option<ProgramInfo> {
-    ui.guide_data();
     if crate::on_demand::active(ui) || ui.playing.get().is_none() {
         return None;
     }
+    let (channel, program) = progress::program(ui);
     let schedule = crate::runtime_owner::schedule();
-    // A zap waiting to tune: the channel it goes to, on air now.
-    let (channel, program) = match crate::browse_playback::pending_channel(ui) {
-        Some(channel) => (
-            channel,
-            schedule.program_at(channel, ui.focus.with(|f| f.now)),
-        ),
-        None => progress::program(ui),
-    };
     let next = if ui.playback.get() == Playback::Live {
         let next = schedule.program_at(channel, program.end);
         match schedule.listing(channel, next) {
@@ -57,8 +56,6 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
             channel_name(channel)
         ),
         title: crate::listing_labels::listing(schedule.listing(channel, program)),
-        synopsis: crate::header::program_description(&*schedule, channel, program)
-            .filter(|description| !description.trim().is_empty()),
         next,
     })
 }
@@ -69,184 +66,148 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
     let size = move || ui.player.main().size.get().filter(|&(w, h)| w > 0 && h > 0);
     let fps = computed(move || fps_label(ui.player.main().format.with(|f| f.fps)));
     let live = move || !ui.paused.get() && ui.playback.get() == Playback::Live;
-    let compact = || window().width.0 < 480.0;
+    let show_quality = move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::scale::phone();
+    let show_next = move || next.with(Option::is_some) && window().width.0 >= NEXT_MIN_WIDTH;
+    let has_title = move || {
+        crate::on_demand::title(ui)
+            .or_else(|| program.with(|p| p.as_ref().map(|p| p.title.clone())))
+            .is_some_and(|title| !title.trim().is_empty())
+    };
+    let title_size = if idiom() == Idiom::Tv {
+        OSD_COMPACT_TV_TITLE
+    } else {
+        OSD_COMPACT_TITLE
+    };
+    let detail_size = if idiom() == Idiom::Tv {
+        OSD_DETAIL
+    } else {
+        OSD_COMPACT_DETAIL
+    };
     let secondary = tint(WHITE, TEXT_SECONDARY_ALPHA);
     view()
         .flex_row()
-        .flex_wrap()
         .items_center()
-        .gap(px(16.0))
+        .gap(px(8.0))
         .px(px(4.0))
-        .py(px(4.0))
+        .py(px(1.0))
         .child(
             view()
                 .flex_1()
-                .min_w(move || -> Length {
-                    if compact() {
-                        percentage(1.0).into()
-                    } else {
-                        px(0.0).into()
-                    }
-                })
-                .gap(px(3.0))
-                .child(
-                    view()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(6.0))
-                        .child(when(
-                            move || program.with(Option::is_some),
-                            move || {
-                                view()
-                                    .flex_row()
-                                    .items_center()
-                                    .gap(px(6.0))
-                                    .min_w(px(0.0))
-                                    .child(
-                                        text(move || {
-                                            program.with(|p| {
-                                                p.as_ref()
-                                                    .map_or_else(String::new, |p| p.channel.clone())
-                                            })
-                                        })
-                                        .flex_shrink(1.0)
-                                        .min_w(px(0.0))
-                                        .number_of_lines(1)
-                                        .text_size(px(OSD_DETAIL))
-                                        .text_color(secondary),
-                                    )
-                                    // Ch± for a finger (#285): live only.
-                                    .child(when(
-                                        move || crate::touch_zap::live(ui),
-                                        move || {
-                                            view()
-                                                .flex_row()
-                                                .flex_shrink_0()
-                                                .gap(px(4.0))
-                                                .child(crate::touch_zap::button(
-                                                    ui,
-                                                    Direction::Previous,
-                                                ))
-                                                .child(crate::touch_zap::button(
-                                                    ui,
-                                                    Direction::Next,
-                                                ))
-                                        },
-                                    ))
-                                    .child(badge(
-                                        move || {
-                                            let label = if ui.paused.get() {
-                                                tr("PAUSED")
-                                            } else if live() {
-                                                tr("LIVE")
-                                            } else {
-                                                tr("CATCH-UP")
-                                            };
-                                            label.to_owned()
-                                        },
-                                        move || if live() { rgb(LIVE_BG) } else { quality_bg() },
-                                    ))
-                            },
-                        ))
-                        .child(when(
-                            move || size().is_some(),
-                            move || {
-                                view()
-                                    .flex_shrink_0()
-                                    .flex_row()
-                                    .gap(px(6.0))
-                                    .child(badge(
-                                        move || {
-                                            size().map(|(_, h)| format!("{h}p")).unwrap_or_default()
-                                        },
-                                        quality_bg,
-                                    ))
-                                    .child(badge(
-                                        move || {
-                                            size()
-                                                .map(|(w, h)| resolution_class(w, h).to_owned())
-                                                .unwrap_or_default()
-                                        },
-                                        quality_bg,
-                                    ))
-                            },
-                        ))
-                        .child(when(
-                            move || fps.with(Option::is_some),
-                            move || {
-                                text(move || fps.get().unwrap_or_default())
-                                    .flex_shrink_0()
-                                    .text_size(px(OSD_BADGE))
-                                    .text_color(secondary)
-                            },
-                        )),
-                )
+                .min_w(px(0.0))
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .child(when(
+                    move || program.with(Option::is_some),
+                    move || {
+                        text(move || {
+                            program.with(|p| {
+                                p.as_ref().map_or_else(String::new, |p| p.channel.clone())
+                            })
+                        })
+                        .flex_shrink(2.0)
+                        .min_w(px(0.0))
+                        .max_w(percentage(0.35))
+                        .number_of_lines(1)
+                        .text_size(px(detail_size))
+                        .text_color(secondary)
+                    },
+                ))
+                // Ch± for a finger (#285): live only; direct flex sibling so it
+                // never shrinks or overlaps the program title.
+                .child(when(
+                    move || program.with(Option::is_some) && crate::touch_zap::live(ui),
+                    move || {
+                        view()
+                            .flex_row()
+                            .flex_shrink_0()
+                            .gap(px(4.0))
+                            .child(crate::touch_zap::button(ui, Direction::Previous))
+                            .child(crate::touch_zap::button(ui, Direction::Next))
+                    },
+                ))
+                .child(when(
+                    move || program.with(Option::is_some) && has_title(),
+                    move || {
+                        text("·")
+                            .flex_shrink_0()
+                            .text_size(px(detail_size))
+                            .text_color(secondary)
+                    },
+                ))
                 .child(
                     text(move || {
                         crate::on_demand::title(ui)
                             .or_else(|| program.with(|p| p.as_ref().map(|p| p.title.clone())))
                             .filter(|title| !title.trim().is_empty())
-                            .or_else(|| ui.playing.get().map(channel_name))
+                            .or_else(|| {
+                                (!crate::on_demand::active(ui) && program.with(Option::is_none))
+                                    .then(|| ui.playing.get().map(channel_name))
+                                    .flatten()
+                            })
                             .unwrap_or_default()
                     })
                     .test_id("bar-title")
+                    .flex_shrink(1.0)
+                    .min_w(px(0.0))
                     .number_of_lines(1)
-                    .text_size(px(OSD_TITLE))
+                    .text_size(px(title_size))
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgb(WHITE)),
                 )
                 .child(when(
+                    move || program.with(Option::is_some),
                     move || {
-                        !crate::scale::phone()
-                            && program.with(|p| p.as_ref().is_some_and(|p| p.synopsis.is_some()))
+                        badge(
+                            move || {
+                                let label = if ui.paused.get() {
+                                    tr("PAUSED")
+                                } else if live() {
+                                    tr("LIVE")
+                                } else {
+                                    tr("CATCH-UP")
+                                };
+                                label.to_owned()
+                            },
+                            move || if live() { rgb(LIVE_BG) } else { quality_bg() },
+                        )
                     },
+                ))
+                .child(when(
+                    move || show_quality() && size().is_some(),
                     move || {
-                        text(move || {
-                            program
-                                .with(|p| p.as_ref().and_then(|p| p.synopsis.clone()))
-                                .unwrap_or_default()
-                        })
-                        .number_of_lines(2)
-                        .text_size(px(OSD_DETAIL))
-                        .text_color(secondary)
+                        badge(
+                            move || size().map(|(_, h)| format!("{h}p")).unwrap_or_default(),
+                            quality_bg,
+                        )
+                    },
+                ))
+                .child(when(
+                    move || show_quality() && fps.with(Option::is_some),
+                    move || {
+                        text(move || fps.get().unwrap_or_default())
+                            .flex_shrink_0()
+                            .text_size(px(OSD_BADGE))
+                            .text_color(secondary)
                     },
                 )),
         )
-        .child(when(
-            move || next.with(Option::is_some),
-            move || {
-                view()
-                    .min_w(px(0.0))
-                    .max_w(move || percentage(if compact() { 1.0 } else { 0.36 }))
-                    .gap(px(3.0))
-                    .child(
-                        text(move || {
-                            next.with(|p| {
-                                p.as_ref().map_or_else(String::new, |(time, _)| {
-                                    format!("{}  {time}", tr("Next"))
-                                })
-                            })
-                        })
-                        .number_of_lines(1)
-                        .text_right()
-                        .text_size(px(OSD_DETAIL))
-                        .text_color(secondary),
-                    )
-                    .child(
-                        text(move || {
-                            next.with(|p| {
-                                p.as_ref()
-                                    .map_or_else(String::new, |(_, title)| title.clone())
-                            })
-                        })
-                        .number_of_lines(1)
-                        .text_right()
-                        .text_size(px(OSD_DETAIL))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(WHITE)),
-                    )
-            },
-        ))
+        .child(when(show_next, move || {
+            text(move || {
+                next.with(|p| {
+                    p.as_ref().map_or_else(String::new, |(time, title)| {
+                        format!("{} {time} · {title}", tr("Next"))
+                    })
+                })
+            })
+            .flex_shrink(1.0)
+            .min_w(px(0.0))
+            .max_w(percentage(0.28))
+            .number_of_lines(1)
+            .text_right()
+            .text_size(px(detail_size))
+            .text_color(secondary)
+        }))
 }
 
 fn quality_bg() -> Rgba {
@@ -259,7 +220,7 @@ fn badge(
 ) -> impl IntoElement {
     text(label)
         .flex_shrink_0()
-        .px(px(6.0))
+        .px(px(5.0))
         .py(px(1.0))
         .rounded(px(RADIUS))
         .text_size(px(OSD_BADGE))

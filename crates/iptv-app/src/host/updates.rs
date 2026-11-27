@@ -1,12 +1,53 @@
 //! Release information for the installed native package.
 pub(crate) const RELEASES: &str = "https://github.com/teng-lin/patina-iptv/releases";
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) mod view;
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+)))]
+pub(crate) mod view {
+    pub(crate) fn open(_: crate::Ui) {}
+    pub(crate) fn close(ui: crate::Ui) {
+        ui.update_dialog_open.set(false);
+    }
+    pub(crate) fn bind(_: crate::Ui) {}
+    pub(crate) fn key(_: crate::Ui, _: iptv_nav::Action) {}
+    pub(crate) fn layer(_: crate::Ui) -> nsh_core::prelude::View {
+        nsh_core::prelude::view()
+    }
+    pub(crate) fn notice_open(_: crate::Ui) -> bool {
+        false
+    }
+    pub(crate) fn dismiss_notice(_: crate::Ui) {}
+    pub(crate) fn notice_key(_: crate::Ui, _: iptv_nav::Action) {}
+}
+
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 pub(crate) enum PackageAction {
+    #[cfg(target_os = "macos")]
+    MacOS(String),
     #[cfg(target_os = "android")]
     Install(iptv_runtime::app_updates::ReleaseAsset),
     #[cfg(target_os = "linux")]
@@ -22,9 +63,17 @@ pub(crate) enum PackageAction {
     Download(String),
 }
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 impl PackageAction {
     pub(crate) fn label(&self) -> &'static str {
         match *self {
+            #[cfg(target_os = "macos")]
+            Self::MacOS(_) => crate::i18n::tr("Download and update"),
             #[cfg(target_os = "linux")]
             Self::AppImage(_) => crate::i18n::tr("Update AppImage"),
             #[cfg(windows)]
@@ -45,6 +94,8 @@ impl PackageAction {
         #[cfg(target_os = "android")]
         use crate::i18n::tr;
         match self {
+            #[cfg(target_os = "macos")]
+            Self::MacOS(version) => macos::update(_ui, version).await,
             #[cfg(target_os = "linux")]
             Self::AppImage(asset) => linux::update(_ui, asset).await,
             #[cfg(windows)]
@@ -56,31 +107,61 @@ impl PackageAction {
                         "Finish recording before installing the update.",
                     ));
                 }
-                crate::settings_view::notify(tr("Downloading…"));
-                let Some(stage) = owner
-                    .download_update(asset.clone(), std::env::temp_dir())
-                    .await
-                else {
-                    return crate::settings_view::notify(tr("Update download failed. Try again."));
-                };
-                if !crate::settings_view::updates::is_open(_ui) {
-                    return;
-                }
-                crate::settings_view::notify(tr("Verifying installer…"));
-                let Some(mut setup) = owner
-                    .prepare_windows_setup(
-                        stage,
-                        asset,
-                        publisher,
-                        tr("The installer could not be verified or opened."),
+                let mut setup = if let Some(setup) = owner.take_windows_setup(&asset) {
+                    setup
+                } else {
+                    crate::settings_view::notify(tr("Downloading…"));
+                    let stage = if let Some(stage) = owner.take_update_download(&asset) {
+                        Some(stage)
+                    } else {
+                        owner
+                            .download_update(asset.clone(), std::env::temp_dir())
+                            .await
+                    };
+                    let Some(stage) = stage else {
+                        if _ui.update_cancel_requested.get_untracked() {
+                            return;
+                        }
+                        return crate::settings_view::notify(tr(
+                            "Update download failed. Try again.",
+                        ));
+                    };
+                    if _ui.update_cancel_requested.get_untracked() {
+                        return;
+                    }
+                    if !crate::settings_view::updates::is_open(_ui) {
+                        owner.retain_update_download(asset, stage);
+                        return;
+                    }
+                    crate::settings_view::notify(tr("Verifying installer…"));
+                    let Some(result) = view::until_update_cancelled(
+                        _ui,
+                        owner.prepare_windows_setup(
+                            stage,
+                            asset.clone(),
+                            publisher,
+                            tr("The installer could not be verified or opened."),
+                        ),
                     )
                     .await
-                else {
-                    return crate::settings_view::notify(tr(
-                        "The installer could not be verified or opened.",
-                    ));
+                    else {
+                        return;
+                    };
+                    let Some(setup) = result else {
+                        if _ui.update_cancel_requested.get_untracked() {
+                            return;
+                        }
+                        return crate::settings_view::notify(tr(
+                            "The installer could not be verified or opened.",
+                        ));
+                    };
+                    setup
                 };
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if !crate::settings_view::updates::is_open(_ui) {
+                    owner.retain_windows_setup(asset, setup);
                     return;
                 }
                 let confirmed = nsh_base::alert_dialog()
@@ -91,21 +172,28 @@ impl PackageAction {
                     .close_on_escape(true)
                     .show()
                     .await;
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
+                    owner.retain_windows_setup(asset, setup);
                     return;
                 }
                 if owner.recording_background_needed() {
+                    owner.retain_windows_setup(asset, setup);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
                 }
                 if !owner.shutdown_recording_host() {
+                    owner.retain_windows_setup(asset, setup);
                     return crate::settings_view::notify(tr(
                         "The recording host is still closing. Try updating again.",
                     ));
                 }
                 if owner.recording_background_needed() {
                     owner.start_recordings();
+                    owner.retain_windows_setup(asset, setup);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
@@ -127,7 +215,7 @@ impl PackageAction {
                 target_os = "android"
             ))]
             Self::Download(url) => {
-                crate::settings_view::updates::open(&url).await;
+                open_download_url(&url).await;
             }
             #[cfg(target_os = "android")]
             Self::Install(asset) => {
@@ -140,27 +228,26 @@ impl PackageAction {
                         "Finish recording before installing the update.",
                     ));
                 }
-                let progress = nsh_base::alert_dialog()
-                    .title(tr("Downloading…"))
-                    .cancel("cancel", tr("Cancel"))
-                    .close_on_escape(true)
-                    .show();
-                let closer = progress.closer();
-                let path = tokio::select! {
-                    biased;
-                    _ = progress => return,
-                    path = owner.download_update(asset, directory) => path,
+                let path = if let Some(path) = owner.take_update_download(&asset) {
+                    Some(path)
+                } else {
+                    owner.download_update(asset.clone(), directory).await
                 };
-                if let Some(closer) = closer {
-                    closer.close();
-                }
                 let Some(path) = path else {
-                    return crate::settings_view::notify(tr("Update download failed. Try again."));
+                    if !_ui.update_cancel_requested.get_untracked() {
+                        crate::settings_view::notify(tr("Update download failed. Try again."));
+                    }
+                    return;
                 };
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if !crate::settings_view::updates::is_open(_ui) {
+                    owner.retain_update_download(asset, path);
                     return;
                 }
                 if owner.recording_background_needed() {
+                    owner.retain_update_download(asset, path);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
@@ -173,10 +260,15 @@ impl PackageAction {
                     .close_on_escape(true)
                     .show()
                     .await;
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
+                    owner.retain_update_download(asset, path);
                     return;
                 }
                 if owner.recording_background_needed() {
+                    owner.retain_update_download(asset, path);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
@@ -197,6 +289,12 @@ impl PackageAction {
     }
 }
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 pub(crate) fn feed(android_build: Option<(u64, u64)>) -> Option<&'static str> {
     if cfg!(target_os = "android") && android_build.is_none() {
         return None;
@@ -210,91 +308,271 @@ pub(crate) fn feed(android_build: Option<(u64, u64)>) -> Option<&'static str> {
     target_os = "windows",
     target_os = "macos"
 ))]
-pub(crate) async fn check(
-    android_build: Option<(u64, u64)>,
-) -> (String, Option<String>, Option<PackageAction>) {
-    use crate::i18n::tr;
-    const PRODUCT: &str = "Patina";
-    use iptv_runtime::app_updates::{InstalledPackage, UpdateResult};
-    let version = env!("CARGO_PKG_VERSION");
-    let Some(feed) = feed(android_build) else {
-        return (
-            format!("{PRODUCT} {version}\n{RELEASES}"),
-            Some(RELEASES.to_owned()),
-            None,
-        );
-    };
-    crate::settings_view::notify(tr("Checking…"));
-    let owner = crate::runtime_owner::runtime();
-    let mut installed = InstalledPackage::native(version);
-    if let Some((code, api)) = android_build {
+fn direct_android_build() -> Option<(u64, u64)> {
+    crate::device::reported()?.direct_android_build
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn metadata_ready() -> bool {
+    metadata_ready_for(crate::device::host().platform, crate::device::reported())
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+fn metadata_ready_for(
+    platform: iptv_core::capabilities::Platform,
+    report: Option<crate::device::Report>,
+) -> bool {
+    use iptv_core::capabilities::Platform;
+    platform != Platform::Android
+        || report.is_some_and(|report| match report.direct_apk {
+            Some(false) => true,
+            Some(true) => report.direct_android_build.is_some(),
+            None => false,
+        })
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn installed() -> iptv_runtime::app_updates::InstalledPackage {
+    let mut installed =
+        iptv_runtime::app_updates::InstalledPackage::native(env!("CARGO_PKG_VERSION"));
+    // The device host also drives the existing synthetic Android app scenarios.
+    if crate::device::host().platform == iptv_core::capabilities::Platform::Android {
+        installed.platform = "android";
+        installed.architecture = match std::env::consts::ARCH {
+            "aarch64" => "arm64-v8a",
+            "arm" => "armeabi-v7a",
+            architecture => architecture,
+        };
+        #[cfg(feature = "test-support")]
+        if std::env::var("IPTV_TEST_PLATFORM").as_deref() == Ok("android") {
+            // The synthetic device represents the same supported Android ABI
+            // on x86 CI hosts as on an ARM Mac.
+            installed.architecture = "arm64-v8a";
+        }
+        installed.format = None;
+        installed.minimum = serde_json::json!({"androidApi": 26});
+    }
+    if let Some((code, api)) = direct_android_build() {
         installed.format = Some("apk".into());
         installed.android_code = Some(code);
         installed.minimum = serde_json::json!({"androidApi": api});
     }
-    let root = include_bytes!(concat!(env!("OUT_DIR"), "/update-root.json"));
-    let result = owner.check_app_update(feed, root, installed).await;
-    let mut action = None;
-    let (message, url) = match result {
-        UpdateResult::Current => (tr("Patina is up to date.").to_owned(), None),
-        UpdateResult::Unavailable => (
-            tr("Update check failed. Try again.").to_owned(),
-            Some(RELEASES.to_owned()),
-        ),
-        UpdateResult::RequirementsUnconfirmed => (
-            tr("Check the system requirements in the release notes.").to_owned(),
-            Some(RELEASES.to_owned()),
-        ),
-        UpdateResult::NoCompatiblePackage => (
-            tr("No compatible package found.").to_owned(),
-            Some(RELEASES.to_owned()),
-        ),
-        UpdateResult::Available {
-            version,
-            notes,
-            preview,
-            asset,
-        } => {
-            if cfg!(target_os = "linux") {
-                action = Some(PackageAction::Download(asset.url().to_owned()));
-            }
-            #[cfg(target_os = "linux")]
-            if cfg!(target_arch = "x86_64")
-                && option_env!("PATINA_APPIMAGE_HANDOFF") == Some("1")
-                && asset.url().ends_with(".AppImage")
-            {
-                action = Some(PackageAction::AppImage(asset));
-            }
-            #[cfg(windows)]
-            if !preview
-                && let Some(publisher) = option_env!("PATINA_WINDOWS_PUBLISHER").map(str::trim)
-                && !publisher.is_empty()
-            {
-                action = Some(PackageAction::Windows(asset, publisher));
-            }
-            #[cfg(target_os = "android")]
-            if option_env!("PATINA_APK_HANDOFF") == Some("1") && android_build.is_some() {
-                action = Some(PackageAction::Install(asset));
-            }
-            let label = if preview {
-                tr("Preview")
-            } else {
-                tr("Update available")
-            };
-            (format!("{label} · {PRODUCT} {version}"), Some(notes))
-        }
-    };
-    (format!("{PRODUCT} {version}\n{message}"), url, action)
+    installed
 }
 
-#[cfg(not(any(
+/// Discovery stays usable without installation credentials. Only authenticated
+/// metadata (or Sparkle's signed appcast) can authorize an in-app installation.
+#[cfg(any(
     target_os = "android",
     target_os = "linux",
-    target_os = "macos",
-    target_os = "windows"
-)))]
-pub(crate) async fn check(
-    _: Option<(u64, u64)>,
-) -> (String, Option<String>, Option<PackageAction>) {
-    (String::new(), None, None)
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) async fn action_for(
+    check: &iptv_runtime::app_updates::github::ReleaseCheck,
+) -> Result<Option<PackageAction>, &'static str> {
+    use iptv_runtime::app_updates::{UpdateResult, github::ReleaseStatus};
+    if check.status != ReleaseStatus::UpdateAvailable {
+        return Ok(None);
+    }
+    let Some(download) = check.release.download.as_ref() else {
+        return Ok(None);
+    };
+    let manual = || Ok(Some(PackageAction::Download(download.url.clone())));
+    #[cfg(target_os = "macos")]
+    if macos::supported() {
+        return Ok(Some(PackageAction::MacOS(check.release.version.clone())));
+    }
+    if !automatic_install_supported() {
+        return manual();
+    }
+    let Some(feed) = feed(direct_android_build()) else {
+        return manual();
+    };
+    let root = include_bytes!(concat!(env!("OUT_DIR"), "/update-root.json"));
+    let verified = crate::runtime_owner::runtime()
+        .check_app_update(feed, root, installed())
+        .await;
+    let UpdateResult::Available {
+        version,
+        preview: _preview,
+        asset,
+        ..
+    } = verified
+    else {
+        // Verification failure never falls back to an unverified installer.
+        return Err(crate::i18n::tr(
+            "The update could not be verified. Try again.",
+        ));
+    };
+    if version != check.release.version || asset.url() != download.url {
+        return Err(crate::i18n::tr(
+            "The update could not be verified. Try again.",
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    if cfg!(target_arch = "x86_64")
+        && option_env!("PATINA_APPIMAGE_HANDOFF") == Some("1")
+        && asset.url().ends_with(".AppImage")
+    {
+        return Ok(Some(PackageAction::AppImage(asset)));
+    }
+    #[cfg(windows)]
+    if !_preview
+        && let Some(publisher) = option_env!("PATINA_WINDOWS_PUBLISHER").map(str::trim)
+        && !publisher.is_empty()
+    {
+        return Ok(Some(PackageAction::Windows(asset, publisher)));
+    }
+    #[cfg(target_os = "android")]
+    if option_env!("PATINA_APK_HANDOFF") == Some("1") && direct_android_build().is_some() {
+        return Ok(Some(PackageAction::Install(asset)));
+    }
+    manual()
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn automatic_install_supported() -> bool {
+    #[cfg(target_os = "macos")]
+    if macos::supported() {
+        return true;
+    }
+    if feed(direct_android_build()).is_none() {
+        return false;
+    }
+    if cfg!(target_os = "android") {
+        return option_env!("PATINA_APK_HANDOFF") == Some("1");
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let format = std::env::current_exe()
+            .ok()
+            .and_then(|exe| std::fs::read_to_string(exe.parent()?.join("patina-package")).ok());
+        appimage_install_enabled(option_env!("PATINA_APPIMAGE_HANDOFF"), format.as_deref())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        cfg!(windows)
+            && option_env!("PATINA_WINDOWS_PUBLISHER").is_some_and(|v| !v.trim().is_empty())
+    }
+}
+
+#[cfg(any(
+    target_os = "linux",
+    all(
+        test,
+        any(target_os = "android", target_os = "windows", target_os = "macos")
+    )
+))]
+fn appimage_install_enabled(handoff: Option<&str>, format: Option<&str>) -> bool {
+    handoff == Some("1") && format.is_some_and(|format| format.trim() == "appimage")
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) async fn open_download_url(url: &str) {
+    if !nsh_core::prelude::open_url(url).await {
+        let _ = nsh_base::alert_dialog()
+            .title(crate::i18n::tr("Release notes and downloads"))
+            .description(url.to_owned())
+            .close_on_escape(true)
+            .cancel("close", crate::i18n::tr("Close"))
+            .show()
+            .await;
+    }
+}
+
+/// Whether the active native installer still offers genuine cancellation.
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn can_cancel_install() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::cancelable();
+    #[cfg(target_os = "linux")]
+    return !crate::runtime().app_update_file_commit_active();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    true
+}
+
+/// Accept cancellation before callers change UI state or persist a skip.
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn try_cancel_current() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::try_cancel_current();
+    #[cfg(target_os = "linux")]
+    return !crate::runtime().app_update_file_commit_active();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    true
+}
+
+#[cfg(all(
+    test,
+    any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    )
+))]
+mod tests {
+    use super::*;
+    use iptv_core::capabilities::Platform;
+
+    #[test]
+    fn android_discovery_waits_for_the_channel_and_direct_package_identity() {
+        let mut report = crate::device::Report::default();
+        assert!(!metadata_ready_for(Platform::Android, None));
+        assert!(!metadata_ready_for(Platform::Android, Some(report)));
+        assert!(metadata_ready_for(Platform::Macos, None));
+        report.direct_apk = Some(true);
+        assert!(!metadata_ready_for(Platform::Android, Some(report)));
+        report.direct_android_build = Some((42, 36));
+        assert!(metadata_ready_for(Platform::Android, Some(report)));
+        report.direct_apk = Some(false);
+        report.direct_android_build = None;
+        assert!(metadata_ready_for(Platform::Android, Some(report)));
+    }
+
+    #[test]
+    fn a_shared_linux_binary_only_installs_from_an_appimage_package() {
+        assert!(appimage_install_enabled(Some("1"), Some("appimage\n")));
+        for format in [None, Some("deb"), Some("rpm"), Some("pacman")] {
+            assert!(!appimage_install_enabled(Some("1"), format));
+        }
+        assert!(!appimage_install_enabled(None, Some("appimage")));
+        assert!(!appimage_install_enabled(Some("0"), Some("appimage")));
+    }
 }

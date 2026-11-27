@@ -92,6 +92,12 @@ pub static GUIDE_UPDATE: Choices = Choices {
     ],
 };
 
+/// Automatic app-version discovery only; installation always needs consent.
+pub static APP_UPDATE_FREQUENCY: Choices = Choices {
+    family: "app_update_frequency",
+    variants: &["never", "on_launch", "daily", "weekly", "monthly"],
+};
+
 pub static SIZE: Choices = Choices {
     family: "size",
     variants: &["small", "medium", "large", "extra_large"],
@@ -238,6 +244,7 @@ pub static ALL: &[&Choices] = &[
     &CHANNEL_SORT,
     &VOD_SORT,
     &GUIDE_UPDATE,
+    &APP_UPDATE_FREQUENCY,
     &SIZE,
     &CLOCK_SIZE,
     &LEVEL,

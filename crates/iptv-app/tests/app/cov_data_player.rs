@@ -1120,7 +1120,46 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     send(&mut app, "tracks", tracks());
     step(app.press("label:Video"));
     step(app.wait_for("label:Mute"));
-    step(app.wait_for("id:play-bar-layer >> text:Generated program synopsis."));
+    step(app.wait_for("id:play-bar-layer >> id:bar-title"));
+    assert!(
+        !app.screen()
+            .matches("id:play-bar-layer >> text:Generated program synopsis.")
+            .unwrap(),
+        "the slim play bar leaves the synopsis to Program details"
+    );
+    assert!(
+        seen(&app, "id:live-progress-hairline"),
+        "live playback shows the top hairline progress indicator"
+    );
+    assert!(
+        !app.screen().matches("id:play-bar-time-line").unwrap(),
+        "live playback omits the timeline row"
+    );
+    let title_y = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.test_id.as_deref() == Some("bar-title"))
+        .expect("bar-title")
+        .bounds
+        .origin
+        .y
+        .0;
+    let mute_bottom = {
+        let b = app
+            .screen()
+            .layout_nodes()
+            .into_iter()
+            .find(|node| node.test_id.as_deref() == Some("play-bar-mute"))
+            .expect("play-bar-mute")
+            .bounds;
+        b.origin.y.0 + b.size.height.0
+    };
+    assert!(
+        mute_bottom - title_y <= 80.0,
+        "live desktop play bar stays slim (content span {:.1}pt)",
+        mute_bottom - title_y
+    );
     step(app.wait_for("text:720p"));
     step(app.wait_for("text:/50/"));
     // Mute, then the desktop's volume along its bar.
@@ -1204,8 +1243,9 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     assert_eq!(opens(), before + 1, "reopened 30 s on");
 
     // A desktop can shrink below the required width of the full transport.
-    // Play/Pause and More remain visible and both seeks move into More.
-    const NARROW_REPLAY_WIDTH: f32 = 180.0;
+    // With 34pt desktop buttons, Rewind fits at 180pt, so shrink to 150pt
+    // where Play/Pause and More remain visible and both seeks move into More.
+    const NARROW_REPLAY_WIDTH: f32 = 150.0;
     step(app.set_viewport(Size::new(px(NARROW_REPLAY_WIDTH), px(480.0))));
     step(app.wait_for("id:play-bar-more"));
     assert!(!seen(&app, "id:play-bar-rewind"));
@@ -1236,6 +1276,14 @@ fn the_player_follows_its_host_through_waits_failures_and_replays() {
     wait_archive_source(&mut app, &props, &previous, false);
     assert_eq!(opens(), before + 2, "reopened 10 s back");
     step(app.set_viewport(size));
+    assert!(
+        !seen(&app, "id:live-progress-hairline"),
+        "catch-up replaces the live hairline with the interactive timeline"
+    );
+    assert!(
+        seen(&app, "id:play-bar-time-line"),
+        "catch-up shows the interactive timeline row"
+    );
     let line = touch_area(&app, |w, h| h == 20.0 && w > 100.0);
     let previous = prop(&app, &props, "source");
     step(app.drag(&line, Point::new(px(60.0), px(0.0))));
