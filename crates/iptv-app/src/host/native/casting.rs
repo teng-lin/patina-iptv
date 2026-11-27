@@ -826,16 +826,15 @@ impl Remote for Playing {
     fn state(&self) -> Task<'_, RemoteState> {
         Box::pin(async {
             let slot = self.session.lock().await;
+            if let Some(outcome) = self.stop_result.get() {
+                return match *outcome.borrow() {
+                    Some(result) => result.map(|()| RemoteState::Ended),
+                    None if outcome.has_changed().is_ok() => Ok(RemoteState::Loading),
+                    None => Err(Error::StopUnconfirmed),
+                };
+            }
             let Some(session) = slot.as_ref() else {
-                return Ok(
-                    if self.stop_result.get().is_some_and(|result| {
-                        result.borrow().is_none() && result.has_changed().is_ok()
-                    }) {
-                        RemoteState::Loading
-                    } else {
-                        RemoteState::Ended
-                    },
-                );
+                return Ok(RemoteState::Ended);
             };
             let snapshot = session.snapshot();
             if finished(&snapshot) {

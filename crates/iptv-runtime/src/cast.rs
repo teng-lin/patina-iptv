@@ -532,7 +532,7 @@ impl Runtime {
         if self.active_cast_ticket() != Some(ticket) {
             return Err(Error::Unavailable);
         }
-        let state = if allowed {
+        let outcome = if allowed {
             let worker = remote.clone();
             let observed = self
                 .spawn_network(async move { worker.state().await })
@@ -546,8 +546,11 @@ impl Runtime {
             match observed {
                 Ok(observed) => {
                     active.failed_polls = 0;
-                    observed
+                    Ok(observed)
                 }
+                // An OS-initiated stop has already joined local retirement.
+                // End the transfer and keep the confirmed receiver result.
+                Err(Error::StopUnconfirmed) => Err(Error::StopUnconfirmed),
                 Err(_) => {
                     // Keep serving briefly while the last observation grows stale.
                     // A disconnected network route requires a fresh selection.
@@ -555,13 +558,16 @@ impl Runtime {
                     if active.failed_polls < 3 {
                         return Ok(RemoteState::Loading);
                     }
-                    RemoteState::Ended
+                    Ok(RemoteState::Ended)
                 }
             }
         } else {
-            RemoteState::Ended
+            Ok(RemoteState::Ended)
         };
-        if state == RemoteState::Ended {
+        if matches!(
+            outcome,
+            Ok(RemoteState::Ended) | Err(Error::StopUnconfirmed)
+        ) {
             let worker = remote.clone();
             self.spawn_network(async move {
                 if allowed {
@@ -574,7 +580,7 @@ impl Runtime {
             .map_err(|_| Error::Unknown)?;
             self.clear_cast(&remote);
         }
-        Ok(state)
+        outcome
     }
 }
 

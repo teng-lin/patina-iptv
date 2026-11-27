@@ -349,12 +349,15 @@ fn monitor(ui: Ui, ticket: u64) {
         }
         crate::tasks::spawn_in_app(async move {
             match runtime().poll_cast(ticket).await {
-                Ok(RemoteState::Ended)
+                ended @ (Ok(RemoteState::Ended) | Err(Error::StopUnconfirmed))
                     if runtime().cast_target().is_none() && ui.cast_remote.get_untracked() =>
                 {
                     ui.cast_remote.set(false);
                     ui.playing.set(None);
                     if !ui.cast_busy.get_untracked() {
+                        if let Err(error) = ended {
+                            report(error);
+                        }
                         chooser::open(ui, chooser::Kind::CastEnded);
                     }
                 }

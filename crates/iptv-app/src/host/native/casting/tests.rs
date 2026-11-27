@@ -143,9 +143,11 @@ async fn stopping_an_owned_receiver_joins_once_and_keeps_a_refusal_after_cancell
         Poll::Ready(())
     })
     .await;
+    assert_eq!(playing.state().await, Ok(RemoteState::Loading));
     release.send(()).unwrap();
     assert_eq!(second.await, Err(Error::StopUnconfirmed));
     assert_eq!(playing.stop_checked().await, Err(Error::StopUnconfirmed));
+    assert_eq!(playing.state().await, Err(Error::StopUnconfirmed));
     assert_eq!(receiver.events(), [Event::Load, Event::Stop]);
     timeout(Duration::from_secs(5), receiver.finish())
         .await
