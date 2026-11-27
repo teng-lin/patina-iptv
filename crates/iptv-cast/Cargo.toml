@@ -11,7 +11,7 @@ license.workspace = true
 default = ["googlecast", "avahi", "airplay"]
 airplay = [
     "dep:mdns-sd", "dep:num-bigint", "dep:plist", "dep:ring",
-    "dep:sha2", "dep:srp", "dep:subtle", "dep:zeroize",
+    "dep:sha2", "dep:srp", "dep:subtle",
 ]
 googlecast = [
     "dep:mdns-sd", "dep:prost", "dep:x509-cert", "dep:webpki",
@@ -39,7 +39,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 url.workspace = true
 webpki = { package = "rustls-webpki", version = "0.103", default-features = false, optional = true }
 x509-cert = { version = "0.2", default-features = false, optional = true }
-zeroize = { version = "1.9", optional = true }
+zeroize = "1.9"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 dbus = { version = "0.9", optional = true }

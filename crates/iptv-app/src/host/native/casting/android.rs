@@ -27,6 +27,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{mpsc, watch};
+use zeroize::Zeroizing;
 
 static HOST: OnceLock<(JavaVM, GlobalRef)> = OnceLock::new();
 
@@ -127,7 +128,7 @@ impl CredentialStore for CastStore {
                     )?
                     .l()?;
                 let payload = JByteArray::from(payload);
-                let bytes = env.convert_byte_array(&payload)?;
+                let bytes = Zeroizing::new(env.convert_byte_array(&payload)?);
                 if bytes.len() > 1 {
                     env.set_byte_array_region(&payload, 0, &vec![0; bytes.len()])?;
                 }
