@@ -1,8 +1,9 @@
-//! The play bar's progress line: in catch-up where the archive plays
-//! (a press or a drag seeks there, `seek.rs`), live how far the program
-//! is; its times at both ends.
+//! The play bar's progress indicators: a slim top hairline (`live_hairline`)
+//! for live TV, and an interactive timeline (`line`) with start/end times for
+//! catch-up and on-demand playback (press or drag seeks, `seek.rs`).
 
 use crate::i18n::tr;
+use nsh_core::platform::Idiom;
 use nsh_core::prelude::*;
 use nsh_core::{TouchEvent, TouchPhase};
 
@@ -10,19 +11,60 @@ use crate::theme::{RADIUS, RESTING_ALPHA, TEXT_SECONDARY_ALPHA};
 use crate::{Playback, Ui, clock, tint};
 
 const WHITE: u32 = 0xFFFFFF;
+pub(super) const HAIRLINE_HEIGHT: f32 = 2.5;
+pub(super) const TIMELINE_HEIGHT: f32 = 20.0;
 
-/// The program on screen: live now, or the replayed one.
+/// Slim non-interactive progress hairline shown at the top of the live bar.
+pub(super) fn live_hairline(ui: Ui) -> impl IntoElement {
+    let fraction = move || {
+        let (_, p) = program(ui);
+        p.progress(ui.focus.with(|f| f.now)).clamp(0.0, 1.0)
+    };
+    let accent = move || rgb(ui.app.theme.with(|t| t.accent.light));
+    view()
+        .test_id("live-progress-hairline")
+        .accessible(true)
+        .label(move || {
+            let (_, p) = program(ui);
+            format!(
+                "{} · {} / {}",
+                tr("Playback position"),
+                clock(p.start),
+                clock(p.end)
+            )
+        })
+        .mx(px(4.0))
+        .h(px(HAIRLINE_HEIGHT))
+        .rounded(px(HAIRLINE_HEIGHT / 2.0))
+        .bg(tint(WHITE, RESTING_ALPHA * 2))
+        .child(
+            view()
+                .h_full()
+                .rounded(px(HAIRLINE_HEIGHT / 2.0))
+                .w(move || percentage(fraction()))
+                .bg(accent),
+        )
+}
+
+/// The program shown on the bar: the pending zap target when a channel switch
+/// is waiting to tune, otherwise the currently playing live or replayed program.
 pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
-    ui.app.data_version.get();
+    ui.guide_data();
+    let schedule = crate::runtime_owner::schedule();
+    if ui.playback.get() == Playback::Live
+        && let Some(channel) = crate::browse_playback::pending_channel(ui)
+    {
+        return (
+            channel,
+            schedule.program_at(channel, ui.focus.with(|f| f.now)),
+        );
+    }
     let channel = ui.playing.get().unwrap_or(0);
     let minute = match ui.playback.get() {
         Playback::Live => ui.focus.with(|f| f.now),
         Playback::CatchUp { start, .. } => start,
     };
-    (
-        channel,
-        crate::runtime_owner::schedule().program_at(channel, minute),
-    )
+    (channel, schedule.program_at(channel, minute))
 }
 
 /// The progress line with its times; in catch-up a press or a drag on it
@@ -77,9 +119,15 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
     let time = move |s: Box<dyn Fn() -> String>| {
         text(s)
             .w(px(64.0))
+            .number_of_lines(1)
             .text_center()
             .text_size(px(12.0))
             .text_color(tint(WHITE, TEXT_SECONDARY_ALPHA))
+    };
+    let touch_slop = if matches!(idiom(), Idiom::Desktop | Idiom::Tv) {
+        0.0
+    } else {
+        8.0
     };
     view()
         .test_id("play-bar-time-line")
@@ -91,7 +139,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
         .child(
             view()
                 .flex_1()
-                .h(px(20.0))
+                .h(px(TIMELINE_HEIGHT))
                 .justify_center()
                 .on_layout(move |b: &Bounds<Points>| width.set(b.size.width.0))
                 .child(
@@ -111,7 +159,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                     // The playing place (catch-up: draggable).
                     view()
                         .absolute()
-                        .top(px(4.0))
+                        .top(px((TIMELINE_HEIGHT - 12.0) / 2.0))
                         .left(move || percentage(fraction()))
                         .ml(px(-6.0))
                         .w(px(12.0))
@@ -167,6 +215,12 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
                         })
                         .absolute()
                         .inset_0()
+                        .hit_slop(EdgeInsets {
+                            top: px(touch_slop),
+                            bottom: px(touch_slop),
+                            left: px(0.0),
+                            right: px(0.0),
+                        })
                         .rounded(px(RADIUS))
                         .on_touch(seek),
                 ),

@@ -5,11 +5,14 @@
 //! while a screen reader runs (`iptv_presentation::play_bar`). A TV opens the
 //! same bar with OK or Menu and traverses its controls with the D-pad.
 //!
-//! Above the controls: the channel, program information and stream quality.
-//! Sound and guide navigation sit left of transport. Favorite, picture in
-//! picture, multiview and display sit to its right. More holds the
-//! available actions that do not fit, plus Record now on Android handhelds
-//! and multiview on Android phones. The timeline sits below the row.
+//! Above the controls: a single compact line with the channel, program title,
+//! stream quality and (on wider screens) what is on next. Sound and guide
+//! navigation sit left of transport. Favorite, picture in picture, multiview
+//! and display sit to its right. More holds the available actions that do not
+//! fit, plus Record now on Android handhelds and multiview on Android phones.
+//! Live playback shows a thin hairline progress indicator at the top of the
+//! panel and omits the timeline row; catch-up and on-demand playback show the
+//! interactive timeline below the controls.
 //! The bar acts on the full-screen player (surface 0). While multiview's grid is open it
 //! does not show (the tiles take the taps), and its state then times the
 //! grid's pointer chrome instead (`multiview.rs`). On a multiview detour
@@ -54,16 +57,23 @@ pub fn pointer_available() -> bool {
     !matches!(idiom(), Idiom::Tv | Idiom::Terminal)
 }
 
-/// A button's side: a finger's target on touch devices, smaller under a mouse.
-/// The phone uses Apple's 44-point touch minimum.
+/// A button's side: a finger's target on touch devices, slimmer under a
+/// desktop mouse. The phone uses Apple's 44-point touch minimum.
 fn target() -> f32 {
     if idiom() == Idiom::Desktop {
-        40.0
+        34.0
     } else if crate::scale::phone() {
         44.0
     } else {
         48.0
     }
+}
+
+/// Whether the bar shows the full interactive timeline row: catch-up and
+/// on-demand playback (including while a title is still preparing). Live TV
+/// uses a slim hairline progress bar at the top of the panel instead.
+fn show_timeline(ui: Ui) -> bool {
+    matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
 }
 
 /// Whether the bar has the desktop's own controls (the volume slider, the
@@ -146,8 +156,22 @@ pub fn height(ui: Ui) -> f32 {
     if let Some(size) = ui.play_bar_size.get() {
         return size.height.0;
     }
-    let row = target() + 8.0;
-    6.0 + info::ESTIMATED_HEIGHT + 4.0 + row + 4.0 + 20.0 + 10.0 + 16.0 + safe_area().bottom.0
+    let row = target();
+    let extra = if show_timeline(ui) {
+        PANEL_GAP + progress::TIMELINE_HEIGHT
+    } else if ui.playing.get().is_some() {
+        PANEL_GAP + progress::HAIRLINE_HEIGHT
+    } else {
+        0.0
+    };
+    PANEL_PAD_Y
+        + info::ESTIMATED_HEIGHT
+        + PANEL_GAP
+        + row
+        + extra
+        + PANEL_PAD_Y
+        + BAR_BOTTOM_MARGIN
+        + safe_area().bottom.0
 }
 
 /// Changes the bar's state and (re)schedules its hiding.
@@ -309,11 +333,14 @@ pub(crate) fn back_bg(ui: Ui) -> impl Fn() -> Rgba + Copy + 'static {
     move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA)
 }
 
-/// The bar's margin at the window's sides, and the panel's padding inside
-/// it (points).
+/// The bar's margin at the window's sides and bottom, and the panel's padding
+/// and vertical gap inside it (points).
 const BAR_MARGIN: f32 = 24.0;
 const PHONE_BAR_MARGIN: f32 = 12.0;
+const BAR_BOTTOM_MARGIN: f32 = 10.0;
 const PANEL_PADDING: f32 = 12.0;
+const PANEL_PAD_Y: f32 = 6.0;
+const PANEL_GAP: f32 = 3.0;
 /// The gap between the bar's groups, and between the transport's buttons.
 const GROUP_GAP: f32 = 8.0;
 const TRANSPORT_GAP: f32 = 6.0;
@@ -368,7 +395,6 @@ fn group_width(group: &[Control], row: &[Control], size: f32) -> f32 {
         }
         width += match control {
             Control::Volume => VOLUME_WIDTH,
-            Control::PlayPause => size + 8.0,
             _ => size,
         };
     }
@@ -476,9 +502,18 @@ fn bar_now(ui: Ui) -> impl IntoElement {
     let controls = computed(move || layout(ui));
     effect(move || {
         let focus = ui.play_bar.with(|b| b.focus);
-        if focus.is_some_and(|c| c != Control::Timeline && !controls.with(|l| l.row.contains(&c))) {
+        let invalid = focus.is_some_and(|c| {
+            if c == Control::Timeline {
+                !show_timeline(ui) || !enabled(ui, Control::Timeline)
+            } else {
+                !controls.with(|l| l.row.contains(&c))
+            }
+        });
+        if invalid {
             let next = controls.with(|l| {
-                if l.row.contains(&Control::More) {
+                if l.row.contains(&Control::PlayPause) {
+                    Control::PlayPause
+                } else if l.row.contains(&Control::More) {
                     Control::More
                 } else {
                     Control::PlayPause
@@ -494,7 +529,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
         .right(px(0.0))
         .bottom(px(0.0))
         .px(move || px(bar_margin()))
-        .pb_safe_area_plus(px(16.0))
+        .pb_safe_area_plus(px(BAR_BOTTOM_MARGIN))
         .on_layout(move |b: &Bounds<Points>| {
             if ui.play_bar_size.get_untracked() != Some(b.size) {
                 ui.play_bar_size.set(Some(b.size));
@@ -505,13 +540,17 @@ fn bar_now(ui: Ui) -> impl IntoElement {
         .child(
             view()
                 .px(px(PANEL_PADDING))
-                .pt(px(6.0))
-                .pb(px(10.0))
-                .gap(px(4.0))
+                .pt(px(PANEL_PAD_Y))
+                .pb(px(PANEL_PAD_Y))
+                .gap(px(PANEL_GAP))
                 .rounded(px(RADIUS_LARGE))
                 .bg(panel)
                 .on_mouse_enter(move |_: &MouseEvent| hover(ui, true))
                 .on_mouse_leave(move |_: &MouseEvent| hover(ui, false))
+                .child(when(
+                    move || !show_timeline(ui) && ui.playing.get().is_some(),
+                    move || progress::live_hairline(ui),
+                ))
                 .child(info::header(ui))
                 .child(
                     view()
@@ -522,7 +561,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                         .child(group(ui, controls, CENTER))
                         .child(group(ui, controls, RIGHT)),
                 )
-                .child(progress::line(ui)),
+                .child(when(move || show_timeline(ui), move || progress::line(ui))),
         )
 }
 
@@ -535,7 +574,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
     let target_window = matches!(control, Control::More | Control::Fullscreen)
         .then(nsh_core::element::desktop::current_window);
     let icon_window = target_window.clone();
-    view()
+    let button = view()
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
@@ -586,7 +625,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
                 .flatten()
                 .map(SharedString::from)
         })
-        .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 2)))
+        .hover(|s| s.bg(tint(WHITE, RESTING_ALPHA * 3)))
         .on_press(move || {
             ui.touched();
             activate(ui, control, target_window.clone());
@@ -610,7 +649,12 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
                         },
                     )
                 }),
-        )
+        );
+    if control == Control::PlayPause {
+        button.bg(tint(WHITE, RESTING_ALPHA * 2))
+    } else {
+        button
+    }
 }
 
 fn control_label(control: Control) -> &'static str {
@@ -949,8 +993,7 @@ fn group(ui: Ui, controls: Memo<Layout>, candidates: &'static [Control]) -> View
                 if c == Control::Volume {
                     return volume(ui);
                 }
-                let size = target() + if c == Control::PlayPause { 8.0 } else { 0.0 };
-                button(ui, c, size)
+                button(ui, c, target())
             },
         )
     }))

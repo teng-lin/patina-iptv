@@ -275,22 +275,30 @@ fn phone_play_bar_keeps_transport_centered_on_its_side() {
                 );
                 assert!(b[2] >= 44.0 - 0.5, "a 44-point target {b:?}: {what}");
             }
-            // The program title sits above the transport and auxiliary actions.
+            // The program title sits above the transport and auxiliary actions,
+            // with usable width and no overlap from the Ch± buttons.
             let title = bounds(app, "bar-title").expect("the title line");
+            assert!(title[2] > 0.0, "{title:?} keeps visible width: {what}");
             assert!(title[1] + title[3] <= top + 0.5, "{title:?} above: {what}");
             assert!(
                 title[0] + title[2] <= size.0 + 0.5,
                 "{title:?} inside: {what}"
             );
-            let timeline = bounds(app, "play-bar-time-line").expect("the bottom timeline");
+            if let Some(next_ch) = bounds(app, "play-bar-next-channel") {
+                assert!(
+                    next_ch[0] + next_ch[2] <= title[0] + 0.5,
+                    "Ch± ({next_ch:?}) must not overlap bar-title ({title:?}): {what}"
+                );
+            }
+            // Live playback uses the slim two-row bar with a top hairline and
+            // no interactive timeline row.
             assert!(
-                rows.iter()
-                    .all(|control| control[1] + control[3] <= timeline[1] + 0.5),
-                "the timeline is below all controls: {timeline:?}, {what}"
+                bounds(app, "live-progress-hairline").is_some(),
+                "live playback shows the top hairline progress cue: {what}"
             );
             assert!(
-                timeline[1] + timeline[3] <= size.1 + 0.5,
-                "{timeline:?} inside: {what}"
+                bounds(app, "play-bar-time-line").is_none(),
+                "live playback omits the non-interactive timeline row: {what}"
             );
             persistent(app, &lifetime, surface);
         }
