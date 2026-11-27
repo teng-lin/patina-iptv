@@ -28,14 +28,24 @@ pub(crate) fn player(app: &Headless) -> NodeId {
 /// Back from a title playing full screen, by the idiom's own input: a
 /// remote's Back (the platform's, as `app.back()` sends it); Backspace on
 /// a desktop keyboard (Escape is the platform's Back, `app.back()`); on a
-/// tablet the play bar's visible ‹ (labeled Movies or Shows), else the
-/// system Back.
+/// tablet the play bar's visible ‹ (labeled Movies or Shows).
 fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
-    let bar = app.screen().matches("id:play-bar-back").unwrap();
     match idiom {
         nsh_core::platform::Idiom::Tv => step(app.back()),
         nsh_core::platform::Idiom::Desktop => step(app.press_key("backspace")),
-        _ if bar => {
+        _ => {
+            // Async source preparation and progress saves can outlast the bar's
+            // idle deadline. Keep the visible Back alive from lookup to press,
+            // as replay_ended_movie does for its transport controls.
+            let mut reader = false;
+            step(app.set_environment("Hold player Back", |env| {
+                reader = env.screen_reader;
+                env.screen_reader = true;
+            }));
+            if !app.screen().matches("id:play-bar-back").unwrap() {
+                step(app.press("id:video"));
+            }
+            step(app.wait_for("id:play-bar-back"));
             let back = app.screen().id("id:play-bar-back").unwrap();
             let labeled = |label: &str| {
                 let screen = app.screen();
@@ -47,8 +57,8 @@ fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
                 "the ‹ reads Movies or Shows"
             );
             step(app.press("id:play-bar-back"));
+            step(app.set_environment("Release player Back", |env| env.screen_reader = reader));
         }
-        _ => step(app.back()),
     }
 }
 
@@ -1750,6 +1760,12 @@ fn exercise_admission(
         );
         app.settle();
     }
+    assert!(
+        app.screen().layout_nodes().iter().any(|node| {
+            node.id == surface && node.bounds.size == Size::new(px(1920.0), px(1080.0))
+        }),
+        "EOF keeps the episode full screen until the viewer goes Back"
+    );
     // Back from the episode: the show's details, the played episode
     // (season 2's first) selected, over the same player, opening nothing
     // (#147).
