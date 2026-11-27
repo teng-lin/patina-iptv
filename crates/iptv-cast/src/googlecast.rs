@@ -1,6 +1,6 @@
 //! Cast v2 control of the Default Media Receiver.
 use crate::{
-    tls,
+    Delivery, tls,
     wire::{self, Envelope, MAX_FRAME},
 };
 use prost::Message;
@@ -16,7 +16,7 @@ use tokio::{
     net::TcpStream,
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{Instant, timeout},
+    time::{Instant, timeout, timeout_at},
 };
 use tokio_rustls::rustls::pki_types::ServerName;
 
@@ -36,7 +36,8 @@ pub enum Error {
     LoadFailed,
     Unknown,
     Ended,
-    OwnershipLost,
+    OwnershipLost { dispatched: bool },
+    TimedOut,
 }
 type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,13 +90,24 @@ pub struct Session {
 }
 impl Session {
     pub async fn connect(address: SocketAddr) -> Result<Self> {
-        Self::open(address, true).await
+        Self::open(address, true, &mut Delivery::NotSent).await
     }
     /// Attaches only to an already running instance of the media receiver.
     pub async fn rejoin(address: SocketAddr) -> Result<Self> {
-        Self::open(address, false).await
+        Self::open(address, false, &mut Delivery::NotSent).await
     }
-    async fn open(address: SocketAddr, launch: bool) -> Result<Self> {
+    pub(crate) async fn connect_bounded(
+        address: SocketAddr,
+        deadline: Instant,
+    ) -> std::result::Result<Self, (Error, Delivery)> {
+        let mut delivery = Delivery::NotSent;
+        timeout_at(deadline, Self::open(address, true, &mut delivery))
+            .await
+            .unwrap_or(Err(Error::TimedOut))
+            .map_err(|error| (error, delivery))
+    }
+
+    async fn open(address: SocketAddr, launch: bool, delivery: &mut Delivery) -> Result<Self> {
         let (socket, local_addr) = timeout(DEADLINE, async {
             let socket = TcpStream::connect(address)
                 .await
@@ -129,12 +141,7 @@ impl Session {
         session.transport = if let Some(id) = app_transport(&status) {
             id
         } else if launch {
-            app_transport(
-                &session
-                    .request(RECEIVER, ROOT, json!({"type":"LAUNCH","appId":APP}))
-                    .await?,
-            )
-            .ok_or(Error::Refused)?
+            session.launch(delivery).await?
         } else {
             return Err(Error::Ended);
         };
@@ -195,7 +202,7 @@ impl Session {
     }
     /// Loads live HLS at the live edge. Only a reply for this request establishes ownership.
     pub async fn load(&self, url: &str) -> Result<i64> {
-        let permit = self.load_permit().await?;
+        let permit = self.request_slot().await?;
         let request = self.queue_load(permit, load_body(url, "application/x-mpegURL", true, None));
         let reply = timeout(DEADLINE, request)
             .await
@@ -203,7 +210,7 @@ impl Session {
             .map_err(|_| Error::Unknown)??;
         load_instance(&reply, url, None)
     }
-    async fn load_permit(&self) -> Result<mpsc::Permit<'_, Request>> {
+    async fn request_slot(&self) -> Result<mpsc::Permit<'_, Request>> {
         timeout(DEADLINE, self.outgoing.reserve())
             .await
             .map_err(|_| Error::Unknown)?
@@ -215,16 +222,58 @@ impl Session {
         permit: mpsc::Permit<'_, Request>,
         body: Value,
     ) -> oneshot::Receiver<Result<Value>> {
+        Self::queue(
+            permit,
+            MEDIA,
+            &self.transport,
+            body,
+            DEADLINE + LATE_LOAD_REPLY,
+        )
+    }
+
+    fn queue(
+        permit: mpsc::Permit<'_, Request>,
+        namespace: &'static str,
+        destination: &str,
+        body: Value,
+        retention: Duration,
+    ) -> oneshot::Receiver<Result<Value>> {
         let (reply, received) = oneshot::channel();
         permit.send(Request {
-            namespace: MEDIA,
-            destination: self.transport.clone(),
+            namespace,
+            destination: destination.into(),
             body,
-            retention: DEADLINE + LATE_LOAD_REPLY,
+            retention,
             reply,
         });
         received
     }
+
+    async fn launch(&self, delivery: &mut Delivery) -> Result<String> {
+        let permit = self.request_slot().await?;
+        *delivery = Delivery::MayHaveReachedReceiver;
+        let received = Self::queue(
+            permit,
+            RECEIVER,
+            ROOT,
+            json!({"type":"LAUNCH","appId":APP}),
+            DEADLINE,
+        );
+        match timeout(DEADLINE, received).await {
+            Ok(Ok(Ok(response))) => {
+                *delivery = Delivery::Acknowledged;
+                app_transport(&response).ok_or(Error::Refused)
+            }
+            Ok(Ok(Err(Error::Refused))) => {
+                *delivery = Delivery::Acknowledged;
+                Err(Error::Refused)
+            }
+            Ok(Ok(Err(error))) => Err(error),
+            Ok(Err(_)) => Err(Error::Unreachable),
+            Err(_) => Err(Error::TimedOut),
+        }
+    }
+
     /// Finds matching content for diagnostics. Use correlated load replies to establish ownership.
     pub async fn lookup(&self, url: &str) -> Result<Option<i64>> {
         let reply = self.media(json!({"type":"GET_STATUS"})).await?;
@@ -279,12 +328,7 @@ impl Session {
             // For receiver-wide changes this status check is the last wire
             // round trip before the write, including after reading output.
             let report = self.media(json!({"type":"GET_STATUS"})).await?;
-            if let Some(token) = token
-                && media_entry(&report, id)
-                    .is_ok_and(|entry| load_tag(entry).is_some_and(|observed| observed != token))
-            {
-                return Err(Error::OwnershipLost);
-            }
+            check_load_tag(&report, id, token, false)?;
             match state(&report, id)? {
                 Status::Playing | Status::Paused | Status::Buffering => {}
                 Status::Unknown => return Err(Error::Unknown),
@@ -306,6 +350,7 @@ impl Session {
             request["currentTime"] = position.as_secs_f64().into();
         }
         let reply = self.media(request).await?;
+        check_load_tag(&reply, id, token, true)?;
         timeout(DEADLINE, async {
             let mut reply = if cmd == Command::Stop {
                 self.media(json!({"type":"GET_STATUS"})).await?
@@ -313,6 +358,7 @@ impl Session {
                 reply
             };
             loop {
+                check_load_tag(&reply, id, token, true)?;
                 match (cmd, state(&reply, id)) {
                     (Command::Play, Ok(Status::Playing | Status::Buffering))
                     | (Command::Pause, Ok(Status::Paused))
@@ -406,6 +452,20 @@ pub(crate) fn tagged_instance(reply: &Value, token: &str) -> Result<Option<i64>>
         return Err(Error::Unknown);
     }
     Ok(id)
+}
+
+fn check_load_tag(reply: &Value, id: i64, token: Option<&str>, dispatched: bool) -> Result<()> {
+    if let Some(token) = token
+        && different_load_tag(reply, id, token)
+    {
+        return Err(Error::OwnershipLost { dispatched });
+    }
+    Ok(())
+}
+
+pub(crate) fn different_load_tag(reply: &Value, id: i64, token: &str) -> bool {
+    media_entry(reply, id)
+        .is_ok_and(|entry| load_tag(entry).is_some_and(|observed| observed != token))
 }
 
 pub(crate) fn load_tag(entry: &Value) -> Option<&str> {

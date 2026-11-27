@@ -642,9 +642,10 @@ async fn loading_reports_whether_a_receiver_could_have_seen_the_request() {
         (ErrorKind::Unreachable, Delivery::NotSent)
     );
 
+    #[derive(Clone, Copy)]
     enum Response {
         LostConnection,
-        Refused,
+        Refused(WireError),
         Unanswered,
     }
     for (mode, expected) in [
@@ -653,7 +654,11 @@ async fn loading_reports_whether_a_receiver_could_have_seen_the_request() {
             (ErrorKind::Unreachable, Delivery::MayHaveReachedReceiver),
         ),
         (
-            Response::Refused,
+            Response::Refused(WireError::LoadFailed),
+            (ErrorKind::ReceiverRefused, Delivery::Acknowledged),
+        ),
+        (
+            Response::Refused(WireError::Refused),
             (ErrorKind::ReceiverRefused, Delivery::Acknowledged),
         ),
         (
@@ -668,7 +673,7 @@ async fn loading_reports_whether_a_receiver_could_have_seen_the_request() {
             let request = requests.recv().await.unwrap();
             match mode {
                 Response::LostConnection => drop(request),
-                Response::Refused => request.reply.send(Err(WireError::LoadFailed)).unwrap(),
+                Response::Refused(reason) => request.reply.send(Err(reason)).unwrap(),
                 Response::Unanswered => {
                     tokio::time::sleep(super::super::DEADLINE + Duration::from_secs(1)).await;
                     drop(request);
@@ -678,6 +683,11 @@ async fn loading_reports_whether_a_receiver_could_have_seen_the_request() {
         let (result, ()) = tokio::join!(cast.load(Media::live(URL).unwrap(), &dispatch), receiver);
         let error = result.err().unwrap();
         assert_eq!((error.kind(), error.delivery()), expected);
+        assert_eq!(
+            error.diagnostic(),
+            matches!(mode, Response::Refused(WireError::LoadFailed))
+                .then_some(&Diagnostic::MediaLoadFailed),
+        );
     }
 }
 
@@ -736,5 +746,66 @@ async fn controls_recheck_the_receiver_capability_and_whether_owned_media_is_pre
             assert!(requests.recv().await.is_none());
         };
         tokio::join!(sender, receiver);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn correlated_media_replies_never_confirm_effects_on_a_reused_id() {
+    use crate::googlecast::tests::session_channel;
+    for (command, verb, confirm_state) in [
+        (Some(Command::Play), "PLAY", "PLAYING"),
+        (Some(Command::Pause), "PAUSE", "PAUSED"),
+        (
+            Some(Command::Seek(Duration::from_secs(5))),
+            "SEEK",
+            "PAUSED",
+        ),
+        (None, "STOP", "IDLE"),
+    ] {
+        for delayed in [false, true] {
+            let (wire, mut requests) = session_channel();
+            let mut cast = CastDriver::new(wire).unwrap();
+            cast.owned = Some(7);
+            let owned = json!({
+                "mediaSessionId":7,"playerState":"BUFFERING","supportedMediaCommands":3,
+                "media":{"customData":{"castRsLoad":cast.token}},
+            });
+            let foreign = json!({
+                "mediaSessionId":7,"playerState":confirm_state,"currentTime":5.0,
+                "idleReason":"CANCELLED","media":{"customData":{"castRsLoad":"foreign"}},
+            });
+            let sender = async {
+                let error = if let Some(command) = command {
+                    cast.command(command).await.unwrap_err()
+                } else {
+                    cast.stop().await.unwrap_err()
+                };
+                assert_eq!(
+                    (error.kind(), error.delivery()),
+                    (ErrorKind::OwnershipLost, Delivery::MayHaveReachedReceiver,)
+                );
+                cast.close().await;
+            };
+            let receiver = async {
+                let query = requests.recv().await.unwrap();
+                assert_eq!(query.body["type"], "GET_STATUS");
+                query.reply.send(Ok(json!({"status":[owned]}))).unwrap();
+                let request = requests.recv().await.unwrap();
+                assert_eq!(request.body["type"], verb);
+                let reply = if delayed { &owned } else { &foreign };
+                let mut reply = reply.clone();
+                if delayed && verb == "PLAY" {
+                    reply["playerState"] = json!("PAUSED");
+                }
+                request.reply.send(Ok(json!({"status":[reply]}))).unwrap();
+                if delayed {
+                    let query = requests.recv().await.unwrap();
+                    assert_eq!(query.body["type"], "GET_STATUS");
+                    query.reply.send(Ok(json!({"status":[foreign]}))).unwrap();
+                }
+                assert!(requests.recv().await.is_none());
+            };
+            tokio::join!(sender, receiver);
+        }
     }
 }

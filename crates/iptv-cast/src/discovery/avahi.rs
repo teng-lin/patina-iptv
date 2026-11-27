@@ -133,7 +133,7 @@ fn resolve(
             if let Some(receiver) =
                 Receiver::from_record(address, field("fn="), field("ca="), field("id="))
             {
-                found.entry(name).or_insert(receiver);
+                found.entry((name, address)).or_insert(receiver);
             }
         }
     }

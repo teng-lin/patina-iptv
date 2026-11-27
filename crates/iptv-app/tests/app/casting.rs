@@ -19,6 +19,7 @@ struct FakeCast {
     states: Arc<Mutex<VecDeque<Result<RemoteState, Error>>>>,
     next_command: Arc<Mutex<Option<tokio::sync::oneshot::Receiver<()>>>>,
     load_error: Option<Error>,
+    prepare_error: Arc<Mutex<Option<Error>>>,
     allow_error: Option<Error>,
     initially_paused: bool,
     stop_unconfirmed: bool,
@@ -50,7 +51,12 @@ impl Port for FakeCast {
     }
     fn prepare(&self, receiver: Receiver, _source: PlaySource) -> Task<'_, Box<dyn Prepared>> {
         assert_eq!(receiver.name, "Generated TV");
-        Box::pin(async { Ok(Box::new(self.clone()) as Box<dyn Prepared>) })
+        Box::pin(async {
+            if let Some(error) = self.prepare_error.lock().unwrap().take() {
+                return Err(error);
+            }
+            Ok(Box::new(self.clone()) as Box<dyn Prepared>)
+        })
     }
 }
 impl Prepared for FakeCast {
@@ -319,6 +325,27 @@ fn a_successful_status_resets_the_disconnect_budget() {
     ));
     assert!(fake.states.lock().unwrap().is_empty());
     assert_eq!(*fake.events.lock().unwrap(), ["load", "allow", "retire"]);
+}
+
+#[test]
+fn a_stale_network_route_cannot_retire_the_current_playback_during_a_channel_change() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    ready_controls(app);
+    *fake.prepare_error.lock().unwrap() = Some(Error::Unavailable);
+    step(app.press("id:play-bar-next-channel"));
+    step(app.wait_for("text:Could not start playback on the selected device."));
+    assert_eq!(*fake.events.lock().unwrap(), ["load", "allow"]);
+    assert!(!iptv_app::player_has_source(0));
+    ready_controls(app);
+    step(app.press("id:play-bar-play-pause"));
+    step(app.wait_until(
+        "the existing receiver is still controllable",
+        Duration::from_secs(10),
+        |_| fake.events.lock().unwrap().contains(&"pause"),
+    ));
 }
 
 #[test]

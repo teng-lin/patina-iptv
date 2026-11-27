@@ -15,7 +15,7 @@ use std::{
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
 pub trait Port: Send + Sync {
     fn discover(&self) -> Task<'_, Vec<Receiver>>;
-    /// Connects and creates a gated LAN relay without opening the upstream.
+    /// Connects and prepares the handoff without opening the upstream.
     fn prepare(&self, receiver: Receiver, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
 }
 /// A system route picker is mounted by the host; its player remains owned by

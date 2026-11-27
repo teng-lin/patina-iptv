@@ -1,7 +1,8 @@
 //! Network casting via the shared sender. The runtime authorizes relay admission.
 use iptv_cast::{
-    Cast, Confirmation, Connect, Connection, Delivery, ErrorKind, Link, Media, OutputChange,
-    Playback, Route, Session, Snapshot, Stage, StopOutcome, Updates, Volume, VolumeScope,
+    Cast, Confirmation, Connect, Connection, Delivery, Diagnostic, ErrorKind, Link, Media,
+    OutputChange, Playback, Route, Session, Snapshot, Stage, StopOutcome, Updates, Volume,
+    VolumeScope,
 };
 use iptv_core::{
     cast::{Command, Error, NetworkProtocol, Receiver, RemoteState},
@@ -141,33 +142,14 @@ impl Port for Sender {
                 _ => return Err(Error::Unsupported),
             };
             let (local, remote) = connection.control_addrs().ok_or(Error::Unavailable)?;
-            let listen = SocketAddr::new(local.ip(), relay_port);
-            let (relay, gate) = tokio::task::spawn_blocking(move || {
-                PlaybackRelay::start_cast(
-                    &source.url,
-                    &source.headers,
-                    super::transport::policy(source.public_only),
-                    listen,
-                    remote.ip(),
-                )
-            })
-            .await
-            .map_err(|_| Error::Unavailable)?
-            .map_err(|_| Error::Unavailable)?;
-            #[cfg(feature = "test-support")]
-            let relay_port = relay
-                .url()
-                .split('/')
-                .nth(2)
-                .and_then(|authority| authority.parse::<SocketAddr>().ok())
-                .map_or(relay_port, |address| address.port());
             Ok(Box::new(Handoff {
-                pending: Some(Pending {
-                    sender: PendingSender::Ready(connection),
-                    relay,
-                    relay_port,
-                    gate,
+                ready: Some(Ready {
+                    connection,
+                    source,
+                    listen: SocketAddr::new(local.ip(), relay_port),
+                    remote,
                 }),
+                pending: None,
                 handle: Handle::current(),
                 guard: None,
             }) as Box<dyn Prepared>)
@@ -175,38 +157,34 @@ impl Port for Sender {
     }
 }
 
-enum PendingSender {
-    Ready(Connection),
-    Loading(Session),
+struct Ready {
+    connection: Connection,
+    source: PlaySource,
+    listen: SocketAddr,
+    remote: SocketAddr,
 }
 
 struct Pending {
-    sender: PendingSender,
+    session: Session,
     relay: PlaybackRelay,
-    relay_port: u16,
     gate: ExternalAdmission,
 }
 
 impl Pending {
     async fn rollback(self) {
         let Pending {
-            sender,
+            session,
             relay,
             gate,
-            ..
         } = self;
         drop(gate);
         relay.shutdown().await;
-        match sender {
-            PendingSender::Ready(connection) => connection.close().await,
-            PendingSender::Loading(session) => {
-                let _ = stop_remote(session).await;
-            }
-        }
+        let _ = stop_remote(session).await;
     }
 }
 
 struct Handoff {
+    ready: Option<Ready>,
     pending: Option<Pending>,
     handle: Handle,
     guard: Option<Box<dyn Fn() -> bool + Send + Sync>>,
@@ -217,6 +195,8 @@ impl Drop for Handoff {
         if let Some(pending) = self.pending.take() {
             // Prepared can be dropped by the UI outside the network runtime.
             self.handle.spawn(pending.rollback());
+        } else if let Some(ready) = self.ready.take() {
+            self.handle.spawn(ready.connection.close());
         }
     }
 }
@@ -231,32 +211,48 @@ impl Prepared for Handoff {
             if self.guard.as_ref().is_some_and(|current| !current()) {
                 return Err(Error::Denied);
             }
-            let pending = self.pending.take().ok_or(Error::Unknown)?;
-            let Pending {
-                sender,
-                relay,
-                relay_port,
-                gate,
-            } = pending;
-            let PendingSender::Ready(connection) = sender else {
-                self.pending = Some(Pending {
-                    sender,
-                    relay,
-                    relay_port,
-                    gate,
-                });
-                return Err(Error::Unknown);
-            };
+            let Ready {
+                connection,
+                source,
+                listen,
+                remote,
+            } = self.ready.take().ok_or(Error::Unknown)?;
+            // The old relay's listener is joined before the runtime calls load.
+            let (relay, gate) = tokio::task::spawn_blocking(move || {
+                PlaybackRelay::start_cast(
+                    &source.url,
+                    &source.headers,
+                    super::transport::policy(source.public_only),
+                    listen,
+                    remote.ip(),
+                )
+            })
+            .await
+            .map_err(|_| Error::Unavailable)?
+            .map_err(|_| Error::Unavailable)?;
+            let relay_port = listen.port();
+            #[cfg(feature = "test-support")]
+            let relay_port = relay
+                .url()
+                .split('/')
+                .nth(2)
+                .and_then(|authority| authority.parse::<SocketAddr>().ok())
+                .map_or(relay_port, |address| address.port());
+            if self.guard.as_ref().is_some_and(|current| !current()) {
+                drop(gate);
+                relay.shutdown().await;
+                connection.close().await;
+                return Err(Error::Denied);
+            }
             let media = Media::live(relay.url())
                 .and_then(|media| media.with_content_type("application/x-mpegURL"))
                 .map_err(|error| map_error(&error))?;
             let session = connection.load(media).map_err(|error| map_error(&error))?;
             let mut updates = session.subscribe();
             let pending = self.pending.insert(Pending {
-                sender: PendingSender::Loading(session),
+                session,
                 relay,
                 gate,
-                relay_port,
             });
             let result = wait_for_request(
                 &mut pending.gate,
@@ -276,17 +272,11 @@ impl Prepared for Handoff {
 
     fn allow(mut self: Box<Self>, authorization: &Authorization) -> Task<'_, Admitted> {
         Box::pin(async move {
-            let pending = self.pending.take().ok_or(Error::Unknown)?;
             let Pending {
-                sender,
+                session,
                 relay,
                 gate,
-                ..
-            } = pending;
-            let PendingSender::Loading(session) = sender else {
-                relay.shutdown().await;
-                return Err(Error::Unknown);
-            };
+            } = self.pending.take().ok_or(Error::Unknown)?;
             let mut updates = session.subscribe();
             let outcome = authorization
                 .while_current(async {
@@ -348,7 +338,8 @@ async fn wait_for_request(
             if let Some(snapshot) = snapshot {
                 if !gate.received_request()
                     && matches!(snapshot.playback(), Playback::Failed(error)
-                        if error.stage() == Stage::Load && error.kind() == ErrorKind::ReceiverRefused)
+                        if error.stage() == Stage::Load
+                            && error.diagnostic() == Some(&Diagnostic::MediaLoadFailed))
                 {
                     return Err(no_request);
                 }

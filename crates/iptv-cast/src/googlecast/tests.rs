@@ -321,3 +321,44 @@ async fn an_unanswered_request_expires_while_heartbeats_keep_the_session_usable(
 
 mod failures;
 mod media;
+
+#[tokio::test(start_paused = true)]
+async fn receiver_launch_retains_delivery_evidence_from_its_own_request() {
+    let (session, requests) = session_channel();
+    drop(requests);
+    let mut delivery = Delivery::NotSent;
+    assert_eq!(session.launch(&mut delivery).await, Err(Error::Unreachable));
+    assert_eq!(delivery, Delivery::NotSent);
+
+    for (response, expected, disposition) in [
+        (
+            Some(Err(Error::Refused)),
+            Err(Error::Refused),
+            Delivery::Acknowledged,
+        ),
+        (
+            Some(Ok(
+                json!({"status":{"applications":[{"appId":APP,"transportId":"generated"}]}}),
+            )),
+            Ok("generated".to_owned()),
+            Delivery::Acknowledged,
+        ),
+        (None, Err(Error::TimedOut), Delivery::MayHaveReachedReceiver),
+    ] {
+        let (session, mut requests) = session_channel();
+        let mut delivery = Delivery::NotSent;
+        let receiver = async {
+            let request = requests.recv().await.unwrap();
+            assert_eq!(request.namespace, RECEIVER);
+            assert_eq!(request.body["type"], "LAUNCH");
+            if let Some(response) = response {
+                request.reply.send(response).unwrap();
+            } else {
+                tokio::time::sleep(DEADLINE + Duration::from_secs(1)).await;
+            }
+        };
+        let (result, ()) = tokio::join!(session.launch(&mut delivery), receiver);
+        assert_eq!(result, expected);
+        assert_eq!(delivery, disposition);
+    }
+}

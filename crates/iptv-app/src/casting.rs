@@ -211,6 +211,15 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 _ => return Err(Error::Unsupported),
             };
             crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
+            // Revalidate network identity while an existing cast still owns
+            // its relay. Preparing this connection does not bind the new relay.
+            let prepared = if airplay {
+                None
+            } else {
+                let prepared = owner.prepare_cast(receiver.clone(), source.clone()).await?;
+                check().await?;
+                Some(prepared)
+            };
             if owner.cast_target().is_some() {
                 if airplay
                     && owner
@@ -227,7 +236,10 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 retired = true;
                 ui.cast_remote.set(false);
             }
-            let prepared = owner.prepare_cast(receiver.clone(), source).await?;
+            let prepared = match prepared {
+                Some(prepared) => prepared,
+                None => owner.prepare_cast(receiver.clone(), source).await?,
+            };
             let grant = check().await?;
             let claim = owner
                 .reserve_cast_viewing(iptv_library::SourceId(authority.source()))

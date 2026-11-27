@@ -90,23 +90,29 @@ async fn browse_mdns(daemon: ServiceDaemon, until: Instant) -> io::Result<Vec<Re
     while let Ok(Ok(event)) = tokio::time::timeout_at(until, events.recv_async()).await {
         record_event(&mut found, event);
     }
-    Ok(found.into_values().collect())
+    Ok(found.into_values().flatten().collect())
 }
 
-fn record_event(found: &mut BTreeMap<String, Receiver>, event: ServiceEvent) {
+fn record_event(found: &mut BTreeMap<String, Vec<Receiver>>, event: ServiceEvent) {
     match event {
         ServiceEvent::ServiceResolved(info) => {
-            if let Some(ip) = info.get_addresses_v4().into_iter().min()
-                && let Some(receiver) = Receiver::from_record(
-                    SocketAddr::from((ip, info.get_port())),
-                    info.get_property_val_str("fn"),
-                    info.get_property_val_str("ca"),
-                    info.get_property_val_str("id"),
-                )
-            {
-                found.insert(info.get_fullname().to_owned(), receiver);
-            } else {
+            let mut addresses = info.get_addresses_v4().into_iter().collect::<Vec<_>>();
+            addresses.sort_unstable();
+            let receivers: Vec<_> = addresses
+                .into_iter()
+                .filter_map(|ip| {
+                    Receiver::from_record(
+                        SocketAddr::from((ip, info.get_port())),
+                        info.get_property_val_str("fn"),
+                        info.get_property_val_str("ca"),
+                        info.get_property_val_str("id"),
+                    )
+                })
+                .collect();
+            if receivers.is_empty() {
                 found.remove(info.get_fullname());
+            } else {
+                found.insert(info.get_fullname().to_owned(), receivers);
             }
         }
         ServiceEvent::ServiceRemoved(_, name) => {

@@ -43,10 +43,9 @@ impl Error {
         }
     }
 
-    // Used by backends that own a separate UDP timing listener.
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "AirPlay integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_diagnostic(mut self, diagnostic: Diagnostic) -> Self {
         self.diagnostic = Some(diagnostic);
@@ -89,7 +88,11 @@ impl std::error::Error for Error {}
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Diagnostic {
-    TimingListener { local_addr: SocketAddr },
+    /// The receiver reported a media load failure without further detail.
+    MediaLoadFailed,
+    TimingListener {
+        local_addr: SocketAddr,
+    },
 }
 
 #[non_exhaustive]

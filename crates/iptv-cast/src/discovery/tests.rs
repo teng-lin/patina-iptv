@@ -34,19 +34,33 @@ fn updated_records_replace_addresses_and_removed_services_leave_the_picker() {
     record_event(&mut found, resolved("A", "127.0.0.5", 8009, "1"));
     record_event(&mut found, resolved("B", "127.0.0.8,127.0.0.2", 8010, "5"));
     assert_eq!(
-        found.values().map(|r| r.name.as_str()).collect::<Vec<_>>(),
-        ["A", "B"]
+        found
+            .values()
+            .flatten()
+            .map(|r| r.name.as_str())
+            .collect::<Vec<_>>(),
+        ["A", "B", "B"]
     );
     assert_eq!(
-        found[&format!("B.{SERVICE}")].address,
-        SocketAddr::from(([127, 0, 0, 2], 8010))
+        found[&format!("B.{SERVICE}")]
+            .iter()
+            .map(|receiver| receiver.address)
+            .collect::<Vec<_>>(),
+        [
+            SocketAddr::from(([127, 0, 0, 2], 8010)),
+            SocketAddr::from(([127, 0, 0, 8], 8010)),
+        ]
     );
     record_event(
         &mut found,
         ServiceEvent::ServiceRemoved(SERVICE.into(), format!("B.{SERVICE}")),
     );
     assert_eq!(
-        found.into_values().map(|r| r.name).collect::<Vec<_>>(),
+        found
+            .into_values()
+            .flatten()
+            .map(|r| r.name)
+            .collect::<Vec<_>>(),
         ["A"]
     );
 }

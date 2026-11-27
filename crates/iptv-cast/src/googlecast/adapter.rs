@@ -1,9 +1,9 @@
 //! The Google Cast wire protocol behind the shared sender handles.
 use super::{Command as WireCommand, Error as WireError, Session as WireSession, Status};
 use crate::{
-    Availability, Command, Confirmation, Credential, Delivery, Error, ErrorKind, Feature, Link,
-    Media, OutputChange, PeerTrust, Playback, ProtocolId, Route, Stage, StopOutcome, Volume,
-    VolumeScope, discovery,
+    Availability, Command, Confirmation, Credential, Delivery, Diagnostic, Error, ErrorKind,
+    Feature, Link, Media, OutputChange, PeerTrust, Playback, ProtocolId, Route, Stage, StopOutcome,
+    Volume, VolumeScope, discovery,
     sender::{
         Backend, BackendConnect, BoxFuture, Candidate, Dispatch, Driver, Features, Observation,
         ScanSink,
@@ -16,6 +16,9 @@ use tokio::{
     time::{Instant, timeout, timeout_at},
 };
 
+// The shared connect worker has a 30-second deadline. Finish first so a
+// transport error can retain the receiver's LAUNCH delivery evidence.
+const CONNECT_WINDOW: Duration = Duration::from_secs(25);
 const ROUTE_WINDOW: Duration = Duration::from_secs(5);
 const RECENT_SCAN: Duration = Duration::from_secs(30);
 const RECONCILE: Duration = Duration::from_secs(3);
@@ -125,14 +128,15 @@ impl Backend for GoogleCast {
         _credential: Option<Credential>,
     ) -> BoxFuture<'a, Result<BackendConnect, Error>> {
         Box::pin(async move {
+            let deadline = Instant::now() + CONNECT_WINDOW;
             let address = route
                 .payload::<Endpoint>()
                 .ok_or_else(connect_error)?
                 .resolve(self)
                 .await?;
-            let wire = WireSession::connect(address)
+            let wire = WireSession::connect_bounded(address, deadline)
                 .await
-                .map_err(|error| translate(error, Stage::Connect, Delivery::NotSent))?;
+                .map_err(|(error, delivery)| translate(error, Stage::Connect, delivery))?;
             Ok(BackendConnect::Ready(Box::new(CastDriver::new(wire)?)))
         })
     }
@@ -177,7 +181,7 @@ impl CastDriver {
         let content_type = content_type(&media)?;
         let wire = self.wire();
         let permit = wire
-            .load_permit()
+            .request_slot()
             .await
             .map_err(|error| translate(error, Stage::Load, Delivery::NotSent))?;
         dispatch.mark_sent()?;
@@ -366,7 +370,7 @@ impl CastDriver {
             .command_owned(id, wire, Some(&self.token))
             .await
             .map_err(|error| {
-                let delivery = if error == WireError::OwnershipLost {
+                let delivery = if matches!(error, WireError::OwnershipLost { dispatched: false }) {
                     Delivery::NotSent
                 } else {
                     Delivery::MayHaveReachedReceiver
@@ -437,7 +441,7 @@ impl CastDriver {
             }
         }
         self.wire()
-            .command(id, WireCommand::Stop)
+            .command_owned(id, WireCommand::Stop, Some(&self.token))
             .await
             .map_err(|error| translate(error, Stage::Stop, Delivery::MayHaveReachedReceiver))?;
         Ok(StopOutcome::StopRequested(Confirmation::ReceiverConfirmed))
@@ -538,8 +542,7 @@ fn other_active_media(reply: &Value, id: i64) -> bool {
 }
 
 fn replaced(reply: &Value, id: i64, token: &str) -> bool {
-    super::media_entry(reply, id)
-        .is_ok_and(|entry| super::load_tag(entry).is_some_and(|observed| observed != token))
+    super::different_load_tag(reply, id, token)
 }
 
 fn owned_active_entry<'a>(
@@ -616,9 +619,15 @@ fn translate(error: WireError, stage: Stage, delivery: Delivery) -> Error {
         WireError::Refused | WireError::LoadFailed => ErrorKind::ReceiverRefused,
         WireError::Unknown => ErrorKind::Protocol,
         WireError::Ended => ErrorKind::Unavailable,
-        WireError::OwnershipLost => ErrorKind::OwnershipLost,
+        WireError::OwnershipLost { .. } => ErrorKind::OwnershipLost,
+        WireError::TimedOut => ErrorKind::TimedOut,
     };
-    Error::new(kind, stage, delivery)
+    let report = Error::new(kind, stage, delivery);
+    if error == WireError::LoadFailed {
+        report.with_diagnostic(Diagnostic::MediaLoadFailed)
+    } else {
+        report
+    }
 }
 
 #[cfg(test)]

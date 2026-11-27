@@ -67,6 +67,25 @@ struct More {
     window: Option<nsh_core::element::desktop::WindowRef>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum RowKey {
+    More(iptv_presentation::play_bar::Control),
+    Cast(String),
+    Position(usize),
+}
+
+fn row_keys(open: Option<&Open>, len: usize) -> Vec<RowKey> {
+    match open.filter(|_| len != 0) {
+        Some(open) if open.kind == Kind::Cast => {
+            open.values.iter().cloned().map(RowKey::Cast).collect()
+        }
+        Some(Open {
+            more: Some(more), ..
+        }) => more.controls.iter().copied().map(RowKey::More).collect(),
+        _ => (0..len).map(RowKey::Position).collect(),
+    }
+}
+
 pub(super) fn open_more(
     ui: Ui,
     controls: Vec<iptv_presentation::play_bar::Control>,
@@ -727,20 +746,10 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                 })
                 .child(
                     virtual_list(count, row)
-                        // A More row keeps its node when another control
-                        // comes or goes around it.
+                        // Preserve a press across updates to the action list.
                         .keys(move || {
                             let len = count();
-                            ui.chooser.with(|chooser| {
-                                match chooser.as_ref().and_then(|c| c.more.as_ref()) {
-                                    Some(more) if len != 0 => more
-                                        .controls
-                                        .iter()
-                                        .map(|&control| (Some(control), 0))
-                                        .collect::<Vec<_>>(),
-                                    _ => (0..len).map(|index| (None, index)).collect(),
-                                }
-                            })
+                            ui.chooser.with(|chooser| row_keys(chooser.as_ref(), len))
                         })
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
@@ -851,5 +860,40 @@ mod snapshot_tests {
             assert_eq!(open.list.selected, 1);
             assert_eq!(open.list.len, labels.len());
         }
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+
+    fn cast_rows(values: &[&str]) -> Open {
+        Open {
+            kind: Kind::Cast,
+            labels: Vec::new(),
+            values: values.iter().map(|id| (*id).to_owned()).collect(),
+            tracks: None,
+            receivers: Vec::new(),
+            more: None,
+            list: Chooser::new(values.len(), 0),
+        }
+    }
+
+    #[test]
+    fn inserting_a_discovered_route_preserves_the_existing_actions() {
+        let before = cast_rows(&["local", "generated:known", "native"]);
+        let after = cast_rows(&["local", "generated:new", "generated:known", "native"]);
+        let before_keys = row_keys(Some(&before), before.list.len);
+        let after_keys = row_keys(Some(&after), after.list.len);
+        assert_eq!(
+            before_keys,
+            [
+                after_keys[0].clone(),
+                after_keys[2].clone(),
+                after_keys[3].clone()
+            ]
+        );
+        assert_ne!(before_keys[1], after_keys[1]);
+        assert!(row_keys(Some(&after), 0).is_empty());
     }
 }
