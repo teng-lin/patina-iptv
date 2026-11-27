@@ -24,7 +24,8 @@ val releaseSigning: String? = when {
 // Disposable validation can never replace the installed application, including
 // when an operator accidentally points the test at a non-disposable device.
 val validationAppId = System.getenv("IPTV_VALIDATION_APP_ID")
-require(validationAppId == null || validationAppId == "com.hantekllc.iptvrs.validation") {
+val disposableAppId = "com.hantekllc.iptvrs.validation"
+require(validationAppId == null || validationAppId == disposableAppId) {
     "IPTV_VALIDATION_APP_ID must be com.hantekllc.iptvrs.validation"
 }
 
@@ -113,6 +114,14 @@ android {
     lint {
         abortOnError = true
         checkReleaseBuilds = true
+    }
+}
+
+androidComponents {
+    beforeVariants { variant ->
+        if (validationAppId != disposableAppId || variant.buildType != "debug") {
+            variant.androidTest.enable = false
+        }
     }
 }
 

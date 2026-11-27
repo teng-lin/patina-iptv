@@ -64,6 +64,40 @@ class Profiles(unittest.TestCase):
             with self.assertRaises(ValueError):
                 a.validate_cast_test(manifest)
 
+    def test_cast_validation_uses_snapshots_even_when_build_outputs_are_replaced(self):
+        build = self.root / "build"
+        build.mkdir()
+        run = self.root / "owned-run"
+        run.mkdir()
+        app = build / "app.apk"
+        probe = build / "probe.apk"
+        app.write_bytes(b"synthetic validation APK")
+        probe.write_bytes(b"synthetic validation test APK")
+
+        def inspect(path, attribute):
+            self.assertEqual(path.parent, run)
+            if attribute == "application-id":
+                self.assertEqual(path.read_bytes(), b"synthetic validation APK")
+                # Simulate a new build publishing both artifacts before boot.
+                app.write_bytes(b"ordinary application")
+                probe.write_bytes(b"new test output")
+                return a.PACKAGE
+            if attribute == "debuggable":
+                return "true"
+            self.assertEqual(attribute, "print")
+            self.assertEqual(path.read_bytes(), b"synthetic validation test APK")
+            return f"""
+                <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{a.CAST_TEST_PACKAGE}">
+                    <instrumentation android:name="{a.CAST_TEST_RUNNER}" android:targetPackage="{a.PACKAGE}" />
+                </manifest>"""
+
+        with patch.object(a, "apk_manifest", side_effect=inspect):
+            app_copy, test_copy = a.stage_cast_apks(run, app, probe)
+        self.assertEqual(app_copy.read_bytes(), b"synthetic validation APK")
+        self.assertEqual(test_copy.read_bytes(), b"synthetic validation test APK")
+        self.assertEqual(app.read_bytes(), b"ordinary application")
+        self.assertEqual(probe.read_bytes(), b"new test output")
+
     def test_release_startup_markers_cannot_replace_process_and_foreground_checks(self):
         component = a.RELEASE_PACKAGE + "/.host.TvActivity"
         with patch.dict(RELEASE["AVD"], {"adb": lambda *args: ""}):

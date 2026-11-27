@@ -102,13 +102,16 @@ cleanup without starting an emulator.
 
 The optional casting instrumentation test uses a fresh copy of the handheld
 profile. It exercises the Android Keystore pairing store with synthetic
-records, LAN identity fencing, the Wi-Fi multicast lock, and the foreground
-service and media controls through Home, screen-off, and session replacement.
-The test uses synthetic playback state and performs no receiver discovery or
-connection.
+records, LAN identity fencing, and the Wi-Fi multicast lock. It checks the
+foreground service lease and the controls its media session advertises
+through Home, screen-off, and session replacement. The test supplies
+synthetic playback state at the Kotlin host boundary. Delivery of media
+commands to the Rust sender and playback on a receiver are outside its scope.
 
 After preparing the native validation library with `tools/sync-host.sh`,
-build the app and test APKs together.
+build the app and test APKs together. Gradle creates the debug instrumentation
+variant only for the validation application ID. Run it through the Python
+disposable profile runner.
 
 ```sh
 (cd hosts/android && IPTV_VALIDATION_APP_ID=com.hantekllc.iptvrs.validation \
@@ -118,8 +121,9 @@ python3 tools/ci/disposable-avd.py "$HOME/.android/avd/tab36.avd" \
   --cast-platform-test hosts/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 ```
 
-The runner verifies both APKs before launching the disposable profile. The
-run directory records the two APK hashes and the instrumentation result. For
+The runner snapshots and verifies both APKs before launching the disposable
+profile, then installs those copies. The run directory records the two APK
+hashes and the instrumentation result. For
 an app APK built with JaCoCo Android test coverage enabled, pass
 `--cast-platform-coverage` to save the execution data in that run directory.
 

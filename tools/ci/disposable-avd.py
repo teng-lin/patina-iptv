@@ -215,6 +215,28 @@ def validate_cast_test(manifest):
         raise ValueError("expected the disposable Patina Cast instrumentation APK")
 
 
+def apk_manifest(apk, attribute):
+    return subprocess.check_output(
+        ["apkanalyzer", "manifest", attribute, str(apk)], text=True, timeout=30).strip()
+
+
+def stage_cast_apks(root, apk, cast_test):
+    # The build outputs may change while the emulator boots. Validate and install
+    # the same copies from the private disposable run.
+    app_copy = root / "app.apk"
+    test_copy = root / "cast-platform-test.apk"
+    for source, copy in ((apk, app_copy), (cast_test, test_copy)):
+        shutil.copyfile(source, copy)
+        copy.chmod(0o400)
+    package = apk_manifest(app_copy, "application-id")
+    debuggable = apk_manifest(app_copy, "debuggable")
+    validate_apk(package, debuggable, release=False)
+    if debuggable != "true":
+        raise ValueError("Cast platform tests require a debuggable validation APK")
+    validate_cast_test(apk_manifest(test_copy, "print"))
+    return app_copy, test_copy
+
+
 def run_cast_test(serial, apk, test_apk, output, collect):
     adb(serial, "install", "-r", str(apk))
     adb(serial, "install", "-t", "-r", str(test_apk))
@@ -279,22 +301,16 @@ def main():
     if output == source or source in output.parents or ".android" in output.parts:
         parser.error("evidence output must be outside the original Android profile")
     apk = args.apk.resolve(strict=True)
-    # Refuse a normal app APK before any device action, including uninstall/install.
-    package = subprocess.check_output(["apkanalyzer", "manifest", "application-id", str(apk)], text=True, timeout=30).strip()
-    debuggable = subprocess.check_output(["apkanalyzer", "manifest", "debuggable", str(apk)],
-                                        text=True, timeout=30).strip()
-    cast_test = None
-    try:
-        validate_apk(package, debuggable, args.release)
-        if args.cast_platform_test:
-            if debuggable != "true":
-                raise ValueError("Cast platform tests require a debuggable validation APK")
-            cast_test = args.cast_platform_test.resolve(strict=True)
-            manifest = subprocess.check_output(
-                ["apkanalyzer", "manifest", "print", str(cast_test)], text=True, timeout=30)
-            validate_cast_test(manifest)
-    except (ValueError, ElementTree.ParseError) as error:
-        parser.error(str(error))
+    cast_test = args.cast_platform_test.resolve(strict=True) if args.cast_platform_test else None
+    package = PACKAGE
+    if not cast_test:
+        # Refuse a normal app APK before any device action, including uninstall/install.
+        package = apk_manifest(apk, "application-id")
+        debuggable = apk_manifest(apk, "debuggable")
+        try:
+            validate_apk(package, debuggable, args.release)
+        except ValueError as error:
+            parser.error(str(error))
     for port in (args.port, args.port + 1):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", port))
@@ -309,6 +325,11 @@ def main():
     log = None
     smoke = None
     try:
+        if cast_test:
+            try:
+                apk, cast_test = stage_cast_apks(root, apk, cast_test)
+            except (ValueError, ElementTree.ParseError) as error:
+                parser.error(str(error))
         output.mkdir(parents=True, exist_ok=True)
         output = Path(tempfile.mkdtemp(prefix="run-", dir=output))
         serial = f"emulator-{args.port}"

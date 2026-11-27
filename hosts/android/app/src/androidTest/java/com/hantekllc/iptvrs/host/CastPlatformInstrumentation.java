@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.Locale;
 import java.util.concurrent.Callable;
+import java.util.concurrent.FutureTask;
 
 /** Tests Android OS leases with synthetic state and no discovery or receiver connection. */
 public final class CastPlatformInstrumentation extends Instrumentation {
@@ -128,17 +129,21 @@ public final class CastPlatformInstrumentation extends Instrumentation {
 
             Files.write(record.toPath(), Arrays.copyOf(replacement, 16));
             require(status() == 2, "truncated record reported invalid");
-            replacement[replacement.length - 1] ^= 1;
-            Files.write(record.toPath(), replacement);
+            byte[] altered = replacement.clone();
+            altered[altered.length - 1] ^= 1;
+            Files.write(record.toPath(), altered);
             require(status() == 2, "altered GCM tag reported invalid");
 
+            Files.write(record.toPath(), replacement);
+            require(Arrays.equals(value, read()), "restored ciphertext loads before key deletion");
             store.deleteEntry(AIRPLAY_ALIAS);
             require(status() == 2, "lost key differs from missing record");
             try {
                 CastHost.saveCredential(KEY, value.clone());
                 throw new AssertionError("replaced ciphertext after Keystore key loss");
             } catch (IllegalStateException expected) {
-                require(Arrays.equals(replacement, Files.readAllBytes(record.toPath())), "existing ciphertext kept");
+                require(Arrays.equals(replacement, Files.readAllBytes(record.toPath())), "intact ciphertext kept");
+                require(!store.containsAlias(AIRPLAY_ALIAS), "failed save leaves the key missing");
             }
             CastHost.forgetCredential(KEY);
             CastHost.saveCredential(KEY, value.clone());
@@ -151,15 +156,11 @@ public final class CastPlatformInstrumentation extends Instrumentation {
     }
 
     private void foreground(Context context) throws Exception {
-        String topology = CastHost.topology();
-        require(topology != null, "disposable Android LAN is available");
-        String address = Arrays.stream(topology.split(","))
-            .map(link -> link.substring(link.indexOf(':') + 1))
-            .filter(candidate -> candidate.matches("[0-9.]+"))
-            .findFirst()
-            .orElseThrow(() -> new AssertionError("disposable AVD requires an IPv4 link"));
-        WifiManager.MulticastLock multicast = CastHost.multicast();
-        require(multicast != null, "tab36 uses Wi-Fi");
+        LanSnapshot lan = awaitValue("disposable Android Wi-Fi with an IPv4 link", 30_000,
+                CastPlatformInstrumentation::sampleLan);
+        String topology = lan.topology;
+        String address = lan.address;
+        WifiManager.MulticastLock multicast = lan.multicast;
         try {
             require(multicast.isHeld(), "multicast discovery lease acquired");
         } finally {
@@ -176,17 +177,22 @@ public final class CastPlatformInstrumentation extends Instrumentation {
         require(CastHost.start(stale, address, topology + ",stale"), "queued old topology");
         try {
             waitForIdleSync();
-            await("obsolete route has no service", () -> instance.get(null) == null && !isForeground(activities));
+            await("obsolete route has no service",
+                    () -> onMain(() -> instance.get(null) == null) && !isForeground(activities));
             require(CastHost.start(CAST_ID, address, topology), "start selected LAN");
-            await("connected-device service and wake lock", () -> {
-                Object service = instance.get(null);
-                return service != null && isForeground(activities)
-                    && wake.get(service) instanceof PowerManager.WakeLock
-                    && ((PowerManager.WakeLock) wake.get(service)).isHeld();
-            });
-            Object service = instance.get(null);
-            PowerManager.WakeLock wakeLock = (PowerManager.WakeLock) wake.get(service);
-            MediaController controller = ((MediaSession) media.get(service)).getController();
+            ServiceSnapshot running = awaitValue("connected-device service and wake lock",
+                    () -> isForeground(activities) ? onMain(() -> {
+                        Object service = instance.get(null);
+                        if (service == null) {
+                            return null;
+                        }
+                        PowerManager.WakeLock lock = (PowerManager.WakeLock) wake.get(service);
+                        MediaSession session = (MediaSession) media.get(service);
+                        return lock != null && lock.isHeld() && session != null
+                            ? new ServiceSnapshot(lock, session.getController()) : null;
+                    }) : null);
+            PowerManager.WakeLock wakeLock = running.wakeLock;
+            MediaController controller = running.controller;
             CastHost.playback(CAST_ID, PLAYING, CAN_PLAY | CAN_PAUSE);
             await("playing and controls", () -> state(controller) == PlaybackState.STATE_PLAYING);
             PlaybackState observed = controller.getPlaybackState();
@@ -285,11 +291,76 @@ public final class CastPlatformInstrumentation extends Instrumentation {
         }
     }
 
+    private static final class LanSnapshot {
+        final String topology;
+        final String address;
+        final WifiManager.MulticastLock multicast;
+
+        LanSnapshot(String topology, String address, WifiManager.MulticastLock multicast) {
+            this.topology = topology;
+            this.address = address;
+            this.multicast = multicast;
+        }
+    }
+
+    private static LanSnapshot sampleLan() {
+        String topology = CastHost.topology();
+        if (topology == null) {
+            return null;
+        }
+        String address = Arrays.stream(topology.split(","))
+            .map(link -> link.substring(link.indexOf(':') + 1))
+            .filter(candidate -> candidate.matches("[0-9.]+"))
+            .findFirst()
+            .orElse(null);
+        if (address == null) {
+            return null;
+        }
+        WifiManager.MulticastLock multicast = CastHost.multicast();
+        if (multicast == null) {
+            return null;
+        }
+        boolean steady = false;
+        try {
+            steady = topology.equals(CastHost.topology());
+            return steady ? new LanSnapshot(topology, address, multicast) : null;
+        } finally {
+            if (!steady) {
+                multicast.release();
+            }
+        }
+    }
+
+    private static final class ServiceSnapshot {
+        final PowerManager.WakeLock wakeLock;
+        final MediaController controller;
+
+        ServiceSnapshot(PowerManager.WakeLock wakeLock, MediaController controller) {
+            this.wakeLock = wakeLock;
+            this.controller = controller;
+        }
+    }
+
+    private <T> T onMain(Callable<T> sample) throws Exception {
+        FutureTask<T> task = new FutureTask<>(sample);
+        runOnMainSync(task);
+        return task.get();
+    }
+
     private static void await(String description, Callable<Boolean> predicate) throws Exception {
-        long deadline = SystemClock.elapsedRealtime() + 10_000;
+        awaitValue(description, () -> predicate.call() ? Boolean.TRUE : null);
+    }
+
+    private static <T> T awaitValue(String description, Callable<T> sample) throws Exception {
+        return awaitValue(description, 10_000, sample);
+    }
+
+    private static <T> T awaitValue(String description, long timeoutMs, Callable<T> sample) throws Exception {
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (predicate.call()) {
-                return;
+            T value = sample.call();
+            if (value != null) {
+                return value;
             }
             SystemClock.sleep(50);
         }
