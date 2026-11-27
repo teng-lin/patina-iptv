@@ -651,6 +651,33 @@ fn fullscreen_channel_order(home: crate::isolated::Home, overlay: bool) {
 }
 
 #[test]
+fn tablet_channel_grip_keeps_a_diagonal_drag_across_the_timeline() {
+    use nsh_core::{geometry::point, platform::Idiom, prelude::px};
+
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_environment("Android tablet", |env| {
+        env.idiom = Idiom::Pad;
+        env.os = nsh_core::platform::Os::Android;
+    }));
+    open_inline_order(app);
+    let strip = "id:reorder-grip-strip";
+    step(app.wait_for(strip));
+    let second = "id:guide-row >> nth=1 >> text:★ Local B";
+    step(app.drag(second, point(px(0.0), px(-50.0))));
+    step(app.wait_for(second));
+    // The three handles share a hit target outside the native list. Its
+    // center is B. Start sideways across the timeline's pan threshold.
+    step(app.drag(strip, point(px(90.0), px(-50.0))));
+    let first = "id:guide-row >> nth=0 >> text:★ Local B";
+    step(app.wait_for(first));
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    step(app.wait_for(first));
+}
+
+#[test]
 fn channel_context_reorders_inline_with_the_pointer() {
     use nsh_core::{geometry::point, platform::Idiom, prelude::px};
 
