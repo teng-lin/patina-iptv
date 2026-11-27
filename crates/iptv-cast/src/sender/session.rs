@@ -85,8 +85,8 @@ pub(crate) struct Dispatch(AtomicU8);
 
 impl Dispatch {
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn mark_sent(&self) -> Result<(), Error> {
         match self

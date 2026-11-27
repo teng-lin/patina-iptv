@@ -16,7 +16,7 @@ test = false
 
 [features]
 # Synthetic fixture transport and key injection; never enabled in packages.
-test-support = ["iptv-runtime/test-support"]
+test-support = ["iptv-runtime/test-support", "iptv-cast/test-support"]
 # A browser package (hosts/tizen-nsh) keeps its data out of the module,
 # whose size is its launch time: the interface languages' messages are
 # read per language from the package, the fonts are the page's (its
@@ -97,6 +97,7 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std",
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSError", "NSString", "NSURL", "NSValue", "NSNotification", "NSOperation", "NSObject", "block2"] }
 
 [dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["ring"] }
 iptv-store-sqlite.workspace = true
 rusqlite.workspace = true
 # Headless runs of the app: what a press reaches (tests/app/pointer.rs).

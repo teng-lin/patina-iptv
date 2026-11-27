@@ -1,13 +1,19 @@
-//! Native discovery and control of casting receivers.
-//!
-//! The shared sender contract is being integrated with the existing Google
-//! Cast engine. Until then, use the `googlecast` and `discovery` modules for
-//! network playback. A shared [Cast] cannot be built without a backend.
+//! Native discovery and control of casting receivers through [Cast].
 
+#[cfg(feature = "googlecast")]
+#[doc(hidden)]
 pub mod discovery;
+#[cfg(feature = "googlecast")]
+#[doc(hidden)]
 pub mod googlecast;
 pub(crate) mod sender;
+#[cfg(any(all(test, feature = "googlecast"), feature = "test-support"))]
+#[doc(hidden)]
+#[path = "googlecast/tests/fixture.rs"]
+pub mod test_support;
+#[cfg(feature = "googlecast")]
 mod tls;
+#[cfg(feature = "googlecast")]
 mod wire;
 
 pub use sender::{

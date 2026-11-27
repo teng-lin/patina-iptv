@@ -43,10 +43,9 @@ impl Error {
         }
     }
 
-    // Used by backends that own a separate UDP timing listener.
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "AirPlay integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_diagnostic(mut self, diagnostic: Diagnostic) -> Self {
         self.diagnostic = Some(diagnostic);
@@ -89,7 +88,11 @@ impl std::error::Error for Error {}
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Diagnostic {
-    TimingListener { local_addr: SocketAddr },
+    /// The receiver reported a media load failure without further detail.
+    MediaLoadFailed,
+    TimingListener {
+        local_addr: SocketAddr,
+    },
 }
 
 #[non_exhaustive]
@@ -169,8 +172,8 @@ pub(crate) struct Features([Availability; 9]);
 
 impl Features {
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with(mut self, feature: Feature, availability: Availability) -> Self {
         self.0[feature as usize] = availability;
@@ -360,16 +363,16 @@ impl Media {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn url(&self) -> &str {
         self.url.as_str()
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn content_type(&self) -> Option<&str> {
         self.content_type.as_ref().map(AsRef::as_ref)
@@ -528,8 +531,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_link(mut self, link: Link, error: Option<Error>) -> Self {
         self.link = Some((link, error));
@@ -537,8 +540,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_position(mut self, position: Option<Duration>) -> Self {
         self.position = Some(position);
@@ -546,8 +549,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_duration(mut self, duration: Option<Duration>) -> Self {
         self.duration = Some(duration);
@@ -555,8 +558,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_features(mut self, features: Features) -> Self {
         self.features = Some(features);
@@ -564,8 +567,8 @@ impl Observation {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "backend integration follows this contract")
+        not(any(test, feature = "googlecast")),
+        expect(dead_code, reason = "requires a backend")
     )]
     pub(crate) fn with_output(
         mut self,

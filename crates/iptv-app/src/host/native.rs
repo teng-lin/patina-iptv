@@ -77,7 +77,7 @@ pub(crate) fn ports(directory: PathBuf) -> crate::runtime::Ports {
     let mut ports = crate::runtime::Ports::new(directory, credential_key::database_key);
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {
-        ports.cast = Some(std::sync::Arc::new(casting::Sender));
+        ports.cast = Some(std::sync::Arc::new(casting::Sender::default()));
     }
     #[cfg(feature = "test-support")]
     if let Some(port) = TEST_CAST.get() {
@@ -145,6 +145,18 @@ pub mod exports {
     #[cfg(feature = "test-support")]
     pub fn install_test_cast_port(port: std::sync::Arc<dyn iptv_runtime::cast::Port>) {
         assert!(super::TEST_CAST.set(port).is_ok());
+    }
+
+    /// Installs a loopback receiver and uses the native network casting port.
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "linux", target_os = "macos", windows)
+    ))]
+    pub fn install_test_loopback_cast(address: std::net::SocketAddr) {
+        assert!(address.ip().is_loopback());
+        install_test_cast_port(std::sync::Arc::new(super::casting::Sender::for_loopback(
+            address,
+        )));
     }
 
     /// Supplies an owner-local native route adapter in the existing app harness.

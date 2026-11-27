@@ -15,7 +15,7 @@ use std::{
 pub type Task<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
 pub trait Port: Send + Sync {
     fn discover(&self) -> Task<'_, Vec<Receiver>>;
-    /// Connects and creates a gated LAN relay without opening the upstream.
+    /// Connects and prepares the handoff without opening the upstream.
     fn prepare(&self, receiver: Receiver, source: PlaySource) -> Task<'_, Box<dyn Prepared>>;
 }
 /// A system route picker is mounted by the host; its player remains owned by
@@ -80,6 +80,13 @@ pub trait Remote: Send + Sync {
             let _ = self.command(Command::Stop).await;
         })
     }
+    /// Joins retirement and tells the viewer if the remote outcome is uncertain.
+    fn stop_checked(&self) -> Task<'_, ()> {
+        Box::pin(async {
+            self.stop().await;
+            Ok(())
+        })
+    }
 }
 pub struct Destination {
     pub receiver: Target,
@@ -140,7 +147,7 @@ impl Runtime {
     pub fn cast_intent_current(&self, ticket: u64) -> bool {
         self.cast_intent() == ticket
     }
-    pub fn chromecast_available(&self) -> bool {
+    pub fn network_cast_available(&self) -> bool {
         self.services().ports().cast.is_some()
     }
     pub fn cast_available(&self) -> bool {
@@ -203,7 +210,7 @@ impl Runtime {
                 .await
                 .map_err(|_| Error::Unavailable)?;
         }
-        let Target::Chromecast(receiver) = receiver else {
+        let Target::Network(receiver) = receiver else {
             unreachable!()
         };
         let port = self
@@ -391,20 +398,20 @@ impl Runtime {
             .remote
             .clone();
         let worker = remote.clone();
-        self.spawn_network(async move {
-            if command == Command::Stop {
-                worker.stop().await;
-                Ok(())
-            } else {
-                worker.command(command).await
-            }
-        })
-        .await
-        .map_err(|_| Error::Unknown)??;
+        let result = self
+            .spawn_network(async move {
+                if command == Command::Stop {
+                    worker.stop_checked().await
+                } else {
+                    worker.command(command).await
+                }
+            })
+            .await
+            .map_err(|_| Error::Unknown)?;
         if command == Command::Stop {
             self.clear_cast(&remote);
         }
-        Ok(())
+        result
     }
     /// Retire the old media before a channel replacement while keeping the
     /// native player's selected route. Explicit Stop always disconnects it.
@@ -482,8 +489,8 @@ impl Runtime {
                     observed
                 }
                 Err(_) => {
-                    // Each poll already tries to rejoin once. Keep serving during
-                    // short control outages, then retire an unreachable receiver.
+                    // Keep serving briefly while the last observation grows stale.
+                    // A disconnected network route requires a fresh selection.
                     active.failed_polls = active.failed_polls.saturating_add(1);
                     if active.failed_polls < 3 {
                         return Ok(RemoteState::Loading);

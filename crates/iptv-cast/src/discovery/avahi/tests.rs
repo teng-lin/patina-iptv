@@ -39,7 +39,13 @@ fn private_bus() -> (Bus, String) {
 #[test]
 fn an_unavailable_avahi_service_returns_an_error() {
     let (_bus, address) = private_bus();
-    assert!(browse(&connection(&address)).is_err());
+    assert!(
+        browse(
+            &connection(&address),
+            Instant::now() + Duration::from_secs(2)
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -51,13 +57,12 @@ fn public_discovery_keeps_early_avahi_signals_and_filters_unusable_services() {
             .build()
             .unwrap();
         let receivers = runtime.block_on(crate::discovery::discover()).unwrap();
-        assert_eq!(receivers.len(), 1);
-        let tv = &receivers[0];
-        assert!(tv.name == "Test TV", "the fixture TV should be selected");
-        assert!(
-            tv.address == ([127, 0, 0, 1], 8009).into()
-                || tv.address == ([127, 0, 0, 2], 8009).into()
-        );
+        assert_eq!(receivers.len(), 2);
+        for (index, tv) in receivers.iter().enumerate() {
+            assert_eq!(tv.name, "Test TV");
+            assert_eq!(tv.id.as_deref(), Some("generated-tv"));
+            assert_eq!(tv.address, ([127, 0, 0, index as u8 + 1], 8009).into());
+        }
         return;
     }
     let (_bus, address) = private_bus();
@@ -125,7 +130,11 @@ fn public_discovery_keeps_early_avahi_signals_and_filters_unusable_services() {
                     } else {
                         "ca=5"
                     };
-                    let txt = vec![format!("fn={name}").into_bytes(), cap.as_bytes().to_vec()];
+                    let txt = vec![
+                        format!("fn={name}").into_bytes(),
+                        cap.as_bytes().to_vec(),
+                        b"id=generated-tv".to_vec(),
+                    ];
                     let ip = if name == "Bad address" {
                         "invalid".into()
                     } else {
