@@ -458,7 +458,7 @@ fn player_content(
         .test_id(&format!("auxiliary-player-{}", id.0))
         .bg(rgb(0x000000))
         // Which pointer presses its controls, as in the main window.
-        .on_touch(move |e: &nsh_core::TouchEvent| crate::pointer_down(local, e))
+        .on_touch(move |e: &nsh_core::TouchEvent| crate::pointer_down(local.chrome, e))
         .on_mouse_enter(move |e: &MouseEvent| {
             let at = e.page_position;
             super::pointer_entered(surface, at.x.0, at.y.0);

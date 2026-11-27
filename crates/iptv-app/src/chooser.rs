@@ -474,8 +474,6 @@ pub(crate) fn is_open(ui: Ui, leave: bool) -> bool {
         .with(|c| c.as_ref().is_some_and(|c| (c.kind == Kind::Leave) == leave))
 }
 
-/// The choosers' layer: `leave` for the question before leaving, over
-/// every screen; else the others, over the video. Each shows only its own.
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;

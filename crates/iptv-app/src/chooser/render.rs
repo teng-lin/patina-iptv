@@ -1,6 +1,8 @@
 //! Chooser layouts and their focused, identity-keyed rows.
 use super::*;
 
+/// The choosers' layer: `leave` for the question before leaving, over
+/// every screen; else the others, over the video. Each shows only its own.
 pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
     let open = move || is_open(ui, leave);
     let overlay = if leave {

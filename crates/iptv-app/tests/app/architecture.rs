@@ -15,15 +15,24 @@ fn ui_only_holds_domain_handles() {
     let fields: BTreeSet<_> = fields
         .lines()
         .filter_map(|line| {
-            let (field, _) = line.split_once(':')?;
-            field.split_whitespace().last()
+            let (field, kind) = line.split_once(':')?;
+            Some((
+                field.split_whitespace().last()?,
+                kind.trim().trim_end_matches(','),
+            ))
         })
         .collect();
     assert_eq!(fields.len(), UI_TOP_LEVEL_FIELDS);
     assert_eq!(
         fields,
         BTreeSet::from([
-            "app", "owner", "guide", "playback", "cast", "screens", "chrome"
+            ("app", "SharedUi"),
+            ("owner", "Owner"),
+            ("guide", "GuideUi"),
+            ("playback", "PlaybackUi"),
+            ("cast", "casting::CastUi"),
+            ("screens", "ScreensUi"),
+            ("chrome", "ChromeUi"),
         ])
     );
 }

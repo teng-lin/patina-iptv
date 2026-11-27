@@ -185,13 +185,13 @@ pub use iptv_presentation::input_mode::InputMode as Input;
 
 /// A pointer went down: a finger, or a mouse, trackpad or pen. Recorded at
 /// the root as the touch starts, before the pressed control hears the press.
-pub(crate) fn pointer_down(ui: Ui, e: &nsh_core::TouchEvent) {
+pub(crate) fn pointer_down(chrome: ChromeUi, e: &nsh_core::TouchEvent) {
     if e.phase != nsh_core::TouchPhase::Start {
         return;
     }
     if let Some(p) = e.points.iter().find(|p| p.changed) {
         let finger = p.pointer_type == PointerType::Touch;
-        ui.chrome.last_press.set(Input::of_press(finger));
+        chrome.last_press.set(Input::of_press(finger));
     }
 }
 
@@ -928,7 +928,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
             )
         })
         // Which pointer presses the controls: touch or pointer mode.
-        .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui, e))
+        .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui.chrome, e))
         // Layers, bottom to top: opaque backdrop, video (multiview's other
         // surfaces while their tiles play), UI, full-screen tap catcher.
         // The picture-in-picture window shows only the video (`pip.rs`).
@@ -1154,10 +1154,10 @@ fn toggle_panels(ui: Ui) {
 
 /// The pointer is what the viewer uses now: Pointer mode, without the
 /// side effects of a press ([`Ui::touched`]).
-pub(crate) fn pointer_input(ui: Ui) {
-    if ui.chrome.input.get_untracked() != Input::Pointer {
-        ui.chrome.last_press.set(Input::Pointer);
-        ui.chrome.input.set(Input::Pointer);
+pub(crate) fn pointer_input(chrome: ChromeUi) {
+    if chrome.input.get_untracked() != Input::Pointer {
+        chrome.last_press.set(Input::Pointer);
+        chrome.input.set(Input::Pointer);
     }
 }
 
@@ -1171,7 +1171,7 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     // moved after keys switches to Pointer, so the ⋯ controls show: no
     // focus moves and no playback is scheduled or canceled.
     if desktop::pointer_traveled(ui.playback.player_surface, x, y) {
-        pointer_input(ui);
+        pointer_input(ui.chrome);
     }
     if ui.chrome.mode.get_untracked() != ViewMode::Fullscreen
         || open

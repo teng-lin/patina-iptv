@@ -46,7 +46,7 @@ pub(super) fn apply(ui: Ui, key: RemoteKey, action: Action) {
         | Action::HourForward
         | Action::DayBack
         | Action::DayForward
-        | Action::ToggleGroups) => crate::grid::keys::apply(ui, a),
+        | Action::ToggleGroups) => crate::grid::keys::apply(ui.guide, a),
         Action::ReturnToPlayer if ui.playback.playing.get().is_some() => {
             ui.chrome.mode.apply(crate::mode::Action::ReturnToPlayer);
         }

@@ -31,7 +31,7 @@ pub(super) fn apply(ui: Ui, action: Action) -> bool {
         Some(Overlay::Chooser | Overlay::Leave) => chooser(ui, action, top == Some(Overlay::Leave)),
         Some(Overlay::Description) => description(ui, action),
         Some(Overlay::Menu | Overlay::PlaylistMenu) => menu(ui, action),
-        _ => return false,
+        None => return false,
     }
     true
 }
