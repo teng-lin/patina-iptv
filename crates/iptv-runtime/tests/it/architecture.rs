@@ -86,19 +86,6 @@ const STORE_ADAPTER_TEST_USERS: &[&str] = &[
     "vod/recovery_tests.rs",
 ];
 
-/// Dedicated files whose modules are compiled only under cfg(test). Some
-/// nested inline modules cannot be resolved from the declaration text alone.
-const STORE_ADAPTER_DEDICATED_TEST_USERS: &[&str] = &[
-    "backup/tests.rs",
-    "guide_checks/retry.rs",
-    "guide_repair/tests.rs",
-    "opening/revocation.rs",
-    "publish/tests/catalog_import_tests.rs",
-    "recordings/shared_tests.rs",
-    "recordings/tests.rs",
-    "vod/recovery_tests.rs",
-];
-
 /// Ratchet the owner shape as PR2 extracts domain state. Includes fields
 /// behind `test-support`, matching the source inventory rather than one build.
 const RUNTIME_FIELD_LIMIT: usize = 14;
@@ -298,14 +285,16 @@ fn runtime_sources_name_only_listed_workspace_crates_and_no_toolkit() {
 
 #[test]
 fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
+    assert!(
+        STORE_ADAPTER_USERS.len() <= 20,
+        "the shipped store adapter boundary exceeded 20 users"
+    );
     let sources = runtime_sources();
     let test_modules = test_modules(&sources);
     let users: BTreeSet<String> = sources
         .iter()
         .filter(|(name, code)| {
-            !test_modules.contains(name.as_str())
-                && !STORE_ADAPTER_DEDICATED_TEST_USERS.contains(&name.as_str())
-                && shipped(code).contains("iptv_store_sqlite")
+            !test_modules.contains(name.as_str()) && shipped(code).contains("iptv_store_sqlite")
         })
         .map(|(name, _)| {
             if name.starts_with("store_service/") {
@@ -317,10 +306,10 @@ fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
         .collect();
     exact(&users, STORE_ADAPTER_USERS, "shipped store adapter user");
     for (name, code) in &sources {
-        if shipped(code).contains("pub(crate) use iptv_store_sqlite::*") {
+        if adapter_reexport(&shipped(code)) {
             assert!(
                 matches!(name.as_str(), "model.rs" | "error.rs"),
-                "{name} re-exports the SQLite adapter namespace"
+                "{name} re-exports the SQLite adapter"
             );
         }
     }
@@ -337,6 +326,21 @@ fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
         STORE_ADAPTER_TEST_USERS,
         "test-only store adapter user",
     );
+}
+
+fn adapter_reexport(code: &str) -> bool {
+    let compact: String = code.chars().filter(|ch| !ch.is_whitespace()).collect();
+    ["pub", "pub(crate)", "pub(super)", "pub(self)"]
+        .into_iter()
+        .any(|visibility| {
+            [
+                "iptv_store_sqlite",
+                "::iptv_store_sqlite",
+                "{iptv_store_sqlite",
+            ]
+            .into_iter()
+            .any(|adapter| compact.contains(&format!("{visibility}use{adapter}")))
+        })
 }
 
 #[test]
@@ -441,17 +445,36 @@ fn test_modules(sources: &[(String, String)]) -> BTreeSet<String> {
     for (name, code) in sources {
         let parent = match name.as_str() {
             "lib.rs" => String::new(),
+            other if other.ends_with("/mod.rs") => other.trim_end_matches("mod.rs").into(),
             other => format!("{}/", other.trim_end_matches(".rs")),
         };
         let mut lines = code.lines().map(str::trim).peekable();
         while let Some(line) = lines.next() {
-            if (line == "#[cfg(test)]" || line.starts_with("#[cfg(all(test,"))
-                && let Some(module) = lines
-                    .peek()
-                    .and_then(|next| next.strip_prefix("mod "))
-                    .and_then(|rest| rest.strip_suffix(';'))
-            {
+            if line != "#[cfg(test)]" && !line.starts_with("#[cfg(all(test,") {
+                continue;
+            }
+            let Some(module) = lines.peek().and_then(|next| next.strip_prefix("mod ")) else {
+                continue;
+            };
+            if let Some(module) = module.strip_suffix(';') {
                 found.insert(format!("{parent}{module}.rs"));
+            } else if let Some(module) = module.strip_suffix(" {") {
+                // An external module declared inside a test-only inline module
+                // inherits the enclosing module's cfg.
+                let mut depth = 0i64;
+                for body in lines.by_ref() {
+                    if depth == 1
+                        && let Some(child) = body
+                            .strip_prefix("mod ")
+                            .and_then(|rest| rest.strip_suffix(';'))
+                    {
+                        found.insert(format!("{parent}{module}/{child}.rs"));
+                    }
+                    depth += body.matches('{').count() as i64 - body.matches('}').count() as i64;
+                    if depth <= 0 {
+                        break;
+                    }
+                }
             }
         }
     }

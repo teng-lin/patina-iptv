@@ -12,6 +12,7 @@ pub use iptv_library::{
 /// opaque, redacting key; commands never return storage records or errors.
 pub use iptv_store_sqlite::DatabaseKey;
 pub(crate) use iptv_store_sqlite::InspectionAccess;
+#[cfg(feature = "native")]
 pub(crate) use iptv_store_sqlite::RecordingCompletion;
 pub(crate) use iptv_store_sqlite::SourceSummary;
 pub(crate) use iptv_store_sqlite::StoredGuide;

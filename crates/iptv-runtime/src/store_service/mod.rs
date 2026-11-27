@@ -26,6 +26,7 @@ mod catalog_repo;
 mod epg_repo;
 mod favorites_repo;
 mod parental_repo;
+#[cfg(feature = "native")]
 mod recording_repo;
 mod system_repo;
 mod vod_repo;
@@ -34,6 +35,7 @@ pub(crate) use catalog_repo::CatalogRepo;
 pub(crate) use epg_repo::EpgRepo;
 pub(crate) use favorites_repo::{FavoriteWrite, FavoritesRepo};
 pub(crate) use parental_repo::ParentalRepo;
+#[cfg(feature = "native")]
 pub(crate) use recording_repo::RecordingRepo;
 pub(crate) use system_repo::SystemRepo;
 pub(crate) use vod_repo::VodRepo;
@@ -385,6 +387,7 @@ impl Service {
         self.drain_on_shutdown_with(|| {})
     }
 
+    #[cfg(any(test, feature = "native"))]
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
         self.drain_on_shutdown_until(Instant::now() + self.drain_limit(), after_writer)
     }
@@ -555,6 +558,7 @@ impl Services {
         }
     }
 
+    #[cfg(feature = "native")]
     pub(crate) fn recordings(&self) -> RecordingRepo {
         RecordingRepo {
             services: self.clone(),
