@@ -256,17 +256,18 @@ fn now_line(p: &Picker) -> String {
 }
 
 fn header(ui: Ui, size: Scale) -> impl IntoElement {
+    let title = move || {
+        state(ui, |p| {
+            trf(
+                "Guide data for {channel}",
+                &[("channel", (&p.subject().name).into())],
+            )
+        })
+        .unwrap_or_default()
+    };
     view()
         .gap(move || size.px(4.0))
-        .child(ui_kit::title(size, move || {
-            state(ui, |p| {
-                trf(
-                    "Guide data for {channel}",
-                    &[("channel", (&p.subject().name).into())],
-                )
-            })
-            .unwrap_or_default()
-        }))
+        .child(ui_kit::title(size, title).label(title))
         .child(
             ui_kit::caption(size, move || state(ui, now_line).unwrap_or_default())
                 .number_of_lines(1),

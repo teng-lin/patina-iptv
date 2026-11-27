@@ -27,6 +27,68 @@ struct NativeProps {
 pub(super) struct Exposure(Arc<Mutex<NativeProps>>);
 
 impl Exposure {
+    /// Inspect the title's own native label, not text-selector child fallback.
+    #[track_caller]
+    fn guide_assignment_title(&self, app: &Headless, title: &str, now: &str) -> NodeId {
+        let nodes = app.screen().layout_nodes();
+        let title = nodes
+            .iter()
+            .find(|node| {
+                node.text
+                    .as_ref()
+                    .is_some_and(|text| text.text.text == title)
+            })
+            .expect("the full title remains the visual text source");
+        assert_eq!(title.text.as_ref().unwrap().text.max_lines, 1);
+        let caption = nodes
+            .iter()
+            .find(|node| {
+                node.parent == title.parent
+                    && node.text.as_ref().is_some_and(|text| text.text.text == now)
+            })
+            .expect("Now remains a separate sibling caption");
+        assert!(caption.bounds.origin.y.0 >= title.bounds.origin.y.0 + title.bounds.size.height.0);
+        let native = self.0.lock().unwrap();
+        assert!(!title.hidden);
+        let props = native.views.get(&title.id);
+        assert!(!props.is_some_and(|props| props.accessibility.hidden));
+        assert_ne!(
+            props.and_then(|props| props.accessibility.accessible),
+            Some(false)
+        );
+        assert_eq!(
+            native
+                .views
+                .get(&title.id)
+                .and_then(|props| props.accessibility.label.as_deref()),
+            Some(title.text.as_ref().unwrap().text.text.as_ref()),
+            "the native title must carry its complete accessible name"
+        );
+        assert!(
+            native
+                .views
+                .get(&title.id)
+                .is_some_and(|props| props.accessibility.role == AccessibilityRole::None)
+        );
+        let mut ancestor = caption.id;
+        while let Some(node) = nodes.iter().find(|node| node.id == ancestor) {
+            assert!(!node.hidden);
+            if let Some(props) = native.views.get(&node.id) {
+                assert!(!props.accessibility.hidden);
+                if node.id != caption.id {
+                    assert_ne!(
+                        props.accessibility.accessible,
+                        Some(true),
+                        "the caption must not be grouped into the title"
+                    );
+                    assert!(props.accessibility.label.is_none());
+                }
+            }
+            ancestor = node.parent;
+        }
+        title.id
+    }
+
     /// Read the Tab parent's own native name, rather than a selector's
     /// fallback to its child text (which Android may visually ellipsize).
     #[track_caller]
@@ -280,6 +342,109 @@ fn inside(screen: &nsh_testing::Screen, control: &str, container: &str) -> bool 
         && c.origin.y.0 >= v.origin.y.0 - 1.0
         && c.origin.x.0 + c.size.width.0 <= v.origin.x.0 + v.size.width.0 + 1.0
         && c.origin.y.0 + c.size.height.0 <= v.origin.y.0 + v.size.height.0 + 1.0
+}
+
+#[test]
+fn guide_assignment_titles_keep_full_native_names_at_largest_text() {
+    let Some(home) = isolated!() else { return };
+    const NAMES: [&str; 2] = [
+        "合成星圖 0002 — 夜間探索與科學故事測試頻道",
+        "合成海岸 0003 — 海洋觀測與自然紀行測試頻道",
+    ];
+    let guide = home.path().join("generated-guide.xml");
+    std::fs::write(
+        &guide,
+        crate::support::guide(
+            crate::support::now(),
+            &[("local-a", "Local A", "Generated bulletin")],
+        ),
+    )
+    .unwrap();
+    let mut settings = large_text();
+    settings.set("general.language", Value::text("ja")).unwrap();
+    settings.set("guide.autoplay", Value::Bool(false)).unwrap();
+    settings
+        .set("guide.stay_on_guide", Value::Bool(true))
+        .unwrap();
+    settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    settings
+        .set("epg.update", Value::choice("on_request"))
+        .unwrap();
+    let exposure = Exposure::default();
+    let observed = exposure.clone();
+    let mut fixture = personalization::launch_prepared(
+        home,
+        settings,
+        true,
+        |path, source| {
+            let mut store = crate::isolated::open_database(path).unwrap();
+            let channels = iptv_providers::m3u::parse_m3u(personalization::M3U);
+            for (channel, name) in channels.channels.items[1..].iter().zip(NAMES) {
+                store
+                    .rename_channel(source, &channel.id, Some(name))
+                    .unwrap();
+            }
+            store
+                .set_guide_sources(
+                    source,
+                    &[iptv_store_sqlite::GuideSource {
+                        feed: iptv_epg::FeedId(373),
+                        provider_index: None,
+                        url: iptv_providers::SecretUrl::new(guide.to_string_lossy()),
+                        name: Some("Generated guide".into()),
+                        enabled: true,
+                        shift_minutes: 0,
+                    }],
+                )
+                .unwrap();
+        },
+        |_| {},
+        move |app| app.observe(move |_, batch| observed.record(batch)),
+    );
+    let app = &mut fixture.app;
+    step(app.wait_for_within("text:Generated bulletin", Duration::from_secs(20)));
+    step(app.open_guide_groups());
+    step(app.press_key("right"));
+    let japanese = iptv_presentation::i18n::resolve("ja", None);
+    let choose = iptv_presentation::i18n::translate(japanese, "Choose guide data…");
+    let now = iptv_presentation::i18n::translate(japanese, "Now: no guide channel matches it");
+    for name in NAMES {
+        step(app.press_key("down"));
+        personalization::open_program_menu(app);
+        step(app.press(&format!("text:{choose}")));
+        let title = iptv_presentation::i18n::format(
+            japanese,
+            "Guide data for {channel}",
+            &[("channel", name.into())],
+        );
+        assert_ne!(title, format!("Guide data for {name}"));
+        step(app.wait_for(&format!("text:{title}")));
+        step(app.wait_for(&format!("text:{now}")));
+        let mut title_id = None;
+        for (idiom, width, height, font_scale) in [
+            (Idiom::Tv, 960.0, 540.0, 1.3),
+            (Idiom::Pad, 1280.0, 800.0, 2.0),
+        ] {
+            step(
+                app.set_environment("largest text with a screen reader", move |env| {
+                    env.idiom = idiom;
+                    env.font_scale = font_scale;
+                    env.screen_reader = true;
+                }),
+            );
+            step(app.set_viewport(Size::new(px(width), px(height))));
+            let current = exposure.guide_assignment_title(app, &title, now);
+            if let Some(previous) = title_id {
+                assert_eq!(
+                    current, previous,
+                    "text scaling retains the same native title"
+                );
+            }
+            title_id = Some(current);
+        }
+        step(app.back());
+        step(app.wait_for_gone(&format!("text:{title}"), Duration::from_secs(3)));
+    }
 }
 
 #[test]
