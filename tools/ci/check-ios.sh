@@ -20,3 +20,12 @@ cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
 # docs/ios-validation.md checks the packaged one by hand.
 cargo build --locked -p iptv-app --lib --target aarch64-apple-ios-sim
 bash tools/check-ios-simulator-entitlements.sh target/aarch64-apple-ios-sim/debug/libiptv_app.rlib
+
+# The dedicated probe selects a synthetic root using the normal native adapter.
+PATINA_AIRPLAY_PROBE=1 cargo check --locked -p iptv-app --lib --target aarch64-apple-ios
+probe_test=$(mktemp -d)
+trap 'rm -rf "$probe_test"' EXIT
+xcrun --sdk macosx clang -fobjc-arc -mmacosx-version-min=14.0 \
+  -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -framework AppKit -framework Foundation \
+  -framework AVFoundation -framework AVKit -framework SystemConfiguration tools/apple-airplay-probe/retry-test.m -o "$probe_test/retry"
+"$probe_test/retry"

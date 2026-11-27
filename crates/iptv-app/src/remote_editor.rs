@@ -60,6 +60,16 @@ pub fn overridden(context: Context, key: RemoteKey) -> bool {
         .filter_map(validated)
         .any(|b| b.context == Some(context) && b.key == key)
 }
+/// Preserve an explicit toggle for the resolved press without changing dedicated media
+/// key semantics merely because a long press has been remapped.
+pub(crate) fn media_toggle_override(context: Context, key: RemoteKey, press: Press) -> bool {
+    saved().iter().filter_map(validated).any(|b| {
+        b.key == key
+            && b.press == press
+            && b.action == Action::PlayPause
+            && (b.context.is_none() || b.context == Some(context))
+    })
+}
 /// The keys set up now: a remote's where none are connected (the
 /// editor opens only from the keys' page).
 fn keys_now() -> Keys {

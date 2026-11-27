@@ -2986,6 +2986,7 @@ version = "0.1.11"
 dependencies = [
  "base64 0.22.1",
  "block2",
+ "cc",
  "chrono",
  "dbus",
  "dbus-secret-service",

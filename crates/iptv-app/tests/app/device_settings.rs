@@ -272,9 +272,7 @@ fn a_compact_window_shows_the_guide_beside_its_preview() {
 fn video_width(s: &nsh_testing::Screen) -> f32 {
     s.layout_nodes()
         .into_iter()
-        .find(|n| {
-            n.kind == nsh_core::ViewKind::Native && n.test_id.as_deref() != Some("device-signals")
-        })
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .map_or(0.0, |n| n.bounds.size.width.0)
 }
 

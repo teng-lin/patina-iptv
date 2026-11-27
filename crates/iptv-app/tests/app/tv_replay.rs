@@ -7,7 +7,7 @@
 //! Synthetic data only: a playlist picked from a file, channel one with a
 //! day of catch-up, its guide a local XMLTV file.
 
-use nsh_core::{MountItem, ViewKind};
+use nsh_core::MountItem;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -206,7 +206,7 @@ fn a_replays_card_has_its_seek_bar_and_ok_seeks_then_opens_the_play_bar() {
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     step(app.press_key("down"));

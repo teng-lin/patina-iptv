@@ -445,22 +445,31 @@ pub fn start(ui: &Ui, channel: usize) {
     open(ui, 0, session);
 }
 
-pub fn toggle_pause(ui: Ui) {
-    if ui.cast_remote.get_untracked() {
-        crate::casting::remote(ui, usize::from(ui.paused.get_untracked()));
-        return;
-    }
+/// An explicit Play or Pause is idempotent on every host. The play bar uses
+/// toggle_pause; dedicated media keys use this same local/remote dispatch.
+pub(crate) fn set_paused(ui: Ui, paused: bool) {
     crate::interruption::viewer_acted(ui);
-    if crate::on_demand::active(ui)
+    if ui.cast_remote.get_untracked() {
+        crate::casting::set_paused(ui, paused);
+    } else if !paused
+        && crate::on_demand::active(ui)
         && ui.player.main().finished.get_untracked()
         && ui.player.main().accepts_native(None)
     {
         ui.paused.set(false);
         retry_surface(ui, 0);
-    } else {
-        ui.paused.update(|p| *p = !*p);
+    } else if ui.paused.get_untracked() != paused {
+        ui.paused.set(paused);
         crate::on_demand::flush(ui, false);
     }
+}
+
+pub fn toggle_pause(ui: Ui) {
+    let replay = !ui.cast_remote.get_untracked()
+        && crate::on_demand::active(ui)
+        && ui.player.main().finished.get_untracked()
+        && ui.player.main().accepts_native(None);
+    set_paused(ui, !replay && !ui.paused.get_untracked());
 }
 
 /// Applies the guide's user-controlled playback block before any PIN check.

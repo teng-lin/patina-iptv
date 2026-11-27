@@ -19,7 +19,7 @@ pub(crate) fn player(app: &Headless) -> NodeId {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.kind == ViewKind::Native)
+        .filter(|n| n.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(nodes.len(), 1, "persistent player surface");
     nodes[0].id

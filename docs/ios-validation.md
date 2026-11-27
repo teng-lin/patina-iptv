@@ -96,3 +96,29 @@ reports that the playlist cannot be read, not that the server refused access.
 
 Afterwards stop the mock server and remove the simulator you created:
 `xcrun simctl shutdown "$udid" && xcrun simctl delete "$udid"`.
+
+## Native AirPlay in Patina
+
+The normal Patina live player's **Cast to TV** control opens Apple's named-device
+picker directly on iPad. No protocol selection is needed. The Apple video route picker belongs to the same runtime as
+the player. Choose only the physical receiver approved for the run and let its
+owner handle any approval. Do not use screen mirroring. The separate developer
+probe remains a diagnostic control; it is not the product acceptance journey.
+
+Use a disposable app identity and matching development profile for physical
+fixture tests so the normal Patina app and its Keychain group remain separate.
+Run the normal `App` root with no probe flag or test-support feature. A package
+using the documented private-fixture hook is a development fixture build; it
+does not validate production URL admission policy. Keep all media generated.
+
+Start a generated live HLS channel in Patina, choose a receiver, and verify video
+on the approved receiver. Check pause/resume with the play bar, changing to another generated channel
+while retaining the route, and choosing this iPad in the same device picker to
+return playback locally. Global Stop must retire the remote stream too.
+The local player must not retain a source while remote playback owns the
+one-stream account. Cancel receiver approval and revoke playback authorization
+to check relay cleanup. Background and lock the iPad during a separately
+approved session to validate continuity and return controls. Record receiver
+observations separately from Patina's remote status; compilation and the
+probe's success do not establish full product acceptance. Stop the fixture
+origin and the probe or product session after the run.

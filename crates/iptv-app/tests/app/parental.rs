@@ -139,7 +139,7 @@ fn aggregate_playlist_reorder_requires_the_settings_pin() {
 
 #[test]
 fn an_open_playlist_menu_checks_the_settings_pin_again_before_changing_policy() {
-    use nsh_core::{EventKind, EventPayload, ViewKind};
+    use nsh_core::{EventKind, EventPayload};
 
     let Some(home) = isolated!() else { return };
     let mut settings = Settings::new();
@@ -189,7 +189,7 @@ fn an_open_playlist_menu_checks_the_settings_pin_again_before_changing_policy() 
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     app.engine().control().dispatch_event(

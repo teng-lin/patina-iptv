@@ -5,6 +5,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 const SHELL_STATICS: &[(&str, &str)] = &[
+    // NSH native views use these IDs and weak references to attach to a runtime-owned sender.
+    ("host/native/apple_airplay/transport.rs", "NEXT_ID"),
+    ("host/native/apple_airplay/transport.rs", "VIEWS"),
     ("host/native/android_transport.rs", "RELAYS"), // JNI playback relay handles.
     ("backup.rs", "REQUEST"),                       // Android document picker signal.
     ("backup.rs", "ANSWER"),                        // Android document picker callback.
@@ -68,6 +71,7 @@ const SHELL_STATICS: &[(&str, &str)] = &[
     ("video.rs", "SOURCED"), // Native player source projection.
     // Synthetic receiver for headless Cast journeys.
     ("host/native.rs", "TEST_CAST"),
+    ("host/native.rs", "TEST_NATIVE_CAST"), // Synthetic native sender port in isolated test processes.
 ];
 
 /// Platform `cfg` outside `src/host/`, the host glue: what is still to

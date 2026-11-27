@@ -464,7 +464,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
                 let entry = ui.focus.with_untracked(|f| f.group);
                 crate::menu_view::open_group_options(ui, entry);
             } else {
-                apply(ui, RemoteKey::Menu, Action::ShowMenu, false);
+                apply(ui, RemoteKey::Menu, Press::Short, Action::ShowMenu, false);
             }
         });
     }
@@ -808,10 +808,23 @@ fn keep_controls_until(ui: Ui, at: u64) {
     }
 }
 
-fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
+fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     // A held key must not reopen a menu, toggle a favorite repeatedly or
     // turn a guide preview into fullscreen. Remapped keys can repeat too.
     if repeat && one_shot_action(action, ui.mode.get_untracked(), context(&ui)) {
+        return;
+    }
+    // Transport keys control the owned receiver even while its destination
+    // picker or another overlay has focus.
+    if ui.player_surface == 0 && ui.cast_remote.get_untracked() && action == Action::PlayPause {
+        crate::player_keys::play_pause(ui, key, press);
+        return;
+    }
+    if action == Action::Stop
+        && ui.player_surface == 0
+        && (ui.cast_remote.get_untracked() || ui.cast_busy.get_untracked())
+    {
+        crate::player_keys::stop_playback(ui);
         return;
     }
     if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {
@@ -1020,7 +1033,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
                 crate::go_back(ui);
             }
             Action::PlayPause | Action::Stop => {
-                crate::player_keys::apply(ui, key, action, repeat);
+                crate::player_keys::apply(ui, key, press, action, repeat);
             }
             _ => {}
         }
@@ -1034,7 +1047,7 @@ fn apply(ui: Ui, key: RemoteKey, action: Action, repeat: bool) {
         return;
     }
     // Full screen and its panels: `player_keys.rs`.
-    if crate::player_keys::apply(ui, key, action, repeat) {
+    if crate::player_keys::apply(ui, key, press, action, repeat) {
         return;
     }
     match action {
@@ -1133,10 +1146,9 @@ mod tests {
                 format!("Request {}", ui.external_request.get())
             }))
             .child(
-                view()
-                    .label("Repeat select")
-                    .h(px(40.0))
-                    .on_press(move || apply(ui, RemoteKey::Red, Action::Select, true)),
+                view().label("Repeat select").h(px(40.0)).on_press(move || {
+                    apply(ui, RemoteKey::Red, Press::Short, Action::Select, true)
+                }),
             )
             .child(
                 view()

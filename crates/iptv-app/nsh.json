@@ -17,14 +17,18 @@
   },
   "macos": {
     "infoPlist": {
-      "NSLocalNetworkUsageDescription": "Finds nearby Chromecast devices and streams video to the TV you choose.",
+      "NSLocalNetworkUsageDescription": "Finds nearby receivers and streams video to the one you choose.",
       "NSBonjourServices": [
         "_googlecast._tcp"
-      ]
+      ],
+      "NSAppTransportSecurity": {
+        "NSAllowsLocalNetworking": true
+      }
     }
   },
   "ios": {
     "infoPlist": {
+      "UIBackgroundModes": ["audio"],
       "UIDeviceFamily": [
         2
       ],
@@ -40,7 +44,7 @@
         "UIInterfaceOrientationLandscapeLeft",
         "UIInterfaceOrientationLandscapeRight"
       ],
-      "NSLocalNetworkUsageDescription": "Plays and reads playlists from servers on your local network.",
+      "NSLocalNetworkUsageDescription": "Reads playlists from local servers and streams video to the AirPlay receiver you choose.",
       "NSAppTransportSecurity": {
         "NSAllowsArbitraryLoads": true,
         "NSAllowsArbitraryLoadsForMedia": true

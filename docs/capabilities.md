@@ -16,6 +16,22 @@ native services report what the operating system actually accepted.
 | iPad | 4 | No |
 | Unknown | 1 | No |
 
+## Sending video
+
+The main player's **Cast to TV** control offers Chromecast on desktop hosts and
+**AirPlay** on macOS and iPad. AirPlay opens Apple's native video picker inside
+Patina. On iPad the play bar's Cast button opens the named-device picker directly.
+On desktop the destination sheet lists discovered receivers and includes the
+system device picker. The play bar controls pause, resume and channel changes.
+Choose this device in the picker to return playback locally. A channel change retires the previous stream while retaining
+the selected native route. Hiding the play bar does not stop playback.
+
+Casting requires a live HLS channel, a free provider viewing claim, and the main
+player outside PiP and multiview. AirPlay requires a private IPv4 LAN interface
+and a receiver that can reach the sender's relay. The integration keeps media
+URLs and credentials inside the sender's relay; see [security](security.md#casting-on-the-local-network).
+Physical acceptance results are separate from compile and headless checks.
+
 ## Device signals
 
 The operating system alone cannot tell an Android phone from a tablet or a

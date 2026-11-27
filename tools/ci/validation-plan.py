@@ -74,7 +74,8 @@ OTHER_HOSTS = ("hosts/android/**", "hosts/ios/**", "hosts/linux/**", "hosts/wind
                "hosts/tizen/**", "hosts/tizen-nsh/**")
 HELPER_INPUTS = ("docs/contributing.md",)
 IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
-       "tools/check-ios-simulator-entitlements.sh",
+       "tools/check-ios-simulator-entitlements.sh", "tools/apple-airplay-probe/**",
+       "crates/iptv-app/src/host/native/apple_airplay.m",
        "tools/mpv-runtime-ios/**", "hosts/ios/**")
 CREDENTIALS = (*BUILD, "crates/iptv-app/src/host/native/credential_key*", "crates/iptv-app/src/host/native/credential_key/**",
                "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",
