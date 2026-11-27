@@ -20,12 +20,12 @@ use tokio::{
 };
 use tokio_rustls::rustls::pki_types::ServerName;
 
-const RECEIVER: &str = "urn:x-cast:com.google.cast.receiver";
-const MEDIA: &str = "urn:x-cast:com.google.cast.media";
-const CONNECTION: &str = "urn:x-cast:com.google.cast.tp.connection";
-const HEARTBEAT: &str = "urn:x-cast:com.google.cast.tp.heartbeat";
-const ROOT: &str = "receiver-0";
-const APP: &str = "CC1AD845";
+pub(crate) const RECEIVER: &str = "urn:x-cast:com.google.cast.receiver";
+pub(crate) const MEDIA: &str = "urn:x-cast:com.google.cast.media";
+pub(crate) const CONNECTION: &str = "urn:x-cast:com.google.cast.tp.connection";
+pub(crate) const HEARTBEAT: &str = "urn:x-cast:com.google.cast.tp.heartbeat";
+pub(crate) const ROOT: &str = "receiver-0";
+pub(crate) const APP: &str = "CC1AD845";
 const DEADLINE: Duration = Duration::from_secs(15);
 const LATE_LOAD_REPLY: Duration = Duration::from_secs(5);
 
@@ -195,28 +195,27 @@ impl Session {
     }
     /// Loads live HLS at the live edge. Only a reply for this request establishes ownership.
     pub async fn load(&self, url: &str) -> Result<i64> {
-        let request = self
-            .submit_load(load_body(url, "application/x-mpegURL", true, None), || {
-                Ok(())
-            })
-            .await?;
+        let permit = self.load_permit().await?;
+        let request = self.queue_load(permit, load_body(url, "application/x-mpegURL", true, None));
         let reply = timeout(DEADLINE, request)
             .await
             .map_err(|_| Error::Unknown)?
             .map_err(|_| Error::Unknown)??;
         load_instance(&reply, url, None)
     }
-    pub(crate) async fn submit_load(
-        &self,
-        body: Value,
-        dispatch: impl FnOnce() -> Result<()>,
-    ) -> Result<oneshot::Receiver<Result<Value>>> {
-        let (reply, received) = oneshot::channel();
-        let permit = timeout(DEADLINE, self.outgoing.reserve())
+    async fn load_permit(&self) -> Result<mpsc::Permit<'_, Request>> {
+        timeout(DEADLINE, self.outgoing.reserve())
             .await
             .map_err(|_| Error::Unknown)?
-            .map_err(|_| Error::Unreachable)?;
-        dispatch()?;
+            .map_err(|_| Error::Unreachable)
+    }
+
+    fn queue_load(
+        &self,
+        permit: mpsc::Permit<'_, Request>,
+        body: Value,
+    ) -> oneshot::Receiver<Result<Value>> {
+        let (reply, received) = oneshot::channel();
         permit.send(Request {
             namespace: MEDIA,
             destination: self.transport.clone(),
@@ -224,7 +223,7 @@ impl Session {
             retention: DEADLINE + LATE_LOAD_REPLY,
             reply,
         });
-        Ok(received)
+        received
     }
     /// Finds matching content for diagnostics. Use correlated load replies to establish ownership.
     pub async fn lookup(&self, url: &str) -> Result<Option<i64>> {

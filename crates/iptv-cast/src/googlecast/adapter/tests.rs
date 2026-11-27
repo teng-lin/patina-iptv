@@ -497,9 +497,12 @@ async fn endpoint_selection_rejects_missing_ambiguous_and_expired_identities() {
         id: None,
         scanned: Instant::now(),
     };
-    assert_eq!(ephemeral.resolve().await.unwrap(), address);
+    assert_eq!(
+        ephemeral.resolve(&GoogleCast::default()).await.unwrap(),
+        address
+    );
     tokio::time::advance(RECENT_SCAN).await;
-    assert!(ephemeral.resolve().await.is_err());
+    assert!(ephemeral.resolve(&GoogleCast::default()).await.is_err());
 }
 
 #[tokio::test(start_paused = true)]
@@ -550,4 +553,188 @@ async fn replacement_during_a_receiver_volume_read_never_applies_the_relative_ch
     };
     tokio::join!(sender, peer);
     socket.await.unwrap();
+}
+
+#[tokio::test]
+async fn production_adapter_drives_the_public_session_against_a_loopback_receiver() {
+    use crate::test_support;
+
+    let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let receiver = test_support::Receiver::start(
+        test_support::Load::Immediate,
+        key_pair.cert.der().to_vec(),
+        key_pair.key_pair.serialize_der(),
+    )
+    .await;
+    let cast = test_support::sender(receiver.address()).unwrap();
+    let discovery = cast.discover(Duration::from_secs(1)).await.unwrap();
+    let route = &discovery.routes()[0];
+    assert_eq!(route.protocol().as_str(), "googlecast");
+    assert_eq!(
+        route.availability(Feature::LoadVideoUrl),
+        Availability::Available
+    );
+    let crate::Connect::Ready(connection) = cast.connect(route).await.unwrap() else {
+        panic!("Google Cast must connect without pairing");
+    };
+    let mut session = connection.load(Media::live(URL).unwrap()).unwrap();
+    let mut updates = session.subscribe();
+    timeout(Duration::from_secs(5), async {
+        while let Some(update) = updates.next().await {
+            if matches!(update.playback(), Playback::Playing) {
+                return;
+            }
+        }
+        panic!("the receiver did not confirm playback");
+    })
+    .await
+    .unwrap();
+    let volume = Command::Output {
+        scope: VolumeScope::Receiver,
+        change: OutputChange::SetVolume(Volume::percent(60).unwrap()),
+    };
+    assert_eq!(
+        session.command(volume).await.unwrap(),
+        Confirmation::Accepted
+    );
+    assert_eq!(
+        session.command(Command::Pause).await.unwrap(),
+        Confirmation::ReceiverConfirmed
+    );
+    assert_eq!(
+        session.command(Command::Play).await.unwrap(),
+        Confirmation::ReceiverConfirmed
+    );
+    assert_eq!(
+        session.stop().await.unwrap(),
+        StopOutcome::StopRequested(Confirmation::ReceiverConfirmed)
+    );
+    assert_eq!(
+        receiver.events(),
+        [
+            test_support::Event::Load,
+            test_support::Event::Paused,
+            test_support::Event::Playing,
+            test_support::Event::Stop,
+        ]
+    );
+    timeout(Duration::from_secs(5), receiver.finish())
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn loading_reports_whether_a_receiver_could_have_seen_the_request() {
+    use crate::googlecast::tests::session_channel;
+
+    let (wire, requests) = session_channel();
+    let mut cast = CastDriver::new(wire).unwrap();
+    drop(requests);
+    let dispatch = Dispatch::default();
+    let error = cast
+        .load(Media::live(URL).unwrap(), &dispatch)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        (error.kind(), error.delivery()),
+        (ErrorKind::Unreachable, Delivery::NotSent)
+    );
+
+    enum Response {
+        LostConnection,
+        Refused,
+        Unanswered,
+    }
+    for (mode, expected) in [
+        (
+            Response::LostConnection,
+            (ErrorKind::Unreachable, Delivery::MayHaveReachedReceiver),
+        ),
+        (
+            Response::Refused,
+            (ErrorKind::ReceiverRefused, Delivery::Acknowledged),
+        ),
+        (
+            Response::Unanswered,
+            (ErrorKind::TimedOut, Delivery::MayHaveReachedReceiver),
+        ),
+    ] {
+        let (wire, mut requests) = session_channel();
+        let mut cast = CastDriver::new(wire).unwrap();
+        let dispatch = Dispatch::default();
+        let receiver = async {
+            let request = requests.recv().await.unwrap();
+            match mode {
+                Response::LostConnection => drop(request),
+                Response::Refused => request.reply.send(Err(WireError::LoadFailed)).unwrap(),
+                Response::Unanswered => {
+                    tokio::time::sleep(super::super::DEADLINE + Duration::from_secs(1)).await;
+                    drop(request);
+                }
+            }
+        };
+        let (result, ()) = tokio::join!(cast.load(Media::live(URL).unwrap(), &dispatch), receiver);
+        let error = result.err().unwrap();
+        assert_eq!((error.kind(), error.delivery()), expected);
+    }
+}
+
+#[tokio::test]
+async fn a_discovered_route_whose_receiver_has_gone_fails_before_loading() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let cast = crate::test_support::sender(listener.local_addr().unwrap()).unwrap();
+    let discovery = cast.discover(Duration::from_secs(1)).await.unwrap();
+    drop(listener);
+    let result = cast.connect(&discovery.routes()[0]).await;
+    let error = result.err().unwrap();
+    assert_eq!(
+        (error.kind(), error.stage(), error.delivery()),
+        (ErrorKind::Unreachable, Stage::Connect, Delivery::NotSent)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn controls_recheck_the_receiver_capability_and_whether_owned_media_is_present() {
+    use crate::googlecast::tests::session_channel;
+    for (entries, command, expected) in [
+        (json!([]), Command::Play, ErrorKind::Unavailable),
+        (
+            json!([{"mediaSessionId":8,"playerState":"PLAYING"}]),
+            Command::Play,
+            ErrorKind::OwnershipLost,
+        ),
+        (
+            json!([{"mediaSessionId":7,"playerState":"PLAYING","supportedMediaCommands":0}]),
+            Command::Pause,
+            ErrorKind::Unsupported,
+        ),
+        (
+            json!([{"mediaSessionId":7,"playerState":"PLAYING"}]),
+            Command::Seek(Duration::from_secs(3)),
+            ErrorKind::Unavailable,
+        ),
+    ] {
+        let (wire, mut requests) = session_channel();
+        let mut cast = CastDriver::new(wire).unwrap();
+        let sender = async {
+            cast.owned = Some(7);
+            let error = cast.command(command).await.unwrap_err();
+            assert_eq!(
+                (error.kind(), error.delivery()),
+                (expected, Delivery::NotSent)
+            );
+            cast.close().await;
+        };
+        let receiver = async {
+            let request = requests.recv().await.unwrap();
+            assert_eq!(request.body["type"], "GET_STATUS");
+            request.reply.send(Ok(json!({"status": entries}))).unwrap();
+            assert!(requests.recv().await.is_none());
+        };
+        tokio::join!(sender, receiver);
+    }
 }

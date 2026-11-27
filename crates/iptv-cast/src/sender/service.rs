@@ -252,7 +252,7 @@ impl CastBuilder {
     pub fn build(self) -> Result<Cast, Error> {
         let backends: Vec<Arc<dyn Backend>> = vec![
             #[cfg(feature = "googlecast")]
-            Arc::new(crate::googlecast::adapter::GoogleCast),
+            Arc::new(crate::googlecast::adapter::GoogleCast::default()),
         ];
         self.build_with(backends)
     }

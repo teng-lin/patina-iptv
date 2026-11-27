@@ -14,6 +14,7 @@ googlecast = [
     "dep:serde_json", "dep:tokio-rustls",
 ]
 avahi = ["googlecast", "dep:dbus"]
+test-support = ["googlecast"]
 
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

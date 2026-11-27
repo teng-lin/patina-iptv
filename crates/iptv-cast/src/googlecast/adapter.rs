@@ -23,7 +23,28 @@ const POLL_INTERVAL: Duration = Duration::from_millis(750);
 const OUTPUT_PROBE: Duration = Duration::from_millis(500);
 const IDLE_GRACE: Duration = Duration::from_secs(15);
 
-pub(crate) struct GoogleCast;
+#[derive(Default)]
+pub(crate) struct GoogleCast {
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) loopback: Option<SocketAddr>,
+}
+
+impl GoogleCast {
+    async fn discover_endpoints(
+        &self,
+        deadline: Instant,
+    ) -> std::io::Result<Vec<discovery::Receiver>> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(address) = self.loopback {
+            return Ok(vec![discovery::Receiver {
+                name: "Generated Chromecast".into(),
+                address,
+                id: Some("generated-loopback".into()),
+            }]);
+        }
+        discovery::discover_until(deadline).await
+    }
+}
 
 #[derive(Clone)]
 struct Endpoint {
@@ -33,10 +54,11 @@ struct Endpoint {
 }
 
 impl Endpoint {
-    async fn resolve(&self) -> Result<SocketAddr, Error> {
+    async fn resolve(&self, backend: &GoogleCast) -> Result<SocketAddr, Error> {
         if let Some(id) = &self.id {
             let deadline = Instant::now() + ROUTE_WINDOW;
-            let devices = discovery::discover_until(deadline)
+            let devices = backend
+                .discover_endpoints(deadline)
                 .await
                 .map_err(|_| connect_error())?;
             unique_endpoint(id, devices)
@@ -71,7 +93,7 @@ impl Backend for GoogleCast {
 
     fn discover(&self, deadline: Instant, sink: ScanSink) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
-            let receivers = discovery::discover_until(deadline).await.map_err(|error| {
+            let receivers = self.discover_endpoints(deadline).await.map_err(|error| {
                 let kind = if error.kind() == std::io::ErrorKind::TimedOut {
                     ErrorKind::TimedOut
                 } else {
@@ -106,7 +128,7 @@ impl Backend for GoogleCast {
             let address = route
                 .payload::<Endpoint>()
                 .ok_or_else(connect_error)?
-                .resolve()
+                .resolve(self)
                 .await?;
             let wire = WireSession::connect(address)
                 .await
@@ -153,27 +175,21 @@ impl CastDriver {
 
     async fn submit(&mut self, media: Media, dispatch: &Dispatch) -> Result<Observation, Error> {
         let content_type = content_type(&media)?;
-        let mut cancelled = None;
         let wire = self.wire();
-        let reply = wire
-            .submit_load(
-                super::load_body(
-                    media.url(),
-                    content_type,
-                    media.is_live(),
-                    Some(&self.token),
-                ),
-                || {
-                    dispatch.mark_sent().map_err(|error| {
-                        cancelled = Some(error);
-                        WireError::Unknown
-                    })
-                },
-            )
+        let permit = wire
+            .load_permit()
             .await
-            .map_err(|error| {
-                cancelled.unwrap_or_else(|| translate(error, Stage::Load, Delivery::NotSent))
-            })?;
+            .map_err(|error| translate(error, Stage::Load, Delivery::NotSent))?;
+        dispatch.mark_sent()?;
+        let reply = wire.queue_load(
+            permit,
+            super::load_body(
+                media.url(),
+                content_type,
+                media.is_live(),
+                Some(&self.token),
+            ),
+        );
         self.live = media.is_live();
         self.pending = Some(PendingLoad {
             url: media.url().to_string(),

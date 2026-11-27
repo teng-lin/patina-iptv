@@ -147,6 +147,18 @@ pub mod exports {
         assert!(super::TEST_CAST.set(port).is_ok());
     }
 
+    /// Installs a loopback receiver and uses the native network casting port.
+    #[cfg(all(
+        feature = "test-support",
+        any(target_os = "linux", target_os = "macos", windows)
+    ))]
+    pub fn install_test_loopback_cast(address: std::net::SocketAddr) {
+        assert!(address.ip().is_loopback());
+        install_test_cast_port(std::sync::Arc::new(super::casting::Sender::for_loopback(
+            address,
+        )));
+    }
+
     /// Supplies an owner-local native route adapter in the existing app harness.
     #[cfg(feature = "test-support")]
     pub fn install_test_native_cast_port(port: std::sync::Arc<dyn iptv_runtime::cast::NativePort>) {

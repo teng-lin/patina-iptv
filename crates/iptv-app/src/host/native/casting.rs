@@ -26,6 +26,8 @@ use tokio::{
 pub(super) struct Sender {
     cast: OnceLock<Cast>,
     routes: Mutex<HashMap<String, Route>>,
+    #[cfg(feature = "test-support")]
+    loopback: Option<SocketAddr>,
 }
 
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(5);
@@ -56,11 +58,27 @@ fn map_error(error: &iptv_cast::Error) -> Error {
 }
 
 impl Sender {
+    #[cfg(feature = "test-support")]
+    pub(super) fn for_loopback(address: SocketAddr) -> Self {
+        Self {
+            loopback: Some(address),
+            ..Self::default()
+        }
+    }
+
+    fn new_cast(&self) -> Result<Cast, iptv_cast::Error> {
+        #[cfg(feature = "test-support")]
+        if let Some(address) = self.loopback {
+            return iptv_cast::test_support::sender(address);
+        }
+        Cast::builder().build()
+    }
+
     fn cast(&self) -> Result<&Cast, Error> {
         if let Some(cast) = self.cast.get() {
             return Ok(cast);
         }
-        let cast = Cast::builder().build().map_err(|error| map_error(&error))?;
+        let cast = self.new_cast().map_err(|error| map_error(&error))?;
         Ok(self.cast.get_or_init(|| cast))
     }
 }
@@ -96,6 +114,12 @@ impl Port for Sender {
         Box::pin(async move {
             let relay_port =
                 configured_relay_port(std::env::var_os("PATINA_CAST_RELAY_PORT").as_deref())?;
+            #[cfg(feature = "test-support")]
+            let relay_port = if self.loopback.is_some() {
+                0
+            } else {
+                relay_port
+            };
             let route = self
                 .routes
                 .lock()
@@ -130,6 +154,13 @@ impl Port for Sender {
             .await
             .map_err(|_| Error::Unavailable)?
             .map_err(|_| Error::Unavailable)?;
+            #[cfg(feature = "test-support")]
+            let relay_port = relay
+                .url()
+                .split('/')
+                .nth(2)
+                .and_then(|authority| authority.parse::<SocketAddr>().ok())
+                .map_or(relay_port, |address| address.port());
             Ok(Box::new(Handoff {
                 pending: Some(Pending {
                     sender: PendingSender::Ready(connection),

@@ -723,3 +723,128 @@ fn stop_during_the_return_to_local_does_not_reopen_the_local_stream() {
         "a newer Stop intent was overridden by return-to-local"
     );
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn open_loopback_cast(
+    home: crate::isolated::Home,
+    receiver: &iptv_cast::test_support::Receiver,
+) -> personalization::Fixture {
+    iptv_app::install_test_loopback_cast(receiver.address());
+    let hls = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nsegment.ts\n".to_owned();
+    let origin = crate::support::Server::start(&[("/generated.m3u8", hls)]);
+    let channel = origin.url("/generated.m3u8");
+    let playlist = format!(
+        "#EXTM3U\n#EXTINF:-1 group-title=\"News\",Local A\n{channel}\n\
+         #EXTINF:-1 group-title=\"News\",Local B\n{channel}\n"
+    );
+    let mut settings = Settings::new();
+    settings
+        .set("guide.after_choosing", Value::choice("stay"))
+        .unwrap();
+    settings.set("guide.switch_delay", Value::ms(0)).unwrap();
+    settings
+        .set("playlists.max_connections", Value::Int(1))
+        .unwrap();
+    let mut fixture = personalization::start_with_playlist(home, settings, false, &playlist);
+    browse_fixture::choose_fullscreen(&mut fixture.app);
+    open_cast(&mut fixture.app);
+    step(
+        fixture
+            .app
+            .wait_for("id:chooser-items >> text:Generated Chromecast"),
+    );
+    step(
+        fixture
+            .app
+            .press("id:chooser-items >> text:Generated Chromecast"),
+    );
+    fixture
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[test]
+fn native_cast_admits_the_gated_relay_before_ack_then_stops_the_owned_media() {
+    use iptv_cast::test_support::{Event, Load, Receiver};
+
+    let Some(home) = isolated!() else { return };
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let receiver = runtime.block_on(Receiver::start(
+        Load::FetchRelay,
+        key_pair.cert.der().to_vec(),
+        key_pair.key_pair.serialize_der(),
+    ));
+    let mut fixture = open_loopback_cast(home, &receiver);
+    let app = &mut fixture.app;
+    step(app.wait_until(
+        "the receiver fetches the gated manifest",
+        Duration::from_secs(10),
+        |_| receiver.events().contains(&Event::FetchedRelay) && !iptv_app::player_has_source(0),
+    ));
+    ready_controls(app);
+    step(app.press("id:play-bar-play-pause"));
+    step(app.wait_until(
+        "the receiver confirms pause",
+        Duration::from_secs(10),
+        |_| receiver.events().contains(&Event::Paused),
+    ));
+    open_cast(app);
+    step(app.press("id:chooser-items >> text:This device"));
+    step(
+        app.wait_until("local playback resumes", Duration::from_secs(10), |_| {
+            iptv_app::player_has_source(0)
+        }),
+    );
+    assert_eq!(
+        receiver.events(),
+        [Event::Load, Event::FetchedRelay, Event::Paused, Event::Stop]
+    );
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), receiver.finish())
+            .await
+            .unwrap()
+            .unwrap();
+    });
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[test]
+fn native_cast_refusal_without_a_fetch_reports_the_relay_port_and_keeps_playing_here() {
+    use iptv_cast::test_support::{Event, Load, Receiver};
+
+    let Some(home) = isolated!() else { return };
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let receiver = runtime.block_on(Receiver::start(
+        Load::Refuse,
+        key_pair.cert.der().to_vec(),
+        key_pair.key_pair.serialize_der(),
+    ));
+    let mut fixture = open_loopback_cast(home, &receiver);
+    step(fixture.app.wait_until(
+        "a refusal reports the bound relay port",
+        Duration::from_secs(10),
+        |screen| {
+            screen.texts().iter().any(|text| {
+                text.strip_prefix("The TV did not request the stream. Allow TCP port ")
+                    .and_then(|suffix| suffix.split(' ').next())
+                    .and_then(|port| port.parse::<std::num::NonZeroU16>().ok())
+                    .is_some()
+            })
+        },
+    ));
+    assert_eq!(receiver.events(), [Event::Load]);
+    assert!(iptv_app::player_has_source(0));
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), receiver.finish())
+            .await
+            .unwrap()
+            .unwrap();
+    });
+}

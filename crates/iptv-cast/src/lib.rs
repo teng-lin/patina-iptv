@@ -7,6 +7,10 @@ pub mod discovery;
 #[doc(hidden)]
 pub mod googlecast;
 pub(crate) mod sender;
+#[cfg(any(all(test, feature = "googlecast"), feature = "test-support"))]
+#[doc(hidden)]
+#[path = "googlecast/tests/fixture.rs"]
+pub mod test_support;
 #[cfg(feature = "googlecast")]
 mod tls;
 #[cfg(feature = "googlecast")]
