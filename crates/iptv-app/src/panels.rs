@@ -3,7 +3,7 @@
 //! focus) and the geometry of the header (`header.rs`) and its preview.
 
 use crate::layout::GuideHeader;
-use iptv_presentation::lists::entry_count;
+use crate::lists;
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -160,30 +160,24 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 /// playlist's groups, in the guide's type on the window color; the focus
 /// is the guide's light pill. Moving over (or tapping) one shows its list.
 pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
-    // New data: the selected group stays in view.
-    effect(move || {
-        ui.guide_data();
-        let group = ui.focus.with_untracked(|f| f.group);
-        groups.scroll_to_index(group as u32, percentage(0.5), px(0.0), false);
-    });
     let size = Scale::new();
     virtual_list(
-        move || {
-            ui.guide_data();
-            entry_count(&*crate::runtime_owner::schedule())
-        },
+        move || lists::visible_entries(ui).len(),
         move |at| {
-            let current = move || ui.focus.with(|f| f.group) == at.index();
+            let entry = move || lists::visible_entries(ui).entry(at.index());
+            let current = move || entry() == Some(ui.focus.with(|f| f.group));
             let focused =
                 move || current() && ui.focus.with(|f| f.pane) == Pane::Groups && ui.keys_shown();
             let mark = move || Mark::of(focused(), current());
             let name = move || {
                 ui.guide_data();
-                crate::lists::browser_entry_name(at.index(), &*crate::runtime_owner::schedule())
+                entry().map_or_else(String::new, |entry| {
+                    lists::browser_entry_name(entry, &*crate::runtime_owner::schedule())
+                })
             };
             let expanded = move || {
                 ui.guide_data();
-                crate::lists::playlist_expanded(at.index(), &*crate::runtime_owner::schedule())
+                lists::playlist_expanded(entry()?, &*crate::runtime_owner::schedule())
             };
             let color = move || match mark() {
                 Mark::Current => rgb(ui.app.theme.with(|t| t.accent.light)),
@@ -203,19 +197,25 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
                 .mx(px(8.0))
                 .on_press(move || {
                     ui.touched();
-                    if idiom() == nsh_core::platform::Idiom::Desktop {
-                        crate::lists::activate_entry(ui, at.index());
-                    } else {
-                        crate::lists::tap_entry(ui, at.index());
+                    if let Some(entry) = entry() {
+                        if idiom() == nsh_core::platform::Idiom::Desktop {
+                            lists::activate_entry(ui, entry);
+                        } else {
+                            lists::tap_entry(ui, entry);
+                        }
                     }
                 })
                 .on_long_press(move || {
                     ui.touched();
-                    crate::menu_view::open_group_options(ui, at.index());
+                    if let Some(entry) = entry() {
+                        crate::menu_view::open_group_options(ui, entry);
+                    }
                 })
                 .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
                     ui.touched();
-                    crate::menu_view::open_group_options(ui, at.index());
+                    if let Some(entry) = entry() {
+                        crate::menu_view::open_group_options(ui, entry);
+                    }
                 })
                 .child(list_rows::name(size, name).flex_1().text_color(color))
                 .child(when(

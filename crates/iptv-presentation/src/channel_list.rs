@@ -12,7 +12,7 @@
 //! The focus is a row of the current list and an entry index; the list
 //! itself is the caller's.
 
-use crate::lists::ChannelList as Rows;
+use crate::lists::{ChannelList as Rows, VisibleEntries};
 
 /// How the list sits over the video.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,8 +67,8 @@ impl ChannelList {
 
     /// Up/Down (and pages): moves within the focused column, clamped. In
     /// the groups a new entry is previewed. `entries` is the groups
-    /// column's length ([`crate::lists::entry_count`]).
-    pub fn move_focus(&mut self, step: isize, list: &Rows, entries: usize) -> Outcome {
+    /// column's visible entries.
+    pub fn move_focus(&mut self, step: isize, list: &Rows, entries: VisibleEntries) -> Outcome {
         match self.pane {
             ListPane::Channels => {
                 if !list.is_empty() {
@@ -78,9 +78,15 @@ impl ChannelList {
                 Outcome::Stay
             }
             ListPane::Groups => {
-                let last = entries.saturating_sub(1) as isize;
-                let to = (self.entry as isize + step).clamp(0, last.max(0)) as usize;
-                self.preview(to, list)
+                let position = entries.position(self.entry);
+                let next = match position {
+                    Some(position) => crate::guide::page_row(position, entries.len(), step),
+                    None if step < 0 => entries.len().saturating_sub(1),
+                    None => 0,
+                };
+                entries
+                    .entry(next)
+                    .map_or(Outcome::Stay, |entry| self.preview(entry, list))
             }
         }
     }
@@ -214,9 +220,11 @@ mod tests {
         }
 
         fn step(&mut self, by: isize) -> Outcome {
-            let o = self
-                .state
-                .move_focus(by, &self.list, entry_count(&self.catalog));
+            let o = self.state.move_focus(
+                by,
+                &self.list,
+                VisibleEntries::all(entry_count(&self.catalog)),
+            );
             self.follow(o)
         }
 

@@ -64,7 +64,7 @@ impl Screen {
 
     fn mv(&mut self, m: Move) -> Outcome {
         let cols = Columns {
-            entries: entry_count(&*self.catalog),
+            entries: crate::lists::VisibleEntries::all(entry_count(&*self.catalog)),
             rail: &self.rail.clone(),
             back_to_now: true,
         };
@@ -75,7 +75,7 @@ impl Screen {
     fn ok(&mut self) -> Outcome {
         let rail = self.rail.clone();
         let cols = Columns {
-            entries: entry_count(&*self.catalog),
+            entries: crate::lists::VisibleEntries::all(entry_count(&*self.catalog)),
             rail: &rail,
             back_to_now: true,
         };
@@ -86,7 +86,7 @@ impl Screen {
     fn back(&mut self) -> Outcome {
         let rail = self.rail.clone();
         let cols = Columns {
-            entries: entry_count(&*self.catalog),
+            entries: crate::lists::VisibleEntries::all(entry_count(&*self.catalog)),
             rail: &rail,
             back_to_now: self.back_to_now,
         };
@@ -271,7 +271,7 @@ fn the_player_list_selects_a_list_without_touching_the_columns() {
     s.focus.now = 40;
     let rail = s.rail.clone();
     let cols = Columns {
-        entries: entry_count(&*s.catalog),
+        entries: crate::lists::VisibleEntries::all(entry_count(&*s.catalog)),
         rail: &rail,
         back_to_now: true,
     };
@@ -387,7 +387,7 @@ fn rail_items_keep_movies_and_shows_reachable_across_playlists() {
         "TV stays home: discovery entries do not replace the guide"
     );
     let cols = Columns {
-        entries: 3,
+        entries: crate::lists::VisibleEntries::all(3),
         rail: &items,
         back_to_now: true,
     };
@@ -452,7 +452,7 @@ fn a_tap_on_a_group_selects_and_filters_it() {
     let cols_entries = entry_count(&*s.catalog);
     let rail = s.rail.clone();
     let cols = Columns {
-        entries: cols_entries,
+        entries: crate::lists::VisibleEntries::all(cols_entries),
         rail: &rail,
         back_to_now: true,
     };
@@ -582,7 +582,7 @@ fn the_groups_back_button_opens_the_rail_as_back_does() {
     let mut by_back = s.focus;
     let rail = s.rail.clone();
     let cols = Columns {
-        entries: entry_count(&*s.catalog),
+        entries: crate::lists::VisibleEntries::all(entry_count(&*s.catalog)),
         rail: &rail,
         back_to_now: true,
     };

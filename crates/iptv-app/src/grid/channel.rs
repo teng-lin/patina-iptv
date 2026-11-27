@@ -28,6 +28,20 @@ pub(crate) fn no_logo() -> String {
         .to_owned()
 }
 
+pub(crate) fn show_channel_logos(ui: Ui) -> bool {
+    crate::settings_wiring::read(ui).bool(
+        iptv_settings::keys::GUIDE_SHOW_LOGOS,
+        &iptv_settings::Target::Global,
+    )
+}
+
+pub(crate) fn channel_logo(ui: Ui, channel: Option<usize>) -> String {
+    ui.guide_data();
+    channel
+        .and_then(|ch| crate::runtime_owner::schedule().channel_logo(ch))
+        .unwrap_or_else(no_logo)
+}
+
 /// The width the name has in a column `column` wide after a number
 /// `number` wide (`numbers.rs`), at size scale `scale`.
 fn name_width(column: f32, number: f32, playing: bool, scale: f32) -> f32 {
@@ -54,17 +68,8 @@ pub(super) fn cell(
             rgb(BRIGHT_TEXT)
         }
     };
-    let show_logo = move || {
-        crate::settings_wiring::read(ui);
-        crate::settings::flag(iptv_settings::keys::GUIDE_SHOW_LOGOS)
-    };
-    let logo = move || {
-        ui.guide_data();
-        channel
-            .get()
-            .and_then(|ch| crate::runtime_owner::schedule().channel_logo(ch))
-            .unwrap_or_else(no_logo)
-    };
+    let show_logo = move || show_channel_logos(ui);
+    let logo = move || channel_logo(ui, channel.get());
     let is_selected = move || {
         if crate::organization_view::guide_order_open(ui) {
             editing.get() == Some(true)

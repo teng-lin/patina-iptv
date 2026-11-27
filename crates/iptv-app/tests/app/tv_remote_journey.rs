@@ -1552,3 +1552,216 @@ fn a_late_release_cannot_apply_the_displaced_guide_press() {
     assert!(!iptv_app::player_has_source(0));
     persistent(app, &lifetime, player);
 }
+
+#[test]
+fn fullscreen_channel_browse_shows_logos_and_skips_hidden_builtin_categories() {
+    let Some(home) = tv_isolated!() else { return };
+    const LOGO: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="10" fill="#2468ab"/></svg>"##;
+    let server = crate::support::Server::start(&[("/logo.svg", LOGO.to_owned())]);
+    let playlist =
+        personalization::M3U.replace("http://example.test/logo.svg", &server.url("/logo.svg"));
+    let (mut fixture, _, _) = tv_with(
+        home,
+        |settings| {
+            for key in [
+                keys::SHOW_FAVORITES,
+                keys::SHOW_RECENT,
+                keys::SHOW_ALL_CHANNELS,
+            ] {
+                settings.set(key.as_str(), Value::Bool(false)).unwrap();
+            }
+        },
+        |path, source| {
+            let m3u = iptv_providers::m3u::parse_m3u(&playlist);
+            crate::isolated::open_database(path)
+                .unwrap()
+                .replace_catalog(source, &m3u.groups, &m3u.channels.items, &[], &[])
+                .unwrap();
+        },
+    );
+    let app = &mut fixture.app;
+    let groups = "id:guide-groups";
+    let player_groups = "id:channel-list-groups";
+    let logos = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let mounted = logos.clone();
+    app.observe(move |_, batch| {
+        let mut mounted = mounted.lock().unwrap();
+        for item in &batch.items {
+            if let nsh_core::MountItem::Image { id, source, .. } = item {
+                if source
+                    .as_ref()
+                    .and_then(|image| image.data.as_ref())
+                    .is_some_and(|data| data.bytes() == LOGO.as_bytes())
+                {
+                    mounted.insert(*id);
+                } else {
+                    mounted.remove(id);
+                }
+            }
+        }
+    });
+    let has_logo = |screen: &nsh_testing::Screen| {
+        let mounted = logos.lock().unwrap();
+        screen.layout_nodes().iter().any(|node| {
+            node.test_id.as_deref() == Some("player-channel-logo")
+                && node.bounds.size.width.0 > 0.0
+                && mounted.contains(&node.id)
+        })
+    };
+    let hidden = |app: &crate::Headless, groups: &str| {
+        for name in ["Favorites", "Recently watched", "All channels"] {
+            assert!(!shows(app, &format!("{groups} >> text:{name}")));
+        }
+    };
+
+    hold(app, RemoteKey::Left, 700, true);
+    step(app.wait_for(&format!("{groups} >> text:News")));
+    hidden(app, groups);
+    assert!(selected(app, "guide-groups >> role:tab[News]"));
+    step(app.remote_tap(RemoteKey::Up));
+    assert!(selected(app, "guide-groups >> role:tab[Sport]"));
+    step(app.remote_tap(RemoteKey::Down));
+    assert!(selected(app, "guide-groups >> role:tab[News]"));
+    step(app.remote_tap(RemoteKey::Right));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("text:▶"));
+    step(app.remote_tap(RemoteKey::Ok));
+
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.wait_for("id:channel-list >> text:/Local A/"));
+    step(app.wait_until("player artwork", Duration::from_secs(5), has_logo));
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.wait_for(&format!("{player_groups} >> text:News")));
+    hidden(app, player_groups);
+    step(app.wait_until("player artwork", Duration::from_secs(5), has_logo));
+    step(app.remote_tap(RemoteKey::Down));
+    step(app.wait_for("id:channel-list >> text:/Local C/"));
+    assert!(selected(app, "channel-list-groups >> role:tab[Sport]"));
+    step(
+        app.wait_until("no recycled artwork", Duration::from_secs(5), |screen| {
+            !has_logo(screen)
+        }),
+    );
+}
+
+#[test]
+fn double_back_arms_only_at_the_rail_and_resets_on_timeout_or_navigation() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "android"),
+        ],
+    ) else {
+        return;
+    };
+    let (mut fixture, _, _) = tv(home, |settings| {
+        settings
+            .set(keys::DOUBLE_BACK_TO_EXIT.as_str(), Value::Bool(true))
+            .unwrap();
+    });
+    let app = &mut fixture.app;
+    let platform_backs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let recorded = platform_backs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if matches!(
+                item,
+                nsh_core::MountItem::Command {
+                    command: nsh_core::Command::Back,
+                    ..
+                }
+            ) {
+                recorded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    });
+    let exits = || platform_backs.load(std::sync::atomic::Ordering::Relaxed);
+    let prompt = "id:exit-confirmation";
+    let back = |app: &mut crate::Headless| {
+        step(app.remote_tap(RemoteKey::Back));
+        step(app.back());
+    };
+    hold(app, RemoteKey::Left, 700, true);
+    back(app);
+    step(app.wait_for("id:navigation-rail >> text:Live TV"));
+    assert!(
+        !shows(app, prompt),
+        "Back into the rail is still navigation"
+    );
+
+    back(app);
+    step(app.wait_for("text:Press Back again to exit"));
+    step(app.run_for(Duration::from_millis(2_050)));
+    assert!(!shows(app, prompt), "the pending exit expires");
+
+    back(app);
+    step(app.wait_for(prompt));
+    step(app.remote_tap(RemoteKey::Right));
+    assert!(!shows(app, prompt), "navigation cancels a pending exit");
+    back(app);
+    assert!(
+        !shows(app, prompt),
+        "Back only returns from Groups to the rail"
+    );
+
+    back(app);
+    step(app.wait_for(prompt));
+    step(app.set_environment("pause", |env| {
+        env.lifecycle = nsh_core::platform::Lifecycle::Inactive;
+    }));
+    assert!(
+        !shows(app, prompt),
+        "losing foreground input cancels the prompt"
+    );
+    step(app.set_environment("resume", |env| {
+        env.lifecycle = nsh_core::platform::Lifecycle::Active;
+    }));
+
+    back(app);
+    step(app.wait_for(prompt));
+    assert_eq!(exits(), 0, "navigation and expiry never request an exit");
+    back(app);
+    assert!(!shows(app, prompt), "a second Back clears the pending exit");
+    assert_eq!(exits(), 1, "one Back reaches the platform on confirmation");
+}
+
+#[test]
+fn player_browse_without_any_categories_keeps_the_channel_list() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv_with(
+        home,
+        |settings| {
+            for key in [
+                keys::SHOW_FAVORITES,
+                keys::SHOW_RECENT,
+                keys::SHOW_ALL_CHANNELS,
+            ] {
+                settings.set(key.as_str(), Value::Bool(false)).unwrap();
+            }
+        },
+        |path, source| {
+            let text = personalization::M3U
+                .replace(" group-title=\"News\"", "")
+                .replace(" group-title=\"Sport\"", "");
+            let m3u = iptv_providers::m3u::parse_m3u(&text);
+            assert!(m3u.groups.is_empty());
+            crate::isolated::open_database(path)
+                .unwrap()
+                .replace_catalog(source, &m3u.groups, &m3u.channels.items, &[], &[])
+                .unwrap();
+        },
+    );
+    let app = &mut fixture.app;
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("text:▶"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.wait_for("id:channel-list >> text:/Local A/"));
+    step(app.remote_tap(RemoteKey::Left));
+    assert!(!shows(app, "id:channel-list-groups"));
+    step(app.remote_tap(RemoteKey::Down));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:channel-list >> text:/Local B.*▶/"));
+}
