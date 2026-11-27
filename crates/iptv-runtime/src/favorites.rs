@@ -9,7 +9,7 @@
 //! host without workers, a browser, to the store's writer lane in order,
 //! [`queue_on_writer`]). They are read when a source is shown, on the
 //! store's reader unless writes of this module are still queued
-//! ([`load`]). The synthetic guide keeps them in memory only.
+//! when loading the guide. The synthetic guide keeps them in memory only.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};
@@ -27,6 +27,9 @@ use iptv_library::SourceId;
 use iptv_providers::model::ContentKind;
 #[cfg(test)]
 use iptv_store_sqlite::Store;
+
+pub(crate) const UNSAVED_EDITS: StoreError =
+    StoreError::Unavailable("recent favorite edits are not saved");
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -229,9 +232,7 @@ pub async fn prepare_source(
     let request = begin_vod_request(owner);
     let after_writes = unsaved(owner).load(Ordering::Acquire) > 0;
     let loaded = if after_writes && !flush(owner).await {
-        Err(StoreError::Unavailable(
-            "recent favorite edits are not saved",
-        ))
+        Err(UNSAVED_EDITS)
     } else {
         owner
             .services()
@@ -875,9 +876,7 @@ pub(crate) async fn save_order(
                         .favorites()
                         .save_order_blocking(source, original, order)
                 } else {
-                    Err(StoreError::Unavailable(
-                        "recent favorite edits are not saved",
-                    ))
+                    Err(UNSAVED_EDITS)
                 };
                 pending.fetch_sub(1, Ordering::AcqRel);
                 let _ = done.send(result);

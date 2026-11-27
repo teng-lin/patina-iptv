@@ -196,9 +196,7 @@ impl FavoritesRepo {
             .call(move |store| {
                 let _counted = counted;
                 if failed.swap(false, Ordering::AcqRel) {
-                    return Err(StoreError::Unavailable(
-                        "recent favorite edits are not saved",
-                    ));
+                    return Err(crate::favorites::UNSAVED_EDITS);
                 }
                 store.save_favorite_order(source, &original, &order)
             })
