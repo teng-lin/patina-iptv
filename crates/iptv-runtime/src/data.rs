@@ -205,7 +205,7 @@ mod playlist_lifecycle_tests {
                 .call(|store| store.add_source(&synthetic("Synthetic shown")))
                 .await
                 .unwrap();
-            owner.shown.set(Some(shown));
+            owner.catalog.set_shown_source(Some(shown));
             crate::library::install(&owner, crate::library::snapshot(&owner).await.unwrap());
 
             // Hold the reader so the checked state from both writes reaches

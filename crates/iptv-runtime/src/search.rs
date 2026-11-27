@@ -109,7 +109,7 @@ impl crate::Runtime {
             .and_then(|value| value.downcast_ref::<EpgSchedule>())
             && let Some(authority) = epg.source_authority()
         {
-            if self.shown.get().map(|source| source.0) != Some(authority.source()) {
+            if self.catalog.shown_source().map(|source| source.0) != Some(authority.source()) {
                 return None;
             }
             return Some(iptv_search::ChannelId::in_source(
@@ -119,8 +119,8 @@ impl crate::Runtime {
             ));
         }
         // A standalone synthetic schedule has no stored source authority.
-        self.shown
-            .get()
+        self.catalog
+            .shown_source()
             .is_none()
             .then(|| iptv_search::ChannelId::new(None, key))
     }
@@ -143,7 +143,7 @@ impl crate::Runtime {
                 source,
                 &identity.content,
             ))?
-        } else if identity.source == self.shown.get().map(|source| source.0) {
+        } else if identity.source == self.catalog.shown_source().map(|source| source.0) {
             schedule.find_channel(&identity.content)?
         } else {
             return None;
@@ -321,7 +321,7 @@ mod identity_tests {
     #[test]
     fn results_resolve_reorders_sources_and_combined_offsets_by_content() {
         let owner = crate::Runtime::default();
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         let original = schedule(1, "generated-first", &["A", "B"]);
         owner.prepare_search_channels(1, &*original);
         let hit = owner
@@ -346,7 +346,7 @@ mod identity_tests {
             owner.resolve_search_channel(&hit.identity, &*schedule(1, "generated-first", &["B"])),
             None
         );
-        owner.shown.set(Some(SourceId(2)));
+        owner.catalog.set_shown_source(Some(SourceId(2)));
         assert_eq!(
             owner.resolve_search_channel(&hit.identity, &*replacement),
             None
@@ -423,7 +423,7 @@ mod identity_tests {
     #[test]
     fn same_numeric_source_and_content_cannot_adopt_a_new_incarnation() {
         let owner = crate::Runtime::default();
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         let original = schedule(1, "generated-original", &["A"]);
         owner.prepare_search_channels(1, &*original);
         let hit = owner
@@ -451,7 +451,7 @@ mod identity_tests {
     fn failed_program_build_completion_allows_retry_without_accepting_stale_versions() {
         let owner = crate::Runtime::default();
         let guide = schedule(1, "generated-original", &["A"]);
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         owner.prepare_search_channels(1, &*guide);
         assert!(owner.begin_program_index(1));
         assert!(!owner.begin_program_index(1));
@@ -473,7 +473,7 @@ mod identity_tests {
     #[test]
     fn program_visibility_archive_and_limit_use_resolved_rows() {
         let owner = crate::Runtime::default();
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         let before = schedule(1, "generated-original", &["A", "B"]);
         owner.prepare_search_channels(1, &*before);
         let mut builder = ProgramIndexBuilder::new(2);

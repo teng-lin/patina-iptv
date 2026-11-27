@@ -62,10 +62,10 @@ impl Runtime {
         self.imports.generation.get()
     }
     pub fn account_limit(&self) -> Option<u32> {
-        self.account_streams.get()
+        self.catalog.account_streams()
     }
     pub fn update_account_limit(&self, limit: Option<u32>) {
-        self.account_streams.set(limit);
+        self.catalog.set_account_streams(limit);
     }
     pub fn set_foreground(&self, foreground: bool) {
         self.set_foreground_for_external(foreground, None);
@@ -87,7 +87,8 @@ impl Runtime {
     }
     pub fn cancel_link_resolution(&self, surface: usize) {
         let running = self
-            .resolving
+            .catalog
+            .pending_resolutions()
             .borrow_mut()
             .get_mut(surface)
             .and_then(Option::take);
@@ -98,13 +99,22 @@ impl Runtime {
     pub fn begin_link_resolution(&self, surface: usize, session: u64) -> CancelToken {
         self.cancel_link_resolution(surface);
         let cancel = CancelToken::new();
-        if let Some(slot) = self.resolving.borrow_mut().get_mut(surface) {
+        if let Some(slot) = self
+            .catalog
+            .pending_resolutions()
+            .borrow_mut()
+            .get_mut(surface)
+        {
             *slot = Some((session, cancel.clone()));
         }
         cancel
     }
     pub fn finish_link_resolution(&self, surface: usize, session: u64) {
-        if let Some(slot) = self.resolving.borrow_mut().get_mut(surface)
+        if let Some(slot) = self
+            .catalog
+            .pending_resolutions()
+            .borrow_mut()
+            .get_mut(surface)
             && slot.as_ref().is_some_and(|(at, _)| *at == session)
         {
             *slot = None;
@@ -269,15 +279,15 @@ impl Runtime {
     /// session read it. A playlist's own `playlists.max_connections`
     /// overrides it; the playlists screen shows both.
     pub fn reported_streams(&self, source: SourceId) -> Option<u32> {
-        if self.shown.get() == Some(source)
-            && let Some(limit) = self.account_streams.get()
+        if self.catalog.shown_source() == Some(source)
+            && let Some(limit) = self.catalog.account_streams()
         {
             return Some(limit);
         }
-        if let Some(Some(limit)) = self.limits.borrow().get(&source) {
+        if let Some(Some(limit)) = self.catalog.provider_limits().borrow().get(&source) {
             return Some(*limit);
         }
-        if let Some(single) = self.single.borrow().as_ref()
+        if let Some(single) = self.catalog.single_schedule().borrow().as_ref()
             && single.source == source
             && single.limit.is_some()
         {
@@ -531,7 +541,7 @@ impl Runtime {
     }
 
     pub fn is_browsing_all(&self) -> bool {
-        self.all.get()
+        self.catalog.combined()
     }
 }
 

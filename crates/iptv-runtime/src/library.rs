@@ -129,7 +129,7 @@ pub fn reset_imports(owner: &super::Runtime) {
 pub use crate::state::LibrarySnapshot as Snapshot;
 
 pub fn install(owner: &super::Runtime, snapshot: Snapshot) -> bool {
-    owner.library.with(|current| {
+    owner.catalog.library_snapshot().with(|current| {
         let changed = current.borrow().as_ref() != Some(&snapshot);
         *current.borrow_mut() = Some(snapshot);
         changed
@@ -138,7 +138,7 @@ pub fn install(owner: &super::Runtime, snapshot: Snapshot) -> bool {
 
 /// The stored playlists in list order.
 fn playlists_native(owner: &super::Runtime) -> Result<Vec<Playlist>, StoreError> {
-    let mut playlists = owner.library.with(|snapshot| {
+    let mut playlists = owner.catalog.library_snapshot().with(|snapshot| {
         snapshot
             .borrow()
             .as_ref()
@@ -197,7 +197,7 @@ pub(crate) fn newest_excluding(
     excluded: Option<SourceId>,
 ) -> Result<Option<StoredSource>, StoreError> {
     let eligible = |p: &Playlist| Some(p.id) != excluded && p.policy.enabled;
-    owner.library.with(|snapshot| {
+    owner.catalog.library_snapshot().with(|snapshot| {
         let snapshot = snapshot.borrow();
         let snapshot = snapshot
             .as_ref()
@@ -230,7 +230,7 @@ fn policy_native(owner: &super::Runtime, id: SourceId) -> Result<SourcePolicy, S
 }
 
 pub fn load(owner: &super::Runtime, id: SourceId) -> Option<StoredSource> {
-    owner.library.with(|snapshot| {
+    owner.catalog.library_snapshot().with(|snapshot| {
         snapshot
             .borrow()
             .as_ref()
@@ -338,12 +338,12 @@ pub fn set_activity(owner: &super::Runtime, id: SourceId, activity: Option<Activ
 }
 
 pub fn set_all(owner: &super::Runtime, all: bool) {
-    owner.all.set(all);
+    owner.catalog.set_combined(all);
     owner.emit(super::RuntimeEvent::BrowsingAll(all));
 }
 
 pub fn set_shown(owner: &super::Runtime, source: Option<SourceId>) {
-    owner.shown.set(source);
+    owner.catalog.set_shown_source(source);
     owner.emit(super::RuntimeEvent::ShownSource(source));
 }
 

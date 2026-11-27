@@ -15,7 +15,6 @@ use iptv_store_sqlite::{
     ChannelOrder, ChannelQuery, EpgCounts, EpgFeedMeta, EpgWindow, GuideSource, ImportErrorKind,
     SourceId, Store, StoreError, StoredGuide,
 };
-use std::cell::Cell;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 /// How many days of finished programs reads of the stored guide reach:
@@ -718,7 +717,7 @@ pub fn error_kind(error: &ImportError) -> ImportErrorKind {
 
 /// `data.rs` put `source`'s schedule on screen.
 pub fn note_shown(owner: &super::Runtime, source: Option<SourceId>) {
-    owner.shown.with(|s| s.set(source));
+    owner.catalog.set_shown_source(source);
 }
 
 pub use crate::model::{GuideStatus, SourceLine};
@@ -757,7 +756,7 @@ pub fn guide_status(owner: &super::Runtime) -> GuideStatus {
 /// Individual mode has one guide owner; aggregate commands cover every
 /// enabled source, with failures and feeds still managed per playlist.
 pub fn shown_sources(owner: &super::Runtime) -> Vec<SourceId> {
-    if let Some(source) = owner.shown.with(Cell::get) {
+    if let Some(source) = owner.catalog.shown_source() {
         return vec![source];
     }
     owner.imports.status.with(|status| {
@@ -772,7 +771,7 @@ pub fn shown_sources(owner: &super::Runtime) -> Vec<SourceId> {
 
 /// The source whose guide is on screen.
 pub fn shown(owner: &super::Runtime) -> Option<SourceId> {
-    owner.shown.with(Cell::get)
+    owner.catalog.shown_source()
 }
 
 /// An update of `source`'s guide asked for by hand is running, or one a

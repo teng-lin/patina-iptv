@@ -90,12 +90,14 @@ impl Runtime {
         &self,
         source: i64,
     ) -> Option<std::rc::Rc<iptv_guide::playback::PlaybackContext>> {
-        self.parts
+        self.catalog
+            .schedule_parts()
             .borrow()
             .get(&SourceId(source))
             .and_then(|s| s.shared_playback())
             .or_else(|| {
-                self.single
+                self.catalog
+                    .single_schedule()
                     .borrow()
                     .as_ref()
                     .filter(|s| s.source.0 == source)

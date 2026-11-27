@@ -544,10 +544,12 @@ impl Runtime {
                 Some(self.services().settings());
         }
         let mut data = self.recordings.shared().lock();
-        if let (Some(source), Some(limit)) = (self.shown.get(), self.account_streams.get()) {
+        if let (Some(source), Some(limit)) =
+            (self.catalog.shown_source(), self.catalog.account_streams())
+        {
             data.provider_limits.insert(source.0, limit);
         }
-        for (source, limit) in self.limits.borrow().iter() {
+        for (source, limit) in self.catalog.provider_limits().borrow().iter() {
             if let Some(limit) = limit {
                 data.provider_limits.insert(source.0, *limit);
             }
@@ -584,10 +586,10 @@ impl Runtime {
                 );
             }
         };
-        for (source, schedule) in self.parts.borrow().iter() {
+        for (source, schedule) in self.catalog.schedule_parts().borrow().iter() {
             keep(*source, schedule);
         }
-        if let Some(single) = self.single.borrow().as_ref() {
+        if let Some(single) = self.catalog.single_schedule().borrow().as_ref() {
             keep(single.source, &single.schedule);
             if let Some(limit) = single.limit {
                 data.provider_limits.insert(single.source.0, limit);

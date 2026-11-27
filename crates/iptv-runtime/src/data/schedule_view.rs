@@ -126,7 +126,7 @@ pub(super) fn commit_schedule(
                 .as_any()
                 .and_then(|schedule| schedule.downcast_ref::<EpgSchedule>())
                 .is_some_and(|actual| expected.same_catalog(actual));
-            if owner.shown.get() != Some(source)
+            if owner.catalog.shown_source() != Some(source)
                 || !owner.organization_edit_current(source, ticket)
                 || !same_catalog
             {
@@ -138,8 +138,8 @@ pub(super) fn commit_schedule(
         ScheduleUpdate::Catalog(schedule) => schedule,
     };
     let previous = owner.set_schedule(current.clone());
-    let revision = owner.schedule_revision.get().wrapping_add(1);
-    owner.schedule_revision.set(revision);
+    let revision = owner.catalog.schedule_revision().wrapping_add(1);
+    owner.catalog.set_schedule_revision(revision);
     let cause = if catalog_changed {
         crate::favorites::rebuild_index(owner, &*current);
         let (has_vod, any_vod) = crate::favorites::vod_availability(owner);
@@ -152,7 +152,7 @@ pub(super) fn commit_schedule(
         current,
         cause,
     });
-    if catalog_changed && owner.schedule_revision.get() == revision {
+    if catalog_changed && owner.catalog.schedule_revision() == revision {
         crate::favorites::publish(owner);
     }
     // A nested projection may supersede this commit without waking waiters.
@@ -160,7 +160,7 @@ pub(super) fn commit_schedule(
     if wake_waiters {
         pages::replaced(owner);
     }
-    if owner.schedule_revision.get() == revision {
+    if owner.catalog.schedule_revision() == revision {
         CommitOutcome::Installed
     } else {
         CommitOutcome::Superseded
@@ -629,7 +629,7 @@ pub(super) async fn replace_single_organization(
     source: SourceId,
     ticket: u64,
 ) -> bool {
-    if owner.shown.get() != Some(source) {
+    if owner.catalog.shown_source() != Some(source) {
         return false;
     }
     let schedule = owner.schedule();
@@ -656,7 +656,7 @@ pub(super) async fn replace_single_organization(
 
 /// Puts `imported` on screen unless a newer import owns the guide.
 pub(crate) fn repair_source_shown(owner: &Rc<crate::Runtime>, source: SourceId) -> bool {
-    owner.shown.get() == Some(source) || combined_includes(owner, source)
+    owner.catalog.shown_source() == Some(source) || combined_includes(owner, source)
 }
 
 pub(crate) async fn show_repair(
@@ -740,7 +740,7 @@ pub(super) async fn show_part(
         }
         return;
     }
-    if Some(source) != owner.shown.get() {
+    if Some(source) != owner.catalog.shown_source() {
         source_changed(owner, Some(source));
     }
     crate::stored::note_shown(owner, Some(source));

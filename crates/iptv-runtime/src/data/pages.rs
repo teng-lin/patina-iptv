@@ -107,7 +107,7 @@ fn arrived(
     let child = combined(&*schedule)
         .and_then(|s| s.source(source.0))
         .or_else(|| {
-            (owner.shown.get() == Some(source))
+            (owner.catalog.shown_source() == Some(source))
                 .then(|| epg(&*schedule))
                 .flatten()
         });
@@ -138,7 +138,7 @@ fn arrived(
     if !accepted {
         result = Err(PageReadError);
     }
-    let completed = owner.page_waiters.with(|waiters| {
+    let completed = owner.catalog.page_waiters().with(|waiters| {
         let mut waiters = waiters.borrow_mut();
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
@@ -181,7 +181,8 @@ fn each(schedule: &dyn Schedule, mut f: impl FnMut(&EpgSchedule)) {
 /// first screen, `opening.rs`): what waited for its programs looks again.
 pub fn replaced(owner: &Rc<crate::Runtime>) {
     for waiter in owner
-        .page_waiters
+        .catalog
+        .page_waiters()
         .with(|w| std::mem::take(&mut *w.borrow_mut()))
     {
         (waiter.complete)(Ok(()));
@@ -217,7 +218,7 @@ pub fn ready(
     }
     log::info!("iptv data: catch-up waits for its guide day");
     let request = epg.pending_page(t);
-    owner.page_waiters.with(|w| {
+    owner.catalog.page_waiters().with(|w| {
         w.borrow_mut().push(Waiter {
             request,
             complete: Box::new(retry),
@@ -274,7 +275,7 @@ mod tests {
         )
     }
     fn install_single(owner: &Rc<crate::Runtime>, source: SourceId, schedule: &Rc<EpgSchedule>) {
-        owner.shown.set(Some(source));
+        owner.catalog.set_shown_source(Some(source));
         owner.set_schedule(schedule.clone());
     }
 
@@ -285,7 +286,7 @@ mod tests {
 
         let owner = Rc::new(crate::Runtime::default());
         owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
-        owner.all.set(true);
+        owner.catalog.set_combined(true);
         owner.imports.epoch.set(NOW);
         let source = SourceSchedule {
             id: 1,
@@ -312,7 +313,7 @@ mod tests {
                     previous, current, ..
                 } => {
                     assert!(Rc::ptr_eq(&owner.schedule(), &current));
-                    assert_eq!(owner.page_waiters.borrow().len(), 1);
+                    assert_eq!(owner.catalog.page_waiters().borrow().len(), 1);
                     if Rc::ptr_eq(&previous, &before) {
                         recorded.borrow_mut().push("rebuild");
                         assert!(toggle_playlist(&owner, 0));
@@ -341,7 +342,7 @@ mod tests {
             *events.borrow(),
             ["rebuild", "toggle", "favorites", "page waiter"]
         );
-        assert!(owner.page_waiters.borrow().is_empty());
+        assert!(owner.catalog.page_waiters().borrow().is_empty());
         let after = owner.schedule();
         let after = after
             .as_any()
@@ -435,7 +436,13 @@ mod tests {
             Duration::ZERO,
         );
         assert_eq!(*results.borrow(), [("A", Ok(()))]);
-        assert_eq!(owner.page_waiters.with(|waiters| waiters.borrow().len()), 1);
+        assert_eq!(
+            owner
+                .catalog
+                .page_waiters()
+                .with(|waiters| waiters.borrow().len()),
+            1
+        );
         arrived(
             &owner,
             SourceId(2),
@@ -499,7 +506,13 @@ mod tests {
         );
         assert!(results.borrow().is_empty());
         assert_eq!(current.paged_days(), 0);
-        assert_eq!(owner.page_waiters.with(|waiters| waiters.borrow().len()), 1);
+        assert_eq!(
+            owner
+                .catalog
+                .page_waiters()
+                .with(|waiters| waiters.borrow().len()),
+            1
+        );
         arrived(
             &owner,
             SourceId(1),
@@ -558,7 +571,13 @@ mod tests {
             Duration::ZERO,
         );
         assert_eq!(*current.borrow(), [Err(PageReadError)]);
-        assert_eq!(owner.page_waiters.with(|waiters| waiters.borrow().len()), 0);
+        assert_eq!(
+            owner
+                .catalog
+                .page_waiters()
+                .with(|waiters| waiters.borrow().len()),
+            0
+        );
     }
 
     #[test]
@@ -589,7 +608,8 @@ mod tests {
         assert!(result.borrow().is_empty());
         assert!(
             owner
-                .page_waiters
+                .catalog
+                .page_waiters()
                 .with(|waiters| waiters.borrow()[0].request.is_none())
         );
         let full = Rc::new(EpgSchedule::from_catalog(
@@ -800,7 +820,8 @@ mod tests {
             }
             assert!(
                 owner
-                    .page_waiters
+                    .catalog
+                    .page_waiters()
                     .with(|waiters| waiters.borrow().is_empty())
             );
             assert!(owner.drain_services());

@@ -1,8 +1,7 @@
 //! Per-owner catalog, schedule, and playback view state.
 
 use crate::{
-    EpgSchedule, LibrarySnapshot, PageWaiters, Resolves, Runtime, Schedule, SingleSchedule, Slot,
-    SourceId,
+    EpgSchedule, LibrarySnapshot, PageWaiters, Resolves, Schedule, SingleSchedule, Slot, SourceId,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -11,46 +10,115 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub struct State {
-    pub(super) account_streams: Slot<Cell<Option<u32>>>,
-    pub(super) resolving: Slot<Resolves>,
-    pub(super) link_client:
-        Arc<Mutex<Option<(crate::network::NetworkConfig, crate::network::Client)>>>,
-    pub(super) library: Slot<RefCell<Option<LibrarySnapshot>>>,
-    pub(super) parts: Slot<RefCell<BTreeMap<SourceId, Rc<EpgSchedule>>>>,
-    pub(super) single: Slot<RefCell<Option<SingleSchedule>>>,
-    pub(super) schedule: RefCell<Rc<dyn Schedule>>,
-    pub(super) schedule_revision: Cell<u64>,
-    pub(super) shown: Slot<Cell<Option<SourceId>>>,
-    pub(super) all: Cell<bool>,
-    pub(super) limits: Slot<RefCell<BTreeMap<SourceId, Option<u32>>>>,
-    pub(super) shows: RefCell<HashMap<SourceId, futures_channel::oneshot::Receiver<()>>>,
-    pub(super) page_waiters: Slot<PageWaiters>,
+type LinkClientCache = Arc<Mutex<Option<(crate::network::NetworkConfig, crate::network::Client)>>>;
+type ScheduleParts = BTreeMap<SourceId, Rc<EpgSchedule>>;
+type ProviderLimits = BTreeMap<SourceId, Option<u32>>;
+type ShowWaiter = futures_channel::oneshot::Receiver<()>;
+
+pub(super) struct State {
+    account_streams: Cell<Option<u32>>,
+    resolving: Resolves,
+    link_client: LinkClientCache,
+    library: Slot<RefCell<Option<LibrarySnapshot>>>,
+    parts: RefCell<ScheduleParts>,
+    single: Slot<RefCell<Option<SingleSchedule>>>,
+    schedule: RefCell<Rc<dyn Schedule>>,
+    schedule_revision: Cell<u64>,
+    shown: Cell<Option<SourceId>>,
+    all: Cell<bool>,
+    limits: Slot<RefCell<ProviderLimits>>,
+    shows: RefCell<HashMap<SourceId, ShowWaiter>>,
+    page_waiters: Slot<PageWaiters>,
 }
 
 impl State {
     pub(super) fn new(schedule: Rc<dyn Schedule>) -> Self {
         Self {
-            account_streams: Slot::default(),
-            resolving: Slot::default(),
+            account_streams: Cell::default(),
+            resolving: Resolves::default(),
             link_client: Arc::new(Mutex::new(None)),
             library: Slot::default(),
-            parts: Slot::default(),
+            parts: RefCell::default(),
             single: Slot::default(),
             schedule: RefCell::new(schedule),
             schedule_revision: Cell::new(0),
-            shown: Slot::default(),
+            shown: Cell::default(),
             all: Cell::new(false),
             limits: Slot::default(),
             shows: RefCell::default(),
             page_waiters: Slot::default(),
         }
     }
-}
 
-impl std::ops::Deref for Runtime {
-    type Target = State;
-    fn deref(&self) -> &Self::Target {
-        &self.catalog
+    pub(super) fn account_streams(&self) -> Option<u32> {
+        self.account_streams.get()
+    }
+
+    pub(super) fn set_account_streams(&self, limit: Option<u32>) {
+        self.account_streams.set(limit);
+    }
+
+    pub(super) fn pending_resolutions(&self) -> &Resolves {
+        &self.resolving
+    }
+
+    pub(super) fn link_client_cache(&self) -> LinkClientCache {
+        self.link_client.clone()
+    }
+
+    pub(super) fn library_snapshot(&self) -> &Slot<RefCell<Option<LibrarySnapshot>>> {
+        &self.library
+    }
+
+    pub(super) fn schedule_parts(&self) -> &RefCell<ScheduleParts> {
+        &self.parts
+    }
+
+    pub(super) fn single_schedule(&self) -> &Slot<RefCell<Option<SingleSchedule>>> {
+        &self.single
+    }
+
+    pub(super) fn schedule(&self) -> Rc<dyn Schedule> {
+        self.schedule.borrow().clone()
+    }
+
+    pub(super) fn replace_schedule(&self, schedule: Rc<dyn Schedule>) -> Rc<dyn Schedule> {
+        self.schedule.replace(schedule)
+    }
+
+    pub(super) fn schedule_revision(&self) -> u64 {
+        self.schedule_revision.get()
+    }
+
+    pub(super) fn set_schedule_revision(&self, revision: u64) {
+        self.schedule_revision.set(revision);
+    }
+
+    pub(super) fn shown_source(&self) -> Option<SourceId> {
+        self.shown.get()
+    }
+
+    pub(super) fn set_shown_source(&self, source: Option<SourceId>) {
+        self.shown.set(source);
+    }
+
+    pub(super) fn combined(&self) -> bool {
+        self.all.get()
+    }
+
+    pub(super) fn set_combined(&self, combined: bool) {
+        self.all.set(combined);
+    }
+
+    pub(super) fn provider_limits(&self) -> &Slot<RefCell<ProviderLimits>> {
+        &self.limits
+    }
+
+    pub(super) fn enqueue_show(&self, source: SourceId, next: ShowWaiter) -> Option<ShowWaiter> {
+        self.shows.borrow_mut().insert(source, next)
+    }
+
+    pub(super) fn page_waiters(&self) -> &Slot<PageWaiters> {
+        &self.page_waiters
     }
 }

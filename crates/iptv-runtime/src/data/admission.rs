@@ -76,7 +76,7 @@ pub async fn update_policy(
     }
     if !policy.enabled {
         crate::library::cancel_running(owner, id);
-        if owner.shown.get() == Some(id) {
+        if owner.catalog.shown_source() == Some(id) {
             let next = crate::library::newest(owner)?;
             show_nothing(owner);
             match next {
@@ -108,7 +108,7 @@ pub(super) fn switch_to_ready(owner: &Rc<crate::Runtime>, id: SourceId) {
     if library::policy(owner, id).is_ok_and(|p| !p.enabled) {
         return;
     }
-    if !combined::active(owner) && owner.shown.get() == Some(id) {
+    if !combined::active(owner) && owner.catalog.shown_source() == Some(id) {
         return;
     }
     let Some(stored) = crate::library::load(owner, id) else {
@@ -136,7 +136,7 @@ pub fn refresh(owner: &Rc<crate::Runtime>, id: SourceId) {
 pub(super) fn refresh_purpose(owner: &Rc<crate::Runtime>, id: SourceId) -> Purpose {
     if combined::active(owner) {
         Purpose::Background
-    } else if owner.shown.get() == Some(id) {
+    } else if owner.catalog.shown_source() == Some(id) {
         Purpose::Refresh
     } else {
         Purpose::Background
@@ -251,7 +251,7 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
         owner.emit(crate::RuntimeEvent::FirstRun);
         return Ok(());
     }
-    if owner.shown.get() != Some(id) {
+    if owner.catalog.shown_source() != Some(id) {
         return Ok(());
     }
     match crate::library::newest(owner)? {

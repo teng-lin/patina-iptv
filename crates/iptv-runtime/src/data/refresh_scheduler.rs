@@ -189,7 +189,8 @@ pub(super) fn start_update(
             let mut unscheduled = None;
             loop {
                 let shown = || {
-                    owner.shown.with(Cell::get) == Some(source) || combined_includes(&owner, source)
+                    owner.catalog.shown_source() == Some(source)
+                        || combined_includes(&owner, source)
                 };
                 let current = || crate::library::import_is_current(&owner, source, &completion);
                 match rx.recv().await {
@@ -238,7 +239,7 @@ pub(super) fn start_update(
 pub(super) fn guides_changed(owner: &std::rc::Rc<crate::Runtime>, source: SourceId) {
     let previous = crate::library::pending_import(owner, source);
     crate::library::revoke_import_handoff(owner, source);
-    if owner.shown.with(Cell::get) != Some(source) && !combined_includes(owner, source) {
+    if owner.catalog.shown_source() != Some(source) && !combined_includes(owner, source) {
         return;
     }
     // A check under way would download and store the feeds as they were.
@@ -340,7 +341,7 @@ pub(super) fn keep_guide_check(
 ) {
     if owner.has_guide_check(source)
         || crate::library::pending_import(owner, source).is_some()
-        || !(owner.shown.get() == Some(source) || combined_includes(owner, source))
+        || !(owner.catalog.shown_source() == Some(source) || combined_includes(owner, source))
     {
         return;
     }
@@ -491,7 +492,7 @@ pub(super) fn restore_guide(owner: &Rc<crate::Runtime>, source: SourceId, genera
 
 /// Prefer the source being browsed, including the focused child of All playlists.
 pub(super) fn source_is_visible(owner: &std::rc::Rc<crate::Runtime>, source: SourceId) -> bool {
-    if owner.shown.get() == Some(source) {
+    if owner.catalog.shown_source() == Some(source) {
         return true;
     }
     if !combined::active(owner) {

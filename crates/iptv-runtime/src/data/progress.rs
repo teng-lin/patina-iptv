@@ -71,7 +71,7 @@ where
     );
     let shows = purpose.shows() && !combined::active(owner);
     let generation = if shows {
-        next_generation(owner, owner.shown.get())
+        next_generation(owner, owner.catalog.shown_source())
     } else {
         owner.imports.generation.with(Cell::get)
     };
@@ -348,7 +348,7 @@ where
             // playlist that stays on screen would have none.
             if failed
                 && shows
-                && let Some(still_shown) = owner.shown.get()
+                && let Some(still_shown) = owner.catalog.shown_source()
                 && Some(still_shown) != import_source
             {
                 keep_shown_check(&owner, still_shown, generation);

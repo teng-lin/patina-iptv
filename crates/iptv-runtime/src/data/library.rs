@@ -25,7 +25,7 @@ pub(super) async fn refresh_cache(owner: &Rc<crate::Runtime>) -> Result<(), Stor
 
 /// A committed mutation must retain its cleanup even if a subsequent read fails.
 async fn refresh_after_commit(owner: &Rc<crate::Runtime>, patch: impl FnOnce(&mut Snapshot)) {
-    owner.library.with(|snapshot| {
+    owner.catalog.library_snapshot().with(|snapshot| {
         if let Some(snapshot) = snapshot.borrow_mut().as_mut() {
             patch(snapshot);
         }
@@ -94,7 +94,7 @@ pub(super) fn prepare_import(
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
-    ) || owner.library.with(|snapshot| {
+    ) || owner.catalog.library_snapshot().with(|snapshot| {
         let snapshot = snapshot.borrow();
         let Some(snapshot) = snapshot.as_ref() else {
             return true;

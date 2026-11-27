@@ -38,6 +38,13 @@
 //!     error.into()
 //! }
 //! ```
+//!
+//! The runtime does not dereference to an internal state owner.
+//!
+//! ```compile_fail
+//! fn requires_deref<T: std::ops::Deref>() {}
+//! requires_deref::<iptv_runtime::Runtime>();
+//! ```
 pub mod build_config;
 pub mod cast;
 pub mod data;
@@ -303,7 +310,7 @@ impl Runtime {
 
     pub fn emit(&self, event: RuntimeEvent) {
         if let RuntimeEvent::AccountStreams(limit) = &event {
-            self.account_streams.set(*limit);
+            self.catalog.set_account_streams(*limit);
         }
         let sink = self.lifecycle.events().borrow().clone();
         if let Some(sink) = sink {
@@ -327,7 +334,7 @@ impl Runtime {
     /// finished (or were dropped); the turn ends when the guard is dropped.
     pub fn show_turn(&self, source: SourceId) -> impl std::future::Future<Output = ShowTurn> {
         let (done, next) = futures_channel::oneshot::channel();
-        let earlier = self.shows.borrow_mut().insert(source, next);
+        let earlier = self.catalog.enqueue_show(source, next);
         async move {
             if let Some(earlier) = earlier {
                 let _ = earlier.await;
@@ -337,11 +344,11 @@ impl Runtime {
     }
 
     pub fn schedule(&self) -> Rc<dyn Schedule> {
-        self.schedule.borrow().clone()
+        self.catalog.schedule()
     }
 
     pub(crate) fn set_schedule(&self, schedule: Rc<dyn Schedule>) -> Rc<dyn Schedule> {
-        self.schedule.replace(schedule)
+        self.catalog.replace_schedule(schedule)
     }
 }
 
@@ -354,7 +361,7 @@ impl Drop for Runtime {
         if let Some((_, cancel)) = self.imports.wizard_import.borrow().as_ref() {
             cancel.cancel();
         }
-        for (_, cancel) in self.resolving.borrow().iter().flatten() {
+        for (_, cancel) in self.catalog.pending_resolutions().borrow().iter().flatten() {
             cancel.cancel();
         }
         for (_, cancel) in self.imports.imports.borrow().values() {
@@ -621,15 +628,15 @@ mod tests {
         let owner = first.clone();
         let task = async move {
             let limit = answer.await.unwrap();
-            owner.account_streams.set(Some(limit));
+            owner.catalog.set_account_streams(Some(limit));
         };
         let mut task = std::pin::pin!(task);
         let mut context = Context::from_waker(Waker::noop());
         assert_eq!(task.as_mut().poll(&mut context), Poll::Pending);
         reply.send(3).unwrap();
         assert_eq!(task.as_mut().poll(&mut context), Poll::Ready(()));
-        assert_eq!(first.account_streams.get(), Some(3));
-        assert_eq!(second.account_streams.get(), None);
+        assert_eq!(first.catalog.account_streams(), Some(3));
+        assert_eq!(second.catalog.account_streams(), None);
     }
 
     #[test]

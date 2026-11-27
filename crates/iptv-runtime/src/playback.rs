@@ -111,7 +111,7 @@ pub(crate) fn link_client(
 ) -> impl std::future::Future<Output = Result<crate::network::Client, iptv_import::FetchError>>
 + crate::MaybeSend
 + use<> {
-    let cache = owner.link_client.clone();
+    let cache = owner.catalog.link_client_cache();
     let network = owner.services().ports().network.clone();
     async move {
         let mut cached = cache
