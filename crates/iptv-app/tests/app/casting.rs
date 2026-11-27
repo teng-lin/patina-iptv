@@ -375,6 +375,38 @@ fn an_unreadable_airplay_pairing_can_be_reset_without_ending_local_playback() {
 }
 
 #[test]
+fn airplay_timing_errors_identify_the_udp_problem_and_keep_local_playback() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast {
+        prepare_error: Arc::new(Mutex::new(Some(Error::AirPlayTimingSocket { port: None }))),
+        airplay: true,
+        ..Default::default()
+    };
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    step(app.wait_for("text:Could not start AirPlay UDP timing."));
+    assert!(iptv_app::player_has_source(0));
+
+    for (error, notification) in [
+        (
+            Error::AirPlayTimingSocket { port: Some(54183) },
+            "text:AirPlay UDP timing failed on port 54183.",
+        ),
+        (
+            Error::AirPlayTiming { port: 54183 },
+            "text:AirPlay timing did not arrive. Allow UDP port 54183 from the receiver.",
+        ),
+    ] {
+        *fake.prepare_error.lock().unwrap() = Some(error);
+        open_cast(app);
+        pick_generated_tv(app, true);
+        step(app.wait_for(notification));
+        assert!(iptv_app::player_has_source(0));
+    }
+    assert!(fake.events.lock().unwrap().is_empty());
+}
+
+#[test]
 fn casting_stop_is_honored_while_forgetting_another_receivers_pairing() {
     let Some(home) = isolated!() else { return };
     let fake = FakeCast {
