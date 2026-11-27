@@ -769,6 +769,48 @@ fn play_here_keeps_its_chooser_open_while_a_remote_command_finishes() {
 }
 
 #[test]
+fn queued_play_here_resumes_locally_after_an_unconfirmed_system_stop() {
+    let Some(home) = isolated!() else { return };
+    let fake = FakeCast::default();
+    let mut fixture = select_generated_tv(home, &fake);
+    let app = &mut fixture.app;
+    open_cast(app);
+    let reply = fake.hold_next_command();
+    step(app.press("id:play-bar-play-pause"));
+    step(
+        app.wait_until("remote pause is pending", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"pause")
+        }),
+    );
+    let here = "id:chooser-items >> text:This device";
+    step(app.press(here));
+    assert!(app.screen().matches(here).unwrap());
+
+    fake.states
+        .lock()
+        .unwrap()
+        .push_back(Err(Error::StopUnconfirmed));
+    step(app.wait_for("text:Could not confirm that the TV stopped playback."));
+    assert!(!iptv_app::player_has_source(0));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire"]
+    );
+
+    reply.send(()).unwrap();
+    step(app.wait_until(
+        "queued Play here reopens the local channel",
+        Duration::from_secs(10),
+        |_| iptv_app::player_has_source(0),
+    ));
+    step(app.wait_for_gone(here, Duration::from_secs(3)));
+    assert_eq!(
+        *fake.events.lock().unwrap(),
+        ["load", "allow", "pause", "retire"]
+    );
+}
+
+#[test]
 fn a_global_stop_queued_during_pause_uses_its_own_cast_intent() {
     let Some(home) = isolated!() else { return };
     let fake = FakeCast::default();

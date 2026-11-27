@@ -454,6 +454,15 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
             chooser::close(ui);
             control(ui, Command::Stop, true);
         }
+    } else if local
+        && !stop_requested
+        && ui.playing.get_untracked().is_none()
+        && let Some(key) = ui.player.main().key.get_untracked()
+        && let Some(channel) = schedule().find_channel(&key)
+    {
+        // The monitor retired the cast while its last command was still pending.
+        chooser::close(ui);
+        ui.play(channel, Playback::Live);
     }
 }
 pub(crate) fn volume(ui: Ui, command: Command) -> bool {
