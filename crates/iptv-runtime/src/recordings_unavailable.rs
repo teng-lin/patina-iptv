@@ -18,43 +18,21 @@ fn unavailable() -> Error {
 /// The recording state of one owner: nothing to hold without capture.
 #[derive(Default)]
 pub(crate) struct State;
-impl State {
-    pub(crate) fn shared(&self) -> &std::sync::Arc<State> {
-        &self.shared
-    }
-    pub(crate) fn is_detached(&self) -> bool {
-        self.detached.get()
-    }
-    pub(crate) fn detach_ui(&self) {}
-}
 
 pub(crate) struct OwnerState {
-    shared: std::sync::Arc<State>,
     detached: std::cell::Cell<bool>,
 }
-impl std::ops::Deref for OwnerState {
-    type Target = State;
-    fn deref(&self) -> &State {
-        &self.shared
-    }
-}
 impl OwnerState {
-    pub(crate) fn new(shared: std::sync::Arc<State>) -> Self {
+    pub(crate) fn new(_: std::sync::Arc<State>) -> Self {
         Self {
-            shared,
             detached: std::cell::Cell::new(false),
         }
     }
-    pub(crate) fn shared(&self) -> &std::sync::Arc<State> {
-        &self.shared
-    }
-    pub(crate) fn is_detached(&self) -> bool {
+    fn is_detached(&self) -> bool {
         self.detached.get()
     }
     pub(crate) fn detach_ui(&self) {
-        if !self.detached.replace(true) {
-            self.shared.detach_ui();
-        }
+        self.detached.set(true);
     }
 }
 
