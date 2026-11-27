@@ -12,14 +12,15 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use iptv_core::guide::Schedule;
+use iptv_core::guide::{GroupName, Schedule};
 use iptv_core::lists::group_of;
 use iptv_presentation::browse::{Columns, Outcome, RailItem, VodAvailability, rail_items};
 use iptv_presentation::channel_list::ChannelList as PlayerList;
 use iptv_presentation::guide::{Focus, Move, Pane};
 use iptv_presentation::lists::{
-    ALL, ChannelList, Entry, ListId, ListView, entry_count, resume_entry,
+    ALL, ChannelList, Entry, ListId, ListView, VisibleEntries, entry_count, resume_entry,
 };
+use iptv_settings::{Settings, Target, keys};
 use nsh_core::prelude::*;
 
 use crate::Ui;
@@ -107,6 +108,42 @@ pub fn list_name(ui: Ui) -> String {
     entry_name(entry, &*crate::runtime_owner::schedule())
 }
 
+fn category_preferences(settings: &Settings) -> [bool; 3] {
+    [
+        keys::SHOW_FAVORITES,
+        keys::SHOW_RECENT,
+        keys::SHOW_ALL_CHANNELS,
+    ]
+    .map(|key| settings.bool(key, &Target::Global))
+}
+
+fn entries_in(ui: Ui, catalog: &dyn Schedule) -> VisibleEntries {
+    let mut visible = category_preferences(&crate::settings_wiring::read(ui));
+    // The combined view has its own aggregate, All playlists.
+    visible[ALL] |= catalog.all_channels_label() == GroupName::AllPlaylists;
+    VisibleEntries::new(entry_count(catalog), visible)
+}
+
+fn visible_selection(
+    catalog: &dyn Schedule,
+    entries: VisibleEntries,
+    entry: usize,
+    channel_key: Option<&str>,
+) -> usize {
+    if entries.position(entry).is_some() || entries.position(ALL).is_some() {
+        return entries.retain(entry);
+    }
+    let group = channel_key
+        .and_then(|key| catalog.find_channel(key))
+        .and_then(|channel| group_of(catalog, channel));
+    entries.retain(group.map_or(entry, |group| Entry::Group(group).index()))
+}
+
+pub(crate) fn visible_entries(ui: Ui) -> VisibleEntries {
+    ui.guide_data();
+    entries_in(ui, &*crate::runtime_owner::schedule())
+}
+
 /// Builds the list of the selected entry. With `keep`, the focus stays on
 /// its channel (the content changed under it); a newly selected list
 /// starts where the core put the focus (its top).
@@ -119,7 +156,10 @@ pub fn rebuild(ui: Ui, keep: bool) {
     };
     let catalog = crate::runtime_owner::schedule();
     let player = keep_player_list(ui, &*catalog);
-    let entry = ui.focus.with(|f| f.group);
+    let entries = entries_in(ui, &*catalog);
+    let entry = ui
+        .focus
+        .with(|f| visible_selection(&*catalog, entries, f.group, key.as_deref()));
     let list = ChannelList::build(
         entry,
         &*catalog,
@@ -131,8 +171,11 @@ pub fn rebuild(ui: Ui, keep: bool) {
     let row = key.and_then(|k| view.find_channel(&k));
     batch(|| {
         ui.list.set(list);
-        ui.focus.update(|f| f.restore(row, &view));
-        restore_player_list(ui, player, &view);
+        ui.focus.update(|f| {
+            f.group = entry;
+            f.restore(row, &view);
+        });
+        restore_player_list(ui, player, &view, entries);
     });
 }
 
@@ -178,19 +221,21 @@ fn keep_list(focus: Focus, list: Rc<ChannelList>, catalog: Rc<dyn Schedule>) -> 
 pub(super) fn restore(ui: Ui, mut kept: Kept, catalog: Rc<dyn Schedule>) {
     let player = kept.player.take();
     let now = crate::clock::now_minute_in(&*catalog);
+    let entries = entries_in(ui, &*catalog);
     let (mut focus, list) = restored_list(
         kept,
         catalog.clone(),
         &crate::favorites::favorite_channels(),
         &crate::favorites::recent_channels(),
         now,
+        entries,
     );
     focus.retain_rail(&rail_untracked(ui));
     let view = ListView::new(catalog, list.clone());
     batch(|| {
         ui.list.set(list);
         ui.focus.set(focus);
-        restore_player_list(ui, player, &view);
+        restore_player_list(ui, player, &view, entries);
     });
 }
 
@@ -200,12 +245,18 @@ fn restored_list(
     favorites: &[usize],
     recent: &[usize],
     now: i32,
+    entries: VisibleEntries,
 ) -> (Focus, Rc<ChannelList>) {
     let mut focus = Focus::at(now);
     focus.visible = kept.focus.visible;
     focus.pane = kept.focus.pane;
     focus.rail = kept.focus.rail;
-    focus.group = kept.list.find(&*catalog);
+    focus.group = visible_selection(
+        &*catalog,
+        entries,
+        kept.list.find(&*catalog),
+        kept.key.as_deref(),
+    );
     let list = Rc::new(ChannelList::build(
         focus.group,
         &*catalog,
@@ -239,10 +290,20 @@ fn keep_player_list(ui: Ui, catalog: &dyn Schedule) -> Option<KeptPlayerList> {
 
 // A missing group falls back to All channels. A missing channel starts at the
 // first row of the restored list, or has no selectable row when it is empty.
-fn restore_player_list(ui: Ui, kept: Option<KeptPlayerList>, view: &ListView) {
+fn restore_player_list(
+    ui: Ui,
+    kept: Option<KeptPlayerList>,
+    view: &ListView,
+    entries: VisibleEntries,
+) {
     if let Some(kept) = kept {
         let mut state = kept.state;
-        state.entry = kept.entry.find(&**view.catalog());
+        let entry = kept.entry.find(&**view.catalog());
+        state.entry = if entries.position(entry).is_some() {
+            entry
+        } else {
+            view.list().entry()
+        };
         state.row = kept
             .key
             .and_then(|key| view.find_channel(&key))
@@ -326,7 +387,7 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
     let rail = rail_untracked(ui);
     let view = view(ui);
     let cols = Columns {
-        entries: entry_count(&**view.catalog()),
+        entries: entries_in(ui, &**view.catalog()),
         rail: &rail,
         // Always: `guide.back_returns_to_now` is retired (#281).
         back_to_now: true,
@@ -336,8 +397,28 @@ fn step(ui: Ui, f: impl FnOnce(&mut Focus, &Columns, &ListView) -> Outcome) -> O
     outcome
 }
 
+/// Reconcile the selected category in each window when visibility changes.
+pub(crate) fn bind_categories(ui: Ui) {
+    let categories = computed(move || category_preferences(&crate::settings_wiring::read(ui)));
+    effect(move || {
+        categories.get();
+        untracked(|| {
+            let entries = visible_entries(ui);
+            let invalid = |entry| entries.retain(entry) != entry;
+            if ui.focus.with(|f| invalid(f.group))
+                || ui
+                    .channels
+                    .with(|list| list.is_some_and(|list| invalid(list.entry)))
+            {
+                rebuild(ui, true);
+            }
+        });
+    });
+}
+
 /// Keep preview focus on a visible, playing surface across stop/layout changes.
 pub fn bind(ui: Ui) {
+    bind_categories(ui);
     effect(move || {
         let available = (ui.playing.get().is_some() || crate::on_demand::active(ui))
             && matches!(
@@ -414,7 +495,9 @@ pub fn tap_entry(ui: Ui, entry: usize) {
     let o = step(ui, |f, cols, _| f.tap_entry(entry, cols));
     follow(ui, o);
     // A parent previews its source before changing section visibility.
-    toggle_playlist(entry);
+    if o != Outcome::None {
+        toggle_playlist(entry);
+    }
 }
 
 /// Activates a group from the desktop's pointer. Playlist section
@@ -586,7 +669,14 @@ mod identity_tests {
             ..Default::default()
         });
         let after: Rc<dyn Schedule> = Rc::new(after);
-        let (focus, list) = restored_list(kept, after.clone(), &[], &[], 60);
+        let (focus, list) = restored_list(
+            kept,
+            after.clone(),
+            &[],
+            &[],
+            60,
+            VisibleEntries::all(entry_count(&*after)),
+        );
         assert_eq!(focus.group, FIRST_GROUP + 1);
         assert_eq!(focus.now, 60);
         assert_eq!(keys(after.clone(), list.clone()), ["b"]);
@@ -603,7 +693,14 @@ mod identity_tests {
             focus.channel = 1;
             let list = Rc::new(ChannelList::build(entry, &*catalog, &[0, 1], &[0, 1]));
             let kept = keep_list(focus, list, catalog.clone());
-            let (focus, list) = restored_list(kept, catalog.clone(), &changed, &changed, 0);
+            let (focus, list) = restored_list(
+                kept,
+                catalog.clone(),
+                &changed,
+                &changed,
+                0,
+                VisibleEntries::all(entry_count(&*catalog)),
+            );
             let view = ListView::new(catalog.clone(), list.clone());
             assert_eq!(view.channel_key(focus.channel).as_deref(), Some("b"));
             assert_eq!(
@@ -614,7 +711,14 @@ mod identity_tests {
             );
             // Removing the focused item must remove its stale list row too.
             let kept = keep_list(focus, list, catalog.clone());
-            let (_, list) = restored_list(kept, catalog.clone(), &[2], &[2], 0);
+            let (_, list) = restored_list(
+                kept,
+                catalog.clone(),
+                &[2],
+                &[2],
+                0,
+                VisibleEntries::all(entry_count(&*catalog)),
+            );
             assert_eq!(keys(catalog.clone(), list), ["c"]);
         }
     }
@@ -631,7 +735,14 @@ mod identity_tests {
         assert!(focus.focus_preview(true));
         let kept = keep_list(focus, list, before);
         let after: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["b", "a"])]));
-        let (mut restored, list) = restored_list(kept, after.clone(), &[0, 1], &[], 60);
+        let (mut restored, list) = restored_list(
+            kept,
+            after.clone(),
+            &[0, 1],
+            &[],
+            60,
+            VisibleEntries::all(entry_count(&*after)),
+        );
         assert_eq!(restored.pane, Pane::Preview);
         assert_eq!(restored.layout_pane(), Pane::Rail);
         assert_eq!(
@@ -654,7 +765,14 @@ mod identity_tests {
             let list = Rc::new(ChannelList::build(focus.group, &*before, &[], &[]));
             let kept = keep_list(focus, list, before);
             let after: Rc<dyn Schedule> = Rc::new(catalog(&[("Generated", &["b", "a"])]));
-            let (mut restored, list) = restored_list(kept, after.clone(), &[], &[], 60);
+            let (mut restored, list) = restored_list(
+                kept,
+                after.clone(),
+                &[],
+                &[],
+                60,
+                VisibleEntries::all(entry_count(&*after)),
+            );
             assert_eq!(
                 restored.rail, item,
                 "bookmark stores the action, not its old position"

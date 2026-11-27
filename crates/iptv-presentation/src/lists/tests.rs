@@ -279,3 +279,32 @@ fn a_resumed_hidden_channel_keeps_all_channels() {
     assert_eq!(ChannelList::build(ALL, &catalog, &[1], &[]).row_of(1), None);
     assert_eq!(resume_entry(5, &catalog, &[5], true), Some(FAVORITES));
 }
+
+#[test]
+fn visible_positions_keep_the_original_category_indices() {
+    for bits in 0..8 {
+        let enabled = std::array::from_fn(|index| bits & (1 << index) != 0);
+        let entries = VisibleEntries::new(FIRST_GROUP + 2, enabled);
+        let expected: Vec<_> = (0..FIRST_GROUP + 2)
+            .filter(|&entry| entry >= FIRST_GROUP || enabled[entry])
+            .collect();
+        assert_eq!(entries.len(), expected.len());
+        for (position, &entry) in expected.iter().enumerate() {
+            assert_eq!(entries.position(entry), Some(position));
+            assert_eq!(entries.entry(position), Some(entry));
+        }
+        assert_eq!(entries.entry(entries.len()), None);
+        assert_eq!(entries.retain(FIRST_GROUP + 1), FIRST_GROUP + 1);
+        if !enabled[FAVORITES] {
+            assert_eq!(entries.position(FAVORITES), None);
+            assert_eq!(
+                entries.retain(FAVORITES),
+                if enabled[ALL] { ALL } else { FIRST_GROUP }
+            );
+        }
+    }
+
+    let empty = VisibleEntries::new(FIRST_GROUP, [false; FIRST_GROUP]);
+    assert!(empty.is_empty());
+    assert_eq!(empty.retain(ALL), ALL);
+}

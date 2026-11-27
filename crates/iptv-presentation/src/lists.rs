@@ -59,6 +59,76 @@ pub fn entry_count(catalog: &dyn Schedule) -> usize {
     FIRST_GROUP + catalog.group_count()
 }
 
+/// Maps visible positions to stable category indices. Only the three built-in
+/// categories can be filtered here. Playlist group indices retain their identity.
+#[derive(Clone, Copy, Debug)]
+pub struct VisibleEntries {
+    count: usize,
+    builtins: [bool; FIRST_GROUP],
+}
+
+impl VisibleEntries {
+    pub fn all(count: usize) -> Self {
+        Self::new(count, [true; FIRST_GROUP])
+    }
+
+    pub fn new(count: usize, builtins: [bool; FIRST_GROUP]) -> Self {
+        Self { count, builtins }
+    }
+
+    fn builtins(self) -> impl Iterator<Item = usize> {
+        self.builtins
+            .into_iter()
+            .take(self.count)
+            .enumerate()
+            .filter_map(|(index, visible)| visible.then_some(index))
+    }
+
+    pub fn len(self) -> usize {
+        self.builtins().count() + self.count.saturating_sub(FIRST_GROUP)
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn entry(self, position: usize) -> Option<usize> {
+        let builtin_count = self.builtins().count();
+        if position < builtin_count {
+            self.builtins().nth(position)
+        } else {
+            let entry = FIRST_GROUP.checked_add(position - builtin_count)?;
+            (entry < self.count).then_some(entry)
+        }
+    }
+
+    pub fn position(self, entry: usize) -> Option<usize> {
+        if entry >= self.count {
+            return None;
+        }
+        if entry < FIRST_GROUP {
+            self.builtins().position(|visible| visible == entry)
+        } else {
+            Some(entry - FIRST_GROUP + self.builtins().count())
+        }
+    }
+
+    /// Keep a visible selection. Otherwise prefer All channels, then the
+    /// first playlist category. With no visible categories, the underlying
+    /// channel list is still available for playback.
+    pub fn retain(self, entry: usize) -> usize {
+        if self.position(entry).is_some() {
+            entry
+        } else if self.position(ALL).is_some() {
+            ALL
+        } else if self.position(FIRST_GROUP).is_some() {
+            FIRST_GROUP
+        } else {
+            self.entry(0).unwrap_or(ALL)
+        }
+    }
+}
+
 /// The name of an entry in the groups column, before localization.
 pub fn entry_name(entry: usize, catalog: &dyn Schedule) -> GroupName {
     match Entry::at(entry) {

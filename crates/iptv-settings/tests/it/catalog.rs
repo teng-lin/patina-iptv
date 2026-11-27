@@ -34,6 +34,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
             GL,
             "a",
         ),
+        ("general.double_back_to_exit", boolean(false), GL, ""),
         ("general.language", text(Locale, 35, "system"), GL, ""),
         ("general.clock", choice(&c::CLOCK, "auto"), GL, ""),
         ("general.keyboard", choice(&c::KEYBOARD, "system"), GL, ""),
@@ -75,6 +76,7 @@ fn documented() -> Vec<(&'static str, ValueType, Scope, &'static str)> {
         ("channels.show_new_groups", boolean(true), GL, ""),
         ("channels.show_all_channels", boolean(true), GL, ""),
         ("channels.show_favorites", boolean(true), GL, ""),
+        ("channels.show_recent", boolean(true), GL, ""),
         ("channels.show_all_playlists", boolean(true), GL, ""),
         (
             "channels.group_all_playlists_by_playlist",

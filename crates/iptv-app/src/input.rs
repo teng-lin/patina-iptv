@@ -29,6 +29,7 @@ impl Ui {
     /// A touch or a click on any control: touch or pointer mode, whichever
     /// made the press.
     pub fn touched(&self) {
+        self.exit_deadline.set(None);
         // PIN entry continues the choice that opened the prompt. Dismissing
         // the prompt cancels it in `parental_view::abort`.
         if self.top_overlay() != Some(crate::overlays::Overlay::Parental) {
@@ -514,6 +515,9 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         return;
     }
     if phase != Phase::Up {
+        if key != RemoteKey::Back {
+            ui.exit_deadline.set(None);
+        }
         crate::browse_playback::activity(ui);
     }
     // Menu has no hold: held, its repeats would close and reopen what its

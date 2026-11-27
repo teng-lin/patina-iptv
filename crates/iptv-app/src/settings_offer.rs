@@ -16,6 +16,10 @@ pub const WIRED: &[&str] = &[
     "playlists.include_vod",
     "vod.autoplay_next_episode",
     "general.language",
+    "general.double_back_to_exit",
+    "channels.show_favorites",
+    "channels.show_recent",
+    "channels.show_all_channels",
     "general.clock",
     "guide.autoplay",
     "guide.switch_delay",
@@ -82,9 +86,9 @@ fn on_keys_page(key: &str) -> bool {
 /// frame-rate switching, decoders, audio passthrough, multicast relay,
 /// voice input, self-update, usage statistics). Also `general.about`,
 /// which the About page shows on its own, and the double-Back confirmation
-/// before leaving (`general.confirm_exit` and its window): each platform's
-/// own Back and exit convention applies instead (#277), and stored values
-/// are kept but ignored.
+/// before leaving (`general.confirm_exit` and its window), retired in #277.
+/// Their stored values are kept but ignored. Android TV uses a separate
+/// opt-in preference at the navigation rail.
 const NOT_OFFERED: &[&str] = &[
     "general.confirm_exit",
     "general.confirm_exit_window",
@@ -182,6 +186,7 @@ fn by_device(device: Device, key: &str) -> Option<Offer> {
         _ => {}
     }
     let hidden = match key {
+        "general.double_back_to_exit" => !crate::exit_confirmation::offered(device.host),
         "general.clock" | "guide.after_choosing" => crate::device::handheld(device.form_factor()),
         "appearance.ui_transparency" | "guide.browse_mode" | "guide.list_browse_mode" => {
             device.window == Class::Compact

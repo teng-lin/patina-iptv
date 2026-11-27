@@ -10,12 +10,12 @@
 //! ([`preview_rect`]).
 
 use crate::i18n::tr;
-use crate::lists::entry_name;
+use crate::lists::{browser_entry_name, visible_entries};
 
 use crate::layout::ListPanel;
 use iptv_nav::Action;
 use iptv_presentation::channel_list::{ChannelList, ListMode, ListPane, Outcome};
-use iptv_presentation::lists::{ChannelList as Rows, Entry, FAVORITES, entry_count};
+use iptv_presentation::lists::{ALL, ChannelList as Rows, FAVORITES, VisibleEntries};
 use nsh_core::prelude::*;
 
 use crate::fonts::{CONDENSED, HEADER_TIMES, MEDIUM, SANS, SECTION, TITLE};
@@ -119,9 +119,9 @@ fn over_video(ui: Ui) -> bool {
 
 /// Runs a step on the list's state with the guide's list and the groups
 /// column's length, then does what it asks.
-fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, usize) -> Outcome) {
+fn update(ui: Ui, f: impl FnOnce(&mut ChannelList, &Rows, VisibleEntries) -> Outcome) {
     let list = ui.list.get_untracked();
-    let entries = entry_count(&*crate::runtime_owner::schedule());
+    let entries = visible_entries(ui);
     let mut outcome = Outcome::Stay;
     ui.channels.update(|c| {
         if let Some(c) = c.as_mut() {
@@ -159,8 +159,10 @@ pub fn key(ui: Ui, action: Action) {
         Action::MoveDown => step(1),
         Action::PageUp => step(-PAGE),
         Action::PageDown => step(PAGE),
-        Action::MoveLeft => update(ui, |c, l, _| {
-            c.left(l);
+        Action::MoveLeft => update(ui, |c, l, entries| {
+            if !entries.is_empty() {
+                c.left(l);
+            }
             Outcome::Stay
         }),
         Action::MoveRight => update(ui, |c, l, _| {
@@ -249,8 +251,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         }
     });
     effect(move || {
-        if let Some((i, _)) = entry_focus.get() {
-            entries.scroll_to_index(i as u32, percentage(0.5), px(0.0), false);
+        if let Some((entry, _)) = entry_focus.get()
+            && let Some(position) = visible_entries(ui).position(entry)
+        {
+            entries.scroll_to_index(position as u32, percentage(0.5), px(0.0), false);
         }
     });
     let panel = move || {
@@ -276,10 +280,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .child(heading(Box::new(|| tr("Groups").to_owned())).px(move || size.px(INSET + 8.0)))
         .child(
             virtual_list(
-                move || {
-                    ui.app.data_version.get();
-                    entry_count(&*crate::runtime_owner::schedule())
-                },
+                move || visible_entries(ui).len(),
                 move |at| entry_row(ui, at, entry_focus, size),
             )
             .estimated_item_size(list_rows::pitch(size, ROW))
@@ -295,7 +296,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         .bg(panel)
         .child(
             heading(Box::new(move || {
-                if groups() {
+                if groups() || visible_entries(ui).is_empty() {
                     crate::lists::list_name(ui)
                 } else {
                     format!("◂  {}", crate::lists::list_name(ui))
@@ -303,8 +304,10 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             }))
             .on_press(move || {
                 ui.touched();
-                update(ui, |c, l, _| {
-                    c.left(l);
+                update(ui, |c, l, entries| {
+                    if !entries.is_empty() {
+                        c.left(l);
+                    }
                     Outcome::Stay
                 });
             }),
@@ -369,11 +372,21 @@ fn entry_row(
     focus: Memo<Option<(usize, bool)>>,
     size: Scale,
 ) -> impl IntoElement {
-    let current = move || ui.list.with(|l| l.entry()) == at.index();
-    let focused = move || ui.keys_shown() && focus.get() == Some((at.index(), true));
+    let visible = move || visible_entries(ui).entry(at.index());
+    let entry = move || visible().unwrap_or(ALL);
+    let current = move || visible() == Some(ui.list.with(|l| l.entry()));
+    let focused = move || {
+        ui.keys_shown() && visible().is_some_and(|entry| focus.get() == Some((entry, true)))
+    };
+    let name = move || {
+        visible().map_or_else(String::new, |entry| {
+            browser_entry_name(entry, &*crate::runtime_owner::schedule())
+        })
+    };
     let mark = move || Mark::of(focused(), current());
     list_rows::row(size, ROW, mark)
         .role(AccessibilityRole::Tab)
+        .label(move || name().trim_start().to_owned())
         .accessibility_state(move || AccessibilityState {
             selected: current(),
             ..Default::default()
@@ -381,52 +394,44 @@ fn entry_row(
         .mx(px(8.0))
         .on_press(move || {
             ui.touched();
-            update(ui, |c, l, _| c.tap_entry(at.index(), l));
+            if let Some(entry) = visible() {
+                update(ui, |c, l, _| c.tap_entry(entry, l));
+            }
         })
         .on_long_press(move || {
             ui.touched();
-            if !crate::multiview::picking(ui) {
-                crate::menu_view::open_group_options(ui, at.index());
+            if !crate::multiview::picking(ui)
+                && let Some(entry) = visible()
+            {
+                crate::menu_view::open_group_options(ui, entry);
             }
         })
         .on_context_menu(move |_: &nsh_core::ContextMenuEvent| {
             ui.touched();
-            if !crate::multiview::picking(ui) {
-                crate::menu_view::open_group_options(ui, at.index());
+            if !crate::multiview::picking(ui)
+                && let Some(entry) = visible()
+            {
+                crate::menu_view::open_group_options(ui, entry);
             }
         })
         .child(
-            list_rows::name(size, move || {
-                ui.app.data_version.get();
-                let schedule = crate::runtime_owner::schedule();
-                let name = entry_name(at.index(), &*schedule);
-                if let Entry::Group(g) = Entry::at(at.index())
-                    && schedule.group_depth(g) > 0
-                {
-                    format!("    {name}")
-                } else {
-                    name
-                }
-            })
-            .text_color(move || mark().text())
-            .mr(move || {
-                px(group_more_room(
-                    ui,
-                    current() && !crate::multiview::picking(ui),
-                    at.index(),
-                ))
-            }),
+            list_rows::name(size, name)
+                .text_color(move || mark().text())
+                .mr(move || {
+                    px(group_more_room(
+                        ui,
+                        current() && !crate::multiview::picking(ui),
+                        entry(),
+                    ))
+                }),
         )
         .child(group_more(
             ui,
             size,
-            move || at.index(),
+            move || entry(),
             current,
             move || !crate::multiview::picking(ui),
-            move || {
-                ui.app.data_version.get();
-                entry_name(at.index(), &*crate::runtime_owner::schedule())
-            },
+            move || name().trim_start().to_owned(),
         ))
 }
 
@@ -503,9 +508,10 @@ fn channel_row(
     focus: Memo<Option<(usize, bool)>>,
     size: Scale,
 ) -> impl IntoElement {
+    let channel = move || ui.list.with(|l| l.channel(at.index()));
     let entry = move || {
         ui.app.data_version.get();
-        let ch = ui.list.with(|l| l.channel(at.index()))?;
+        let ch = channel()?;
         let s = crate::runtime_owner::schedule();
         let now = ui.focus.with(|f| f.now);
         let playing = if ui.playing.get() == Some(ch) {
@@ -552,20 +558,40 @@ fn channel_row(
             ui.touched();
             open_channel_menu(ui, at.index());
         })
+        .flex_row()
+        .items_center()
+        .child(when(
+            move || is_open(ui) && crate::grid::show_channel_logos(ui),
+            move || {
+                image(crate::content_image::source(move || {
+                    crate::grid::channel_logo(ui, channel())
+                }))
+                .test_id("player-channel-logo")
+                .accessibility_elements_hidden(true)
+                .w(move || size.px(40.0))
+                .h(move || size.px(36.0))
+                .mr(move || size.px(8.0))
+                .flex_shrink_0()
+                .object_fit(ResizeMode::Contain)
+            },
+        ))
         .child(
-            list_rows::name(size, move || entry().map_or(String::new(), |e| e.0))
+            view()
+                .flex_1()
+                .min_w(px(0.0))
                 .mr(move || px(more_room(ui)))
-                .text_color(move || mark().text()),
-        )
-        .child(
-            // What is on: a program title, in the grid's type.
-            list_rows::second(
-                size,
-                move || entry().map_or(String::new(), |e| e.1),
-                CONDENSED,
-            )
-            .mr(move || px(more_room(ui)))
-            .text_color(move || mark().secondary()),
+                .child(
+                    list_rows::name(size, move || entry().map_or(String::new(), |e| e.0))
+                        .text_color(move || mark().text()),
+                )
+                .child(
+                    list_rows::second(
+                        size,
+                        move || entry().map_or(String::new(), |e| e.1),
+                        CONDENSED,
+                    )
+                    .text_color(move || mark().secondary()),
+                ),
         )
         .child(when(
             move || more_shown(ui) && entry().is_some(),

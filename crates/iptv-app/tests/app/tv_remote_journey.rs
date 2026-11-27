@@ -1552,3 +1552,122 @@ fn a_late_release_cannot_apply_the_displaced_guide_press() {
     assert!(!iptv_app::player_has_source(0));
     persistent(app, &lifetime, player);
 }
+
+#[test]
+fn fullscreen_channel_browse_shows_logos_and_skips_hidden_builtin_categories() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv(home, |settings| {
+        for key in [
+            keys::SHOW_FAVORITES,
+            keys::SHOW_RECENT,
+            keys::SHOW_ALL_CHANNELS,
+        ] {
+            settings.set(key.as_str(), Value::Bool(false)).unwrap();
+        }
+    });
+    let app = &mut fixture.app;
+    let groups = "id:guide-groups";
+    let player_groups = "id:channel-list-groups";
+    let has_logos = |app: &crate::Headless| {
+        app.screen().layout_nodes().iter().any(|node| {
+            node.test_id.as_deref() == Some("player-channel-logo") && node.bounds.size.width.0 > 0.0
+        })
+    };
+    let hidden = |app: &crate::Headless, groups: &str| {
+        for name in ["Favorites", "Recently watched", "All channels"] {
+            assert!(!shows(app, &format!("{groups} >> text:{name}")));
+        }
+    };
+
+    step(app.open_guide_groups());
+    step(app.wait_for(&format!("{groups} >> text:News")));
+    hidden(app, groups);
+    assert!(selected(app, "guide-groups >> role:tab[News]"));
+    step(app.remote_tap(RemoteKey::Up));
+    assert!(selected(app, "guide-groups >> role:tab[Sport]"));
+    step(app.remote_tap(RemoteKey::Down));
+    assert!(selected(app, "guide-groups >> role:tab[News]"));
+    step(app.remote_tap(RemoteKey::Right));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("text:▶"));
+    step(app.remote_tap(RemoteKey::Ok));
+
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.wait_for("id:channel-list >> text:/Local A/"));
+    assert!(has_logos(app));
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.wait_for(&format!("{player_groups} >> text:News")));
+    hidden(app, player_groups);
+    assert!(has_logos(app));
+    step(app.remote_tap(RemoteKey::Down));
+    step(app.wait_for("id:channel-list >> text:/Local C/"));
+    assert!(selected(
+        app,
+        &format!("{player_groups} >> role:tab[Sport]")
+    ));
+}
+
+#[test]
+fn double_back_arms_only_at_the_rail_and_resets_on_timeout_or_navigation() {
+    fn here() {}
+    let Some(home) = crate::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "android"),
+        ],
+    ) else {
+        return;
+    };
+    let (mut fixture, _, _) = tv(home, |settings| {
+        settings
+            .set(keys::DOUBLE_BACK_TO_EXIT.as_str(), Value::Bool(true))
+            .unwrap();
+    });
+    let app = &mut fixture.app;
+    let prompt = "id:exit-confirmation";
+    let back = |app: &mut crate::Headless| {
+        step(app.remote_tap(RemoteKey::Back));
+        step(app.back());
+    };
+    step(app.open_guide_groups());
+    back(app);
+    step(app.wait_for("id:navigation-rail >> text:Live TV"));
+    assert!(
+        !shows(app, prompt),
+        "Back into the rail is still navigation"
+    );
+
+    back(app);
+    step(app.wait_for("text:Press Back again to exit"));
+    step(app.run_for(Duration::from_millis(2_050)));
+    assert!(!shows(app, prompt), "the pending exit expires");
+
+    back(app);
+    step(app.wait_for(prompt));
+    step(app.remote_tap(RemoteKey::Right));
+    assert!(!shows(app, prompt), "navigation cancels a pending exit");
+    back(app);
+    assert!(
+        !shows(app, prompt),
+        "Back only returns from Groups to the rail"
+    );
+
+    back(app);
+    step(app.wait_for(prompt));
+    step(app.set_environment("pause", |env| {
+        env.lifecycle = nsh_core::platform::Lifecycle::Inactive;
+    }));
+    assert!(
+        !shows(app, prompt),
+        "losing foreground input cancels the prompt"
+    );
+    step(app.set_environment("resume", |env| {
+        env.lifecycle = nsh_core::platform::Lifecycle::Active;
+    }));
+
+    back(app);
+    step(app.wait_for(prompt));
+    back(app);
+    assert!(!shows(app, prompt), "a second Back clears the pending exit");
+}
