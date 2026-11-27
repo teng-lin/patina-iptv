@@ -11,7 +11,7 @@ use super::*;
 /// Opens a fresh search screen picking for multiview. A screen waiting
 /// for playback to end gives way to it.
 pub fn open_to_pick(ui: Ui) {
-    if ui.search.with_untracked(Option::is_some) {
+    if ui.screens.search.with_untracked(Option::is_some) {
         close(ui);
     }
     let history = if options(&crate::settings::get()).show_history {
@@ -20,7 +20,7 @@ pub fn open_to_pick(ui: Ui) {
         SearchHistory::default()
     };
     log::info!("iptv search: picking for multiview");
-    ui.search.set(Some(Screen {
+    ui.screens.search.set(Some(Screen {
         state: SearchState::new(history),
         suspended: false,
         programs: ProgramSearch::Building,
@@ -31,7 +31,9 @@ pub fn open_to_pick(ui: Ui) {
 
 /// Whether the screen picks for multiview.
 pub fn picking(ui: Ui) -> bool {
-    ui.search.with(|s| s.as_ref().is_some_and(|s| s.pick))
+    ui.screens
+        .search
+        .with(|s| s.as_ref().is_some_and(|s| s.pick))
 }
 
 /// Chooses result `id` while picking for multiview: its channel becomes a

@@ -185,13 +185,13 @@ pub use iptv_presentation::input_mode::InputMode as Input;
 
 /// A pointer went down: a finger, or a mouse, trackpad or pen. Recorded at
 /// the root as the touch starts, before the pressed control hears the press.
-pub(crate) fn pointer_down(ui: Ui, e: &nsh_core::TouchEvent) {
+pub(crate) fn pointer_down(chrome: ChromeUi, e: &nsh_core::TouchEvent) {
     if e.phase != nsh_core::TouchPhase::Start {
         return;
     }
     if let Some(p) = e.points.iter().find(|p| p.changed) {
         let finger = p.pointer_type == PointerType::Touch;
-        ui.last_press.set(Input::of_press(finger));
+        chrome.last_press.set(Input::of_press(finger));
     }
 }
 
@@ -266,13 +266,33 @@ pub struct Ui {
     pub app: SharedUi,
     /// Owns work that must survive changes to controls inside this window.
     owner: Owner,
+    pub(crate) cast: casting::CastUi,
+    pub(crate) guide: GuideUi,
+    pub(crate) playback: PlaybackUi,
+    pub(crate) screens: ScreensUi,
+    pub(crate) chrome: ChromeUi,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GuideUi {
     /// The remote's focus; its `channel` is a row of `list`.
     pub focus: Signal<Focus>,
     pub browse_playback: Signal<iptv_presentation::browse_playback::BrowsePlayback>,
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
-    pub(crate) cast: casting::CastUi,
+    /// A timeline pan's hold on the channel whose program on air it
+    /// started from: browse playback keeps that channel while the pan
+    /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
+    pub pan_anchor: Signal<Option<iptv_presentation::browse_playback::PanAnchor>>,
+    /// The list the guide shows: catalog channels (`lists.rs`).
+    pub list: Signal<Rc<ChannelList>>,
+    /// The guide rows on screen, as the list reports them.
+    pub visible_rows: Signal<Option<(usize, usize)>>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct PlaybackUi {
     pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
     /// The pending zap is a touch's (a swipe, the play bar's channel
     /// buttons, a screen reader's action): its banner shows when it tunes,
@@ -281,26 +301,11 @@ pub struct Ui {
     /// A swipe over full-screen video under way: the banner of the channel
     /// it would change to, following the finger (`touch_zap.rs`).
     pub(crate) swipe: Signal<Option<touch_zap::Preview>>,
-    /// A timeline pan's hold on the channel whose program on air it
-    /// started from: browse playback keeps that channel while the pan
-    /// moves the focus along the row (`grid/pan.rs`, `browse_playback.rs`).
-    pub pan_anchor: Signal<Option<iptv_presentation::browse_playback::PanAnchor>>,
     /// The host's audio interruptions' policy (`interruption.rs`).
     pub interruptions: Signal<iptv_presentation::interruption::Interruptions>,
-    /// The list the guide shows: catalog channels (`lists.rs`).
-    pub list: Signal<Rc<ChannelList>>,
     /// The playing channel (catalog).
     pub playing: Signal<Option<usize>>,
-    pub input: Signal<Input>,
-    /// What the last pointer press was made with ([`Ui::touched`] reads it).
-    pub last_press: Signal<Input>,
-    pub mode: mode::Mode,
-    pub stats: Signal<Stats>,
-    #[cfg(feature = "test-support")]
-    pub(crate) performance: Signal<Option<performance_probe::Probe>>,
     pub player_status: Signal<String>,
-    /// The guide rows on screen, as the list reports them.
-    pub visible_rows: Signal<Option<(usize, usize)>>,
     /// Player panels over full-screen video.
     pub panels: Signal<Panels>,
     /// The pointer's play bar over full-screen video (`play_bar.rs`).
@@ -311,6 +316,43 @@ pub struct Ui {
     /// A catch-up seek being chosen: the target, in seconds into the
     /// program, opened once the keys pause (`seek.rs`).
     pub seek_target: Signal<Option<i32>>,
+    /// Live or catch-up for the playing channel.
+    pub playback: Signal<Playback>,
+    pub channel_number:
+        Signal<iptv_presentation::channel_number::ChannelNumber<iptv_search::ChannelId>>,
+    pub sleep: Signal<SleepTimer>,
+    /// Each player surface's stream, health, position, size and tracks;
+    /// the channel history (`player.rs`).
+    pub player: player::Player,
+    pub player_surface: usize,
+    /// Volume, mute and audio delay (`media.rs`).
+    pub media: media::Media,
+    /// Several channels at once, while open (`multiview.rs`).
+    pub multiview: Signal<Option<multiview::State>>,
+    pub player_windows: Signal<iptv_presentation::playback_windows::Workspace<String>>,
+    /// The channel list over full-screen video, while open.
+    pub channels: Signal<Option<iptv_presentation::channel_list::ChannelList>>,
+    /// Group and search selection while adding or replacing a multiview tile.
+    pub channel_picker: Signal<Option<multiview_picker::Screen>>,
+    /// The picture-in-picture window, as the host reports it (`pip.rs`).
+    pub pip: Signal<iptv_presentation::pip::Pip>,
+}
+
+impl PlaybackUi {
+    /// Bind a fresh window to an already-mounted auxiliary player surface.
+    pub(crate) fn for_secondary_window(self, parent: Self, surface: usize) -> Self {
+        Self {
+            player_surface: surface,
+            // Every window observes and changes the same audible player.
+            player_windows: parent.player_windows,
+            playing: parent.player.stream(surface).channel,
+            ..self
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ScreensUi {
     /// The open context menu, if any.
     pub menu: Signal<Option<Menu>>,
     /// The program description popover, if open.
@@ -319,11 +361,6 @@ pub struct Ui {
     pub recordings: Signal<iptv_presentation::recording::Screen>,
     pub vod: Signal<iptv_presentation::vod::Screen>,
     pub recordings_open: Memo<bool>,
-    /// Live or catch-up for the playing channel.
-    pub playback: Signal<Playback>,
-    pub channel_number:
-        Signal<iptv_presentation::channel_number::ChannelNumber<iptv_search::ChannelId>>,
-    pub sleep: Signal<SleepTimer>,
     /// The open chooser over the video (picture size, sleep timer).
     pub chooser: Signal<Option<chooser::Open>>,
     /// The favorites editor, when open.
@@ -337,11 +374,6 @@ pub struct Ui {
     /// The add-playlist wizard, when open.
     pub wizard: Signal<Option<wizard_view::Open>>,
     restore_review: Signal<Option<backup::RestoreReview>>,
-    /// The question before quitting during a capture, with its focused
-    /// answer (`desktop::quit_confirm`).
-    quit_confirm: Signal<Option<desktop::quit_confirm::Choice>>,
-    store_startup_failure: Signal<Option<startup_view::StoreFailure>>,
-    store_failure_scroll: ui_kit::FocusScroll,
     /// The playlists screen, when open.
     pub playlists: Signal<Option<playlists_view::Open>>,
     /// A playlist's guide sources screen, when open (over the playlists
@@ -406,21 +438,22 @@ pub struct Ui {
         target_os = "macos"
     ))]
     update_notes_scroll: ui_kit::FocusScroll,
-    /// Each player surface's stream, health, position, size and tracks;
-    /// the channel history (`player.rs`).
-    pub player: player::Player,
-    pub player_surface: usize,
-    /// Volume, mute and audio delay (`media.rs`).
-    pub media: media::Media,
-    /// Several channels at once, while open (`multiview.rs`).
-    pub multiview: Signal<Option<multiview::State>>,
-    pub player_windows: Signal<iptv_presentation::playback_windows::Workspace<String>>,
-    /// The channel list over full-screen video, while open.
-    pub channels: Signal<Option<iptv_presentation::channel_list::ChannelList>>,
-    /// Group and search selection while adding or replacing a multiview tile.
-    pub channel_picker: Signal<Option<multiview_picker::Screen>>,
-    /// The picture-in-picture window, as the host reports it (`pip.rs`).
-    pub pip: Signal<iptv_presentation::pip::Pip>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ChromeUi {
+    pub input: Signal<Input>,
+    /// What the last pointer press was made with ([`Ui::touched`] reads it).
+    pub last_press: Signal<Input>,
+    pub mode: mode::Mode,
+    pub stats: Signal<Stats>,
+    #[cfg(feature = "test-support")]
+    pub(crate) performance: Signal<Option<performance_probe::Probe>>,
+    /// The question before quitting during a capture, with its focused
+    /// answer (`desktop::quit_confirm`).
+    quit_confirm: Signal<Option<desktop::quit_confirm::Choice>>,
+    store_startup_failure: Signal<Option<startup_view::StoreFailure>>,
+    store_failure_scroll: ui_kit::FocusScroll,
     /// A Long Back acted: the platform's Back on its release is swallowed
     /// (`input.rs`).
     pub back_guard: Signal<iptv_nav::BackGuard>,
@@ -444,6 +477,12 @@ impl SharedUi {
             account_streams: signal(None),
         }
     }
+
+    fn now_ms(&self) -> u64 {
+        nsh_core::time::now()
+            .saturating_duration_since(self.epoch)
+            .as_millis() as u64
+    }
 }
 
 impl Ui {
@@ -455,148 +494,156 @@ impl Ui {
         let ui = Self {
             app,
             owner: Owner::current(),
-            focus: signal(Focus::default()),
-            browse_playback: signal(Default::default()),
-            autoplay_held: signal(None),
             cast: casting::CastUi::new(),
-            pending_zap: signal(None),
-            touch_zapped: signal(false),
-            swipe: signal(None),
-            pan_anchor: signal(None),
-            interruptions: signal(Default::default()),
-            list: signal(Rc::new(ChannelList::build(
-                iptv_presentation::lists::ALL,
-                &*schedule(),
-                &[],
-                &[],
-            ))),
-            playing: signal(None),
-            // Until a press reports its pointer: a finger on phones and
-            // tablets, the mouse on desktops.
-            last_press: signal(if crate::host::ANDROID || crate::host::IPAD {
-                Input::Touch
-            } else {
-                Input::Pointer
-            }),
-            // A phone or tablet is touched first: no remote hints, and its
-            // visible controls show, until a key is used. TVs, desktops and
-            // terminals start with their keys.
-            input: signal(
-                if matches!(
-                    idiom(),
-                    nsh_core::platform::Idiom::Phone | nsh_core::platform::Idiom::Pad
-                ) {
+            guide: GuideUi {
+                focus: signal(Focus::default()),
+                browse_playback: signal(Default::default()),
+                autoplay_held: signal(None),
+                pan_anchor: signal(None),
+                list: signal(Rc::new(ChannelList::build(
+                    iptv_presentation::lists::ALL,
+                    &*schedule(),
+                    &[],
+                    &[],
+                ))),
+                visible_rows: signal(None),
+            },
+            playback: PlaybackUi {
+                pending_zap: signal(None),
+                touch_zapped: signal(false),
+                swipe: signal(None),
+                interruptions: signal(Default::default()),
+                playing: signal(None),
+                player_status: signal("idle".to_owned()),
+                panels: signal(Panels::default()),
+                play_bar: signal(Default::default()),
+                play_bar_size: signal(None),
+                paused: signal(false),
+                seek_target: signal(None),
+                playback: signal(Playback::Live),
+                channel_number: signal(Default::default()),
+                sleep: signal(SleepTimer::default()),
+                player,
+                player_surface: 0,
+                media: media::Media::new(),
+                multiview: signal(None),
+                player_windows: signal(Default::default()),
+                channels: signal(None),
+                channel_picker: signal(None),
+                pip: signal(Default::default()),
+            },
+            screens: ScreensUi {
+                menu: signal(None),
+                description: signal(None),
+                description_scroll: ui_kit::FocusScroll::new(),
+                recordings,
+                vod: signal(iptv_presentation::vod::Screen::default()),
+                recordings_open,
+                chooser: signal(None),
+                editor: signal(None),
+                organization: request_ui::RequestUi::new(),
+                custom_groups: request_ui::RequestUi::new(),
+                remote_editor: signal(None),
+                search: signal(None),
+                search_history_revision: signal(0),
+                wizard: signal(None),
+                restore_review: nsh_core::element::signal_with(
+                    None,
+                    nsh_core::element::SignalEquals::Never,
+                ),
+                playlists: signal(None),
+                guide_sources: signal(None),
+                guide_inspect: signal(None),
+                guide_repair: signal(None),
+                guide_repair_cancel: stored(None),
+                guide_inspect_cancel: stored(None),
+                guide_assign: request_ui::RequestUi::new(),
+                parental: signal(None),
+                settings_screen: signal(None),
+                update_dialog_open: signal(false),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_revision: signal(0),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_ready: signal(false),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_install_busy: signal(false),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_cancel_requested: signal(false),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_pending_dismissed: signal(false),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_focus: signal(0),
+                #[cfg(any(
+                    target_os = "android",
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos"
+                ))]
+                update_notes_scroll: ui_kit::FocusScroll::new(),
+            },
+            chrome: ChromeUi {
+                // Until a press reports its pointer: a finger on phones and
+                // tablets, the mouse on desktops.
+                last_press: signal(if crate::host::ANDROID || crate::host::IPAD {
                     Input::Touch
                 } else {
-                    Input::Keys
-                },
-            ),
-            mode: mode::Mode::new(app.settings),
-            stats: signal(Stats::default()),
-            #[cfg(feature = "test-support")]
-            performance: signal(None),
-            player_status: signal("idle".to_owned()),
-            visible_rows: signal(None),
-            panels: signal(Panels::default()),
-            play_bar: signal(Default::default()),
-            play_bar_size: signal(None),
-            paused: signal(false),
-            seek_target: signal(None),
-            menu: signal(None),
-            description: signal(None),
-            description_scroll: ui_kit::FocusScroll::new(),
-            recordings,
-            vod: signal(iptv_presentation::vod::Screen::default()),
-            recordings_open,
-            playback: signal(Playback::Live),
-            channel_number: signal(Default::default()),
-            sleep: signal(SleepTimer::default()),
-            chooser: signal(None),
-            editor: signal(None),
-            organization: request_ui::RequestUi::new(),
-            custom_groups: request_ui::RequestUi::new(),
-            remote_editor: signal(None),
-            search: signal(None),
-            search_history_revision: signal(0),
-            wizard: signal(None),
-            restore_review: nsh_core::element::signal_with(
-                None,
-                nsh_core::element::SignalEquals::Never,
-            ),
-            quit_confirm: signal(None),
-            store_startup_failure: signal(None),
-            store_failure_scroll: ui_kit::FocusScroll::new(),
-            playlists: signal(None),
-            guide_sources: signal(None),
-            guide_inspect: signal(None),
-            guide_repair: signal(None),
-            guide_repair_cancel: stored(None),
-            guide_inspect_cancel: stored(None),
-            guide_assign: request_ui::RequestUi::new(),
-            parental: signal(None),
-            settings_screen: signal(None),
-            update_dialog_open: signal(false),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_revision: signal(0),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_ready: signal(false),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_install_busy: signal(false),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_cancel_requested: signal(false),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_pending_dismissed: signal(false),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_focus: signal(0),
-            #[cfg(any(
-                target_os = "android",
-                target_os = "linux",
-                target_os = "windows",
-                target_os = "macos"
-            ))]
-            update_notes_scroll: ui_kit::FocusScroll::new(),
-            player,
-            player_surface: 0,
-            media: media::Media::new(),
-            multiview: signal(None),
-            player_windows: signal(Default::default()),
-            channels: signal(None),
-            channel_picker: signal(None),
-            pip: signal(Default::default()),
-            back_guard: signal(iptv_nav::BackGuard::default()),
-            exit_deadline: signal(None),
+                    Input::Pointer
+                }),
+                // A phone or tablet is touched first: no remote hints, and its
+                // visible controls show, until a key is used. TVs, desktops and
+                // terminals start with their keys.
+                input: signal(
+                    if matches!(
+                        idiom(),
+                        nsh_core::platform::Idiom::Phone | nsh_core::platform::Idiom::Pad
+                    ) {
+                        Input::Touch
+                    } else {
+                        Input::Keys
+                    },
+                ),
+                mode: mode::Mode::new(app.settings),
+                stats: signal(Stats::default()),
+                #[cfg(feature = "test-support")]
+                performance: signal(None),
+                quit_confirm: signal(None),
+                store_startup_failure: signal(None),
+                store_failure_scroll: ui_kit::FocusScroll::new(),
+                back_guard: signal(iptv_nav::BackGuard::default()),
+                exit_deadline: signal(None),
+            },
         };
-        player_panels::bind_auto_hide(ui);
+        player_panels::bind_auto_hide(app, ui.playback);
         ui
     }
 }
@@ -609,7 +656,7 @@ impl Ui {
     }
 
     pub fn keys_shown(&self) -> bool {
-        self.input.get().key_hints()
+        self.chrome.input.get().key_hints()
     }
 
     /// Whether lists are edited by dragging with visible Save and Cancel
@@ -631,7 +678,7 @@ impl Ui {
             idiom(),
             nsh_core::platform::Idiom::Tv | nsh_core::platform::Idiom::Terminal
         );
-        self.input.get().back_controls(remote_back)
+        self.chrome.input.get().back_controls(remote_back)
     }
 
     /// A foreground UI surface color. In guide mode the opaque colors are
@@ -639,7 +686,7 @@ impl Ui {
     /// the foreground is clear and the preview rectangle shows the video; in
     /// overlay mode it tints the full-screen video.
     pub fn surface(&self, rgb_hex: u32) -> Rgba {
-        let alpha = match self.mode.get() {
+        let alpha = match self.chrome.mode.get() {
             // `appearance.ui_transparency`
             ViewMode::Overlay => theme::overlay_alpha(&settings_wiring::read(*self)),
             ViewMode::Guide | ViewMode::Fullscreen => 0x00,
@@ -650,15 +697,13 @@ impl Ui {
     /// Milliseconds since the app started, on the engine's clock (a
     /// test's manual clock moves it with the timers).
     pub fn now_ms(&self) -> u64 {
-        nsh_core::time::now()
-            .saturating_duration_since(self.app.epoch)
-            .as_millis() as u64
+        self.app.now_ms()
     }
 
     /// Changes the panels at the current point in the app's clock.
     pub fn update_panels(&self, f: impl FnOnce(&mut Panels, u64)) {
         let now = self.now_ms();
-        self.panels.update(|p| f(p, now));
+        self.playback.panels.update(|p| f(p, now));
     }
 }
 
@@ -799,9 +844,9 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     desktop::menus(ui);
     // Leaving full screen closes the panels.
     effect(move || {
-        if ui.mode.get() != ViewMode::Fullscreen {
+        if ui.chrome.mode.get() != ViewMode::Fullscreen {
             log::info!("iptv panels hidden: left full screen");
-            ui.panels.update(|p| p.hide());
+            ui.playback.panels.update(|p| p.hide());
         }
     });
     favorites::reset();
@@ -828,8 +873,8 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
 
     let rows = element_ref();
     let groups = element_ref();
-    let channel = computed(move || ui.focus.with(|f| f.channel));
-    let group = computed(move || ui.focus.with(|f| f.group));
+    let channel = computed(move || ui.guide.focus.with(|f| f.channel));
+    let group = computed(move || ui.guide.focus.with(|f| f.group));
     let shown = computed(move || lists::columns_shown(ui));
     // Keys scroll only when the focus comes within EDGE rows of the
     // viewport's edge (touch scrolls on its own).
@@ -839,7 +884,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         if !ui.keys_shown() {
             return;
         }
-        let Some((first, last)) = ui.visible_rows.get_untracked() else {
+        let Some((first, last)) = ui.guide.visible_rows.get_untracked() else {
             return;
         };
         if ch < first + EDGE {
@@ -850,7 +895,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
                 false,
             );
         } else if ch + EDGE > last {
-            let len = ui.list.with_untracked(|l| l.len());
+            let len = ui.guide.list.with_untracked(|l| l.len());
             let target = (ch + EDGE).min(len.saturating_sub(1));
             rows.scroll_to_index(target as u32, percentage(1.0), px(0.0), false);
         }
@@ -876,10 +921,14 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
         // A moving mouse over full-screen video shows the player panels.
         .on_mouse_move(move |e: &MouseEvent| pointer_moved(ui, e))
         .on_mouse_enter(move |e: &MouseEvent| {
-            desktop::pointer_entered(ui.player_surface, e.page_position.x.0, e.page_position.y.0)
+            desktop::pointer_entered(
+                ui.playback.player_surface,
+                e.page_position.x.0,
+                e.page_position.y.0,
+            )
         })
         // Which pointer presses the controls: touch or pointer mode.
-        .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui, e))
+        .on_touch(move |e: &nsh_core::TouchEvent| pointer_down(ui.chrome, e))
         // Layers, bottom to top: opaque backdrop, video (multiview's other
         // surfaces while their tiles play), UI, full-screen tap catcher.
         // The picture-in-picture window shows only the video (`pip.rs`).
@@ -912,7 +961,7 @@ pub(crate) fn guide_chrome_pointer_events(ui: Ui) -> PointerEvents {
 }
 
 fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
-    let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
+    let fullscreen = move || ui.chrome.mode.get() == ViewMode::Fullscreen;
     let shown = move || pip::ui_shown(ui);
     let gesture = touch_zap::Gesture::new();
     view()
@@ -1027,7 +1076,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
 /// actions change channel (`touch_zap.rs`). It lies above the video, which
 /// it never wraps.
 fn video_catcher(ui: Ui, live: bool, gesture: touch_zap::Gesture) -> View {
-    let fullscreen = move || ui.mode.get() == ViewMode::Fullscreen;
+    let fullscreen = move || ui.chrome.mode.get() == ViewMode::Fullscreen;
     let swiped = gesture.swiped;
     let catcher = view()
         .test_id("video")
@@ -1095,20 +1144,20 @@ fn toggle_panels(ui: Ui) {
         play_bar::tapped(ui);
         return;
     }
-    if ui.panels.with(|p| p.shown) == iptv_presentation::panels::Shown::Hidden {
+    if ui.playback.panels.with(|p| p.shown) == iptv_presentation::panels::Shown::Hidden {
         ui.update_panels(|p, now| p.show_card(now));
     } else {
         log::info!("iptv panels hidden by a tap");
-        ui.panels.update(|p| p.hide());
+        ui.playback.panels.update(|p| p.hide());
     }
 }
 
 /// The pointer is what the viewer uses now: Pointer mode, without the
 /// side effects of a press ([`Ui::touched`]).
-pub(crate) fn pointer_input(ui: Ui) {
-    if ui.input.get_untracked() != Input::Pointer {
-        ui.last_press.set(Input::Pointer);
-        ui.input.set(Input::Pointer);
+pub(crate) fn pointer_input(chrome: ChromeUi) {
+    if chrome.input.get_untracked() != Input::Pointer {
+        chrome.last_press.set(Input::Pointer);
+        chrome.input.set(Input::Pointer);
     }
 }
 
@@ -1121,17 +1170,17 @@ fn pointer_moved(ui: Ui, e: &MouseEvent) {
     // Anywhere else (the guide, lists, Recordings), a mouse that really
     // moved after keys switches to Pointer, so the ⋯ controls show: no
     // focus moves and no playback is scheduled or canceled.
-    if desktop::pointer_traveled(ui.player_surface, x, y) {
-        pointer_input(ui);
+    if desktop::pointer_traveled(ui.playback.player_surface, x, y) {
+        pointer_input(ui.chrome);
     }
-    if ui.mode.get_untracked() != ViewMode::Fullscreen
+    if ui.chrome.mode.get_untracked() != ViewMode::Fullscreen
         || open
         || !desktop::pointer_moved(x, y, ui.now_ms())
     {
         return;
     }
-    if ui.input.get_untracked() != Input::Pointer {
-        ui.last_press.set(Input::Pointer);
+    if ui.chrome.input.get_untracked() != Input::Pointer {
+        ui.chrome.last_press.set(Input::Pointer);
         ui.touched();
     }
     play_bar::pointer_moved(ui);
@@ -1175,16 +1224,21 @@ pub(crate) fn leave() {
 /// so Android handhelds can preview the gesture back to their launcher.
 fn bind_back(ui: Ui) {
     let back_target = computed(move || {
-        let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
+        let panels = ui.playback.panels.with(|p| p.shown)
+            != iptv_presentation::panels::Shown::Hidden
             || play_bar::shows(ui);
-        let menu = ui.menu.with(Option::is_some)
-            || ui.description.with(Option::is_some)
-            || ui.chooser.with(Option::is_some)
-            || ui.editor.with(Option::is_some)
-            || ui.focus.with(|f| f.hint)
+        let menu = ui.screens.menu.with(Option::is_some)
+            || ui.screens.description.with(Option::is_some)
+            || ui.screens.chooser.with(Option::is_some)
+            || ui.screens.editor.with(Option::is_some)
+            || ui.guide.focus.with(|f| f.hint)
             || channels_view::is_open(ui)
             || multiview_picker::is_open(ui);
-        (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu)
+        (
+            ui.chrome.mode.get(),
+            ui.guide.focus.with(|f| f.pane),
+            panels || menu,
+        )
     });
     effect(move || {
         let top = ui.top_overlay();
@@ -1192,15 +1246,15 @@ fn bind_back(ui: Ui) {
             && !desktop::fullscreen()
             && match back_target.get() {
                 (ViewMode::Guide, Pane::Rail, false) => true,
-                (ViewMode::Overlay, Pane::Rail, false) => ui.playing.with(Option::is_none),
+                (ViewMode::Overlay, Pane::Rail, false) => ui.playback.playing.with(Option::is_none),
                 _ => false,
             };
         let double_back = rail_root
             && exit_confirmation::enabled(ui)
             && lifecycle() == nsh_core::platform::Lifecycle::Active
-            && !ui.channel_number.with(|entry| entry.active());
+            && !ui.playback.channel_number.with(|entry| entry.active());
         if !double_back {
-            ui.exit_deadline.set(None);
+            ui.chrome.exit_deadline.set(None);
         }
         let leaves = match top {
             Some(overlays::Overlay::Wizard) => wizard_view::back_leaves(ui),
@@ -1208,8 +1262,8 @@ fn bind_back(ui: Ui) {
                 startup_view::store_failure_back_leaves(ui)
             }
             _ => rail_root,
-        } && !ui.channel_number.with(|entry| entry.active())
-            && !ui.back_guard.with(iptv_nav::BackGuard::armed);
+        } && !ui.playback.channel_number.with(|entry| entry.active())
+            && !ui.chrome.back_guard.with(iptv_nav::BackGuard::armed);
         if !leaves || asks_before_leaving() || double_back {
             on_back_press(move || {
                 input::swallow_back(ui)
@@ -1230,24 +1284,29 @@ fn bind_back(ui: Ui) {
 /// instead, over every other layer.
 pub(crate) fn go_back(ui: Ui) -> bool {
     external_player::cancel_pending(ui);
-    if ui.channel_number.with(|entry| entry.active()) {
-        ui.channel_number.update(|entry| {
+    if ui.playback.channel_number.with(|entry| entry.active()) {
+        ui.playback.channel_number.update(|entry| {
             entry.take();
         });
         return true;
     }
-    ui.pending_zap.set(None);
+    ui.playback.pending_zap.set(None);
     browse_playback::activity(ui);
     untracked(|| {
         use overlays::Overlay;
         let top = ui.top_overlay();
-        let panels = ui.panels.with(|p| p.shown) != iptv_presentation::panels::Shown::Hidden
+        let panels = ui.playback.panels.with(|p| p.shown)
+            != iptv_presentation::panels::Shown::Hidden
             || play_bar::shows(ui);
-        let menu = ui.menu.with(Option::is_some)
-            || ui.description.with(Option::is_some)
-            || ui.chooser.with(Option::is_some)
-            || ui.editor.with(Option::is_some);
-        match (ui.mode.get(), ui.focus.with(|f| f.pane), panels || menu) {
+        let menu = ui.screens.menu.with(Option::is_some)
+            || ui.screens.description.with(Option::is_some)
+            || ui.screens.chooser.with(Option::is_some)
+            || ui.screens.editor.with(Option::is_some);
+        match (
+            ui.chrome.mode.get(),
+            ui.guide.focus.with(|f| f.pane),
+            panels || menu,
+        ) {
             _ if top == Some(Overlay::QuitConfirm) => desktop::quit_confirm::back(ui),
             _ if top == Some(Overlay::Leave) => {
                 chooser::close(ui);
@@ -1313,11 +1372,13 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             }
             // The operating system's full screen is restored first; the
             // next Back leaves the video for where it was chosen.
-            _ if ui.player_surface == 0 && desktop::fullscreen() => {
+            _ if ui.playback.player_surface == 0 && desktop::fullscreen() => {
                 desktop::set_fullscreen(false);
                 true
             }
-            (ViewMode::Fullscreen, _, false) if ui.player.recorded.with(Option::is_some) => {
+            (ViewMode::Fullscreen, _, false)
+                if ui.playback.player.recorded.with(Option::is_some) =>
+            {
                 recordings_view::open(ui);
                 true
             }
@@ -1328,19 +1389,20 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             // A tile watched full screen: back to the grid as it was.
             _ if multiview::detour(ui) => multiview::resume(ui),
             (ViewMode::Fullscreen, _, true) => {
-                ui.panels.update(|p| p.hide());
-                ui.play_bar
+                ui.playback.panels.update(|p| p.hide());
+                ui.playback
+                    .play_bar
                     .update(iptv_presentation::play_bar::PlayBar::hide);
                 true
             }
             // Hint, past program → now, guide → groups → rail → leave.
-            (ViewMode::Overlay, _, _) if ui.playing.get_untracked().is_some() => {
-                ui.mode.apply(mode::Action::Back);
+            (ViewMode::Overlay, _, _) if ui.playback.playing.get_untracked().is_some() => {
+                ui.chrome.mode.apply(mode::Action::Back);
                 true
             }
             (ViewMode::Guide | ViewMode::Overlay, _, _) => lists::back(ui),
             _ => {
-                ui.mode.apply(mode::Action::Back);
+                ui.chrome.mode.apply(mode::Action::Back);
                 true
             }
         }

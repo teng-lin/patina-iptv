@@ -31,12 +31,12 @@ struct ProgramInfo {
 }
 
 fn program_info(ui: Ui) -> Option<ProgramInfo> {
-    if crate::on_demand::active(ui) || ui.playing.get().is_none() {
+    if crate::on_demand::active(ui) || ui.playback.playing.get().is_none() {
         return None;
     }
     let (channel, program) = progress::program(ui);
     let schedule = crate::runtime_owner::schedule();
-    let next = if ui.playback.get() == Playback::Live {
+    let next = if ui.playback.playback.get() == Playback::Live {
         let next = schedule.program_at(channel, program.end);
         match schedule.listing(channel, next) {
             Some(Listing::Title(title))
@@ -52,7 +52,7 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
     Some(ProgramInfo {
         channel: format!(
             "{}  {}",
-            crate::lists::number(ui, channel),
+            crate::lists::number(ui.guide, channel),
             channel_name(channel)
         ),
         title: crate::listing_labels::listing(schedule.listing(channel, program)),
@@ -63,9 +63,16 @@ fn program_info(ui: Ui) -> Option<ProgramInfo> {
 pub(super) fn header(ui: Ui) -> impl IntoElement {
     let program = computed(move || program_info(ui));
     let next = computed(move || program.with(|p| p.as_ref().and_then(|p| p.next.clone())));
-    let size = move || ui.player.main().size.get().filter(|&(w, h)| w > 0 && h > 0);
-    let fps = computed(move || fps_label(ui.player.main().format.with(|f| f.fps)));
-    let live = move || !ui.paused.get() && ui.playback.get() == Playback::Live;
+    let size = move || {
+        ui.playback
+            .player
+            .main()
+            .size
+            .get()
+            .filter(|&(w, h)| w > 0 && h > 0)
+    };
+    let fps = computed(move || fps_label(ui.playback.player.main().format.with(|f| f.fps)));
+    let live = move || !ui.playback.paused.get() && ui.playback.playback.get() == Playback::Live;
     let show_quality = move || window().width.0 >= QUALITY_MIN_WIDTH && !crate::scale::phone();
     let show_next = move || next.with(Option::is_some) && window().width.0 >= NEXT_MIN_WIDTH;
     let has_title = move || {
@@ -142,7 +149,7 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                             .filter(|title| !title.trim().is_empty())
                             .or_else(|| {
                                 (!crate::on_demand::active(ui) && program.with(Option::is_none))
-                                    .then(|| ui.playing.get().map(channel_name))
+                                    .then(|| ui.playback.playing.get().map(channel_name))
                                     .flatten()
                             })
                             .unwrap_or_default()
@@ -160,7 +167,7 @@ pub(super) fn header(ui: Ui) -> impl IntoElement {
                     move || {
                         badge(
                             move || {
-                                let label = if ui.paused.get() {
+                                let label = if ui.playback.paused.get() {
                                     tr("PAUSED")
                                 } else if live() {
                                     tr("LIVE")

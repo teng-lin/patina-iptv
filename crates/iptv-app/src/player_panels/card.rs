@@ -48,15 +48,15 @@ fn program(ui: Ui) -> (usize, Program) {
     ui.guide_data();
     // A zap waiting to tune: the channel it goes to, on air now.
     if let Some(channel) = crate::browse_playback::pending_channel(ui) {
-        let now = ui.focus.with(|f| f.now);
+        let now = ui.guide.focus.with(|f| f.now);
         return (
             channel,
             crate::runtime_owner::schedule().program_at(channel, now),
         );
     }
-    let channel = ui.playing.get().unwrap_or(0);
-    let minute = match ui.playback.get() {
-        Playback::Live => ui.focus.with(|f| f.now),
+    let channel = ui.playback.playing.get().unwrap_or(0);
+    let minute = match ui.playback.playback.get() {
+        Playback::Live => ui.guide.focus.with(|f| f.now),
         Playback::CatchUp { start, .. } => start,
     };
     (
@@ -76,7 +76,7 @@ fn progress(ui: Ui) -> f32 {
         };
     }
     let (_, p) = program(ui);
-    let now = ui.focus.with(|f| f.now);
+    let now = ui.guide.focus.with(|f| f.now);
     if p.airing(now) == Airing::Live {
         p.progress(now)
     } else {
@@ -86,9 +86,10 @@ fn progress(ui: Ui) -> f32 {
 
 /// The one time line's kind now.
 fn line_kind(ui: Ui) -> Line {
-    let replay =
-        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui);
-    ui.panels
+    let replay = matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
+        || crate::on_demand::active(ui);
+    ui.playback
+        .panels
         .with(|p| p.line(replay))
         .unwrap_or(if replay { Line::Seek } else { Line::Progress })
 }
@@ -98,7 +99,7 @@ fn line_kind(ui: Ui) -> Line {
 fn ends(ui: Ui) -> (String, String) {
     match (line_kind(ui), crate::seek::elapsed(ui)) {
         (Line::Seek, Some((at, length))) => {
-            let seeking = if ui.seek_target.get().is_some() {
+            let seeking = if ui.playback.seek_target.get().is_some() {
                 "⇢ "
             } else {
                 ""
@@ -114,7 +115,7 @@ fn ends(ui: Ui) -> (String, String) {
         }
         _ => {
             let (_, p) = program(ui);
-            let at = ui.focus.with(|f| f.now);
+            let at = ui.guide.focus.with(|f| f.now);
             let left =
                 minutes_left(crate::i18n::language(), p.start, p.end, at).unwrap_or_default();
             (format!("{}–{}", clock(p.start), clock(p.end)), left)
@@ -176,13 +177,13 @@ pub(super) fn time_line(ui: Ui) -> View {
 }
 
 fn number_and_name(ui: Ui, channel: usize) -> String {
-    if let Some((job, _)) = ui.player.recorded.get() {
+    if let Some((job, _)) = ui.playback.player.recorded.get() {
         return job.request.channel_name;
     }
     // As in the guide: its place in the list on screen.
     format!(
         "{}  {}",
-        crate::lists::number(ui, channel),
+        crate::lists::number(ui.guide, channel),
         channel_name(channel)
     )
 }
@@ -192,7 +193,7 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
     let now = move || program(ui).1;
     let next = move || crate::runtime_owner::schedule().program_at(channel(), now().end);
     let format = move || {
-        let main = ui.player.main();
+        let main = ui.playback.player.main();
         let (width, height) = main.size.get().unwrap_or((0, 0));
         let f = main.format.get();
         StreamFormat { width, height, ..f }
@@ -246,7 +247,8 @@ pub(super) fn info_card(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> im
                 )
                 .child(
                     text(move || {
-                        ui.player
+                        ui.playback
+                            .player
                             .recorded
                             .with(|r| r.as_ref().map(|(j, _)| j.request.title.clone()))
                             .unwrap_or_else(|| {
@@ -349,9 +351,9 @@ fn badge(
             };
             tint(WHITE, alpha)
         })
-        .accessibility_elements_hidden(move || ui.playing.get().is_none())
+        .accessibility_elements_hidden(move || ui.playback.playing.get().is_none())
         .opacity(move || {
-            if ui.playing.get().is_some() {
+            if ui.playback.playing.get().is_some() {
                 1.0_f32
             } else {
                 0.0

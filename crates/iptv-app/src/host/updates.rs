@@ -18,7 +18,7 @@ pub(crate) mod view;
 pub(crate) mod view {
     pub(crate) fn open(_: crate::Ui) {}
     pub(crate) fn close(ui: crate::Ui) {
-        ui.update_dialog_open.set(false);
+        ui.screens.update_dialog_open.set(false);
     }
     pub(crate) fn bind(_: crate::Ui) {}
     pub(crate) fn key(_: crate::Ui, _: iptv_nav::Action) {}
@@ -119,14 +119,14 @@ impl PackageAction {
                             .await
                     };
                     let Some(stage) = stage else {
-                        if _ui.update_cancel_requested.get_untracked() {
+                        if _ui.screens.update_cancel_requested.get_untracked() {
                             return;
                         }
                         return crate::settings_view::notify(tr(
                             "Update download failed. Try again.",
                         ));
                     };
-                    if _ui.update_cancel_requested.get_untracked() {
+                    if _ui.screens.update_cancel_requested.get_untracked() {
                         return;
                     }
                     if !crate::settings_view::updates::is_open(_ui) {
@@ -148,7 +148,7 @@ impl PackageAction {
                         return;
                     };
                     let Some(setup) = result else {
-                        if _ui.update_cancel_requested.get_untracked() {
+                        if _ui.screens.update_cancel_requested.get_untracked() {
                             return;
                         }
                         return crate::settings_view::notify(tr(
@@ -157,7 +157,7 @@ impl PackageAction {
                     };
                     setup
                 };
-                if _ui.update_cancel_requested.get_untracked() {
+                if _ui.screens.update_cancel_requested.get_untracked() {
                     return;
                 }
                 if !crate::settings_view::updates::is_open(_ui) {
@@ -172,7 +172,7 @@ impl PackageAction {
                     .close_on_escape(true)
                     .show()
                     .await;
-                if _ui.update_cancel_requested.get_untracked() {
+                if _ui.screens.update_cancel_requested.get_untracked() {
                     return;
                 }
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
@@ -234,12 +234,12 @@ impl PackageAction {
                     owner.download_update(asset.clone(), directory).await
                 };
                 let Some(path) = path else {
-                    if !_ui.update_cancel_requested.get_untracked() {
+                    if !_ui.screens.update_cancel_requested.get_untracked() {
                         crate::settings_view::notify(tr("Update download failed. Try again."));
                     }
                     return;
                 };
-                if _ui.update_cancel_requested.get_untracked() {
+                if _ui.screens.update_cancel_requested.get_untracked() {
                     return;
                 }
                 if !crate::settings_view::updates::is_open(_ui) {
@@ -260,7 +260,7 @@ impl PackageAction {
                     .close_on_escape(true)
                     .show()
                     .await;
-                if _ui.update_cancel_requested.get_untracked() {
+                if _ui.screens.update_cancel_requested.get_untracked() {
                     return;
                 }
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {

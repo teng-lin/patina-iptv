@@ -67,7 +67,7 @@ pub(super) async fn update(ui: Ui, version: String) {
         if !ui.owner.is_live() {
             return;
         }
-        if ui.update_cancel_requested.get_untracked() && try_cancel_current() {
+        if ui.screens.update_cancel_requested.get_untracked() && try_cancel_current() {
             break 4;
         }
         // This future belongs to the app root, so owner/Ui access remains on

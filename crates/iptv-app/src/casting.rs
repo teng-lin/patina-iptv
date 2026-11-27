@@ -46,11 +46,12 @@ impl CastUi {
 pub(super) fn available(ui: Ui) -> bool {
     runtime().cast_available()
         && crate::device::host().form_factor != FormFactor::Tv
-        && ui.player_surface == 0
+        && ui.playback.player_surface == 0
         && !crate::multiview::is_open(ui)
         && !crate::pip::in_window(ui)
         && (ui.cast.remote.get()
-            || (ui.playing.get().is_some() && ui.playback.get() == Playback::Live))
+            || (ui.playback.playing.get().is_some()
+                && ui.playback.playback.get() == Playback::Live))
 }
 
 pub(super) fn local_blocked(ui: Ui) -> bool {
@@ -74,15 +75,16 @@ pub(super) fn discover(ui: Ui) {
         return;
     }
     ui.cast.state.update(|state| state.discovering = true);
-    let channel = ui.player.main().key.get_untracked();
+    let channel = ui.playback.player.main().key.get_untracked();
     crate::tasks::spawn_in_app(async move {
         let result = runtime().cast_receivers().await;
         ui.cast.state.update(|state| state.discovering = false);
-        let still_open = ui.chooser.with_untracked(|open| {
+        let still_open = ui.screens.chooser.with_untracked(|open| {
             open.as_ref()
                 .is_some_and(|open| open.kind == chooser::Kind::Cast)
         });
-        if !still_open || channel != ui.player.main().key.get_untracked() || !available(ui) {
+        if !still_open || channel != ui.playback.player.main().key.get_untracked() || !available(ui)
+        {
             return;
         }
         // Keep current and local destinations usable when discovery fails.
@@ -125,7 +127,7 @@ pub(super) fn select(ui: Ui, receiver: Receiver) {
         play_here(ui);
         return;
     }
-    if let Some(channel) = ui.playing.get_untracked() {
+    if let Some(channel) = ui.playback.playing.get_untracked() {
         start(ui, channel, Target::Network(receiver));
     }
 }
@@ -135,7 +137,7 @@ pub(super) fn select_airplay(ui: Ui) {
         && !runtime()
             .cast_target()
             .is_some_and(|(target, _)| target == Target::AirPlay)
-        && let Some(channel) = ui.playing.get_untracked()
+        && let Some(channel) = ui.playback.playing.get_untracked()
     {
         start(ui, channel, Target::AirPlay);
     }
@@ -176,8 +178,8 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let previous = owner
         .cast_target()
         .map(|(_, key)| key)
-        .or_else(|| ui.player.main().key.get_untracked());
-    let old_paused = ui.paused.get_untracked();
+        .or_else(|| ui.playback.player.main().key.get_untracked());
+    let old_paused = ui.playback.paused.get_untracked();
     let ticket = owner.next_cast_intent();
     let current = move || runtime().cast_intent_current(ticket);
     ui.cast.state.update(|state| state.busy = true);
@@ -283,7 +285,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             let claim = owner
                 .reserve_cast_viewing(iptv_library::SourceId(authority.source()))
                 .ok_or(Error::Busy)?;
-            ui.paused.set(true);
+            ui.playback.paused.set(true);
             let prepared = owner.load_cast(ticket, prepared, grant).await?;
             check().await?;
             crate::player::stop_for_handoff(ui, &target);
@@ -312,13 +314,13 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 transferred = false;
                 return Err(Error::Denied);
             }
-            ui.player.main().key.set(Some(key.clone()));
-            ui.playing.set(schedule().find_channel(&key));
+            ui.playback.player.main().key.set(Some(key.clone()));
+            ui.playback.playing.set(schedule().find_channel(&key));
             ui.cast
                 .state
                 .update(|state| state.controls = owner.cast_controls().unwrap_or(Controls::NONE));
             ui.cast.state.update(|state| state.remote = true);
-            ui.paused.set(paused);
+            ui.playback.paused.set(paused);
             monitor(ui, ticket);
             Ok(())
         }
@@ -341,21 +343,21 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             if retired && pending_stop_current(ui) {
                 // The old receiver is already stopped. Preserve the viewer's Stop
                 // even when the switch failed after releasing its local surface.
-                ui.playing.set(None);
+                ui.playback.playing.set(None);
             } else if current() || returning_local {
-                ui.paused.set(old_paused);
+                ui.playback.paused.set(old_paused);
                 if retired
                     && let Some(ch) = previous
                         .as_deref()
                         .and_then(|key| schedule().find_channel(key))
                 {
-                    ui.playing.set(None);
+                    ui.playback.playing.set(None);
                     ui.play(ch, Playback::Live);
-                    if ui.playing.get_untracked() == Some(ch) {
-                        ui.paused.set(old_paused);
+                    if ui.playback.playing.get_untracked() == Some(ch) {
+                        ui.playback.paused.set(old_paused);
                     }
                     if transferred
-                        && ui.playing.get_untracked() == Some(ch)
+                        && ui.playback.playing.get_untracked() == Some(ch)
                         && crate::parental_view::live_target(ui, ch).as_ref() == Some(&target)
                     {
                         transferred = false;
@@ -366,7 +368,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                 owner.parental_end_transfer(&target);
             }
         }
-        if ui.chooser.with_untracked(|open| {
+        if ui.screens.chooser.with_untracked(|open| {
             open.as_ref().is_some_and(|open| {
                 matches!(open.kind, chooser::Kind::AirPlay | chooser::Kind::Cast)
             })
@@ -387,7 +389,7 @@ fn monitor(ui: Ui, ticket: u64) {
                     if runtime().cast_target().is_none() && ui.cast.remote.get_untracked() =>
                 {
                     ui.cast.state.update(|state| state.remote = false);
-                    ui.playing.set(None);
+                    ui.playback.playing.set(None);
                     if let Err(error) = ended {
                         report(error);
                     }
@@ -401,7 +403,7 @@ fn monitor(ui: Ui, ticket: u64) {
                             ui.cast.state.update(|state| state.controls = controls);
                         }
                         if matches!(state, RemoteState::Playing | RemoteState::Paused) {
-                            ui.paused.set(state == RemoteState::Paused);
+                            ui.playback.paused.set(state == RemoteState::Paused);
                         }
                         monitor(ui, ticket);
                     }
@@ -418,7 +420,7 @@ pub(crate) fn set_paused(ui: Ui, paused: bool) {
     } else {
         Command::Play
     };
-    if ui.paused.get_untracked() != paused && supports(ui, command) {
+    if ui.playback.paused.get_untracked() != paused && supports(ui, command) {
         control(ui, command, false);
     }
 }
@@ -453,7 +455,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                     report(error);
                 }
                 ui.cast.state.update(|state| state.remote = false);
-                ui.playing.set(None);
+                ui.playback.playing.set(None);
                 if resume_local
                     && !pending_stop_current(ui)
                     && let Some(ch) = schedule().find_channel(&key)
@@ -462,7 +464,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                 }
             }
             _ if command != Command::Stop && !ui.cast.remote.get_untracked() => {}
-            Ok(()) => ui.paused.set(command == Command::Pause),
+            Ok(()) => ui.playback.paused.set(command == Command::Pause),
             Err(e) => report(e),
         }
         finish_pending_stop(ui);
@@ -494,12 +496,12 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
         }
     } else if local
         && !stop_requested
-        && ui.playing.get_untracked().is_none()
-        && let Some(key) = ui.player.main().key.get_untracked()
+        && ui.playback.playing.get_untracked().is_none()
+        && let Some(key) = ui.playback.player.main().key.get_untracked()
         && let Some(channel) = schedule().find_channel(&key)
     {
         // The monitor retired the cast while its last command was still pending.
-        if ui.chooser.with_untracked(|open| {
+        if ui.screens.chooser.with_untracked(|open| {
             open.as_ref().is_some_and(|open| {
                 matches!(
                     open.kind,

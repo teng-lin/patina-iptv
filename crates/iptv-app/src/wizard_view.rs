@@ -47,7 +47,7 @@ fn open_with(ui: Ui, wizard: Wizard) {
     if let Some(Step::Processing { id, .. } | Step::Canceling { id }) = read(ui, Wizard::step) {
         crate::runtime_owner::runtime().cancel_wizard_import(id, false);
     }
-    ui.wizard.set(Some(Open {
+    ui.screens.wizard.set(Some(Open {
         wizard,
         editing: None,
         prefilled: false,
@@ -95,11 +95,11 @@ pub fn open_add(ui: Ui) {
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.wizard.with(Option::is_some)
+    ui.screens.wizard.with(Option::is_some)
 }
 
 fn read<R>(ui: Ui, f: impl FnOnce(&Wizard) -> R) -> Option<R> {
-    ui.wizard.with(|w| w.as_ref().map(|o| f(&o.wizard)))
+    ui.screens.wizard.with(|w| w.as_ref().map(|o| f(&o.wizard)))
 }
 
 /// Feeds `event` to the wizard and performs what it asks for.
@@ -117,7 +117,7 @@ pub fn send(ui: Ui, event: WizardEvent) {
         return;
     }
     let mut effect = None;
-    ui.wizard.update(|w| {
+    ui.screens.wizard.update(|w| {
         if let Some(open) = w {
             effect = open.wizard.handle(event);
         }
@@ -140,9 +140,12 @@ fn prefill(ui: Ui) {
             && w.value(Field::PlaylistUrl).is_empty()
     })
     .unwrap_or(false)
-        && ui.wizard.with(|w| w.as_ref().is_some_and(|o| !o.prefilled));
+        && ui
+            .screens
+            .wizard
+            .with(|w| w.as_ref().is_some_and(|o| !o.prefilled));
     if due {
-        ui.wizard.update(|w| {
+        ui.screens.wizard.update(|w| {
             if let Some(open) = w {
                 open.prefilled = true;
                 open.wizard.handle(WizardEvent::SetField {
@@ -196,7 +199,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             let (id, _) = runtime.start_wizard_import(
                 job,
                 move |id, _store_epoch| {
-                    ui.wizard.update(|open| {
+                    ui.screens.wizard.update(|open| {
                         if let Some(open) = open {
                             open.wizard.admit_import(id);
                         }
@@ -229,7 +232,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                 crate::playlists_view::close(ui);
                 crate::settings_view::close(ui);
             }
-            ui.wizard.set(None);
+            ui.screens.wizard.set(None);
         }
     }
 }
@@ -307,7 +310,8 @@ fn screen_of(w: &Wizard) -> Option<Screen> {
 
 pub fn layer(ui: Ui) -> impl IntoElement {
     let screen = computed(move || {
-        ui.wizard
+        ui.screens
+            .wizard
             .with(|w| w.as_ref().and_then(|o| screen_of(&o.wizard)))
     });
     let editing = computed(move || entry::is_editing(ui));

@@ -110,7 +110,7 @@ pub fn open(ui: Ui) {
     if !keys.contains(&editor.key) {
         editor.key = keys[0];
     }
-    ui.remote_editor.set(Some(editor));
+    ui.screens.remote_editor.set(Some(editor));
 }
 
 /// Moves the focus `by` fields, past one not shown.
@@ -125,18 +125,19 @@ fn step(s: &mut Editor, by: isize) {
     }
 }
 pub fn is_open(ui: Ui) -> bool {
-    ui.remote_editor.with(Option::is_some)
+    ui.screens.remote_editor.with(Option::is_some)
 }
 /// Whether the editor waits for a key to bind (tracked).
 pub(crate) fn capturing(ui: Ui) -> bool {
-    ui.remote_editor
+    ui.screens
+        .remote_editor
         .with(|s| s.as_ref().is_some_and(|s| s.capturing))
 }
 fn state<R>(ui: Ui, f: impl FnOnce(&Editor) -> R) -> Option<R> {
-    ui.remote_editor.with(|s| s.as_ref().map(f))
+    ui.screens.remote_editor.with(|s| s.as_ref().map(f))
 }
 fn update(ui: Ui, f: impl FnOnce(&mut Editor)) {
-    ui.remote_editor.update(|s| {
+    ui.screens.remote_editor.update(|s| {
         if let Some(s) = s {
             f(s)
         }
@@ -146,12 +147,12 @@ pub fn back(ui: Ui) -> bool {
     let mut close = false;
     update(ui, |s| close = !s.back());
     if close {
-        ui.remote_editor.set(None);
+        ui.screens.remote_editor.set(None);
     }
     true
 }
 fn close(ui: Ui) {
-    ui.remote_editor.set(None);
+    ui.screens.remote_editor.set(None);
 }
 pub fn capture(ui: Ui, key: RemoteKey) {
     if key == RemoteKey::Back {

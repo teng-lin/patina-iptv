@@ -46,7 +46,7 @@ const CARD_W: f32 = 660.0;
 
 /// Opens the screen for `playlist`.
 pub fn open(ui: Ui, playlist: SourceId) {
-    ui.guide_sources.set(Some(screen(playlist)));
+    ui.screens.guide_sources.set(Some(screen(playlist)));
     // Timer failures can occur without publishing a new visible guide.
     // Opening the controls always reads the latest persisted refresh result.
     crate::runtime::data::refresh_guide_status(&crate::runtime_owner::runtime());
@@ -67,8 +67,8 @@ fn screen(playlist: SourceId) -> Screen {
 }
 
 pub fn close(ui: Ui) {
-    if ui.guide_sources.with_untracked(Option::is_some) {
-        ui.guide_sources.set(None);
+    if ui.screens.guide_sources.with_untracked(Option::is_some) {
+        ui.screens.guide_sources.set(None);
         if !crate::settings_view::is_open(ui) {
             crate::runtime_owner::runtime().parental_content_closed();
         }
@@ -77,16 +77,16 @@ pub fn close(ui: Ui) {
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.guide_sources.with(Option::is_some)
+    ui.screens.guide_sources.with(Option::is_some)
 }
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.guide_sources.with(|s| s.as_ref().map(f))
+    ui.screens.guide_sources.with(|s| s.as_ref().map(f))
 }
 
 fn update(ui: Ui, f: impl FnOnce(&mut Screen) -> Option<Effect>) {
     let mut effect = None;
-    ui.guide_sources.update(|s| {
+    ui.screens.guide_sources.update(|s| {
         if let Some(s) = s {
             effect = f(s).map(|e| (s.playlist(), e));
         }
@@ -235,11 +235,12 @@ pub fn layer(ui: Ui) -> impl IntoElement {
         ui.app.settings.get();
         ui.app.data_version.get();
         let playlist = ui
+            .screens
             .guide_sources
             .with_untracked(|s| s.as_ref().map(Screen::playlist));
         if let Some(playlist) = playlist {
             let lines = crate::runtime_owner::runtime().source_lines(playlist);
-            ui.guide_sources.update(|s| {
+            ui.screens.guide_sources.update(|s| {
                 if let Some(s) = s {
                     s.set_lines(lines);
                 }
@@ -736,7 +737,7 @@ fn edit_sheet(ui: Ui, size: Scale) -> impl IntoElement {
                     .element_ref(&field)
                     .value(current)
                     .on_change(move |t: &str| {
-                        ui.guide_sources.update(|s| {
+                        ui.screens.guide_sources.update(|s| {
                             if let Some(s) = s {
                                 s.set_text(t);
                             }

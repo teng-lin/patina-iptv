@@ -173,7 +173,7 @@ pub fn open(ui: Ui) {
         crate::backup::probe_pickers();
         let mut screen = with_ctx(|ctx| Screen::opened(PAGES, LAST.with(Cell::get), ctx));
         screen.set_playlists(playlist_rows());
-        ui.settings_screen.set(Some(screen));
+        ui.screens.settings_screen.set(Some(screen));
         log::info!("iptv settings: open");
     }
 }
@@ -181,16 +181,17 @@ pub fn open(ui: Ui) {
 pub fn close(ui: Ui) {
     crate::runtime_owner::runtime().parental_content_closed();
     if let Some(page) = ui
+        .screens
         .settings_screen
         .with_untracked(|s| s.as_ref().map(|s| s.page().key))
     {
         LAST.with(|l| l.set(page));
     }
     let typing = editing_text(ui);
-    if ui.settings_screen.with_untracked(Option::is_some) {
+    if ui.screens.settings_screen.with_untracked(Option::is_some) {
         log::info!("iptv settings: close");
     }
-    ui.settings_screen.set(None);
+    ui.screens.settings_screen.set(None);
     if typing {
         dismiss_keyboard();
     }
@@ -198,11 +199,11 @@ pub fn close(ui: Ui) {
 
 /// The screen is shown and takes the remote.
 pub fn is_open(ui: Ui) -> bool {
-    ui.settings_screen.with(Option::is_some)
+    ui.screens.settings_screen.with(Option::is_some)
 }
 
 fn editing_text(ui: Ui) -> bool {
-    ui.settings_screen.with_untracked(|s| {
+    ui.screens.settings_screen.with_untracked(|s| {
         s.as_ref()
             .is_some_and(|s| matches!(s.editor(), Some(Editor::Text { .. })))
     })
@@ -238,7 +239,7 @@ fn playlist_rows() -> Vec<PlaylistRow> {
 
 /// The stored playlists changed: the Playlists page follows.
 pub(crate) fn playlists_changed(ui: Ui) {
-    if ui.settings_screen.with_untracked(Option::is_some) {
+    if ui.screens.settings_screen.with_untracked(Option::is_some) {
         let rows = playlist_rows();
         update(ui, move |screen, ctx| {
             screen.set_playlists(rows);
@@ -300,7 +301,7 @@ fn update(ui: Ui, f: impl FnOnce(&mut Screen, &Ctx) -> Effect) {
     let typing = editing_text(ui);
     let mut effect = Effect::None;
     with_ctx(|ctx| {
-        ui.settings_screen.update(|s| {
+        ui.screens.settings_screen.update(|s| {
             if let Some(s) = s {
                 effect = f(s, ctx);
             }
@@ -396,7 +397,8 @@ fn run(ui: Ui, key: &'static str) {
             crate::player::watch_time::reset(ui);
             let owner = crate::runtime_owner::runtime();
             let saved = owner.clear_watch_history();
-            ui.player
+            ui.playback
+                .player
                 .history
                 .set(iptv_presentation::playback::ChannelHistory::default());
             crate::tasks::spawn_in_app(async move {
@@ -480,7 +482,7 @@ fn run(ui: Ui, key: &'static str) {
 }
 
 fn state<R>(ui: Ui, f: impl FnOnce(&Screen) -> R) -> Option<R> {
-    ui.settings_screen.with(|s| s.as_ref().map(f))
+    ui.screens.settings_screen.with(|s| s.as_ref().map(f))
 }
 
 fn status(settings: &Settings, row: &Row) -> Status {

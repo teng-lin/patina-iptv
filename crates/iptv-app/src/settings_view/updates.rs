@@ -19,7 +19,7 @@ pub(crate) fn bind(ui: crate::Ui) {
 }
 
 pub(crate) fn is_open(ui: crate::Ui) -> bool {
-    ui.update_dialog_open.get()
+    ui.screens.update_dialog_open.get()
 }
 
 pub(crate) fn close(ui: crate::Ui) {

@@ -59,15 +59,15 @@ impl Pan {
     }
 
     pub(crate) fn new(ui: Ui, width: Signal<f32>) -> Pan {
-        let (window, now) = ui.focus.with_untracked(|f| (f.window, f.now));
-        let bounds = view_range(&crate::lists::view(ui), now);
+        let (window, now) = ui.guide.focus.with_untracked(|f| (f.window, f.now));
+        let bounds = view_range(&crate::lists::view(ui.guide), now);
         let model = Timeline::new(window, bounds);
         let band = Band::around(model.view());
         let pan = Pan {
             ui,
             model: stored(model),
             width,
-            span: computed(move || ui.focus.with(|f| f.visible)),
+            span: computed(move || ui.guide.focus.with(|f| f.visible)),
             band: signal(band),
             clip: signal(window),
             offset: animated_value(0.0),
@@ -120,8 +120,8 @@ impl Pan {
         let ui = self.ui;
         effect(move || {
             ui.guide_data();
-            let (window, now, span) = ui.focus.with(|f| (f.window, f.now, f.visible));
-            let bounds = untracked(|| view_range(&crate::lists::view(ui), now));
+            let (window, now, span) = ui.guide.focus.with(|f| (f.window, f.now, f.visible));
+            let bounds = untracked(|| view_range(&crate::lists::view(ui.guide), now));
             self.model.with(|m| {
                 m.set_span(span);
                 m.set_bounds(bounds);
@@ -152,7 +152,7 @@ impl Pan {
         if self.slid.with(|s| std::mem::replace(s, slide)) != slide {
             self.offset.set(slide);
         }
-        let now = self.ui.focus.with_untracked(|f| f.now);
+        let now = self.ui.guide.focus.with_untracked(|f| f.now);
         let away = self.model.with(|m| m.away_from_now(now));
         if self.away.get_untracked() != away {
             self.away.set(away);
@@ -165,18 +165,19 @@ impl Pan {
             return;
         }
         let window = self.model.with(|m| m.window());
-        let view = crate::lists::view(self.ui);
+        let view = crate::lists::view(self.ui.guide);
         // The pan moves the focus along its row: still the anchored
         // channel. The anchor moves first, so browse playback never sees
         // the new focus without it.
-        let mut next = self.ui.focus.get_untracked();
+        let mut next = self.ui.guide.focus.get_untracked();
         next.pan_to(window, &view);
-        if self.ui.pan_anchor.with_untracked(Option::is_some) {
+        if self.ui.guide.pan_anchor.with_untracked(Option::is_some) {
             self.ui
+                .guide
                 .pan_anchor
                 .update(|a| a.iter_mut().for_each(|a| a.panned(&next)));
         }
-        self.ui.focus.update(|f| f.pan_to(window, &view));
+        self.ui.guide.focus.update(|f| f.pan_to(window, &view));
         self.show();
     }
 
@@ -186,13 +187,14 @@ impl Pan {
     /// the focus keeps that anchor; any other focus has none.
     fn anchor(&self) {
         let ui = self.ui;
-        let focus = ui.focus.get_untracked();
-        let Some(channel) = untracked(|| crate::lists::focused_channel(ui))
+        let focus = ui.guide.focus.get_untracked();
+        let Some(channel) = untracked(|| crate::lists::focused_channel(ui.guide))
             .and_then(|ch| crate::runtime_owner::schedule().channel_key(ch))
         else {
-            return ui.pan_anchor.set(None);
+            return ui.guide.pan_anchor.set(None);
         };
         let held = ui
+            .guide
             .pan_anchor
             .with_untracked(|a| a.as_ref().is_some_and(|a| a.holds(&channel, &focus)));
         if held {
@@ -201,8 +203,8 @@ impl Pan {
         let next = focused(ui)
             .2
             .then(|| iptv_presentation::browse_playback::PanAnchor::new(channel, &focus));
-        if next.is_some() || ui.pan_anchor.with_untracked(Option::is_some) {
-            ui.pan_anchor.set(next);
+        if next.is_some() || ui.guide.pan_anchor.with_untracked(Option::is_some) {
+            ui.guide.pan_anchor.set(next);
         }
     }
 
@@ -239,7 +241,7 @@ impl Pan {
         let schedule = crate::runtime_owner::schedule();
         for minute in [
             rest - MARGIN,
-            rest + self.ui.focus.with_untracked(|f| f.visible) + MARGIN,
+            rest + self.ui.guide.focus.with_untracked(|f| f.visible) + MARGIN,
         ] {
             crate::data::pages::want(&*schedule, minute);
         }
@@ -299,14 +301,14 @@ impl Pan {
         self.ui.touched();
         self.fling.with(|g| *g += 1);
         self.model.with(Timeline::cancel);
-        self.ui.focus.update(|f| f.jump_to_now());
+        self.ui.guide.focus.update(|f| f.jump_to_now());
     }
 }
 
 /// The focused row, its program's start, and whether that airs now.
 fn focused(ui: Ui) -> (usize, i32, bool) {
-    let view = crate::lists::view(ui);
-    ui.focus.with_untracked(|f| {
+    let view = crate::lists::view(ui.guide);
+    ui.guide.focus.with_untracked(|f| {
         let p = f.program(&view);
         (
             f.channel,

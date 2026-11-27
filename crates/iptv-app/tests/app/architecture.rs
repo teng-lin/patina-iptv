@@ -4,6 +4,39 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+const UI_TOP_LEVEL_FIELDS: usize = 7;
+
+#[test]
+fn ui_only_holds_domain_handles() {
+    let (root, _) = app_sources();
+    let source = code(&root.join("lib.rs"));
+    let (_, definition) = source.split_once("pub struct Ui {").expect("Ui definition");
+    let (fields, _) = definition.split_once("\n}").expect("end of Ui definition");
+    let fields: BTreeSet<_> = fields
+        .lines()
+        .filter_map(|line| {
+            let (field, kind) = line.split_once(':')?;
+            Some((
+                field.split_whitespace().last()?,
+                kind.trim().trim_end_matches(','),
+            ))
+        })
+        .collect();
+    assert_eq!(fields.len(), UI_TOP_LEVEL_FIELDS);
+    assert_eq!(
+        fields,
+        BTreeSet::from([
+            ("app", "SharedUi"),
+            ("owner", "Owner"),
+            ("guide", "GuideUi"),
+            ("playback", "PlaybackUi"),
+            ("cast", "casting::CastUi"),
+            ("screens", "ScreensUi"),
+            ("chrome", "ChromeUi"),
+        ])
+    );
+}
+
 const SHELL_STATICS: &[(&str, &str)] = &[
     // NSH native views use these IDs and weak references to attach to a runtime-owned sender.
     ("host/native/apple_airplay/transport.rs", "NEXT_ID"),

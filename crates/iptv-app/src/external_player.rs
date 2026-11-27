@@ -202,10 +202,10 @@ struct PreviousPlayback {
 
 impl PreviousPlayback {
     fn capture(ui: Ui) -> Option<Self> {
-        let channel = ui.playing.get_untracked()?;
+        let channel = ui.playback.playing.get_untracked()?;
         let schedule = crate::runtime_owner::schedule();
         let (epg, local) = iptv_guide::combined::epg_channel(&*schedule, channel)?;
-        let archive = match ui.playback.get_untracked() {
+        let archive = match ui.playback.playback.get_untracked() {
             Playback::Live => None,
             Playback::CatchUp { start, offset } => Some(crate::player::PendingArchive::capture(
                 &*schedule, channel, start, offset,
@@ -215,7 +215,7 @@ impl PreviousPlayback {
             key: schedule.channel_key(channel)?,
             authority: epg.resolution_authority(local)?,
             archive,
-            mode: ui.mode.get_untracked(),
+            mode: ui.chrome.mode.get_untracked(),
         })
     }
 
@@ -245,7 +245,7 @@ impl PreviousPlayback {
         }
         let ui = pending.ui;
         if !current()
-            || ui.playing.get_untracked().is_some()
+            || ui.playback.playing.get_untracked().is_some()
             || crate::on_demand::active(ui)
             || ui.cast.external.active().is_some()
         {
@@ -265,8 +265,10 @@ impl PreviousPlayback {
         }
         pending.return_to_internal(&target);
         ui.play(channel, playback);
-        if ui.playing.get_untracked() == Some(channel) {
-            ui.mode.apply(crate::mode::Action::Restore(self.mode));
+        if ui.playback.playing.get_untracked() == Some(channel) {
+            ui.chrome
+                .mode
+                .apply(crate::mode::Action::Restore(self.mode));
         } else {
             pending.owner.parental_end_transfer(&target);
         }
@@ -275,7 +277,7 @@ impl PreviousPlayback {
 
 fn group(ui: Ui) -> Option<(ListId, usize)> {
     let schedule = crate::runtime_owner::schedule();
-    let entry = ui.list.with_untracked(|list| list.entry());
+    let entry = ui.guide.list.with_untracked(|list| list.entry());
     let Entry::Group(group) = Entry::at(entry) else {
         return None;
     };
@@ -329,7 +331,7 @@ fn open_from(
     archive: Option<Program>,
     choice: Option<Rc<crate::archive_playback::Choice>>,
 ) -> Outcome {
-    if !host::EXTERNAL_PLAYER || ui.player_surface != 0 {
+    if !host::EXTERNAL_PLAYER || ui.playback.player_surface != 0 {
         return Outcome::Internal;
     }
     let Some((list, group_index)) = group(ui) else {

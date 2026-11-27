@@ -35,11 +35,11 @@ pub struct Early {
 pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     let generation = crate::runtime_owner::runtime().browser_generation();
     if !crate::settings::flag(iptv_settings::keys::RESUME_LAST_CHANNEL)
-        || ui.wizard.with_untracked(Option::is_some)
-        || ui.playing.get_untracked().is_some()
-        || ui.player.recorded.with_untracked(Option::is_some)
-        || ui.player.vod.with_untracked(Option::is_some)
-        || !ui.player.resume.get_untracked()
+        || ui.screens.wizard.with_untracked(Option::is_some)
+        || ui.playback.playing.get_untracked().is_some()
+        || ui.playback.player.recorded.with_untracked(Option::is_some)
+        || ui.playback.player.vod.with_untracked(Option::is_some)
+        || !ui.playback.player.resume.get_untracked()
     {
         return false;
     }
@@ -63,11 +63,11 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
         }
     };
     if crate::runtime_owner::runtime().browser_generation() != generation
-        || ui.wizard.with_untracked(Option::is_some)
-        || ui.playing.get_untracked().is_some()
-        || ui.player.recorded.with_untracked(Option::is_some)
-        || ui.player.vod.with_untracked(Option::is_some)
-        || !ui.player.resume.get_untracked()
+        || ui.screens.wizard.with_untracked(Option::is_some)
+        || ui.playback.playing.get_untracked().is_some()
+        || ui.playback.player.recorded.with_untracked(Option::is_some)
+        || ui.playback.player.vod.with_untracked(Option::is_some)
+        || !ui.playback.player.resume.get_untracked()
     {
         return false;
     }
@@ -80,54 +80,54 @@ pub async fn early(ui: Ui, stored: &StoredSource) -> bool {
     }
     log::info!("iptv player: resuming the last channel before the guide");
     crate::startup::mark("last channel resolved");
-    let main = ui.player.main();
+    let main = ui.playback.player.main();
     let mut session = 0;
     let now = ui.now_ms();
     main.health.update(|h| session = h.start(true, now));
-    ui.player.resume.set(false);
-    ui.playback.set(Playback::Live);
+    ui.playback.player.resume.set(false);
+    ui.playback.playback.set(Playback::Live);
     let authority = crate::runtime::Runtime::stored_source_authority(stored).resolve(&row.channel);
-    ui.player.early.set(Some(Early {
+    ui.playback.player.early.set(Some(Early {
         authority: authority.clone(),
         source_id: stored.id.0,
         key,
         source: source.clone(),
     }));
     super::load_authorized(ui, 0, session, source, Some(authority));
-    ui.mode.apply(crate::mode::Action::EnterFullscreen);
+    ui.chrome.mode.apply(crate::mode::Action::EnterFullscreen);
     true
 }
 
 /// Whether surface 0 plays an early stream (no catalog channel yet).
 pub fn playing(ui: Ui) -> bool {
-    ui.player.early.with(Option::is_some)
+    ui.playback.player.early.with(Option::is_some)
 }
 
 /// The early stream to open again (a retry before the guide arrived).
 pub fn source(ui: Ui) -> Option<Early> {
-    ui.player.early.get_untracked()
+    ui.playback.player.early.get_untracked()
 }
 
 /// The guide is on screen: the early stream's channel becomes the playing
 /// channel, found by key, with its channel banner. True when there was an early
 /// stream (also when its channel is gone and it stopped).
 pub fn adopt(ui: Ui) -> bool {
-    let Some(early) = ui.player.early.get_untracked() else {
+    let Some(early) = ui.playback.player.early.get_untracked() else {
         return false;
     };
-    let main = ui.player.main();
+    let main = ui.playback.player.main();
     let Some(channel) = crate::runtime_owner::schedule().find_channel(&early.key) else {
         log::info!("iptv player: the early channel is not in the guide; stopping");
-        ui.player.early.set(None);
+        ui.playback.player.early.set(None);
         super::stop(ui);
-        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
         return true;
     };
     if crate::runtime_owner::schedule().channel_block(channel)
         != iptv_core::organization::Block::None
     {
         super::stop(ui);
-        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
         return true;
     }
     // Preparing the early stream already owns this request, even before a
@@ -142,9 +142,9 @@ pub fn adopt(ui: Ui) -> bool {
         });
     nsh_core::prelude::batch(|| {
         main.key.set(Some(early.key.clone()));
-        ui.player.history.update(|h| h.played(&early.key));
-        ui.playing.set(Some(channel));
-        ui.player.early.set(None);
+        ui.playback.player.history.update(|h| h.played(&early.key));
+        ui.playback.playing.set(Some(channel));
+        ui.playback.player.early.set(None);
     });
     crate::favorites::played(&early.key);
     crate::lists::show_resumed(ui, channel);
@@ -153,7 +153,7 @@ pub fn adopt(ui: Ui) -> bool {
         // the guide has it.
         ui.play(channel, Playback::Live);
     }
-    if ui.mode.get_untracked() == ViewMode::Fullscreen {
+    if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen {
         ui.show_playing();
     }
     true

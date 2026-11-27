@@ -35,7 +35,8 @@ impl PartialEq for Screen {
 }
 
 fn catalog(ui: Ui) -> Rc<dyn Schedule> {
-    ui.channel_picker
+    ui.playback
+        .channel_picker
         .with(|p| p.as_ref().map(|p| p.catalog.clone()))
         .unwrap_or_else(crate::schedule)
 }
@@ -49,18 +50,20 @@ fn combined(catalog: &dyn Schedule) -> Option<&CombinedSchedule> {
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.channel_picker.with(Option::is_some)
+    ui.playback.channel_picker.with(Option::is_some)
 }
 
 fn state<T>(ui: Ui, f: impl FnOnce(&ChannelPicker) -> T) -> Option<T> {
-    ui.channel_picker.with(|p| p.as_ref().map(|p| f(&p.state)))
+    ui.playback
+        .channel_picker
+        .with(|p| p.as_ref().map(|p| f(&p.state)))
 }
 
 pub fn open(ui: Ui) {
     let catalog = crate::runtime_owner::schedule();
-    let group = ListId::of(ui.list.with_untracked(|l| l.entry()), &*catalog);
+    let group = ListId::of(ui.guide.list.with_untracked(|l| l.entry()), &*catalog);
     let channel = crate::multiview::pick_from(ui).and_then(|c| catalog.channel_key(c));
-    ui.channel_picker.set(Some(Screen {
+    ui.playback.channel_picker.set(Some(Screen {
         state: ChannelPicker::open(group, channel),
         catalog,
     }));
@@ -68,12 +71,12 @@ pub fn open(ui: Ui) {
 }
 
 pub fn close(ui: Ui) {
-    ui.channel_picker.set(None);
+    ui.playback.channel_picker.set(None);
     crate::multiview::list_closed(ui);
 }
 
 fn update(ui: Ui, f: impl FnOnce(&mut ChannelPicker)) {
-    ui.channel_picker.update(|p| {
+    ui.playback.channel_picker.update(|p| {
         if let Some(p) = p {
             f(&mut p.state);
         }
@@ -100,7 +103,7 @@ fn refresh_catalog(ui: Ui) {
         }
         _ => current,
     };
-    ui.channel_picker.update(|p| {
+    ui.playback.channel_picker.update(|p| {
         if let Some(p) = p {
             p.catalog = next;
         }
@@ -136,7 +139,7 @@ fn group(ui: Ui, entry: usize, toggle: bool) {
         && let Some(collapsed) = all.toggle_playlist(g)
     {
         let next = Rc::new(all.with_browser_expansion(collapsed));
-        ui.channel_picker.update(|p| {
+        ui.playback.channel_picker.update(|p| {
             if let Some(p) = p {
                 p.catalog = next;
             }
@@ -224,10 +227,11 @@ pub fn layer(ui: Ui) -> impl IntoElement {
     });
     effect(move || {
         let picking = ui
+            .playback
             .multiview
             .with(|m| m.as_ref().is_some_and(|m| m.pick().is_some()));
-        if !picking && ui.channel_picker.with_untracked(Option::is_some) {
-            ui.channel_picker.set(None);
+        if !picking && ui.playback.channel_picker.with_untracked(Option::is_some) {
+            ui.playback.channel_picker.set(None);
         }
     });
     when(move || is_open(ui), move || screen(ui))
@@ -341,7 +345,7 @@ fn header(ui: Ui, size: Scale) -> impl IntoElement {
         .items_center()
         .gap(move || size.px(12.0))
         .child(ui_kit::title(size, move || {
-            ui.multiview.with(|m| {
+            ui.playback.multiview.with(|m| {
                 if m.as_ref().is_some_and(|m| {
                     matches!(
                         m.pick(),
@@ -462,7 +466,7 @@ fn channel_row(ui: Ui, at: Position, size: Scale, row: Memo<Option<usize>>) -> i
                     let Some(channel) = channel() else {
                         return String::new();
                     };
-                    let now = ui.focus.with(|f| f.now);
+                    let now = ui.guide.focus.with(|f| f.now);
                     let catalog = catalog(ui);
                     let program = catalog.program_at(channel.index, now);
                     format!(

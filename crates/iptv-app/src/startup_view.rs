@@ -61,7 +61,7 @@ pub(crate) fn store_failed(
         log::warn!("iptv storage initialization failed: {error:?}");
         Cause::Other(diagnostic())
     };
-    ui.store_startup_failure.update(|failure| {
+    ui.chrome.store_startup_failure.update(|failure| {
         let retrying = failure
             .as_ref()
             .map(|previous| previous.controls)
@@ -90,7 +90,7 @@ pub(crate) fn store_failed(
 
 fn change_controls(ui: crate::Ui, f: impl FnOnce(&mut Recovery) -> bool) -> bool {
     let mut changed = false;
-    ui.store_startup_failure.update(|failure| {
+    ui.chrome.store_startup_failure.update(|failure| {
         if let Some(failure) = failure {
             changed = f(&mut failure.controls);
         }
@@ -99,7 +99,8 @@ fn change_controls(ui: crate::Ui, f: impl FnOnce(&mut Recovery) -> bool) -> bool
 }
 
 fn controls(ui: crate::Ui) -> Option<Recovery> {
-    ui.store_startup_failure
+    ui.chrome
+        .store_startup_failure
         .with(|failure| failure.as_ref().map(|failure| failure.controls))
 }
 
@@ -134,8 +135,8 @@ pub(crate) fn store_failure_key(ui: crate::Ui, action: iptv_nav::Action) {
     if !change_controls(ui, |controls| controls.move_to(focus)) {
         let distance = crate::scale::now() * 96.0;
         match action {
-            Action::MoveUp => ui.store_failure_scroll.scroll_by(-distance),
-            Action::MoveDown => ui.store_failure_scroll.scroll_by(distance),
+            Action::MoveUp => ui.chrome.store_failure_scroll.scroll_by(-distance),
+            Action::MoveDown => ui.chrome.store_failure_scroll.scroll_by(distance),
             _ => {}
         }
     }
@@ -147,18 +148,18 @@ pub(crate) fn store_failure_layer(ui: crate::Ui) -> impl nsh_core::prelude::Into
     use nsh_core::prelude::*;
 
     let size = Scale::new();
-    let scrolling = ui.store_failure_scroll;
+    let scrolling = ui.chrome.store_failure_scroll;
     let retry = move || controls(ui).map_or(Retry::Unavailable, Recovery::retry);
     let expanded = move || controls(ui).is_some_and(Recovery::details);
     let newer = move || {
-        ui.store_startup_failure.with(|failure| {
+        ui.chrome.store_startup_failure.with(|failure| {
             failure
                 .as_ref()
                 .is_some_and(|failure| matches!(failure.cause, Cause::Newer { .. }))
         })
     };
     let restart = move || {
-        ui.store_startup_failure.with(|failure| {
+        ui.chrome.store_startup_failure.with(|failure| {
             failure
                 .as_ref()
                 .is_some_and(|failure| matches!(failure.cause, Cause::RestartRequired(_)))
@@ -265,7 +266,7 @@ fn failure_details(
     use nsh_core::prelude::*;
 
     dynamic(move || {
-        ui.store_startup_failure.with(|failure| {
+        ui.chrome.store_startup_failure.with(|failure| {
             failure.as_ref().map(|failure| {
                 let diagnostic = match &failure.cause {
                     Cause::Newer { found, supported } => trf(

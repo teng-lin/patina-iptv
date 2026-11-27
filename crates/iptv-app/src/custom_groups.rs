@@ -19,24 +19,24 @@ use nsh_core::Checked;
 use nsh_core::prelude::*;
 
 fn read<R>(ui: Ui, f: impl FnOnce(&Open) -> R) -> Option<R> {
-    ui.custom_groups.read(f)
+    ui.screens.custom_groups.read(f)
 }
 fn update(ui: Ui, f: impl FnOnce(&mut Open)) {
-    ui.custom_groups.update(f);
+    ui.screens.custom_groups.update(f);
 }
 pub fn is_open(ui: Ui) -> bool {
-    ui.custom_groups.is_open()
+    ui.screens.custom_groups.is_open()
 }
 fn request<R: Send + 'static>(
     ui: Ui,
     operation: impl std::future::Future<Output = Result<R, Error>> + 'static,
     done: impl FnOnce(Ui, Result<R, Error>) + 'static,
 ) {
-    let generation = ui.custom_groups.epoch();
+    let generation = ui.screens.custom_groups.epoch();
     let result = operation;
     crate::tasks::spawn_in_app(async move {
         let result = result.await;
-        if ui.custom_groups.is_current(generation) && is_open(ui) {
+        if ui.screens.custom_groups.is_current(generation) && is_open(ui) {
             done(ui, result);
         }
     });
@@ -47,7 +47,7 @@ fn mutate<R: Send + 'static>(
     operation: impl std::future::Future<Output = Result<R, Error>> + 'static,
     done: impl FnOnce(Ui, Result<R, Error>) + 'static,
 ) {
-    let generation = ui.custom_groups.epoch();
+    let generation = ui.screens.custom_groups.epoch();
     let result = operation;
     crate::tasks::spawn_in_app(async move {
         let result = result.await;
@@ -55,7 +55,7 @@ fn mutate<R: Send + 'static>(
         if result.is_ok() {
             data::organization_changed(&crate::runtime_owner::runtime(), source);
         }
-        if ui.custom_groups.is_current(generation) && is_open(ui) {
+        if ui.screens.custom_groups.is_current(generation) && is_open(ui) {
             done(ui, result);
         }
     });
@@ -82,7 +82,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
         crate::parental_view::protected_settings(ui, move || open_with(ui, source, members));
         return;
     }
-    ui.custom_groups.open(Open::new(source));
+    ui.screens.custom_groups.open(Open::new(source));
     request(
         ui,
         crate::runtime::commands::custom_groups(&crate::runtime_owner::runtime(), source),
@@ -102,7 +102,7 @@ fn open_with(ui: Ui, source: SourceId, members: Option<ChannelScope>) {
 }
 fn close(ui: Ui) {
     dismiss_keyboard();
-    ui.custom_groups.close();
+    ui.screens.custom_groups.close();
 }
 fn reload(ui: Ui) {
     let Some((source, scope)) = read(ui, |s| (s.source, s.scope.clone())) else {
@@ -133,7 +133,7 @@ fn report(ui: Ui, result: Result<(), Error>) {
     }
 }
 fn show_members(ui: Ui, scope: ChannelScope) {
-    ui.custom_groups.next_request();
+    ui.screens.custom_groups.next_request();
     let Some(source) = read(ui, |s| s.source) else {
         return;
     };
@@ -148,7 +148,7 @@ fn show_members(ui: Ui, scope: ChannelScope) {
     );
 }
 pub fn back(ui: Ui) -> bool {
-    ui.custom_groups.next_request();
+    ui.screens.custom_groups.next_request();
     let Some((editing, root)) = read(ui, |s| (s.editing.is_some(), s.page == Page::Groups)) else {
         return false;
     };

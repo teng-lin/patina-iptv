@@ -37,7 +37,7 @@ async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Ite
 }
 
 fn still_open(ui: Ui, generation: u64) -> bool {
-    ui.organization.is_current(generation)
+    ui.screens.organization.is_current(generation)
 }
 
 pub fn open(ui: Ui, source: SourceId, kind: Kind, focus: Option<String>) {
@@ -96,12 +96,14 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
             crate::settings_view::close(ui);
         }
         crate::channels_view::close(ui);
-        ui.panels.update(|panels| panels.hide());
-        ui.mode
+        ui.playback.panels.update(|panels| panels.hide());
+        ui.chrome
+            .mode
             .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
         crate::lists::open_groups(ui);
         crate::browse_playback::hold(ui);
-        ui.organization
+        ui.screens
+            .organization
             .open(Open::with_editor(None, editor, Placement::Groups));
     });
 }
@@ -140,7 +142,7 @@ pub fn open_context_reorder(
             && let Some(id) = &focus
             && let Some(&channel) = guide_order_keys(ui, source, &list).get(id)
         {
-            let now = ui.focus.with_untracked(|f| f.now);
+            let now = ui.guide.focus.with_untracked(|f| f.now);
             crate::lists::tap(ui, channel, now);
         }
         crate::browse_playback::hold(ui);
@@ -149,18 +151,18 @@ pub fn open_context_reorder(
 }
 
 fn leave_fullscreen_for_reorder(ui: Ui) -> bool {
-    let from_player = ui.mode.get_untracked() == crate::ViewMode::Fullscreen;
+    let from_player = ui.chrome.mode.get_untracked() == crate::ViewMode::Fullscreen;
     if from_player {
         crate::channels_view::close(ui);
-        ui.panels.update(|panels| panels.hide());
-        ui.mode.apply(crate::mode::Action::ReturnToBrowse);
+        ui.playback.panels.update(|panels| panels.hide());
+        ui.chrome.mode.apply(crate::mode::Action::ReturnToBrowse);
     }
     from_player
 }
 
 fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
     if idiom() != nsh_core::platform::Idiom::Tv
-        || ui.mode.get_untracked() == crate::ViewMode::Fullscreen
+        || ui.chrome.mode.get_untracked() == crate::ViewMode::Fullscreen
     {
         Placement::Panel(list)
     } else if *kind == Kind::Groups {
@@ -172,10 +174,10 @@ fn reorder_placement(ui: Ui, kind: &Kind, list: ListId) -> Placement {
 }
 
 fn guide_reorder_placement(ui: Ui, list: ListId) -> Placement {
-    let return_to_groups = ui.focus.with_untracked(|f| f.pane == Pane::Groups);
+    let return_to_groups = ui.guide.focus.with_untracked(|f| f.pane == Pane::Groups);
     let entry = list.find(&*crate::runtime_owner::schedule());
     crate::lists::preview(ui, entry);
-    ui.focus.update(|f| {
+    ui.guide.focus.update(|f| {
         f.close_columns();
         f.hint = false;
     });
@@ -207,6 +209,7 @@ fn open_with(
     placement: Placement,
 ) {
     let generation = ui
+        .screens
         .organization
         .open(Open::new(source, kind.clone(), mode, placement));
     crate::tasks::spawn_in_app(async move {
@@ -263,7 +266,7 @@ fn block_state(state: &Open, id: &str) -> Block {
 }
 
 pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked: bool) {
-    let generation = ui.organization.epoch();
+    let generation = ui.screens.organization.epoch();
     let owner = crate::runtime_owner::runtime();
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     crate::tasks::spawn_in_app(async move {
@@ -302,13 +305,13 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.organization.is_open()
+    ui.screens.organization.is_open()
 }
 fn state<R>(ui: Ui, f: impl FnOnce(&Open) -> R) -> Option<R> {
-    ui.organization.read(f)
+    ui.screens.organization.read(f)
 }
 fn update(ui: Ui, f: impl FnOnce(&mut Open)) {
-    ui.organization.update(f)
+    ui.screens.organization.update(f)
 }
 pub fn back(ui: Ui) -> bool {
     if state(ui, |s| s.saving).unwrap_or(false) {
@@ -352,7 +355,7 @@ fn close(ui: Ui) {
     {
         crate::lists::open_groups(ui);
     }
-    ui.organization.close();
+    ui.screens.organization.close();
     dismiss_keyboard();
 }
 pub fn key(ui: Ui, action: Action) {
@@ -476,7 +479,7 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 
 fn save_order(ui: Ui) {
     if state(ui, |s| s.scope.is_none()) == Some(true) {
-        let generation = ui.organization.epoch();
+        let generation = ui.screens.organization.epoch();
         crate::settings_view::settings_guarded(ui, move || {
             if !still_open(ui, generation) {
                 return;
@@ -534,7 +537,7 @@ fn persist_order(ui: Ui) {
     if playlists && !check_playlist_order_catalog(ui) {
         return;
     }
-    let generation = ui.organization.epoch();
+    let generation = ui.screens.organization.epoch();
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let mut saved_positions = None;
@@ -657,7 +660,7 @@ fn perform(ui: Ui, edit: Edit) {
 }
 
 fn apply_edit(ui: Ui, edit: Edit) {
-    let generation = ui.organization.epoch();
+    let generation = ui.screens.organization.epoch();
     let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
@@ -878,7 +881,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
 }
 
 fn commit(ui: Ui) {
-    let generation = ui.organization.epoch();
+    let generation = ui.screens.organization.epoch();
     let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
@@ -1447,7 +1450,7 @@ pub(crate) fn guide_order_scope(ui: Ui) -> Option<(SourceId, ListId)> {
 pub(crate) fn guide_order_keys(ui: Ui, source: SourceId, list: &ListId) -> HashMap<String, usize> {
     ui.app.data_version.get();
     let catalog = crate::runtime_owner::schedule();
-    ui.list.with(|channels| {
+    ui.guide.list.with(|channels| {
         if &ListId::of(channels.entry(), &*catalog) != list {
             return HashMap::new();
         }
@@ -1787,7 +1790,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             })
             .flatten()
         }) {
-            let generation = ui.organization.epoch();
+            let generation = ui.screens.organization.epoch();
             crate::tasks::spawn_in_app(async move {
                 if let Ok(loaded) = items(source, &kind, None).await
                     && still_open(ui, generation)

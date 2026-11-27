@@ -37,8 +37,8 @@ impl Ui {
     /// What just started playing over full-screen video: the banner for
     /// a live channel, the card with its seek bar for a replay.
     pub fn show_playing(&self) {
-        let live =
-            self.playback.get_untracked() == Playback::Live && !crate::on_demand::active(*self);
+        let live = self.playback.playback.get_untracked() == Playback::Live
+            && !crate::on_demand::active(*self);
         self.update_panels(|p, now| {
             if live {
                 p.show_banner(now);
@@ -65,7 +65,7 @@ fn with(name: &str, value: Option<String>) -> String {
 /// reference shows one.
 fn label(ui: Ui, control: Control) -> String {
     use Control::*;
-    let main = ui.player.main();
+    let main = ui.playback.player.main();
     let tracks = main.tracks;
     match control {
         Search => tr("Search").to_owned(),
@@ -90,7 +90,8 @@ fn label(ui: Ui, control: Control) -> String {
         ),
         PictureInPicture => with(
             tr("Picture in picture"),
-            ui.pip
+            ui.playback
+                .pip
                 .with(|pip| {
                     iptv_presentation::capabilities::pip(pip, crate::pip::playing(ui)).reason()
                 })
@@ -119,7 +120,7 @@ fn label(ui: Ui, control: Control) -> String {
             tr("Audio delay"),
             Some(delay_label(
                 crate::i18n::language(),
-                ui.media.delay_ms.get(),
+                ui.playback.media.delay_ms.get(),
             )),
         ),
         Captions => with(
@@ -137,7 +138,8 @@ fn label(ui: Ui, control: Control) -> String {
         SleepTimer => with(
             tr("Sleep timer"),
             Some(
-                ui.sleep
+                ui.playback
+                    .sleep
                     .with(|t| t.remaining_minutes(ui.now_ms()))
                     .map_or(tr("Off").to_owned(), |m| {
                         trf("{minutes} min", &[("minutes", m.into())])
@@ -150,7 +152,8 @@ fn label(ui: Ui, control: Control) -> String {
 }
 
 fn is_favorite(ui: Ui) -> bool {
-    ui.playing
+    ui.playback
+        .playing
         .get()
         .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch)))
 }
@@ -162,7 +165,7 @@ fn is_favorite(ui: Ui) -> bool {
 /// viewer can change its condition. The features that follow the
 /// device's form factor and input are left out here.
 pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
-    let main = ui.player_surface == 0;
+    let main = ui.playback.player_surface == 0;
     match control {
         // Where the device offers them (`capabilities::record_now` and
         // `recordings_library`).
@@ -177,44 +180,48 @@ pub(crate) fn offered(ui: Ui, device: Device, control: Control) -> bool {
         Control::Multiview => main && crate::multiview::offer_on(ui, device).shown(),
         // Shown until the host reports, then only where it can: never a TV
         // (`Pip::report`), the iPad or a browser TV (`pip::bind`).
-        Control::PictureInPicture => ui.pip.with(|p| !p.reported || p.supported),
+        Control::PictureInPicture => ui.playback.pip.with(|p| !p.reported || p.supported),
         _ => true,
     }
 }
 
 /// Whether a control can act now; the rest show disabled.
 pub fn enabled(ui: Ui, control: Control) -> bool {
-    let choice = |k| ui.player.main().tracks.with(|t| t.has_choice(k));
+    let choice = |k| ui.playback.player.main().tracks.with(|t| t.has_choice(k));
     match control {
         Control::Multiview => crate::multiview::availability(ui).available(),
         Control::Record => {
-            ui.player_surface == 0
-                && ui.playback.get() == crate::Playback::Live
-                && !ui.recordings.with(|s| s.busy || s.starting.is_some())
+            ui.playback.player_surface == 0
+                && ui.playback.playback.get() == crate::Playback::Live
+                && !ui
+                    .screens
+                    .recordings
+                    .with(|s| s.busy || s.starting.is_some())
                 && (crate::recordings_view::recording_active(ui)
                     || (crate::capabilities::record_now().offered()
                         && ui
+                            .playback
                             .playing
                             .get()
                             .is_some_and(crate::recordings_view::available)))
         }
         Control::Recordings => {
-            ui.player_surface == 0 && crate::capabilities::recordings_library(ui)
+            ui.playback.player_surface == 0 && crate::capabilities::recordings_library(ui)
         }
-        Control::Search => ui.player_surface == 0,
+        Control::Search => ui.playback.player_surface == 0,
         Control::ChannelList | Control::Favorite | Control::Scaling | Control::SleepTimer => true,
         Control::VideoTracks => choice(Track::Video),
         Control::AudioTracks => choice(Track::Audio),
         Control::Captions => choice(Track::Text),
-        Control::AudioOffset => crate::media::AUDIO_DELAY && ui.playing.get().is_some(),
+        Control::AudioOffset => crate::media::AUDIO_DELAY && ui.playback.playing.get().is_some(),
         Control::PictureInPicture => crate::pip::can_enter(ui),
     }
 }
 
 /// The panels as shown: hidden outside full screen and in multiview.
 fn shown(ui: Ui) -> Shown {
-    if ui.mode.get() == ViewMode::Fullscreen && !crate::multiview::is_open(ui) {
-        ui.panels.with(|p| p.shown)
+    if ui.chrome.mode.get() == ViewMode::Fullscreen && !crate::multiview::is_open(ui) {
+        ui.playback.panels.with(|p| p.shown)
     } else {
         Shown::Hidden
     }
@@ -227,30 +234,30 @@ fn events(hidden: bool, open: PointerEvents) -> PointerEvents {
     if hidden { PointerEvents::None } else { open }
 }
 
-pub(crate) fn bind_auto_hide(ui: Ui) {
+pub(crate) fn bind_auto_hide(app: crate::SharedUi, playback: crate::PlaybackUi) {
     // A screen reader's or switch user moves through the panels at their
     // own pace: while one runs they stay until hidden (WCAG 2.2.1); the
     // play bar does the same (`play_bar::bind`).
     effect(move || {
         let on = crate::device::assistive();
-        if untracked(|| ui.panels.with(|p| p.waits_for_assistive() != on)) {
-            let now = ui.now_ms();
-            untracked(|| ui.panels.update(|p| p.assistive(on, now)));
+        if untracked(|| playback.panels.with(|p| p.waits_for_assistive() != on)) {
+            let now = app.now_ms();
+            untracked(|| playback.panels.update(|p| p.assistive(on, now)));
         }
     });
     // A channel change can publish the deadline from a debounce whose
     // owner is disposed when playback updates the focused target. Bind
     // to the window so the deadline remains armed through that change.
-    let deadline = computed(move || ui.panels.with(|p| p.hide_at_ms()));
+    let deadline = computed(move || playback.panels.with(|p| p.hide_at_ms()));
     effect(move || {
         if let Some(at) = deadline.get() {
             drop(spawn(async move {
-                timer_until(ui.app.epoch + Duration::from_millis(at)).await;
-                let now = ui.now_ms();
-                if ui.panels.with_untracked(|p| p.hide_at_ms()) != Some(at) {
+                timer_until(app.epoch + Duration::from_millis(at)).await;
+                let now = app.now_ms();
+                if playback.panels.with_untracked(|p| p.hide_at_ms()) != Some(at) {
                     return;
                 }
-                ui.panels.update(|p| {
+                playback.panels.update(|p| {
                     if p.tick(now) {
                         log::info!("iptv panels auto-hide now={now} at={at}");
                     }
@@ -294,16 +301,16 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 .child(when(
                     move || {
                         card()
-                            && ui.player.recorded.with(Option::is_none)
-                            && ui.player.vod.with(Option::is_none)
+                            && ui.playback.player.recorded.with(Option::is_none)
+                            && ui.playback.player.vod.with(Option::is_none)
                     },
                     move || card::info_card(ui, panel),
                 ))
                 .child(when(
                     move || {
                         card()
-                            && (ui.player.recorded.with(Option::is_some)
-                                || ui.player.vod.with(Option::is_some))
+                            && (ui.playback.player.recorded.with(Option::is_some)
+                                || ui.playback.player.vod.with(Option::is_some))
                     },
                     move || {
                         let size = crate::scale::Scale::new();
@@ -312,14 +319,14 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                                 if let Some(title) = crate::vod_view::title(ui) {
                                     return title;
                                 }
-                                ui.player.recorded.with(|r| {
+                                ui.playback.player.recorded.with(|r| {
                                     r.as_ref()
                                         .map(|(job, _)| job.request.title.clone())
                                         .unwrap_or_default()
                                 })
                             }))
                             .child(crate::ui_kit::body(size, move || {
-                                ui.player.recorded.with(|r| {
+                                ui.playback.player.recorded.with(|r| {
                                     r.as_ref()
                                         .map(|(job, _)| job.request.channel_name.clone())
                                         .unwrap_or_default()
@@ -351,7 +358,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
 /// The playing channel's group at the left; live state, sleep timer, date
 /// and time at the right.
 fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
-    let live = move || !ui.paused.get();
+    let live = move || !ui.playback.paused.get();
     view()
         .mt(px(16.0))
         .flex_row()
@@ -364,7 +371,10 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         .child(
             text(move || {
                 ui.guide_data();
-                ui.playing.get().map_or(String::new(), card::group_of)
+                ui.playback
+                    .playing
+                    .get()
+                    .map_or(String::new(), card::group_of)
             })
             .flex_1()
             .number_of_lines(1)
@@ -373,12 +383,12 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         )
         .child(
             text(move || {
-                if ui.player.vod.with(Option::is_some) {
+                if ui.playback.player.vod.with(Option::is_some) {
                     if live() { tr("Video") } else { tr("Paused") }
-                } else if ui.player.recorded.with(Option::is_some) {
+                } else if ui.playback.player.recorded.with(Option::is_some) {
                     if live() { tr("Recorded") } else { tr("PAUSED") }
                 } else {
-                    match (ui.playback.get(), live()) {
+                    match (ui.playback.playback.get(), live()) {
                         (Playback::CatchUp { .. }, true) => tr("CATCH-UP"),
                         (_, true) => tr("LIVE"),
                         (_, false) => tr("PAUSED"),
@@ -408,7 +418,8 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
         .child(
             // Sleep timer: minutes left as of the last redraw.
             text(move || {
-                ui.sleep
+                ui.playback
+                    .sleep
                     .with(|t| t.remaining_minutes(ui.now_ms()))
                     .map_or(String::new(), |m| {
                         trf("Sleep {minutes} min", &[("minutes", m.into())])
@@ -421,7 +432,7 @@ fn top_bar(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> View {
             text(move || {
                 ui.guide_data();
                 let s = crate::runtime_owner::schedule();
-                let unix = crate::guide::unix_of(&*s, ui.focus.with(|f| f.now));
+                let unix = crate::guide::unix_of(&*s, ui.guide.focus.with(|f| f.now));
                 date_time(
                     unix,
                     crate::clock::offset_minutes(unix),
@@ -483,7 +494,7 @@ fn quick_row(ui: Ui, panel: impl Fn() -> Rgba + Copy + 'static) -> impl IntoElem
         .children(QUICK_ACTIONS.iter().enumerate().map(move |(i, action)| {
             let action = *action;
             // Multiview only where the strip offers it (`offered`).
-            let offered = move || ui.panels.with(|p| p.offers_quick(action));
+            let offered = move || ui.playback.panels.with(|p| p.offers_quick(action));
             when(offered, move || quick_card(ui, i, action))
         }))
         .self_start()
@@ -494,6 +505,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
     let focused = move || {
         ui.keys_shown()
             && ui
+                .playback
                 .panels
                 .with(|p| p.shown == Shown::Card && p.quick == Some(i))
     };
@@ -506,7 +518,7 @@ fn quick_card(ui: Ui, i: usize, action: QuickAction) -> impl IntoElement {
         focused,
         move || action == QuickAction::Multiview && !crate::multiview::availability(ui).available(),
         move || {
-            ui.panels.update(|p| p.quick = Some(i));
+            ui.playback.panels.update(|p| p.quick = Some(i));
             crate::player_keys::press_quick(ui, action);
         },
     )
@@ -525,8 +537,8 @@ fn hint_line(ui: Ui, shown: Memo<Shown>) -> impl IntoElement {
         if !ui.keys_shown() {
             return "";
         }
-        let focused = ui.panels.with(|p| p.quick.is_some());
-        let replay = matches!(ui.playback.get(), Playback::CatchUp { .. });
+        let focused = ui.playback.panels.with(|p| p.quick.is_some());
+        let replay = matches!(ui.playback.playback.get(), Playback::CatchUp { .. });
         let seek = replay.then(|| {
             ui.app.settings.get();
             crate::settings::choice(iptv_settings::keys::SEEK_KEYS)
@@ -560,18 +572,21 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
         // A resize or a report that leaves the strip as it is does not
         // touch the panels, whose readers would otherwise all run again.
         if ui
+            .playback
             .panels
             .with_untracked(|p| p.controls().eq(shown.iter().copied()))
         {
             return;
         }
         untracked(|| {
-            ui.panels
+            ui.playback
+                .panels
                 .update(|p| p.offer(|control| shown.contains(&control)))
         });
     });
     let focus = computed(move || {
-        ui.panels
+        ui.playback
+            .panels
             .with(|p| p.controls().position(|c| c == p.focused()).unwrap_or(0))
     });
     effect(move || {
@@ -580,16 +595,17 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
             list.scroll_to_index(at as u32, percentage(0.5), px(0.0), true);
         }
     });
-    let count = computed(move || ui.panels.with(|p| p.controls().count()));
+    let count = computed(move || ui.playback.panels.with(|p| p.controls().count()));
     virtual_list(count, move |at| {
         // A recycled cell takes another row: read its index each time.
         let control = computed(move || {
             let index = at.index();
-            ui.panels.with(|p| p.controls().nth(index))
+            ui.playback.panels.with(|p| p.controls().nth(index))
         });
         let focused = move || {
             ui.keys_shown()
                 && ui
+                    .playback
                     .panels
                     .with(|p| p.shown == Shown::Controls && control.get() == Some(p.focused()))
         };
@@ -602,7 +618,7 @@ fn strip(ui: Ui, open: impl Fn() -> bool + Copy + 'static) -> VirtualList {
                 let Some(control) = control.get_untracked() else {
                     return;
                 };
-                ui.panels.update(|p| p.focus_control(control));
+                ui.playback.panels.update(|p| p.focus_control(control));
                 crate::player_keys::press_control(ui, control);
             },
         )

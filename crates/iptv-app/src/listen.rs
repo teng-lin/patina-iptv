@@ -20,23 +20,26 @@ use crate::Ui;
 /// not heard offer Listen to this. A detour (one tile full screen) shows
 /// one player only.
 pub fn choice(ui: Ui) -> bool {
-    ui.multiview.with(|m| {
+    ui.playback.multiview.with(|m| {
         m.as_ref()
             .is_some_and(|m| m.detour().is_none() && m.tiles().len() > 1)
-    }) || ui.player_windows.with(|w| !w.sessions().is_empty())
+    }) || ui
+        .playback
+        .player_windows
+        .with(|w| !w.sessions().is_empty())
 }
 
 /// Whether `ui`'s own player (the main one, or a window's) is the heard
 /// one, its own Mute aside.
 pub fn heard(ui: Ui) -> bool {
-    crate::multiview::audible(ui, ui.player_surface)
+    crate::multiview::audible(ui, ui.playback.player_surface)
 }
 
 /// Whether `ui`'s own player sounds: heard and not muted by its Mute.
 pub fn sounding(ui: Ui) -> bool {
-    match ui.player_surface {
-        0 => heard(ui) && !crate::media::muted(ui),
-        surface => ui.player_windows.with(|w| {
+    match ui.playback.player_surface {
+        0 => heard(ui) && !crate::media::muted(ui.playback),
+        surface => ui.playback.player_windows.with(|w| {
             w.on_surface(surface)
                 .is_some_and(|s| w.audible() == Some(s.id) && !s.volume.muted)
         }),
@@ -46,22 +49,23 @@ pub fn sounding(ui: Ui) -> bool {
 /// Listen to this on `ui`'s own player (a window's, or the main one): its
 /// sound plays, every other player's is muted.
 pub fn listen(ui: Ui) {
-    let surface = ui.player_surface;
+    let surface = ui.playback.player_surface;
     log::info!("iptv sound: listening to surface {surface}");
     ui.touched();
     if surface == 0 {
         batch(|| {
-            ui.player_windows.update(|w| w.listen_to_main());
-            if ui.media.volume.with_untracked(|v| v.muted) {
-                ui.media.volume.update(|v| v.muted = false);
+            ui.playback.player_windows.update(|w| w.listen_to_main());
+            if ui.playback.media.volume.with_untracked(|v| v.muted) {
+                ui.playback.media.volume.update(|v| v.muted = false);
             }
         });
         return;
     }
     let id = ui
+        .playback
         .player_windows
         .with_untracked(|w| w.on_surface(surface).map(|s| s.id));
     if let Some(id) = id {
-        ui.player_windows.update(|w| w.listen(id));
+        ui.playback.player_windows.update(|w| w.listen(id));
     }
 }

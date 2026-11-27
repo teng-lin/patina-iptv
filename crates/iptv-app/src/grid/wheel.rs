@@ -58,7 +58,7 @@ pub(super) fn trackball(pan: Pan, grid: impl IntoElement + 'static) -> Scroll {
             // wheel: only the steps are.
             if dx != 0.0 && dx.abs() < PAD / 4.0 {
                 if !coasting.with(|c| *c) {
-                    crate::pointer_input(pan.ui());
+                    crate::pointer_input(pan.ui().chrome);
                 }
                 pan.wheeled(dx);
             }

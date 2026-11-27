@@ -29,12 +29,12 @@ enum Status {
 }
 
 fn status_of(ui: Ui) -> Status {
-    let channel = ui.playing.get();
+    let channel = ui.playback.playing.get();
     let demand = crate::on_demand::active(ui);
     if channel.is_none() && !demand {
         return Status::Hidden;
     }
-    if ui.mode.get() == ViewMode::Overlay {
+    if ui.chrome.mode.get() == ViewMode::Overlay {
         return Status::Hidden; // the guide covers the video
     }
     if crate::multiview::is_open(ui) {
@@ -46,9 +46,10 @@ fn status_of(ui: Ui) -> Status {
         "no account" => tr("no account").to_owned(),
         _ => detail.to_owned(),
     };
-    let catch_up = matches!(ui.playback.get(), Playback::CatchUp { .. });
+    let catch_up = matches!(ui.playback.playback.get(), Playback::CatchUp { .. });
     let now = ui.now_ms();
-    ui.player
+    ui.playback
+        .player
         .main()
         .health
         .with(|h| match (h.phase(), h.failure()) {
@@ -92,7 +93,7 @@ fn status_of(ui: Ui) -> Status {
 /// The status over the video, in the player's rectangle.
 pub fn status(ui: Ui) -> impl IntoElement {
     let status = computed(move || status_of(ui));
-    let compact = move || ui.mode.get() == ViewMode::Guide;
+    let compact = move || ui.chrome.mode.get() == ViewMode::Guide;
     let panel = move || tint(ui.app.theme.with(|t| t.background.panel), PANEL_ALPHA);
     let size = move |full: f32| px(if compact() { full * 0.6 } else { full });
     let waiting = move || matches!(status.get(), Status::Waiting(_));
@@ -101,7 +102,7 @@ pub fn status(ui: Ui) -> impl IntoElement {
     let retry_active = move || {
         !ui.any_overlay_open()
             && !crate::play_bar::captures(ui)
-            && !ui.panels.with(|p| p.captures_input())
+            && !ui.playback.panels.with(|p| p.captures_input())
     };
     let retry_keys = move || ui.keys_shown() && retry_active();
     view()

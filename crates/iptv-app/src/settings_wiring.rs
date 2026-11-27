@@ -34,13 +34,13 @@ pub fn bind(ui: Ui) {
         let span = s.int(iptv_settings::keys::GUIDE_VISIBLE_MINUTES, &Target::Global) as i32;
         untracked(|| {
             ui.app.theme.set(theme);
-            if ui.focus.with_untracked(|f| f.visible) != span {
-                let view = crate::lists::view(ui);
-                ui.focus.update(|f| f.set_visible(span, &view));
+            if ui.guide.focus.with_untracked(|f| f.visible) != span {
+                let view = crate::lists::view(ui.guide);
+                ui.guide.focus.update(|f| f.set_visible(span, &view));
             }
-            if ui.panels.with(|p| p.timeouts) != timeouts {
+            if ui.playback.panels.with(|p| p.timeouts) != timeouts {
                 let now = ui.now_ms();
-                ui.panels.update(|p| p.set_timeouts(timeouts, now));
+                ui.playback.panels.update(|p| p.set_timeouts(timeouts, now));
             }
         });
     });

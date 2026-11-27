@@ -12,7 +12,7 @@ use iptv_presentation::sound::{VOLUME_STEP, Volume};
 use iptv_presentation::tracks::Choice;
 use nsh_core::prelude::*;
 
-use crate::Ui;
+use crate::{PlaybackUi, Ui};
 
 /// Sound state beside [`Ui`]'s (signals are `Copy`), the same for every
 /// surface; multiview mutes all but its active one.
@@ -38,8 +38,8 @@ pub const AUDIO_DELAY: bool = true;
 
 /// `surface` opened another stream: its tracks are not known yet and the
 /// choices made for the last one do not apply.
-pub fn reset(ui: Ui, surface: usize) {
-    let m = ui.player.stream(surface);
+pub(crate) fn reset(playback: PlaybackUi, surface: usize) {
+    let m = playback.player.stream(surface);
     if m.tracks.with_untracked(|t| *t != Tracks::default()) {
         m.tracks.set(Tracks::default());
     }
@@ -53,9 +53,9 @@ pub fn reset(ui: Ui, surface: usize) {
 
 /// The viewer picked `value` (a track id, `auto` or `off`) for `kind` of
 /// the full-screen player.
-pub fn choose(ui: Ui, kind: Kind, value: String) {
+pub(crate) fn choose(playback: PlaybackUi, kind: Kind, value: String) {
     log::info!("iptv tracks: {kind:?} → {value}");
-    ui.player.main().choice.update(|c| match kind {
+    playback.player.main().choice.update(|c| match kind {
         Kind::Video => c.video = value,
         Kind::Audio => c.audio = value,
         Kind::Text => c.text = value,
@@ -67,17 +67,17 @@ pub fn step_volume(ui: Ui, up: bool) {
     if crate::casting::volume(ui, iptv_core::cast::Command::StepVolume(delta as i8)) {
         return;
     }
-    change_volume(ui, |v| v.step(delta));
-    log_volume(ui);
+    change_volume(ui.playback, |v| v.step(delta));
+    log_volume(ui.playback);
 }
 
 pub fn toggle_mute(ui: Ui) {
     if crate::casting::volume(ui, iptv_core::cast::Command::ToggleMute) {
         return;
     }
-    let muted = !untracked(|| muted(ui));
-    change_volume(ui, |v| v.muted = muted);
-    log_volume(ui);
+    let muted = !untracked(|| muted(ui.playback));
+    change_volume(ui.playback, |v| v.muted = muted);
+    log_volume(ui.playback);
 }
 
 pub fn set_volume(ui: Ui, level: i32) {
@@ -87,35 +87,35 @@ pub fn set_volume(ui: Ui, level: i32) {
     ) {
         return;
     }
-    change_volume(ui, |v| v.set(level));
+    change_volume(ui.playback, |v| v.set(level));
 }
 
 /// Include audio ownership so the main controls describe what is actually heard.
-pub fn muted(ui: Ui) -> bool {
-    ui.media.volume.with(|v| v.muted)
-        || (ui.player_surface == 0 && ui.player_windows.with(|w| w.audible().is_some()))
+pub(crate) fn muted(playback: PlaybackUi) -> bool {
+    playback.media.volume.with(|v| v.muted)
+        || (playback.player_surface == 0 && playback.player_windows.with(|w| w.audible().is_some()))
 }
 
 /// The level currently audible on this player, including audio ownership.
-pub(crate) fn audible_volume(ui: Ui) -> u8 {
-    if muted(ui) {
+pub(crate) fn audible_volume(playback: PlaybackUi) -> u8 {
+    if muted(playback) {
         0
     } else {
-        ui.media.volume.with(|v| v.level)
+        playback.media.volume.with(|v| v.level)
     }
 }
 
-fn change_volume(ui: Ui, change: impl FnOnce(&mut Volume)) {
+fn change_volume(playback: PlaybackUi, change: impl FnOnce(&mut Volume)) {
     batch(|| {
-        ui.media.volume.update(change);
-        if ui.player_surface == 0 && !ui.media.volume.with_untracked(|v| v.muted) {
-            ui.player_windows.update(|w| w.listen_to_main());
+        playback.media.volume.update(change);
+        if playback.player_surface == 0 && !playback.media.volume.with_untracked(|v| v.muted) {
+            playback.player_windows.update(|w| w.listen_to_main());
         }
     });
 }
 
-fn log_volume(ui: Ui) {
-    let v = ui.media.volume.get_untracked();
+fn log_volume(playback: PlaybackUi) {
+    let v = playback.media.volume.get_untracked();
     log::info!(
         "iptv volume: {}%{}",
         v.level,
@@ -124,14 +124,14 @@ fn log_volume(ui: Ui) {
 }
 
 /// The host's `tracks` event from `surface`.
-pub fn on_tracks(ui: Ui, surface: usize, tracks: Tracks) {
+pub(crate) fn on_tracks(playback: PlaybackUi, surface: usize, tracks: Tracks) {
     log::info!(
         "iptv tracks {surface}: {} video, {} audio, {} subtitles",
         tracks.video.len(),
         tracks.audio.len(),
         tracks.text.len()
     );
-    let m = ui.player.stream(surface);
+    let m = playback.player.stream(surface);
     if m.tracks.with_untracked(|t| *t != tracks) {
         m.tracks.set(tracks);
     }
@@ -139,8 +139,13 @@ pub fn on_tracks(ui: Ui, surface: usize, tracks: Tracks) {
 
 /// The host's `format` event from `surface`: whichever of `fps` and
 /// `channels` it knows.
-pub fn on_format(ui: Ui, surface: usize, fps: Option<f64>, channels: Option<u32>) {
-    let m = ui.player.stream(surface);
+pub(crate) fn on_format(
+    playback: PlaybackUi,
+    surface: usize,
+    fps: Option<f64>,
+    channels: Option<u32>,
+) {
+    let m = playback.player.stream(surface);
     let mut f = m.format.get_untracked();
     if let Some(fps) = fps {
         f.fps = fps as f32;

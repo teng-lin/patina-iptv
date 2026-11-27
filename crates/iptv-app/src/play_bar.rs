@@ -73,7 +73,7 @@ fn target() -> f32 {
 /// on-demand playback (including while a title is still preparing). Live TV
 /// uses a slim hairline progress bar at the top of the panel instead.
 fn show_timeline(ui: Ui) -> bool {
-    matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
+    matches!(ui.playback.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::active(ui)
 }
 
 /// Whether the bar has the desktop's own controls (the volume slider, the
@@ -96,15 +96,15 @@ fn bar_margin() -> f32 {
 
 /// Whether the bar is on screen.
 pub fn shows(ui: Ui) -> bool {
-    ui.mode.get() == ViewMode::Fullscreen
+    ui.chrome.mode.get() == ViewMode::Fullscreen
         && (idiom() == Idiom::Tv || !ui.keys_shown())
-        && ui.play_bar.with(|b| b.shown)
+        && ui.playback.play_bar.with(|b| b.shown)
         && !crate::multiview::is_open(ui)
         && available()
         // A chooser needs usable list rows on a short landscape screen.
         // The held bar returns with its original focus when the popup closes.
         && (window().height.0 - safe_area().top.0 - safe_area().bottom.0 >= 400.0
-            || !(ui.chooser.with(Option::is_some) || ui.description.with(Option::is_some)))
+            || !(ui.screens.chooser.with(Option::is_some) || ui.screens.description.with(Option::is_some)))
 }
 
 /// Leaving full screen or a key (off a TV) hides the bar; it stays while
@@ -112,10 +112,10 @@ pub fn shows(ui: Ui) -> bool {
 /// screen reader runs.
 pub fn bind(ui: Ui) {
     effect(move || {
-        let away =
-            ui.mode.get() != ViewMode::Fullscreen || (idiom() != Idiom::Tv && ui.keys_shown());
-        if away && ui.play_bar.with_untracked(|b| b.shown) {
-            ui.play_bar.update(PlayBar::hide);
+        let away = ui.chrome.mode.get() != ViewMode::Fullscreen
+            || (idiom() != Idiom::Tv && ui.keys_shown());
+        if away && ui.playback.play_bar.with_untracked(|b| b.shown) {
+            ui.playback.play_bar.update(PlayBar::hide);
         }
     });
     // A screen reader's user moves from control to control by swipes, a
@@ -123,7 +123,7 @@ pub fn bind(ui: Ui) {
     // it is hidden.
     effect(move || {
         let reader = crate::device::assistive();
-        if untracked(|| ui.play_bar.with(|b| b.reader != reader)) {
+        if untracked(|| ui.playback.play_bar.with(|b| b.reader != reader)) {
             untracked(|| update(ui, |b, now| b.screen_reader(reader, now)));
         }
     });
@@ -132,18 +132,18 @@ pub fn bind(ui: Ui) {
     effect(move || {
         let idle = iptv_presentation::play_bar::HIDE_AFTER_MS
             .max(crate::device::recommended().controls_ms);
-        if untracked(|| ui.play_bar.with(|b| b.idle_ms() != idle)) {
+        if untracked(|| ui.playback.play_bar.with(|b| b.idle_ms() != idle)) {
             untracked(|| update(ui, |b, now| b.set_idle_ms(idle, now)));
         }
     });
     let popup = computed(move || {
-        ui.chooser.with(Option::is_some)
-            || ui.description.with(Option::is_some)
+        ui.screens.chooser.with(Option::is_some)
+            || ui.screens.description.with(Option::is_some)
             || ui.cast.picker_open.get()
     });
     effect(move || {
         let open = popup.get();
-        if untracked(|| ui.play_bar.with(|b| b.held != open)) {
+        if untracked(|| ui.playback.play_bar.with(|b| b.held != open)) {
             untracked(|| update(ui, |b, now| b.hold(open, now)));
         }
     });
@@ -153,13 +153,13 @@ pub fn bind(ui: Ui) {
 /// safe area): popups over the video keep clear of it. Until the first
 /// layout use an estimate.
 pub fn height(ui: Ui) -> f32 {
-    if let Some(size) = ui.play_bar_size.get() {
+    if let Some(size) = ui.playback.play_bar_size.get() {
         return size.height.0;
     }
     let row = target();
     let extra = if show_timeline(ui) {
         PANEL_GAP + progress::TIMELINE_HEIGHT
-    } else if ui.playing.get().is_some() {
+    } else if ui.playback.playing.get().is_some() {
         PANEL_GAP + progress::HAIRLINE_HEIGHT
     } else {
         0.0
@@ -178,12 +178,12 @@ pub fn height(ui: Ui) -> f32 {
 fn update(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
     // An auxiliary control (Guide, for example) can close its window and
     // dispose this local presentation before the press handler finishes.
-    if untracked(|| ui.play_bar.try_get()).is_none() {
+    if untracked(|| ui.playback.play_bar.try_get()).is_none() {
         return;
     }
     let now = ui.now_ms();
-    ui.play_bar.update(|b| f(b, now));
-    let Some(at) = ui.play_bar.with_untracked(PlayBar::hide_at_ms) else {
+    ui.playback.play_bar.update(|b| f(b, now));
+    let Some(at) = ui.playback.play_bar.with_untracked(PlayBar::hide_at_ms) else {
         return;
     };
     // The window owns the idle deadline even when a resize replaces a button.
@@ -191,10 +191,10 @@ fn update(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
         let _task = set_timeout(Duration::from_millis(at.saturating_sub(now)), move || {
             let now = ui.now_ms();
             // Later input moved the deadline: then this does nothing.
-            if untracked(|| ui.play_bar.try_get())
+            if untracked(|| ui.playback.play_bar.try_get())
                 .is_some_and(|b| b.hide_at_ms().is_some_and(|at| now >= at))
             {
-                ui.play_bar.update(|b| {
+                ui.playback.play_bar.update(|b| {
                     b.tick(now);
                 });
             }
@@ -204,8 +204,8 @@ fn update(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
 
 /// The bar replaces the remote's panels while a pointer is used.
 fn show(ui: Ui, f: impl FnOnce(&mut PlayBar, u64)) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
-        ui.panels.update(|p| p.hide());
+    if ui.playback.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
+        ui.playback.panels.update(|p| p.hide());
     }
     update(ui, f);
 }
@@ -299,7 +299,7 @@ fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
                 move || {
                     if crate::multiview::detour(ui) {
                         tr("Multiview")
-                    } else if ui.player.recorded.with(Option::is_some) {
+                    } else if ui.playback.player.recorded.with(Option::is_some) {
                         tr("Recordings")
                     } else if let Some(kind) = crate::vod_view::returns_to(ui) {
                         if kind == iptv_core::vod::Kind::Movie {
@@ -318,8 +318,8 @@ fn back(ui: Ui, back_action: fn(Ui) -> bool) -> impl IntoElement {
                     }
                     ui.touched();
                     log::info!("iptv play bar: back");
-                    ui.panels.update(|p| p.hide());
-                    ui.play_bar.update(PlayBar::hide);
+                    ui.playback.panels.update(|p| p.hide());
+                    ui.playback.play_bar.update(PlayBar::hide);
                     back_action(ui);
                 },
             )
@@ -403,6 +403,7 @@ fn group_width(group: &[Control], row: &[Control], size: f32) -> f32 {
 
 fn layout(ui: Ui) -> Layout {
     let width = ui
+        .playback
         .play_bar_size
         .get()
         .map_or_else(|| window().width.0, |s| s.width.0);
@@ -495,13 +496,13 @@ fn bar_now(ui: Ui) -> impl IntoElement {
     // Hidden, the bar is unmounted: forget its height, which a resize or a
     // text change meanwhile makes stale, until it lays out again.
     cleanup(move || {
-        if untracked(|| ui.play_bar_size.try_get()).is_some() {
-            ui.play_bar_size.set(None);
+        if untracked(|| ui.playback.play_bar_size.try_get()).is_some() {
+            ui.playback.play_bar_size.set(None);
         }
     });
     let controls = computed(move || layout(ui));
     effect(move || {
-        let focus = ui.play_bar.with(|b| b.focus);
+        let focus = ui.playback.play_bar.with(|b| b.focus);
         let invalid = focus.is_some_and(|c| {
             if c == Control::Timeline {
                 !show_timeline(ui) || !enabled(ui, Control::Timeline)
@@ -531,8 +532,8 @@ fn bar_now(ui: Ui) -> impl IntoElement {
         .px(move || px(bar_margin()))
         .pb_safe_area_plus(px(BAR_BOTTOM_MARGIN))
         .on_layout(move |b: &Bounds<Points>| {
-            if ui.play_bar_size.get_untracked() != Some(b.size) {
-                ui.play_bar_size.set(Some(b.size));
+            if ui.playback.play_bar_size.get_untracked() != Some(b.size) {
+                ui.playback.play_bar_size.set(Some(b.size));
             }
         })
         // Only the panel takes presses: around it they reach the video.
@@ -548,7 +549,7 @@ fn bar_now(ui: Ui) -> impl IntoElement {
                 .on_mouse_enter(move |_: &MouseEvent| hover(ui, true))
                 .on_mouse_leave(move |_: &MouseEvent| hover(ui, false))
                 .child(when(
-                    move || !show_timeline(ui) && ui.playing.get().is_some(),
+                    move || !show_timeline(ui) && ui.playback.playing.get().is_some(),
                     move || progress::live_hairline(ui),
                 ))
                 .child(info::header(ui))
@@ -584,13 +585,13 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
             selected: focused(ui, control),
             has_popup: control == Control::More,
             expanded: (control == Control::More).then(|| {
-                ui.chooser.with(|c| {
+                ui.screens.chooser.with(|c| {
                     c.as_ref()
                         .is_some_and(|c| c.kind == crate::chooser::Kind::More)
                 })
             }),
             pressed: match control {
-                Control::PlayPause => Some(if ui.paused.get() {
+                Control::PlayPause => Some(if ui.playback.paused.get() {
                     Checked::False
                 } else {
                     Checked::True
@@ -709,7 +710,7 @@ fn control_id(control: Control) -> &'static str {
 fn tracks(ui: Ui) -> Option<Track> {
     [Track::Text, Track::Audio, Track::Video]
         .into_iter()
-        .find(|k| ui.player.main().tracks.with(|t| t.has_choice(*k)))
+        .find(|k| ui.playback.player.main().tracks.with(|t| t.has_choice(*k)))
 }
 /// The device is a phone (its form factor, not its window's size).
 fn phone_form() -> bool {
@@ -737,12 +738,13 @@ fn enabled(ui: Ui, control: Control) -> bool {
     use iptv_core::cast::Command;
     match control {
         Control::Rewind | Control::Forward | Control::Timeline => {
-            matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
+            matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
+                || crate::on_demand::seekable(ui)
         }
         Control::Record => {
             crate::player_panels::enabled(ui, iptv_presentation::panels::Control::Record)
         }
-        Control::Favorite | Control::Details => ui.playing.get().is_some(),
+        Control::Favorite | Control::Details => ui.playback.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => {
             !ui.cast.remote.get() && crate::multiview::availability(ui).available()
@@ -751,7 +753,7 @@ fn enabled(ui: Ui, control: Control) -> bool {
         Control::Pip => !ui.cast.remote.get() && crate::pip::can_enter(ui),
         Control::PlayPause => crate::casting::supports(
             ui,
-            if ui.paused.get() {
+            if ui.playback.paused.get() {
                 Command::Play
             } else {
                 Command::Pause
@@ -795,13 +797,17 @@ pub(super) fn activate(
             | Control::Search
             | Control::Volume
     ) {
-        if ui.description.with_untracked(Option::is_some) {
+        if ui.screens.description.with_untracked(Option::is_some) {
             crate::menu_view::close(ui);
             if control == Control::Details {
                 return;
             }
         }
-        if let Some(kind) = ui.chooser.with_untracked(|c| c.as_ref().map(|c| c.kind)) {
+        if let Some(kind) = ui
+            .screens
+            .chooser
+            .with_untracked(|c| c.as_ref().map(|c| c.kind))
+        {
             chooser::close(ui);
             if matches!(
                 (control, kind),
@@ -840,7 +846,7 @@ pub(super) fn activate(
         Control::PlayPause => crate::player::toggle_pause(ui),
         Control::Record => crate::recordings_view::toggle_current(ui),
         Control::Favorite => {
-            if let Some(ch) = ui.playing.get_untracked() {
+            if let Some(ch) = ui.playback.playing.get_untracked() {
                 crate::favorites::toggle(ui, ch);
             }
         }
@@ -853,15 +859,15 @@ pub(super) fn activate(
         Control::Picture => chooser::open(ui, Kind::Picture),
         Control::Channels => {
             crate::channels_view::open(ui, ListMode::Overlay);
-            ui.play_bar.update(PlayBar::hide);
+            ui.playback.play_bar.update(PlayBar::hide);
         }
         Control::Multiview => {
-            ui.play_bar.update(PlayBar::hide);
+            ui.playback.play_bar.update(PlayBar::hide);
             crate::multiview::open(ui);
         }
         Control::Cast => crate::casting::open(ui),
         Control::Pip => {
-            ui.play_bar.update(PlayBar::hide);
+            ui.playback.play_bar.update(PlayBar::hide);
             crate::pip::enter(ui);
         }
         Control::Guide => crate::player_keys::press_quick(ui, QuickAction::Guide),
@@ -883,7 +889,8 @@ pub(super) fn activate(
             if crate::seek::pending(ui) {
                 crate::seek::commit_now(ui);
             }
-            ui.play_bar
+            ui.playback
+                .play_bar
                 .update(|b| b.focus_control(Control::PlayPause, ui.now_ms()));
         }
     }
@@ -891,7 +898,9 @@ pub(super) fn activate(
 }
 
 pub(super) fn focused(ui: Ui, control: Control) -> bool {
-    idiom() == Idiom::Tv && ui.keys_shown() && ui.play_bar.with(|b| b.focus == Some(control))
+    idiom() == Idiom::Tv
+        && ui.keys_shown()
+        && ui.playback.play_bar.with(|b| b.focus == Some(control))
 }
 /// Open the shared bar with Play/pause focused.
 pub fn remote(ui: Ui) {
@@ -951,11 +960,13 @@ pub fn key(ui: Ui, key: RemoteKey, action: Action, repeat: bool) -> bool {
             update(ui, |b, now| b.focus_control(Control::PlayPause, now));
         }
         Action::Select | Action::ShowPanels => {
-            if let Some(control) = ui.play_bar.with_untracked(|b| b.focus) {
+            if let Some(control) = ui.playback.play_bar.with_untracked(|b| b.focus) {
                 activate(ui, control, None);
             }
         }
-        Action::ShowControls if key == RemoteKey::Menu => ui.play_bar.update(PlayBar::hide),
+        Action::ShowControls if key == RemoteKey::Menu => {
+            ui.playback.play_bar.update(PlayBar::hide)
+        }
         Action::ShowControls => remote(ui),
         _ => return false,
     }
@@ -1002,13 +1013,16 @@ fn group(ui: Ui, controls: Memo<Layout>, candidates: &'static [Control]) -> View
 /// The center action reopens a completed on-demand title from the beginning.
 fn play_again(ui: Ui) -> bool {
     crate::on_demand::active(ui)
-        && ui.player.main().finished.get()
-        && ui.player.main().native_published()
+        && ui.playback.player.main().finished.get()
+        && ui.playback.player.main().native_published()
 }
 
 fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRef>) -> Icon {
     match c {
-        Control::Mute if crate::media::muted(ui) || ui.media.volume.with(|v| v.level == 0) => {
+        Control::Mute
+            if crate::media::muted(ui.playback)
+                || ui.playback.media.volume.with(|v| v.level == 0) =>
+        {
             Icon::Muted
         }
         Control::Mute | Control::Volume => Icon::Volume,
@@ -1016,11 +1030,12 @@ fn icon(ui: Ui, c: Control, window: Option<&nsh_core::element::desktop::WindowRe
         Control::Channels => Icon::ChannelList,
         Control::Guide => Icon::Guide,
         Control::Rewind => Icon::Rewind,
-        Control::PlayPause if ui.paused.get() || play_again(ui) => Icon::Play,
+        Control::PlayPause if ui.playback.paused.get() || play_again(ui) => Icon::Play,
         Control::PlayPause => Icon::Pause,
         Control::Forward => Icon::Forward,
         Control::Favorite
             if ui
+                .playback
                 .playing
                 .get()
                 .is_some_and(|ch| ui.app.favorites.with(|f| f.contains(&ch))) =>
@@ -1059,7 +1074,7 @@ pub(super) fn label(ui: Ui, c: Control) -> &'static str {
 
 /// The desktop's volume: press or drag along it.
 fn volume(ui: Ui) -> View {
-    let level = move || f32::from(crate::media::audible_volume(ui)) / 100.0;
+    let level = move || f32::from(crate::media::audible_volume(ui.playback)) / 100.0;
     let set = move |e: &TouchEvent| {
         if let Some(p) = e.points.iter().find(|p| p.changed) {
             let at = (p.location.x.0 / VOLUME_WIDTH * 100.0).round() as i32;
@@ -1100,7 +1115,7 @@ fn details(ui: Ui) {
             program_start: p.start,
         },
     );
-    ui.description.set(Some(Origin {
+    ui.screens.description.set(Some(Origin {
         channel,
         program_start: p.start,
     }));

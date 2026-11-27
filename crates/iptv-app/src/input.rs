@@ -18,8 +18,11 @@ use crate::guide::{Move, Pane};
 use crate::{Input, Ui, ViewMode};
 
 mod back;
+mod guide_actions;
 mod keys;
+mod modal_actions;
 mod number;
+mod player_actions;
 
 pub(crate) use back::swallow_back;
 use back::{act, swallow_release};
@@ -29,15 +32,17 @@ impl Ui {
     /// A touch or a click on any control: touch or pointer mode, whichever
     /// made the press.
     pub fn touched(&self) {
-        self.exit_deadline.set(None);
+        self.chrome.exit_deadline.set(None);
         // PIN entry continues the choice that opened the prompt. Dismissing
         // the prompt cancels it in `parental_view::abort`.
         if self.top_overlay() != Some(crate::overlays::Overlay::Parental) {
             crate::external_player::cancel_pending(*self);
         }
-        self.pending_zap.set(None);
+        self.playback.pending_zap.set(None);
         crate::browse_playback::activity(*self);
-        self.input.set(self.last_press.get_untracked());
+        self.chrome
+            .input
+            .set(self.chrome.last_press.get_untracked());
     }
 }
 
@@ -177,7 +182,8 @@ type Surface = (Context, InputOwner);
 fn surface(ui: &Ui) -> Surface {
     let owner = if let Some(overlay) = ui.top_overlay() {
         if overlay == crate::overlays::Overlay::ChannelList {
-            ui.channels
+            ui.playback
+                .channels
                 .with(|list| list.map(|list| InputOwner::ChannelList(list.pane)))
                 .unwrap_or(InputOwner::Overlay(overlay))
         } else if overlay == crate::overlays::Overlay::Settings
@@ -189,18 +195,18 @@ fn surface(ui: &Ui) -> Surface {
         }
     } else if crate::multiview::is_open(*ui) {
         InputOwner::Multiview
-    } else if ui.mode.get() == ViewMode::Fullscreen {
+    } else if ui.chrome.mode.get() == ViewMode::Fullscreen {
         if crate::play_bar::captures(*ui) {
             InputOwner::PlayBar
         } else {
-            match ui.panels.with(|p| p.shown) {
+            match ui.playback.panels.with(|p| p.shown) {
                 iptv_presentation::panels::Shown::Card => InputOwner::Card,
                 iptv_presentation::panels::Shown::Controls => InputOwner::Strip,
                 _ => InputOwner::Video,
             }
         }
     } else {
-        InputOwner::Pane(ui.focus.with(|f| f.pane))
+        InputOwner::Pane(ui.guide.focus.with(|f| f.pane))
     };
     (context(ui), owner)
 }
@@ -365,9 +371,10 @@ pub fn context(ui: &Ui) -> Context {
     if crate::multiview::is_open(*ui) {
         return Context::Multiview; // Up/Down/Left/Right, OK, Long OK, Menu
     }
-    match (ui.mode.get(), ui.focus.with(|f| f.pane)) {
+    match (ui.chrome.mode.get(), ui.guide.focus.with(|f| f.pane)) {
         (ViewMode::Fullscreen, _)
-            if crate::play_bar::captures(*ui) || ui.panels.with(|p| p.captures_input()) =>
+            if crate::play_bar::captures(*ui)
+                || ui.playback.panels.with(|p| p.captures_input()) =>
         {
             Context::Controls
         }
@@ -409,7 +416,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     // Named bindings omit the repeat phase. Ask NSH to suppress repeats
     // according to the current action, including custom key bindings.
     let one_shot_keys = computed(move || {
-        let mode = ui.mode.get();
+        let mode = ui.chrome.mode.get();
         let context = context(&ui);
         ui.app.settings.get();
         let keymap = crate::remote_editor::keymap();
@@ -460,9 +467,9 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
     });
     if crate::desktop::DESKTOP {
         on_key("shift+f10", move |_| {
-            if context(&ui) == Context::Groups && ui.focus.with(|f| f.pane == Pane::Groups) {
-                ui.input.set(Input::Keys);
-                let entry = ui.focus.with_untracked(|f| f.group);
+            if context(&ui) == Context::Groups && ui.guide.focus.with(|f| f.pane == Pane::Groups) {
+                ui.chrome.input.set(Input::Keys);
+                let entry = ui.guide.focus.with_untracked(|f| f.group);
                 crate::menu_view::open_group_options(ui, entry);
             } else {
                 apply(ui, RemoteKey::Menu, Press::Short, Action::ShowMenu, false);
@@ -475,7 +482,7 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         if number::backspace(ui) {
             return;
         }
-        if ui.player_surface != 0
+        if ui.playback.player_surface != 0
             && crate::pip::exit(ui, iptv_presentation::pip_window::Exit::BackToApp)
         {
             return;
@@ -493,19 +500,19 @@ pub(crate) fn bind(ui: Ui) -> InputScope {
         on_key("cmd+down", move |_| crate::media::step_volume(ui, false));
     }
     // Spike shortcuts for the view modes.
-    if ui.player_surface == 0 {
+    if ui.playback.player_surface == 0 {
         on_key("o", move |_| {
-            ui.mode.apply(crate::mode::Action::ToggleOverlay)
+            ui.chrome.mode.apply(crate::mode::Action::ToggleOverlay)
         });
         on_key("f", move |_| {
-            ui.mode.apply(crate::mode::Action::ToggleFullscreen)
+            ui.chrome.mode.apply(crate::mode::Action::ToggleFullscreen)
         });
     }
     input
 }
 
 fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
-    if ui.player_surface != 0
+    if ui.playback.player_surface != 0
         && crate::pip::in_window(ui)
         && !matches!(
             key,
@@ -516,7 +523,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     }
     if phase != Phase::Up {
         if key != RemoteKey::Back {
-            ui.exit_deadline.set(None);
+            ui.chrome.exit_deadline.set(None);
         }
         crate::browse_playback::activity(ui);
     }
@@ -528,7 +535,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     // A fresh Back: whatever an earlier one left armed is gone, before a
     // prompt below takes the key (its Back must not be swallowed).
     if key == RemoteKey::Back && phase == Phase::Down {
-        ui.back_guard.update(BackGuard::pressed);
+        ui.chrome.back_guard.update(BackGuard::pressed);
     }
     let captured = untracked(|| capture(ui));
     let session = nav.borrow_mut().session(captured.clone()).0;
@@ -665,7 +672,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
         );
     }
     // Stop/Guide can dispose an auxiliary window before this handler returns.
-    if untracked(|| ui.stats.try_get()).is_none() {
+    if untracked(|| ui.chrome.stats.try_get()).is_none() {
         return;
     }
     // IR remotes never auto-repeat: decide long press on a timer too. If the
@@ -698,7 +705,7 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     if phase == Phase::Up && action.is_none() {
         return; // releases are logged only when they act (a deferred short press)
     }
-    ui.stats.update(|s| {
+    ui.chrome.stats.update(|s| {
         s.keys += 1;
         s.last_us = us;
         s.max_us = s.max_us.max(us);
@@ -707,9 +714,9 @@ fn key_event(ui: Ui, nav: &Rc<RefCell<Nav>>, key: RemoteKey, phase: Phase) {
     log::info!(
         "iptv key={} phase={phase:?} ctx={ctx:?} action={action:?} n={} handler_us={us} mode={:?} panels={:?}",
         key.name(),
-        ui.stats.with(|s| s.keys),
-        ui.mode.get(),
-        ui.panels.with(|p| p.shown)
+        ui.chrome.stats.with(|s| s.keys),
+        ui.chrome.mode.get(),
+        ui.playback.panels.with(|p| p.shown)
     );
 }
 
@@ -728,7 +735,7 @@ fn resolve(
         } => {
             if ctx == Context::Menu
                 && (ui.top_overlay() == Some(crate::overlays::Overlay::Leave)
-                    || ui.menu.with(|menu| {
+                    || ui.screens.menu.with(|menu| {
                         menu.as_ref()
                             .is_some_and(|menu| menu.group_offset.is_some())
                     }))
@@ -774,7 +781,7 @@ fn resolve(
 /// A key going down counts as use of the panels and the play bar on
 /// screen, as an applied key does (`apply`).
 fn keep_controls(ui: Ui) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
+    if ui.playback.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
         ui.update_panels(|p, now| p.touch(now));
     }
     if untracked(|| crate::play_bar::shows(ui)) {
@@ -794,18 +801,18 @@ fn release_consumed(ui: Ui, nav: &Nav, key: RemoteKey) {
 /// The held key no longer keeps the card or the play bar: decided,
 /// dropped or taken by a prompt.
 fn release_controls(ui: Ui) {
-    if ui.panels.with_untracked(|p| p.holding()) {
-        ui.panels.update(|p| p.release_hold());
+    if ui.playback.panels.with_untracked(|p| p.holding()) {
+        ui.playback.panels.update(|p| p.release_hold());
     }
-    if untracked(|| ui.play_bar.try_get()).is_some_and(|b| b.holding()) {
+    if untracked(|| ui.playback.play_bar.try_get()).is_some_and(|b| b.holding()) {
         crate::play_bar::release_hold(ui);
     }
 }
 
 /// Keeps a shown card or play bar until at least `at` (ms).
 fn keep_controls_until(ui: Ui, at: u64) {
-    if ui.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
-        ui.panels.update(|p| p.keep_until(at));
+    if ui.playback.panels.with_untracked(|p| p.shown) != iptv_presentation::panels::Shown::Hidden {
+        ui.playback.panels.update(|p| p.keep_until(at));
     }
     if untracked(|| crate::play_bar::shows(ui)) {
         crate::play_bar::keep_until(ui, at);
@@ -815,212 +822,32 @@ fn keep_controls_until(ui: Ui, at: u64) {
 fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     // A held key must not reopen a menu, toggle a favorite repeatedly or
     // turn a guide preview into fullscreen. Remapped keys can repeat too.
-    if repeat && one_shot_action(action, ui.mode.get_untracked(), context(&ui)) {
+    if repeat && one_shot_action(action, ui.chrome.mode.get_untracked(), context(&ui)) {
         return;
     }
-    // Transport keys control the owned receiver even while its destination
-    // picker or another overlay has focus.
-    if ui.player_surface == 0 && ui.cast.remote.get_untracked() && action == Action::PlayPause {
-        crate::player_keys::play_pause(ui, key, press);
-        return;
-    }
-    if action == Action::Stop
-        && ui.player_surface == 0
-        && (ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked())
-    {
-        crate::player_keys::stop_playback(ui);
-        return;
-    }
-    if action == Action::Stop && ui.player_surface == 0 && crate::external_player::is_playing(ui) {
-        crate::player_keys::stop_playback(ui);
+    if player_actions::transport(ui, key, press, action) {
         return;
     }
     if action != Action::Ignore {
         crate::external_player::cancel_pending(ui);
     }
-    if ui.player_surface != 0 {
-        match action {
-            // The guide is in the main window; dismissing this player lets
-            // its owner stop the correct surface. Search has no local screen.
-            Action::Stop | Action::ShowGuide => {
-                ui.mode.apply(crate::mode::Action::ReturnToBrowse);
-                return;
-            }
-            Action::OpenSearch | Action::Record => return,
-            _ => {}
-        }
+    if player_actions::auxiliary(ui, action) {
+        return;
     }
     if !matches!(action, Action::ChannelUp | Action::ChannelDown) {
-        ui.pending_zap.set(None);
+        ui.playback.pending_zap.set(None);
     }
     crate::browse_playback::activity(ui);
     // The first key after touch or a pointer starts from a row on screen.
-    if ui.input.get() != Input::Keys {
-        if let Some((first, last)) = ui.visible_rows.get() {
-            ui.focus.update(|f| f.adopt_rows(first, last));
+    if ui.chrome.input.get() != Input::Keys {
+        if let Some((first, last)) = ui.guide.visible_rows.get() {
+            ui.guide.focus.update(|f| f.adopt_rows(first, last));
         }
-        ui.input.set(Input::Keys);
+        ui.chrome.input.set(Input::Keys);
     }
     // Any key while panels show keeps them up.
     ui.update_panels(|p, now| p.touch(now));
-    use crate::overlays::Overlay;
-    let top = ui.top_overlay();
-    let mv = |m: Move| crate::lists::navigate(ui, m);
-    if top == Some(Overlay::QuitConfirm) {
-        crate::desktop::quit_confirm::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::StoreStartupFailure) {
-        crate::startup_view::store_failure_key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Vod) {
-        crate::vod_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Parental) {
-        crate::parental_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::CastPairing) {
-        crate::cast_pairing::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::RestoreReview) {
-        crate::backup::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Recordings) {
-        crate::recordings_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Wizard) {
-        crate::wizard_view::key(ui, action);
-        return;
-    }
-    // Top-most first: a guide sources screen opens over the playlists
-    // screen, which opens over settings.
-    if top == Some(Overlay::GuideRepair) {
-        crate::guide_repair_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::GuideInspection) {
-        crate::guide_inspect_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::GuideSources) {
-        crate::epg_sources_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::RemoteEditor) {
-        crate::remote_editor::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Organization) {
-        crate::organization_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::CustomGroups) {
-        crate::custom_groups::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Playlists) {
-        crate::playlists_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::AppUpdateNotice) {
-        crate::settings_view::updates::notice_key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::AppUpdate) {
-        crate::settings_view::updates::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Settings) {
-        crate::settings_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::GuideAssign) {
-        crate::guide_assign_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::FavoritesEditor) {
-        crate::fav_editor::key(ui, action);
-        return;
-    }
-    if matches!(top, Some(Overlay::Chooser | Overlay::Leave)) {
-        match action {
-            Action::MoveUp => crate::chooser::move_focus(ui, -1),
-            Action::MoveDown => crate::chooser::move_focus(ui, 1),
-            Action::MoveLeft if top == Some(Overlay::Leave) => {
-                crate::chooser::focus_leave(ui, false)
-            }
-            Action::MoveRight if top == Some(Overlay::Leave) => {
-                crate::chooser::focus_leave(ui, true)
-            }
-            Action::Select => {
-                if let Some(i) = ui.chooser.with(|c| c.as_ref().map(|c| c.list.focus)) {
-                    crate::chooser::pick(ui, i);
-                }
-            }
-            Action::Back | Action::ShowMenu => crate::chooser::close(ui),
-            _ => {}
-        }
-        return;
-    }
-    if top == Some(Overlay::Description) {
-        // Select and Record press the details' Record button, which only a
-        // program on now shows (`recordings_view::record_details`).
-        if matches!(action, Action::Select | Action::Record)
-            && let Some(origin) = ui.description.get_untracked()
-        {
-            crate::recordings_view::record_details(ui, origin);
-            return;
-        }
-        // Back (or Menu) closes program details.
-        match action {
-            Action::MoveUp => crate::menu_view::scroll_description(ui, -1.0),
-            Action::MoveDown => crate::menu_view::scroll_description(ui, 1.0),
-            Action::Back => crate::menu_view::back(ui),
-            Action::ShowMenu => crate::menu_view::close(ui),
-            _ => {}
-        }
-        return;
-    }
-    if matches!(top, Some(Overlay::Menu | Overlay::PlaylistMenu)) {
-        match action {
-            Action::MoveUp => ui
-                .menu
-                .update(|m| m.as_mut().into_iter().for_each(|m| m.move_focus(-1))),
-            Action::MoveDown => ui
-                .menu
-                .update(|m| m.as_mut().into_iter().for_each(|m| m.move_focus(1))),
-            Action::MoveLeft | Action::MoveRight => ui.menu.update(|menu| {
-                if let Some(menu) = menu {
-                    menu.step_group_offset(if action == Action::MoveLeft { -1 } else { 1 });
-                }
-            }),
-            Action::Select => {
-                if let Some(item) = ui.menu.with(|m| m.as_ref().and_then(|m| m.focused())) {
-                    crate::menu_view::perform(ui, item);
-                }
-            }
-            Action::Back => crate::menu_view::back(ui),
-            Action::ShowMenu => crate::menu_view::close(ui),
-            _ => {}
-        }
-        return;
-    }
-    if top == Some(Overlay::ChannelPicker) {
-        crate::multiview_picker::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::ChannelList) {
-        crate::channels_view::key(ui, action);
-        return;
-    }
-    if top == Some(Overlay::Search) {
-        crate::search_view::key(ui, action);
+    if modal_actions::apply(ui, action) {
         return;
     }
     if crate::multiview::is_open(ui) {
@@ -1030,110 +857,16 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     if number::apply(ui, action) {
         return;
     }
-    // The preview owns focus, not the guide row left underneath it. Keep
-    // program/list commands from acting on a different channel.
-    if ui.mode.get() == ViewMode::Guide && ui.focus.with(|f| f.pane == Pane::Preview) {
-        match action {
-            Action::MoveUp => mv(Move::Up),
-            Action::MoveDown => mv(Move::Down),
-            Action::MoveLeft => mv(Move::Left),
-            Action::MoveRight => mv(Move::Right),
-            Action::Select | Action::ReturnToPlayer => crate::lists::ok(ui),
-            Action::ShowMenu | Action::ShowControls
-                if ui.playing.get().is_some() || crate::on_demand::active(ui) =>
-            {
-                ui.mode.apply(crate::mode::Action::EnterFullscreen);
-                crate::play_bar::remote(ui);
-            }
-            Action::Back => {
-                crate::go_back(ui);
-            }
-            Action::PlayPause | Action::Stop => {
-                crate::player_keys::apply(ui, key, press, action, repeat);
-            }
-            _ => {}
-        }
+    if player_actions::preview(ui, key, press, action, repeat) {
         return;
     }
     // Any key but Back dismisses the hint card (Back does, as its own step).
-    if action != Action::Back && ui.focus.with(|f| f.hint) {
-        ui.focus.update(|f| f.hint = false);
+    if action != Action::Back && ui.guide.focus.with(|f| f.hint) {
+        ui.guide.focus.update(|f| f.hint = false);
     }
-    if crate::play_bar::key(ui, key, action, repeat) {
-        return;
+    if !player_actions::controls(ui, key, press, action, repeat) {
+        guide_actions::apply(ui, key, action);
     }
-    // Full screen and its panels: `player_keys.rs`.
-    if crate::player_keys::apply(ui, key, press, action, repeat) {
-        return;
-    }
-    match action {
-        Action::Record => crate::recordings_view::current(ui),
-        Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Groups => {
-            let entry = ui.focus.with_untracked(|f| f.group);
-            let combined = crate::data::combined::active(&crate::runtime_owner::runtime());
-            if (key == RemoteKey::Menu && !combined && entry == iptv_presentation::lists::ALL)
-                || (!crate::menu_view::open_group_options(ui, entry)
-                    && ui.app.library.shown.get_untracked().is_none()
-                    && !combined)
-            {
-                crate::wizard_view::open_add(ui);
-            }
-        }
-        Action::ShowMenu if ui.focus.with(|f| f.pane) == Pane::Rail => {}
-        Action::ShowMenu
-            if ui.mode.get() != ViewMode::Fullscreen
-                && ui.focus.with(|f| f.pane) == Pane::Guide =>
-        {
-            crate::menu_view::open_timeline_context(ui);
-        }
-        Action::ShowMenu => crate::menu_view::open(ui),
-        Action::MoveUp => mv(Move::Up),
-        Action::MoveDown => mv(Move::Down),
-        Action::MoveLeft => mv(Move::Left),
-        Action::MoveRight => mv(Move::Right),
-        Action::Select => {
-            if !ui
-                .focus
-                .with(|f| matches!(f.pane, Pane::Guide | Pane::Groups))
-                || !crate::menu_view::open_empty_group_settings(ui)
-            {
-                crate::lists::ok(ui);
-            }
-        }
-        Action::ShowGuide => ui.mode.apply(crate::mode::Action::ShowGuide),
-        Action::ShowGroups => crate::lists::open_groups(ui),
-        Action::OpenSearch => crate::search_view::open(ui),
-        a @ (Action::JumpToNow
-        | Action::HourBack
-        | Action::HourForward
-        | Action::DayBack
-        | Action::DayForward
-        | Action::ToggleGroups) => crate::grid::keys::apply(ui, a),
-        Action::ReturnToPlayer if ui.playing.get().is_some() => {
-            ui.mode.apply(crate::mode::Action::ReturnToPlayer);
-        }
-        Action::ToggleFavorite => {
-            if let Some(channel) = if ui.mode.get() == ViewMode::Fullscreen {
-                ui.playing.get()
-            } else {
-                crate::lists::focused_channel(ui)
-            } {
-                crate::favorites::toggle(ui, channel);
-            }
-        }
-        Action::PageUp => page(ui, -1),
-        Action::PageDown => page(ui, 1),
-        other => log::info!("iptv action {other:?} not implemented yet"),
-    }
-}
-
-/// Page up/down: moves the focus by the rows on screen.
-fn page(ui: Ui, dir: isize) {
-    let rows = ui.visible_rows.get().map_or(8, |(a, b)| (b - a).max(1));
-    let len = ui.list.with(|l| l.len());
-    ui.focus.update(|f| {
-        f.channel = iptv_presentation::guide::page_row(f.channel, len, dir * rows as isize);
-    });
 }
 
 /// Synthetic native journey: the same Enter dispatch as the registered key handler.

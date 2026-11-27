@@ -58,7 +58,7 @@ pub(super) fn cell(
     number_w: Memo<f32>,
     editing: Memo<Option<bool>>,
 ) -> impl IntoElement {
-    let playing = move || channel.get().is_some() && ui.playing.get() == channel.get();
+    let playing = move || channel.get().is_some() && ui.playback.playing.get() == channel.get();
     let color = move || {
         if editing.get() == Some(false) {
             rgb(crate::theme::FOCUSED_TEXT)
@@ -74,7 +74,7 @@ pub(super) fn cell(
         if crate::organization_view::guide_order_open(ui) {
             editing.get() == Some(true)
         } else {
-            ui.focus.with(|f| f.channel == at.index())
+            ui.guide.focus.with(|f| f.channel == at.index())
         }
     };
     let grips = move || crate::organization_view::guide_order_open(ui) && ui.drag_editing();
@@ -130,8 +130,8 @@ pub(super) fn cell(
             if crate::organization_view::guide_order_open(ui) || crate::grid::closed_columns(ui) {
                 return;
             }
-            let view = crate::lists::view(ui);
-            ui.focus.update(|f| {
+            let view = crate::lists::view(ui.guide);
+            ui.guide.focus.update(|f| {
                 let now = f.now;
                 f.tap(at.index(), now, &view)
             });

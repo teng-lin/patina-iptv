@@ -64,7 +64,7 @@ pub(crate) fn start(ui: Ui) {
     owner.bind_browser(move || crate::runtime::BrowserState {
         focused_key: crate::runtime_events::focused_channel(ui)
             .and_then(|channel| schedule().channel_key(channel)),
-        playing: ui.playing.get_untracked().is_some(),
+        playing: ui.playback.playing.get_untracked().is_some(),
     });
     tasks::spawn_in_app(async move {
         let owner = runtime();

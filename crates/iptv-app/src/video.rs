@@ -130,7 +130,7 @@ pub fn layout_rect(ui: Ui, surface: usize) -> (f32, f32, f32, f32) {
         return (0.0, 0.0, 0.0, 0.0);
     }
     let w = window();
-    if ui.mode.get() != ViewMode::Guide {
+    if ui.chrome.mode.get() != ViewMode::Guide {
         crate::channels_view::preview_rect(ui, w.width.0, w.height.0)
             .unwrap_or((0.0, 0.0, w.width.0, w.height.0))
     } else {
@@ -182,7 +182,7 @@ pub(crate) fn backdrop_clear(ui: Ui) -> bool {
     if !crate::host::video_under_page() {
         return false;
     }
-    let stream = ui.player.main();
+    let stream = ui.playback.player.main();
     plays(ui, 0)
         && stream.source.with(Option::is_some)
         && stream.rendered.get() == Some(stream.token.get())
@@ -191,19 +191,19 @@ pub(crate) fn backdrop_clear(ui: Ui) -> bool {
 /// Whether surface `surface` has something to play (reactive).
 fn plays(ui: Ui, surface: usize) -> bool {
     if surface == 0 {
-        ui.playing.get().is_some()
+        ui.playback.playing.get().is_some()
             || crate::player::resume::playing(ui)
-            || ui.player.recorded.with(Option::is_some)
-            || ui.player.vod.with(Option::is_some)
+            || ui.playback.player.recorded.with(Option::is_some)
+            || ui.playback.player.vod.with(Option::is_some)
     } else {
-        ui.player.stream(surface).channel.get().is_some()
+        ui.playback.player.stream(surface).channel.get().is_some()
     }
 }
 
 /// The stream as the host's `source` prop: `{url, headers, token, live,
 /// reconnect}`, or null when nothing plays.
 fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
-    let stream = ui.player.stream(surface);
+    let stream = ui.playback.player.stream(surface);
     if !plays(ui, surface) {
         return None;
     }
@@ -225,7 +225,7 @@ fn source_prop(ui: Ui, surface: usize) -> Option<SourceProps> {
 
 /// Player surface `surface` (0: the full-screen one).
 pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
-    let stream = ui.player.stream(surface);
+    let stream = ui.playback.player.stream(surface);
     let sent = RefCell::new(None);
     let props = PlayerBindings {
         source: Box::new(move || {
@@ -234,7 +234,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
             source
         }),
         paused: Box::new(move || {
-            (surface == 0 && ui.paused.get()) || crate::multiview::paused(ui, surface)
+            (surface == 0 && ui.playback.paused.get()) || crate::multiview::paused(ui, surface)
         }),
         seek: Box::new(move || stream.seek.get()),
         picture_size: Box::new(move || {
@@ -249,20 +249,23 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         audio_track: Box::new(move || stream.choice.with(|c| c.audio.clone())),
         text_track: Box::new(move || stream.choice.with(|c| c.text.clone())),
         volume: Box::new(move || {
-            ui.player_windows
+            ui.playback
+                .player_windows
                 .with(|w| w.on_surface(surface).map(|s| s.volume.level))
-                .unwrap_or_else(|| ui.media.volume.with(|v| v.level))
+                .unwrap_or_else(|| ui.playback.media.volume.with(|v| v.level))
         }),
         muted: Box::new(move || {
-            ui.player_windows
+            ui.playback
+                .player_windows
                 .with(|w| w.on_surface(surface).map(|s| s.volume.muted))
-                .unwrap_or_else(|| ui.media.volume.with(|v| v.muted))
+                .unwrap_or_else(|| ui.playback.media.volume.with(|v| v.muted))
                 || !crate::multiview::audible(ui, surface)
         }),
         audio_delay: Box::new(move || {
-            ui.player_windows
+            ui.playback
+                .player_windows
                 .with(|w| w.on_surface(surface).map(|s| s.audio_delay))
-                .unwrap_or_else(|| ui.media.delay_ms.get())
+                .unwrap_or_else(|| ui.playback.media.delay_ms.get())
         }),
         pip: Box::new(move || crate::pip::prop(ui, surface)),
     };
@@ -301,7 +304,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
 /// `size` without its two numbers still marks reported size (the
 /// stream's size stays), and the rest sets nothing.
 fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
-    if !ui.player.stream(surface).accepts_native(None) {
+    if !ui.playback.player.stream(surface).accepts_native(None) {
         return;
     }
     let (kind, status) = match error {
@@ -336,13 +339,13 @@ fn on_unread(ui: Ui, surface: usize, error: PlayerEventError) {
 fn report(ui: Ui, surface: usize, kind: PlayerEventKind, status: String) {
     log::info!("iptv player {surface} {}: {status}", kind.wire());
     if surface == 0 {
-        ui.player_status.set(status);
+        ui.playback.player_status.set(status);
     }
 }
 
 /// One event from surface `surface`'s player.
 fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
-    let stream = ui.player.stream(surface);
+    let stream = ui.playback.player.stream(surface);
     let accepts = match &event {
         // Replacement preparation withdraws callback admission while the old
         // source stays mounted. It can still lose its picture in that window.
@@ -378,9 +381,11 @@ fn on_event(ui: Ui, surface: usize, event: PlayerEvent) {
             crate::on_demand::observe(ui, surface, token, seek_id, ms, duration_ms, seekable);
             return;
         }
-        PlayerEvent::Tracks(tracks) => return crate::media::on_tracks(ui, surface, tracks),
+        PlayerEvent::Tracks(tracks) => {
+            return crate::media::on_tracks(ui.playback, surface, tracks);
+        }
         PlayerEvent::Format { fps, channels } => {
-            return crate::media::on_format(ui, surface, fps, channels);
+            return crate::media::on_format(ui.playback, surface, fps, channels);
         }
         PlayerEvent::Pip {
             supported,

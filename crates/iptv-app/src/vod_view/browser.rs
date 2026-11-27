@@ -6,7 +6,7 @@ use iptv_presentation::browse::RailItem;
 use iptv_presentation::vod::{CatalogGroup, Destination};
 
 fn all_label(ui: Ui) -> &'static str {
-    if ui.vod.with(|s| s.query.kind == Kind::Series) {
+    if ui.screens.vod.with(|s| s.query.kind == Kind::Series) {
         tr("All shows")
     } else {
         tr("All movies")
@@ -14,10 +14,11 @@ fn all_label(ui: Ui) -> &'static str {
 }
 
 pub(super) fn activate_navigation(ui: Ui) {
-    match ui.vod.with_untracked(|s| s.destination) {
+    match ui.screens.vod.with_untracked(|s| s.destination) {
         Destination::Live => close(ui),
         Destination::Movies | Destination::Shows => {
             let kind = if ui
+                .screens
                 .vod
                 .with_untracked(|s| s.destination == Destination::Shows)
             {
@@ -25,8 +26,8 @@ pub(super) fn activate_navigation(ui: Ui) {
             } else {
                 Kind::Movie
             };
-            if ui.vod.with_untracked(|s| s.query.kind == kind) {
-                ui.vod.update(|s| s.open_categories());
+            if ui.screens.vod.with_untracked(|s| s.query.kind == kind) {
+                ui.screens.vod.update(|s| s.open_categories());
             } else {
                 open(ui, kind);
             }
@@ -41,7 +42,8 @@ pub(super) fn activate_navigation(ui: Ui) {
 /// Whether the rail widens to show its labels: while the remote is on it,
 /// except beside the one-pane empty catalog, which keeps the width.
 fn rail_labels(ui: Ui) -> bool {
-    ui.vod
+    ui.screens
+        .vod
         .with(|s| s.control == Control::Navigation && !s.one_pane())
 }
 
@@ -85,10 +87,14 @@ fn navigation(ui: Ui, size: Scale) -> View {
             .into_iter()
             .map(move |(destination, item, label)| {
                 // Only what can show anything here (`Screen::set_navigation`).
-                let offered = move || ui.vod.with(|s| s.destinations().contains(&destination));
+                let offered = move || {
+                    ui.screens
+                        .vod
+                        .with(|s| s.destinations().contains(&destination))
+                };
                 when(offered, move || {
                     let focused = move || {
-                        ui.vod.with(|s| {
+                        ui.screens.vod.with(|s| {
                             s.control == Control::Navigation && s.destination == destination
                         })
                     };
@@ -108,7 +114,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
                         .role(AccessibilityRole::Tab)
                         .label(label)
                         .accessibility_state(move || AccessibilityState {
-                            selected: ui.vod.with(|s| match destination {
+                            selected: ui.screens.vod.with(|s| match destination {
                                 Destination::Movies => s.query.kind == Kind::Movie,
                                 Destination::Shows => s.query.kind == Kind::Series,
                                 _ => false,
@@ -117,7 +123,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
                         })
                         .on_press(move || {
                             ui.touched();
-                            ui.vod.update(|s| s.destination = destination);
+                            ui.screens.vod.update(|s| s.destination = destination);
                             activate_navigation(ui);
                         })
                         .flex_row()
@@ -155,7 +161,7 @@ fn navigation(ui: Ui, size: Scale) -> View {
 
 fn choose_category(ui: Ui, group: CatalogGroup) {
     ui.touched();
-    ui.vod.update(|s| s.choose_catalog_group(group));
+    ui.screens.vod.update(|s| s.choose_catalog_group(group));
     reload(ui, false);
 }
 
@@ -190,11 +196,11 @@ fn category_button(
 
 fn categories(ui: Ui, size: Scale) -> impl IntoElement {
     when(
-        move || ui.vod.with(|s| s.shows_categories()),
+        move || ui.screens.vod.with(|s| s.shows_categories()),
         move || {
             let rows = element_ref();
             let chosen = move || {
-                ui.vod.with(|s| {
+                ui.screens.vod.with(|s| {
                     if s.query.continue_watching {
                         0
                     } else {
@@ -223,7 +229,7 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                     ui,
                     size,
                     move || {
-                        ui.vod.with(|s| {
+                        ui.screens.vod.with(|s| {
                             s.query
                                 .source
                                 .and_then(|id| s.sources.iter().find(|v| v.id == id))
@@ -231,18 +237,18 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                                 .unwrap_or_else(|| tr("All playlists").into())
                         })
                     },
-                    move || ui.vod.with(|s| s.control == Control::Source),
+                    move || ui.screens.vod.with(|s| s.control == Control::Source),
                     move || {
-                        ui.vod.update(|s| s.control = Control::Source);
+                        ui.screens.vod.update(|s| s.control = Control::Source);
                         cycle_source(ui);
                     },
                 ))
                 .child(
                     virtual_list(
-                        move || ui.vod.with(|s| s.categories.len() + 2),
+                        move || ui.screens.vod.with(|s| s.categories.len() + 2),
                         move |at| {
                             let category = move || {
-                                ui.vod.with(|s| {
+                                ui.screens.vod.with(|s| {
                                     at.index()
                                         .checked_sub(2)
                                         .and_then(|i| s.categories.get(i))
@@ -250,7 +256,7 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                                 })
                             };
                             let selected = move || {
-                                ui.vod.with(|s| match at.index() {
+                                ui.screens.vod.with(|s| match at.index() {
                                     0 => s.query.continue_watching,
                                     1 => !s.query.continue_watching && s.query.category.is_none(),
                                     _ => category().is_some_and(|c| {
@@ -267,7 +273,8 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
                                     _ => category().map(|c| c.name).unwrap_or_default(),
                                 },
                                 move || {
-                                    selected() && ui.vod.with(|s| s.control == Control::Category)
+                                    selected()
+                                        && ui.screens.vod.with(|s| s.control == Control::Category)
                                 },
                                 move || {
                                     let group = match at.index() {
@@ -307,7 +314,7 @@ fn categories(ui: Ui, size: Scale) -> impl IntoElement {
 }
 
 pub(super) fn focused_card(ui: Ui) -> Option<Card> {
-    ui.vod.with(|s| {
+    ui.screens.vod.with(|s| {
         if let Some(details) = &s.details {
             return Some(details.item.clone());
         }
@@ -343,7 +350,7 @@ fn tools(ui: Ui, size: Scale) -> View {
         [Control::Search, Control::Sort]
             .into_iter()
             .map(move |control| {
-                let focused = move || ui.vod.with(|s| s.control == control);
+                let focused = move || ui.screens.vod.with(|s| s.control == control);
                 view()
                     .size(move || size.px(ui_kit::TOUCH))
                     .rounded(move || size.px(crate::theme::RADIUS))
@@ -352,7 +359,7 @@ fn tools(ui: Ui, size: Scale) -> View {
                         if control == Control::Search {
                             tr("Search").to_owned()
                         } else {
-                            ui.vod.with(|s| {
+                            ui.screens.vod.with(|s| {
                                 format!(
                                     "{} · {}",
                                     tr("Sort"),
@@ -377,7 +384,7 @@ fn tools(ui: Ui, size: Scale) -> View {
                     })
                     .on_press(move || {
                         ui.touched();
-                        ui.vod.update(|s| s.control = control);
+                        ui.screens.vod.update(|s| s.control = control);
                         activate(ui);
                     })
                     .child(
@@ -404,7 +411,7 @@ pub(super) fn hero(ui: Ui, size: Scale) -> View {
         // The one-pane empty catalog has no title to describe: only the
         // tools' row, so its message and action stay in the window.
         .h(move || {
-            size.px(if ui.vod.with(|s| s.one_pane()) {
+            size.px(if ui.screens.vod.with(|s| s.one_pane()) {
                 32.0 + ui_kit::TOUCH
             } else {
                 300.0
@@ -415,7 +422,7 @@ pub(super) fn hero(ui: Ui, size: Scale) -> View {
         .gap(move || size.px(12.0))
         .test_id("vod-focused-metadata")
         .child(when(
-            move || ui.vod.with(|s| s.details.is_none()),
+            move || ui.screens.vod.with(|s| s.details.is_none()),
             move || {
                 view()
                     .absolute()
@@ -432,7 +439,7 @@ pub(super) fn hero(ui: Ui, size: Scale) -> View {
         )
         .child(ui_kit::body(size, move || {
             let mut line = focused_card(ui).map(|c| summary(&c)).unwrap_or_default();
-            let seasons = ui.vod.with(|s| {
+            let seasons = ui.screens.vod.with(|s| {
                 s.details
                     .as_ref()
                     .or_else(|| {
@@ -467,10 +474,11 @@ fn poster(
     index: impl Fn() -> usize + Copy + 'static,
     width: Signal<f32>,
 ) -> View {
-    let card = move || ui.vod.with(|s| s.cards.get(index()).cloned());
+    let card = move || ui.screens.vod.with(|s| s.cards.get(index()).cloned());
     let focused = move || {
         card().is_some_and(|c| {
-            ui.vod
+            ui.screens
+                .vod
                 .with(|s| s.control == Control::Catalog && s.focused.as_ref() == Some(&c.key))
         })
     };
@@ -491,7 +499,8 @@ fn poster(
         .test_id("vod-title")
         .label(move || card().map(|c| card_label(&c, false)).unwrap_or_default())
         .accessibility_state(move || AccessibilityState {
-            selected: card().is_some_and(|c| ui.vod.with(|s| s.focused.as_ref() == Some(&c.key))),
+            selected: card()
+                .is_some_and(|c| ui.screens.vod.with(|s| s.focused.as_ref() == Some(&c.key))),
             ..Default::default()
         })
         .on_press(move || {
@@ -583,7 +592,8 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
     let rows = element_ref();
     let width = signal(size.of(150.0));
     let focused_row = computed(move || {
-        ui.vod
+        ui.screens
+            .vod
             .with(|s| s.focused_index().map(|at| at / s.columns.max(1)))
     });
     effect(move || {
@@ -605,13 +615,17 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
                     - size.of(4.0))
                 .max(1.0),
             );
-            if ui.vod.with_untracked(|s| s.columns != columns) {
-                ui.vod.update(|s| s.columns = columns);
+            if ui.screens.vod.with_untracked(|s| s.columns != columns) {
+                ui.screens.vod.update(|s| s.columns = columns);
             }
         })
         .child(
             virtual_list(
-                move || ui.vod.with(|s| s.cards.len().div_ceil(s.columns.max(1))),
+                move || {
+                    ui.screens
+                        .vod
+                        .with(|s| s.cards.len().div_ceil(s.columns.max(1)))
+                },
                 move |row| {
                     view()
                         .flex_row()
@@ -619,13 +633,14 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
                         .pb(move || size.px(10.0))
                         .children((0..12).map(move |column| {
                             when(
-                                move || ui.vod.with(|s| column < s.columns.max(1)),
+                                move || ui.screens.vod.with(|s| column < s.columns.max(1)),
                                 move || {
                                     let index = move || {
-                                        row.index() * ui.vod.with(|s| s.columns.max(1)) + column
+                                        row.index() * ui.screens.vod.with(|s| s.columns.max(1))
+                                            + column
                                     };
                                     when(
-                                        move || ui.vod.with(|s| index() < s.cards.len()),
+                                        move || ui.screens.vod.with(|s| index() < s.cards.len()),
                                         move || poster(ui, size, index, width),
                                     )
                                     .otherwise(|| view().flex_1())
@@ -644,7 +659,7 @@ fn grid(ui: Ui, size: Scale) -> impl IntoElement {
 fn category_heading(ui: Ui, size: Scale) -> impl IntoElement {
     // The one-pane empty catalog has nothing to filter.
     when(
-        move || ui.vod.with(|s| !s.one_pane()),
+        move || ui.screens.vod.with(|s| !s.one_pane()),
         move || category_heading_button(ui, size),
     )
 }
@@ -654,7 +669,7 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
         ui,
         size,
         move || {
-            ui.vod.with(|s| {
+            ui.screens.vod.with(|s| {
                 if s.query.continue_watching {
                     tr("Continue watching").into()
                 } else {
@@ -672,7 +687,7 @@ fn category_heading_button(ui: Ui, size: Scale) -> View {
             })
         },
         || false,
-        move || ui.vod.update(|s| s.open_categories()),
+        move || ui.screens.vod.update(|s| s.open_categories()),
     )
     .px(px(0.0))
 }
@@ -688,7 +703,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     });
     effect(move || {
         let compact = compact.get();
-        ui.vod.update(|s| s.set_compact(compact));
+        ui.screens.vod.update(|s| s.set_compact(compact));
     });
     let offered = computed(move || {
         ui.app.library.version.get();
@@ -699,9 +714,11 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     });
     effect(move || {
         let (catalogs, recordings) = offered.get();
-        ui.vod.update(|s| s.set_navigation(catalogs, recordings));
+        ui.screens
+            .vod
+            .update(|s| s.set_navigation(catalogs, recordings));
     });
-    let preview = computed(move || ui.vod.with(|s| (s.focused.clone(), s.generation)));
+    let preview = computed(move || ui.screens.vod.with(|s| (s.focused.clone(), s.generation)));
     effect(move || {
         let (Some(key), generation) = preview.get() else {
             return;
@@ -713,7 +730,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
         crate::tasks::spawn_in_app(async move {
             timer(std::time::Duration::from_millis(250)).await;
             if cancel.is_canceled()
-                || !ui.vod.with_untracked(|s| {
+                || !ui.screens.vod.with_untracked(|s| {
                     s.open
                         && s.details.is_none()
                         && s.generation == generation
@@ -726,7 +743,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                 // No await between the access check and UI publication: a
                 // revoked grant must not restore metadata after redaction.
                 if owner.parental_allowed(&Runtime::vod_target(&details.item.key)) {
-                    ui.vod.update(|s| {
+                    ui.screens.vod.update(|s| {
                         s.publish_preview(generation, details);
                     });
                 }
@@ -735,7 +752,8 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
     });
     let field = element_ref();
     crate::input::bind_field_focus(field, move || {
-        ui.vod
+        ui.screens
+            .vod
             .with(|s| s.control == Control::Search && s.search_open)
     });
     view()
@@ -750,7 +768,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
             crate::overlays::Overlay::Vod.accessibility_covered(ui)
         })
         .child(when(
-            move || ui.vod.with(|s| s.shows_navigation()),
+            move || ui.screens.vod.with(|s| s.shows_navigation()),
             move || navigation(ui, size),
         ))
         .child(categories(ui, size))
@@ -768,7 +786,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                         .child(category_heading(ui, size))
                         .child(view().flex_1())
                         .child(ui_kit::caption(size, move || {
-                            ui.vod.with(|s| {
+                            ui.screens.vod.with(|s| {
                                 s.focused_index()
                                     .map(|at| {
                                         format!(
@@ -783,27 +801,33 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                         })),
                 )
                 .child(when(
-                    move || ui.vod.with(|s| s.search_open || !s.query.text.is_empty()),
+                    move || {
+                        ui.screens
+                            .vod
+                            .with(|s| s.search_open || !s.query.text.is_empty())
+                    },
                     move || {
                         ui_kit::field(size, input())
                             .element_ref(&field)
                             .test_id("vod-search")
-                            .value(move || ui.vod.with(|s| s.query.text.clone()))
+                            .value(move || ui.screens.vod.with(|s| s.query.text.clone()))
                             .placeholder(tr("Search movies and series"))
                             .on_change(move |text: &str| {
-                                ui.vod.update(|s| s.query.text = text.into());
+                                ui.screens.vod.update(|s| s.query.text = text.into());
                                 reload(ui, false);
                             })
                             .auto_correct(false)
                             .auto_capitalize(AutoCapitalize::None)
                             .return_key_type(ReturnKeyType::Search)
-                            .on_submit(move |_: &str| ui.vod.update(|s| s.close_search()))
-                            .on_focus(move || ui.vod.update(|s| s.control = Control::Search))
+                            .on_submit(move |_: &str| ui.screens.vod.update(|s| s.close_search()))
+                            .on_focus(move || {
+                                ui.screens.vod.update(|s| s.control = Control::Search)
+                            })
                     },
                 ))
                 .child(ui_kit::caption(size, move || status_message(ui)))
                 .child(when(
-                    move || ui.vod.with(|s| s.retry.is_some() && !s.busy),
+                    move || ui.screens.vod.with(|s| s.retry.is_some() && !s.busy),
                     move || {
                         button(ui, size, Control::Retry, tr("Retry"), move || retry(ui))
                             .test_id("vod-retry")
@@ -812,7 +836,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                 .child(super::empty::screen(ui, size))
                 .child(grid(ui, size))
                 .child(when(
-                    move || ui.vod.with(|s| s.has_more),
+                    move || ui.screens.vod.with(|s| s.has_more),
                     move || {
                         ui_kit::button(
                             ui,
@@ -820,7 +844,7 @@ pub(super) fn screen(ui: Ui, size: Scale) -> View {
                             tr("Load more"),
                             || false,
                             move || {
-                                if !ui.vod.with_untracked(|s| s.busy) {
+                                if !ui.screens.vod.with_untracked(|s| s.busy) {
                                     reload(ui, true);
                                 }
                             },

@@ -165,9 +165,10 @@ pub fn group_column(ui: Ui, groups: ElementRef) -> impl IntoElement {
         move || lists::visible_entries(ui).len(),
         move |at| {
             let entry = move || lists::visible_entries(ui).entry(at.index());
-            let current = move || entry() == Some(ui.focus.with(|f| f.group));
-            let focused =
-                move || current() && ui.focus.with(|f| f.pane) == Pane::Groups && ui.keys_shown();
+            let current = move || entry() == Some(ui.guide.focus.with(|f| f.group));
+            let focused = move || {
+                current() && ui.guide.focus.with(|f| f.pane) == Pane::Groups && ui.keys_shown()
+            };
             let mark = move || Mark::of(focused(), current());
             let name = move || {
                 ui.guide_data();

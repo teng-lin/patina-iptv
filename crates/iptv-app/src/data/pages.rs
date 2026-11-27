@@ -7,7 +7,7 @@ use std::cell::Cell;
 pub fn bind(ui: Ui) {
     effect(move || {
         ui.app.data_version.get();
-        let archive = match (ui.playing.get(), ui.playback.get()) {
+        let archive = match (ui.playback.playing.get(), ui.playback.playback.get()) {
             (Some(channel), Playback::CatchUp { start, .. }) => Some((channel, start)),
             _ => None,
         };
@@ -24,7 +24,7 @@ pub fn bind(ui: Ui) {
     let away = Cell::new(false);
     effect(move || {
         ui.app.data_version.get();
-        let home = ui.focus.with(|f| f.window == home_window(f.now));
+        let home = ui.guide.focus.with(|f| f.window == home_window(f.now));
         if home && away.replace(false) {
             untracked(|| {
                 crate::runtime::data::pages::evict(&crate::runtime_owner::runtime());

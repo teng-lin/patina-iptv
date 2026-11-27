@@ -44,7 +44,7 @@ fn warning_label(choice: WarningChoice) -> &'static str {
 }
 
 fn with_state<T>(ui: Ui, f: impl FnOnce(&State) -> T) -> Option<T> {
-    ui.multiview.with(|m| m.as_ref().map(f))
+    ui.playback.multiview.with(|m| m.as_ref().map(f))
 }
 
 /// Why no more tiles fit, while none does.
@@ -67,7 +67,8 @@ enum TileStatus {
 
 fn tile_status(ui: Ui, surface: usize) -> TileStatus {
     let now = ui.now_ms();
-    ui.player
+    ui.playback
+        .player
         .stream(surface)
         .health
         .with(|h| match h.failure() {
@@ -138,7 +139,7 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
         .role(AccessibilityRole::Button)
         .label(move || {
             let name = channel().map_or_else(|| tr("Channels").to_owned(), channel_name);
-            let silent = !heard() || ui.media.volume.with(|v| v.muted);
+            let silent = !heard() || ui.playback.media.volume.with(|v| v.muted);
             if several() && silent {
                 trf("{channel} · muted", &[("channel", name.as_str().into())])
             } else {
@@ -241,7 +242,11 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
                     text(move || {
                         ui.guide_data();
                         channel().map_or(String::new(), |ch| {
-                            format!("{}  {}", crate::lists::number(ui, ch), channel_name(ch))
+                            format!(
+                                "{}  {}",
+                                crate::lists::number(ui.guide, ch),
+                                channel_name(ch)
+                            )
                         })
                     })
                     .number_of_lines(1)
@@ -258,7 +263,7 @@ fn tile(ui: Ui, index: usize) -> impl IntoElement {
                 .child(when(
                     move || several() && heard(),
                     move || {
-                        let muted = move || ui.media.volume.with(|v| v.muted);
+                        let muted = move || ui.playback.media.volume.with(|v| v.muted);
                         svg(move || icons::src(if muted() { Icon::Muted } else { Icon::Volume }))
                             .test_id("multiview-heard")
                             .size(px(OSD_DETAIL + 2.0))

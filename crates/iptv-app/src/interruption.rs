@@ -13,7 +13,7 @@ use nsh_core::prelude::*;
 use crate::Ui;
 
 /// The heard player: its surface, and multiview's tile on it while the
-/// grid shows (its pause is the tile's own; otherwise `ui.paused`).
+/// grid shows (its pause is the tile's own; otherwise `ui.playback.paused`).
 #[derive(Clone, Copy, PartialEq)]
 struct Heard {
     surface: usize,
@@ -25,7 +25,8 @@ fn heard(ui: Ui) -> Heard {
         .find(|&s| crate::multiview::audible(ui, s))
         .unwrap_or(0);
     let tile = if crate::multiview::is_open(ui) {
-        ui.multiview
+        ui.playback
+            .multiview
             .with(|m| m.as_ref().and_then(|m| m.tile_on(surface)))
     } else {
         None
@@ -36,25 +37,25 @@ fn heard(ui: Ui) -> Heard {
 fn paused(ui: Ui, heard: Heard) -> bool {
     match heard.tile {
         Some(_) => crate::multiview::paused(ui, heard.surface),
-        None => ui.paused.get(),
+        None => ui.playback.paused.get(),
     }
 }
 
 fn set_paused(ui: Ui, heard: Heard, paused: bool) {
     match heard.tile {
-        Some(index) => ui.multiview.update(|m| {
+        Some(index) => ui.playback.multiview.update(|m| {
             if let Some(m) = m.as_mut() {
                 m.set_paused(index, paused);
             }
         }),
-        None => ui.paused.set(paused),
+        None => ui.playback.paused.set(paused),
     }
 }
 
 /// The policy's identity for what `heard` plays: its surface and its
 /// stream's token (0: nothing open).
 fn stream(ui: Ui, heard: Heard) -> u64 {
-    let s = ui.player.stream(heard.surface);
+    let s = ui.playback.player.stream(heard.surface);
     if s.source.with(Option::is_none) {
         return 0;
     }
@@ -72,7 +73,8 @@ pub fn on_change(ui: Ui, surface: usize, change: AudioChange) {
         let id = stream(ui, heard);
         let playing = id != 0 && !paused(ui, heard);
         let mut response = None;
-        ui.interruptions
+        ui.playback
+            .interruptions
             .update(|p| response = p.report(change.interruption(), id, playing));
         log::info!(
             "iptv audio: {} on surface {} -> {response:?}",
@@ -92,7 +94,7 @@ pub fn on_change(ui: Ui, surface: usize, change: AudioChange) {
 /// coming back leaves playback as it is. Called as each explicit action is
 /// accepted, before any delayed work it starts.
 pub fn viewer_acted(ui: Ui) {
-    ui.interruptions.update(|p| p.viewer_acted());
+    ui.playback.interruptions.update(|p| p.viewer_acted());
 }
 
 /// Changes nobody reported (a tile's own pause, another stream, the heard
@@ -105,6 +107,6 @@ pub fn bind(ui: Ui) {
     });
     effect(move || {
         let (paused, id) = now.get();
-        ui.interruptions.update(|p| p.observed(paused, id));
+        ui.playback.interruptions.update(|p| p.observed(paused, id));
     });
 }

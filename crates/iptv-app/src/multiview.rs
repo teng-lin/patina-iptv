@@ -13,7 +13,7 @@
 //! Keys: the arrows, OK (the tile's menu), Long OK where keys report their
 //! release (enlarge/reduce), Back. A pointer (desktop, tablet; never a TV)
 //! shows the pointer chrome while it moves or after a tap, on the play
-//! bar's timer (`ui.play_bar`, which does not show itself in multiview, and
+//! bar's timer (`ui.playback.play_bar`, which does not show itself in multiview, and
 //! which keeps the chrome until the next tap while a screen reader runs): a
 //! toolbar (Add screen, Exit multiview) and each tile's remove and
 //! enlarge buttons. A long press on a tile enlarges or reduces it.
@@ -81,7 +81,7 @@ pub fn offer_on(ui: Ui, device: Device) -> MultiviewOffer {
 /// own source's (`data::combined::connection_limit`).
 fn account_streams(ui: Ui) -> Option<u32> {
     ui.app.account_streams.get().or_else(|| {
-        let channel = ui.playing.get()?;
+        let channel = ui.playback.playing.get()?;
         let schedule = crate::runtime_owner::schedule();
         let all = schedule
             .as_any()?
@@ -118,9 +118,10 @@ pub fn availability(ui: Ui) -> Availability {
     }
     iptv_presentation::capabilities::multiview(
         offer,
-        ui.player_surface == 0,
-        ui.playing.get().is_some(),
-        ui.player_windows
+        ui.playback.player_surface == 0,
+        ui.playback.playing.get().is_some(),
+        ui.playback
+            .player_windows
             .with(|windows| !windows.sessions().is_empty()),
     )
 }
@@ -157,30 +158,33 @@ pub fn set_account_streams(allowed: Option<u32>) {
 
 /// A multiview session exists (its grid shows, or it waits for a detour).
 pub fn session(ui: Ui) -> bool {
-    ui.multiview.with(Option::is_some)
+    ui.playback.multiview.with(Option::is_some)
 }
 
 /// The grid shows (a session, not on a detour): it owns the keys and taps.
 pub fn is_open(ui: Ui) -> bool {
-    ui.multiview
+    ui.playback
+        .multiview
         .with(|m| m.as_ref().is_some_and(|m| m.detour().is_none()))
 }
 
 /// A tile plays full screen while the grid waits.
 pub fn detour(ui: Ui) -> bool {
-    ui.multiview
+    ui.playback
+        .multiview
         .with(|m| m.as_ref().is_some_and(|m| m.detour().is_some()))
 }
 
 /// The channel list picks for multiview.
 pub fn picking(ui: Ui) -> bool {
-    ui.multiview
+    ui.playback
+        .multiview
         .with_untracked(|m| m.as_ref().is_some_and(|m| m.pick().is_some()))
 }
 
 /// Where the channel list starts while picking: the active tile's channel.
 pub fn pick_from(ui: Ui) -> Option<usize> {
-    ui.multiview.with_untracked(|m| {
+    ui.playback.multiview.with_untracked(|m| {
         m.as_ref()
             .filter(|m| m.pick().is_some())
             .and_then(|m| m.tiles().get(m.active_index()))
@@ -192,12 +196,13 @@ pub fn pick_from(ui: Ui) -> Option<usize> {
 /// the one watched full screen), a desktop player window that took the
 /// sound, or else the full-screen one.
 pub fn audible(ui: Ui, surface: usize) -> bool {
-    if let Some(audible) = ui.player_windows.with(|w| w.audible()) {
+    if let Some(audible) = ui.playback.player_windows.with(|w| w.audible()) {
         return ui
+            .playback
             .player_windows
             .with(|w| w.on_surface(surface).is_some_and(|s| s.id == audible));
     }
-    ui.multiview.with(|m| match m {
+    ui.playback.multiview.with(|m| match m {
         None => surface == 0,
         Some(m) => m.audible_surface() == surface,
     })
@@ -207,13 +212,14 @@ pub fn audible(ui: Ui, surface: usize) -> bool {
 pub fn mounted(ui: Ui, surface: usize) -> bool {
     surface > 0
         && ui
+            .playback
             .multiview
             .with(|m| m.as_ref().is_some_and(|m| m.tile_on(surface).is_some()))
 }
 
 /// Tile `index`'s rectangle (px) in the window.
 pub fn tile_rect(ui: Ui, index: usize) -> Option<(f32, f32, f32, f32)> {
-    let layout = ui.multiview.with(|m| {
+    let layout = ui.playback.multiview.with(|m| {
         m.as_ref()
             .filter(|m| index < m.tiles().len())
             .map(State::layout)
@@ -232,6 +238,7 @@ pub fn tile_rect(ui: Ui, index: usize) -> Option<(f32, f32, f32, f32)> {
 /// Where `surface` shows while the grid is open; `None` without a tile.
 pub fn surface_rect(ui: Ui, surface: usize) -> Option<(f32, f32, f32, f32)> {
     let tile = ui
+        .playback
         .multiview
         .with(|m| m.as_ref().and_then(|m| m.tile_on(surface)))?;
     tile_rect(ui, tile)
@@ -249,17 +256,17 @@ pub fn open(ui: Ui) {
         resume(ui);
         return;
     }
-    let Some(channel) = ui.playing.get_untracked() else {
+    let Some(channel) = ui.playback.playing.get_untracked() else {
         return;
     };
     if untracked(|| session(ui)) {
         return;
     }
-    if ui.playback.get_untracked() != Playback::Live {
+    if ui.playback.playback.get_untracked() != Playback::Live {
         ui.play(channel, Playback::Live);
     }
-    ui.paused.set(false);
-    ui.panels.update(|p| p.hide());
+    ui.playback.paused.set(false);
+    ui.playback.panels.update(|p| p.hide());
     crate::channels_view::close(ui);
     let limits = Limits {
         decoders: untracked(|| tiles(ui)),
@@ -270,7 +277,9 @@ pub fn open(ui: Ui) {
         limits.decoders,
         limits.connections
     );
-    ui.multiview.set(Some(Multiview::open(channel, limits)));
+    ui.playback
+        .multiview
+        .set(Some(Multiview::open(channel, limits)));
     apply(ui, |m, _| m.add());
 }
 
@@ -288,7 +297,7 @@ fn end(ui: Ui) {
     for surface in 1..MAX_SURFACES {
         crate::player::stop_surface(ui, surface);
     }
-    ui.multiview.set(None);
+    ui.playback.multiview.set(None);
 }
 
 /// The remote while the grid owns it (`input.rs`).
@@ -326,10 +335,10 @@ pub fn back(ui: Ui) -> bool {
 /// tile stays paused (the grid's pause is the tile's own).
 pub fn resume(ui: Ui) -> bool {
     log::info!("iptv multiview: back to the grid");
-    ui.panels.update(|p| p.hide());
-    let paused = ui.paused.get_untracked();
-    ui.paused.set(false);
-    ui.multiview.update(|m| {
+    ui.playback.panels.update(|p| p.hide());
+    let paused = ui.playback.paused.get_untracked();
+    ui.playback.paused.set(false);
+    ui.playback.multiview.update(|m| {
         if let Some(m) = m.as_mut() {
             if let Some(d) = m.detour() {
                 m.set_paused(d, paused);
@@ -344,12 +353,13 @@ pub fn resume(ui: Ui) -> bool {
 /// alone holds).
 pub fn paused(ui: Ui, surface: usize) -> bool {
     if let Some(paused) = ui
+        .playback
         .player_windows
         .with(|w| w.on_surface(surface).map(|s| s.paused))
     {
         return paused;
     }
-    ui.multiview.with(|m| {
+    ui.playback.multiview.with(|m| {
         m.as_ref()
             .and_then(|m| m.tile_on(surface).map(|t| m.tiles()[t].paused))
             .unwrap_or(false)
@@ -407,7 +417,8 @@ pub fn picked(ui: Ui, channel: usize) -> bool {
 /// with or without a choice.
 pub fn list_closed(ui: Ui) {
     if picking(ui) {
-        ui.multiview
+        ui.playback
+            .multiview
             .update(|m| m.iter_mut().for_each(State::cancel_pick));
     }
 }
@@ -422,7 +433,7 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
     let follows = crate::settings::flag(iptv_settings::keys::SOUND_FOLLOWS_TILE)
         && iptv_presentation::capabilities::sound_follows_tile(untracked(crate::device::host));
     let mut step = None;
-    ui.multiview.update(|m| {
+    ui.playback.multiview.update(|m| {
         if let Some(m) = m.as_mut() {
             m.set_sound_follows_focus(follows);
             let before = m.assignments();
@@ -455,11 +466,11 @@ fn apply(ui: Ui, f: impl FnOnce(&mut State, &dyn Fn(usize) -> bool) -> Outcome<u
     match outcome {
         Outcome::Stay => {}
         Outcome::PickChannel => {
-            ui.play_bar.update(PlayBar::hide);
+            ui.playback.play_bar.update(PlayBar::hide);
             crate::multiview_picker::open(ui);
         }
         Outcome::SearchChannel => {
-            ui.play_bar.update(PlayBar::hide);
+            ui.playback.play_bar.update(PlayBar::hide);
             crate::search_view::open_to_pick(ui);
         }
         Outcome::Retry(surface) => crate::player::retry_surface(ui, surface),
@@ -480,18 +491,18 @@ fn leave(ui: Ui, channel: usize, surface: usize) {
     // The stream surface 0 keeps takes its tile's pause (a call's or
     // unplugged headphones' included: the interruption policy still owns
     // it, as the same stream's pause).
-    let kept = surface == 0 && ui.playing.get_untracked() == Some(channel);
+    let kept = surface == 0 && ui.playback.playing.get_untracked() == Some(channel);
     // Set before the session ends, so the pause never lapses between.
     let paused = kept && paused(ui, 0);
-    if kept && paused != ui.paused.get_untracked() {
-        ui.paused.set(paused);
+    if kept && paused != ui.playback.paused.get_untracked() {
+        ui.playback.paused.set(paused);
     }
     end(ui);
-    if surface != 0 || ui.playing.get_untracked() != Some(channel) {
+    if surface != 0 || ui.playback.playing.get_untracked() != Some(channel) {
         crate::lists::show_channel(ui, channel);
         ui.play(channel, Playback::Live);
     }
-    if ui.mode.get_untracked() == ViewMode::Fullscreen && ui.keys_shown() {
+    if ui.chrome.mode.get_untracked() == ViewMode::Fullscreen && ui.keys_shown() {
         ui.show_playing();
     }
 }

@@ -18,7 +18,7 @@ pub(super) const TIMELINE_HEIGHT: f32 = 20.0;
 pub(super) fn live_hairline(ui: Ui) -> impl IntoElement {
     let fraction = move || {
         let (_, p) = program(ui);
-        p.progress(ui.focus.with(|f| f.now)).clamp(0.0, 1.0)
+        p.progress(ui.guide.focus.with(|f| f.now)).clamp(0.0, 1.0)
     };
     let accent = move || rgb(ui.app.theme.with(|t| t.accent.light));
     view()
@@ -51,17 +51,17 @@ pub(super) fn live_hairline(ui: Ui) -> impl IntoElement {
 pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
     ui.guide_data();
     let schedule = crate::runtime_owner::schedule();
-    if ui.playback.get() == Playback::Live
+    if ui.playback.playback.get() == Playback::Live
         && let Some(channel) = crate::browse_playback::pending_channel(ui)
     {
         return (
             channel,
-            schedule.program_at(channel, ui.focus.with(|f| f.now)),
+            schedule.program_at(channel, ui.guide.focus.with(|f| f.now)),
         );
     }
-    let channel = ui.playing.get().unwrap_or(0);
-    let minute = match ui.playback.get() {
-        Playback::Live => ui.focus.with(|f| f.now),
+    let channel = ui.playback.playing.get().unwrap_or(0);
+    let minute = match ui.playback.playback.get() {
+        Playback::Live => ui.guide.focus.with(|f| f.now),
         Playback::CatchUp { start, .. } => start,
     };
     (channel, schedule.program_at(channel, minute))
@@ -72,7 +72,8 @@ pub(super) fn program(ui: Ui) -> (usize, crate::guide::Program) {
 pub(super) fn line(ui: Ui) -> impl IntoElement {
     let width = signal(0.0_f32);
     let catch_up = move || {
-        matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
+        matches!(ui.playback.playback.get(), Playback::CatchUp { .. })
+            || crate::on_demand::seekable(ui)
     };
     let fraction = move || match crate::seek::elapsed(ui) {
         Some((at, length)) => {
@@ -84,7 +85,7 @@ pub(super) fn line(ui: Ui) -> impl IntoElement {
         }
         None => {
             let (_, p) = program(ui);
-            p.progress(ui.focus.with(|f| f.now))
+            p.progress(ui.guide.focus.with(|f| f.now))
         }
     };
     let ends = move || match crate::seek::elapsed(ui) {

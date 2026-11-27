@@ -2,27 +2,28 @@
 use crate::Ui;
 
 pub fn active(ui: Ui) -> bool {
-    ui.player.recorded.with(Option::is_some) || ui.player.vod.with(Option::is_some)
+    ui.playback.player.recorded.with(Option::is_some)
+        || ui.playback.player.vod.with(Option::is_some)
 }
 pub fn seekable(ui: Ui) -> bool {
-    let stream = ui.player.main();
+    let stream = ui.playback.player.main();
     let published = stream.native_published();
     let seekable = stream.timeline.with(|timeline| timeline.seekable);
     active(ui) && published && seekable
 }
 
 pub fn seek_to(ui: Ui, ms: u64) -> bool {
-    if !active(ui) || !ui.player.main().accepts_native(None) {
+    if !active(ui) || !ui.playback.player.main().accepts_native(None) {
         return false;
     }
-    let stream = ui.player.main();
+    let stream = ui.playback.player.main();
     let mut command = None;
     stream.timeline.update(|t| command = t.seek_to(ms));
     if let Some(command) = command {
         crate::interruption::viewer_acted(ui);
         if stream.finished.get_untracked() {
             stream.finished.set(false);
-            ui.player.vod.update(|playing| {
+            ui.playback.player.vod.update(|playing| {
                 if let Some((playing, _)) = playing {
                     playing.ended = false;
                 }
@@ -40,7 +41,13 @@ pub fn seek_to(ui: Ui, ms: u64) -> bool {
     }
 }
 pub fn step(ui: Ui, seconds: i32) -> bool {
-    let position = ui.player.main().timeline.get_untracked().position_ms;
+    let position = ui
+        .playback
+        .player
+        .main()
+        .timeline
+        .get_untracked()
+        .position_ms;
     seek_to(
         ui,
         position.saturating_add_signed(i64::from(seconds) * 1000),
@@ -55,7 +62,7 @@ pub fn observe(
     duration_ms: Option<u64>,
     seekable: bool,
 ) {
-    let stream = ui.player.stream(surface);
+    let stream = ui.playback.player.stream(surface);
     if surface != 0 || !stream.accepts_native(Some(token)) || !active(ui) {
         return;
     }
@@ -81,7 +88,7 @@ pub fn observe(
     }
 }
 pub fn flush(ui: Ui, ended: bool) {
-    let stream = ui.player.main();
+    let stream = ui.playback.player.main();
     if !stream.accepts_native(None) {
         return;
     }
@@ -95,14 +102,15 @@ pub fn flush(ui: Ui, ended: bool) {
     }
     let progress = stream.timeline.get_untracked().progress(ended);
     crate::vod_view::observe(ui, progress.position_ms, progress.duration_ms, ended);
-    if let Some((job, source)) = ui.player.recorded.get_untracked() {
+    if let Some((job, source)) = ui.playback.player.recorded.get_untracked() {
         // This method queues the write immediately; disposal cannot lose the last point.
         crate::runtime_owner::runtime().save_recording_progress(job.id, &source, progress);
     }
 }
 
 pub fn title(ui: Ui) -> Option<String> {
-    ui.player
+    ui.playback
+        .player
         .recorded
         .with(|r| r.as_ref().map(|(job, _)| job.request.title.clone()))
         .or_else(|| crate::vod_view::title(ui))
