@@ -21,16 +21,20 @@ internal object CastCredentials {
     const val PRESENT: Byte = 1
     const val INVALID: Byte = 2
 
-    @Synchronized fun load(context: Context, key: String): ByteArray {
+    @Synchronized fun load(
+        context: Context,
+        key: String,
+    ): ByteArray {
         val (file, associatedData) = record(context, key)
         if (!exists(file)) return byteArrayOf(MISSING)
         val wrapping = wrappingKey(create = false) ?: return byteArrayOf(INVALID)
         val sealed = file.openRead().use(::readSealed) ?: return byteArrayOf(INVALID)
-        val credential = try {
-            CredentialKey.unwrap(wrapping, sealed, associatedData)
-        } catch (_: AEADBadTagException) {
-            return byteArrayOf(INVALID)
-        }
+        val credential =
+            try {
+                CredentialKey.unwrap(wrapping, sealed, associatedData)
+            } catch (_: AEADBadTagException) {
+                return byteArrayOf(INVALID)
+            }
         return try {
             byteArrayOf(PRESENT) + credential
         } finally {
@@ -38,7 +42,11 @@ internal object CastCredentials {
         }
     }
 
-    @Synchronized fun save(context: Context, key: String, credential: ByteArray) {
+    @Synchronized fun save(
+        context: Context,
+        key: String,
+        credential: ByteArray,
+    ) {
         try {
             require(credential.size in 1..MAX_CREDENTIAL_SIZE)
             val (file, associatedData) = record(context, key)
@@ -62,7 +70,10 @@ internal object CastCredentials {
         }
     }
 
-    @Synchronized fun forget(context: Context, key: String) {
+    @Synchronized fun forget(
+        context: Context,
+        key: String,
+    ) {
         val (file) = record(context, key)
         file.delete()
         check(!exists(file) && !File(file.baseFile.path + ".new").exists())
@@ -72,26 +83,31 @@ internal object CastCredentials {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (store.containsAlias(ALIAS)) return store.getKey(ALIAS, null) as? SecretKey
         if (!create) return null
-        return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(
-                KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build(),
-            )
-        }.generateKey()
+        return KeyGenerator
+            .getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            .apply {
+                init(
+                    KeyGenParameterSpec
+                        .Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                        .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                        .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                        .setKeySize(256)
+                        .build(),
+                )
+            }.generateKey()
     }
 
-    private fun record(context: Context, key: String): Pair<AtomicFile, ByteArray> {
+    private fun record(
+        context: Context,
+        key: String,
+    ): Pair<AtomicFile, ByteArray> {
         val associatedData = key.toByteArray(Charsets.UTF_8)
         val bytes = MessageDigest.getInstance("SHA-256").digest(associatedData)
         val digest = bytes.joinToString("") { "%02x".format(it) }
         return AtomicFile(File(context.noBackupFilesDir, "airplay-v1-$digest")) to associatedData
     }
 
-    private fun exists(file: AtomicFile): Boolean =
-        file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()
+    private fun exists(file: AtomicFile): Boolean = file.baseFile.exists() || File(file.baseFile.path + ".bak").exists()
 
     internal fun readSealed(input: InputStream): ByteArray? {
         val bytes = ByteArray(MAX_SEALED_SIZE + 1)

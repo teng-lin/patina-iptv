@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap
 /** Android owns OS leases. Rust owns the receiver session and its media relay. */
 internal object CastHost {
     @Volatile private var application: Context? = null
+
     @Volatile var visible = false
     private val main = Handler(Looper.getMainLooper())
     private val requests = ConcurrentHashMap<Long, CastStartRequest>()
@@ -24,7 +25,11 @@ internal object CastHost {
     const val PAUSE = 3
 
     @JvmStatic private external fun initialize()
-    @JvmStatic external fun playbackEvent(id: Long, event: Int)
+
+    @JvmStatic external fun playbackEvent(
+        id: Long,
+        event: Int,
+    )
 
     fun attach(context: Context) {
         application = context.applicationContext
@@ -55,17 +60,21 @@ internal object CastHost {
         }
     }
 
-    @JvmStatic fun topology(): String? =
-        application?.let { CastLanNetwork.topology(lanNetworks(it)) }
+    @JvmStatic fun topology(): String? = application?.let { CastLanNetwork.topology(lanNetworks(it)) }
 
-    @JvmStatic fun start(id: Long, address: String, topology: String): Boolean {
+    @JvmStatic fun start(
+        id: Long,
+        address: String,
+        topology: String,
+    ): Boolean {
         val context = application ?: return false
         if (!visible) return false
         // Rust passes a numeric address from the owned connection's socket.
         return try {
             requests[id] = CastStartRequest(InetAddress.getByName(address), topology)
-            val intent = Intent(context, CastPlaybackService::class.java)
-                .putExtra(CastPlaybackService.ID, id)
+            val intent =
+                Intent(context, CastPlaybackService::class.java)
+                    .putExtra(CastPlaybackService.ID, id)
             if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
             true
         } catch (_: Exception) {
@@ -81,30 +90,47 @@ internal object CastHost {
         main.post { CastPlaybackService.instance?.release(id) }
     }
 
-    @JvmStatic fun playback(id: Long, state: Int, controls: Int) {
+    @JvmStatic fun playback(
+        id: Long,
+        state: Int,
+        controls: Int,
+    ) {
         main.post { CastPlaybackService.instance?.playback(id, state, controls) }
     }
 
-    @JvmStatic fun loadCredential(key: String): ByteArray =
-        CastCredentials.load(checkNotNull(application), key)
+    @JvmStatic fun loadCredential(key: String): ByteArray = CastCredentials.load(checkNotNull(application), key)
 
-    @JvmStatic fun saveCredential(key: String, credential: ByteArray) =
-        CastCredentials.save(checkNotNull(application), key, credential)
+    @JvmStatic fun saveCredential(
+        key: String,
+        credential: ByteArray,
+    ) = CastCredentials.save(checkNotNull(application), key, credential)
 
-    @JvmStatic fun forgetCredential(key: String) =
-        CastCredentials.forget(checkNotNull(application), key)
+    @JvmStatic fun forgetCredential(key: String) = CastCredentials.forget(checkNotNull(application), key)
 }
 
-internal data class CastStartRequest(val address: InetAddress, val topology: String)
+internal data class CastStartRequest(
+    val address: InetAddress,
+    val topology: String,
+)
 
-internal data class CastLanNetwork(val handle: Long, val wifi: Boolean, val addresses: List<InetAddress>) {
+internal data class CastLanNetwork(
+    val handle: Long,
+    val wifi: Boolean,
+    val addresses: List<InetAddress>,
+) {
     companion object {
         fun topology(networks: List<CastLanNetwork>): String? =
-            networks.flatMap { network ->
-                network.addresses.map { "${network.handle}:${it.hostAddress}" }
-            }.sorted().joinToString(",").ifEmpty { null }
+            networks
+                .flatMap { network ->
+                    network.addresses.map { "${network.handle}:${it.hostAddress}" }
+                }.sorted()
+                .joinToString(",")
+                .ifEmpty { null }
 
-        fun select(networks: List<CastLanNetwork>, request: CastStartRequest): CastLanNetwork? {
+        fun select(
+            networks: List<CastLanNetwork>,
+            request: CastStartRequest,
+        ): CastLanNetwork? {
             if (topology(networks) != request.topology) return null
             return networks.singleOrNull { request.address in it.addresses }
         }

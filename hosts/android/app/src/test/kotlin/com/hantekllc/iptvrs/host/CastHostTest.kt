@@ -1,9 +1,9 @@
 package com.hantekllc.iptvrs.host
 
-import java.net.InetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.net.InetAddress
 
 class CastHostTest {
     private val address = InetAddress.getByName("192.0.2.7")
@@ -22,9 +22,13 @@ class CastHostTest {
         val wifi = CastLanNetwork(1, true, listOf(address, other))
         val wire = CastLanNetwork(2, false, listOf(other))
         val request = CastStartRequest(address, CastLanNetwork.topology(listOf(wifi, wire))!!)
-        assertEquals(wifi.copy(addresses = listOf(other, address)), CastLanNetwork.select(
-            listOf(wire, wifi.copy(addresses = listOf(other, address))), request,
-        ))
+        assertEquals(
+            wifi.copy(addresses = listOf(other, address)),
+            CastLanNetwork.select(
+                listOf(wire, wifi.copy(addresses = listOf(other, address))),
+                request,
+            ),
+        )
         assertNull(CastLanNetwork.select(listOf(wifi.copy(addresses = listOf(other)), wire), request))
         val duplicate = wire.copy(addresses = listOf(address))
         val ambiguous = CastStartRequest(address, CastLanNetwork.topology(listOf(wifi, duplicate))!!)
