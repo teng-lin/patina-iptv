@@ -50,10 +50,10 @@ async fn locally_rejected_loads_release_the_relay_port_before_returning() {
             .env(CHILD, "1")
             .output()
             .unwrap();
+        let stdout = String::from_utf8_lossy(&result.stdout);
         assert!(
-            result.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&result.stdout),
+            result.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
             String::from_utf8_lossy(&result.stderr)
         );
         return;
