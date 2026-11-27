@@ -119,8 +119,10 @@ pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receive
         .iter()
         .any(|receiver| receiver.protocol == NetworkProtocol::AirPlay);
     labels.extend(receivers.iter().map(|receiver| match receiver.protocol {
-        NetworkProtocol::AirPlay => format!("{} · AirPlay", receiver.name),
-        NetworkProtocol::GoogleCast if mixed => format!("{} · Chromecast", receiver.name),
+        NetworkProtocol::AirPlay => trf("{name} · AirPlay", &[("name", (&receiver.name).into())]),
+        NetworkProtocol::GoogleCast if mixed => {
+            trf("{name} · Chromecast", &[("name", (&receiver.name).into())])
+        }
         NetworkProtocol::GoogleCast => receiver.name.clone(),
     }));
     values.extend(receivers.iter().map(|r| r.id.clone()));

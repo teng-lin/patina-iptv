@@ -55,7 +55,7 @@ impl Entry {
         attributes.insert("application", "rust-keyring");
         let label = match self.service.as_str() {
             "org.iptv-rs.database" => "Patina catalog key",
-            _ => "Patina AirPlay pairing",
+            _ => crate::i18n::tr("Patina AirPlay pairing"),
         };
         collection
             .create_item(label, attributes, secret, true, "text/plain")
