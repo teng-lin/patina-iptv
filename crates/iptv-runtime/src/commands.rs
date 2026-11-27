@@ -179,14 +179,6 @@ fn startup_library_native(
     services.catalog().startup_library()
 }
 
-fn source_policies_native(
-    services: &Services,
-) -> impl std::future::Future<
-    Output = Result<Vec<(crate::model::SourceSummary, iptv_library::SourcePolicy)>, StoreError>,
-> + use<> {
-    services.catalog().source_policies()
-}
-
 fn guide_status_snapshot_native(
     services: &Services,
 ) -> impl std::future::Future<Output = Result<super::state::StatusSnapshot, StoreError>> + use<> {
@@ -200,21 +192,6 @@ fn description_native(
     start: iptv_epg::UnixTime,
 ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + use<> {
     services.epg().description(source, key, start)
-}
-
-fn guide_sources_native(
-    services: &Services,
-    source: SourceId,
-) -> impl std::future::Future<
-    Output = Result<
-        (
-            Option<crate::model::StoredGuide>,
-            Vec<iptv_library::GuideSource>,
-        ),
-        StoreError,
-    >,
-> + use<> {
-    services.epg().guide_sources_snapshot(source)
 }
 
 fn clear_guides_native(
@@ -608,19 +585,6 @@ pub(crate) fn startup_library(
     async move { startup.await.map_err(crate::Error::from) }
 }
 
-pub(crate) fn source_policies(
-    owner: &crate::Runtime,
-) -> impl std::future::Future<
-    Output = Result<Vec<(crate::model::SourceSummary, iptv_library::SourcePolicy)>, crate::Error>,
-> + use<> {
-    let services = owner.services();
-    async move {
-        source_policies_native(&services)
-            .await
-            .map_err(crate::Error::from)
-    }
-}
-
 pub(crate) fn guide_status_snapshot(
     owner: &crate::Runtime,
 ) -> impl std::future::Future<Output = Result<super::state::StatusSnapshot, crate::Error>> + use<> {
@@ -641,26 +605,6 @@ pub(crate) fn description(
     let services = owner.services();
     async move {
         description_native(&services, source, key, start)
-            .await
-            .map_err(crate::Error::from)
-    }
-}
-
-pub(crate) fn guide_sources(
-    owner: &crate::Runtime,
-    source: SourceId,
-) -> impl std::future::Future<
-    Output = Result<
-        (
-            Option<crate::model::StoredGuide>,
-            Vec<iptv_library::GuideSource>,
-        ),
-        crate::Error,
-    >,
-> + use<> {
-    let services = owner.services();
-    async move {
-        guide_sources_native(&services, source)
             .await
             .map_err(crate::Error::from)
     }

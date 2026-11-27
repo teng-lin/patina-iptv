@@ -154,6 +154,33 @@ where
     query_with_deadline(owner, control, QUERY_DEADLINE, operation)
 }
 
+fn inspection_access(snapshot: &crate::parental::Snapshot) -> iptv_store_sqlite::InspectionAccess {
+    use iptv_core::parental::ContentKind;
+    use std::sync::atomic::Ordering;
+
+    let current = snapshot.epoch.load(Ordering::SeqCst) == snapshot.at;
+    let now = crate::parental::now_ms();
+    iptv_store_sqlite::InspectionAccess {
+        unrestricted: !snapshot.access.policy.protects(ContentKind::Live)
+            || (current && snapshot.access.all_content_granted(now)),
+        grants: if current {
+            snapshot.access.content_grants().cloned().collect()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+fn inspection_context(snapshot: &crate::parental::Snapshot) -> String {
+    use sha2::Digest;
+
+    let access = inspection_access(snapshot);
+    format!(
+        "{:x}",
+        sha2::Sha256::digest(format!("{}:{access:?}", snapshot.policy_at).as_bytes())
+    )
+}
+
 fn authorized_query<T, F, K>(
     owner: &Runtime,
     control: InspectionControl,
@@ -171,7 +198,7 @@ where
     let services = owner.services();
     let reading = authorization.clone();
     let read = query(owner, control, move |store| {
-        store.inspection_with_access(reading.inspection_access(), |store| {
+        store.inspection_with_access(inspection_access(&reading), |store| {
             let value = match operation(store)? {
                 Ok(value) => value,
                 Err(error) => return Ok(Err(error)),
@@ -223,7 +250,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,
@@ -260,7 +287,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,
@@ -295,7 +322,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,
@@ -324,7 +351,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,

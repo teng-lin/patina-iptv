@@ -12,7 +12,7 @@ use iptv_providers::model::SourceConfig;
 use iptv_providers::{ContentId, GroupId};
 use iptv_store_sqlite::{
     ChannelOrder, ChannelQuery, ChannelScope, CustomGroup, CustomGroupId, MoveTarget, OrderScope,
-    SourceSummary, Store, StoredSource,
+    Store, StoredSource,
 };
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -124,17 +124,20 @@ pub(crate) struct CatalogRepo {
 }
 
 impl CatalogRepo {
-    pub(crate) async fn source_policies(
+    pub(crate) async fn refresh_sources(
         self,
-    ) -> Result<Vec<(SourceSummary, SourcePolicy)>, StoreError> {
+    ) -> Result<Vec<crate::library::RefreshSource>, StoreError> {
         self.services
             .call(|store| {
                 store
                     .sources()?
                     .into_iter()
                     .map(|source| {
-                        let policy = store.source_policy(source.id)?;
-                        Ok((source, policy))
+                        Ok(crate::library::RefreshSource {
+                            id: source.id,
+                            last_attempt_at: source.import.last_attempt_at,
+                            policy: store.source_policy(source.id)?,
+                        })
                     })
                     .collect()
             })
@@ -154,7 +157,13 @@ impl CatalogRepo {
                         snapshot.enabled.push(source.id);
                     }
                     if let Some(guide) = store.epg_guide(source.id)? {
-                        snapshot.guides.insert(source.id, guide);
+                        snapshot.guides.insert(
+                            source.id,
+                            crate::state::CachedGuide {
+                                summary: crate::stored::guide_snapshot(&guide),
+                                has_feeds: !guide.feeds.is_empty(),
+                            },
+                        );
                     }
                     let results = store.epg_feed_results(source.id)?;
                     let lines = store

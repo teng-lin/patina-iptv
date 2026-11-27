@@ -1,8 +1,8 @@
 //! Owned application state; all types here are independent of the shell.
 use iptv_guide::EpgSchedule;
 use iptv_import::CancelToken;
-use iptv_library::{Playlist, SourceId, SourceLine};
-use iptv_store_sqlite::{StoredGuide, StoredSource};
+use iptv_library::{GuideSnapshot, Playlist, SourceId, SourceLine};
+use iptv_store_sqlite::StoredSource;
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
@@ -83,8 +83,13 @@ pub struct StatusSnapshot {
     pub library: Option<LibrarySnapshot>,
     pub combined: bool,
     pub enabled: Vec<SourceId>,
-    pub guides: BTreeMap<SourceId, StoredGuide>,
+    pub guides: BTreeMap<SourceId, CachedGuide>,
     pub lines: BTreeMap<SourceId, Vec<SourceLine>>,
+}
+
+pub(crate) struct CachedGuide {
+    pub(crate) summary: GuideSnapshot,
+    pub(crate) has_feeds: bool,
 }
 
 /// Organization read atomically for one committed library version.

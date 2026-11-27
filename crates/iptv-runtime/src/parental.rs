@@ -497,27 +497,6 @@ pub(crate) struct Snapshot {
     pub(crate) policy_at: u64,
 }
 impl Snapshot {
-    pub(crate) fn inspection_access(&self) -> crate::model::InspectionAccess {
-        let current = self.epoch.load(Ordering::SeqCst) == self.at;
-        let now = now_ms();
-        crate::model::InspectionAccess {
-            unrestricted: !self.access.policy.protects(ContentKind::Live)
-                || (current && self.access.all_content_granted(now)),
-            grants: if current {
-                self.access.content_grants().cloned().collect()
-            } else {
-                Vec::new()
-            },
-        }
-    }
-    pub(crate) fn inspection_context(&self) -> String {
-        let access = self.inspection_access();
-        use sha2::Digest;
-        format!(
-            "{:x}",
-            sha2::Sha256::digest(format!("{}:{access:?}", self.policy_at).as_bytes())
-        )
-    }
     pub(crate) fn inspection_current(&self, grants: &[Target]) -> bool {
         self.grants_current(grants, |grant, now| self.access.granted(grant, now))
     }
