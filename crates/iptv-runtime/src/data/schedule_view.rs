@@ -1,42 +1,16 @@
 use super::*;
-#[allow(unused_imports)]
-use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline};
-#[allow(unused_imports)]
-use crate::model::{StoreError, StoredSource};
-#[allow(unused_imports)]
+use crate::imports::{GuideRead, Imported, Streams};
 use crate::state::SingleSchedule;
-#[allow(unused_imports)]
 use crate::time::now_unix;
-#[allow(unused_imports)]
-use crate::{GuideWork, Runtime, RuntimeEvent, ScheduleCause};
-#[allow(unused_imports)]
-use iptv_core::add_playlist::{FailureKind, ImportFailure};
-#[allow(unused_imports)]
+use crate::{Runtime, RuntimeEvent, ScheduleCause};
 use iptv_core::guide::Schedule;
-#[allow(unused_imports)]
 use iptv_epg::GuideStore;
-#[allow(unused_imports)]
 use iptv_guide::EpgSchedule;
-#[allow(unused_imports)]
 use iptv_guide::combined::{CombinedSchedule, SourceSchedule};
-#[allow(unused_imports)]
-use iptv_import::CancelToken;
-#[allow(unused_imports)]
 use iptv_library::SourceId;
-#[allow(unused_imports)]
-use iptv_providers::model::{Source, SourceConfig};
-#[allow(unused_imports)]
-use std::cell::{Cell, RefCell};
-#[allow(unused_imports)]
+use std::cell::Cell;
 use std::collections::BTreeSet;
-#[allow(unused_imports)]
 use std::rc::Rc;
-#[allow(unused_imports)]
-use std::time::Duration;
-#[allow(unused_imports)]
-use tokio::sync::mpsc::error::TryRecvError;
-#[allow(unused_imports)]
-use tokio::sync::mpsc::unbounded_channel;
 
 pub(super) enum ScheduleUpdate<'a> {
     Source {

@@ -732,7 +732,7 @@ impl Runtime {
         if !self.recordings.shared().lock().ready {
             return Err(Error::unavailable("Recording service unavailable"));
         }
-        refresh_accounts(&self.services(), &self.recordings.shared())
+        refresh_accounts(&self.services(), self.recordings.shared())
             .await
             .map_err(|_| Error::unavailable("Recording sources unavailable"))?;
         self.recordings.shared().retire_unused().await;

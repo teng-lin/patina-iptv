@@ -25,16 +25,6 @@ use tough::{
 };
 use url::Url;
 
-/// Per-owner update admission and publication state.
-#[derive(Default)]
-pub(crate) struct OwnerState {
-    #[cfg(any(target_os = "linux", test))]
-    file_commits: std::cell::Cell<usize>,
-    controller: RefCell<state::Controller>,
-    pending: RefCell<Option<pending::Pending>>,
-    download: RefCell<Option<pending::Active>>,
-}
-
 const USER_AGENT: &str = "Patina";
 
 #[derive(Clone, Debug)]
@@ -201,6 +191,16 @@ async fn verified_index(
         .await
         .ok()?;
     selection::select(&bytes, installed)
+}
+
+/// Per-owner update admission and publication state.
+#[derive(Default)]
+pub(crate) struct OwnerState {
+    #[cfg(any(target_os = "linux", test))]
+    file_commits: std::cell::Cell<usize>,
+    controller: RefCell<state::Controller>,
+    pending: RefCell<Option<pending::Pending>>,
+    download: RefCell<Option<pending::Active>>,
 }
 
 #[cfg(test)]
