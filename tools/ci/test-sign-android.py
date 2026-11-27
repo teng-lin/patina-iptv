@@ -290,6 +290,7 @@ class RealPackaging(Signing):
                 '  <application android:label="Synthetic" android:hasCode="false"/>\n</manifest>\n')
     CONTENT = {"lib/arm64-v8a/libnsh.so": b"\x7fELFsynthetic", "lib/armeabi-v7a/libnsh.so": b"\x7fELFsynthetic",
                "assets/notices/THIRD-PARTY.html": b"synthetic",
+               "assets/notices/NOTICE-pyatv.md": b"synthetic pyatv notice",
                "assets/notices/components.json": b"{}", "assets/notices/NSH-RUNNERS.html": b"synthetic",
                "assets/notices/runner-components.json": b"{}", "assets/notices/gradle/index.json": b"{}"}
 
