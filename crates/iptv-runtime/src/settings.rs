@@ -5,8 +5,31 @@ use crate::network::NetworkConfig;
 use futures_channel::oneshot;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
+
+pub(crate) struct State {
+    saved: crate::Slot<RefCell<Option<(u64, Arc<Settings>)>>>,
+    changed: crate::Slot<Cell<u64>>,
+    read_only: Cell<Option<std::io::ErrorKind>>,
+    session_only_noted: Cell<bool>,
+}
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            saved: crate::Slot::default(),
+            changed: crate::Slot::default(),
+            read_only: Cell::new(None),
+            session_only_noted: Cell::new(false),
+        }
+    }
+}
+impl State {
+    pub(super) fn session_only_noted(&self) -> &Cell<bool> {
+        &self.session_only_noted
+    }
+}
 
 /// One owner's effective settings, shared with its workers.
 pub(crate) type Shared = RwLock<Option<Arc<Settings>>>;
@@ -44,11 +67,12 @@ fn path(directory: &Path) -> PathBuf {
 pub(crate) fn load(owner: &super::Runtime) {
     let services = owner.services();
     let (settings, read_only) = read_file(services.files(), &path(services.directory()));
-    owner.settings_read_only.set(read_only);
+    owner.settings.read_only.set(read_only);
     let settings = Arc::new(adopt_retired(settings));
     owner
-        .settings_saved
-        .with(|saved| *saved.borrow_mut() = Some((owner.settings_changed.get(), settings.clone())));
+        .settings
+        .saved
+        .with(|saved| *saved.borrow_mut() = Some((owner.settings.changed.get(), settings.clone())));
     replace(services.shared_settings(), settings);
 }
 
@@ -202,7 +226,7 @@ pub(crate) fn check_setting_write(owner: &super::Runtime, key: &str) -> Result<(
 }
 
 fn check_writable(owner: &super::Runtime) -> Result<(), SaveError> {
-    match owner.settings_read_only.get() {
+    match owner.settings.read_only.get() {
         Some(error) => Err(SaveError::Storage(error)),
         None => Ok(()),
     }
@@ -411,8 +435,8 @@ fn apply_with_reply(
         log::info!("iptv settings: {key} changed");
         owner.emit(super::RuntimeEvent::SettingsChanged);
     }
-    let revision = owner.settings_changed.get() + 1;
-    owner.settings_changed.set(revision);
+    let revision = owner.settings.changed.get() + 1;
+    owner.settings.changed.set(revision);
     if !services.files().can_write() {
         // Neither a file writer nor a host keeps the files here: the
         // settings apply for this session.
@@ -430,15 +454,15 @@ fn apply_with_reply(
         let owner = task_owner;
         let result = saved.await;
         match settle(result) {
-            Settled::Saved => owner.settings_saved.with(|saved| {
+            Settled::Saved => owner.settings.saved.with(|saved| {
                 let mut saved = saved.borrow_mut();
                 if saved.as_ref().is_none_or(|(at, _)| *at < revision) {
                     *saved = Some((revision, next));
                 }
             }),
-            Settled::Failed if owner.settings_changed.get() == revision => {
+            Settled::Failed if owner.settings.changed.get() == revision => {
                 if let Some((_, previous)) =
-                    owner.settings_saved.with(|saved| saved.borrow().clone())
+                    owner.settings.saved.with(|saved| saved.borrow().clone())
                 {
                     publish(&owner, &services.settings(), previous);
                     owner.emit(super::RuntimeEvent::SettingsChanged);

@@ -77,7 +77,7 @@ impl Runtime {
         foreground: bool,
         external: Option<&iptv_core::parental::Target>,
     ) {
-        self.foreground.set(foreground);
+        self.lifecycle.foreground().set(foreground);
         if !foreground {
             if let Some(target) = external {
                 self.parental_content_transferred(target);
@@ -190,7 +190,7 @@ impl Runtime {
     /// Tells the user, once per owner, that settings last for the session:
     /// this host has neither a file writer nor a file host to save them.
     pub(crate) fn note_session_only(&self) {
-        if !self.session_only_noted.replace(true) {
+        if !self.settings.session_only_noted().replace(true) {
             self.emit(crate::RuntimeEvent::Notify(
                 "Changes are not saved on this device: they last until you show another playlist or close Patina.",
             ));
@@ -423,14 +423,18 @@ impl Runtime {
 
     /// Applies new statistics on entering the guide or selecting a different list.
     pub fn refresh_watch_order(self: &Rc<Self>) {
-        let dirty = std::mem::take(&mut *self.watch_sort_dirty.borrow_mut());
+        let dirty = std::mem::take(&mut *self.organization.watch_sort_dirty().borrow_mut());
         if dirty.is_empty() {
             return;
         }
         let owner = self.clone();
         self.spawn(async move {
             if !crate::favorites::flush(&owner).await {
-                owner.watch_sort_dirty.borrow_mut().extend(dirty);
+                owner
+                    .organization
+                    .watch_sort_dirty()
+                    .borrow_mut()
+                    .extend(dirty);
                 return;
             }
             let sources = owner
@@ -454,7 +458,11 @@ impl Runtime {
                         crate::data::watch_order_changed(&owner, source);
                     }
                 }
-                Err(_) => owner.watch_sort_dirty.borrow_mut().extend(dirty),
+                Err(_) => owner
+                    .organization
+                    .watch_sort_dirty()
+                    .borrow_mut()
+                    .extend(dirty),
             }
         });
     }
@@ -558,7 +566,7 @@ impl Runtime {
     ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (entered, observed) = std::sync::mpsc::channel();
         let (release, resume) = std::sync::mpsc::channel();
-        *self.inspection_scan.borrow_mut() = Some(Box::new(move || {
+        self.inspection.set_scan_hook(Box::new(move || {
             let _ = entered.send(());
             let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
         }));

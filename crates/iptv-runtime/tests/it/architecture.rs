@@ -95,7 +95,7 @@ const STORE_ADAPTER_USERS: &[&str] = &[
 
 /// Ratchet the owner shape as PR2 extracts domain state. Includes fields
 /// behind `test-support`, matching the source inventory rather than one build.
-const RUNTIME_FIELD_LIMIT: usize = 57;
+const RUNTIME_FIELD_LIMIT: usize = 41;
 
 /// Process-lifetime facts and explicitly opted-in native recording services.
 /// UI Runtime owners are never discovered globally. The recording registry

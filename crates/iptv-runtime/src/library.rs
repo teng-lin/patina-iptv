@@ -437,14 +437,14 @@ pub fn save_collapsed(
 /// Refresh policy belongs to the application; the host supplies timers and
 /// foreground notifications. No device wakeups are requested in the background.
 pub fn start_scheduler(owner: &Rc<super::Runtime>) {
-    if owner.scheduler_started.replace(true) {
+    if owner.lifecycle.scheduler_started().replace(true) {
         return;
     }
     let runtime = owner.clone();
     owner.spawn(async move {
         let mut startup = true;
         loop {
-            if runtime.foreground.get() {
+            if runtime.lifecycle.foreground().get() {
                 if let Ok(sources) = super::commands::source_policies(&runtime).await {
                     for (source, policy) in sources {
                         let attempted = runtime

@@ -69,6 +69,9 @@ pub struct BrowserState {
 }
 
 mod guide_checks;
+mod lifecycle;
+mod organization;
+
 pub use guide_checks::GuideWork;
 pub(crate) mod state;
 pub use events::{RuntimeEvent, ScheduleCause};
@@ -151,16 +154,11 @@ type PageWaiters = RefCell<Vec<data::pages::Waiter>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
 /// The guide updates asked for by hand that have not ended, each with its work.
 type Updates = Vec<(SourceId, Rc<ImportWork>)>;
-type SavedSettings = RefCell<Option<(u64, std::sync::Arc<iptv_settings::Settings>)>>;
 
 pub struct Runtime {
-    cast: RefCell<Option<cast::Active>>,
-    cast_workers: RefCell<Vec<cast::Worker>>,
-    cast_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    cast: cast::State,
     parental: RefCell<parental::State>,
-    recordings: std::sync::Arc<recordings::State>,
-    recordings_detached: Cell<bool>,
-    shutdown_requested: Cell<bool>,
+    recordings: recordings::OwnerState,
     vod: std::sync::Arc<vod::State>,
     repairs: RefCell<guide_repair::State>,
     account_streams: Slot<Cell<Option<u32>>>,
@@ -168,19 +166,12 @@ pub struct Runtime {
     wizard_import: Slot<RefCell<Option<(iptv_core::add_playlist::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
     inspection: inspection::Vault,
-    #[cfg(feature = "test-support")]
-    inspection_scan: RefCell<Option<inspection::ScanHook>>,
-    settings_saved: Slot<SavedSettings>,
-    settings_changed: Slot<Cell<u64>>,
-    settings_read_only: Cell<Option<std::io::ErrorKind>>,
+    settings: settings::State,
     link_client:
         std::sync::Arc<std::sync::Mutex<Option<(network::NetworkConfig, network::Client)>>>,
-    backup_busy: Cell<bool>,
-    /// The user was told that changes last for the session.
-    session_only_noted: Cell<bool>,
-    backup_progress: Cell<model::BackupProgress>,
+    backup: backup::State,
     search: search::State,
-    favorites: Slot<RefCell<favorites::State>>,
+    organization: organization::State,
     activity: RefCell<BTreeMap<SourceId, model::Activity>>,
     all: Cell<bool>,
     generation: Slot<Cell<u64>>,
@@ -200,19 +191,12 @@ pub struct Runtime {
     edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
     status: Slot<RefCell<StatusSnapshot>>,
     page_waiters: Slot<PageWaiters>,
-    organization_revision: Slot<Cell<u64>>,
-    watch_sort_dirty: std::cell::RefCell<std::collections::BTreeSet<model::SourceId>>,
     schedule: RefCell<Rc<dyn Schedule>>,
     schedule_revision: Cell<u64>,
-    events: RefCell<Option<EventSink>>,
-    tasks: TaskBinding,
-    wizard_tickets: Cell<u64>,
-    foreground: Cell<bool>,
-    scheduler_started: Cell<bool>,
-    guide_checks: RefCell<guide_checks::GuideChecks>,
+    lifecycle: lifecycle::State,
     status_revision: Cell<u64>,
-    browser: RefCell<Option<BrowserObserver>>,
-    organization_edits: RefCell<HashMap<SourceId, u64>>,
+    wizard_tickets: Cell<u64>,
+    guide_checks: RefCell<guide_checks::GuideChecks>,
     /// Each source's last show, which the next one waits for.
     shows: RefCell<HashMap<SourceId, futures_channel::oneshot::Receiver<()>>>,
 }
@@ -231,13 +215,9 @@ impl Runtime {
         let guide_checks = guide_checks::GuideChecks::default();
         let schedule = Rc::new(SyntheticSchedule);
         Self {
-            cast: RefCell::default(),
-            cast_workers: RefCell::default(),
-            cast_generation: Default::default(),
+            cast: cast::State::default(),
             parental: RefCell::default(),
-            recordings,
-            recordings_detached: Cell::new(false),
-            shutdown_requested: Cell::new(false),
+            recordings: recordings::OwnerState::new(recordings),
             vod: Default::default(),
             repairs: RefCell::default(),
             account_streams: Slot::default(),
@@ -245,17 +225,11 @@ impl Runtime {
             wizard_import: Slot::default(),
             store,
             inspection: inspection::Vault::new(entropy),
-            #[cfg(feature = "test-support")]
-            inspection_scan: RefCell::default(),
-            settings_saved: Slot::default(),
-            settings_changed: Slot::default(),
-            settings_read_only: Cell::new(None),
+            settings: settings::State::default(),
             link_client: Default::default(),
-            backup_busy: Cell::new(false),
-            session_only_noted: Cell::new(false),
-            backup_progress: Cell::new(model::BackupProgress::Idle),
+            backup: backup::State::default(),
             search: search::State::default(),
-            favorites: Slot(RefCell::new(favorites::State::with_catalog(&*schedule))),
+            organization: organization::State::new(favorites::State::with_catalog(&*schedule)),
             activity: RefCell::default(),
             all: Cell::new(false),
             generation: Slot::default(),
@@ -275,19 +249,12 @@ impl Runtime {
             edits: Slot::default(),
             status: Slot::default(),
             page_waiters: Slot::default(),
-            organization_revision: Slot::default(),
-            watch_sort_dirty: Default::default(),
             schedule: RefCell::new(schedule),
             schedule_revision: Cell::new(0),
-            events: RefCell::new(None),
-            tasks: TaskBinding::default(),
-            wizard_tickets: Cell::new(0),
-            foreground: Cell::new(true),
-            scheduler_started: Cell::new(false),
-            guide_checks: RefCell::new(guide_checks),
+            lifecycle: lifecycle::State::default(),
             status_revision: Cell::new(0),
-            browser: RefCell::default(),
-            organization_edits: RefCell::default(),
+            wizard_tickets: Cell::new(0),
+            guide_checks: RefCell::new(guide_checks),
             shows: RefCell::default(),
         }
     }
@@ -311,28 +278,28 @@ impl Runtime {
         spawn: impl Fn(LocalTask) + 'static,
         delay: impl Fn(std::time::Duration) -> LocalTask + 'static,
     ) {
-        self.tasks.bind(spawn, delay);
+        self.lifecycle.tasks().bind(spawn, delay);
     }
     /// Runs `task` on the host's local executor. The task holds its owner
     /// itself: it names no other one, whichever owner the host polls it under.
     pub(crate) fn spawn(&self, task: impl std::future::Future<Output = ()> + 'static) {
-        if !self.tasks.try_spawn(Box::pin(task)) {
+        if !self.lifecycle.tasks().try_spawn(Box::pin(task)) {
             log::error!("runtime task rejected because no task host is available");
         }
     }
 
     pub(crate) fn has_tasks(&self) -> bool {
-        self.tasks.has_tasks()
+        self.lifecycle.tasks().has_tasks()
     }
 
     pub(crate) fn try_spawn(&self, task: impl std::future::Future<Output = ()> + 'static) -> bool {
-        self.tasks.try_spawn(Box::pin(task))
+        self.lifecycle.tasks().try_spawn(Box::pin(task))
     }
     pub(crate) fn delay(
         &self,
         duration: std::time::Duration,
     ) -> impl std::future::Future<Output = ()> + use<> {
-        self.tasks.delay(duration)
+        self.lifecycle.tasks().delay(duration)
     }
     pub fn flush_files(&self, limit: std::time::Duration) -> bool {
         self.store.files().flush(limit)
@@ -346,7 +313,7 @@ impl Runtime {
     /// The calling thread becomes this owner's application thread: store
     /// requests are accepted from now until [`Runtime::drain_services`].
     pub fn start_services(&self) {
-        self.shutdown_requested.set(false);
+        self.lifecycle.shutdown_requested().set(false);
         self.store.begin();
         self.inspection.renew();
     }
@@ -354,14 +321,12 @@ impl Runtime {
         let deadline = crate::time::Instant::now() + self.store.drain_limit();
         self.inspection.close_workers();
         self.parental_lock();
-        if !self.recordings_detached.replace(true) {
-            self.recordings.detach_ui();
-        }
+        self.recordings.detach_ui();
         self.cancel_guide_checks();
         // A Recently added sort still running must not hold the analysis
         // lane's teardown barrier.
         self.vod.cancel_discovery();
-        self.shutdown_requested.set(true);
+        self.lifecycle.shutdown_requested().set(true);
         self.close_cast();
         let drained = self
             .store
@@ -379,10 +344,11 @@ impl Runtime {
     }
 
     pub fn bind_browser(&self, observe: impl Fn() -> BrowserState + 'static) {
-        *self.browser.borrow_mut() = Some(Rc::new(observe));
+        *self.lifecycle.browser().borrow_mut() = Some(Rc::new(observe));
     }
     pub(crate) fn browser(&self) -> BrowserState {
-        self.browser
+        self.lifecycle
+            .browser()
             .borrow()
             .as_ref()
             .map(|observe| observe())
@@ -390,27 +356,27 @@ impl Runtime {
     }
 
     pub fn bind(&self, sink: impl Fn(RuntimeEvent) + 'static) {
-        *self.events.borrow_mut() = Some(Rc::new(sink));
+        *self.lifecycle.events().borrow_mut() = Some(Rc::new(sink));
     }
 
     pub fn emit(&self, event: RuntimeEvent) {
         if let RuntimeEvent::AccountStreams(limit) = &event {
             self.account_streams.set(*limit);
         }
-        let sink = self.events.borrow().clone();
+        let sink = self.lifecycle.events().borrow().clone();
         if let Some(sink) = sink {
             sink(event);
         }
     }
 
     pub(crate) fn begin_organization_edit(&self, source: SourceId) -> u64 {
-        let mut edits = self.organization_edits.borrow_mut();
+        let mut edits = self.organization.edits().borrow_mut();
         let ticket = edits.entry(source).or_default();
         *ticket = ticket.wrapping_add(1);
         *ticket
     }
     pub(crate) fn organization_edit_current(&self, source: SourceId, ticket: u64) -> bool {
-        self.organization_edits.borrow().get(&source) == Some(&ticket)
+        self.organization.edits().borrow().get(&source) == Some(&ticket)
     }
 
     /// A turn at putting `source` on screen: shows of one source finish in
@@ -442,9 +408,7 @@ impl Drop for Runtime {
         // An abandoned reply can leave its discovery query on the analysis lane.
         // Cancel it before fallback draining waits for that lane's barrier.
         self.vod.cancel_discovery();
-        if !self.recordings_detached.replace(true) {
-            self.recordings.detach_ui();
-        }
+        self.recordings.detach_ui();
         if let Some((_, cancel)) = self.wizard_import.borrow().as_ref() {
             cancel.cancel();
         }
@@ -463,7 +427,7 @@ impl Drop for Runtime {
         // the independent native recording host retains its own services.
         // An explicit attempt already spent its bounded shutdown budget, even
         // if a noncooperative lane did not close. Do not spend it again in Drop.
-        if !self.shutdown_requested.replace(true) {
+        if !self.lifecycle.shutdown_requested().replace(true) {
             let deadline = crate::time::Instant::now() + self.store.drain_limit();
             self.close_cast();
             if !self

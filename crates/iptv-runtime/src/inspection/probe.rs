@@ -102,6 +102,8 @@ pub(crate) struct Vault {
     next_call: AtomicU64,
     workers: Arc<Workers>,
     #[cfg(feature = "test-support")]
+    scan_hook: std::cell::RefCell<Option<crate::inspection::ScanHook>>,
+    #[cfg(feature = "test-support")]
     stage_hook: Arc<Mutex<Option<Arc<crate::testing::GateState>>>>,
 }
 impl Vault {
@@ -119,8 +121,18 @@ impl Vault {
             next_call: AtomicU64::new(0),
             workers: Arc::default(),
             #[cfg(feature = "test-support")]
+            scan_hook: std::cell::RefCell::default(),
+            #[cfg(feature = "test-support")]
             stage_hook: Arc::default(),
         }
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) fn set_scan_hook(&self, hook: crate::inspection::ScanHook) {
+        *self.scan_hook.borrow_mut() = Some(hook);
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) fn take_scan_hook(&self) -> Option<crate::inspection::ScanHook> {
+        self.scan_hook.borrow_mut().take()
     }
     pub(crate) fn context(&self, epoch: u64) -> String {
         format!(

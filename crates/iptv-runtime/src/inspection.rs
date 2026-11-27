@@ -88,7 +88,7 @@ where
     let operation_cancel = token.clone();
     let slot = owner.inspection.admit();
     #[cfg(feature = "test-support")]
-    let mut scan = owner.inspection_scan.borrow_mut().take();
+    let mut scan = owner.inspection.take_scan_hook();
     let read: std::pin::Pin<
         Box<dyn Future<Output = iptv_store_sqlite::Result<InspectionResult<T>>> + Send>,
     > = match slot {

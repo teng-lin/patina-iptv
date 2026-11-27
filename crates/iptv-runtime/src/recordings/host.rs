@@ -196,7 +196,7 @@ impl State {
 }
 impl Runtime {
     pub(crate) fn start_recording_host(&self) {
-        self.recordings.start(Some(&self.services()));
+        self.recordings.shared().start(Some(&self.services()));
     }
     /// OS hosts must explicitly stop work before process shutdown/restore.
     /// A capture cut short is recovered by the next host.

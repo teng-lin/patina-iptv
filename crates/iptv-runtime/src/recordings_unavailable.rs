@@ -19,7 +19,43 @@ fn unavailable() -> Error {
 #[derive(Default)]
 pub(crate) struct State;
 impl State {
+    pub(crate) fn shared(&self) -> &std::sync::Arc<State> {
+        &self.shared
+    }
+    pub(crate) fn is_detached(&self) -> bool {
+        self.detached.get()
+    }
     pub(crate) fn detach_ui(&self) {}
+}
+
+pub(crate) struct OwnerState {
+    shared: std::sync::Arc<State>,
+    detached: std::cell::Cell<bool>,
+}
+impl std::ops::Deref for OwnerState {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.shared
+    }
+}
+impl OwnerState {
+    pub(crate) fn new(shared: std::sync::Arc<State>) -> Self {
+        Self {
+            shared,
+            detached: std::cell::Cell::new(false),
+        }
+    }
+    pub(crate) fn shared(&self) -> &std::sync::Arc<State> {
+        &self.shared
+    }
+    pub(crate) fn is_detached(&self) -> bool {
+        self.detached.get()
+    }
+    pub(crate) fn detach_ui(&self) {
+        if !self.detached.replace(true) {
+            self.shared.detach_ui();
+        }
+    }
 }
 
 pub mod host {
@@ -83,7 +119,7 @@ impl Runtime {
         None
     }
     pub fn reserve_viewing(&self, _surface: usize, _source: SourceId) -> bool {
-        !self.recordings_detached.get()
+        !self.recordings.is_detached()
     }
     pub fn release_viewing(&self, _surface: usize) {}
     pub fn recording_snapshot(&self) -> Vec<Job> {

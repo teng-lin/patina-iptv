@@ -392,7 +392,7 @@ impl State {
 }
 impl Runtime {
     pub(super) fn retire_previous_viewing(&self, surface: usize) {
-        let state = self.recordings.clone();
+        let state = self.recordings.shared().clone();
         let gate = state.preparation_gate(surface);
         self.services().spawn(async move {
             let _gate = gate.lock().await;
@@ -405,7 +405,7 @@ impl Runtime {
         &self,
         surface: usize,
     ) -> impl std::future::Future<Output = ()> + use<> {
-        let state = self.recordings.clone();
+        let state = self.recordings.shared().clone();
         let gate = state.preparation_gate(surface);
         let services = self.services();
         #[cfg(feature = "test-support")]
@@ -429,10 +429,10 @@ impl Runtime {
     /// A returning viewer can retain the incoming owner still held by capture.
     /// A different channel needs its own permitted connection.
     pub fn reserve_live_viewing(&self, surface: usize, source: SourceId, channel: &str) -> bool {
-        if self.recordings_detached.get() {
+        if self.recordings.is_detached() {
             return false;
         }
-        let mut data = self.recordings.lock();
+        let mut data = self.recordings.shared().lock();
         let input = data.shared_for(source.0, channel);
         if (!data.active.is_empty()
             || data.external_viewer.is_some()
@@ -445,7 +445,7 @@ impl Runtime {
         {
             return false;
         }
-        self.recordings.cancel_preparation(surface);
+        self.recordings.shared().cancel_preparation(surface);
         let mut lease = data.lease(source.0);
         lease.input = input;
         data.suspended_viewers.remove(&surface);
@@ -457,6 +457,7 @@ impl Runtime {
     }
     pub fn owns_viewing_source(&self, surface: usize, source: &PlaySource) -> bool {
         self.recordings
+            .shared
             .lock()
             .viewers
             .get(&surface)
@@ -508,6 +509,7 @@ impl Runtime {
     ) -> impl std::future::Future<Output = Result<PlaySource, Error>> + use<> {
         let attempt = log::log_enabled!(target: PREPARATION_LOG, log::Level::Debug).then(|| {
             self.recordings
+                .shared
                 .next_preparation
                 .fetch_add(1, Ordering::Relaxed)
         });
@@ -518,9 +520,9 @@ impl Runtime {
             }
         };
         trace_preparation("requested");
-        let disabled = self.recordings_detached.get()
-            || self.shutdown_requested.get()
-            || self.recordings.is_stopping();
+        let disabled = self.recordings.is_detached()
+            || self.lifecycle.shutdown_requested().get()
+            || self.recordings.shared().is_stopping();
         if !disabled {
             self.start_recordings();
         }
@@ -528,7 +530,7 @@ impl Runtime {
         let pause = share
             .then(|| self.services().take_source_preparation())
             .flatten();
-        let state = self.recordings.clone();
+        let state = self.recordings.shared().clone();
         let services = state
             .host
             .lock()

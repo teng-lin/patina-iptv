@@ -1155,8 +1155,9 @@ pub(crate) fn watch_order_changed(owner: &Rc<crate::Runtime>, source: SourceId) 
 
 fn reload_organization(owner: &Rc<crate::Runtime>, source: SourceId, retry_watch_order: bool) {
     owner
-        .organization_revision
-        .set(owner.organization_revision.get().wrapping_add(1));
+        .organization
+        .revision()
+        .set(owner.organization.revision().get().wrapping_add(1));
     let ticket = owner.begin_organization_edit(source);
     owner.emit(crate::RuntimeEvent::LibraryChanged);
     let task = owner.clone();
@@ -1167,7 +1168,10 @@ fn reload_organization(owner: &Rc<crate::Runtime>, source: SourceId, retry_watch
             replace_single_organization(&task, source, ticket).await
         };
         if retry_watch_order && !installed {
-            task.watch_sort_dirty.borrow_mut().insert(source);
+            task.organization
+                .watch_sort_dirty()
+                .borrow_mut()
+                .insert(source);
         }
     });
 }
