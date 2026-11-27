@@ -363,6 +363,9 @@ impl Wire {
         headers: &[(&str, &str)],
         body: &[u8],
     ) -> Result<()> {
+        if let Some(fault) = self.frame_fault {
+            return Err(fault);
+        }
         let mut head = format!("{verb} {target} {}\r\n", version.token());
         // Request fields are supplied by the sender, and values from the receiver
         // are parsed into typed IDs before they are rendered here.

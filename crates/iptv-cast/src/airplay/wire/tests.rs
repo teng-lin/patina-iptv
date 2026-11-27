@@ -192,6 +192,12 @@ async fn delivers_buffered_authenticated_messages_before_a_framing_fault() {
         let message = reader.receive().await.unwrap();
         assert_eq!(message.sequence, Some(sequence));
         assert_eq!(message.start, Start::Request);
+        assert!(matches!(
+            reader
+                .send_request(Version::Http, "GET", "/info", &[], &[])
+                .await,
+            Err(Fault::InvalidMessage)
+        ));
     }
     for _ in 0..2 {
         assert!(matches!(reader.receive().await, Err(Fault::InvalidMessage)));

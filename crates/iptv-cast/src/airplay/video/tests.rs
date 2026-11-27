@@ -303,6 +303,42 @@ fn an_unread_playback_observation_is_delivered_before_transport_failure() {
     assert_eq!(empty.next().now_or_never(), Some(Err(closed)));
 }
 
+#[tokio::test]
+async fn a_valid_event_is_retained_when_its_acknowledgement_cannot_be_sent() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (connection, receiver) = tokio::join!(TcpStream::connect(address), listener.accept());
+    let mut connection = connection.unwrap();
+    connection.shutdown().await.unwrap();
+    let mut events = Wire::new(connection);
+    let mut receiver = Wire::new(receiver.unwrap().0);
+    events.enable_encryption(&[0x11; 32], &[0x22; 32]);
+    receiver.enable_encryption(&[0x22; 32], &[0x11; 32]);
+    let observations = Observations::default();
+    observations.accept();
+    let body = state_event("item", "playing");
+    let (observed, acknowledged) = timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            event_loop(
+                events,
+                "item".to_owned(),
+                Arc::new(AtomicBool::new(true)),
+                &observations,
+            ),
+            receiver.request(Version::Http, "POST", "/event", &[], &body),
+        )
+    })
+    .await
+    .unwrap();
+    assert!(acknowledged.is_err());
+    let fault = observed.unwrap_err();
+    assert!(matches!(fault, VideoFault::Wire(_)));
+    observations.fault(fault);
+    let (playing, _) = parse_event(&body, "item").unwrap();
+    assert_eq!(observations.next().now_or_never(), Some(Ok(playing)));
+    assert_eq!(observations.next().now_or_never(), Some(Err(fault)));
+}
+
 #[test]
 fn validates_timing_datagram_and_uses_ntp_timestamp() {
     let mut packet = [0; 32];

@@ -1,7 +1,7 @@
 //! AirPlay v2 URL playback on a verified, dedicated transport.
 use super::{
     hap::{self, AuthFault, Verified},
-    wire::{Fault, Version, Wire},
+    wire::{Fault, Start, Version, Wire},
 };
 use plist::{
     Dictionary, Value,
@@ -431,14 +431,14 @@ async fn event_loop(
     loop {
         let message = wire.receive().await?;
         let was_dispatched = dispatched.load(Ordering::Acquire);
-        timeout(EXCHANGE_TIMEOUT, wire.ack_event(&message))
-            .await
-            .map_err(|_| VideoFault::TimedOut)??;
+        let acknowledged = timeout(EXCHANGE_TIMEOUT, wire.ack_event(&message)).await;
         if was_dispatched
+            && message.start == Start::Request
             && let Some((observation, explicitly_owned)) = parse_event(&message.body, &item)
         {
             evidence.media(observation, explicitly_owned);
         }
+        acknowledged.map_err(|_| VideoFault::TimedOut)??;
     }
 }
 
