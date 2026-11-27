@@ -115,6 +115,29 @@ async fn dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and
 async fn locally_rejected_loads_release_the_relay_port_before_returning() {
     use iptv_cast::test_support;
 
+    const CHILD: &str = "PATINA_RELAY_RETIREMENT_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // A concurrent Linux spawn can inherit the listening socket until exec,
+        // retaining its port after the relay has closed its own descriptor.
+        // Keep the immediate-reuse assertion strict in a process with no spawns.
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "host::native::casting::tests::locally_rejected_loads_release_the_relay_port_before_returning",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        assert!(
+            result.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        return;
+    }
+
     for media in [
         Media::live("invalid media URL"),
         Media::live("http://example.test/generated-without-content-type"),

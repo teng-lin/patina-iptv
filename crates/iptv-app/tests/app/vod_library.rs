@@ -31,24 +31,35 @@ pub(crate) fn player(app: &Headless) -> NodeId {
 /// tablet the play bar's visible ‹ (labeled Movies or Shows), else the
 /// system Back.
 fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
-    let bar = app.screen().matches("id:play-bar-back").unwrap();
     match idiom {
         nsh_core::platform::Idiom::Tv => step(app.back()),
         nsh_core::platform::Idiom::Desktop => step(app.press_key("backspace")),
-        _ if bar => {
-            let back = app.screen().id("id:play-bar-back").unwrap();
-            let labeled = |label: &str| {
-                let screen = app.screen();
-                (0..screen.count(&format!("label:{label}")).unwrap())
-                    .any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back))
-            };
-            assert!(
-                labeled("Movies") || labeled("Shows"),
-                "the ‹ reads Movies or Shows"
-            );
-            step(app.press("id:play-bar-back"));
+        _ => {
+            // Async source preparation and progress saves can outlast the bar's
+            // idle deadline. Keep the visible Back alive from lookup to press,
+            // as replay_ended_movie does for its transport controls.
+            let mut reader = false;
+            step(app.set_environment("Hold player Back", |env| {
+                reader = env.screen_reader;
+                env.screen_reader = true;
+            }));
+            if app.screen().matches("id:play-bar-back").unwrap() {
+                let back = app.screen().id("id:play-bar-back").unwrap();
+                let labeled = |label: &str| {
+                    let screen = app.screen();
+                    (0..screen.count(&format!("label:{label}")).unwrap())
+                        .any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back))
+                };
+                assert!(
+                    labeled("Movies") || labeled("Shows"),
+                    "the ‹ reads Movies or Shows"
+                );
+                step(app.press("id:play-bar-back"));
+            } else {
+                step(app.back());
+            }
+            step(app.set_environment("Release player Back", |env| env.screen_reader = reader));
         }
-        _ => step(app.back()),
     }
 }
 
@@ -1451,7 +1462,14 @@ fn exercise_admission(
     } else {
         step(app.press("text:/Generated Second/"));
     }
+    let mut reader = false;
     if let Some(held) = &held {
+        // These controls must stay mounted across native callbacks and the
+        // asynchronous source publication, independently of the idle deadline.
+        step(app.set_environment("Hold preparation controls", |env| {
+            reader = env.screen_reader;
+            env.screen_reader = true;
+        }));
         step(crate::isolated::wait_outside(
             &mut app,
             "source preparation acknowledged",
@@ -1577,6 +1595,9 @@ fn exercise_admission(
                 surface,
                 "rejection retains the persistent native surface"
             );
+            step(app.set_environment("Release preparation controls", |env| {
+                env.screen_reader = reader;
+            }));
             return;
         }
         held.release();
@@ -1650,6 +1671,9 @@ fn exercise_admission(
                     .is_ok_and(|state| !state.disabled)
             },
         ));
+        step(app.set_environment("Release preparation controls", |env| {
+            env.screen_reader = reader;
+        }));
     }
     if resume != ResumeCase::Seekable {
         assert_eq!(
@@ -1750,6 +1774,12 @@ fn exercise_admission(
         );
         app.settle();
     }
+    assert!(
+        app.screen().layout_nodes().iter().any(|node| {
+            node.id == surface && node.bounds.size == Size::new(px(1920.0), px(1080.0))
+        }),
+        "EOF keeps the episode full screen until the viewer goes Back"
+    );
     // Back from the episode: the show's details, the played episode
     // (season 2's first) selected, over the same player, opening nothing
     // (#147).
