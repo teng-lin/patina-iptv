@@ -220,11 +220,7 @@ fn only_runtime_can_use_the_store_adapter() {
     let (root, files) = app_sources();
     for file in files {
         let source = code(&file);
-        let name = file
-            .strip_prefix(&root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
+        let name = file_name(&root, &file);
         for forbidden in ["iptv_store_sqlite", "store_service::"] {
             if forbidden == "iptv_store_sqlite" && name == STORE_HOST {
                 continue;
@@ -243,11 +239,7 @@ fn shell_statics_are_only_the_documented_platform_cache_and_ui_handles() {
     let (root, files) = app_sources();
     let mut retained = BTreeSet::new();
     for file in files {
-        let name = file
-            .strip_prefix(&root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
+        let name = file_name(&root, &file);
         for item in statics(&code(&file)) {
             assert!(
                 SHELL_STATICS.contains(&(name.as_str(), item)),
@@ -272,12 +264,8 @@ fn platform_cfg_lives_in_the_host_modules() {
     let (root, files) = app_sources();
     let mut found = BTreeSet::new();
     for file in files {
-        let name = file
-            .strip_prefix(&root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
-        if name == "host.rs" || name.starts_with("host/") || !platform_cfg(&code(&file)) {
+        let name = file_name(&root, &file);
+        if host_file(&name) || !platform_cfg(&code(&file)) {
             continue;
         }
         assert!(
@@ -308,11 +296,7 @@ fn only_native_hosts_read_the_standard_clocks() {
     // the host's wall clock (`crate::host::since_epoch`).
     let (root, files) = app_sources();
     for file in files {
-        let name = file
-            .strip_prefix(&root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
+        let name = file_name(&root, &file);
         if name == "host/native.rs" || name.starts_with("host/native/") {
             continue;
         }
@@ -347,4 +331,289 @@ fn declarations_include_macro_and_local_statics_but_not_lifetimes() {
     );
     assert!(statics("unsafe extern \"C\" { static HOST_NAME: &str; }").is_empty());
     assert!(statics("fn f() -> &'static str { x } struct A(&'static [u8]);").is_empty());
+}
+const TREE_SEAMS: [&str; 2] = ["screens", "library_ui"];
+
+/// Existing lateral dependencies. Remove rows as callers move to shared
+/// routes and view helpers.
+const CROSS_SCREEN_IMPORTS: &[(&str, &str)] = &[
+    ("library_ui/custom_groups.rs", "screens::parental_view"),
+    ("library_ui/epg_sources_view.rs", "screens::parental_view"),
+    ("library_ui/epg_sources_view.rs", "screens::settings_view"),
+    ("library_ui/guide_repair_view.rs", "screens::parental_view"),
+    ("library_ui/organization_view.rs", "screens::channels_view"),
+    ("library_ui/organization_view.rs", "screens::parental_view"),
+    ("library_ui/organization_view.rs", "screens::settings_view"),
+    ("library_ui/playlists_view.rs", "screens::settings_view"),
+    ("library_ui/wizard_view.rs", "screens::settings_view"),
+    ("screens/settings_offer.rs", "library_ui::backup"),
+    ("screens/settings_view.rs", "library_ui::backup"),
+    (
+        "screens/settings_view/view.rs",
+        "library_ui::playlists_view",
+    ),
+    ("screens/vod_view/empty.rs", "library_ui::playlists_view"),
+    ("screens/vod_view/empty.rs", "library_ui::wizard_view"),
+];
+
+fn host_file(name: &str) -> bool {
+    name == "host.rs" || name.starts_with("host/")
+}
+
+fn file_name(root: &Path, file: &Path) -> String {
+    file.strip_prefix(root)
+        .unwrap()
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Test harnesses can instantiate the application to exercise real host
+/// adapters. Skip those modules when checking production dependencies.
+fn shipped(source: &str) -> String {
+    let mut lines = source.lines().peekable();
+    let mut result = String::new();
+    while let Some(line) = lines.next() {
+        let attribute = line.trim();
+        if attribute.starts_with("#[cfg(") {
+            let mut cfg = attribute.to_owned();
+            while !cfg.ends_with(']') {
+                let Some(continuation) = lines.next() else {
+                    break;
+                };
+                cfg.push_str(continuation.trim());
+            }
+            let test = cfg == "#[cfg(test)]" || cfg.starts_with("#[cfg(all(test,");
+            if test
+                && lines
+                    .peek()
+                    .is_some_and(|next| next.trim_start().starts_with("mod "))
+            {
+                let mut depth = 0isize;
+                for line in lines.by_ref() {
+                    depth +=
+                        line.matches('{').count() as isize - line.matches('}').count() as isize;
+                    if depth <= 0 {
+                        break;
+                    }
+                }
+                continue;
+            }
+            result.push_str(&cfg);
+        } else {
+            result.push_str(line);
+        }
+        result.push('\n');
+    }
+    result
+}
+
+fn is_word(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+fn tokens(mut source: &str) -> impl Iterator<Item = &str> {
+    std::iter::from_fn(move || {
+        source = source.trim_start();
+        let first = source.chars().next()?;
+        let length = if is_word(first) {
+            source
+                .find(|character| !is_word(character))
+                .unwrap_or(source.len())
+        } else if source.starts_with("::") {
+            2
+        } else {
+            first.len_utf8()
+        };
+        let (token, rest) = source.split_at(length);
+        source = rest;
+        Some(token)
+    })
+}
+
+/// Expand use trees as well as ordinary paths so aliases, groups and globs
+/// cannot hide an import. Qualified calls have the same boundary as imports.
+fn paths_from<'a>(source: &'a str, root: &str) -> BTreeSet<Vec<&'a str>> {
+    let tokens: Vec<_> = tokens(source).collect();
+    let mut paths = BTreeSet::new();
+    for (at, pair) in tokens.windows(2).enumerate() {
+        if pair == [root, "::"] {
+            expand_path(&tokens, &mut (at + 2), &mut Vec::new(), &mut paths);
+        }
+    }
+    paths
+}
+
+fn expand_path<'a>(
+    tokens: &[&'a str],
+    at: &mut usize,
+    prefix: &mut Vec<&'a str>,
+    paths: &mut BTreeSet<Vec<&'a str>>,
+) {
+    let Some(&component) = tokens.get(*at) else {
+        return;
+    };
+    *at += 1;
+    if component == "{" {
+        while tokens.get(*at).is_some_and(|token| *token != "}") {
+            expand_path(tokens, at, prefix, paths);
+            if tokens.get(*at) == Some(&"as") {
+                *at += 2;
+            }
+            if tokens.get(*at) != Some(&",") {
+                break;
+            }
+            *at += 1;
+        }
+        if tokens.get(*at) == Some(&"}") {
+            *at += 1;
+        }
+    } else if component == "*" || component.chars().next().is_some_and(is_word) {
+        prefix.push(component);
+        if tokens.get(*at) == Some(&"::") {
+            *at += 1;
+            expand_path(tokens, at, prefix, paths);
+        } else {
+            paths.insert(prefix.clone());
+        }
+        prefix.pop();
+    }
+}
+
+#[test]
+fn host_has_no_view_or_wiring_dependency() {
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file_name(&root, &file);
+        if !host_file(&name) || name.ends_with("/tests.rs") {
+            continue;
+        }
+        let source = shipped(&code(&file));
+        for path in paths_from(&source, "crate") {
+            assert!(
+                !matches!(
+                    path[0],
+                    "*" | "App"
+                        | "Ui"
+                        | "SharedUi"
+                        | "GuideUi"
+                        | "PlaybackUi"
+                        | "ChromeUi"
+                        | "ScreensUi"
+                        | "ViewMode"
+                        | "Playback"
+                        | "guide"
+                        | "playback"
+                        | "library_ui"
+                        | "screens"
+                        | "chrome"
+                        | "wiring"
+                ),
+                "{name} depends on application path {}",
+                path.join("::")
+            );
+        }
+    }
+}
+
+#[test]
+fn native_adapters_and_package_update_operations_live_in_the_host() {
+    let (root, files) = app_sources();
+    for file in files {
+        let name = file_name(&root, &file);
+        if host_file(&name) || name == "main.rs" || name.ends_with("/tests.rs") {
+            continue;
+        }
+        let source = shipped(&code(&file));
+        for word in source.split(|character| !is_word(character)) {
+            assert!(
+                !word.starts_with("nsh_platform_")
+                    && !matches!(
+                        word,
+                        "jni"
+                            | "objc2"
+                            | "block2"
+                            | "dbus"
+                            | "dbus_secret_service"
+                            | "keyring"
+                            | "iptv_cast"
+                            | "iptv_net"
+                            | "iptv_web"
+                            | "iptv_store_sqlite"
+                    ),
+                "{name} names host adapter {word}"
+            );
+        }
+        for scope in ["iptv_runtime", "runtime"] {
+            assert!(
+                !paths_from(&source, scope)
+                    .iter()
+                    .any(|path| path.first() == Some(&"app_updates")),
+                "{name} must use the host facade for package update operations"
+            );
+        }
+    }
+}
+
+#[test]
+fn direct_screen_imports_follow_the_shrink_only_list() {
+    let (root, files) = app_sources();
+    let mut found = BTreeSet::new();
+    for file in files {
+        let name = file_name(&root, &file);
+        let Some((tree, _)) = name.split_once('/') else {
+            continue;
+        };
+        let Some(other) = TREE_SEAMS
+            .into_iter()
+            .find(|candidate| *candidate != tree && TREE_SEAMS.contains(&tree))
+        else {
+            continue;
+        };
+        let source = code(&file);
+        for path in ["crate", "super", "self"]
+            .into_iter()
+            .flat_map(|scope| paths_from(&source, scope))
+        {
+            let mut path = path
+                .into_iter()
+                .skip_while(|component| *component == "super");
+            if path.next() == Some(other) {
+                let module = path.next().unwrap_or("*");
+                assert!(
+                    !matches!(module, "*" | "self"),
+                    "{name} imports all of {other}"
+                );
+                found.insert((name.clone(), format!("{other}::{module}")));
+            }
+        }
+    }
+    let expected = CROSS_SCREEN_IMPORTS
+        .iter()
+        .map(|(file, module)| (file.to_string(), module.to_string()))
+        .collect();
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn grouped_and_aliased_paths_expose_their_dependencies() {
+    let source = "
+        use crate::{host::{self, Path}, screens::{settings_view as settings, *}, Ui};
+        use super::super::wiring::{data::catalog, runtime::Runtime};
+        let status = crate :: playback :: video :: has_source(0);
+        #[cfg(test)]
+        mod tests { use crate::App; }
+    ";
+    let source = shipped(source);
+    assert_eq!(
+        paths_from(&source, "crate"),
+        BTreeSet::from([
+            vec!["host", "self"],
+            vec!["host", "Path"],
+            vec!["screens", "settings_view"],
+            vec!["screens", "*"],
+            vec!["Ui"],
+            vec!["playback", "video", "has_source"],
+        ])
+    );
+    assert!(paths_from(&source, "super").contains(&vec!["super", "wiring", "data", "catalog"]));
 }
