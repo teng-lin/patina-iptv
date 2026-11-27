@@ -539,17 +539,25 @@ fn an_unconfirmed_system_stop_reports_the_receiver_result_and_releases_the_cast(
 }
 
 #[test]
-fn an_unconfirmed_system_stop_is_reported_during_another_cast_command() {
+fn an_unconfirmed_system_stop_is_reported_while_forgetting_another_pairing() {
     let Some(home) = isolated!() else { return };
-    let fake = FakeCast::default();
+    let fake = FakeCast {
+        changed_identity: Arc::new(AtomicBool::new(true)),
+        extra_airplay: true,
+        ..Default::default()
+    };
+    let (release, wait) = tokio::sync::oneshot::channel();
+    *fake.pending_forget.lock().unwrap() = Some(wait);
     let mut fixture = select_generated_tv(home, &fake);
     let app = &mut fixture.app;
-    ready_controls(app);
-    let reply = fake.hold_next_command();
-    step(app.press("id:play-bar-play-pause"));
+    open_cast(app);
+    step(app.wait_for("id:chooser-items >> text:Generated AirPlay · AirPlay"));
+    step(app.press("id:chooser-items >> text:Generated AirPlay · AirPlay"));
+    step(app.wait_for("text:Forget pairing"));
+    step(app.press("text:Forget pairing"));
     step(
-        app.wait_until("remote pause", Duration::from_secs(10), |_| {
-            fake.events.lock().unwrap().contains(&"pause")
+        app.wait_until("forget is pending", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"forget pending")
         }),
     );
     fake.states
@@ -558,11 +566,23 @@ fn an_unconfirmed_system_stop_is_reported_during_another_cast_command() {
         .push_back(Err(Error::StopUnconfirmed));
     step(app.wait_for("text:Could not confirm that the TV stopped playback."));
     assert!(!iptv_app::player_has_source(0));
+    release.send(()).unwrap();
+    step(
+        app.wait_until("pairing removed", Duration::from_secs(10), |_| {
+            fake.events.lock().unwrap().contains(&"forgot pairing")
+        }),
+    );
     assert_eq!(
         *fake.events.lock().unwrap(),
-        ["load", "allow", "pause", "retire"]
+        [
+            "load",
+            "allow",
+            "identity changed",
+            "forget pending",
+            "retire",
+            "forgot pairing"
+        ]
     );
-    reply.send(()).unwrap();
 }
 
 #[test]
