@@ -93,12 +93,12 @@ pub(super) fn source_schedules(
 }
 
 pub(super) fn reset_epoch(owner: &Runtime, now: i64) {
-    owner.epoch.set(now - now.rem_euclid(3600));
+    owner.imports.epoch.set(now - now.rem_euclid(3600));
 }
 
 pub(super) fn invalidate_rebuild(owner: &Runtime) -> u64 {
-    let next = owner.rebuild.get().wrapping_add(1);
-    owner.rebuild.set(next);
+    let next = owner.imports.rebuild.get().wrapping_add(1);
+    owner.imports.rebuild.set(next);
     next
 }
 

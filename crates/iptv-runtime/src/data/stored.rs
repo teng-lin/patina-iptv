@@ -16,21 +16,22 @@ use iptv_import::{CancelToken, EpgSourceConfig};
 /// Refresh the stored status and report whether the library snapshot changed.
 pub(super) fn load_status(owner: &Rc<Runtime>) -> impl Future<Output = Option<bool>> + use<> {
     owner
+        .imports
         .status_revision
-        .set(owner.status_revision.get().wrapping_add(1));
-    let expected = owner.status_revision.get();
+        .set(owner.imports.status_revision.get().wrapping_add(1));
+    let expected = owner.imports.status_revision.get();
     let loaded = crate::commands::guide_status_snapshot(owner);
     let owner = owner.clone();
     async move {
         let mut snapshot = loaded.await.ok()?;
-        if owner.status_revision.get() != expected {
+        if owner.imports.status_revision.get() != expected {
             return None;
         }
         let changed = snapshot
             .library
             .take()
             .is_some_and(|snapshot| crate::library::install(&owner, snapshot));
-        *owner.status.borrow_mut() = snapshot;
+        *owner.imports.status.borrow_mut() = snapshot;
         Some(changed)
     }
 }
@@ -98,7 +99,7 @@ pub(crate) fn supersede(owner: &Rc<crate::Runtime>, source: SourceId) -> Superse
 }
 
 pub(super) fn has_enabled_guides(owner: &Runtime, source: SourceId) -> bool {
-    owner.status.with(|status| {
+    owner.imports.status.with(|status| {
         let status = status.borrow();
         match status.lines.get(&source) {
             Some(lines) if !lines.is_empty() => lines.iter().any(|line| line.source.enabled),

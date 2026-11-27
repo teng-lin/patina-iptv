@@ -1,6 +1,7 @@
 //! A bounded analysis snapshot produces an immutable, owner-bound repair plan.
 use super::*;
 use iptv_epg::{ChannelKey, FeedId, MatchIndex, Overrides, PlaylistChannel, XmltvChannel};
+use iptv_library::inspection::ProbeId;
 use iptv_store_sqlite::{
     EpgOverride, GuideSource, RepairBatch, RepairCandidate, RepairChoice, RepairFeed,
     RepairMapping, Store,
@@ -87,30 +88,136 @@ pub(super) struct Preparation<'a> {
     pub cancel: &'a CancelToken,
     pub deadline: Instant,
 }
-pub(super) fn prepare(
+
+struct Evidence {
+    expires_at: i64,
+    staged_channels: BTreeMap<ProbeId, Vec<XmltvChannel>>,
+}
+
+struct FeedPlan {
+    after_configs: Vec<GuideSource>,
+    changes: Vec<RepairFeed>,
+    previews: Vec<FeedPreview>,
+    order: Option<(Vec<FeedId>, Vec<FeedId>)>,
+}
+
+/// Apply validated feed edits and preserve the complete ordering preview.
+fn prepare_feed_edits(request: &Request, configs: &[GuideSource]) -> Result<FeedPlan> {
+    let mut after_configs = configs.to_vec();
+    let mut changes = Vec::new();
+    let mut previews = Vec::new();
+    let mut seen = HashSet::new();
+    for edit in &request.feeds {
+        if !seen.insert(edit.feed)
+            || edit.remove && (edit.enabled.is_some() || edit.shift_minutes.is_some())
+            || edit
+                .shift_minutes
+                .is_some_and(|shift| shift.unsigned_abs() > 24 * 60)
+        {
+            return Err(Error::InvalidRequest);
+        }
+        let before = configs
+            .iter()
+            .find(|feed| feed.feed == edit.feed)
+            .ok_or(Error::InvalidRequest)?
+            .clone();
+        let at = after_configs
+            .iter()
+            .position(|feed| feed.feed == edit.feed)
+            .ok_or(Error::InvalidRequest)?;
+        let after = if edit.remove {
+            after_configs.remove(at);
+            None
+        } else {
+            let mut updated = before.clone();
+            if let Some(enabled) = edit.enabled {
+                updated.enabled = enabled;
+            }
+            if let Some(shift) = edit.shift_minutes {
+                updated.shift_minutes = shift;
+            }
+            after_configs[at] = updated.clone();
+            Some(updated)
+        };
+        previews.push(FeedPreview {
+            feed: Some(edit.feed),
+            name: before.name.clone().unwrap_or_default(),
+            before_position: configs
+                .iter()
+                .position(|f| f.feed == edit.feed)
+                .map(|v| v as u32),
+            after_position: after_configs
+                .iter()
+                .position(|f| f.feed == edit.feed)
+                .map(|v| v as u32),
+            before_enabled: Some(before.enabled),
+            after_enabled: after.as_ref().map(|f| f.enabled),
+            before_shift_minutes: Some(before.shift_minutes),
+            after_shift_minutes: after.as_ref().map(|f| f.shift_minutes),
+            added: false,
+            removed: after.is_none(),
+        });
+        changes.push(RepairFeed {
+            before: Some(before),
+            after,
+        });
+    }
+    let order = if let Some(order) = &request.feed_order {
+        let before: Vec<_> = configs.iter().map(|f| f.feed).collect();
+        let unique: HashSet<_> = order.iter().copied().collect();
+        if unique.len() != order.len()
+            || unique != before.iter().copied().collect()
+            || request.feeds.iter().any(|f| f.remove)
+        {
+            return Err(Error::InvalidRequest);
+        }
+        let by_id: HashMap<_, _> = after_configs.into_iter().map(|f| (f.feed, f)).collect();
+        after_configs = order.iter().map(|id| by_id[id].clone()).collect();
+        Some((before, order.clone()))
+    } else {
+        None
+    };
+    for (position, config) in after_configs.iter().enumerate() {
+        let before_position = configs
+            .iter()
+            .position(|feed| feed.feed == config.feed)
+            .map(|v| v as u32);
+        if let Some(preview) = previews.iter_mut().find(|p| p.feed == Some(config.feed)) {
+            preview.after_position = Some(position as u32);
+        } else if before_position != Some(position as u32) {
+            previews.push(FeedPreview {
+                feed: Some(config.feed),
+                name: config.name.clone().unwrap_or_default(),
+                before_position,
+                after_position: Some(position as u32),
+                before_enabled: Some(config.enabled),
+                after_enabled: Some(config.enabled),
+                before_shift_minutes: Some(config.shift_minutes),
+                after_shift_minutes: Some(config.shift_minutes),
+                added: false,
+                removed: false,
+            });
+        }
+    }
+    Ok(FeedPlan {
+        after_configs,
+        changes,
+        previews,
+        order,
+    })
+}
+
+/// Verify every admitted lease before using its staged channel rows.
+fn prepare_evidence(
     store: &Store,
-    request: Request,
+    request: &Request,
     leases: &[ProbeLease],
-    context: Preparation<'_>,
-) -> Result<StoredPlan> {
-    let Preparation {
-        epoch,
-        id,
-        created_at,
-        cancel,
-        deadline,
-    } = context;
-    if !request.valid() {
-        return Err(Error::InvalidRequest);
-    }
-    let source = request.source;
-    if storage(store.source(source))?.is_none() {
-        return Err(InspectionError::SourceMissing(source).into());
-    }
-    let incarnation = storage(store.source_incarnation(source))?;
-    if !storage(store.source_policy(source))?.enabled {
-        return Err(InspectionError::SourceDisabled(source).into());
-    }
+    source: SourceId,
+    incarnation: &str,
+    created_at: i64,
+    cancel: &CancelToken,
+    deadline: Instant,
+) -> Result<Evidence> {
     let mut expires_at = created_at.saturating_add(PLAN_TTL_SECONDS);
     for held in leases {
         held.validate_alive()?;
@@ -156,6 +263,49 @@ pub(super) fn prepare(
             held.listed_channels_with_control(cancel, deadline)?,
         );
     }
+    Ok(Evidence {
+        expires_at,
+        staged_channels,
+    })
+}
+
+pub(super) fn prepare(
+    store: &Store,
+    request: Request,
+    leases: &[ProbeLease],
+    context: Preparation<'_>,
+) -> Result<StoredPlan> {
+    let Preparation {
+        epoch,
+        id,
+        created_at,
+        cancel,
+        deadline,
+    } = context;
+    if !request.valid() {
+        return Err(Error::InvalidRequest);
+    }
+    let source = request.source;
+    if storage(store.source(source))?.is_none() {
+        return Err(InspectionError::SourceMissing(source).into());
+    }
+    let incarnation = storage(store.source_incarnation(source))?;
+    if !storage(store.source_policy(source))?.enabled {
+        return Err(InspectionError::SourceDisabled(source).into());
+    }
+    let Evidence {
+        expires_at,
+        staged_channels,
+    } = prepare_evidence(
+        store,
+        &request,
+        leases,
+        source,
+        &incarnation,
+        created_at,
+        cancel,
+        deadline,
+    )?;
     let configs = storage(store.guide_sources(source))?;
     let listed =
         storage(store.guide_repair_listed(source))?.ok_or(InspectionError::LimitExceeded)?;
@@ -210,107 +360,12 @@ pub(super) fn prepare(
         })
         .collect();
     let mut after_overrides = before_overrides.clone();
-    let mut after_configs = configs.clone();
-    let mut feed_changes = Vec::new();
-    let mut feed_previews = Vec::new();
-    let mut seen = HashSet::new();
-    for edit in &request.feeds {
-        if !seen.insert(edit.feed)
-            || edit.remove && (edit.enabled.is_some() || edit.shift_minutes.is_some())
-            || edit
-                .shift_minutes
-                .is_some_and(|shift| shift.unsigned_abs() > 24 * 60)
-        {
-            return Err(Error::InvalidRequest);
-        }
-        let before = configs
-            .iter()
-            .find(|f| f.feed == edit.feed)
-            .ok_or(Error::InvalidRequest)?
-            .clone();
-        let at = after_configs
-            .iter()
-            .position(|f| f.feed == edit.feed)
-            .ok_or(Error::InvalidRequest)?;
-        let after = if edit.remove {
-            after_configs.remove(at);
-            None
-        } else {
-            let mut updated = before.clone();
-            if let Some(enabled) = edit.enabled {
-                updated.enabled = enabled;
-            }
-            if let Some(shift) = edit.shift_minutes {
-                updated.shift_minutes = shift;
-            }
-            after_configs[at] = updated.clone();
-            Some(updated)
-        };
-        feed_previews.push(FeedPreview {
-            feed: Some(edit.feed),
-            name: before.name.clone().unwrap_or_default(),
-            before_position: configs
-                .iter()
-                .position(|f| f.feed == edit.feed)
-                .map(|v| v as u32),
-            after_position: after_configs
-                .iter()
-                .position(|f| f.feed == edit.feed)
-                .map(|v| v as u32),
-            before_enabled: Some(before.enabled),
-            after_enabled: after.as_ref().map(|f| f.enabled),
-            before_shift_minutes: Some(before.shift_minutes),
-            after_shift_minutes: after.as_ref().map(|f| f.shift_minutes),
-            added: false,
-            removed: after.is_none(),
-        });
-        feed_changes.push(RepairFeed {
-            before: Some(before),
-            after,
-        });
-    }
-    let order = if let Some(order) = &request.feed_order {
-        let before: Vec<_> = configs.iter().map(|f| f.feed).collect();
-        let unique: HashSet<_> = order.iter().copied().collect();
-        if unique.len() != order.len()
-            || unique != before.iter().copied().collect()
-            || request.feeds.iter().any(|f| f.remove)
-        {
-            return Err(Error::InvalidRequest);
-        }
-        let by_id: HashMap<_, _> = after_configs.into_iter().map(|f| (f.feed, f)).collect();
-        after_configs = order.iter().map(|id| by_id[id].clone()).collect();
-        Some((before, order.clone()))
-    } else {
-        None
-    };
-    // A priority-only edit is itself reviewable even if every enabled/shift
-    // value stays the same; return the full changed precedence before apply.
-    for (position, config) in after_configs.iter().enumerate() {
-        let before_position = configs
-            .iter()
-            .position(|f| f.feed == config.feed)
-            .map(|v| v as u32);
-        if let Some(preview) = feed_previews
-            .iter_mut()
-            .find(|p| p.feed == Some(config.feed))
-        {
-            preview.after_position = Some(position as u32);
-        } else if before_position != Some(position as u32) {
-            feed_previews.push(FeedPreview {
-                feed: Some(config.feed),
-                name: config.name.clone().unwrap_or_default(),
-                before_position,
-                after_position: Some(position as u32),
-                before_enabled: Some(config.enabled),
-                after_enabled: Some(config.enabled),
-                before_shift_minutes: Some(config.shift_minutes),
-                after_shift_minutes: Some(config.shift_minutes),
-                added: false,
-                removed: false,
-            });
-        }
-    }
+    let FeedPlan {
+        mut after_configs,
+        changes: feed_changes,
+        previews: mut feed_previews,
+        order,
+    } = prepare_feed_edits(&request, &configs)?;
     let mut additions = Vec::new();
     let mut staged_feeds = BTreeMap::new();
     let feed_floor = if request.additions.is_empty() {

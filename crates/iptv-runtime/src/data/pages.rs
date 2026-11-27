@@ -286,7 +286,7 @@ mod tests {
         let owner = Rc::new(crate::Runtime::default());
         owner.bind_tasks(drop, |_| Box::pin(std::future::pending()));
         owner.all.set(true);
-        owner.epoch.set(NOW);
+        owner.imports.epoch.set(NOW);
         let source = SourceSchedule {
             id: 1,
             name: "Generated".into(),
@@ -329,8 +329,8 @@ mod tests {
         let outcome = commit_schedule(
             &owner,
             ScheduleUpdate::Combined {
-                generation: owner.generation.get(),
-                revision: owner.rebuild.get(),
+                generation: owner.imports.generation.get(),
+                revision: owner.imports.rebuild.get(),
                 sources: vec![source],
                 collapsed: Vec::new(),
             },
@@ -382,8 +382,8 @@ mod tests {
             commit_schedule(
                 &owner,
                 ScheduleUpdate::Combined {
-                    generation: owner.generation.get(),
-                    revision: owner.rebuild.get(),
+                    generation: owner.imports.generation.get(),
+                    revision: owner.imports.rebuild.get(),
                     sources: Vec::new(),
                     collapsed: Vec::new(),
                 },

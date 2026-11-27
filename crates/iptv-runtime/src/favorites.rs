@@ -271,7 +271,7 @@ pub async fn prepare_source(
     owner: &std::rc::Rc<super::Runtime>,
     source: Option<SourceId>,
 ) -> Option<impl FnOnce()> {
-    let generation = owner.generation.get();
+    let generation = owner.imports.generation.get();
     let id = source?;
     let services = owner.services();
     let history_revision = owner
@@ -295,7 +295,7 @@ pub async fn prepare_source(
         Ok(((has_vod, any_vod), keys, recent))
     })
     .await;
-    if !services.is_current() || owner.generation.get() != generation {
+    if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
     let ((has_vod, any_vod), keys, recent) = match loaded {
@@ -338,7 +338,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
         .organization
         .favorites()
         .with(|state| state.borrow().history_revision);
-    let generation = owner.generation.get();
+    let generation = owner.imports.generation.get();
     let services = owner.services();
     let request = begin_vod_request(owner);
     use iptv_guide::combined::{qualified_key, split_key};
@@ -365,7 +365,7 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
         ))
     })
     .await;
-    if !services.is_current() || owner.generation.get() != generation {
+    if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
     let Ok((ids, favorites, recent, has_vod)) = loaded else {

@@ -47,8 +47,8 @@ impl Runtime {
     where
         F: Fn(crate::data::Update) + 'static,
     {
-        let ticket = self.wizard_tickets.get().wrapping_add(1).max(1);
-        self.wizard_tickets.set(ticket);
+        let ticket = self.imports.wizard_tickets.get().wrapping_add(1).max(1);
+        self.imports.wizard_tickets.set(ticket);
         let id = ImportId(ticket);
         let cancel = CancelToken::new();
         self.remember_wizard_import(id, cancel.clone());
@@ -60,7 +60,7 @@ impl Runtime {
     }
 
     pub fn browser_generation(&self) -> u64 {
-        self.generation.get()
+        self.imports.generation.get()
     }
     pub fn account_limit(&self) -> Option<u32> {
         self.account_streams.get()
@@ -112,10 +112,10 @@ impl Runtime {
         }
     }
     pub fn remember_wizard_import(&self, id: ImportId, cancel: CancelToken) {
-        *self.wizard_import.borrow_mut() = Some((id, cancel));
+        *self.imports.wizard_import.borrow_mut() = Some((id, cancel));
     }
     pub fn cancel_wizard_import(&self, id: ImportId) {
-        let mut running = self.wizard_import.borrow_mut();
+        let mut running = self.imports.wizard_import.borrow_mut();
         if running.as_ref().is_some_and(|(at, _)| *at == id)
             && let Some((_, token)) = running.take()
         {
@@ -124,7 +124,7 @@ impl Runtime {
         }
     }
     pub fn finish_wizard_import(&self, id: ImportId) {
-        let mut running = self.wizard_import.borrow_mut();
+        let mut running = self.imports.wizard_import.borrow_mut();
         if running.as_ref().is_some_and(|(at, _)| *at == id) {
             running.take();
         }

@@ -736,7 +736,7 @@ pub enum GuideStatus {
 pub fn guide_status(owner: &super::Runtime) -> GuideStatus {
     let sources = shown_sources(owner);
     if sources.is_empty() {
-        return if owner.status.with(|status| status.borrow().combined) {
+        return if owner.imports.status.with(|status| status.borrow().combined) {
             GuideStatus::Empty
         } else {
             GuideStatus::NoSource
@@ -769,7 +769,7 @@ pub fn shown_sources(owner: &super::Runtime) -> Vec<SourceId> {
     if let Some(source) = owner.shown.with(Cell::get) {
         return vec![source];
     }
-    owner.status.with(|status| {
+    owner.imports.status.with(|status| {
         let status = status.borrow();
         if status.combined {
             status.enabled.clone()
@@ -788,6 +788,7 @@ pub fn shown(owner: &super::Runtime) -> Option<SourceId> {
 /// guide action superseded still unwinds.
 pub fn updating(owner: &super::Runtime, source: SourceId) -> bool {
     owner
+        .imports
         .updating
         .with(|u| u.borrow().iter().any(|(id, _)| *id == source))
 }
@@ -797,7 +798,7 @@ pub fn updating(owner: &super::Runtime, source: SourceId) -> bool {
 /// guide chosen, the guide data deleted) downloads nothing any more, and
 /// a request made while it unwinds needs an update of its own.
 pub fn update_current(owner: &super::Runtime, source: SourceId) -> bool {
-    owner.updating.with(|u| {
+    owner.imports.updating.with(|u| {
         u.borrow()
             .iter()
             .any(|(id, job)| *id == source && super::library::import_is_current(owner, source, job))
@@ -810,7 +811,7 @@ pub fn unwinding_updates(
     owner: &super::Runtime,
     source: SourceId,
 ) -> Vec<super::library::ImportCompletion> {
-    owner.updating.with(|u| {
+    owner.imports.updating.with(|u| {
         u.borrow()
             .iter()
             .filter(|(id, job)| {
@@ -827,6 +828,7 @@ pub fn begin_update(
     job: &super::library::ImportCompletion,
 ) {
     owner
+        .imports
         .updating
         .with(|u| u.borrow_mut().push((source, job.clone())));
 }
@@ -836,7 +838,7 @@ pub fn end_update(
     source: SourceId,
     job: &super::library::ImportCompletion,
 ) {
-    owner.updating.with(|u| {
+    owner.imports.updating.with(|u| {
         u.borrow_mut()
             .retain(|(id, other)| *id != source || !std::rc::Rc::ptr_eq(other, job))
     });
@@ -847,7 +849,7 @@ pub use iptv_library::SourceLine;
 /// `source`'s guide sources in order, each with its last result (one
 /// short read of the store).
 pub fn source_lines(owner: &super::Runtime, source: SourceId) -> Vec<SourceLine> {
-    owner.status.with(|status| {
+    owner.imports.status.with(|status| {
         status
             .borrow()
             .lines
@@ -876,6 +878,7 @@ pub fn cached_guide_state(
     source: SourceId,
 ) -> Option<iptv_library::GuideSnapshot> {
     owner
+        .imports
         .status
         .with(|status| status.borrow().guides.get(&source).map(guide_snapshot))
 }
@@ -892,11 +895,17 @@ fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
 }
 
 pub(crate) fn guide_edit_revision(owner: &super::Runtime, source: SourceId) -> u64 {
-    owner.edits.borrow().get(&source).copied().unwrap_or(0)
+    owner
+        .imports
+        .edits
+        .borrow()
+        .get(&source)
+        .copied()
+        .unwrap_or(0)
 }
 
 pub fn next_guide_edit(owner: &super::Runtime, source: SourceId) -> u64 {
-    owner.edits.with(|edits| {
+    owner.imports.edits.with(|edits| {
         let mut edits = edits.borrow_mut();
         let generation = edits.entry(source).or_default();
         *generation += 1;
@@ -906,6 +915,7 @@ pub fn next_guide_edit(owner: &super::Runtime, source: SourceId) -> u64 {
 
 pub fn guide_edit_is_current(owner: &super::Runtime, source: SourceId, generation: u64) -> bool {
     owner
+        .imports
         .edits
         .with(|edits| edits.borrow().get(&source) == Some(&generation))
 }

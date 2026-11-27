@@ -24,6 +24,7 @@ pub fn import_completion(cancel: CancelToken) -> ImportCompletion {
 pub fn track_import(owner: &super::Runtime, source: SourceId, completion: &ImportCompletion) {
     owner.cancel_guide_check(source);
     let replaced = owner
+        .imports
         .completions
         .with(|jobs| jobs.borrow_mut().insert(source, Rc::downgrade(completion)));
     if let Some(replaced) = replaced.and_then(|job| job.upgrade())
@@ -35,7 +36,7 @@ pub fn track_import(owner: &super::Runtime, source: SourceId, completion: &Impor
 /// An Add learns its source ID only after saving. A newer known-source job may
 /// already own that ID by then, including a worker that has just completed.
 pub fn track_added_import(owner: &super::Runtime, source: SourceId, completion: &ImportCompletion) {
-    owner.completions.with(|jobs| {
+    owner.imports.completions.with(|jobs| {
         jobs.borrow_mut()
             .entry(source)
             .or_insert_with(|| Rc::downgrade(completion));
@@ -44,6 +45,7 @@ pub fn track_added_import(owner: &super::Runtime, source: SourceId, completion: 
 pub type ImportRevision = Option<Weak<ImportWork>>;
 pub fn import_revision(owner: &super::Runtime, source: SourceId) -> ImportRevision {
     owner
+        .imports
         .completions
         .with(|jobs| jobs.borrow().get(&source).cloned())
 }
@@ -60,6 +62,7 @@ pub fn import_revision_is_current(
 }
 pub fn pending_import(owner: &super::Runtime, source: SourceId) -> Option<ImportCompletion> {
     owner
+        .imports
         .completions
         .with(|jobs| jobs.borrow().get(&source).and_then(Weak::upgrade))
         .filter(|job| !job.finished())
@@ -69,7 +72,7 @@ pub fn import_is_current(
     source: SourceId,
     completion: &ImportCompletion,
 ) -> bool {
-    owner.completions.with(|jobs| {
+    owner.imports.completions.with(|jobs| {
         jobs.borrow()
             .get(&source)
             .and_then(Weak::upgrade)
@@ -78,7 +81,7 @@ pub fn import_is_current(
 }
 pub fn revoke_import_handoff(owner: &super::Runtime, source: SourceId) {
     owner.repairs.borrow_mut().revoke(source);
-    if let Some(job) = owner.completions.with(|jobs| {
+    if let Some(job) = owner.imports.completions.with(|jobs| {
         jobs.borrow_mut()
             .remove(&source)
             .and_then(|job| job.upgrade())
@@ -108,7 +111,7 @@ pub fn replace_import(owner: &super::Runtime, source: SourceId) -> Option<Import
     supersede_import(owner, source)
 }
 pub fn reset_imports(owner: &super::Runtime) {
-    owner.completions.with(|jobs| {
+    owner.imports.completions.with(|jobs| {
         for job in jobs
             .borrow_mut()
             .drain()
@@ -297,7 +300,7 @@ pub fn load(owner: &super::Runtime, id: SourceId) -> Option<StoredSource> {
 }
 
 pub fn running(owner: &super::Runtime, id: SourceId) -> bool {
-    owner.imports.with(|r| r.borrow().contains_key(&id))
+    owner.imports.imports.with(|r| r.borrow().contains_key(&id))
 }
 
 /// [`cancel_running`] for a newer import of `id` that starts now: the
@@ -315,7 +318,7 @@ pub fn replace_running(owner: &super::Runtime, id: SourceId) {
 pub fn cancel_running(owner: &super::Runtime, id: SourceId) {
     owner.cancel_guide_check(id);
     revoke_import_handoff(owner, id);
-    if let Some((_, token)) = owner.imports.with(|r| r.borrow_mut().remove(&id)) {
+    if let Some((_, token)) = owner.imports.imports.with(|r| r.borrow_mut().remove(&id)) {
         log::info!("iptv data: canceling the running import of source {}", id.0);
         token.cancel();
     }
@@ -393,9 +396,13 @@ pub fn edit_guides(
 
 pub fn set_activity(owner: &super::Runtime, id: SourceId, activity: Option<Activity>) {
     if let Some(activity) = &activity {
-        owner.activity.borrow_mut().insert(id, activity.clone());
+        owner
+            .imports
+            .activity
+            .borrow_mut()
+            .insert(id, activity.clone());
     } else {
-        owner.activity.borrow_mut().remove(&id);
+        owner.imports.activity.borrow_mut().remove(&id);
     }
     owner.emit(super::RuntimeEvent::RefreshProgress(id, activity));
 }
@@ -448,6 +455,7 @@ pub fn start_scheduler(owner: &Rc<super::Runtime>) {
                 if let Ok(sources) = super::commands::source_policies(&runtime).await {
                     for (source, policy) in sources {
                         let attempted = runtime
+                            .imports
                             .attempts
                             .borrow()
                             .get(&source.id)

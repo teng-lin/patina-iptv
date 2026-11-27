@@ -15,7 +15,7 @@ pub fn choose(
     // Work under way shows or stores the guide as it was matched before
     // this choice: it is replaced, whatever it is.
     let superseded = stored::supersede(owner, source);
-    let generation = owner.generation.with(std::cell::Cell::get);
+    let generation = owner.imports.generation.with(std::cell::Cell::get);
     let saved = crate::assign::save(owner, source, key, choice);
     owner.spawn({
         let owner = owner.clone();

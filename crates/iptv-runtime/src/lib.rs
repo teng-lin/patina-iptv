@@ -68,7 +68,9 @@ pub struct BrowserState {
     pub playing: bool,
 }
 
+mod catalog;
 mod guide_checks;
+mod import_state;
 mod lifecycle;
 mod organization;
 
@@ -84,7 +86,6 @@ use iptv_import::CancelToken;
 use iptv_library::SourceId;
 use state::{ImportWork, LibrarySnapshot, SingleSchedule, StatusSnapshot};
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashMap};
 use std::rc::Weak;
 
 #[derive(Default)]
@@ -152,53 +153,21 @@ type EventSink = Rc<dyn Fn(RuntimeEvent)>;
 type BrowserObserver = Rc<dyn Fn() -> BrowserState>;
 type PageWaiters = RefCell<Vec<data::pages::Waiter>>;
 type Resolves = RefCell<[Option<(u64, CancelToken)>; iptv_core::multiview::MAX_SURFACES]>;
-/// The guide updates asked for by hand that have not ended, each with its work.
-type Updates = Vec<(SourceId, Rc<ImportWork>)>;
-
 pub struct Runtime {
     cast: cast::State,
     parental: RefCell<parental::State>,
     recordings: recordings::OwnerState,
     vod: std::sync::Arc<vod::State>,
     repairs: RefCell<guide_repair::State>,
-    account_streams: Slot<Cell<Option<u32>>>,
-    resolving: Slot<Resolves>,
-    wizard_import: Slot<RefCell<Option<(iptv_core::add_playlist::ImportId, CancelToken)>>>,
     store: std::sync::Arc<store_service::Service>,
     inspection: inspection::Vault,
     settings: settings::State,
-    link_client:
-        std::sync::Arc<std::sync::Mutex<Option<(network::NetworkConfig, network::Client)>>>,
     backup: backup::State,
     search: search::State,
     organization: organization::State,
-    activity: RefCell<BTreeMap<SourceId, model::Activity>>,
-    all: Cell<bool>,
-    generation: Slot<Cell<u64>>,
-    imports: Slot<RefCell<HashMap<SourceId, (u64, CancelToken)>>>,
-    attempts: Slot<RefCell<HashMap<SourceId, i64>>>,
-    tickets: Slot<Cell<u64>>,
-    completions: Slot<RefCell<HashMap<SourceId, Weak<ImportWork>>>>,
-    library: Slot<RefCell<Option<LibrarySnapshot>>>,
-    parts: Slot<RefCell<BTreeMap<SourceId, Rc<EpgSchedule>>>>,
-    limits: Slot<RefCell<BTreeMap<SourceId, Option<u32>>>>,
-    resume: Slot<Cell<bool>>,
-    rebuild: Slot<Cell<u64>>,
-    epoch: Slot<Cell<i64>>,
-    single: Slot<RefCell<Option<SingleSchedule>>>,
-    shown: Slot<Cell<Option<SourceId>>>,
-    updating: Slot<RefCell<Updates>>,
-    edits: Slot<RefCell<BTreeMap<SourceId, u64>>>,
-    status: Slot<RefCell<StatusSnapshot>>,
-    page_waiters: Slot<PageWaiters>,
-    schedule: RefCell<Rc<dyn Schedule>>,
-    schedule_revision: Cell<u64>,
+    catalog: catalog::State,
+    imports: import_state::State,
     lifecycle: lifecycle::State,
-    status_revision: Cell<u64>,
-    wizard_tickets: Cell<u64>,
-    guide_checks: RefCell<guide_checks::GuideChecks>,
-    /// Each source's last show, which the next one waits for.
-    shows: RefCell<HashMap<SourceId, futures_channel::oneshot::Receiver<()>>>,
 }
 
 impl Runtime {
@@ -220,42 +189,15 @@ impl Runtime {
             recordings: recordings::OwnerState::new(recordings),
             vod: Default::default(),
             repairs: RefCell::default(),
-            account_streams: Slot::default(),
-            resolving: Slot::default(),
-            wizard_import: Slot::default(),
             store,
             inspection: inspection::Vault::new(entropy),
             settings: settings::State::default(),
-            link_client: Default::default(),
             backup: backup::State::default(),
             search: search::State::default(),
             organization: organization::State::new(favorites::State::with_catalog(&*schedule)),
-            activity: RefCell::default(),
-            all: Cell::new(false),
-            generation: Slot::default(),
-            imports: Slot::default(),
-            attempts: Slot::default(),
-            tickets: Slot::default(),
-            completions: Slot::default(),
-            library: Slot::default(),
-            parts: Slot::default(),
-            limits: Slot::default(),
-            resume: Slot::default(),
-            rebuild: Slot::default(),
-            epoch: Slot::default(),
-            single: Slot::default(),
-            shown: Slot::default(),
-            updating: Slot::default(),
-            edits: Slot::default(),
-            status: Slot::default(),
-            page_waiters: Slot::default(),
-            schedule: RefCell::new(schedule),
-            schedule_revision: Cell::new(0),
+            catalog: catalog::State::new(schedule),
+            imports: import_state::State::new(guide_checks),
             lifecycle: lifecycle::State::default(),
-            status_revision: Cell::new(0),
-            wizard_tickets: Cell::new(0),
-            guide_checks: RefCell::new(guide_checks),
-            shows: RefCell::default(),
         }
     }
 }
@@ -409,16 +351,22 @@ impl Drop for Runtime {
         // Cancel it before fallback draining waits for that lane's barrier.
         self.vod.cancel_discovery();
         self.recordings.detach_ui();
-        if let Some((_, cancel)) = self.wizard_import.borrow().as_ref() {
+        if let Some((_, cancel)) = self.imports.wizard_import.borrow().as_ref() {
             cancel.cancel();
         }
         for (_, cancel) in self.resolving.borrow().iter().flatten() {
             cancel.cancel();
         }
-        for (_, cancel) in self.imports.borrow().values() {
+        for (_, cancel) in self.imports.imports.borrow().values() {
             cancel.cancel();
         }
-        for completion in self.completions.borrow().values().filter_map(Weak::upgrade) {
+        for completion in self
+            .imports
+            .completions
+            .borrow()
+            .values()
+            .filter_map(Weak::upgrade)
+        {
             completion.cancel.cancel();
         }
         // Hosts normally drain explicitly. Unwinding or an abandoned owner must
