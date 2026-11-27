@@ -31,7 +31,7 @@ pub enum Error {
     Unavailable,
     Refused,
     Unknown,
-    NoRequest,
+    NoRequest { relay_port: u16 },
     Busy,
     Denied,
     Unsupported,

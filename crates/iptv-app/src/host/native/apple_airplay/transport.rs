@@ -338,11 +338,11 @@ impl Prepared for Handoff {
                 }
                 let gate = self.gate.as_mut().ok_or(Error::Unavailable)?;
                 tokio::select! {
-                    connected = gate.connected() => return if connected { Ok(()) } else { Err(Error::NoRequest) },
+                    connected = gate.connected() => return if connected { Ok(()) } else { Err(Error::Unknown) },
                     _ = tokio::time::sleep(Duration::from_millis(100)) => {}
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    return Err(Error::NoRequest);
+                    return Err(Error::Unknown);
                 }
             }
         })

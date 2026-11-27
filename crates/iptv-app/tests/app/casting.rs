@@ -224,15 +224,13 @@ fn play_pause_uses_the_receivers_confirmed_pause_state_at_handoff() {
 fn no_receiver_request_keeps_local_playback() {
     let Some(home) = isolated!() else { return };
     let fake = FakeCast {
-        load_error: Some(Error::NoRequest),
+        load_error: Some(Error::NoRequest { relay_port: 53317 }),
         ..Default::default()
     };
     let mut fixture = select_generated_tv(home, &fake);
-    step(
-        fixture
-            .app
-            .wait_for("text:Could not start playback on the selected device."),
-    );
+    step(fixture.app.wait_for(
+        "text:The TV did not request the stream. Allow TCP port 53317 from the TV in your firewall and check Wi-Fi client isolation.",
+    ));
     assert!(iptv_app::player_has_source(0));
     assert_eq!(*fake.events.lock().unwrap(), ["load"]);
 }

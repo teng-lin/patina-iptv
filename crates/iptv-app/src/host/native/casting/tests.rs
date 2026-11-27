@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn cast_relay_uses_a_fixed_default_or_an_explicit_tcp_port() {
+    assert_eq!(configured_relay_port(None), Ok(49152));
+    assert_eq!(configured_relay_port(Some(OsStr::new("53317"))), Ok(53317));
+    for value in ["", "0", "65536", "abc"] {
+        assert_eq!(
+            configured_relay_port(Some(OsStr::new(value))),
+            Err(Error::Unavailable)
+        );
+    }
+}
+
+#[test]
 fn reasonless_idle_has_a_grace_period_that_playback_resets() {
     let start = Instant::now();
     let mut idle_since = None;
