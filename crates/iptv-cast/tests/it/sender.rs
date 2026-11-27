@@ -1,8 +1,8 @@
 use std::{future::Future, time::Duration};
 
 use iptv_cast::{
-    Cast, Command, Connect, Connection, Error, ErrorKind, Media, Pairing, PinCode, Route, RouteId,
-    Session, Snapshot, Stage, Updates,
+    Cast, Command, Connect, Connection, Error, Media, Pairing, PinCode, Route, RouteId, Session,
+    Snapshot, Updates,
 };
 
 fn cloneable<T: Clone + Send + Sync + 'static>() {}
@@ -51,7 +51,7 @@ fn public_handles_and_futures_have_the_documented_thread_safety() {
 }
 
 #[tokio::test]
-async fn configuration_reports_that_the_shared_registry_has_no_production_backend_yet() {
+async fn configuration_respects_the_enabled_protocol_features() {
     let Ok(media) = Media::live("http://localhost/generated.m3u8") else {
         panic!("valid public media URL")
     };
@@ -60,9 +60,15 @@ async fn configuration_reports_that_the_shared_registry_has_no_production_backen
             .with_content_type("application/vnd.apple.mpegurl")
             .is_ok()
     );
-    let Err(error) = Cast::builder().build() else {
-        panic!("shared configuration requires a backend")
-    };
-    assert_eq!(error.stage(), Stage::Configuration);
-    assert_eq!(error.kind(), ErrorKind::Unavailable);
+    #[cfg(feature = "googlecast")]
+    assert!(Cast::builder().build().is_ok());
+    #[cfg(not(feature = "googlecast"))]
+    {
+        let error = Cast::builder()
+            .build()
+            .err()
+            .expect("a protocol is required");
+        assert_eq!(error.stage(), iptv_cast::Stage::Configuration);
+        assert_eq!(error.kind(), iptv_cast::ErrorKind::Unavailable);
+    }
 }
