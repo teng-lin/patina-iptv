@@ -368,6 +368,7 @@ impl Service {
         self.drain_on_shutdown_with(|| {})
     }
 
+    #[cfg(any(feature = "native", test))]
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
         self.drain_on_shutdown_until(Instant::now() + self.drain_limit(), after_writer)
     }
