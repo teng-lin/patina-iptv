@@ -375,8 +375,7 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     app.answer_picks_myself();
     step(app.wait_for("id:wizard-welcome"));
 
-    let open_m3u_form = |app: &mut Headless| {
-        step(app.press("id:wizard-welcome-add"));
+    let choose_m3u = |app: &mut Headless| {
         step(app.wait_for("id:wizard-form"));
         step(app.press("id:wizard-source-type"));
         step(app.wait_for("id:wizard-source-picker"));
@@ -385,12 +384,12 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     let open_add = |app: &mut Headless| {
         step(app.open_settings_playlists());
         step(app.press("id:settings-content >> text:Add a playlist"));
-        step(app.wait_for("id:wizard-welcome"));
-        open_m3u_form(app);
+        choose_m3u(app);
     };
 
     // Finish first-run setup so the import starts from a dismissible wizard.
-    open_m3u_form(&mut app);
+    step(app.press("id:wizard-welcome-add"));
+    choose_m3u(&mut app);
     enter(
         &mut app,
         "http://…/playlist.m3u",
@@ -399,7 +398,7 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     step(app.press("text:Add playlist"));
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.press_key("enter"));
-    step(app.wait_for_gone("id:wizard-welcome", GONE));
+    step(app.wait_for_gone("text:Playlist added", GONE));
 
     iptv_app::hold_reports(true);
     let _release_reports = ReleaseReports;
@@ -417,9 +416,7 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     step(app.press("text:Cancel"));
     step(app.wait_for("text:Stopped. Your entries are kept; add the playlist again when ready."));
     step(app.press_key("backspace"));
-    step(app.wait_for("id:wizard-welcome"));
-    step(app.press_key("backspace"));
-    step(app.wait_for_gone("id:wizard-welcome", GONE));
+    step(app.wait_for_gone("id:wizard-form", GONE));
 
     open_add(&mut app);
     let new_url = format!("{local}/new.m3u");
@@ -429,11 +426,11 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
 
     // The successor cannot finish until the server releases its response.
     // The old terminal report must leave it in the processing step.
+    let delivered = iptv_app::wizard_reports_delivered();
     iptv_app::hold_reports(false);
-    step(app.wait_until("the old report was released", IMPORT, |_| {
-        iptv_app::reports_waiting() == 0
+    step(app.wait_until("the old report was delivered", IMPORT, |_| {
+        iptv_app::wizard_reports_delivered() > delivered
     }));
-    step(app.wait(Duration::from_millis(100)));
     assert!(app.shows("Adding the playlist"));
     release_new.send(()).unwrap();
     step(app.wait_for_within("text:Playlist added", IMPORT));

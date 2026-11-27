@@ -190,6 +190,17 @@ pub trait Tasks: Send + Sync {
     fn delay(&self, duration: Duration) -> Task;
 }
 
+/// Identifies the pinned Tokio worker-spawn panic handled at the native
+/// execution boundary. Terminal hosts can leave their screen active.
+#[doc(hidden)]
+pub fn worker_spawn_refusal(payload: &(dyn std::any::Any + Send)) -> Option<&str> {
+    payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .filter(|reason| reason.starts_with("OS can't spawn worker thread: "))
+}
+
 /// The output of spawned work, awaited by whoever spawned it. Dropping it
 /// detaches the work (cancel it with its `CancelToken`).
 pub struct Join<T>(oneshot::Receiver<T>);

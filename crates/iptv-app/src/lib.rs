@@ -1391,6 +1391,14 @@ pub fn reports_waiting() -> usize {
     host::host_handle().map_or(0, |owner| owner.reports_waiting())
 }
 
+#[cfg(feature = "test-support")]
+pub fn wizard_reports_delivered() -> usize {
+    host::host_handle().map_or(0, |owner| owner.wizard_reports_delivered())
+}
+
+#[doc(hidden)]
+pub use iptv_runtime::execution::worker_spawn_refusal;
+
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.
 #[cfg(feature = "test-support")]

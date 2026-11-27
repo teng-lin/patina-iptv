@@ -221,6 +221,8 @@ pub enum Msg {
     NoCheck {
         source: SourceId,
     },
+    /// A guide worker could not run. The refresh policy did not answer.
+    WorkerUnavailable,
     Playlist(Result<(ImportCounts, Box<Imported>), ImportFailure>),
     /// What the store has (before the playlist), or the source's guide
     /// loaded after the playlist was reported.

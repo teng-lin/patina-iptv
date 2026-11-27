@@ -705,9 +705,7 @@ impl Runtime {
                 .services()
                 .spawn_blocking(move || space_admission(&root, &active, seconds))
                 .await;
-            if let Ok(Err(error)) = checked {
-                return Err(error);
-            }
+            checked.map_err(|_| Error::unavailable("Recording service unavailable"))??;
         }
         if request.start <= now() && !self.recordings.lock().recording_capacity(&request) {
             return Err(Error::unavailable(

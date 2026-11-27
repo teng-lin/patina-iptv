@@ -571,7 +571,7 @@ fn start_update(
             }
             let guides = stored::configured_guides(&owner, source).await;
             let current = crate::library::import_is_current(&owner, source, &completion);
-            let (accepted, mut rx) =
+            let (mut accepted, mut rx) =
                 stored::download(&owner, source, guides, cancel, current, || {
                     source_is_visible(&owner, source)
                 });
@@ -603,6 +603,7 @@ fn start_update(
                         owner.take_owed_guide_check(source);
                         answered = true;
                     }
+                    Some(Msg::WorkerUnavailable) => accepted = false,
                     Some(_) => {}
                     None => break,
                 }
@@ -1568,6 +1569,7 @@ where
                                 answered = true;
                             }
                         }
+                        Ok(Msg::WorkerUnavailable) => {}
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
                             open = false;
@@ -2079,7 +2081,7 @@ async fn read_guide(
             guide_pipeline(&worker, source, &tx, read, &cancel).await;
         },
         move || {
-            let _ = failed_tx.send(Msg::NoCheck { source });
+            let _ = failed_tx.send(Msg::WorkerUnavailable);
         },
     ) {
         owner.end_guide_check(source);
@@ -2190,11 +2192,16 @@ mod playlist_lifecycle_tests {
     }
 
     fn run(test: impl AsyncFnOnce(Rc<Runtime>)) {
+        run_with(|_| {}, test);
+    }
+
+    fn run_with(configure: impl FnOnce(&mut crate::Ports), test: impl AsyncFnOnce(Rc<Runtime>)) {
         let directory = tempfile::tempdir().unwrap();
-        let owner = Rc::new(Runtime::new(crate::Ports::new(
-            directory.path().into(),
-            |_| Ok(crate::model::DatabaseKey::from_bytes([0x73; 32])),
-        )));
+        let mut ports = crate::Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x73; 32]))
+        });
+        configure(&mut ports);
+        let owner = Rc::new(Runtime::new(ports));
         owner.bind_tasks(
             |task| drop(tokio::task::spawn_local(task)),
             |duration| Box::pin(tokio::time::sleep(duration)),
@@ -2210,6 +2217,69 @@ mod playlist_lifecycle_tests {
                 .expect("playlist lifecycle scenario timed out");
         });
         assert!(owner.drain_services());
+    }
+
+    #[test]
+    fn guide_worker_refusal_reports_failure_and_leaves_a_check_owed() {
+        use crate::execution::{Execution, Job, Lane, LocalTask, Task, Tasks};
+        use crate::native::execution::NativeExecution;
+
+        struct RefusingGuideExecution;
+        impl Execution for RefusingGuideExecution {
+            fn lane(&self, name: &'static str) -> std::io::Result<Box<dyn Lane>> {
+                NativeExecution.lane(name)
+            }
+            fn worker(&self, name: String, job: Job) -> std::io::Result<()> {
+                NativeExecution.worker(name, job)
+            }
+            fn tasks(&self) -> Box<dyn Tasks> {
+                struct Refused;
+                impl Tasks for Refused {
+                    fn ready(&self) -> bool {
+                        false
+                    }
+                    fn spawn(&self, _: Task) {}
+                    fn spawn_blocking(&self, _: Job) {}
+                    fn block_on(&self, _: LocalTask<'_>) {}
+                    fn delay(&self, _: Duration) -> Task {
+                        Box::pin(std::future::ready(()))
+                    }
+                }
+                Box::new(Refused)
+            }
+        }
+
+        run_with(
+            |ports| ports.execution = std::sync::Arc::new(RefusingGuideExecution),
+            async |owner| {
+                let source = owner
+                    .services()
+                    .call(|store| {
+                        let source = store.add_source(&synthetic("Synthetic guide retry"))?;
+                        let feed = crate::guides::user_source(
+                            crate::guides::FIRST_USER_FEED,
+                            SecretUrl::new("http://127.0.0.1:9/synthetic.xml"),
+                            None,
+                        );
+                        store.set_guide_sources(source, &[feed])?;
+                        Ok(source)
+                    })
+                    .await
+                    .unwrap();
+                owner.shown.set(Some(source));
+                let generation = owner.generation.get();
+                let (done, result) = futures_channel::oneshot::channel();
+                assert!(start_update(&owner, source, None, true, move |accepted| {
+                    let _ = done.send(accepted);
+                }));
+                assert!(!result.await.unwrap(), "the manual update never ran");
+                assert!(owner.has_guide_check(source));
+
+                owner.end_guide_check(source);
+                read_guide(&owner, source, generation, GuideRead::Check, None, true).await;
+                assert!(owner.has_guide_check(source));
+            },
+        );
     }
 
     fn synthetic(name: &str) -> Source {

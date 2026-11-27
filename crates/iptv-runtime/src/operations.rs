@@ -57,6 +57,8 @@ impl Runtime {
             let services = services.clone();
             on_admitted(id, services.epoch());
             move |update| {
+                #[cfg(feature = "test-support")]
+                let terminal = matches!(&update, crate::data::Update::Done(_));
                 let Some(owner) = owner.upgrade() else {
                     return;
                 };
@@ -73,6 +75,14 @@ impl Runtime {
                 };
                 if current {
                     on_update(id, update);
+                }
+                #[cfg(feature = "test-support")]
+                if terminal {
+                    services
+                        .service()
+                        .hooks
+                        .wizard_reports_delivered
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         });

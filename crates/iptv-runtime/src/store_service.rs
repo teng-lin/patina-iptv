@@ -501,6 +501,11 @@ async fn cooperative_import_turn<'a>(
 }
 
 impl Services {
+    #[cfg(feature = "native")]
+    pub(crate) fn tasks_ready(&self) -> bool {
+        self.service.tasks().ready()
+    }
+
     pub(crate) fn service(&self) -> &Arc<Service> {
         &self.service
     }

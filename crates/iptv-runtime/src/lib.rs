@@ -633,6 +633,17 @@ impl HostHandle {
             .map_or(0, |service| service.hooks.reports_waiting())
     }
 
+    /// Number of wizard terminal reports processed, including stale reports.
+    #[cfg(feature = "test-support")]
+    pub fn wizard_reports_delivered(&self) -> usize {
+        self.0.upgrade().map_or(0, |service| {
+            service
+                .hooks
+                .wizard_reports_delivered
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
+    }
+
     /// Pause a FIFO writer job; the returned gate acknowledges actual entry.
     #[cfg(feature = "test-support")]
     pub fn hold_writer(&self) -> Option<TestGate> {

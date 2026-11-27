@@ -122,6 +122,7 @@ fn work(shared: &(Mutex<State>, Condvar)) {
 pub(crate) struct Hooks {
     refusals: std::sync::atomic::AtomicUsize,
     reports: Mutex<(bool, usize)>,
+    pub(crate) wizard_reports_delivered: std::sync::atomic::AtomicUsize,
     released: Condvar,
     publication: Mutex<Option<Arc<crate::testing::GateState>>>,
     source_preparation: Mutex<Option<Arc<crate::testing::GateState>>>,
