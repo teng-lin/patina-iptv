@@ -366,12 +366,54 @@ pub struct Ui {
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     update_dialog_open: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_revision: Signal<u64>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_ready: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_install_busy: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_cancel_requested: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_pending_dismissed: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_focus: Signal<usize>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
     update_notes_scroll: ui_kit::FocusScroll,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
@@ -513,12 +555,54 @@ impl Ui {
             parental: signal(None),
             settings_screen: signal(None),
             update_dialog_open: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_revision: signal(0),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_ready: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_install_busy: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_cancel_requested: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_pending_dismissed: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_focus: signal(0),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
             update_notes_scroll: ui_kit::FocusScroll::new(),
             player,
             player_surface: 0,

@@ -1,5 +1,5 @@
 //! The view observes the runtime's cached result; closing it never cancels a check.
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use iptv_nav::Action;
 use iptv_runtime::app_updates::{
@@ -8,6 +8,7 @@ use iptv_runtime::app_updates::{
 };
 use nsh_core::prelude::*;
 
+use crate::settings_view::updates as facade;
 use crate::{
     Ui, ViewMode,
     i18n::{tr, trf},
@@ -16,9 +17,7 @@ use crate::{
 };
 
 fn now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
+    crate::host::since_epoch().map_or(0, |d| d.as_secs().min(i64::MAX as u64) as i64)
 }
 
 fn changed(ui: Ui) {
@@ -43,7 +42,7 @@ fn scheduled_enabled() -> bool {
     true
 }
 
-pub(super) fn bind(ui: Ui) {
+pub(crate) fn bind(ui: Ui) {
     if !supported() {
         return;
     }
@@ -85,7 +84,7 @@ fn timer(ui: Ui) {
     });
 }
 
-pub(super) fn open(ui: Ui) {
+pub(crate) fn open(ui: Ui) {
     if !supported() {
         return;
     }
@@ -140,7 +139,7 @@ fn skip(ui: Ui) {
         crate::runtime().skip_app_update_version(&check.release.version);
         persist(ui);
     }
-    super::close(ui);
+    facade::close(ui);
 }
 
 fn acknowledge(ui: Ui) {
@@ -162,6 +161,20 @@ fn newer(ui: Ui) -> bool {
             ReleaseStatus::UpdateAvailable | ReleaseStatus::NoCompatiblePackage
         )
     })
+}
+
+fn manual_download_visible(ui: Ui) -> bool {
+    newer(ui)
+        && crate::host::updates::automatic_install_supported()
+        && snapshot(ui)
+            .cached
+            .is_some_and(|check| check.release.download.is_some())
+}
+
+fn manual_download(ui: Ui) {
+    if let Some(download) = snapshot(ui).cached.and_then(|check| check.release.download) {
+        crate::tasks::spawn_in_app(async move { super::open_download_url(&download.url).await });
+    }
 }
 
 fn pending_ready(ui: Ui) -> bool {
@@ -186,8 +199,24 @@ fn error_message(error: &CheckError) -> &'static str {
 
 fn status(ui: Ui) -> String {
     let state = snapshot(ui);
-    if ui.update_install_busy.get() {
-        if let Some((received, total)) = crate::runtime().app_update_download_progress() {
+    status_for(
+        &state,
+        ui.update_ready.get(),
+        ui.update_install_busy.get(),
+        crate::runtime().app_update_download_progress(),
+        pending_ready(ui),
+    )
+}
+
+fn status_for(
+    state: &Snapshot,
+    initialized: bool,
+    install_busy: bool,
+    progress: Option<(u64, u64)>,
+    pending: bool,
+) -> String {
+    if install_busy {
+        if let Some((received, total)) = progress {
             let percent = (u128::from(received) * 100 / u128::from(total.max(1)))
                 .min(100)
                 .to_string();
@@ -198,14 +227,14 @@ fn status(ui: Ui) -> String {
         }
         return tr("Checking…").to_owned();
     }
-    if pending_ready(ui) {
-        return tr("Update ready to install.").to_owned();
-    }
-    if state.checking || !ui.update_ready.get() {
+    if state.checking || !initialized {
         return tr("Checking…").to_owned();
     }
     if let Some(error) = &state.error {
         return error_message(error).to_owned();
+    }
+    if pending {
+        return tr("Update ready to install.").to_owned();
     }
     state.cached.as_ref().map_or_else(|| tr("Check for updates").to_owned(), |check| {
         match check.status {
@@ -255,23 +284,52 @@ fn notes(ui: Ui) -> String {
     })
 }
 
-struct InstallOperation(Ui);
+struct InstallOperation {
+    owner: Owner,
+    busy: Signal<bool>,
+    panel_open: Signal<bool>,
+    focus: Signal<usize>,
+    pending_dismissed: Signal<bool>,
+    revision: Signal<u64>,
+}
+
+impl InstallOperation {
+    fn new(ui: Ui) -> Self {
+        Self {
+            owner: ui.owner,
+            busy: ui.update_install_busy,
+            panel_open: ui.update_dialog_open,
+            focus: ui.update_focus,
+            pending_dismissed: ui.update_pending_dismissed,
+            revision: ui.update_revision,
+        }
+    }
+}
+
 impl Drop for InstallOperation {
     fn drop(&mut self) {
-        self.0.update_install_busy.try_set(false);
-        if self.0.owner.is_live() {
-            self.0.update_pending_dismissed.set(false);
-            changed(self.0);
+        self.busy.try_set(false);
+        if self.owner.is_live() {
+            if !self.panel_open.get_untracked() {
+                self.focus.set(0);
+            }
+            self.pending_dismissed.set(false);
+            self.revision
+                .update(|revision| *revision = revision.wrapping_add(1));
         }
     }
 }
 
 fn progress_timer(ui: Ui) {
-    let _timer = set_timeout(Duration::from_millis(200), move || {
-        if ui.update_install_busy.get_untracked() {
-            changed(ui);
-            progress_timer(ui);
-        }
+    // A pointer press runs under the panel's child owner. Progress belongs to
+    // the accepted root operation, including while Later closes that panel.
+    ui.owner.run(move || {
+        let _timer = set_timeout(Duration::from_millis(200), move || {
+            if ui.update_install_busy.get_untracked() {
+                changed(ui);
+                progress_timer(ui);
+            }
+        });
     });
 }
 
@@ -294,7 +352,7 @@ fn download(ui: Ui) {
     }
     ui.update_install_busy.set(true);
     ui.update_cancel_requested.set(false);
-    let operation = InstallOperation(ui);
+    let operation = InstallOperation::new(ui);
     progress_timer(ui);
     crate::tasks::spawn_in_app(async move {
         let _operation = operation;
@@ -306,7 +364,7 @@ fn download(ui: Ui) {
                 crate::settings_view::notify(action.label());
                 action.run(ui).await;
             }
-            Ok(None) => super::open(&check.release.url).await,
+            Ok(None) => super::open_download_url(&check.release.url).await,
             Err(message) => crate::settings_view::notify(message),
         }
     });
@@ -317,22 +375,20 @@ fn activate(ui: Ui, index: usize) {
         0 => check(ui, Trigger::Manual),
         1 if newer(ui) => download(ui),
         2 if newer(ui) => skip(ui),
-        3 => super::close(ui),
+        3 => facade::close(ui),
         4 if ui.update_install_busy.get_untracked() => cancel_download(ui),
+        5 if manual_download_visible(ui) => manual_download(ui),
         _ => {}
     }
 }
 
-pub(super) fn key(ui: Ui, action: Action) {
+pub(crate) fn key(ui: Ui, action: Action) {
     let at = ui.update_focus.get_untracked();
-    let mut controls = vec![0];
-    if newer(ui) {
-        controls.extend([1, 2]);
-    }
-    controls.push(3);
-    if ui.update_install_busy.get_untracked() {
-        controls.push(4);
-    }
+    let controls = panel_controls(
+        newer(ui),
+        manual_download_visible(ui),
+        ui.update_install_busy.get_untracked(),
+    );
     let position = controls.iter().position(|index| *index == at).unwrap_or(0);
     match action {
         Action::MoveLeft => ui.update_focus.set(controls[position.saturating_sub(1)]),
@@ -346,12 +402,28 @@ pub(super) fn key(ui: Ui, action: Action) {
     }
 }
 
-pub(super) fn layer(ui: Ui) -> View {
+fn panel_controls(newer: bool, manual_download: bool, install_busy: bool) -> Vec<usize> {
+    let mut controls = vec![0];
+    if newer {
+        controls.push(1);
+        if manual_download {
+            controls.push(5);
+        }
+        controls.push(2);
+    }
+    controls.push(3);
+    if install_busy {
+        controls.push(4);
+    }
+    controls
+}
+
+pub(crate) fn layer(ui: Ui) -> View {
     view()
         .pointer_events(PointerEvents::BoxNone)
         .absolute()
         .inset_0()
-        .child(when(move || super::is_open(ui), move || panel(ui)))
+        .child(when(move || facade::is_open(ui), move || panel(ui)))
         .child(when(move || notice_open(ui), move || notice(ui)))
 }
 
@@ -365,6 +437,9 @@ fn panel(ui: Ui) -> View {
         if !ui.update_install_busy.get() && focus == 4 {
             ui.update_focus.set(3);
         }
+        if focus == 5 && !manual_download_visible(ui) {
+            ui.update_focus.set(0);
+        }
     });
     ui_kit::screen(ui, size)
         .test_id("app-update-panel")
@@ -376,7 +451,7 @@ fn panel(ui: Ui) -> View {
             ui,
             size,
             move || tr("App updates"),
-            super::close,
+            facade::close,
         ))
         .child(ui_kit::heading(size, move || status(ui)).test_id("app-update-status"))
         .child(ui_kit::body(size, move || details(ui)))
@@ -426,6 +501,21 @@ fn panel(ui: Ui) -> View {
                     },
                 ))
                 .child(when(
+                    move || manual_download_visible(ui),
+                    move || {
+                        // Explicit browser download remains available when the
+                        // signed installer feed or appcast cannot be verified.
+                        // It never authorizes installation inside Patina.
+                        ui_kit::button(
+                            ui,
+                            size,
+                            move || tr("Download package"),
+                            move || ui.update_focus.get() == 5,
+                            move || activate(ui, 5),
+                        )
+                    },
+                ))
+                .child(when(
                     move || newer(ui),
                     move || {
                         ui_kit::button(
@@ -459,8 +549,8 @@ fn panel(ui: Ui) -> View {
         )
 }
 
-pub(super) fn notice_open(ui: Ui) -> bool {
-    if super::is_open(ui)
+pub(crate) fn notice_open(ui: Ui) -> bool {
+    if facade::is_open(ui)
         || ui.mode.get() == ViewMode::Fullscreen
         || (snapshot(ui).notice.is_none()
             && (!pending_ready(ui) || ui.update_pending_dismissed.get()))
@@ -473,19 +563,33 @@ pub(super) fn notice_open(ui: Ui) -> bool {
         .all(|overlay| !overlay.is_open(ui))
 }
 
-pub(super) fn dismiss_notice(ui: Ui) {
+pub(crate) fn dismiss_notice(ui: Ui) {
     ui.update_pending_dismissed.set(true);
     acknowledge(ui);
 }
 
-pub(super) fn notice_key(ui: Ui, action: Action) {
+#[derive(Debug, PartialEq, Eq)]
+enum NoticeAction {
+    Review,
+    Dismiss,
+}
+
+fn notice_navigation(focus: Signal<usize>, action: Action) -> Option<NoticeAction> {
     match action {
-        Action::MoveLeft | Action::MoveUp => ui.update_focus.set(0),
-        Action::MoveRight | Action::MoveDown => ui.update_focus.set(1),
-        Action::Select if ui.update_focus.get_untracked() == 0 => review(ui),
-        Action::Select => dismiss_notice(ui),
-        Action::Back | Action::ShowMenu => dismiss_notice(ui),
+        Action::MoveLeft | Action::MoveUp => focus.set(0),
+        Action::MoveRight | Action::MoveDown => focus.set(1),
+        Action::Select if focus.get_untracked() == 0 => return Some(NoticeAction::Review),
+        Action::Select | Action::Back | Action::ShowMenu => return Some(NoticeAction::Dismiss),
         _ => {}
+    }
+    None
+}
+
+pub(crate) fn notice_key(ui: Ui, action: Action) {
+    match notice_navigation(ui.update_focus, action) {
+        Some(NoticeAction::Review) => review(ui),
+        Some(NoticeAction::Dismiss) => dismiss_notice(ui),
+        None => {}
     }
 }
 
@@ -524,3 +628,6 @@ fn notice(ui: Ui) -> View {
                 )),
         )
 }
+
+#[cfg(test)]
+mod tests;

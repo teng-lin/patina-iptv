@@ -1,6 +1,34 @@
 //! Release information for the installed native package.
 pub(crate) const RELEASES: &str = "https://github.com/teng-lin/patina-iptv/releases";
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) mod view;
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+)))]
+pub(crate) mod view {
+    pub(crate) fn open(_: crate::Ui) {}
+    pub(crate) fn bind(_: crate::Ui) {}
+    pub(crate) fn key(_: crate::Ui, _: iptv_nav::Action) {}
+    pub(crate) fn layer(_: crate::Ui) -> nsh_core::prelude::View {
+        nsh_core::prelude::view()
+    }
+    pub(crate) fn notice_open(_: crate::Ui) -> bool {
+        false
+    }
+    pub(crate) fn dismiss_notice(_: crate::Ui) {}
+    pub(crate) fn notice_key(_: crate::Ui, _: iptv_nav::Action) {}
+}
+
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "linux")]
@@ -8,6 +36,12 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 pub(crate) enum PackageAction {
     #[cfg(target_os = "macos")]
     MacOS(String),
@@ -26,6 +60,12 @@ pub(crate) enum PackageAction {
     Download(String),
 }
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 impl PackageAction {
     pub(crate) fn label(&self) -> &'static str {
         match *self {
@@ -76,10 +116,16 @@ impl PackageAction {
                             .await
                     };
                     let Some(stage) = stage else {
+                        if _ui.update_cancel_requested.get_untracked() {
+                            return;
+                        }
                         return crate::settings_view::notify(tr(
                             "Update download failed. Try again.",
                         ));
                     };
+                    if _ui.update_cancel_requested.get_untracked() {
+                        return;
+                    }
                     if !crate::settings_view::updates::is_open(_ui) {
                         owner.retain_update_download(asset, stage);
                         return;
@@ -94,6 +140,9 @@ impl PackageAction {
                         )
                         .await
                     else {
+                        if _ui.update_cancel_requested.get_untracked() {
+                            return;
+                        }
                         return crate::settings_view::notify(tr(
                             "The installer could not be verified or opened.",
                         ));
@@ -115,6 +164,9 @@ impl PackageAction {
                     .close_on_escape(true)
                     .show()
                     .await;
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
                     owner.retain_windows_setup(asset, setup);
                     return;
@@ -155,7 +207,7 @@ impl PackageAction {
                 target_os = "android"
             ))]
             Self::Download(url) => {
-                crate::settings_view::updates::open(&url).await;
+                open_download_url(&url).await;
             }
             #[cfg(target_os = "android")]
             Self::Install(asset) => {
@@ -200,6 +252,9 @@ impl PackageAction {
                     .close_on_escape(true)
                     .show()
                     .await;
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
                     owner.retain_update_download(asset, path);
                     return;
@@ -226,6 +281,12 @@ impl PackageAction {
     }
 }
 
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 pub(crate) fn feed(android_build: Option<(u64, u64)>) -> Option<&'static str> {
     if cfg!(target_os = "android") && android_build.is_none() {
         return None;
@@ -239,10 +300,20 @@ pub(crate) fn feed(android_build: Option<(u64, u64)>) -> Option<&'static str> {
     target_os = "windows",
     target_os = "macos"
 ))]
+fn direct_android_build() -> Option<(u64, u64)> {
+    crate::device::reported()?.direct_android_build
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
 pub(crate) fn installed() -> iptv_runtime::app_updates::InstalledPackage {
     let mut installed =
         iptv_runtime::app_updates::InstalledPackage::native(env!("CARGO_PKG_VERSION"));
-    if let Some((code, api)) = crate::device::direct_android_build() {
+    if let Some((code, api)) = direct_android_build() {
         installed.format = Some("apk".into());
         installed.android_code = Some(code);
         installed.minimum = serde_json::json!({"androidApi": api});
@@ -273,7 +344,10 @@ pub(crate) async fn action_for(
     if macos::supported() {
         return Ok(Some(PackageAction::MacOS(check.release.version.clone())));
     }
-    let Some(feed) = feed(crate::device::direct_android_build()) else {
+    if !automatic_install_supported() {
+        return manual();
+    }
+    let Some(feed) = feed(direct_android_build()) else {
         return manual();
     };
     let root = include_bytes!(concat!(env!("OUT_DIR"), "/update-root.json"));
@@ -312,9 +386,7 @@ pub(crate) async fn action_for(
         return Ok(Some(PackageAction::Windows(asset, publisher)));
     }
     #[cfg(target_os = "android")]
-    if option_env!("PATINA_APK_HANDOFF") == Some("1")
-        && crate::device::direct_android_build().is_some()
-    {
+    if option_env!("PATINA_APK_HANDOFF") == Some("1") && direct_android_build().is_some() {
         return Ok(Some(PackageAction::Install(asset)));
     }
     manual()
@@ -331,7 +403,7 @@ pub(crate) fn automatic_install_supported() -> bool {
     if macos::supported() {
         return true;
     }
-    if feed(crate::device::direct_android_build()).is_none() {
+    if feed(direct_android_build()).is_none() {
         return false;
     }
     if cfg!(target_os = "android") {
@@ -341,4 +413,22 @@ pub(crate) fn automatic_install_supported() -> bool {
         return option_env!("PATINA_APPIMAGE_HANDOFF") == Some("1");
     }
     cfg!(windows) && option_env!("PATINA_WINDOWS_PUBLISHER").is_some_and(|v| !v.trim().is_empty())
+}
+
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) async fn open_download_url(url: &str) {
+    if !nsh_core::prelude::open_url(url).await {
+        let _ = nsh_base::alert_dialog()
+            .title(crate::i18n::tr("Release notes and downloads"))
+            .description(url.to_owned())
+            .close_on_escape(true)
+            .cancel("close", crate::i18n::tr("Close"))
+            .show()
+            .await;
+    }
 }

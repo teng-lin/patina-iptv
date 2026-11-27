@@ -345,6 +345,7 @@ mod tests {
         // the screens that cover it do not.
         let over_the_picture = [
             Overlay::Leave,
+            Overlay::AppUpdateNotice,
             Overlay::Chooser,
             Overlay::Description,
             Overlay::PlaylistMenu,

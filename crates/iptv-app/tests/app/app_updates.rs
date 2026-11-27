@@ -19,13 +19,13 @@ struct Response {
     held: bool,
     requests: usize,
 }
-struct Api {
+pub(super) struct Api {
     state: Arc<Mutex<Response>>,
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
 impl Api {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         // SAFETY: isolated! gives this scenario a fresh process. No app or
@@ -92,13 +92,13 @@ impl Api {
             thread: Some(thread),
         }
     }
-    fn serve(&self, status: u16, body: String) {
+    pub(super) fn serve(&self, status: u16, body: String) {
         let mut state = self.state.lock().unwrap();
         state.status = status;
         state.body = body;
         state.held = false;
     }
-    fn requests(&self) -> usize {
+    pub(super) fn requests(&self) -> usize {
         self.state.lock().unwrap().requests
     }
 }
@@ -108,7 +108,7 @@ impl Drop for Api {
         self.thread.take().unwrap().join().unwrap();
     }
 }
-fn release(version: &str, assets: bool) -> String {
+pub(super) fn release(version: &str, assets: bool) -> String {
     let suffix = if cfg!(target_os = "macos") {
         "macos-arm64.dmg"
     } else if cfg!(windows) {

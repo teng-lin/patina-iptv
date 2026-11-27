@@ -287,9 +287,9 @@ fn describe(
 fn suffix(installed: &InstalledPackage) -> Option<&'static str> {
     let format = installed.format.as_deref();
     match (installed.platform, installed.architecture, format) {
-        ("android", "arm64-v8a" | "armeabi-v7a", None | Some("apk")) => {
-            Some("android-tablet-tv.apk")
-        }
+        // A matching CPU does not establish a direct APK installation channel.
+        // Store/unknown builds must not be offered another channel's package.
+        ("android", "arm64-v8a" | "armeabi-v7a", Some("apk")) => Some("android-tablet-tv.apk"),
         ("macos", "arm64", None | Some("dmg")) => Some("macos-arm64.dmg"),
         ("windows", "x86_64", None | Some("exe")) => Some("windows-x86_64-setup.exe"),
         ("linux", "x86_64", Some("appimage")) => Some("linux-x86_64.AppImage"),

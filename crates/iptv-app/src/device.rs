@@ -42,11 +42,11 @@ use crate::layout::Class;
 
 /// What the host reported: nothing until it does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Report {
+pub(crate) struct Report {
     form_factor: Option<FormFactor>,
     input: Option<Input>,
     decoders: Option<usize>,
-    direct_android_build: Option<(u64, u64)>,
+    pub(crate) direct_android_build: Option<(u64, u64)>,
 }
 
 /// How long the system asks panels that hide by themselves to stay, at
@@ -130,14 +130,11 @@ pub(crate) fn reported_android_form() -> Option<FormFactor> {
     if built().platform != Platform::Android {
         return None;
     }
-    REPORTED.with(Cell::get)?.with(|report| report.form_factor)
+    reported()?.form_factor
 }
 
-pub(crate) fn direct_android_build() -> Option<(u64, u64)> {
-    REPORTED
-        .with(Cell::get)?
-        .get_untracked()
-        .direct_android_build
+pub(crate) fn reported() -> Option<Report> {
+    Some(REPORTED.with(Cell::get)?.get())
 }
 
 /// The current surface's size class (reactive: its size, the guide's

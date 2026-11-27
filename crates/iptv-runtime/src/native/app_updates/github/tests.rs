@@ -181,7 +181,14 @@ async fn newer_release_without_matching_package_still_supplies_notes_and_release
 #[test]
 fn package_matching_respects_architecture_and_installation_channel() {
     for (platform, arch, format, expected) in [
-        ("android", "arm64-v8a", None, Some("android-tablet-tv.apk")),
+        ("android", "arm64-v8a", None, None),
+        ("android", "armeabi-v7a", None, None),
+        (
+            "android",
+            "arm64-v8a",
+            Some("apk"),
+            Some("android-tablet-tv.apk"),
+        ),
         (
             "android",
             "armeabi-v7a",
@@ -190,6 +197,7 @@ fn package_matching_respects_architecture_and_installation_channel() {
         ),
         ("android", "x86_64", None, None),
         ("android", "arm64-v8a", Some("store"), None),
+        ("android", "armeabi-v7a", Some("store"), None),
         ("macos", "arm64", None, Some("macos-arm64.dmg")),
         ("macos", "x86_64", None, None),
         ("windows", "x86_64", None, Some("windows-x86_64-setup.exe")),
@@ -207,6 +215,36 @@ fn package_matching_respects_architecture_and_installation_channel() {
         package.architecture = arch;
         package.format = format.map(str::to_owned);
         assert_eq!(suffix(&package), expected, "{platform} {arch} {format:?}");
+    }
+}
+
+#[tokio::test]
+async fn android_release_discovery_offers_apk_only_to_explicit_direct_installations() {
+    let mut data = release("0.1.10");
+    let name = "Patina-0.1.10-android-tablet-tv.apk";
+    data["assets"] = json!([{
+        "name": name, "size": 9,
+        "browser_download_url": format!("{RELEASES}/download/v0.1.10/{name}")
+    }]);
+    for architecture in ["arm64-v8a", "armeabi-v7a"] {
+        for format in [None, Some("store"), Some("apk")] {
+            let mut package = installed("0.1.9");
+            package.platform = "android";
+            package.architecture = architecture;
+            package.format = format.map(str::to_owned);
+            let (endpoint, worker) = fixture(json!([data]));
+            let checked = get(&endpoint, package).await.unwrap();
+            assert_eq!(checked.release.version, "0.1.10");
+            assert!(!checked.release.notes.is_empty());
+            if format == Some("apk") {
+                assert_eq!(checked.status, ReleaseStatus::UpdateAvailable);
+                assert_eq!(checked.release.download.unwrap().name, name);
+            } else {
+                assert_eq!(checked.status, ReleaseStatus::NoCompatiblePackage);
+                assert!(checked.release.download.is_none());
+            }
+            received(worker).await;
+        }
     }
 }
 
