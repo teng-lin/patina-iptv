@@ -92,6 +92,107 @@ fn never_is_manual_only_and_on_launch_is_once_per_owner() {
 }
 
 #[test]
+fn on_launch_waits_out_persisted_backoff_then_checks_once() {
+    let mut previous = Controller::default();
+    let token = previous
+        .begin_check(1000, Trigger::Startup, Frequency::OnLaunch)
+        .unwrap();
+    previous.finish_check(token, 1001, Err(CheckError::Network));
+    let mut restarted = Controller::default();
+    restarted.restore(previous.document()).unwrap();
+    assert!(
+        restarted
+            .begin_check(1002, Trigger::Startup, Frequency::OnLaunch)
+            .is_none()
+    );
+    assert!(
+        restarted
+            .begin_check(1900, Trigger::Automatic, Frequency::OnLaunch)
+            .is_none()
+    );
+    let token = restarted
+        .begin_check(1901, Trigger::Automatic, Frequency::OnLaunch)
+        .unwrap();
+    // A failed actual launch attempt is still a single attempt for this owner.
+    restarted.finish_check(token, 1902, Err(CheckError::Network));
+    assert!(
+        restarted
+            .begin_check(10_000, Trigger::Automatic, Frequency::OnLaunch)
+            .is_none()
+    );
+    assert!(
+        restarted
+            .begin_check(10_001, Trigger::Startup, Frequency::OnLaunch)
+            .is_none()
+    );
+}
+
+#[test]
+fn queued_manual_intent_survives_restore_and_closed_panel_with_never_frequency() {
+    let mut state = Controller::default();
+    state.queue_manual_check();
+    // Async restore may finish after the user closes the panel. It restores
+    // durable preferences without replacing the live owner's explicit intent.
+    state
+        .restore(serde_json::json!({
+            "version": 1, "last_attempt": 1000, "retry_after": 1900
+        }))
+        .unwrap();
+    assert!(state.manual_check_pending());
+    let token = state
+        .begin_check(1001, Trigger::Startup, Frequency::Never)
+        .unwrap();
+    assert!(!state.manual_check_pending());
+    state.queue_manual_check();
+    assert!(
+        state
+            .begin_check(1002, Trigger::Automatic, Frequency::Never)
+            .is_none()
+    );
+    assert!(!state.manual_check_pending());
+    assert!(state.finish_check(token, 1003, Ok(release("2.0.0"))));
+    assert_eq!(state.snapshot().notice, Some(release("2.0.0")));
+    assert!(state.durable.notified_version.is_none());
+    assert_eq!(state.document()["pending_version"], "2.0.0");
+    assert!(
+        state
+            .begin_check(1004, Trigger::Automatic, Frequency::Never)
+            .is_none()
+    );
+}
+
+#[test]
+fn directory_sync_failure_cannot_allow_an_older_save_to_replace_newer_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("schedule.json");
+    let writes = Mutex::new(0);
+    let newest = serde_json::json!({"version": 1, "pending_version": "3.0.0"});
+    let old = serde_json::json!({"version": 1, "pending_version": "2.0.0"});
+    let error = persist_document(&file, &newest, 2, &writes, |_| {
+        Err(io::Error::other("synthetic directory sync failure"))
+    })
+    .unwrap_err();
+    assert_eq!(error.to_string(), "synthetic directory sync failure");
+    assert_eq!(*writes.lock().unwrap(), 2);
+    persist_document(&file, &old, 1, &writes, |_| {
+        panic!("stale save must not sync")
+    })
+    .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&file).unwrap()).unwrap(),
+        newest
+    );
+    // An equal-revision retry must still be allowed to finish the sync step.
+    let mut synced = false;
+    persist_document(&file, &newest, 2, &writes, |_| {
+        synced = true;
+        Ok(())
+    })
+    .unwrap();
+    assert!(synced);
+}
+
+#[test]
 fn monthly_is_calendar_month_with_short_month_and_leap_year_clamping() {
     let time = |text: &str| DateTime::parse_from_rfc3339(text).unwrap().timestamp();
     for (last, due) in [
@@ -222,7 +323,7 @@ fn stale_completions_cannot_clear_or_replace_current_check() {
 }
 
 #[test]
-fn opening_updates_joins_scheduled_work_without_a_second_request_or_duplicate_notice() {
+fn opening_updates_joins_scheduled_work_but_only_display_acknowledges_the_result() {
     let mut state = Controller::default();
     let token = state
         .begin_check(0, Trigger::Startup, Frequency::Weekly)
@@ -235,8 +336,22 @@ fn opening_updates_joins_scheduled_work_without_a_second_request_or_duplicate_no
     assert!(state.snapshot().checking);
     assert!(state.finish_check(token, 2, Ok(release("2.0.0"))));
     assert_eq!(state.snapshot().cached, Some(release("2.0.0")));
-    assert!(state.snapshot().notice.is_none());
-    assert_eq!(state.durable.notified_version.as_deref(), Some("2.0.0"));
+    // The user may have closed the panel while the joined request was pending.
+    assert_eq!(state.snapshot().notice, Some(release("2.0.0")));
+    assert!(state.durable.notified_version.is_none());
+    let mut restarted = Controller::default();
+    restarted.restore(state.document()).unwrap();
+    complete(
+        &mut restarted,
+        3,
+        Trigger::Startup,
+        Frequency::Weekly,
+        "2.0.0",
+    );
+    assert!(restarted.snapshot().notice.is_some());
+    restarted.acknowledge_notice();
+    assert!(restarted.snapshot().notice.is_none());
+    assert_eq!(restarted.durable.notified_version.as_deref(), Some("2.0.0"));
 }
 
 #[test]
@@ -259,7 +374,12 @@ fn pending_notice_refresh_is_not_a_repeating_check_and_clear_actions_are_durable
             match action {
                 "acknowledge" => restarted.acknowledge_notice(),
                 "skip" => restarted.skip_version("2.0.0"),
-                "manual" => complete(&mut restarted, 1003, Trigger::Manual, frequency, "2.0.0"),
+                "manual" => {
+                    complete(&mut restarted, 1003, Trigger::Manual, frequency, "2.0.0");
+                    // Fetching alone is not evidence that the panel stayed open.
+                    assert!(restarted.snapshot().notice.is_some());
+                    restarted.acknowledge_notice();
+                }
                 _ => {
                     let token = restarted
                         .begin_check(1003, Trigger::Manual, frequency)

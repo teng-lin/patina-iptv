@@ -56,16 +56,27 @@ pub(crate) fn bind(ui: Ui) {
         let resumed = !was_foreground.replace(foreground) && foreground;
         if resumed {
             let first = !started.replace(true);
-            let trigger = if !first {
-                Trigger::Automatic
-            } else if ui.update_dialog_open.get_untracked() {
+            let trigger = if crate::runtime().app_update_manual_check_pending() {
                 Trigger::Manual
+            } else if !first {
+                Trigger::Automatic
             } else {
                 Trigger::Startup
             };
             if trigger == Trigger::Manual || scheduled_enabled() {
                 check(ui, trigger);
             }
+        } else if foreground && crate::runtime().app_update_manual_check_pending() {
+            check(ui, Trigger::Manual);
+        }
+    });
+    effect(move || {
+        if ui.update_dialog_open.get()
+            && lifecycle() != nsh_core::platform::Lifecycle::Background
+            && ui.top_overlay() == Some(crate::overlays::Overlay::AppUpdate)
+            && snapshot(ui).notice.is_some()
+        {
+            acknowledge(ui);
         }
     });
     crate::tasks::spawn_in_app(async move {
@@ -93,6 +104,7 @@ pub(crate) fn open(ui: Ui) {
     ui.update_focus.set(0);
     ui.update_notes_scroll.reset();
     ui.update_dialog_open.set(true);
+    crate::runtime().queue_manual_app_update_check();
     if ui.update_ready.get_untracked() {
         check(ui, Trigger::Manual);
     }
@@ -169,10 +181,17 @@ fn acknowledge(ui: Ui) {
 }
 
 fn review(ui: Ui) {
-    acknowledge(ui);
-    ui.update_focus.set(0);
-    ui.update_notes_scroll.reset();
-    ui.update_dialog_open.set(true);
+    crate::settings_view::settings_guarded(ui, move || {
+        acknowledge(ui);
+        ui.update_focus.set(0);
+        ui.update_notes_scroll.reset();
+        ui.update_dialog_open.set(true);
+    });
+}
+
+fn releases_fallback(ui: Ui) -> bool {
+    let state = snapshot(ui);
+    state.cached.is_none() && state.error.is_some()
 }
 
 fn newer(ui: Ui) -> bool {
@@ -284,7 +303,10 @@ fn details(ui: Ui) -> String {
                 crate::clock::date_only(time),
                 crate::clock::time_only(time)
             );
-            trf("Last checked: {time}", &[("time", time.as_str().into())])
+            trf(
+                "Last successful check: {time}",
+                &[("time", time.as_str().into())],
+            )
         })
         .unwrap_or_default();
     let Some(check) = state.cached else {
@@ -437,6 +459,9 @@ fn download(ui: Ui) {
         return;
     }
     let Some(check) = snapshot(ui).cached else {
+        if releases_fallback(ui) {
+            crate::tasks::spawn_in_app(async { super::open_download_url(super::RELEASES).await });
+        }
         return;
     };
     if !newer(ui) {
@@ -468,9 +493,12 @@ fn download(ui: Ui) {
 }
 
 fn activate(ui: Ui, index: usize) {
+    if !current_controls(ui).contains(&index) {
+        return;
+    }
     match index {
         0 => check(ui, Trigger::Manual),
-        1 if newer(ui) => download(ui),
+        1 => download(ui),
         2 if newer(ui) => skip(ui),
         3 => facade::close(ui),
         4 if ui.update_install_busy.get_untracked() => {
@@ -483,13 +511,7 @@ fn activate(ui: Ui, index: usize) {
 
 pub(crate) fn key(ui: Ui, action: Action) {
     let at = ui.update_focus.get_untracked();
-    let controls = panel_controls(
-        newer(ui),
-        manual_download_visible(ui),
-        ui.update_install_busy.get_untracked(),
-        snapshot(ui).checking,
-        cancellation_allowed(ui),
-    );
+    let controls = current_controls(ui);
     let position = controls.iter().position(|index| *index == at).unwrap_or(0);
     match action {
         Action::MoveLeft => ui.update_focus.set(controls[position.saturating_sub(1)]),
@@ -503,28 +525,40 @@ pub(crate) fn key(ui: Ui, action: Action) {
     }
 }
 
+fn current_controls(ui: Ui) -> Vec<usize> {
+    panel_controls(
+        newer(ui),
+        manual_download_visible(ui),
+        ui.update_install_busy.get_untracked(),
+        snapshot(ui).checking,
+        cancellation_allowed(ui),
+        releases_fallback(ui),
+    )
+}
+
 fn panel_controls(
     newer: bool,
     manual_download: bool,
     install_busy: bool,
     checking: bool,
     cancelable: bool,
+    releases_fallback: bool,
 ) -> Vec<usize> {
     let blocked = install_busy || checking;
     let mut controls = Vec::new();
     if !blocked {
         controls.push(0);
     }
-    if newer {
-        if !blocked {
+    if !blocked {
+        if newer || releases_fallback {
             controls.push(1);
-            if manual_download {
-                controls.push(5);
-            }
         }
-        if !install_busy || cancelable {
-            controls.push(2);
+        if manual_download {
+            controls.push(5);
         }
+    }
+    if newer && (!install_busy || cancelable) {
+        controls.push(2);
     }
     controls.push(3);
     if install_busy && cancelable {
@@ -555,6 +589,7 @@ fn panel(ui: Ui) -> View {
             busy,
             checking,
             cancelable,
+            releases_fallback(ui),
         );
         if !controls.contains(&focus) {
             ui.update_focus.set(if busy && cancelable {
@@ -611,7 +646,7 @@ fn panel(ui: Ui) -> View {
                     }),
                 )
                 .child(when(
-                    move || newer(ui),
+                    move || newer(ui) || releases_fallback(ui),
                     move || {
                         ui_kit::button(
                             ui,
@@ -621,7 +656,7 @@ fn panel(ui: Ui) -> View {
                                     tr("Install update")
                                 } else if snapshot(ui)
                                     .cached
-                                    .is_some_and(|check| check.release.download.is_none())
+                                    .is_none_or(|check| check.release.download.is_none())
                                 {
                                     tr("Release notes and downloads")
                                 } else if crate::host::updates::automatic_install_supported() {

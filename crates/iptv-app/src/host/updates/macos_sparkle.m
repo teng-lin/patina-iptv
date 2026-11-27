@@ -135,6 +135,22 @@ static BOOL PatinaVersion(PatinaSparkleDelegate *delegate, id item) {
 }
 
 @implementation PatinaSparkleUserDriver
+- (void (^)(NSInteger))holdPreparedReply:(void (^)(NSInteger))reply {
+    // Dismissing Sparkle's standard Ready UI discards its stored callback.
+    // Retain genuine Skip now, before the viewer clicks Install, and share
+    // one consumption gate with that UI and the shell's later approval.
+    __block void (^pending)(NSInteger) = reply;
+    __weak PatinaSparkleDelegate *delegate = self.delegate;
+    void (^once)(NSInteger) = ^(NSInteger choice) {
+        void (^consume)(NSInteger) = pending;
+        pending = nil;
+        if (!consume) return;
+        delegate.cancelPrepared = nil;
+        consume(choice);
+    };
+    self.delegate.cancelPrepared = ^{ once(PatinaSkip); };
+    return once;
+}
 - (void)requestInstallWithReply:(void (^)(NSInteger))reply {
     if (self.abandoned || !PatinaMatches(self.delegate.session) || !self.delegate.versionAccepted) {
         uint64_t session = self.delegate.session;
@@ -195,6 +211,7 @@ static BOOL PatinaVersion(PatinaSparkleDelegate *delegate, id item) {
     if (prepared) {
         self.extracting = YES;
         PatinaPublish(self.delegate.session, 7);
+        reply = [self holdPreparedReply:reply];
     }
     if (!prepared) PatinaPublish(self.delegate.session, 2);
     __weak PatinaSparkleUserDriver *weak = self;
@@ -217,6 +234,7 @@ static BOOL PatinaVersion(PatinaSparkleDelegate *delegate, id item) {
         return;
     }
     PatinaPublish(self.delegate.session, 7);
+    reply = [self holdPreparedReply:reply];
     __weak PatinaSparkleUserDriver *weak = self;
     [self.standard showReadyToInstallAndRelaunch:^(NSInteger choice) {
         PatinaSparkleUserDriver *driver = weak;

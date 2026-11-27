@@ -25,7 +25,7 @@ fn release(version: &str) -> Value {
         "html_url": format!("{RELEASES}/tag/v{version}"),
         "body": "## Synthetic release\n\nRepair playback and preserve the library.",
         "published_at": "2026-11-27T10:00:00Z",
-        "assets": [{"name": name, "size": 512,
+        "assets": [{"name": name, "state": "uploaded", "size": 512,
             "browser_download_url": format!("{RELEASES}/download/v{version}/{name}")}]
     })
 }
@@ -178,6 +178,36 @@ async fn newer_release_without_matching_package_still_supplies_notes_and_release
     }
 }
 
+#[tokio::test]
+async fn failed_package_upload_keeps_notes_available_and_does_not_shadow_an_uploaded_package() {
+    for uploaded in [false, true] {
+        let mut data = release("0.1.10");
+        let mut starter = data["assets"][0].clone();
+        starter["state"] = json!("starter");
+        starter["size"] = json!(0);
+        if !uploaded {
+            data["assets"] = json!([]);
+        }
+        data["assets"].as_array_mut().unwrap().insert(0, starter);
+        let (endpoint, worker) = fixture(json!([data]));
+        let checked = get(&endpoint, installed("0.1.9")).await.unwrap();
+        assert_eq!(checked.release.version, "0.1.10");
+        assert_eq!(checked.release.url, format!("{RELEASES}/tag/v0.1.10"));
+        assert!(checked.release.notes.contains("Repair playback"));
+        if uploaded {
+            assert_eq!(checked.status, ReleaseStatus::UpdateAvailable);
+            assert_eq!(
+                checked.release.download.unwrap().name,
+                "Patina-0.1.10-linux-x86_64.AppImage"
+            );
+        } else {
+            assert_eq!(checked.status, ReleaseStatus::NoCompatiblePackage);
+            assert!(checked.release.download.is_none());
+        }
+        received(worker).await;
+    }
+}
+
 #[test]
 fn package_matching_respects_architecture_and_installation_channel() {
     for (platform, arch, format, expected) in [
@@ -317,20 +347,33 @@ async fn reports_network_rate_limit_timeout_and_invalid_responses_as_errors() {
         Err(CheckError::Network)
     );
 
-    let (endpoint, worker) = serve(vec![(200, b"[]".to_vec(), Duration::from_millis(100))]);
-    let client = NetClient::new(config()).unwrap();
-    assert_eq!(
-        check(
-            &client,
-            &endpoint,
-            false,
-            installed("0.1.9"),
-            Duration::from_millis(20)
-        )
-        .await,
-        Err(CheckError::Timeout)
-    );
-    received(worker).await;
+    for deadline in [Duration::ZERO, Duration::from_millis(20)] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/releases", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let (stop, stopped) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let mut sockets = Vec::new();
+            while stopped.try_recv() == Err(std::sync::mpsc::TryRecvError::Empty) {
+                match listener.accept() {
+                    Ok((socket, _)) => sockets.push(socket),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("{error}"),
+                }
+            }
+            // Keep accepted connections open without replying. The deadline
+            // may cancel before a connection or complete headers ever arrive.
+        });
+        let client = NetClient::new(config()).unwrap();
+        let result = check(&client, &endpoint, false, installed("0.1.9"), deadline).await;
+        stop.send(()).unwrap();
+        tokio::task::spawn_blocking(move || worker.join().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(result, Err(CheckError::Timeout));
+    }
 }
 
 #[tokio::test]

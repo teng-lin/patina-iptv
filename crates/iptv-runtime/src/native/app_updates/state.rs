@@ -78,14 +78,25 @@ pub struct Controller {
     cached: Option<ReleaseCheck>,
     error: Option<CheckError>,
     notice: Option<ReleaseCheck>,
-    active: Option<(CheckToken, Trigger)>,
+    active: Option<CheckToken>,
     next_token: u64,
     startup_attempted: bool,
+    startup_pending: bool,
+    manual_requested: bool,
     revision: u64,
     writes: Arc<Mutex<u64>>,
 }
 
 impl Controller {
+    /// Preserve explicit intent while the host awaits restored state or metadata.
+    pub fn queue_manual_check(&mut self) {
+        self.manual_requested = true;
+    }
+
+    pub fn manual_check_pending(&self) -> bool {
+        self.manual_requested
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             checking: self.active.is_some(),
@@ -105,12 +116,23 @@ impl Controller {
         trigger: Trigger,
         frequency: Frequency,
     ) -> Option<CheckToken> {
-        if let Some((_, active_trigger)) = self.active.as_mut() {
-            // Opening the result during a scheduled fetch joins that fetch.
-            // Its result has now been explicitly requested, so do not also
-            // announce it as an unseen scheduled discovery when it completes.
+        if trigger == Trigger::Startup && frequency == Frequency::OnLaunch {
+            self.startup_pending = !self.startup_attempted;
+        }
+        let trigger = if self.manual_requested {
+            Trigger::Manual
+        } else {
+            trigger
+        };
+        if self.active.is_some() {
+            // Joining a fetch consumes the request, but does not acknowledge
+            // its result: the panel may close before the response arrives.
             if trigger == Trigger::Manual {
-                *active_trigger = Trigger::Manual;
+                self.manual_requested = false;
+            }
+            if self.startup_pending {
+                self.startup_attempted = true;
+                self.startup_pending = false;
             }
             return None;
         }
@@ -133,7 +155,7 @@ impl Controller {
             let due = pending
                 || match frequency {
                     Frequency::Never => false,
-                    Frequency::OnLaunch => trigger == Trigger::Startup && !self.startup_attempted,
+                    Frequency::OnLaunch => self.startup_pending && !self.startup_attempted,
                     Frequency::Daily | Frequency::Weekly | Frequency::Monthly => {
                         self.durable.last_success.is_none_or(|last| {
                             // A clock correction must not suppress checks for months.
@@ -147,8 +169,12 @@ impl Controller {
         }
         self.next_token = self.next_token.wrapping_add(1);
         let token = CheckToken(self.next_token);
-        self.active = Some((token, trigger));
-        self.startup_attempted |= trigger == Trigger::Startup;
+        self.active = Some(token);
+        self.startup_attempted |= trigger == Trigger::Startup || self.startup_pending;
+        self.startup_pending = false;
+        if trigger == Trigger::Manual {
+            self.manual_requested = false;
+        }
         self.error = None;
         self.durable.last_attempt = Some(now);
         self.revision += 1;
@@ -162,7 +188,7 @@ impl Controller {
         now: i64,
         result: Result<ReleaseCheck, CheckError>,
     ) -> bool {
-        let Some((active, trigger)) = self.active else {
+        let Some(active) = self.active else {
             return false;
         };
         if active != token {
@@ -179,14 +205,7 @@ impl Controller {
                     check.status,
                     ReleaseStatus::UpdateAvailable | ReleaseStatus::NoCompatiblePackage
                 );
-                if trigger == Trigger::Manual {
-                    // A manual result is always visible, including a skipped version.
-                    self.notice = None;
-                    self.durable.pending_version = None;
-                    if newer {
-                        self.durable.notified_version = Some(check.release.version.clone());
-                    }
-                } else if newer
+                if newer
                     && self.durable.skipped_version.as_deref() != Some(&check.release.version)
                     && self.durable.notified_version.as_deref() != Some(&check.release.version)
                 {
@@ -287,9 +306,44 @@ fn path(directory: &Path) -> std::path::PathBuf {
     crate::backup::sibling(directory, "app-update").join("schedule.json")
 }
 
+fn persist_document(
+    file: &Path,
+    document: &serde_json::Value,
+    revision: u64,
+    writes: &Mutex<u64>,
+    sync_directory: impl FnOnce(&Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut written = writes
+        .lock()
+        .map_err(|_| io::Error::other("update schedule lock poisoned"))?;
+    if revision < *written {
+        return Ok(());
+    }
+    let directory = file
+        .parent()
+        .ok_or_else(|| io::Error::other("missing update schedule directory"))?;
+    std::fs::create_dir_all(directory)?;
+    let mut temp = tempfile::NamedTempFile::new_in(directory)?;
+    serde_json::to_writer(&mut temp, document)?;
+    temp.as_file().sync_all()?;
+    temp.persist(file).map_err(|error| error.error)?;
+    // The replacement is already visible even if syncing its directory fails.
+    // Block older saves now; equal revisions may retry the durability step.
+    *written = revision;
+    sync_directory(directory)
+}
+
 impl crate::Runtime {
     pub fn app_update_snapshot(&self) -> Snapshot {
         self.app_update_state.borrow().snapshot()
+    }
+
+    pub fn queue_manual_app_update_check(&self) {
+        self.app_update_state.borrow_mut().queue_manual_check();
+    }
+
+    pub fn app_update_manual_check_pending(&self) -> bool {
+        self.app_update_state.borrow().manual_check_pending()
     }
 
     pub fn begin_app_update_check(
@@ -370,24 +424,11 @@ impl crate::Runtime {
         self.services()
             .spawn(async move {
                 tokio::task::spawn_blocking(move || {
-                    let mut written = writes
-                        .lock()
-                        .map_err(|_| io::Error::other("update schedule lock poisoned"))?;
-                    if revision < *written {
-                        return Ok(());
-                    }
-                    let directory = file
-                        .parent()
-                        .ok_or_else(|| io::Error::other("missing update schedule directory"))?;
-                    std::fs::create_dir_all(directory)?;
-                    let mut temp = tempfile::NamedTempFile::new_in(directory)?;
-                    serde_json::to_writer(&mut temp, &document)?;
-                    temp.as_file().sync_all()?;
-                    temp.persist(&file).map_err(|error| error.error)?;
-                    #[cfg(unix)]
-                    std::fs::File::open(directory)?.sync_all()?;
-                    *written = revision;
-                    Ok(())
+                    persist_document(&file, &document, revision, &writes, |_directory| {
+                        #[cfg(unix)]
+                        std::fs::File::open(_directory)?.sync_all()?;
+                        Ok(())
+                    })
                 })
                 .await
                 .map_err(io::Error::other)?

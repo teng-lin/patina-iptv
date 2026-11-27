@@ -62,9 +62,7 @@ impl Api {
                 stream
                     .set_write_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
-                let mut buffer = [0; 8192];
-                let count = stream.read(&mut buffer).unwrap();
-                let headers = String::from_utf8_lossy(&buffer[..count]).to_lowercase();
+                let headers = read_headers(&mut stream).to_lowercase();
                 assert!(headers.starts_with("get /releases?"));
                 assert!(!headers.contains("authorization:"));
                 assert!(!headers.contains("cookie:"));
@@ -104,6 +102,52 @@ impl Api {
     fn hold(&self) {
         self.state.lock().unwrap().held = true;
     }
+}
+
+fn read_headers(stream: &mut impl Read) -> String {
+    let mut headers = Vec::new();
+    let mut chunk = [0; 1024];
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !headers.windows(4).any(|part| part == b"\r\n\r\n") {
+        let count = stream
+            .read(&mut chunk)
+            .expect("complete request headers before deadline");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "request headers exceeded deadline"
+        );
+        assert_ne!(count, 0, "request ended before complete headers");
+        headers.extend_from_slice(&chunk[..count]);
+        assert!(
+            headers.len() <= 16 * 1024,
+            "request headers exceed fixture limit"
+        );
+    }
+    String::from_utf8(headers).expect("UTF-8 fixture headers")
+}
+
+#[test]
+fn fixture_checks_headers_that_arrive_in_separate_reads() {
+    struct Chunks(std::collections::VecDeque<&'static [u8]>);
+    impl Read for Chunks {
+        fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+            let chunk = self.0.pop_front().unwrap_or_default();
+            bytes[..chunk.len()].copy_from_slice(chunk);
+            Ok(chunk.len())
+        }
+    }
+    let mut chunks = Chunks(
+        [
+            b"GET /releases?per_page=100 HTTP/1.1\r\n".as_slice(),
+            b"User-Agent: Patina\r\n".as_slice(),
+            b"Authorization: synthetic\r\nCookie: synthetic\r\n\r\n".as_slice(),
+        ]
+        .into(),
+    );
+    let headers = read_headers(&mut chunks);
+    assert!(headers.contains("User-Agent: Patina"));
+    assert!(headers.contains("Authorization: synthetic"));
+    assert!(headers.contains("Cookie: synthetic"));
 }
 impl Drop for Api {
     fn drop(&mut self) {
@@ -484,88 +528,41 @@ fn default_weekly_notice_physical_right_selects_later_without_opening_or_downloa
 }
 
 #[test]
-fn closing_a_failed_manual_check_restores_review_focus_to_the_waiting_notice() {
+fn closing_a_joined_manual_check_keeps_the_unseen_result_and_notice_remote_focus() {
     let Some(home) = isolated!() else { return };
     let api = Api::start();
     let mut fixture = personalization::launch(home, Settings::new(), false, |_| {}, |_| {});
-    let directory = fixture.path.parent().unwrap();
-    let schedule = directory
-        .parent()
-        .unwrap()
-        .join(format!(
-            "{}.app-update",
-            directory.file_name().unwrap().to_string_lossy()
-        ))
-        .join("schedule.json");
     let app = &mut fixture.app;
-    // Let the scheduled request complete behind Settings without opening the
-    // update panel and turning that first request into a manual check.
-    step(app.open_guide_groups());
-    step(app.press("id:navigation-rail >> role:tab[Settings]"));
-    step(app.press("id:settings-content >> text:About >> nth=0"));
-    api.serve(200, release("9.8.7", true));
-    let deadline =
-        std::time::Instant::now() + crate::isolated::scaled_duration(Duration::from_secs(10));
-    loop {
-        if std::fs::read(&schedule)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|state| state["pending_version"] == "9.8.7")
-        {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "scheduled update notice must be pending behind Settings: {:?}",
-            std::fs::read_to_string(&schedule)
-        );
-        // The notice is hidden by Settings, so persistence need not produce a
-        // rendered batch. Keep pumping the app while observing that disk write.
-        app.idle(Duration::from_millis(20)).unwrap();
-    }
-    assert!(!app.screen().matches("id:app-update-notice").unwrap());
-    api.serve(503, "{}".into());
-    step(app.press("id:settings-content >> text:Check for updates"));
-    step(app.wait_for("id:app-update-panel >> text:Update check failed. Try again."));
-    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
-    let focused = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
-    let later = "id:app-update-panel >> text:Later";
-    for _ in 0..6 {
-        if app.screen().span_style(later).unwrap().color == focused {
-            break;
-        }
-        step(app.press_key("right"));
-    }
-    assert_eq!(
-        app.screen().span_style(later).unwrap().color,
-        focused,
-        "Later owns the panel's physical remote focus before closing"
-    );
+    about(app);
+    step(app.wait_for("id:app-update-panel >> text:Checking…"));
     step(app.press_key("enter"));
-    step(app.wait_for_gone("id:app-update-panel", Duration::from_secs(5)));
+    api.serve(200, release("9.8.7", true));
     for _ in 0..6 {
         if !app.screen().matches("id:settings-screen").unwrap() {
             break;
         }
         step(app.back());
-        app.idle(Duration::from_millis(50)).unwrap();
     }
     step(app.wait_for("id:app-update-notice"));
+    assert_eq!(
+        api.requests(),
+        1,
+        "opening during the scheduled fetch joins it"
+    );
+    let focused = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
     assert_eq!(
         app.screen()
             .span_style("id:app-update-notice >> text:View update")
             .unwrap()
             .color,
-        focused,
-        "returning from the panel selects the visible Review action"
+        focused
     );
     step(app.press_key("enter"));
     step(app.wait_for("id:app-update-panel"));
     step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
-    assert!(
-        app.screen().opened_urls().is_empty(),
-        "Review opens the cached panel without downloading or opening a browser"
-    );
+    step(app.press("id:app-update-panel >> text:Later"));
+    step(app.wait_for_gone("id:app-update-notice", Duration::from_secs(5)));
+    assert!(app.screen().opened_urls().is_empty());
 }
 
 #[test]
@@ -700,4 +697,126 @@ fn compact_large_text_update_panel_keeps_actions_reachable_and_notes_scrollable(
         app.screen().opened_urls().is_empty(),
         "remote dismissal does not activate a download"
     );
+}
+
+#[test]
+fn closing_a_manual_check_before_android_metadata_does_not_discard_it_under_never() {
+    fn here() {}
+    let Some(home) = super::isolated::run_with_env(
+        std::any::type_name_of_val(&here),
+        &[
+            ("IPTV_TEST_DEVICE_SIGNALS", "1"),
+            ("IPTV_TEST_PLATFORM", "android"),
+        ],
+    ) else {
+        return;
+    };
+    let api = Api::start();
+    api.serve(
+        200,
+        release_for_suffix("9.8.7", true, "android-tablet-tv.apk"),
+    );
+    let mut settings = Settings::new();
+    settings
+        .set("general.app_update_frequency", Value::choice("never"))
+        .unwrap();
+    let mut fixture = personalization::launch(home, settings, false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    super::device_signals::report(app, "tv", false, true);
+    about(app);
+    step(app.wait_for("id:app-update-panel >> text:Checking…"));
+    step(app.press("id:app-update-panel >> text:Later"));
+    assert_eq!(api.requests(), 0);
+    android_distribution(
+        app,
+        serde_json::json!({"directApk":true,"versionCode":42,"androidApi":36}),
+    );
+    for _ in 0..6 {
+        if !app.screen().matches("id:settings-screen").unwrap() {
+            break;
+        }
+        step(app.back());
+    }
+    step(app.wait_for("id:app-update-notice"));
+    assert_eq!(
+        api.requests(),
+        1,
+        "the accepted manual request survives closing the waiting panel"
+    );
+    step(app.press_key("enter"));
+    step(app.wait_for("id:app-update-panel >> text:Update available"));
+    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
+}
+
+#[test]
+fn first_discovery_failure_keeps_the_public_releases_browser_route() {
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    api.serve(503, "{}".into());
+    let mut settings = Settings::new();
+    settings
+        .set("general.app_update_frequency", Value::choice("never"))
+        .unwrap();
+    let mut fixture = personalization::launch(home, settings, false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    about(app);
+    step(app.wait_for("id:app-update-panel >> text:Update check failed. Try again."));
+    step(app.press("id:app-update-panel >> text:Release notes and downloads"));
+    assert_eq!(
+        app.screen().opened_urls(),
+        ["https://github.com/teng-lin/patina-iptv/releases"]
+    );
+}
+
+#[test]
+fn update_notice_review_requires_the_settings_pin_and_cancellation_keeps_the_notice() {
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    api.serve(200, release("9.8.7", true));
+    let mut settings = Settings::new();
+    settings
+        .set(
+            "parental.require_pin_for",
+            Value::choice("blocked_content_and_settings"),
+        )
+        .unwrap();
+    let mut fixture = personalization::launch_prepared(
+        home,
+        settings,
+        false,
+        |path, _| {
+            crate::isolated::open_database(path)
+                .unwrap()
+                .set_parental_credential(&iptv_store_sqlite::parental::ParentalCredential {
+                    salt: [0x63; 16],
+                    verifier: [
+                        108, 253, 222, 238, 40, 38, 77, 8, 100, 135, 138, 42, 133, 48, 171, 236,
+                        123, 169, 134, 85, 199, 28, 212, 46, 152, 192, 13, 230, 58, 195, 156, 119,
+                    ],
+                    recovery_verifier: [0; 32],
+                    failures: 0,
+                    retry_after: 0,
+                })
+                .unwrap();
+        },
+        |_| {},
+        |_| {},
+    );
+    let app = &mut fixture.app;
+    step(app.wait_for("id:app-update-notice"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:parental-layer >> text:Enter parental PIN"));
+    assert!(!app.screen().matches("id:app-update-panel").unwrap());
+    step(app.back());
+    step(app.wait_for("id:app-update-notice"));
+    step(app.press_key("enter"));
+    step(app.wait_for("id:parental-layer >> text:Enter parental PIN"));
+    for digit in ["2", "4", "6", "8"] {
+        step(app.press_key(digit));
+    }
+    step(app.press("id:parental-layer >> text:Continue"));
+    step(app.wait_for("id:app-update-panel"));
+    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
+    step(app.press("id:app-update-panel >> text:Later"));
+    step(app.wait_for_gone("id:app-update-notice", Duration::from_secs(5)));
 }

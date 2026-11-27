@@ -175,7 +175,7 @@ fn retained_package_does_not_hide_manual_check_progress_or_failure() {
             "Could not connect to GitHub. Check your connection and try again."
         );
         assert!(
-            panel_controls(true, true, false, false, true).contains(&1),
+            panel_controls(true, true, false, false, true, false).contains(&1),
             "installation remains available"
         );
         assert_eq!(state.cached, retained_release);
@@ -195,21 +195,30 @@ fn retained_package_does_not_hide_manual_check_progress_or_failure() {
 fn manual_package_route_is_reachable_between_install_and_skip_without_hidden_focus_stops() {
     // Control identities follow the visual order, including the separately
     // confirmed browser route when authenticated installation is available.
-    assert_eq!(panel_controls(true, true, true, false, true), [2, 3, 4]);
     assert_eq!(
-        panel_controls(true, true, false, false, true),
+        panel_controls(true, true, true, false, true, false),
+        [2, 3, 4]
+    );
+    assert_eq!(
+        panel_controls(true, true, false, false, true, false),
         [0, 1, 5, 2, 3]
     );
     assert_eq!(
-        panel_controls(true, false, false, false, true),
+        panel_controls(true, false, false, false, true, false),
         [0, 1, 2, 3]
     );
-    assert_eq!(panel_controls(false, false, false, false, true), [0, 3]);
-    assert_eq!(panel_controls(false, false, true, false, true), [3, 4]);
-    assert_eq!(panel_controls(true, true, false, true, true), [2, 3]);
-    assert_eq!(panel_controls(false, false, false, true, true), [3]);
     assert_eq!(
-        panel_controls(true, true, true, false, false),
+        panel_controls(false, false, false, false, true, false),
+        [0, 3]
+    );
+    assert_eq!(
+        panel_controls(false, false, true, false, true, false),
+        [3, 4]
+    );
+    assert_eq!(panel_controls(true, true, false, true, true, false), [2, 3]);
+    assert_eq!(panel_controls(false, false, false, true, true, false), [3]);
+    assert_eq!(
+        panel_controls(true, true, true, false, false, false),
         [3],
         "irrevocable native extraction keeps only Later remote-actionable"
     );
@@ -217,24 +226,29 @@ fn manual_package_route_is_reachable_between_install_and_skip_without_hidden_foc
 
 #[component]
 fn UpdateOverlap() -> impl IntoElement {
-    use iptv_runtime::app_updates::github::{ReleaseCheck, ReleaseInfo};
+    use iptv_runtime::app_updates::github::{DownloadLink, ReleaseCheck, ReleaseInfo};
     use std::rc::Rc;
     let directory = tempfile::tempdir().unwrap();
+    crate::tasks::bind_owner();
     let application = Rc::new(crate::runtime_owner::new_runtime(
         directory.path().to_owned(),
     ));
-    crate::runtime_owner::with_runtime(application.clone(), || {
+    let ui = crate::runtime_owner::with_runtime(application.clone(), || {
         let ui = Ui::new(crate::SharedUi::new(), crate::player::Player::new());
         ui.update_ready.set(true);
         let release = |version: &str| ReleaseCheck {
             installed_version: "1.0.0".into(),
-            status: ReleaseStatus::NoCompatiblePackage,
+            status: ReleaseStatus::UpdateAvailable,
             release: ReleaseInfo {
                 version: version.into(),
                 notes: "Generated notes".into(),
                 published_at: None,
                 url: "https://github.com/synthetic/patina/releases".into(),
-                download: None,
+                download: Some(DownloadLink {
+                    name: "synthetic-package".into(),
+                    url: format!("https://example.test/synthetic-{version}"),
+                    size: 9,
+                }),
             },
         };
         let token = application
@@ -261,6 +275,10 @@ fn UpdateOverlap() -> impl IntoElement {
             .unwrap();
         download(ui);
         manual_download(ui);
+        ui.update_focus.set(1);
+        key(ui, Action::Select);
+        ui.update_focus.set(5);
+        key(ui, Action::Select);
         assert!(!ui.update_install_busy.get_untracked());
         assert!(application.app_update_snapshot().checking);
         assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
@@ -274,8 +292,14 @@ fn UpdateOverlap() -> impl IntoElement {
             "3.0.0"
         );
         assert!(!application.has_pending_app_update());
+        ui
     });
-    view().child(text("No overlapping update operations"))
+    cleanup(move || drop(directory));
+    view()
+        .child(text("No overlapping update operations"))
+        .child(text("Open verified fixture route").on_press(move || {
+            crate::runtime_owner::with_runtime(application.clone(), || manual_download(ui));
+        }))
 }
 
 #[test]
@@ -286,4 +310,13 @@ fn release_checks_and_accepted_installation_cannot_replace_each_others_version()
     .unwrap();
     app.wait_for("text:No overlapping update operations")
         .unwrap();
+    assert!(
+        app.screen().opened_urls().is_empty(),
+        "held check blocks browser actions"
+    );
+    app.press("text:Open verified fixture route").unwrap();
+    assert_eq!(
+        app.screen().opened_urls(),
+        ["https://example.test/synthetic-3.0.0"]
+    );
 }

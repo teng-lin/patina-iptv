@@ -63,10 +63,9 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         let Some(file) = file else {
             return notify(tr("Update download failed. Try again."));
         };
+        let commit = super::file_commit::Phase::begin();
         let saved = owner.save_appimage(destination, file).await;
-        if ui.update_cancel_requested.get_untracked() {
-            return;
-        }
+        drop(commit);
         if saved {
             notify(tr("AppImage saved."));
         } else {
@@ -134,7 +133,10 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         owner.retain_appimage(asset, file);
         return notify(tr("Finish recording before installing the update."));
     }
-    let Some(previous) = owner.replace_appimage(image, file).await else {
+    let commit = super::file_commit::Phase::begin();
+    let previous = owner.replace_appimage(image, file).await;
+    drop(commit);
+    let Some(previous) = previous else {
         return notify(tr("Could not replace the AppImage. Try Save as…"));
     };
     let _ = alert_dialog()

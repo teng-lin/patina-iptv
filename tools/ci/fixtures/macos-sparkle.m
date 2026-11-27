@@ -147,6 +147,29 @@ int main(int argc, const char **argv) {
         assert(resumedChoice == PatinaSkip && patina_sparkle_status(session) == 5);
         patina_sparkle_cancel(session); drainMain();
 
+        // Disposal while native Ready is visible must consume genuine Skip
+        // before dismissal clears the standard driver's choice callback.
+        // This also covers a resumed prepared update before any button click.
+        item.displayVersionString = @"0.2.0";
+        for (NSUInteger resumed = 0; resumed < 2; resumed++) {
+            session = synthetic(); driver = PatinaUpdaterController.userDriver;
+            [PatinaUpdaterDelegate updater:nil didFindValidUpdate:item];
+            __block NSUInteger answers = 0;
+            __block NSInteger answer = -1;
+            void (^reply)(NSInteger) = ^(NSInteger choice) { answers++; answer = choice; };
+            if (resumed) [driver showUpdateFoundWithAppcastItem:item state:item reply:reply];
+            else [driver showReadyToInstallAndRelaunch:reply];
+            SyntheticStandard *readyUI = (SyntheticStandard *)driver.standard;
+            void (^staleChoice)(NSInteger) = readyUI.choice;
+            assert(PatinaUpdaterDelegate.cancelPrepared != nil && answers == 0);
+            background(^{ patina_sparkle_cancel(session); });
+            drainMain(); drainMain();
+            assert(answers == 1 && answer == PatinaSkip && readyUI.dismissed);
+            assert(PatinaUpdaterController == nil && PatinaSession == 0);
+            staleChoice(1); drainMain();
+            assert(answers == 1 && PatinaUpdaterController == nil);
+        }
+
         // A resumed Installing choice is held until the shell approves.
         session = synthetic(); driver = PatinaUpdaterController.userDriver;
         item.displayVersionString = @"0.2.0";

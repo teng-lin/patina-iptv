@@ -246,8 +246,12 @@ fn describe(
         .ok_or(CheckError::InvalidResponse)?;
     let name = suffix(installed).map(|suffix| format!("Patina-{latest}-{suffix}"));
     let mut matching = assets.iter().filter(|asset| {
-        name.as_deref()
-            .is_some_and(|name| asset["name"].as_str() == Some(name))
+        // A failed GitHub upload can leave an empty starter entry. It is not
+        // a downloadable package and must not hide the release's notes.
+        asset["state"] != "starter"
+            && name
+                .as_deref()
+                .is_some_and(|name| asset["name"].as_str() == Some(name))
     });
     let download = if let Some(asset) = matching.next() {
         if matching.next().is_some() {

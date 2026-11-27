@@ -154,7 +154,11 @@ fn actual_streaming_download_reports_progress_and_cancel_removes_the_partial_fil
             } else {
                 // Cancellation closes the partial HTTP response without waiting
                 // for its remaining bytes or permitting an installer handoff.
-                assert_eq!(stream.read(&mut buffer).unwrap_or(0), 0);
+                match stream.read(&mut buffer) {
+                    Ok(0) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+                    result => panic!("cancellation must close the response socket: {result:?}"),
+                }
             }
         }
     });
