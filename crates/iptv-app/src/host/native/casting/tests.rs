@@ -103,7 +103,7 @@ async fn dropping_a_pending_handoff_outside_the_runtime_retires_its_receiver_and
     .await
     .unwrap();
     assert_eq!(receiver.events(), [Event::Load, Event::Stop]);
-    drop(std::net::TcpListener::bind(listen).expect("relay port is free before remote STOP"));
+    drop(std::net::TcpListener::bind(listen).expect("dropped handoff frees its relay port"));
     timeout(Duration::from_secs(5), receiver.finish())
         .await
         .unwrap()
