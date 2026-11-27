@@ -2,7 +2,7 @@
 //! Channels and groups retain focus by content identity as filters or the
 //! catalog change. It never changes the guide's selected list.
 
-use crate::lists::{ChannelList, ListId, entry_count};
+use crate::lists::{ChannelList, ListId, VisibleEntries};
 use iptv_core::guide::Schedule;
 use std::rc::Rc;
 
@@ -68,8 +68,14 @@ impl ChannelPicker {
         self.channels.get(self.row()?).map(|c| c.index)
     }
 
-    pub fn refresh(&mut self, catalog: &dyn Schedule, favorites: &[usize], recent: &[usize]) {
-        let entry = self.entry(catalog);
+    pub fn refresh(
+        &mut self,
+        catalog: &dyn Schedule,
+        favorites: &[usize],
+        recent: &[usize],
+        entries: VisibleEntries,
+    ) {
+        let entry = entries.retain_selection(self.entry(catalog), catalog, self.channel.as_deref());
         self.group = ListId::of(entry, catalog);
         let rows = ChannelList::build(entry, catalog, favorites, recent);
         let query = self.query.trim().to_lowercase();
@@ -137,16 +143,16 @@ impl ChannelPicker {
         };
     }
 
-    pub fn vertical(&mut self, by: isize, catalog: &dyn Schedule) {
+    pub fn vertical(&mut self, by: isize, catalog: &dyn Schedule, entries: VisibleEntries) {
         match self.pane {
             Pane::Groups => {
-                let entry = (self.entry(catalog) as isize + by)
-                    .clamp(0, entry_count(catalog).saturating_sub(1) as isize)
-                    as usize;
-                if by < 0 && entry == self.entry(catalog) {
-                    self.pane = Pane::Search;
-                } else {
-                    self.group(entry, catalog);
+                let entry = self.entry(catalog);
+                let position = entries.position(entry).unwrap_or(0);
+                let next = entries.entry(crate::guide::page_row(position, entries.len(), by));
+                match next {
+                    Some(next) if next != entry || by >= 0 => self.group(next, catalog),
+                    _ if by < 0 => self.pane = Pane::Search,
+                    _ => {}
                 }
             }
             Pane::Channels => {
@@ -164,9 +170,10 @@ impl ChannelPicker {
         }
     }
 
-    pub fn horizontal(&mut self, right: bool) {
+    pub fn horizontal(&mut self, right: bool, entries: VisibleEntries) {
         self.keyboard = false;
         self.pane = match (self.pane, right) {
+            (Pane::Channels, false) if entries.is_empty() => Pane::Search,
             (Pane::Channels, false) => Pane::Groups,
             (Pane::Groups, true) if !self.channels.is_empty() => Pane::Channels,
             (Pane::Search, true) => Pane::Clear,
@@ -195,11 +202,25 @@ impl ChannelPicker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lists::{ALL, FAVORITES, FIRST_GROUP, RECENT, tests::Catalog};
+    use crate::lists::{ALL, FAVORITES, FIRST_GROUP, RECENT, entry_count, tests::Catalog};
+
+    fn refresh_all(
+        picker: &mut ChannelPicker,
+        catalog: &Catalog,
+        favorites: &[usize],
+        recent: &[usize],
+    ) {
+        picker.refresh(
+            catalog,
+            favorites,
+            recent,
+            VisibleEntries::all(entry_count(catalog)),
+        );
+    }
 
     fn picker(catalog: &Catalog) -> ChannelPicker {
         let mut picker = ChannelPicker::open(ListId::All, Some("k4".into()));
-        picker.refresh(catalog, &[7, 1], &[4, 0]);
+        refresh_all(&mut picker, catalog, &[7, 1], &[4, 0]);
         picker
     }
 
@@ -209,15 +230,15 @@ mod tests {
         let mut picker = picker(&catalog);
         assert_eq!(picker.row(), Some(4));
         picker.type_query(" c4 ".into());
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert_eq!(picker.selected(), Some(4));
         assert_eq!(picker.row(), Some(0));
         assert_eq!(picker.channels()[0].number, 5);
         picker.type_query("".into());
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert_eq!(picker.row(), Some(4));
         picker.type_query("5".into());
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert!(
             picker
                 .channels()
@@ -232,19 +253,19 @@ mod tests {
         let mut picker = picker(&catalog);
         picker.type_query("c4".into());
         picker.group(FIRST_GROUP, &catalog);
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert!(picker.channels().is_empty());
         assert_eq!(picker.selected(), None);
-        picker.horizontal(true);
+        picker.horizontal(true, VisibleEntries::all(entry_count(&catalog)));
         assert_eq!(picker.pane, Pane::Groups, "empty results cannot be entered");
         picker.group(FIRST_GROUP + 1, &catalog);
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert_eq!(picker.query(), "c4");
         assert_eq!(picker.selected(), Some(4));
         assert_eq!(picker.channels()[0].number, 2);
         picker.type_query("".into());
         picker.group(FAVORITES, &catalog);
-        picker.refresh(&catalog, &[7, 1], &[4, 0]);
+        refresh_all(&mut picker, &catalog, &[7, 1], &[4, 0]);
         assert_eq!(
             picker
                 .channels()
@@ -254,7 +275,7 @@ mod tests {
             [7, 1]
         );
         picker.group(RECENT, &catalog);
-        picker.refresh(&catalog, &[7, 1], &[4, 0]);
+        refresh_all(&mut picker, &catalog, &[7, 1], &[4, 0]);
         assert_eq!(picker.selected(), Some(4));
     }
 
@@ -263,7 +284,7 @@ mod tests {
         let catalog = Catalog::small();
         let mut picker = picker(&catalog);
         picker.group(FIRST_GROUP + 1, &catalog);
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         let mut changed = Catalog::new(
             vec![("Sports", 2), ("News", 3), ("Kids", 4)],
             (0..9).collect(),
@@ -271,7 +292,7 @@ mod tests {
         changed.keys = ["k3", "k4", "k0", "k1", "k2", "k5", "k6", "k7", "k8"]
             .map(String::from)
             .to_vec();
-        picker.refresh(&changed, &[], &[]);
+        refresh_all(&mut picker, &changed, &[], &[]);
         assert_eq!(picker.entry(&changed), FIRST_GROUP);
         assert_eq!(
             picker.selected(),
@@ -280,7 +301,7 @@ mod tests {
         );
         assert_eq!(picker.row(), Some(1));
         let gone = Catalog::new(vec![("News", 3)], vec![0, 1, 2]);
-        picker.refresh(&gone, &[], &[]);
+        refresh_all(&mut picker, &gone, &[], &[]);
         assert_eq!(picker.entry(&gone), ALL);
         assert!(picker.selected().is_some());
     }
@@ -289,30 +310,49 @@ mod tests {
     fn remote_reaches_search_groups_results_clear_and_close() {
         let catalog = Catalog::small();
         let mut picker = picker(&catalog);
-        picker.horizontal(false);
+        picker.horizontal(false, VisibleEntries::all(entry_count(&catalog)));
         assert_eq!(picker.pane, Pane::Groups);
-        picker.vertical(1, &catalog);
-        picker.refresh(&catalog, &[], &[]);
+        picker.vertical(1, &catalog, VisibleEntries::all(entry_count(&catalog)));
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert_eq!(picker.entry(&catalog), FIRST_GROUP);
-        picker.horizontal(true);
+        picker.horizontal(true, VisibleEntries::all(entry_count(&catalog)));
         assert_eq!(picker.pane, Pane::Channels);
-        picker.vertical(-1, &catalog);
+        picker.vertical(-1, &catalog, VisibleEntries::all(entry_count(&catalog)));
         assert_eq!(picker.pane, Pane::Search);
-        picker.horizontal(true);
+        picker.horizontal(true, VisibleEntries::all(entry_count(&catalog)));
         assert_eq!(picker.pane, Pane::Clear);
-        picker.horizontal(true);
+        picker.horizontal(true, VisibleEntries::all(entry_count(&catalog)));
         assert_eq!(picker.pane, Pane::Close);
-        picker.horizontal(false);
-        picker.horizontal(false);
+        picker.horizontal(false, VisibleEntries::all(entry_count(&catalog)));
+        picker.horizontal(false, VisibleEntries::all(entry_count(&catalog)));
         picker.edit();
         picker.type_query("missing".into());
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert!(!picker.back(), "finish editing first");
         assert!(!picker.keyboard);
         assert!(!picker.back(), "then clear the search");
-        picker.refresh(&catalog, &[], &[]);
+        refresh_all(&mut picker, &catalog, &[], &[]);
         assert_eq!(picker.query(), "");
         assert!(!picker.channels().is_empty());
         assert!(picker.back(), "finally close");
+    }
+    #[test]
+    fn hidden_categories_are_skipped_without_renumbering_groups() {
+        let catalog = Catalog::small();
+        let entries = VisibleEntries::new(entry_count(&catalog), [false, true, false]);
+        let mut picker = ChannelPicker::open(ListId::All, Some("k4".into()));
+        picker.refresh(&catalog, &[7], &[4], entries);
+        assert_eq!(picker.entry(&catalog), FIRST_GROUP + 1);
+        assert_eq!(picker.selected(), Some(4));
+
+        picker.horizontal(false, entries);
+        picker.vertical(-1, &catalog, entries);
+        assert_eq!(picker.entry(&catalog), FIRST_GROUP);
+        picker.vertical(-1, &catalog, entries);
+        assert_eq!(picker.entry(&catalog), RECENT);
+        picker.refresh(&catalog, &[7], &[4], entries);
+        assert_eq!(picker.selected(), Some(4));
+        picker.vertical(-1, &catalog, entries);
+        assert_eq!(picker.pane, Pane::Search);
     }
 }

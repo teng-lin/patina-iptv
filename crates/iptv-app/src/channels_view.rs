@@ -428,7 +428,7 @@ fn entry_row(
         .child(group_more(
             ui,
             size,
-            move || entry(),
+            entry,
             current,
             move || !crate::multiview::picking(ui),
             move || name().trim_start().to_owned(),

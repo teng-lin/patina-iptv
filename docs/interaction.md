@@ -271,8 +271,8 @@ and focus on a live channel follows the clock to the program now on air.
   On desktop, Escape leaves the window open. On Samsung Tizen, Return at
   the top level opens **Close Patina?**. Back or No dismisses the prompt.
 - **Now:** **Settings → Appearance → Categories** has separate switches
-  for Favorites, Recently watched, and All channels in the guide and
-  player channel list. The player list also follows the **Channel logos**
+  for Favorites, Recently watched, and All channels in the guide, player
+  channel list, and multiview picker. The player list follows the **Channel logos**
   setting used in the guide.
 
 ## Secondary actions

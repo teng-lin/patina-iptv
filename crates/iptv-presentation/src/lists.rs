@@ -127,6 +127,30 @@ impl VisibleEntries {
             self.entry(0).unwrap_or(ALL)
         }
     }
+
+    /// After hiding the selected category, keep its channel in a visible
+    /// group when possible. An ungrouped channel can still be shown in the
+    /// aggregate without adding a hidden category back to the column.
+    pub fn retain_selection(
+        self,
+        entry: usize,
+        catalog: &dyn Schedule,
+        channel_key: Option<&str>,
+    ) -> usize {
+        if self.position(entry).is_some() || self.position(ALL).is_some() {
+            return self.retain(entry);
+        }
+        let Some(channel) = channel_key.and_then(|key| catalog.find_channel(key)) else {
+            return self.retain(entry);
+        };
+        if let Some(group) = iptv_core::lists::group_of(catalog, channel) {
+            self.retain(Entry::Group(group).index())
+        } else if catalog.playlist_order().contains(&channel) {
+            ALL
+        } else {
+            self.retain(entry)
+        }
+    }
 }
 
 /// The name of an entry in the groups column, before localization.

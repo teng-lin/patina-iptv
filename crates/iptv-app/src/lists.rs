@@ -108,7 +108,7 @@ pub fn list_name(ui: Ui) -> String {
     entry_name(entry, &*crate::runtime_owner::schedule())
 }
 
-fn category_preferences(settings: &Settings) -> [bool; 3] {
+pub(crate) fn category_preferences(settings: &Settings) -> [bool; 3] {
     [
         keys::SHOW_FAVORITES,
         keys::SHOW_RECENT,
@@ -117,26 +117,11 @@ fn category_preferences(settings: &Settings) -> [bool; 3] {
     .map(|key| settings.bool(key, &Target::Global))
 }
 
-fn entries_in(ui: Ui, catalog: &dyn Schedule) -> VisibleEntries {
+pub(crate) fn entries_in(ui: Ui, catalog: &dyn Schedule) -> VisibleEntries {
     let mut visible = category_preferences(&crate::settings_wiring::read(ui));
     // The combined view has its own aggregate, All playlists.
     visible[ALL] |= catalog.all_channels_label() == GroupName::AllPlaylists;
     VisibleEntries::new(entry_count(catalog), visible)
-}
-
-fn visible_selection(
-    catalog: &dyn Schedule,
-    entries: VisibleEntries,
-    entry: usize,
-    channel_key: Option<&str>,
-) -> usize {
-    if entries.position(entry).is_some() || entries.position(ALL).is_some() {
-        return entries.retain(entry);
-    }
-    let group = channel_key
-        .and_then(|key| catalog.find_channel(key))
-        .and_then(|channel| group_of(catalog, channel));
-    entries.retain(group.map_or(entry, |group| Entry::Group(group).index()))
 }
 
 pub(crate) fn visible_entries(ui: Ui) -> VisibleEntries {
@@ -148,6 +133,10 @@ pub(crate) fn visible_entries(ui: Ui) -> VisibleEntries {
 /// its channel (the content changed under it); a newly selected list
 /// starts where the core put the focus (its top).
 pub fn rebuild(ui: Ui, keep: bool) {
+    rebuild_in(ui, keep, None);
+}
+
+fn rebuild_in(ui: Ui, keep: bool, explicit_entry: Option<usize>) {
     let key = if keep {
         let v = view(ui);
         ui.focus.with(|f| v.channel_key(f.channel))
@@ -157,9 +146,10 @@ pub fn rebuild(ui: Ui, keep: bool) {
     let catalog = crate::runtime_owner::schedule();
     let player = keep_player_list(ui, &*catalog);
     let entries = entries_in(ui, &*catalog);
-    let entry = ui
-        .focus
-        .with(|f| visible_selection(&*catalog, entries, f.group, key.as_deref()));
+    let entry = explicit_entry.unwrap_or_else(|| {
+        ui.focus
+            .with(|f| entries.retain_selection(f.group, &*catalog, key.as_deref()))
+    });
     let list = ChannelList::build(
         entry,
         &*catalog,
@@ -251,12 +241,8 @@ fn restored_list(
     focus.visible = kept.focus.visible;
     focus.pane = kept.focus.pane;
     focus.rail = kept.focus.rail;
-    focus.group = visible_selection(
-        &*catalog,
-        entries,
-        kept.list.find(&*catalog),
-        kept.key.as_deref(),
-    );
+    focus.group =
+        entries.retain_selection(kept.list.find(&*catalog), &*catalog, kept.key.as_deref());
     let list = Rc::new(ChannelList::build(
         focus.group,
         &*catalog,
@@ -320,8 +306,9 @@ fn listed(ui: Ui, channel: usize) -> usize {
     }
     let catalog = crate::runtime_owner::schedule();
     let entry = group_of(&*catalog, channel).map_or(ALL, |g| Entry::Group(g).index());
-    ui.focus.update(|f| f.group = entry);
-    rebuild(ui, false);
+    // A direct selection (for example from Search) can reach an ungrouped
+    // channel through the aggregate even when its category tab is hidden.
+    rebuild_in(ui, false, Some(entry));
     ui.list.with_untracked(|l| l.row_of(channel)).unwrap_or(0)
 }
 
@@ -403,7 +390,12 @@ pub(crate) fn bind_categories(ui: Ui) {
     effect(move || {
         categories.get();
         untracked(|| {
-            let entries = visible_entries(ui);
+            let catalog = crate::runtime_owner::schedule();
+            // The real catalog's restore chooses the initial category.
+            if catalog.channel_count() == 0 {
+                return;
+            }
+            let entries = entries_in(ui, &*catalog);
             let invalid = |entry| entries.retain(entry) != entry;
             if ui.focus.with(|f| invalid(f.group))
                 || ui

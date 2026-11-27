@@ -1556,21 +1556,56 @@ fn a_late_release_cannot_apply_the_displaced_guide_press() {
 #[test]
 fn fullscreen_channel_browse_shows_logos_and_skips_hidden_builtin_categories() {
     let Some(home) = tv_isolated!() else { return };
-    let (mut fixture, _, _) = tv(home, |settings| {
-        for key in [
-            keys::SHOW_FAVORITES,
-            keys::SHOW_RECENT,
-            keys::SHOW_ALL_CHANNELS,
-        ] {
-            settings.set(key.as_str(), Value::Bool(false)).unwrap();
-        }
-    });
+    const LOGO: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><circle cx="12" cy="12" r="10" fill="#2468ab"/></svg>"##;
+    let server = crate::support::Server::start(&[("/logo.svg", LOGO.to_owned())]);
+    let playlist =
+        personalization::M3U.replace("http://example.test/logo.svg", &server.url("/logo.svg"));
+    let (mut fixture, _, _) = tv_with(
+        home,
+        |settings| {
+            for key in [
+                keys::SHOW_FAVORITES,
+                keys::SHOW_RECENT,
+                keys::SHOW_ALL_CHANNELS,
+            ] {
+                settings.set(key.as_str(), Value::Bool(false)).unwrap();
+            }
+        },
+        |path, source| {
+            let m3u = iptv_providers::m3u::parse_m3u(&playlist);
+            crate::isolated::open_database(path)
+                .unwrap()
+                .replace_catalog(source, &m3u.groups, &m3u.channels.items, &[], &[])
+                .unwrap();
+        },
+    );
     let app = &mut fixture.app;
     let groups = "id:guide-groups";
     let player_groups = "id:channel-list-groups";
-    let has_logos = |app: &crate::Headless| {
-        app.screen().layout_nodes().iter().any(|node| {
-            node.test_id.as_deref() == Some("player-channel-logo") && node.bounds.size.width.0 > 0.0
+    let logos = Arc::new(Mutex::new(std::collections::HashSet::new()));
+    let mounted = logos.clone();
+    app.observe(move |_, batch| {
+        let mut mounted = mounted.lock().unwrap();
+        for item in &batch.items {
+            if let nsh_core::MountItem::Image { id, source, .. } = item {
+                if source
+                    .as_ref()
+                    .and_then(|image| image.data.as_ref())
+                    .is_some_and(|data| data.bytes() == LOGO.as_bytes())
+                {
+                    mounted.insert(*id);
+                } else {
+                    mounted.remove(id);
+                }
+            }
+        }
+    });
+    let has_logo = |screen: &nsh_testing::Screen| {
+        let mounted = logos.lock().unwrap();
+        screen.layout_nodes().iter().any(|node| {
+            node.test_id.as_deref() == Some("player-channel-logo")
+                && node.bounds.size.width.0 > 0.0
+                && mounted.contains(&node.id)
         })
     };
     let hidden = |app: &crate::Headless, groups: &str| {
@@ -1579,7 +1614,7 @@ fn fullscreen_channel_browse_shows_logos_and_skips_hidden_builtin_categories() {
         }
     };
 
-    step(app.open_guide_groups());
+    hold(app, RemoteKey::Left, 700, true);
     step(app.wait_for(&format!("{groups} >> text:News")));
     hidden(app, groups);
     assert!(selected(app, "guide-groups >> role:tab[News]"));
@@ -1594,17 +1629,19 @@ fn fullscreen_channel_browse_shows_logos_and_skips_hidden_builtin_categories() {
 
     step(app.remote_tap(RemoteKey::Left));
     step(app.wait_for("id:channel-list >> text:/Local A/"));
-    assert!(has_logos(app));
+    step(app.wait_until("player artwork", Duration::from_secs(5), has_logo));
     step(app.remote_tap(RemoteKey::Left));
     step(app.wait_for(&format!("{player_groups} >> text:News")));
     hidden(app, player_groups);
-    assert!(has_logos(app));
+    step(app.wait_until("player artwork", Duration::from_secs(5), has_logo));
     step(app.remote_tap(RemoteKey::Down));
     step(app.wait_for("id:channel-list >> text:/Local C/"));
-    assert!(selected(
-        app,
-        &format!("{player_groups} >> role:tab[Sport]")
-    ));
+    assert!(selected(app, "channel-list-groups >> role:tab[Sport]"));
+    step(
+        app.wait_until("no recycled artwork", Duration::from_secs(5), |screen| {
+            !has_logo(screen)
+        }),
+    );
 }
 
 #[test]
@@ -1625,12 +1662,28 @@ fn double_back_arms_only_at_the_rail_and_resets_on_timeout_or_navigation() {
             .unwrap();
     });
     let app = &mut fixture.app;
+    let platform_backs = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let recorded = platform_backs.clone();
+    app.observe(move |_, batch| {
+        for item in &batch.items {
+            if matches!(
+                item,
+                nsh_core::MountItem::Command {
+                    command: nsh_core::Command::Back,
+                    ..
+                }
+            ) {
+                recorded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    });
+    let exits = || platform_backs.load(std::sync::atomic::Ordering::Relaxed);
     let prompt = "id:exit-confirmation";
     let back = |app: &mut crate::Headless| {
         step(app.remote_tap(RemoteKey::Back));
         step(app.back());
     };
-    step(app.open_guide_groups());
+    hold(app, RemoteKey::Left, 700, true);
     back(app);
     step(app.wait_for("id:navigation-rail >> text:Live TV"));
     assert!(
@@ -1668,6 +1721,8 @@ fn double_back_arms_only_at_the_rail_and_resets_on_timeout_or_navigation() {
 
     back(app);
     step(app.wait_for(prompt));
+    assert_eq!(exits(), 0, "navigation and expiry never request an exit");
     back(app);
     assert!(!shows(app, prompt), "a second Back clears the pending exit");
+    assert_eq!(exits(), 1, "one Back reaches the platform on confirmation");
 }
