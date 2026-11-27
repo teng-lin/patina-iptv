@@ -110,7 +110,10 @@ pub(crate) fn close(ui: Ui) {
 fn check(ui: Ui, trigger: Trigger) {
     // A missing Android report is not evidence of a store installation. Do not
     // consume the due check or persist a result for the wrong package channel.
-    if !ui.update_ready.get_untracked() || !super::metadata_ready() {
+    if ui.update_install_busy.get_untracked()
+        || !ui.update_ready.get_untracked()
+        || !super::metadata_ready()
+    {
         return;
     }
     let owner = crate::runtime();
@@ -150,7 +153,9 @@ fn persist(ui: Ui) {
 }
 
 fn skip(ui: Ui) {
-    cancel_download(ui);
+    if !cancel_download(ui) {
+        return;
+    }
     if let Some(check) = snapshot(ui).cached {
         crate::runtime().skip_app_update_version(&check.release.version);
         persist(ui);
@@ -188,6 +193,9 @@ fn manual_download_visible(ui: Ui) -> bool {
 }
 
 fn manual_download(ui: Ui) {
+    if download_blocked(ui) {
+        return;
+    }
     if let Some(download) = snapshot(ui).cached.and_then(|check| check.release.download) {
         crate::tasks::spawn_in_app(async move { super::open_download_url(&download.url).await });
     }
@@ -287,7 +295,14 @@ fn details(ui: Ui) -> String {
         &[("version", check.release.version.as_str().into())],
     );
     let date = check.release.published_at.as_deref().unwrap_or("");
-    format!("{installed}\n{latest}\n{date}\n{checked}")
+    // Pair related metadata so a wrapped status and large text still leave a
+    // readable notes viewport on a short landscape screen.
+    let dates = [date, &checked]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    format!("{installed} · {latest}\n{dates}")
 }
 
 fn notes(ui: Ui) -> String {
@@ -349,11 +364,23 @@ fn progress_timer(ui: Ui) {
     });
 }
 
-fn cancel_download(ui: Ui) {
+fn cancellation_allowed(ui: Ui) -> bool {
+    ui.update_revision.get();
+    !ui.update_install_busy.get() || super::can_cancel_install()
+}
+
+fn cancel_download(ui: Ui) -> bool {
+    // Native extraction can win between rendering an enabled button and the
+    // press. Do not claim cancellation or persist Skip after that boundary.
+    if !super::try_cancel_current() {
+        changed(ui);
+        return false;
+    }
     ui.update_cancel_requested.set(true);
     crate::runtime().cancel_app_update_download();
     crate::runtime().cancel_pending_app_update();
     changed(ui);
+    true
 }
 
 async fn until_cancelled<T>(
@@ -391,8 +418,22 @@ async fn authorization_cancelled(ui: Ui) {
     }
 }
 
+pub(super) async fn until_update_cancelled<T>(
+    ui: Ui,
+    operation: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    until_cancelled(operation, authorization_cancelled(ui), move || {
+        !ui.owner.is_live() || ui.update_cancel_requested.get_untracked()
+    })
+    .await
+}
+
+fn download_blocked(ui: Ui) -> bool {
+    ui.update_install_busy.get() || snapshot(ui).checking
+}
+
 fn download(ui: Ui) {
-    if ui.update_install_busy.get_untracked() {
+    if download_blocked(ui) {
         return;
     }
     let Some(check) = snapshot(ui).cached else {
@@ -407,12 +448,8 @@ fn download(ui: Ui) {
     progress_timer(ui);
     crate::tasks::spawn_in_app(async move {
         let _operation = operation;
-        let Some(result) = until_cancelled(
-            crate::host::updates::action_for(&check),
-            authorization_cancelled(ui),
-            move || !ui.owner.is_live() || ui.update_cancel_requested.get_untracked(),
-        )
-        .await
+        let Some(result) =
+            until_update_cancelled(ui, crate::host::updates::action_for(&check)).await
         else {
             return;
         };
@@ -436,7 +473,9 @@ fn activate(ui: Ui, index: usize) {
         1 if newer(ui) => download(ui),
         2 if newer(ui) => skip(ui),
         3 => facade::close(ui),
-        4 if ui.update_install_busy.get_untracked() => cancel_download(ui),
+        4 if ui.update_install_busy.get_untracked() => {
+            cancel_download(ui);
+        }
         5 if manual_download_visible(ui) => manual_download(ui),
         _ => {}
     }
@@ -448,6 +487,8 @@ pub(crate) fn key(ui: Ui, action: Action) {
         newer(ui),
         manual_download_visible(ui),
         ui.update_install_busy.get_untracked(),
+        snapshot(ui).checking,
+        cancellation_allowed(ui),
     );
     let position = controls.iter().position(|index| *index == at).unwrap_or(0);
     match action {
@@ -462,17 +503,31 @@ pub(crate) fn key(ui: Ui, action: Action) {
     }
 }
 
-fn panel_controls(newer: bool, manual_download: bool, install_busy: bool) -> Vec<usize> {
-    let mut controls = vec![0];
+fn panel_controls(
+    newer: bool,
+    manual_download: bool,
+    install_busy: bool,
+    checking: bool,
+    cancelable: bool,
+) -> Vec<usize> {
+    let blocked = install_busy || checking;
+    let mut controls = Vec::new();
+    if !blocked {
+        controls.push(0);
+    }
     if newer {
-        controls.push(1);
-        if manual_download {
-            controls.push(5);
+        if !blocked {
+            controls.push(1);
+            if manual_download {
+                controls.push(5);
+            }
         }
-        controls.push(2);
+        if !install_busy || cancelable {
+            controls.push(2);
+        }
     }
     controls.push(3);
-    if install_busy {
+    if install_busy && cancelable {
         controls.push(4);
     }
     controls
@@ -491,14 +546,24 @@ fn panel(ui: Ui) -> View {
     let size = Scale::new();
     effect(move || {
         let focus = ui.update_focus.get();
-        if !newer(ui) && matches!(focus, 1 | 2) {
-            ui.update_focus.set(0);
-        }
-        if !ui.update_install_busy.get() && focus == 4 {
-            ui.update_focus.set(3);
-        }
-        if focus == 5 && !manual_download_visible(ui) {
-            ui.update_focus.set(0);
+        let busy = ui.update_install_busy.get();
+        let checking = snapshot(ui).checking;
+        let cancelable = cancellation_allowed(ui);
+        let controls = panel_controls(
+            newer(ui),
+            manual_download_visible(ui),
+            busy,
+            checking,
+            cancelable,
+        );
+        if !controls.contains(&focus) {
+            ui.update_focus.set(if busy && cancelable {
+                4
+            } else if busy || checking {
+                3
+            } else {
+                0
+            });
         }
     });
     ui_kit::screen(ui, size)
@@ -528,13 +593,23 @@ fn panel(ui: Ui) -> View {
                 .flex_row()
                 .flex_wrap()
                 .gap(move || size.px(12.0))
-                .child(ui_kit::button(
-                    ui,
-                    size,
-                    move || tr("Check for updates"),
-                    move || ui.update_focus.get() == 0,
-                    move || activate(ui, 0),
-                ))
+                .child(
+                    ui_kit::button(
+                        ui,
+                        size,
+                        move || tr("Check for updates"),
+                        move || ui.update_focus.get() == 0,
+                        move || activate(ui, 0),
+                    )
+                    .disabled(move || download_blocked(ui))
+                    .opacity(move || {
+                        if download_blocked(ui) {
+                            0.4_f32
+                        } else {
+                            1.0_f32
+                        }
+                    }),
+                )
                 .child(when(
                     move || newer(ui),
                     move || {
@@ -558,6 +633,14 @@ fn panel(ui: Ui) -> View {
                             move || ui.update_focus.get() == 1,
                             move || activate(ui, 1),
                         )
+                        .disabled(move || download_blocked(ui))
+                        .opacity(move || {
+                            if download_blocked(ui) {
+                                0.4_f32
+                            } else {
+                                1.0_f32
+                            }
+                        })
                     },
                 ))
                 .child(when(
@@ -573,6 +656,14 @@ fn panel(ui: Ui) -> View {
                             move || ui.update_focus.get() == 5,
                             move || activate(ui, 5),
                         )
+                        .disabled(move || download_blocked(ui))
+                        .opacity(move || {
+                            if download_blocked(ui) {
+                                0.4_f32
+                            } else {
+                                1.0_f32
+                            }
+                        })
                     },
                 ))
                 .child(when(
@@ -585,6 +676,14 @@ fn panel(ui: Ui) -> View {
                             move || ui.update_focus.get() == 2,
                             move || activate(ui, 2),
                         )
+                        .disabled(move || !cancellation_allowed(ui))
+                        .opacity(move || {
+                            if cancellation_allowed(ui) {
+                                1.0_f32
+                            } else {
+                                0.4_f32
+                            }
+                        })
                     },
                 ))
                 .child(ui_kit::button(
@@ -595,7 +694,7 @@ fn panel(ui: Ui) -> View {
                     move || activate(ui, 3),
                 ))
                 .child(when(
-                    move || ui.update_install_busy.get(),
+                    move || ui.update_install_busy.get() && cancellation_allowed(ui),
                     move || {
                         ui_kit::button(
                             ui,

@@ -175,7 +175,7 @@ fn retained_package_does_not_hide_manual_check_progress_or_failure() {
             "Could not connect to GitHub. Check your connection and try again."
         );
         assert!(
-            panel_controls(true, true, false).contains(&1),
+            panel_controls(true, true, false, false, true).contains(&1),
             "installation remains available"
         );
         assert_eq!(state.cached, retained_release);
@@ -195,9 +195,95 @@ fn retained_package_does_not_hide_manual_check_progress_or_failure() {
 fn manual_package_route_is_reachable_between_install_and_skip_without_hidden_focus_stops() {
     // Control identities follow the visual order, including the separately
     // confirmed browser route when authenticated installation is available.
-    assert_eq!(panel_controls(true, true, true), [0, 1, 5, 2, 3, 4]);
-    assert_eq!(panel_controls(true, true, false), [0, 1, 5, 2, 3]);
-    assert_eq!(panel_controls(true, false, false), [0, 1, 2, 3]);
-    assert_eq!(panel_controls(false, false, false), [0, 3]);
-    assert_eq!(panel_controls(false, false, true), [0, 3, 4]);
+    assert_eq!(panel_controls(true, true, true, false, true), [2, 3, 4]);
+    assert_eq!(
+        panel_controls(true, true, false, false, true),
+        [0, 1, 5, 2, 3]
+    );
+    assert_eq!(
+        panel_controls(true, false, false, false, true),
+        [0, 1, 2, 3]
+    );
+    assert_eq!(panel_controls(false, false, false, false, true), [0, 3]);
+    assert_eq!(panel_controls(false, false, true, false, true), [3, 4]);
+    assert_eq!(panel_controls(true, true, false, true, true), [2, 3]);
+    assert_eq!(panel_controls(false, false, false, true, true), [3]);
+    assert_eq!(
+        panel_controls(true, true, true, false, false),
+        [3],
+        "irrevocable native extraction keeps only Later remote-actionable"
+    );
+}
+
+#[component]
+fn UpdateOverlap() -> impl IntoElement {
+    use iptv_runtime::app_updates::github::{ReleaseCheck, ReleaseInfo};
+    use std::rc::Rc;
+    let directory = tempfile::tempdir().unwrap();
+    let application = Rc::new(crate::runtime_owner::new_runtime(
+        directory.path().to_owned(),
+    ));
+    crate::runtime_owner::with_runtime(application.clone(), || {
+        let ui = Ui::new(crate::SharedUi::new(), crate::player::Player::new());
+        ui.update_ready.set(true);
+        let release = |version: &str| ReleaseCheck {
+            installed_version: "1.0.0".into(),
+            status: ReleaseStatus::NoCompatiblePackage,
+            release: ReleaseInfo {
+                version: version.into(),
+                notes: "Generated notes".into(),
+                published_at: None,
+                url: "https://github.com/synthetic/patina/releases".into(),
+                download: None,
+            },
+        };
+        let token = application
+            .begin_app_update_check(1, Trigger::Manual, Frequency::Never)
+            .unwrap();
+        assert!(application.finish_app_update_check(token, 2, Ok(release("2.0.0"))));
+
+        // An accepted installation holds its displayed release stable across
+        // manual, startup and timer checks until its guard completes.
+        ui.update_install_busy.set(true);
+        let installation = InstallOperation::new(ui);
+        for trigger in [Trigger::Manual, Trigger::Startup, Trigger::Automatic] {
+            check(ui, trigger);
+            let state = application.app_update_snapshot();
+            assert!(!state.checking, "a competing release check was not started");
+            assert_eq!(state.cached.unwrap().release.version, "2.0.0");
+        }
+        drop(installation);
+
+        // Conversely, a held check must finish before a cached older release
+        // can authorize any installation or browser download action.
+        let token = application
+            .begin_app_update_check(3, Trigger::Manual, Frequency::Never)
+            .unwrap();
+        download(ui);
+        manual_download(ui);
+        assert!(!ui.update_install_busy.get_untracked());
+        assert!(application.app_update_snapshot().checking);
+        assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
+        assert_eq!(
+            application
+                .app_update_snapshot()
+                .cached
+                .unwrap()
+                .release
+                .version,
+            "3.0.0"
+        );
+        assert!(!application.has_pending_app_update());
+    });
+    view().child(text("No overlapping update operations"))
+}
+
+#[test]
+fn release_checks_and_accepted_installation_cannot_replace_each_others_version() {
+    let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+        nsh_core::element::Root::of::<UpdateOverlap>(),
+    ))
+    .unwrap();
+    app.wait_for("text:No overlapping update operations")
+        .unwrap();
 }

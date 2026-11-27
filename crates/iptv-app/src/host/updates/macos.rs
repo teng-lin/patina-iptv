@@ -10,6 +10,8 @@ unsafe extern "C" {
         failure: *const std::ffi::c_char,
     ) -> u64;
     fn patina_sparkle_status(session: u64) -> u8;
+    fn patina_sparkle_can_cancel() -> bool;
+    fn patina_sparkle_try_cancel() -> bool;
     fn patina_sparkle_allow_restart(session: u64);
     fn patina_sparkle_cancel(session: u64);
 }
@@ -31,6 +33,17 @@ pub(super) fn supported() -> bool {
     unsafe { patina_sparkle_supported() }
 }
 
+pub(super) fn cancelable() -> bool {
+    // SAFETY: this queries the synchronized stage mailbox only.
+    unsafe { patina_sparkle_can_cancel() }
+}
+
+pub(super) fn try_cancel_current() -> bool {
+    // SAFETY: cancellation is accepted atomically before extraction and the
+    // public Sparkle cancellation callback runs on AppKit's main queue.
+    unsafe { patina_sparkle_try_cancel() }
+}
+
 pub(super) async fn update(ui: Ui, version: String) {
     let owner = crate::runtime_owner::runtime();
     if owner.recording_background_needed() {
@@ -50,19 +63,20 @@ pub(super) async fn update(ui: Ui, version: String) {
     }
     let session = Session(token);
     let mut host_stopped = false;
-    let failed = loop {
+    let outcome = loop {
         if !ui.owner.is_live() {
             return;
         }
-        if ui.update_cancel_requested.get_untracked() {
-            break false;
+        if ui.update_cancel_requested.get_untracked() && try_cancel_current() {
+            break 4;
         }
         // This future belongs to the app root, so owner/Ui access remains on
         // its shell thread. AppKit callbacks publish only mailbox status.
         // SAFETY: status reads the synchronized generation mailbox only.
         match unsafe { patina_sparkle_status(session.0) } {
-            0 | 4 => break false,
-            5 => break true,
+            0 | 4 => break 4,
+            5 => break 5,
+            8 => break 8,
             3 if !owner.recording_background_needed() && owner.shutdown_recording_host() => {
                 if owner.recording_background_needed() {
                     owner.start_recordings();
@@ -81,12 +95,18 @@ pub(super) async fn update(ui: Ui, version: String) {
         });
         let _ = reply.await;
     };
+    // Native revocation/cleanup must precede restoring the recording host.
+    drop(session);
     // A failed or dismissed installation may leave this process running after
     // its recording host was stopped for relaunch. Restore normal operation.
     if host_stopped {
         owner.start_recordings();
     }
-    if failed {
+    if outcome == 5 {
         notify(tr("The installer could not be verified or opened."));
+    } else if outcome == 8 {
+        notify(tr(
+            "The update is prepared. Quit Patina to finish installing it, or check again to retry.",
+        ));
     }
 }

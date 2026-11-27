@@ -8,6 +8,8 @@ pub(crate) mod pending;
 mod selection;
 pub mod state;
 mod trust;
+#[cfg(any(windows, test))]
+mod verifier;
 #[cfg(windows)]
 mod windows;
 pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};

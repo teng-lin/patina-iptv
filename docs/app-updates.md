@@ -39,12 +39,22 @@ package** browser action remains available when an installer feed or appcast is
 unavailable. Downloading through that action requires the viewer to install the
 package using the platform's normal tools.
 
-In-app downloads show progress and can be canceled. Closing the update panel
-lets an accepted download finish; the runtime retains the verified file and
-offers it again without downloading twice. Explicit cancellation removes partial
-and retained stages. Stages are private temporary files and do not survive app
-exit. Recording activity is checked again before an installer handoff. Deferring
-installation preserves the staged file; it does not silently stop a recording.
+Android, Windows and AppImage in-app downloads show progress and can be
+canceled. Closing the update panel lets an accepted download finish; the runtime
+retains the verified file and offers it again without downloading twice. Explicit
+cancellation removes their partial and retained stages. These runtime stages are
+private temporary files and do not survive app exit. Recording activity is checked
+again before installer handoff. Deferring installation preserves the staged file;
+it does not silently stop a recording.
+
+On macOS, Sparkle's real download cancellation ends when extraction begins. Cancel
+and Skip become unavailable during preparation and handoff; Later can still close
+the app panel. Patina holds the prepared install reply until its recording guard
+approves it. Once approved, Sparkle's external prepared installer can apply the
+update on a later normal quit, including after immediate termination is declined.
+A deferred handoff restores the recording host and remains resumable through a
+new check; it does not promise that the prepared update was removed. See the
+[macOS lifecycle contract](macos-updates.md).
 
 Production activation still requires a published authenticated feed, trusted
 keys, platform signing configuration and install-over-previous acceptance. The

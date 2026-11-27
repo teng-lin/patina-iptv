@@ -134,15 +134,20 @@ impl PackageAction {
                         return;
                     }
                     crate::settings_view::notify(tr("Verifying installer…"));
-                    let Some(setup) = owner
-                        .prepare_windows_setup(
+                    let Some(result) = view::until_update_cancelled(
+                        _ui,
+                        owner.prepare_windows_setup(
                             stage,
                             asset.clone(),
                             publisher,
                             tr("The installer could not be verified or opened."),
-                        )
-                        .await
+                        ),
+                    )
+                    .await
                     else {
+                        return;
+                    };
+                    let Some(setup) = result else {
                         if _ui.update_cancel_requested.get_untracked() {
                             return;
                         }
@@ -499,6 +504,34 @@ pub(crate) async fn open_download_url(url: &str) {
             .show()
             .await;
     }
+}
+
+/// Whether the active native installer still offers genuine cancellation.
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn can_cancel_install() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::cancelable();
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+
+/// Accept cancellation before callers change UI state or persist a skip.
+#[cfg(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "macos"
+))]
+pub(crate) fn try_cancel_current() -> bool {
+    #[cfg(target_os = "macos")]
+    return macos::try_cancel_current();
+    #[cfg(not(target_os = "macos"))]
+    true
 }
 
 #[cfg(all(

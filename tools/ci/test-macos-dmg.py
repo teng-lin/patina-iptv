@@ -180,6 +180,9 @@ class SparkleConfiguration(unittest.TestCase):
             subprocess.run(["clang", "-fobjc-arc", "-Werror", str(source), "-framework", "AppKit",
                             "-framework", "Security", "-o", str(executable)], check=True)
             subprocess.run([str(executable)], check=True)
+            marker = Path(directory) / "normal-quit.txt"
+            subprocess.run([str(executable), "--quit-child", str(marker)], check=True, timeout=15)
+            self.assertIn("Cocoa cancelled", marker.read_text())
 
 
 if __name__ == "__main__":

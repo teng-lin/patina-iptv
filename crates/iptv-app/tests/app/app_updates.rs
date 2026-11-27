@@ -101,6 +101,9 @@ impl Api {
     pub(super) fn requests(&self) -> usize {
         self.state.lock().unwrap().requests
     }
+    fn hold(&self) {
+        self.state.lock().unwrap().held = true;
+    }
 }
 impl Drop for Api {
     fn drop(&mut self) {
@@ -137,7 +140,89 @@ fn about(app: &mut super::Headless) {
     step(app.wait_for("id:app-update-panel"));
 }
 fn refresh(app: &mut super::Headless) {
+    // Retained release notes can be visible during an earlier check. Wait for
+    // that operation to finish before asking the enabled control to retry.
+    step(app.wait_for_gone(
+        "id:app-update-panel >> text:Checking…",
+        Duration::from_secs(10),
+    ));
     step(app.press("id:app-update-panel >> text:Check for updates"));
+}
+
+#[test]
+fn a_held_release_check_disables_cached_downloads_and_keeps_remote_focus_on_enabled_actions() {
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    api.serve(200, release("9.8.7", true));
+    let mut settings = Settings::new();
+    settings
+        .set("general.app_update_frequency", Value::choice("never"))
+        .unwrap();
+    let mut fixture = personalization::launch(home, settings, false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    about(app);
+    step(app.wait_for("id:app-update-panel >> text:/Latest version: 9.8.7/"));
+    step(
+        app.wait_for("id:app-update-panel >> text:/Update available|A newer version is available/"),
+    );
+    let requests = api.requests();
+    api.hold();
+    refresh(app);
+    step(
+        app.wait_until("manual HTTP check is held", Duration::from_secs(10), |_| {
+            api.requests() > requests
+        }),
+    );
+    step(app.wait_for("id:app-update-panel >> text:Checking…"));
+    step(app.wait_for("id:app-update-panel >> text:/Latest version: 9.8.7/"));
+    for label in [
+        "Download package",
+        "Release notes and downloads",
+        "Download and update",
+    ] {
+        let selector = format!("id:app-update-panel >> text:{label}");
+        if app.screen().matches(&selector).unwrap() {
+            let error = app.press(&selector).unwrap_err();
+            assert!(error.contains("disabled"), "{error}");
+        }
+    }
+    assert!(app.screen().opened_urls().is_empty());
+    step(app.press_key("right"));
+    let focused = nsh_core::Color((iptv_app::theme::FOCUSED_TEXT << 8) | 0xff);
+    let later = "id:app-update-panel >> text:Later";
+    assert_eq!(app.screen().span_style(later).unwrap().color, focused);
+    // Left visits Skip and Right returns to Later; disabled Check/Download
+    // controls never take remote focus while the cached version is stale.
+    step(app.press_key("left"));
+    assert_eq!(
+        app.screen()
+            .span_style("id:app-update-panel >> text:Skip this version")
+            .unwrap()
+            .color,
+        focused
+    );
+    step(app.press_key("right"));
+    assert_eq!(app.screen().span_style(later).unwrap().color, focused);
+    api.serve(200, release("9.8.8", true));
+    step(app.wait_for("id:app-update-panel >> text:/Latest version: 9.8.8/"));
+    step(
+        app.wait_for("id:app-update-panel >> text:/Update available|A newer version is available/"),
+    );
+    assert_eq!(app.screen().span_style(later).unwrap().color, focused);
+    assert!(
+        app.screen().opened_urls().is_empty(),
+        "no old-version download was accepted"
+    );
+    for _ in 0..4 {
+        step(app.press_key("left"));
+    }
+    assert_eq!(
+        app.screen()
+            .span_style("id:app-update-panel >> text:Check for updates")
+            .unwrap()
+            .color,
+        focused
+    );
 }
 
 fn android_distribution(app: &mut super::Headless, data: serde_json::Value) {
@@ -510,82 +595,92 @@ fn compact_large_text_update_panel_keeps_actions_reachable_and_notes_scrollable(
     about(app);
     step(app.wait_for("text:/Latest version: 9.8.7/"));
     step(app.wait_for("id:app-update-notes >> text:/Beginning of generated release notes/"));
-    for (width, height, idiom) in [(960.0, 540.0, Idiom::Tv), (915.0, 412.0, Idiom::Phone)] {
-        step(app.set_environment("large system text", move |env| {
-            env.idiom = idiom;
-            env.font_scale = 1.3;
-        }));
-        step(app.set_viewport(Size::new(px(width), px(height))));
-        app.idle(Duration::from_millis(100)).unwrap();
-        let nodes = app.screen().layout_nodes();
-        let bounds = |selector: &str| {
-            let id = app.screen().id(selector).unwrap();
-            nodes.iter().find(|node| node.id == id).unwrap().bounds
-        };
-        let notes = bounds("id:app-update-notes");
-        let text = nodes
-            .iter()
-            .find_map(|node| {
-                node.text.as_ref().filter(|text| {
-                    text.text
-                        .text
-                        .starts_with("Beginning of generated release notes")
-                })
-            })
-            .unwrap();
-        let mut one_line = (*text.text).clone();
-        one_line.text = "Generated change".into();
-        one_line.spans.truncate(1);
-        one_line.spans[0].end = one_line.text.len() as u32;
-        let engine = ApproxTextEngine;
-        let line_height = engine.measure(&engine.prepare(&one_line), None).height.0;
-        let mut actions = vec!["Close", "Check for updates", "Skip this version", "Later"];
-        for offered in [
-            "Download package",
-            "Download and update",
-            "Release notes and downloads",
-        ] {
-            if app
-                .screen()
-                .matches(&format!("id:app-update-panel >> role:button[{offered}]"))
-                .unwrap()
-            {
-                actions.push(offered);
-            }
-        }
-        for action in actions {
-            let control = bounds(&format!("id:app-update-panel >> role:button[{action}]"));
-            assert!(
-                control.origin.x.0 >= 0.0
-                    && control.origin.y.0 >= 0.0
-                    && control.origin.x.0 + control.size.width.0 <= width + 1.0
-                    && control.origin.y.0 + control.size.height.0 <= height + 1.0,
-                "{width}x{height} large text: {action} must remain inside the viewport; control={control:?}, notes={notes:?}"
-            );
-        }
-        assert!(
-            notes.size.height.0 >= line_height,
-            "{width}x{height} large text: release notes need at least one readable line; notes={notes:?}, line_height={line_height}"
-        );
-        let start = text.content.origin.y.0;
-        step(app.press_key("down"));
-        step(app.wait_until(
-            "remote scroll moves release notes",
-            Duration::from_secs(5),
-            |screen| {
-                screen
-                    .layout_nodes()
-                    .iter()
-                    .filter_map(|node| node.text.as_ref())
-                    .find(|text| {
+    let check_sizes = |app: &mut super::Headless| {
+        for (width, height, idiom) in [(960.0, 540.0, Idiom::Tv), (915.0, 412.0, Idiom::Phone)] {
+            step(app.set_environment("large system text", move |env| {
+                env.idiom = idiom;
+                env.font_scale = 1.3;
+            }));
+            step(app.set_viewport(Size::new(px(width), px(height))));
+            app.idle(Duration::from_millis(100)).unwrap();
+            let nodes = app.screen().layout_nodes();
+            let bounds = |selector: &str| {
+                let id = app.screen().id(selector).unwrap();
+                nodes.iter().find(|node| node.id == id).unwrap().bounds
+            };
+            let notes = bounds("id:app-update-notes");
+            let text = nodes
+                .iter()
+                .find_map(|node| {
+                    node.text.as_ref().filter(|text| {
                         text.text
                             .text
                             .starts_with("Beginning of generated release notes")
                     })
-                    .is_some_and(|text| text.content.origin.y.0 < start)
-            },
-        ));
-    }
+                })
+                .unwrap();
+            let mut one_line = (*text.text).clone();
+            one_line.text = "Generated change".into();
+            one_line.spans.truncate(1);
+            one_line.spans[0].end = one_line.text.len() as u32;
+            let engine = ApproxTextEngine;
+            let line_height = engine.measure(&engine.prepare(&one_line), None).height.0;
+            let mut actions = vec!["Close", "Check for updates", "Skip this version", "Later"];
+            for offered in [
+                "Download package",
+                "Download and update",
+                "Release notes and downloads",
+            ] {
+                if app
+                    .screen()
+                    .matches(&format!("id:app-update-panel >> role:button[{offered}]"))
+                    .unwrap()
+                {
+                    actions.push(offered);
+                }
+            }
+            for action in actions {
+                let control = bounds(&format!("id:app-update-panel >> role:button[{action}]"));
+                assert!(
+                    control.origin.x.0 >= 0.0
+                        && control.origin.y.0 >= 0.0
+                        && control.origin.x.0 + control.size.width.0 <= width + 1.0
+                        && control.origin.y.0 + control.size.height.0 <= height + 1.0,
+                    "{width}x{height} large text: {action} must remain inside the viewport; control={control:?}, notes={notes:?}"
+                );
+            }
+            assert!(
+                notes.size.height.0 >= line_height,
+                "{width}x{height} large text: release notes need at least one readable line; notes={notes:?}, line_height={line_height}"
+            );
+            let start = text.content.origin.y.0;
+            step(app.press_key("down"));
+            step(app.wait_until(
+                "remote scroll moves release notes",
+                Duration::from_secs(5),
+                |screen| {
+                    screen
+                        .layout_nodes()
+                        .iter()
+                        .filter_map(|node| node.text.as_ref())
+                        .find(|text| {
+                            text.text
+                                .text
+                                .starts_with("Beginning of generated release notes")
+                        })
+                        .is_some_and(|text| text.content.origin.y.0 < start)
+                },
+            ));
+        }
+    };
+    check_sizes(app);
+    // The missing-package status is longer and wraps even on a wide phone.
+    // Exercise the same worst case on macOS as on a development Linux build.
+    published[0]["assets"] = serde_json::json!([]);
+    api.serve(200, published.to_string());
+    refresh(app);
+    step(app.wait_for("id:app-update-panel >> text:A newer version is available, but there is no compatible package for this installation."));
+    check_sizes(app);
     // Up/down scroll the notes without moving the action focus; Right selects
     // the offered update, Skip, then Later. Select must dismiss this panel.
     let has_manual = app

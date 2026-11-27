@@ -13,7 +13,24 @@ are disabled. Its appcast version must match the GitHub version the viewer chose
 Relaunch waits until the recording host can close safely and flushes watch time.
 AppKit publishes a token-scoped restart request; the owning NSH shell task checks
 the runtime and approves it. Native callbacks never access shell state. Disposing
-that root revokes queued approval and releases the updater, aborting its cycle.
+that root revokes queued approval. A forwarding public `SPUUserDriver` preserves
+Sparkle's standard UI and captures its real check/download cancellation blocks.
+Cancellation ends when extraction begins, matching Sparkle's standard UI. The app
+hides Cancel and disables Skip during extraction and preparation; Later can still
+close the app panel. The public Ready reply is held until the recording guard
+approves installation, including when resuming an already prepared installer.
+Root disposal before approval answers that one-shot reply with Skip, which cancels
+the prepared installation; disposal during extraction retains only native state
+until Ready can answer Skip. Version validation covers resumed updates too.
+
+Once the approved Install reply runs, Sparkle's external installer owns the
+handoff. A prepared update can install on a later normal quit even when immediate
+termination is declined. The external agent observes process exit; it does not
+require Cocoa's WillTerminate notification. Patina keeps its existing quit and
+recording guards. If the approved process remains alive after 60 seconds, Patina
+releases the native UI/controller before restoring the recording host and reports
+that installation was deferred. This does not claim to remove the prepared update.
+Checking again can resume it through the same version and recording guards.
 
 ## Public configuration and packaging
 
@@ -68,7 +85,11 @@ transport/key validation, the pinned archive boundary, version preservation and
 disabled automatic installation. On macOS it also compiles the actual bridge
 against AppKit/Security and checks preview refusal, appcast/GitHub version
 agreement, requests from a separate native thread, shell-authorized relaunch,
-root disposal after queued approval and a replacement session's stale-event fence.
+root disposal after queued approval, genuine download cancellation, extraction
+races, prepared Skip replies, resumed-version rejection, retry reauthorization,
+and generation/attempt-fenced deferred recovery. A separate real AppKit child
+process verifies that a delegate can cancel Cocoa termination, stop its run loop,
+and exit normally without a WillTerminate callback, as the pinned NSH runner does.
 
 Before enabling production, stage two differently versioned Developer ID builds
 using the same public updater key. Install the older build with a synthetic
@@ -76,10 +97,20 @@ encrypted library and recording, discover the newer GitHub release, cancel one
 download, reject a tampered archive, then complete the verified upgrade. Verify
 the newer version after relaunch, reopen the existing encrypted library, retain
 recordings and exercise backup restore. Start a recording while the installation
-dialog is open and verify that relaunch waits. Exercise an unwritable installation
+dialog is open and verify that relaunch waits. Cancel at the download/extraction
+boundary and dispose the root before approving a prepared update; verify that the
+public Skip reply cancels it. Decline an immediate quit and confirm the recording
+host resumes, the deferred notice appears, and a later check resumes only the
+selected version. Exercise an unwritable installation
 and offline appcast. These signed install-over-previous checks require the real
 protected signing setup; the synthetic bridge test does not claim to replace them.
 
 Upstream references: [programmatic setup](https://sparkle-project.org/documentation/programmatic-setup/),
 [publishing](https://sparkle-project.org/documentation/publishing/), and
 [code signing](https://sparkle-project.org/documentation/#6-code-sign-your-app).
+
+The lifecycle contract follows the pinned public
+[SPUUserDriver](https://github.com/sparkle-project/Sparkle/blob/2.10.1/Sparkle/SPUUserDriver.h)
+replies and the external
+[InstallerProgress](https://github.com/sparkle-project/Sparkle/blob/2.10.1/Sparkle/InstallerProgress/InstallerProgressAppController.m)
+termination observer. It uses no private Sparkle driver API or AppKit delegate replacement.
