@@ -905,11 +905,15 @@ async fn finish_automatic_guide(
                     let _ = tx.send(Msg::Guide(Box::new(Imported {
                         groups: catalog.groups.clone(),
                         channels: catalog.channels.clone(),
-                        playback: Streams::Current,
+                        playback: Streams::New(
+                            super::playback::context_for(&job.source.config, &catalog.source),
+                            super::playback::account_streams(&catalog.source),
+                            saved.authority.clone(),
+                        ),
                         guide,
                         now,
                         source: saved.id,
-                        resume: false,
+                        resume: true,
                     })));
                 }
                 Err(ImportError::Canceled) => {}
