@@ -3,4 +3,6 @@
     <string name="external_channel">Reprodução noutra app</string>
     <string name="external_title">O Patina está a enviar um canal</string>
     <string name="external_background">Outra app está a reproduzir um canal do Patina</string>
+    <string name="cast_playback">A transmitir do Patina</string>
+    <string name="cast_stop">Parar transmissão</string>
 </resources>

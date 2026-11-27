@@ -3,4 +3,6 @@
     <string name="external_channel">Воспроизведение в другом приложении</string>
     <string name="external_title">Patina передаёт канал</string>
     <string name="external_background">Другое приложение воспроизводит канал из Patina</string>
+    <string name="cast_playback">Трансляция из Patina</string>
+    <string name="cast_stop">Остановить трансляцию</string>
 </resources>

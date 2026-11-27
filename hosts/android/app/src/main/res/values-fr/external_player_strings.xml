@@ -3,4 +3,6 @@
     <string name="external_channel">Lecture dans une autre app</string>
     <string name="external_title">Patina transmet une chaîne</string>
     <string name="external_background">Une autre app lit une chaîne de Patina</string>
+    <string name="cast_playback">Diffusion depuis Patina</string>
+    <string name="cast_stop">Arrêter la diffusion</string>
 </resources>

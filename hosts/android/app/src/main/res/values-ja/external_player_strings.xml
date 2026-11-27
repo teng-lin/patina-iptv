@@ -3,4 +3,6 @@
     <string name="external_channel">他のアプリで再生</string>
     <string name="external_title">Patina がチャンネルを送信中</string>
     <string name="external_background">他のアプリが Patina のチャンネルを再生しています</string>
+    <string name="cast_playback">Patina からキャスト中</string>
+    <string name="cast_stop">キャストを停止</string>
 </resources>

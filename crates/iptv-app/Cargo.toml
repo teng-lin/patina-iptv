@@ -73,7 +73,7 @@ jni = "0.21"
 # localtime_r for the device's UTC offset (time.rs).
 libc = "0.2"
 
-[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+[target.'cfg(any(target_os = "android", target_os = "linux", target_os = "macos", windows))'.dependencies]
 iptv-cast.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]

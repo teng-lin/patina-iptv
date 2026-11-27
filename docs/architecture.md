@@ -277,7 +277,7 @@ The workspace has nineteen crates under `crates/` and the vendored
 | `iptv-player-mpv` | Adapters | `iptv-core`, `iptv-net`, platform NSH components |
 | `iptv-runtime` | Application | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-library`, `iptv-providers`, `iptv-search`, `iptv-settings`, `iptv-store-sqlite`; `iptv-net` with its `native` feature |
 | `iptv-web` | Adapters, and with its `bridge` feature View | `iptv-core`, `iptv-epg`, `iptv-guide`, `iptv-import`, `iptv-providers`, `iptv-search`; `iptv-nav` and `iptv-presentation` with `bridge` |
-| `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, on desktops `iptv-cast`, on Apple hosts AVKit and AVFoundation, in the browser `iptv-web` and `iptv-store-sqlite` |
+| `iptv-app` | View | every portable crate, `iptv-runtime`, `iptv-player-mpv`, `nsh-tv`, NSH; natively `iptv-net`, on desktops and handheld Android `iptv-cast`, on Apple hosts AVKit and AVFoundation, in the browser `iptv-web` and `iptv-store-sqlite` |
 | `nsh-tv` (vendored) | View | NSH |
 | `iptv-tui` | Hosts | `iptv-app`, `iptv-library`, `iptv-net`, `iptv-player-mpv`, `iptv-providers`, `iptv-settings`, `iptv-store-sqlite`, NSH |
 
@@ -737,6 +737,16 @@ chooser layer, so hiding the play bar cannot destroy the remote player. Native
 callbacks carry the owning generation; stale callbacks and queued commands are
 ignored after cancellation or replacement. Apple's receiver approval stays in
 the system UI, rather than being inferred from successful pairing or selection.
+
+Handheld Android registers the shared network sender for Chromecast and AirPlay.
+The Android host holds a Wi-Fi multicast lock during discovery and grants a
+foreground service lease for the selected connection's LAN interface before
+Patina submits its gated relay. The service keeps that relay available during
+backgrounding and screen lock and forwards media controls to the owned session.
+When the bound network or address disappears, the sender closes the relay and
+requires a fresh receiver selection. Android Keystore protects saved AirPlay
+pairing records in app-private no-backup storage. The TV host does not register
+the sender.
 
 Playback transport uses the same shared play bar for local Media3/mpv and
 remote playback. Explicit media Play/Pause keys and Android picture-in-picture

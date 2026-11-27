@@ -4,9 +4,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Whether the network is metered, before a recording starts (#275). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -51,6 +53,8 @@
             android:stopWithTask="false" android:foregroundServiceType="dataSync|mediaPlayback" />
         <service android:name=".ExternalPlaybackService" android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+        <service android:name=".CastPlaybackService" android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
         <!-- Only the Record now watchdog alarm (RecordingHost.arm, before Android 12)
              and an earlier version's pending alarm, which it retires, reach it. -->
         <receiver android:name=".RecordingAlarm" android:exported="false" />

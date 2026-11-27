@@ -3,4 +3,6 @@
     <string name="external_channel">在其他应用中播放</string>
     <string name="external_title">Patina 正在传送频道</string>
     <string name="external_background">其他应用正在播放来自 Patina 的频道</string>
+    <string name="cast_playback">正在从 Patina 投屏</string>
+    <string name="cast_stop">停止投屏</string>
 </resources>
