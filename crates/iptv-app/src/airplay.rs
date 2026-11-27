@@ -34,6 +34,9 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
         return view();
     }
     let pending_choice = std::cell::RefCell::new(None);
+    // Return the serial as soon as this handoff settles (or immediately if
+    // rejected). Native cleanup only touches that choice's priming item.
+    let choice_reply = signal(None::<(u64, bool)>);
     view()
         // This host is always mounted, including while the play bar disappears.
         .w(px(0.0))
@@ -45,6 +48,11 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                 .w(px(0.0))
                 .h(px(0.0))
                 .prop("owner", move || json!(runtime().native_cast_view()))
+                .prop("finishedChoice", move || {
+                    json!(choice_reply.get().and_then(|(serial, started)| {
+                        (!started || !ui.cast_busy.get()).then_some(serial)
+                    }))
+                })
                 .on_native_event(move |event: &NativeEvent| match event.name.as_ref() {
                     "routes-open" => {
                         pending_choice.replace(Some((
@@ -61,14 +69,19 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                         }
                     }
                     "route-selected" => {
-                        if pending_choice.take().is_some_and(|(ticket, channel)| {
+                        let valid = pending_choice.take().is_some_and(|(ticket, channel)| {
                             runtime().cast_intent_current(ticket)
                                 && channel.is_some()
                                 && channel == ui.player.main().key.get_untracked()
                                 && crate::casting::available(ui)
-                        }) {
+                        });
+                        let started = if valid && !ui.cast_busy.get_untracked() {
                             crate::casting::select_airplay(ui);
-                        }
+                            ui.cast_busy.get_untracked()
+                        } else {
+                            false
+                        };
+                        choice_reply.set(event.data.as_u64().map(|serial| (serial, started)));
                     }
                     "local-selected" => crate::casting::play_here(ui),
                     _ => {}

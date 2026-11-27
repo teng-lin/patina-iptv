@@ -32,6 +32,8 @@ unsafe extern "C" {
     fn patina_airplay_remote(view: *const c_void, command: u8, value: i16);
     fn patina_airplay_disconnect(view: *const c_void);
     fn patina_airplay_invalidate(view: *const c_void);
+    fn patina_airplay_choice_serial(view: *const c_void) -> u64;
+    fn patina_airplay_finish_choice(view: *const c_void, serial: u64);
     fn patina_airplay_owner(view: *const c_void, owner: u64);
     fn patina_cast_button_create() -> *mut c_void;
     fn patina_cast_button_owner(view: *const c_void, owner: u64);
@@ -131,7 +133,13 @@ extern "C" fn emit(context: *const c_void, external: bool, status: u8) {
         9 => Some("local-selected"),
         _ => None,
     } {
-        owner.component.emit(name, json!({}));
+        let data = if status == 8 {
+            // SAFETY: this callback originates from the retained native view on main.
+            json!(unsafe { patina_airplay_choice_serial(owner.view.get()) })
+        } else {
+            json!({})
+        };
+        owner.component.emit(name, data);
         return;
     }
     if let Some(bridge) = owner.bridge.borrow().as_ref() {
@@ -190,6 +198,15 @@ impl NativeComponent for Picker {
 
     fn set_prop(&mut self, name: &str, value: Option<&Value>) {
         match name {
+            "finishedChoice" => {
+                if let Some(serial) = value.and_then(Value::as_u64) {
+                    // SAFETY: the view is retained on main; native code checks both
+                    // the picker serial and item identity before releasing its route.
+                    unsafe {
+                        patina_airplay_finish_choice(Retained::as_ptr(&self.view).cast(), serial)
+                    };
+                }
+            }
             "owner" => {
                 let id = value.and_then(Value::as_u64);
                 if self._context.owner.get() != id {

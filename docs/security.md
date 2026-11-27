@@ -303,13 +303,11 @@ is unavailable. The capability and media use plain HTTP on the trusted LAN;
 provider addresses, headers, playlist comments and rendition links stay behind
 opaque routes. No provider address is passed to AVPlayer or the receiver.
 
-AVPlayer may request a playlist while preparing the system picker. That request
-waits behind the same admission gate as the receiver: the runtime validates
-parental authority, reserves the account claim, retires local viewing inputs,
-and only then permits an upstream fetch. While receiver approval is pending,
-intent or authorization revocation cancels the handoff. Cancel restores local
-playback; Play here retires the remote stream before reopening locally. Stop
-revokes the relay and releases this app's player, without selecting a system
-output or affecting another application's player. The persistent mpv surface
-stays mounted throughout. Only live HLS is supported; this path does not remux
-or transcode incompatible streams.
+While the viewer chooses a video destination, AVPlayer negotiates the route
+with a paused frame generated locally. The channel stays on its current
+destination. Once AVPlayer confirms external video, the relay holds the
+channel request until the runtime validates parental authority, reserves the
+account claim and retires the previous viewing input. Returning to this device
+retires the relay and releases Patina’s native player before reopening local
+playback. Stop releases the stream. The persistent mpv surface stays mounted
+throughout the switch. The relay supports live HLS.

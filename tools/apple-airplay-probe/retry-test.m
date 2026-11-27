@@ -101,7 +101,9 @@ int main(void) {
         standby.syntheticExternal = YES;
         [choosing refresh];
         NSCAssert(!standby.currentItem && ![routeEvents containsObject:@8], @"expired picker cannot change playback");
-        standby.syntheticExternal = NO;
+        NSCAssert([choosing routingPlayer] != standby, @"expiry releases the priming player's route");
+        standby = [SyntheticRoutePlayer new];
+        [choosing setObservedPlayer:standby];
         [choosing routesWillPresent];
         AVPlayerItem *primed = standby.currentItem;
         [choosing routesDidEnd];
@@ -112,6 +114,12 @@ int main(void) {
                   @"late approval starts exactly one handoff");
         [choosing command:ProbeStop];
         NSCAssert(standby.currentItem == primed, @"Prepare preserves the routing item until replacement");
+        uint64_t accepted = [choosing choiceSerial];
+        [choosing finishPickerChoice:accepted-1];
+        NSCAssert(standby.currentItem == primed, @"stale replies cannot release the newer choice");
+        [choosing finishPickerChoice:accepted];
+        NSCAssert(standby.currentItem == nil && [choosing routingPlayer] != standby,
+                  @"a rejected handoff immediately releases its priming frame and route");
         [choosing invalidate];
         NSCAssert(![[NSFileManager defaultManager] fileExistsAtPath:frameFile.path], @"remove temporary frame");
 
@@ -132,6 +140,8 @@ int main(void) {
         [transfer setValue:@YES forKey:@"playIssued"];
         [transfer setValue:@YES forKey:@"wasRouted"];
         [transfer routesWillPresent];
+        [transfer finishPickerChoice:[transfer choiceSerial]];
+        NSCAssert(synthetic.currentItem == item, @"a completed handoff retains its live media");
         synthetic.syntheticExternal = NO;
         [transfer refresh];
         NSCAssert(synthetic.currentItem == item, @"transient route selection must retain the current stream");

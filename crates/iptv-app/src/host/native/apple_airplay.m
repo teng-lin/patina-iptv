@@ -177,13 +177,20 @@ static void PatinaBindRoutePickers(uint64_t owner);
 }
 #endif
 
+- (uint64_t)choiceSerial { return _routeChoiceSerial; }
+
+// Late UI replies may arrive after a newer picker or after AVPlayer has
+// replaced the priming frame with an actual channel. Neither is ours to stop.
+- (void)finishPickerChoice:(uint64_t)serial {
+    if (serial && serial == _routeChoiceSerial && !_source &&
+        _pickerFrame && _player.currentItem == _pickerFrame) {
+        [self disconnect];
+    }
+}
+
 - (void)expireRouteChoice {
     _routeChoiceArmed = NO;
-    if (_pickerFrame && _player.currentItem == _pickerFrame) {
-        _handoffRequested = NO;
-        [self clearItem];
-    }
-    _pickerFrame = nil;
+    [self finishPickerChoice:_routeChoiceSerial];
 }
 
 - (void)routesWillPresent {
@@ -563,6 +570,12 @@ static void PatinaBindRoutePickers(uint64_t owner) {
     for (PatinaCastButton *button in PatinaRouteButtons) {
         if (button.ownerID == owner) [button bindPlayer];
     }
+}
+uint64_t patina_airplay_choice_serial(const void *view) {
+    return [(__bridge PatinaAirPlayPlayer *)view choiceSerial];
+}
+void patina_airplay_finish_choice(const void *view, uint64_t serial) {
+    [(__bridge PatinaAirPlayPlayer *)view finishPickerChoice:serial];
 }
 void patina_airplay_owner(const void *view, uint64_t owner) {
     [(__bridge PatinaAirPlayPlayer *)view setOwnerID:owner];
