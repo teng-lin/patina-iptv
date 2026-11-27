@@ -3,7 +3,8 @@
 from pathlib import Path
 import sys
 root = Path(sys.argv[1])
-for name in ("THIRD-PARTY.html", "components.json", "NSH-RUNNERS.html", "runner-components.json"):
+for name in ("THIRD-PARTY.html", "components.json", "NSH-RUNNERS.html",
+             "runner-components.json", "NOTICE-pyatv.md"):
     matches = list(root.rglob(name))
     if not matches or not all(p.stat().st_size > 0 for p in matches):
         raise SystemExit(f"missing or empty package notice: {name}")

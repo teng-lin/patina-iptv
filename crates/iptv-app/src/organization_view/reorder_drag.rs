@@ -184,6 +184,44 @@ impl DragList {
             && (self.column.is_none() || super::guide_order_accessible(self.ui))
     }
 
+    /// A native list can intercept a finger before the responder grant reaches
+    /// the platform. On handhelds the handles have their own hit target
+    /// alongside the scroller, so the list never receives that touch-down.
+    fn handheld() -> bool {
+        matches!(
+            idiom(),
+            nsh_core::platform::Idiom::Phone | nsh_core::platform::Idiom::Pad
+        )
+    }
+
+    fn responder(
+        self,
+        view: View,
+        claim: TouchClaim,
+        start_y: impl Fn(&ResponderEvent) -> Option<f32> + 'static,
+    ) -> View {
+        view.claim_touches(claim)
+            .keep_touches(true)
+            .on_responder_grant(move |event: &ResponderEvent| {
+                if let Some(y) = start_y(event) {
+                    self.start(y);
+                }
+            })
+            .on_responder_start(move |e: &ResponderEvent| {
+                if e.gesture.active_touches > 1 {
+                    self.finish(true);
+                }
+            })
+            .on_responder_move(move |e: &ResponderEvent| self.dragged(e.gesture.delta.y.0))
+            .on_responder_release(move |e: &ResponderEvent| {
+                // A quick swipe can deliver its destination only on finger-up.
+                // The gesture delta stops at the last move sample.
+                self.dragged((e.page.y - e.gesture.origin.y).0);
+                self.finish(false);
+            })
+            .on_responder_terminate(move |_: &ResponderEvent| self.finish(true))
+    }
+
     pub(crate) fn with_grips(self, content: View) -> View {
         let size = self.size;
         let viewport = element_ref();
@@ -193,6 +231,30 @@ impl DragList {
                 untracked(|| self.finish(closed));
             }
         });
+        let content = self.responder(
+            content,
+            // The handheld strip claims first. A pointer that lands on a
+            // row's own grip bubbles here, where the viewport owns the drag.
+            TouchClaim::on_start().ask(move |request: &ClaimRequest| {
+                if !self.can_grab() {
+                    return;
+                }
+                if let Some(viewport) = self.viewport.get_untracked() {
+                    let x = request.event.page.x - viewport.origin.x;
+                    let right = self
+                        .column
+                        .map_or(viewport.size.width, |column| px(column()));
+                    if x >= right - self.size.px(GRIP_COLUMN) && x <= right {
+                        request.claim();
+                    }
+                }
+            }),
+            move |event| {
+                self.viewport
+                    .get_untracked()
+                    .map(|v| (event.page.y - v.origin.y).0)
+            },
+        );
         content
             .element_ref(&viewport)
             .on_layout(move |_: &Bounds<Points>| {
@@ -205,46 +267,30 @@ impl DragList {
                     }
                 }));
             })
-            .claim_touches(
-                TouchClaim::on_start()
-                    .capture()
-                    .ask(move |request: &ClaimRequest| {
-                        if !self.can_grab() {
-                            return;
-                        }
-                        if let Some(viewport) = self.viewport.get_untracked() {
-                            let x = request.event.page.x - viewport.origin.x;
-                            let right = self
-                                .column
-                                .map_or(viewport.size.width, |column| px(column()));
-                            if x >= right - self.size.px(GRIP_COLUMN) && x <= right {
-                                request.claim();
-                            }
-                        }
-                    }),
-            )
-            .keep_touches(self.column.is_some())
-            .on_responder_grant(move |event: &ResponderEvent| {
-                if let Some(viewport) = self.viewport.get_untracked() {
-                    self.start((event.page.y - viewport.origin.y).0);
-                }
-            })
-            .on_responder_move(move |e: &ResponderEvent| self.dragged(e.gesture.delta.y.0))
-            .on_responder_release(move |_: &ResponderEvent| self.finish(false))
-            .on_responder_terminate(move |_: &ResponderEvent| self.finish(true))
             .child(when(
-                move || crate::host::ANDROID && self.column.is_none() && self.can_grab(),
+                move || self.can_grab() && Self::handheld(),
                 move || {
-                    // Keep the grip strip outside the native scroll view's touch path.
-                    view()
+                    let strip = view()
+                        .test_id("reorder-grip-strip")
                         .absolute()
-                        .right(px(0.0))
                         .top(px(0.0))
                         .bottom(px(0.0))
                         .w(move || size.px(GRIP_COLUMN))
+                        .max_h(move || {
+                            let count = state(self.ui, |s| s.editor.rows().len()).unwrap_or(0);
+                            px(count as f32 * self.pitch())
+                        })
                         .focusable(false)
                         .accessibility_elements_hidden(true)
-                        .on_press(|| {})
+                        // Android's native view must consume DOWN as well.
+                        .on_press(|| {});
+                    let strip = match self.column {
+                        Some(column) => strip.left(move || px(column()) - size.px(GRIP_COLUMN)),
+                        None => strip.right(px(0.0)),
+                    };
+                    self.responder(strip, TouchClaim::on_start(), |event| {
+                        Some(event.location.y.0)
+                    })
                 },
             ))
             .child(when(

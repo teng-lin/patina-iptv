@@ -267,6 +267,7 @@ pub fn layer(ui: Ui, surface: usize) -> impl IntoElement {
         pip: Box::new(move || crate::pip::prop(ui, surface)),
     };
     let mut player = native(iptv_player_mpv::PLAYER_VIEW)
+        .test_id("video-player")
         .absolute()
         .left(move || px(surface_rect(ui, surface).0))
         .top(move || px(surface_rect(ui, surface).1))

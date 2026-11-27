@@ -36,7 +36,8 @@ LANE_WORKFLOWS = {
     ".github/workflows/windows-package-check.yml": "windows-package",
     ".github/workflows/package-check.yml": "packages",
 }
-NOTICES = ("about.toml", "LICENSE", "tools/ci/notices.hbs", "tools/ci/component-inventory.py",
+PYATV_NOTICE = "crates/iptv-cast/NOTICE-pyatv.md"
+NOTICES = ("about.toml", "LICENSE", PYATV_NOTICE, "tools/ci/notices.hbs", "tools/ci/component-inventory.py",
            "tools/ci/crypto-native-notices.py", "tools/ci/check-notices.py", "tools/ci/notices.sh",
            "tools/ci/check-package-lock.py", "tools/ci/audit-runners.sh")
 ANDROID_PACKAGE = (*NOTICES, *BUILD, "tools/ci/package.Cargo.lock", "hosts/android/**", "crates/iptv-app/build.rs", "crates/iptv-app/nsh.json",
@@ -74,13 +75,14 @@ OTHER_HOSTS = ("hosts/android/**", "hosts/ios/**", "hosts/linux/**", "hosts/wind
                "hosts/tizen/**", "hosts/tizen-nsh/**")
 HELPER_INPUTS = ("docs/contributing.md",)
 IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit.sh", "tools/ci/check-ios.sh",
-       "tools/check-ios-simulator-entitlements.sh",
+       "tools/check-ios-simulator-entitlements.sh", "tools/apple-airplay-probe/**",
+       "crates/iptv-app/src/host/native/apple_airplay.m",
        "tools/mpv-runtime-ios/**", "hosts/ios/**")
 CREDENTIALS = (*BUILD, "crates/iptv-app/src/host/native/credential_key*", "crates/iptv-app/src/host/native/credential_key/**",
                "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",
                "tools/ci/isolated-credentials.py")
 DOCS = ("docs/**", ".gitignore", ".editorconfig")
-SHIPPED_MARKDOWN = ("tools/mpv-runtime*/**", "crates/iptv-app/fonts/**", "vendor/**", *HOST_INPUTS)
+SHIPPED_MARKDOWN = ("tools/mpv-runtime*/**", "crates/iptv-app/fonts/**", "vendor/**", PYATV_NOTICE, *HOST_INPUTS)
 METADATA = (".github/ISSUE_TEMPLATE/**", ".github/pull_request_template.md", ".github/CODEOWNERS", ".github/dependabot.yml")
 
 

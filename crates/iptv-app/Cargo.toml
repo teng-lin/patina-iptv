@@ -16,7 +16,7 @@ test = false
 
 [features]
 # Synthetic fixture transport and key injection; never enabled in packages.
-test-support = ["iptv-runtime/test-support"]
+test-support = ["iptv-runtime/test-support", "iptv-cast/test-support"]
 # A browser package (hosts/tizen-nsh) keeps its data out of the module,
 # whose size is its launch time: the interface languages' messages are
 # read per language from the package, the fonts are the page's (its
@@ -80,15 +80,16 @@ iptv-cast.workspace = true
 dbus-secret-service = { version = "4.1", features = ["crypto-rust"] }
 # The logind and portal sleep inhibitors while recording (host/native/keep_awake.rs).
 dbus = "0.9"
-nsh-platform-linux.workspace = true
+# Direct Cargo builds need SVG rendering for the desktop controls.
+nsh-platform-linux = { workspace = true, features = ["svg"] }
 tempfile = "3"
 keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-nsh-platform-macos.workspace = true
+nsh-platform-macos = { workspace = true, features = ["svg"] }
 
 [target.'cfg(target_os = "ios")'.dependencies]
-nsh-platform-ios.workspace = true
+nsh-platform-ios = { workspace = true, features = ["svg"] }
 objc2 = "0.6.5"
 block2 = "0.6.2"
 objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std", "UIView", "UIResponder", "UIAccessibility", "UIApplication", "UIScene"] }
@@ -96,6 +97,7 @@ objc2-ui-kit = { version = "0.3.2", default-features = false, features = ["std",
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSError", "NSString", "NSURL", "NSValue", "NSNotification", "NSOperation", "NSObject", "block2"] }
 
 [dev-dependencies]
+rcgen = { version = "0.13", default-features = false, features = ["ring"] }
 iptv-store-sqlite.workspace = true
 rusqlite.workspace = true
 # Headless runs of the app: what a press reaches (tests/app/pointer.rs).
@@ -122,6 +124,7 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [build-dependencies]
+cc = "1"
 embed-resource = "3.0"
 # The bundle id for the iOS simulator's entitlements (build.rs).
 serde_json.workspace = true

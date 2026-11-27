@@ -289,6 +289,25 @@ vulnerability-free.
 
 ## Casting on the local network
 
-The Linux Cast sender gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
+The desktop Cast sender gives the selected receiver a short-lived opaque HTTP address. The relay admits only that receiver's IP and requires a random capability for each media request. It keeps provider URLs and headers on the sender. The media and capability cross the local network in cleartext. Another sender that joins the Cast application can also read the capability. Device discovery and the Cast TLS certificate do not authenticate the TV's identity. Use a trusted local network and select the intended display.
 
-The relay listens on the interface used to reach the TV, on TCP port 49152 by default. Set `PATINA_CAST_RELAY_PORT` to choose another port before starting Patina. A firewall rule can limit access to the receiver address.
+The relay listens on the interface used to reach the TV, on TCP port 49152 by default. Set `PATINA_CAST_RELAY_PORT` to choose another port before starting Patina. See the [desktop firewall instructions](desktop.md#cast-live-tv) for a rule scoped to the receiver address.
+
+AirPlay on macOS and iPad uses Apple's native video route picker and AVPlayer.
+The public picker does not expose the selected receiver's IP to Patina. Its
+relay therefore uses a random 192-bit capability and admits private IPv4 peers,
+rather than claiming the Chromecast adapter's additional receiver-IP binding.
+It binds a concrete private address on the Mac's primary physical interface or
+the iPad's Wi-Fi interface, on an ephemeral port. A VPN-only or IPv6-only path
+is unavailable. The capability and media use plain HTTP on the trusted LAN;
+provider addresses, headers, playlist comments and rendition links stay behind
+opaque routes. No provider address is passed to AVPlayer or the receiver.
+
+While the viewer chooses a video destination, AVPlayer negotiates the route
+with a paused frame generated locally. The channel stays on its current
+destination. Once AVPlayer confirms external video, the relay holds the
+channel request until the runtime validates parental authority, reserves the
+account claim and retires the previous viewing input. Returning to this device
+retires the relay and releases Patina’s native player before reopening local
+playback. Stop releases the stream. The persistent mpv surface stays mounted
+throughout the switch. The relay supports live HLS.

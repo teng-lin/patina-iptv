@@ -2,7 +2,7 @@
 use crate::browse_fixture::choose_fullscreen;
 use crate::personalization::{self, step};
 use iptv_settings::{Settings, Value};
-use nsh_core::{MountItem, NodeId, ViewKind, platform::Idiom};
+use nsh_core::{MountItem, NodeId, platform::Idiom};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -221,7 +221,7 @@ fn tv_guide_preview_and_shared_bar_keep_the_existing_player_and_route_dpad() {
         .screen()
         .layout_nodes()
         .iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     // Play B, then focus A: opening the preview must return B, not tune A.
@@ -401,7 +401,7 @@ fn the_rail_reaches_preview_on_desktop_and_tv_without_reopening_video() {
         .screen()
         .layout_nodes()
         .iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     step(app.press_key("down"));
@@ -472,7 +472,7 @@ fn numeric_channel_entry_commits_corrected_identity_and_invalid_input_does_not_z
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     step(app.press_key("2"));

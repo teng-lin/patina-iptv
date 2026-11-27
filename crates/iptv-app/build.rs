@@ -5,6 +5,28 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build_version.rs");
     build_version::emit();
+    println!("cargo:rustc-check-cfg=cfg(patina_airplay_probe)");
+    println!("cargo:rerun-if-env-changed=PATINA_AIRPLAY_PROBE");
+    let probe = std::env::var("PATINA_AIRPLAY_PROBE").as_deref() == Ok("1");
+    if probe {
+        println!("cargo:rustc-cfg=patina_airplay_probe");
+    }
+    if matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("macos" | "ios")
+    ) {
+        let source = "src/host/native/apple_airplay.m";
+        println!("cargo:rerun-if-changed={source}");
+        cc::Build::new()
+            .file(source)
+            .flag("-fobjc-arc")
+            .compile("patina_airplay_probe");
+        println!("cargo:rustc-link-lib=framework=AVKit");
+        println!("cargo:rustc-link-lib=framework=AVFoundation");
+        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+            println!("cargo:rustc-link-lib=framework=SystemConfiguration");
+        }
+    }
     println!("cargo:rerun-if-env-changed=PATINA_UPDATE_ROOT");
     println!("cargo:rerun-if-env-changed=PATINA_UPDATE_FEED");
     let root = std::env::var_os("PATINA_UPDATE_ROOT");
@@ -49,17 +71,22 @@ fn main() {
     let os = std::env::var("CARGO_CFG_TARGET_OS");
     let abi = std::env::var("CARGO_CFG_TARGET_ABI");
     if let (Ok("ios"), Ok("sim")) = (os.as_deref(), abi.as_deref()) {
-        simulator_entitlements();
+        let manifest = if probe {
+            "../../tools/apple-airplay-probe/nsh.json"
+        } else {
+            "nsh.json"
+        };
+        simulator_entitlements(manifest);
     }
 }
 
 /// Writes the iOS simulator's entitlements for `src/host/native/simulator_entitlements.rs`
 /// to link: the app's identity and its own Keychain access group, both the
 /// bundle id in `nsh.json`, as Xcode gives a simulator build.
-fn simulator_entitlements() {
-    println!("cargo:rerun-if-changed=nsh.json");
+fn simulator_entitlements(manifest: &str) {
+    println!("cargo:rerun-if-changed={manifest}");
     let config: serde_json::Value =
-        serde_json::from_slice(&std::fs::read("nsh.json").expect("read nsh.json"))
+        serde_json::from_slice(&std::fs::read(manifest).expect("read nsh.json"))
             .expect("parse nsh.json");
     let id = config["id"].as_str().expect("nsh.json has an `id`");
     assert!(

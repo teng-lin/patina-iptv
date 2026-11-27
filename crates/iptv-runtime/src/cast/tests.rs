@@ -185,10 +185,11 @@ impl<'a> Trial<'a> {
         };
         let (claim, released) = mpsc::channel::<()>();
         let dest = Destination {
-            receiver: Receiver {
+            receiver: iptv_core::cast::Target::Network(Receiver {
                 name: "Generated TV".into(),
-                address: ([127, 0, 0, 1], 8009).into(),
-            },
+                id: "googlecast:generated".into(),
+                protocol: iptv_core::cast::NetworkProtocol::GoogleCast,
+            }),
             key: "generated".into(),
             authority,
         };

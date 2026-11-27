@@ -27,9 +27,7 @@ use crate::tv_shared_controls::{Lifetime, persistent, preview_fixture_with};
 use iptv_app::layout::{Class, GuideHeader};
 use iptv_settings::{Settings, Value};
 use nsh_core::platform::{Idiom, Lifecycle, Os};
-use nsh_core::{
-    EventKind, EventPayload, MountItem, NodeId, Size, ViewKind, element::Root, prelude::*,
-};
+use nsh_core::{EventKind, EventPayload, MountItem, NodeId, Size, element::Root, prelude::*};
 use nsh_engine::EngineConfig;
 use serde_json::{Value as Json, json};
 
@@ -84,7 +82,7 @@ pub(crate) fn player(app: &Headless) -> NodeId {
         .layout_nodes()
         .into_iter()
         // The device observer (`device.rs`), where simulated, is no player.
-        .filter(|n| n.kind == ViewKind::Native && n.test_id.as_deref() != Some("device-signals"))
+        .filter(|n| n.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(players.len(), 1, "one persistent player surface");
     players[0].id
@@ -545,9 +543,9 @@ fn ipad_full_screen_and_details_keep_progress_and_episode_in_every_window() {
     show_bar(&mut app);
     step(app.press("id:play-bar-back"));
     step(app.wait_until("the guide's preview", WAIT, |s| {
-        s.layout_nodes()
-            .iter()
-            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
+        s.layout_nodes().iter().any(|n| {
+            n.test_id.as_deref() == Some("video-player") && n.bounds.size.width.0 < LANDSCAPE.0
+        })
     }));
     assert_eq!(sources(&seen), movie);
     // ‹ from a movie returns to its details (#147); close them and the

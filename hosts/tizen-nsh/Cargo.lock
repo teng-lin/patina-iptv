@@ -2094,6 +2094,7 @@ version = "0.1.11"
 dependencies = [
  "base64 0.22.1",
  "block2",
+ "cc",
  "chrono",
  "dbus",
  "dbus-secret-service",
@@ -2144,13 +2145,24 @@ name = "iptv-cast"
 version = "0.1.11"
 dependencies = [
  "dbus",
+ "futures-util",
  "mdns-sd",
+ "mime",
+ "num-bigint",
+ "plist",
  "prost",
+ "ring",
  "rustls-webpki",
  "serde_json",
+ "sha2",
+ "srp",
+ "subtle",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
+ "url",
  "x509-cert",
+ "zeroize",
 ]
 
 [[package]]
@@ -2562,6 +2574,12 @@ dependencies = [
  "polycool",
  "smallvec",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "libc"
@@ -3571,6 +3589,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "plist"
+version = "1.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86a77b7d9cdebd9643c180c158748db7d894b24a3935ed4b5843e698ae086eb"
+dependencies = [
+ "base64 0.23.1",
+ "indexmap",
+ "quick-xml",
+ "time",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4494,6 +4524,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "srp"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cdd40049b29ab1315ccba7ffcf1eece8162982eab14edfac3cf2c2ffab18193"
+dependencies = [
+ "digest",
+ "generic-array",
+ "lazy_static",
+ "num-bigint",
+ "subtle",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4827,6 +4870,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

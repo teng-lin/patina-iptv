@@ -32,7 +32,7 @@ const MAX_ROWS: usize = 7;
 pub enum Kind {
     Picture,
     Cast,
-    CastRemote,
+    AirPlay,
     CastEnded,
     More,
     Volume,
@@ -55,6 +55,7 @@ pub struct Open {
     values: Vec<String>,
     /// Snapshot behind both the translated labels and their opaque pick values.
     tracks: Option<iptv_core::tracks::Tracks>,
+    receivers: Vec<iptv_core::cast::Receiver>,
     // Preserve action identity for a press and keep the originating desktop window.
     more: Option<More>,
     pub list: Chooser,
@@ -64,6 +65,25 @@ pub struct Open {
 struct More {
     controls: Vec<iptv_presentation::play_bar::Control>,
     window: Option<nsh_core::element::desktop::WindowRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum RowKey {
+    More(iptv_presentation::play_bar::Control),
+    Cast(String),
+    Position(usize),
+}
+
+fn row_keys(open: Option<&Open>, len: usize) -> Vec<RowKey> {
+    match open.filter(|_| len != 0) {
+        Some(open) if open.kind == Kind::Cast => {
+            open.values.iter().cloned().map(RowKey::Cast).collect()
+        }
+        Some(Open {
+            more: Some(more), ..
+        }) => more.controls.iter().copied().map(RowKey::More).collect(),
+        _ => (0..len).map(RowKey::Position).collect(),
+    }
 }
 
 pub(super) fn open_more(
@@ -80,18 +100,54 @@ pub(super) fn open_more(
         labels: Vec::new(),
         values: Vec::new(),
         tracks: None,
+        receivers: Vec::new(),
         more: Some(More { controls, window }),
     }));
 }
 
-pub(crate) fn show_receivers(ui: Ui, receivers: Vec<iptv_core::cast::Receiver>) {
-    let len = receivers.len();
+pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receiver>) {
+    use iptv_core::cast::{NetworkProtocol, Target};
+    let owner = crate::runtime_owner::runtime();
+    if let Some((Target::Network(current), _)) = owner.cast_target()
+        && !receivers.iter().any(|receiver| receiver.id == current.id)
+    {
+        receivers.push(current);
+    }
+    let mut labels = vec![tr("This device").to_owned()];
+    let mut values = vec!["local".to_owned()];
+    let mixed = receivers
+        .iter()
+        .any(|receiver| receiver.protocol == NetworkProtocol::AirPlay);
+    labels.extend(receivers.iter().map(|receiver| match receiver.protocol {
+        NetworkProtocol::AirPlay => trf("{name} · AirPlay", &[("name", (&receiver.name).into())]),
+        NetworkProtocol::GoogleCast if mixed => {
+            trf("{name} · Chromecast", &[("name", (&receiver.name).into())])
+        }
+        NetworkProtocol::GoogleCast => receiver.name.clone(),
+    }));
+    values.extend(receivers.iter().map(|r| r.id.clone()));
+    // Production Apple hosts provide the real named-device control. The
+    // fallback supports native ports without a mounted platform view.
+    if owner.native_cast_available() && owner.native_cast_view().is_none() {
+        labels.push(tr("Choose a device").to_owned());
+        values.push("native".into());
+    }
+    let list = ui.chooser.with_untracked(|open| {
+        if let Some(open) = open.as_ref().filter(|open| open.kind == Kind::Cast) {
+            let mut list = open.list.clone();
+            list.replace_actions(&open.values, &values);
+            list
+        } else {
+            Chooser::new(labels.len(), 0)
+        }
+    });
     ui.chooser.set(Some(Open {
         kind: Kind::Cast,
-        list: Chooser::new(len, 0),
-        labels: receivers.iter().map(|r| r.name.clone()).collect(),
-        values: receivers.iter().map(|r| r.address.to_string()).collect(),
+        list,
+        labels,
+        values,
         tracks: None,
+        receivers,
         more: None,
     }));
 }
@@ -139,7 +195,7 @@ fn title(kind: Kind) -> &'static str {
         Kind::AudioDelay => tr("Audio delay"),
         Kind::History => tr("Recently watched"),
         Kind::Cast => tr("Cast to TV"),
-        Kind::CastRemote => tr("Casting through this device"),
+        Kind::AirPlay => tr("Cast to TV"),
         Kind::CastEnded => tr("Casting ended."),
         Kind::Leave => tr("Close Patina?"),
     }
@@ -212,12 +268,12 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             ui.player.main().key.get_untracked().into_iter().collect(),
             0,
         ),
-        Kind::CastRemote => (
-            [tr("Pause"), tr("Play"), tr("Play here"), tr("Stop casting")]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
-            Vec::new(),
+        Kind::AirPlay if ui.cast_busy.get_untracked() => {
+            (vec![tr("Cancel").to_owned()], Vec::new(), 0)
+        }
+        Kind::AirPlay => (
+            vec![tr("This device").to_owned()],
+            vec!["local".to_owned()],
             0,
         ),
         Kind::Cast | Kind::More => (Vec::new(), Vec::new(), 0),
@@ -271,6 +327,7 @@ impl Open {
             labels,
             values,
             tracks: Some(tracks),
+            receivers: Vec::new(),
             more: None,
         }
     }
@@ -302,11 +359,19 @@ pub fn open(ui: Ui, kind: Kind) {
         labels,
         values,
         tracks: None,
+        receivers: Vec::new(),
         more: None,
     }));
 }
 
 pub fn close(ui: Ui) {
+    if ui.cast_busy.get_untracked()
+        && ui
+            .chooser
+            .with_untracked(|open| open.as_ref().is_some_and(|open| open.kind == Kind::AirPlay))
+    {
+        crate::casting::play_here(ui);
+    }
     ui.chooser.set(None);
 }
 
@@ -336,11 +401,11 @@ pub fn pick(ui: Ui, index: usize) {
     let Some(open) = ui.chooser.get_untracked() else {
         return;
     };
-    if open.kind == Kind::CastRemote && index == 2 && ui.cast_busy.get_untracked() {
-        crate::settings_view::notify(tr("Wait for the current cast request to finish."));
+    let value = open.values.get(index).cloned().unwrap_or_default();
+    if open.kind == Kind::Cast && value == "local" && ui.cast_busy.get_untracked() {
+        crate::casting::play_here(ui);
         return;
     }
-    let value = open.values.get(index).cloned().unwrap_or_default();
     close(ui);
     match open.kind {
         Kind::Picture => {
@@ -377,17 +442,27 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::Cast => {
-            if let (Some(name), Ok(address)) = (open.labels.get(index), value.parse()) {
-                crate::casting::select(
-                    ui,
-                    iptv_core::cast::Receiver {
-                        name: name.clone(),
-                        address,
-                    },
-                );
+            if value == "local" {
+                crate::casting::play_here(ui);
+                return;
+            }
+            if value == "native" {
+                crate::casting::select_airplay(ui);
+                return;
+            }
+            if let Some(receiver) = open
+                .receivers
+                .into_iter()
+                .find(|receiver| receiver.id == value)
+            {
+                crate::casting::select(ui, receiver);
             }
         }
-        Kind::CastRemote => crate::casting::remote(ui, index),
+        Kind::AirPlay => {
+            if !ui.cast_busy.get_untracked() {
+                crate::casting::play_here(ui);
+            }
+        }
         Kind::CastEnded => {
             if index == 0
                 && ui.playing.get_untracked().is_none()
@@ -525,9 +600,12 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                         _ => entries(ui, c.kind).0.get(index)?.clone(),
                     };
                     let checked = match c.kind {
+                        Kind::Cast => c
+                            .values
+                            .get(index)
+                            .is_some_and(|value| crate::casting::destination_selected(value)),
                         Kind::History
-                        | Kind::Cast
-                        | Kind::CastRemote
+                        | Kind::AirPlay
                         | Kind::CastEnded
                         | Kind::More
                         | Kind::Leave => false,
@@ -545,7 +623,7 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                 c.as_ref().is_some_and(|c| {
                     matches!(
                         c.kind,
-                        Kind::Cast | Kind::CastRemote | Kind::CastEnded | Kind::More | Kind::Leave
+                        Kind::Cast | Kind::AirPlay | Kind::CastEnded | Kind::More | Kind::Leave
                     )
                 })
             })
@@ -670,22 +748,17 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                         .px(move || size.px(list_rows::INSET))
                         .py(move || size.px(8.0)),
                 )
+                .child(if leave {
+                    view()
+                } else {
+                    crate::airplay::picker(ui, move || kind() == Some(Kind::AirPlay))
+                })
                 .child(
                     virtual_list(count, row)
-                        // A More row keeps its node when another control
-                        // comes or goes around it.
+                        // Preserve a press across updates to the action list.
                         .keys(move || {
                             let len = count();
-                            ui.chooser.with(|chooser| {
-                                match chooser.as_ref().and_then(|c| c.more.as_ref()) {
-                                    Some(more) if len != 0 => more
-                                        .controls
-                                        .iter()
-                                        .map(|&control| (Some(control), 0))
-                                        .collect::<Vec<_>>(),
-                                    _ => (0..len).map(|index| (None, index)).collect(),
-                                }
-                            })
+                            ui.chooser.with(|chooser| row_keys(chooser.as_ref(), len))
                         })
                         .estimated_item_size(list_rows::pitch(size, ROW))
                         .element_ref(&list)
@@ -708,7 +781,27 @@ pub fn layer(ui: Ui, leave: bool) -> impl IntoElement {
                                 content
                             })
                         }),
-                ),
+                )
+                .child(when(
+                    move || {
+                        !leave
+                            && kind() == Some(Kind::Cast)
+                            && crate::runtime_owner::runtime().native_cast_view().is_some()
+                    },
+                    move || {
+                        view()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.0))
+                            .px(px(16.0))
+                            .child(crate::airplay::button(
+                                ui,
+                                48.0,
+                                "chooser-native-device-picker",
+                            ))
+                            .child(text(move || tr("Choose a device")))
+                    },
+                )),
         )
 }
 
@@ -776,5 +869,40 @@ mod snapshot_tests {
             assert_eq!(open.list.selected, 1);
             assert_eq!(open.list.len, labels.len());
         }
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::*;
+
+    fn cast_rows(values: &[&str]) -> Open {
+        Open {
+            kind: Kind::Cast,
+            labels: Vec::new(),
+            values: values.iter().map(|id| (*id).to_owned()).collect(),
+            tracks: None,
+            receivers: Vec::new(),
+            more: None,
+            list: Chooser::new(values.len(), 0),
+        }
+    }
+
+    #[test]
+    fn inserting_a_discovered_route_preserves_the_existing_actions() {
+        let before = cast_rows(&["local", "generated:known", "native"]);
+        let after = cast_rows(&["local", "generated:new", "generated:known", "native"]);
+        let before_keys = row_keys(Some(&before), before.list.len);
+        let after_keys = row_keys(Some(&after), after.list.len);
+        assert_eq!(
+            before_keys,
+            [
+                after_keys[0].clone(),
+                after_keys[2].clone(),
+                after_keys[3].clone()
+            ]
+        );
+        assert_ne!(before_keys[1], after_keys[1]);
+        assert!(row_keys(Some(&after), 0).is_empty());
     }
 }

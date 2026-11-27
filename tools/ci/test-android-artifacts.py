@@ -13,7 +13,7 @@ import zipfile
 CHECK = Path(__file__).with_name("check-android-artifacts.py")
 MERGE = runpy.run_path(str(Path(__file__).with_name("merge-android-native.py")))["merge"]
 NOTICES = ("THIRD-PARTY.html", "components.json", "NSH-RUNNERS.html",
-           "runner-components.json", "gradle/index.json")
+           "runner-components.json", "gradle/index.json", "NOTICE-pyatv.md")
 
 
 class Artifacts(unittest.TestCase):
@@ -55,10 +55,11 @@ class Artifacts(unittest.TestCase):
             self.assertIn("invalid native library", result.stderr)
 
     def test_notices_remain_required(self):
-        for result in self.check_packages({"arm64-v8a": b"\x7fELFsynthetic", "armeabi-v7a": b"\x7fELFsynthetic"},
-                                          missing_notice="THIRD-PARTY.html"):
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("THIRD-PARTY.html", result.stderr)
+        for notice in ("THIRD-PARTY.html", "NOTICE-pyatv.md"):
+            for result in self.check_packages({"arm64-v8a": b"\x7fELFsynthetic", "armeabi-v7a": b"\x7fELFsynthetic"},
+                                              missing_notice=notice):
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(notice, result.stderr)
 
     def test_emulator_abi_override(self):
         for result in self.check_packages({"x86_64": b"\x7fELFsynthetic"}, abi_override="x86_64"):

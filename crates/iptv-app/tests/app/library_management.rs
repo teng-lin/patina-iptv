@@ -276,6 +276,8 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
         step(app.press_key("up"));
     }
     step(app.press_key("enter"));
+    // Enter queues the store write. Wait for the saved row to appear.
+    step(app.wait_for("text:Automatic refresh: every hour"));
     assert_eq!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -286,6 +288,7 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     );
     step(app.press_key("down"));
     step(app.press_key("enter"));
+    step(app.wait_for("text:Refresh on startup: Yes"));
     assert!(
         crate::isolated::open_database(&path)
             .unwrap()
@@ -296,13 +299,17 @@ fn organization_playlist_policies_and_remote_bindings_are_editable_and_persisted
     step(app.press_key("up"));
     step(app.press_key("up"));
     step(app.press_key("enter"));
-    assert!(
-        !crate::isolated::open_database(&path)
-            .unwrap()
-            .source_policy(source)
-            .unwrap()
-            .enabled
-    );
+    step(app.wait_until(
+        "source hidden in the database",
+        Duration::from_secs(5),
+        |_| {
+            !crate::isolated::open_database(&path)
+                .unwrap()
+                .source_policy(source)
+                .unwrap()
+                .enabled
+        },
+    ));
     step(app.back());
     step(app.press("id:settings-content >> role:checkbox[/^Synthetic library · /]"));
     step(app.wait_until(

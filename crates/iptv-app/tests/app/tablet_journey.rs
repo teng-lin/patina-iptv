@@ -25,8 +25,7 @@ use iptv_settings::{Settings, Value};
 use nsh_core::picker::PickedFile;
 use nsh_core::platform::{Idiom, Os};
 use nsh_core::{
-    EventKind, EventPayload, ImageData, MountItem, NodeId, Point, Size, ViewKind, element::Root,
-    prelude::*,
+    EventKind, EventPayload, ImageData, MountItem, NodeId, Point, Size, element::Root, prelude::*,
 };
 use nsh_engine::EngineConfig;
 use serde_json::{Value as Json, json};
@@ -130,7 +129,7 @@ fn player(app: &Headless) -> NodeId {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.kind == ViewKind::Native)
+        .filter(|n| n.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(players.len(), 1, "one persistent player surface");
     players[0].id
@@ -248,7 +247,7 @@ fn full_screen(app: &mut Headless, width: f32) {
     step(app.wait_until("full screen", WAIT, |s| {
         s.layout_nodes()
             .iter()
-            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 >= width)
+            .any(|n| n.test_id.as_deref() == Some("video-player") && n.bounds.size.width.0 >= width)
     }));
     show_bar(app);
 }
@@ -256,9 +255,9 @@ fn full_screen(app: &mut Headless, width: f32) {
 /// Back in the guide: the video in its preview.
 fn in_preview(app: &mut Headless) {
     step(app.wait_until("the guide's preview", WAIT, |s| {
-        s.layout_nodes()
-            .iter()
-            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
+        s.layout_nodes().iter().any(|n| {
+            n.test_id.as_deref() == Some("video-player") && n.bounds.size.width.0 < LANDSCAPE.0
+        })
     }));
 }
 
@@ -398,9 +397,9 @@ fn touch_alone_plays_a_channel_and_a_past_program_and_returns() {
     assert_eq!(video_width(&app), LANDSCAPE.0);
     step(app.press("id:play-bar-back"));
     step(app.wait_until("back in the guide", WAIT, |s| {
-        s.layout_nodes()
-            .iter()
-            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
+        s.layout_nodes().iter().any(|n| {
+            n.test_id.as_deref() == Some("video-player") && n.bounds.size.width.0 < LANDSCAPE.0
+        })
     }));
 
     observe_native_workers(&mut app);
@@ -743,9 +742,9 @@ fn a_keyboard_over_search_edits_text_without_reaching_the_player() {
     // Search from the guide's rail, by touch, over the playing preview.
     step(app.press("id:play-bar-back"));
     step(app.wait_until("in the guide", WAIT, |s| {
-        s.layout_nodes()
-            .iter()
-            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
+        s.layout_nodes().iter().any(|n| {
+            n.test_id.as_deref() == Some("video-player") && n.bounds.size.width.0 < LANDSCAPE.0
+        })
     }));
     step(app.open_guide_groups());
     step(app.press("text:Search"));
@@ -854,9 +853,9 @@ fn calls_and_unplugged_headphones_pause_by_policy_and_never_restart_a_stop() {
     show_bar(app);
     step(app.press("id:play-bar-back"));
     step(app.wait_until("the guide", WAIT, |s| {
-        s.layout_nodes()
-            .iter()
-            .any(|n| n.kind == ViewKind::Native && n.bounds.size.width.0 < LANDSCAPE.0)
+        s.layout_nodes().iter().any(|n| {
+            n.test_id.as_deref() == Some("video-player") && n.bounds.size.width.0 < LANDSCAPE.0
+        })
     }));
     crate::personalization::menu(app, "Manage blocked channels…");
     step(app.wait_for("id:organization-row-1 >> text:Unblocked"));

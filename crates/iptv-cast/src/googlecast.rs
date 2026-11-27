@@ -1,6 +1,6 @@
 //! Cast v2 control of the Default Media Receiver.
 use crate::{
-    tls,
+    Delivery, tls,
     wire::{self, Envelope, MAX_FRAME},
 };
 use prost::Message;
@@ -8,23 +8,26 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::TcpStream,
     sync::{mpsc, oneshot},
-    time::{Instant, timeout},
+    task::JoinHandle,
+    time::{Instant, timeout, timeout_at},
 };
 use tokio_rustls::rustls::pki_types::ServerName;
 
-const RECEIVER: &str = "urn:x-cast:com.google.cast.receiver";
-const MEDIA: &str = "urn:x-cast:com.google.cast.media";
-const CONNECTION: &str = "urn:x-cast:com.google.cast.tp.connection";
-const HEARTBEAT: &str = "urn:x-cast:com.google.cast.tp.heartbeat";
-const ROOT: &str = "receiver-0";
-const APP: &str = "CC1AD845";
+pub(crate) const RECEIVER: &str = "urn:x-cast:com.google.cast.receiver";
+pub(crate) const MEDIA: &str = "urn:x-cast:com.google.cast.media";
+pub(crate) const CONNECTION: &str = "urn:x-cast:com.google.cast.tp.connection";
+pub(crate) const HEARTBEAT: &str = "urn:x-cast:com.google.cast.tp.heartbeat";
+pub(crate) const ROOT: &str = "receiver-0";
+pub(crate) const APP: &str = "CC1AD845";
 const DEADLINE: Duration = Duration::from_secs(15);
+const LATE_LOAD_REPLY: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -33,15 +36,19 @@ pub enum Error {
     LoadFailed,
     Unknown,
     Ended,
+    OwnershipLost { dispatched: bool },
+    TimedOut,
 }
 type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
     Volume(u8),
+    SetMuted(bool),
     StepVolume(i8),
     ToggleMute,
     Play,
     Pause,
+    Seek(Duration),
     Stop,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +67,7 @@ struct Request {
     namespace: &'static str,
     destination: String,
     body: Value,
+    retention: Duration,
     reply: oneshot::Sender<Result<Value>>,
 }
 struct Pending {
@@ -75,23 +83,36 @@ struct Pending {
 pub struct Session {
     outgoing: mpsc::Sender<Request>,
 
-    local_ip: IpAddr,
+    local_addr: SocketAddr,
+    peer_addr: SocketAddr,
+    driver: Option<Arc<JoinHandle<()>>>,
     transport: String,
 }
 impl Session {
     pub async fn connect(address: SocketAddr) -> Result<Self> {
-        Self::open(address, true).await
+        Self::open(address, true, &mut Delivery::NotSent).await
     }
     /// Attaches only to an already running instance of the media receiver.
     pub async fn rejoin(address: SocketAddr) -> Result<Self> {
-        Self::open(address, false).await
+        Self::open(address, false, &mut Delivery::NotSent).await
     }
-    async fn open(address: SocketAddr, launch: bool) -> Result<Self> {
-        let (socket, local_ip) = timeout(DEADLINE, async {
+    pub(crate) async fn connect_bounded(
+        address: SocketAddr,
+        deadline: Instant,
+    ) -> std::result::Result<Self, (Error, Delivery)> {
+        let mut delivery = Delivery::NotSent;
+        timeout_at(deadline, Self::open(address, true, &mut delivery))
+            .await
+            .unwrap_or(Err(Error::TimedOut))
+            .map_err(|error| (error, delivery))
+    }
+
+    async fn open(address: SocketAddr, launch: bool, delivery: &mut Delivery) -> Result<Self> {
+        let (socket, local_addr) = timeout(DEADLINE, async {
             let socket = TcpStream::connect(address)
                 .await
                 .map_err(|_| Error::Unreachable)?;
-            let local = socket.local_addr().map_err(|_| Error::Unreachable)?.ip();
+            let local = socket.local_addr().map_err(|_| Error::Unreachable)?;
             let socket = tls::connector()
                 .map_err(|_| Error::Unreachable)?
                 .connect(ServerName::IpAddress(address.ip().into()), socket)
@@ -103,11 +124,14 @@ impl Session {
         .map_err(|_| Error::Unreachable)??;
         let (tx, rx) = mpsc::channel(16);
 
-        tokio::spawn(drive(socket, rx));
+        let sender = format!("sender-{:032x}", random_token()?);
+        let driver = tokio::spawn(drive(socket, rx, sender));
         let mut session = Self {
             outgoing: tx,
 
-            local_ip,
+            local_addr,
+            peer_addr: address,
+            driver: Some(Arc::new(driver)),
             transport: String::new(),
         };
         session.connect_channel(ROOT).await?;
@@ -117,23 +141,29 @@ impl Session {
         session.transport = if let Some(id) = app_transport(&status) {
             id
         } else if launch {
-            app_transport(
-                &session
-                    .request(RECEIVER, ROOT, json!({"type":"LAUNCH","appId":APP}))
-                    .await?,
-            )
-            .ok_or(Error::Refused)?
+            session.launch(delivery).await?
         } else {
             return Err(Error::Ended);
         };
         session.connect_channel(&session.transport).await?;
         if !launch {
-            session.media(json!({"type":"GET_STATUS"})).await?;
+            let reply = session.media(json!({"type":"GET_STATUS"})).await?;
+            media_entries(&reply)?;
         }
         Ok(session)
     }
     pub fn local_ip(&self) -> IpAddr {
-        self.local_ip
+        self.local_addr.ip()
+    }
+    pub(crate) fn control_addrs(&self) -> (SocketAddr, SocketAddr) {
+        (self.local_addr, self.peer_addr)
+    }
+    pub(crate) async fn close(mut self) {
+        let driver = self.driver.take().and_then(Arc::into_inner);
+        drop(self.outgoing);
+        if let Some(driver) = driver {
+            let _ = driver.await;
+        }
     }
     async fn connect_channel(&self, destination: &str) -> Result<()> {
         self.request(
@@ -157,6 +187,7 @@ impl Session {
                     namespace,
                     destination: destination.into(),
                     body,
+                    retention: DEADLINE,
                     reply,
                 })
                 .await
@@ -166,39 +197,126 @@ impl Session {
         .await
         .map_err(|_| Error::Unknown)?
     }
-    async fn media(&self, body: Value) -> Result<Value> {
+    pub(crate) async fn media(&self, body: Value) -> Result<Value> {
         self.request(MEDIA, &self.transport, body).await
     }
-    /// Loads live HLS at the live edge. Only a reply for this URL establishes ownership.
+    /// Loads live HLS at the live edge. Only a reply for this request establishes ownership.
     pub async fn load(&self, url: &str) -> Result<i64> {
-        let reply=self.media(json!({"type":"LOAD","autoplay":true,"media":{"contentId":url,"contentType":"application/x-mpegURL","streamType":"LIVE"}})).await?;
-        media_entries(&reply)
-            .find(|item| item.pointer("/media/contentId").and_then(Value::as_str) == Some(url))
-            .and_then(|item| item["mediaSessionId"].as_i64())
-            .ok_or(Error::Unknown)
+        let permit = self.request_slot().await?;
+        let request = self.queue_load(permit, load_body(url, "application/x-mpegURL", true, None));
+        let reply = timeout(DEADLINE, request)
+            .await
+            .map_err(|_| Error::Unknown)?
+            .map_err(|_| Error::Unknown)??;
+        load_instance(&reply, url, None)
     }
-    /// Returns the receiver's current ownership of one opaque relay capability.
+    async fn request_slot(&self) -> Result<mpsc::Permit<'_, Request>> {
+        timeout(DEADLINE, self.outgoing.reserve())
+            .await
+            .map_err(|_| Error::Unknown)?
+            .map_err(|_| Error::Unreachable)
+    }
+
+    fn queue_load(
+        &self,
+        permit: mpsc::Permit<'_, Request>,
+        body: Value,
+    ) -> oneshot::Receiver<Result<Value>> {
+        Self::queue(
+            permit,
+            MEDIA,
+            &self.transport,
+            body,
+            DEADLINE + LATE_LOAD_REPLY,
+        )
+    }
+
+    fn queue(
+        permit: mpsc::Permit<'_, Request>,
+        namespace: &'static str,
+        destination: &str,
+        body: Value,
+        retention: Duration,
+    ) -> oneshot::Receiver<Result<Value>> {
+        let (reply, received) = oneshot::channel();
+        permit.send(Request {
+            namespace,
+            destination: destination.into(),
+            body,
+            retention,
+            reply,
+        });
+        received
+    }
+
+    async fn launch(&self, delivery: &mut Delivery) -> Result<String> {
+        let permit = self.request_slot().await?;
+        *delivery = Delivery::MayHaveReachedReceiver;
+        let received = Self::queue(
+            permit,
+            RECEIVER,
+            ROOT,
+            json!({"type":"LAUNCH","appId":APP}),
+            DEADLINE,
+        );
+        match timeout(DEADLINE, received).await {
+            Ok(Ok(Ok(response))) => {
+                *delivery = Delivery::Acknowledged;
+                app_transport(&response).ok_or(Error::Refused)
+            }
+            Ok(Ok(Err(Error::Refused))) => {
+                *delivery = Delivery::Acknowledged;
+                Err(Error::Refused)
+            }
+            Ok(Ok(Err(error))) => Err(error),
+            Ok(Err(_)) => Err(Error::Unreachable),
+            Err(_) => Err(Error::TimedOut),
+        }
+    }
+
+    /// Finds matching content for diagnostics. Use correlated load replies to establish ownership.
     pub async fn lookup(&self, url: &str) -> Result<Option<i64>> {
         let reply = self.media(json!({"type":"GET_STATUS"})).await?;
-        Ok(media_entries(&reply)
-            .find(|item| item.pointer("/media/contentId").and_then(Value::as_str) == Some(url))
-            .and_then(|item| item["mediaSessionId"].as_i64()))
+        let mut unidentified = false;
+        for item in media_entries(&reply)? {
+            match item.pointer("/media/contentId").and_then(Value::as_str) {
+                Some(content) if content == url => return Ok(item["mediaSessionId"].as_i64()),
+                Some(_) => {}
+                // The receiver may omit unchanged media metadata.
+                None => unidentified = true,
+            }
+        }
+        if unidentified {
+            return Err(Error::Unknown);
+        }
+        Ok(None)
     }
 
     pub async fn status(&self, id: i64) -> Result<Status> {
         let reply = self.media(json!({"type":"GET_STATUS"})).await?;
-        state(&reply, id).ok_or(Error::Ended)
+        state(&reply, id)
     }
     pub async fn command(&self, id: i64, cmd: Command) -> Result<()> {
+        self.command_owned(id, cmd, None).await
+    }
+
+    pub(crate) async fn command_owned(
+        &self,
+        id: i64,
+        cmd: Command,
+        token: Option<&str>,
+    ) -> Result<()> {
         let value = match cmd {
             Command::Volume(level) => Some(json!({"level":f64::from(level.min(100))/100.0})),
+            Command::SetMuted(muted) => Some(json!({"muted":muted})),
             Command::StepVolume(_) | Command::ToggleMute => {
-                let status = self
-                    .request(RECEIVER, ROOT, json!({"type":"GET_STATUS"}))
-                    .await?;
+                let status = self.receiver_status().await?;
                 let volume = &status["status"]["volume"];
                 Some(if let Command::StepVolume(step) = cmd {
-                    let level = volume["level"].as_f64().ok_or(Error::Unknown)?;
+                    let level = volume["level"]
+                        .as_f64()
+                        .filter(|level| (0.0..=1.0).contains(level))
+                        .ok_or(Error::Unknown)?;
                     json!({"level":(level+f64::from(step)/100.0).clamp(0.0,1.0)})
                 } else {
                     json!({"muted":!volume["muted"].as_bool().ok_or(Error::Unknown)?})
@@ -207,7 +325,11 @@ impl Session {
             _ => None,
         };
         if let Some(volume) = value {
-            match self.status(id).await? {
+            // For receiver-wide changes this status check is the last wire
+            // round trip before the write, including after reading output.
+            let report = self.media(json!({"type":"GET_STATUS"})).await?;
+            check_load_tag(&report, id, token, false)?;
+            match state(&report, id)? {
                 Status::Playing | Status::Paused | Status::Buffering => {}
                 Status::Unknown => return Err(Error::Unknown),
                 _ => return Err(Error::Ended),
@@ -219,43 +341,167 @@ impl Session {
         let verb = match cmd {
             Command::Play => "PLAY",
             Command::Pause => "PAUSE",
+            Command::Seek(_) => "SEEK",
             Command::Stop => "STOP",
             _ => return Err(Error::Refused),
         };
-        self.media(json!({"type":verb,"mediaSessionId":id})).await?;
-        if cmd == Command::Stop {
-            timeout(DEADLINE, async {
-                loop {
-                    match self.status(id).await {
-                        Err(Error::Ended)
-                        | Ok(
-                            Status::Idle
-                            | Status::Finished
+        let mut request = json!({"type":verb,"mediaSessionId":id});
+        if let Command::Seek(position) = cmd {
+            request["currentTime"] = position.as_secs_f64().into();
+        }
+        let reply = self.media(request).await?;
+        check_load_tag(&reply, id, token, true)?;
+        timeout(DEADLINE, async {
+            let mut reply = if cmd == Command::Stop {
+                self.media(json!({"type":"GET_STATUS"})).await?
+            } else {
+                reply
+            };
+            loop {
+                check_load_tag(&reply, id, token, true)?;
+                match (cmd, state(&reply, id)) {
+                    (Command::Play, Ok(Status::Playing | Status::Buffering))
+                    | (Command::Pause, Ok(Status::Paused))
+                    | (Command::Stop, Ok(Status::Canceled)) => return Ok(()),
+                    (Command::Stop, Err(Error::Ended)) if media_entries(&reply)?.is_empty() => {
+                        return Ok(());
+                    }
+                    (Command::Seek(position), Ok(Status::Playing | Status::Paused))
+                        if media_entry(&reply, id)?
+                            .get("currentTime")
+                            .and_then(Value::as_f64)
+                            .is_some_and(|time| (time - position.as_secs_f64()).abs() < 1.0) =>
+                    {
+                        return Ok(());
+                    }
+                    (
+                        _,
+                        Ok(
+                            Status::Finished
                             | Status::Interrupted
                             | Status::Canceled
                             | Status::Failed,
-                        ) => return Ok(()),
-                        Err(error) => return Err(error),
-                        Ok(_) => tokio::time::sleep(Duration::from_millis(250)).await,
-                    }
+                        ),
+                    ) => return Err(Error::Ended),
+                    (_, Err(error)) => return Err(error),
+                    (_, Ok(_)) => {}
                 }
-            })
+                // The acknowledgement can precede the actual playback change.
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                reply = self.media(json!({"type":"GET_STATUS"})).await?;
+            }
+        })
+        .await
+        .map_err(|_| Error::Unknown)?
+    }
+    pub(crate) async fn receiver_status(&self) -> Result<Value> {
+        self.request(RECEIVER, ROOT, json!({"type":"GET_STATUS"}))
             .await
-            .map_err(|_| Error::Unknown)??;
-        }
-        Ok(())
     }
 }
-fn media_entries(v: &Value) -> impl Iterator<Item = &Value> {
-    v["status"].as_array().into_iter().flatten()
+
+pub(crate) fn random_token() -> Result<u128> {
+    let mut bytes = [0; 16];
+    tokio_rustls::rustls::crypto::ring::default_provider()
+        .secure_random
+        .fill(&mut bytes)
+        .map_err(|_| Error::Unreachable)?;
+    Ok(u128::from_be_bytes(bytes))
 }
-fn state(v: &Value, id: i64) -> Option<Status> {
-    let item = media_entries(v).find(|v| v["mediaSessionId"].as_i64() == Some(id))?;
-    Some(match item["playerState"].as_str() {
-        Some("PLAYING") => Status::Playing,
-        Some("PAUSED") => Status::Paused,
-        Some("BUFFERING") => Status::Buffering,
-        Some("IDLE") => match item["idleReason"].as_str() {
+
+pub(crate) fn load_body(url: &str, content_type: &str, live: bool, token: Option<&str>) -> Value {
+    let mut body = json!({
+        "type":"LOAD",
+        "autoplay":true,
+        "media":{
+            "contentId":url,
+            "contentType":content_type,
+            "streamType":if live {"LIVE"} else {"BUFFERED"}
+        }
+    });
+    if let Some(token) = token {
+        body["media"]["customData"] = json!({"castRsLoad":token});
+    }
+    body
+}
+
+/// A matching response needs a unique media instance. An echoed, different tag
+/// identifies someone else's load even when both senders supplied the same URL.
+pub(crate) fn load_instance(reply: &Value, url: &str, token: Option<&str>) -> Result<i64> {
+    let mut matches = media_entries(reply)?.iter().filter(|entry| {
+        entry.pointer("/media/contentId").and_then(Value::as_str) == Some(url)
+            && load_tag(entry).is_none_or(|tag| Some(tag) == token)
+    });
+    let entry = matches.next().ok_or(Error::Unknown)?;
+    if matches.next().is_some() {
+        return Err(Error::Unknown);
+    }
+    entry["mediaSessionId"].as_i64().ok_or(Error::Unknown)
+}
+
+/// Status queries may recover a lost load reply only if its unique tag was
+/// echoed by the receiver. The media URL alone does not distinguish senders.
+pub(crate) fn tagged_instance(reply: &Value, token: &str) -> Result<Option<i64>> {
+    let mut matches = media_entries(reply)?
+        .iter()
+        .filter(|entry| load_tag(entry) == Some(token));
+    let id = matches
+        .next()
+        .and_then(|entry| entry["mediaSessionId"].as_i64());
+    if matches.next().is_some() {
+        return Err(Error::Unknown);
+    }
+    Ok(id)
+}
+
+fn check_load_tag(reply: &Value, id: i64, token: Option<&str>, dispatched: bool) -> Result<()> {
+    if let Some(token) = token
+        && different_load_tag(reply, id, token)
+    {
+        return Err(Error::OwnershipLost { dispatched });
+    }
+    Ok(())
+}
+
+pub(crate) fn different_load_tag(reply: &Value, id: i64, token: &str) -> bool {
+    media_entry(reply, id)
+        .is_ok_and(|entry| load_tag(entry).is_some_and(|observed| observed != token))
+}
+
+pub(crate) fn load_tag(entry: &Value) -> Option<&str> {
+    entry
+        .pointer("/media/customData/castRsLoad")
+        .and_then(Value::as_str)
+}
+
+pub(crate) fn media_entries(reply: &Value) -> Result<&[Value]> {
+    let entries = reply["status"].as_array().ok_or(Error::Unknown)?;
+    // A malformed entry could represent the session we were asked to find.
+    if entries
+        .iter()
+        .any(|entry| entry["mediaSessionId"].as_i64().is_none())
+    {
+        return Err(Error::Unknown);
+    }
+    Ok(entries)
+}
+pub(crate) fn media_entry(reply: &Value, id: i64) -> Result<&Value> {
+    let mut entries = media_entries(reply)?
+        .iter()
+        .filter(|entry| entry["mediaSessionId"].as_i64() == Some(id));
+    let entry = entries.next().ok_or(Error::Ended)?;
+    if entries.next().is_some() {
+        return Err(Error::Unknown);
+    }
+    Ok(entry)
+}
+pub(crate) fn state(reply: &Value, id: i64) -> Result<Status> {
+    let item = media_entry(reply, id)?;
+    Ok(match item["playerState"].as_str().ok_or(Error::Unknown)? {
+        "PLAYING" => Status::Playing,
+        "PAUSED" => Status::Paused,
+        "BUFFERING" => Status::Buffering,
+        "IDLE" => match item["idleReason"].as_str() {
             Some("FINISHED") => Status::Finished,
             Some("INTERRUPTED") => Status::Interrupted,
             Some("CANCELLED") => Status::Canceled,
@@ -277,6 +523,7 @@ fn app_transport(v: &Value) -> Option<String> {
 async fn drive(
     mut socket: impl AsyncRead + AsyncWrite + Unpin,
     mut requests: mpsc::Receiver<Request>,
+    sender: String,
 ) {
     let mut pending = HashMap::<u64, Pending>::new();
     let mut id = 0u64;
@@ -288,16 +535,16 @@ async fn drive(
             _=tick.tick()=>{
                 if seen.elapsed()>=DEADLINE{break;}
                 pending.retain(|_,p|p.deadline>Instant::now() && !p.reply.is_closed());
-                if !write(&mut socket,HEARTBEAT,ROOT,json!({"type":"PING"})).await{break;}
+                if !write(&mut socket,&sender,HEARTBEAT,ROOT,json!({"type":"PING"})).await{break;}
             }
             req=requests.recv()=>{
                 let Some(mut req)=req else{break;};
                 if req.reply.is_closed(){continue;}
                 id+=1;
                 if req.namespace!=CONNECTION{req.body["requestId"]=id.into();}
-                if !write(&mut socket,req.namespace,&req.destination,req.body).await{break;}
+                if !write(&mut socket,&sender,req.namespace,&req.destination,req.body).await{break;}
                 if req.namespace==CONNECTION{let _=req.reply.send(Ok(Value::Null));}
-                else{pending.insert(id,Pending{namespace:req.namespace,destination:req.destination,reply:req.reply,deadline:Instant::now()+DEADLINE});}
+                else{pending.insert(id,Pending{namespace:req.namespace,destination:req.destination,reply:req.reply,deadline:Instant::now()+req.retention});}
             }
             read=socket.read_buf(&mut buffer)=>{
                 if !matches!(read,Ok(n) if n>0){break;}
@@ -307,20 +554,20 @@ async fn drive(
                     if buffer.len()<4+n{break;}
                     let message=Envelope::decode(&buffer[4..4+n]);buffer.drain(..4+n);
                     let Ok(m)=message else{return;};
-                    if m.kind!=0 || !matches!(m.destination.as_str(),"sender-0"|"*"){continue;}
+                    if m.kind!=0 || (m.destination!=sender && m.destination!="*"){continue;}
                     let Some(v)=m.message.and_then(|s|serde_json::from_str::<Value>(&s).ok()) else{continue;};
                     seen=Instant::now();
                     if m.namespace==HEARTBEAT && v["type"]=="PING" {
-                        if !write(&mut socket,HEARTBEAT,&m.source,json!({"type":"PONG"})).await{return;}
+                        if !write(&mut socket,&sender,HEARTBEAT,&m.source,json!({"type":"PONG"})).await{return;}
                     } else if m.namespace==CONNECTION && v["type"]=="CLOSE" {return;}
 
-                    if let Some(id)=v["requestId"].as_u64()
+                    if m.destination==sender && let Some(id)=v["requestId"].as_u64()
                         && pending.get(&id).is_some_and(|p|p.namespace==m.namespace && p.destination==m.source)
                         && let Some(p)=pending.remove(&id) {
-                        let result=match v["type"].as_str(){
-                            Some("LOAD_FAILED")=>Err(Error::LoadFailed),
-                            Some("LOAD_CANCELLED"|"INVALID_REQUEST"|"LAUNCH_ERROR"|"INVALID_PLAYER_STATE")=>Err(Error::Refused),
-                            Some("MEDIA_STATUS"|"RECEIVER_STATUS")=>Ok(v),
+                        let result=match (m.namespace.as_str(), v["type"].as_str()){
+                            (_, Some("LOAD_FAILED"))=>Err(Error::LoadFailed),
+                            (_, Some("LOAD_CANCELLED"|"INVALID_REQUEST"|"LAUNCH_ERROR"|"INVALID_PLAYER_STATE"))=>Err(Error::Refused),
+                            (MEDIA, Some("MEDIA_STATUS")) | (RECEIVER, Some("RECEIVER_STATUS"))=>Ok(v),
                             _=>Err(Error::Unknown)
                         };
                         let _=p.reply.send(result);
@@ -330,12 +577,20 @@ async fn drive(
         }
     }
 }
-async fn write(socket: &mut (impl AsyncWrite + Unpin), ns: &str, dest: &str, v: Value) -> bool {
+async fn write(
+    socket: &mut (impl AsyncWrite + Unpin),
+    source: &str,
+    ns: &str,
+    dest: &str,
+    v: Value,
+) -> bool {
     matches!(
-        timeout(DEADLINE, wire::send(socket, ns, dest, v)).await,
+        timeout(DEADLINE, wire::send(socket, source, ns, dest, v)).await,
         Ok(Ok(()))
     )
 }
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod adapter;

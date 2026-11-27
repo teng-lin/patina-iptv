@@ -126,8 +126,11 @@ pub fn bind(ui: Ui) {
             untracked(|| update(ui, |b, now| b.set_idle_ms(idle, now)));
         }
     });
-    let popup =
-        computed(move || ui.chooser.with(Option::is_some) || ui.description.with(Option::is_some));
+    let popup = computed(move || {
+        ui.chooser.with(Option::is_some)
+            || ui.description.with(Option::is_some)
+            || ui.cast_picker_open.get()
+    });
     effect(move || {
         let open = popup.get();
         if untracked(|| ui.play_bar.with(|b| b.held != open)) {
@@ -433,8 +436,8 @@ fn layout_for_width(ui: Ui, width: f32) -> Layout {
         // Keep transport direct where it fits, including at widths below
         // the full replay transport. A wide slider can yield to a later icon.
         for control in [
-            PlayPause, Rewind, Forward, Favorite, Guide, Pip, Mute, Multiview, Listen, Record,
-            Channels, Tracks, Volume, Details, Picture, Fullscreen,
+            PlayPause, Cast, Rewind, Forward, Favorite, Guide, Pip, Mute, Multiview, Listen,
+            Record, Channels, Tracks, Volume, Details, Picture, Fullscreen,
         ] {
             if candidates.contains(&control) && !under_more(&control) {
                 row.push(control);
@@ -526,6 +529,9 @@ fn bar_now(ui: Ui) -> impl IntoElement {
 /// An icon button shared by touch, pointer and D-pad. Admission and actions
 /// are resolved from the same stable identity on every input path.
 fn button(ui: Ui, control: Control, size: f32) -> View {
+    if control == Control::Cast && crate::airplay::direct() {
+        return crate::airplay::button(ui, size, control_id(control));
+    }
     let target_window = matches!(control, Control::More | Control::Fullscreen)
         .then(nsh_core::element::desktop::current_window);
     let icon_window = target_window.clone();
@@ -533,7 +539,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .role(AccessibilityRole::Button)
         .accessible(true)
         .test_id(control_id(control))
-        .disabled(move || !shown(ui, control) || (control == Control::Cast && ui.cast_busy.get()))
+        .disabled(move || !shown(ui, control))
         .accessibility_state(move || AccessibilityState {
             busy: control == Control::Cast && ui.cast_busy.get(),
             selected: focused(ui, control),
@@ -544,13 +550,19 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
                         .is_some_and(|c| c.kind == crate::chooser::Kind::More)
                 })
             }),
-            pressed: (control == Control::Record).then(|| {
-                if crate::recordings_view::recording_active(ui) {
+            pressed: match control {
+                Control::PlayPause => Some(if ui.paused.get() {
+                    Checked::False
+                } else {
+                    Checked::True
+                }),
+                Control::Record => Some(if crate::recordings_view::recording_active(ui) {
                     Checked::True
                 } else {
                     Checked::False
-                }
-            }),
+                }),
+                _ => None,
+            },
             ..Default::default()
         })
         .flex_shrink_0()
@@ -678,6 +690,7 @@ fn shown(ui: Ui, control: Control) -> bool {
 }
 
 fn enabled(ui: Ui, control: Control) -> bool {
+    use iptv_core::cast::Command;
     match control {
         Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
@@ -692,7 +705,17 @@ fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Cast => crate::casting::available(ui),
         Control::Pip => !ui.cast_remote.get() && crate::pip::can_enter(ui),
-        Control::Volume | Control::Fullscreen => desktop_controls(),
+        Control::PlayPause => crate::casting::supports(
+            ui,
+            if ui.paused.get() {
+                Command::Play
+            } else {
+                Command::Pause
+            },
+        ),
+        Control::Mute => crate::casting::supports(ui, Command::ToggleMute),
+        Control::Volume => desktop_controls() && crate::casting::supports(ui, Command::Volume(0)),
+        Control::Fullscreen => desktop_controls(),
         Control::Listen => crate::listen::choice(ui) && !crate::listen::heard(ui),
         _ => true,
     }

@@ -255,7 +255,7 @@ impl Scenario {
         step(self.app.wait_for_gone("text:/ Now$/", IMPORT));
     }
 
-    /// From Guide sources, wait for the stored guide (including any failed download) to be removed.
+    /// From Guide sources, wait for confirmation and the stored guide record to be removed.
     fn confirm_guide_deletion(&mut self) {
         let saved = store(&self.data);
         let source = self.source;
@@ -269,6 +269,7 @@ impl Scenario {
         step(self.app.press("text:Delete stored guide data"));
         step(self.app.wait_for("text:/^Delete guide data for /"));
         step(self.app.press("text:Delete"));
+        step(self.app.wait_for_within("text:Guide data deleted", IMPORT));
         until(
             &mut self.app,
             "the stored guide was deleted",
@@ -428,6 +429,18 @@ fn a_failed_refresh_over_a_canceled_guide_download_keeps_the_guide_timer() {
 fn a_guide_check_due_during_a_refresh_waits_for_it() {
     let Some(home) = isolated!() else { return };
     let mut s = Scenario::start(&home, true, true);
+    let notices = Arc::new(Mutex::new(Vec::new()));
+    let observed = notices.clone();
+    s.app.observe(move |_, batch| {
+        for item in &batch.items {
+            if let nsh_core::MountItem::Text { text, .. } = item {
+                let text = text.text.to_string();
+                if matches!(text.as_str(), "Guide data deleted" | "Guide updated") {
+                    observed.lock().unwrap().push(text);
+                }
+            }
+        }
+    });
     // The refresh waits for its playlist.
     let playlist = s.playlist.clone().expect("a linked playlist");
     playlist.hold();
@@ -451,6 +464,7 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
     };
     step(s.app.press(action));
     s.until_asked(asked);
+    step(s.app.wait_for("id:guide-sources-screen >> text:Updating…"));
     assert!(
         !s.pending(),
         "the update owns the guide: no timer meanwhile"
@@ -461,8 +475,24 @@ fn a_guide_check_due_during_a_refresh_waits_for_it() {
         "the generated programs are stored before deletion"
     );
     s.confirm_guide_deletion();
-    s.until_pending("the revoked update kept a guide check");
-    // The check the update asked for, hours away, comes due.
+    // The action title stays the same while updating; its status must settle.
+    // Keep the clock fixed so the confirmation cannot expire during the wait.
+    let source = s.source;
+    s.app.wait_until_fixed_clock(
+        "the revoked update unwound and kept its guide check",
+        IMPORT,
+        |screen| {
+            iptv_app::guide_check_pending(source)
+                && !screen
+                    .matches("id:guide-sources-screen >> text:Updating…")
+                    .unwrap()
+        },
+    );
+    assert!(s.shows("id:app-notice >> text:Guide data deleted"));
+    assert_eq!(notices.lock().unwrap().as_slice(), ["Guide data deleted"]);
+    // Registration is visible before the engine polls the task that arms its
+    // timer. Let it set the deadline on the current clock before jumping ahead.
+    s.app.settle();
     step(s.app.fast_forward(LATER));
     assert!(s.pending(), "due while the refresh runs: it waits again");
     // The refresh fails with no guide stored: it sets no check itself.
@@ -954,17 +984,21 @@ fn manual_guide_updates_keep_the_backoff_when_work_ends_under_an_older_generatio
     s.delete_guide_data();
     s.server.serve("not a guide".to_owned());
     s.update_now();
-    s.until_pending("the failed download set its back-off");
+    // The timer can be visible before the guide sources screen shows the
+    // failed update. Wait for the action that belongs to that result.
+    let retry = "id:guide-sources-screen >> text:Retry";
+    let source = s.source;
+    until(
+        &mut s.app,
+        "the failed download set its back-off and showed Retry",
+        IMPORT,
+        |app| iptv_app::guide_check_pending(source) && app.screen().matches(retry).unwrap(),
+    );
     let asked = s.server.requests();
     // The update waits for the store; the workers refuse the Add, then it.
     iptv_app::occupy_writer(Duration::from_secs(3));
     iptv_app::refuse_work(2);
-    let action = if s.app.screen().matches("text:Retry").unwrap() {
-        "text:Retry"
-    } else {
-        "text:Update the guide now"
-    };
-    step(s.app.press(action));
+    step(s.app.press(retry));
     to_guide(&mut s.app);
     let second = Server::start("second.m3u", "audio/x-mpegurl", String::new());
     s.add_playlist(&second.link);

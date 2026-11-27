@@ -4,8 +4,7 @@
 use crate::personalization::{self, Fixture, step};
 use iptv_settings::{Settings, Value};
 use nsh_core::{
-    AccessibilityRole, MountBatch, MountItem, NodeId, Size, ViewKind, ViewProps, platform::Idiom,
-    prelude::px,
+    AccessibilityRole, MountBatch, MountItem, NodeId, Size, ViewProps, platform::Idiom, prelude::px,
 };
 use nsh_testing::Headless;
 use std::{
@@ -545,7 +544,7 @@ fn largest_text_pin_keeps_cancel_visible_and_dpad_has_no_invisible_stop() {
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     step(
@@ -785,7 +784,7 @@ fn inactive_player_ui_stays_out_of_accessibility_and_returns_without_recreating_
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     exposure.shown(app, "guide-ui", true);

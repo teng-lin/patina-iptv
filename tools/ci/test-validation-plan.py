@@ -137,7 +137,8 @@ class Selection(unittest.TestCase):
             self.assertTrue(v.select([path])["credentials"], path)
         for path in ("tools/fetch-mpvkit.sh", "tools/mpv-runtime-ios/runtime-ios.json",
                      "crates/iptv-player-mpv/src/mpv/ios.rs", "tools/ci/check-ios.sh",
-                     "crates/iptv-app/nsh.json", "tools/check-ios-simulator-entitlements.sh"):
+                     "crates/iptv-app/nsh.json", "tools/check-ios-simulator-entitlements.sh",
+                     "crates/iptv-app/src/host/native/apple_airplay.m", "tools/apple-airplay-probe/view.rs"):
             self.assertTrue(v.select([path])["ios"], path)
         self.assertFalse(v.select(["docs/architecture.md"])["ios"])
 
@@ -252,7 +253,7 @@ class Selection(unittest.TestCase):
 
     def test_packaging_helper_dependency_closure(self):
         for path in ("tools/ci/notices.hbs", "tools/ci/component-inventory.py", "tools/ci/crypto-native-notices.py",
-                     "tools/ci/check-package-lock.py"):
+                     "tools/ci/check-package-lock.py", "crates/iptv-cast/NOTICE-pyatv.md"):
             plan = v.select([path])
             self.assertTrue(plan["packages"], path)
             self.assertFalse(plan["android_package"], path)

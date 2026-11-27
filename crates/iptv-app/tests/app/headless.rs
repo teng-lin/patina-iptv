@@ -228,6 +228,9 @@ impl Headless {
                 RemoteKey::Back => "GoBack",
                 RemoteKey::Menu => "ContextMenu",
                 RemoteKey::Stop => "MediaStop",
+                RemoteKey::Play => "MediaPlay",
+                RemoteKey::Pause => "MediaPause",
+                RemoteKey::PlayPause => "MediaPlayPause",
                 _ => return Err(format!("missing raw event for {key:?}")),
             }
             .into();
@@ -269,6 +272,7 @@ impl Headless {
             RemoteKey::Ok => "Enter",
             RemoteKey::Menu => "ContextMenu",
             RemoteKey::PlayPause => "MediaPlayPause",
+            RemoteKey::Pause => "MediaPause",
             RemoteKey::Previous => "MediaTrackPrevious",
             RemoteKey::Back => "GoBack",
             RemoteKey::Digit(d) => ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"][d as usize],

@@ -9,6 +9,7 @@ use iptv_library::SourceId;
 use std::{future::Future, rc::Rc};
 
 /// Parental policy verified against committed storage for external playback.
+#[derive(Clone)]
 pub struct ExternalPlaybackAuthorization {
     access: crate::parental::Snapshot,
     target: Target,

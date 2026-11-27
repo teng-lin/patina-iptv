@@ -615,7 +615,7 @@ fn fullscreen_channel_order(home: crate::isolated::Home, overlay: bool) {
         app.screen()
             .layout_nodes()
             .into_iter()
-            .find(|node| node.kind == nsh_core::ViewKind::Native)
+            .find(|node| node.test_id.as_deref() == Some("video-player"))
             .expect("persistent player")
     };
     let id = player(app).id;
@@ -648,6 +648,93 @@ fn fullscreen_channel_order(home: crate::isolated::Home, overlay: bool) {
         iptv_app::player_has_source(0),
         "the original stream stays open"
     );
+}
+
+#[test]
+fn tablet_channel_grip_keeps_a_diagonal_drag_across_the_timeline() {
+    use nsh_core::{geometry::point, platform::Idiom, prelude::px};
+
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_environment("Android tablet", |env| {
+        env.idiom = Idiom::Pad;
+        env.os = nsh_core::platform::Os::Android;
+    }));
+    open_inline_order(app);
+    let strip = "id:reorder-grip-strip";
+    step(app.wait_for(strip));
+    let second = "id:guide-row >> nth=1 >> text:★ Local B";
+    step(app.drag(second, point(px(0.0), px(-50.0))));
+    step(app.wait_for(second));
+    // The three handles share a hit target outside the native list. Its
+    // center is B. Start sideways across the timeline's pan threshold.
+    step(app.drag(strip, point(px(90.0), px(-50.0))));
+    let first = "id:guide-row >> nth=0 >> text:★ Local B";
+    step(app.wait_for(first));
+    step(app.press("id:organization-screen >> text:Save"));
+    step(app.wait_for_gone("id:organization-screen", Duration::from_secs(5)));
+    step(app.wait_for(first));
+}
+
+#[test]
+fn tablet_channel_drop_uses_the_position_delivered_on_finger_up() {
+    use nsh_core::{
+        EventKind, EventPayload, PointerType, ROOT_ID, TouchEvent, TouchPhase, TouchPoint,
+        geometry::point, platform::Idiom, prelude::px,
+    };
+
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_environment("iPad", |env| {
+        env.idiom = Idiom::Pad;
+        env.os = nsh_core::platform::Os::Ios;
+    }));
+    open_inline_order(app);
+    step(app.wait_for("id:reorder-grip-strip"));
+    let strip = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.test_id.as_deref() == Some("reorder-grip-strip"))
+        .unwrap();
+    let center = strip.bounds.center();
+    // The middle row is B. A quick drag can lift over A without a move sample.
+    for (phase, timestamp, y) in [
+        (TouchPhase::Start, 0.0, center.y),
+        (TouchPhase::End, 100.0, center.y - px(50.0)),
+    ] {
+        let event = TouchEvent {
+            phase,
+            timestamp,
+            points: vec![TouchPoint {
+                id: 1,
+                target: strip.id,
+                path: if phase == TouchPhase::Start {
+                    vec![strip.id]
+                } else {
+                    vec![]
+                },
+                page: point(center.x, y),
+                location: point(center.x - strip.bounds.origin.x, y - strip.bounds.origin.y),
+                changed: true,
+                pointer_type: PointerType::Touch,
+                pressure: TouchPoint::default_pressure(phase, true),
+                tilt_x: 0.0,
+                tilt_y: 0.0,
+            }],
+            modifiers: Default::default(),
+            activated: None,
+        };
+        app.engine().control().dispatch_event(
+            ROOT_ID,
+            EventKind::Touch,
+            EventPayload::Touch(Box::new(event)),
+        );
+        app.settle();
+    }
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
 }
 
 #[test]

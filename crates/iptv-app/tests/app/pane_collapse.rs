@@ -19,7 +19,7 @@ use iptv_providers::{
     model::{ContentKind, Source, SourceConfig, XtreamCredentials},
 };
 use iptv_settings::Value;
-use nsh_core::{NodeId, Size, ViewKind, element::Root, platform::Idiom, prelude::*};
+use nsh_core::{NodeId, Size, element::Root, platform::Idiom, prelude::*};
 use nsh_engine::EngineConfig;
 
 const EXPANDED: (f32, f32) = (1920.0, 1080.0);
@@ -54,7 +54,7 @@ fn player(app: &Headless) -> NodeId {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.kind == ViewKind::Native)
+        .filter(|n| n.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(players.len(), 1, "one persistent player surface");
     players[0].id

@@ -10,8 +10,7 @@ use iptv_providers::{
 };
 use iptv_settings::{Settings, Value as Setting};
 use nsh_core::{
-    EventKind, EventPayload, MountItem, Point, Size, ViewKind, element::Root, platform::Idiom,
-    prelude::*,
+    EventKind, EventPayload, MountItem, Point, Size, element::Root, platform::Idiom, prelude::*,
 };
 use nsh_engine::EngineConfig;
 use serde_json::{Value, json};
@@ -168,7 +167,7 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     let send = |app: &mut Headless, name: &str, data: Value| {
@@ -275,7 +274,7 @@ fn saved_recording_resumes_seeks_paused_and_starts_again_without_changing_surfac
         app.screen()
             .layout_nodes()
             .into_iter()
-            .filter(|node| node.kind == ViewKind::Native)
+            .filter(|node| node.test_id.as_deref() == Some("video-player"))
             .map(|node| node.id)
             .collect::<Vec<_>>(),
         [player],
@@ -304,7 +303,7 @@ fn tv_saved_playback_returns_through_guide_preview_without_reopening_the_player(
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     step(app.press_key("m"));
@@ -412,7 +411,7 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|n| n.kind == ViewKind::Native)
+        .find(|n| n.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     step(app.press("id:video"));
@@ -502,7 +501,7 @@ fn back_returns_to_the_library_and_delete_handles_the_playing_file_after_consent
         app.screen()
             .layout_nodes()
             .iter()
-            .any(|n| n.kind == ViewKind::Native && n.id == player)
+            .any(|n| n.test_id.as_deref() == Some("video-player") && n.id == player)
     );
 }
 
@@ -538,7 +537,7 @@ fn a_saved_recording_grant_revoked_during_preparation_never_reaches_the_native_p
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     app.engine().control().dispatch_event(
@@ -582,7 +581,7 @@ fn foreground_before_ready_reauthorizes_retained_recording_without_transport_err
         .screen()
         .layout_nodes()
         .into_iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     let before = iptv_app::player_opens(0);

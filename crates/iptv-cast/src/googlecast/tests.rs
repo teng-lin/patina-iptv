@@ -10,7 +10,7 @@ async fn next_frame(peer: &mut DuplexStream) -> (Envelope, Value) {
     (frame, body)
 }
 
-async fn next_request(peer: &mut DuplexStream) -> (Envelope, Value) {
+pub(super) async fn next_request(peer: &mut DuplexStream) -> (Envelope, Value) {
     loop {
         let (frame, body) = next_frame(peer).await;
         if frame.namespace != HEARTBEAT {
@@ -19,7 +19,7 @@ async fn next_request(peer: &mut DuplexStream) -> (Envelope, Value) {
     }
 }
 
-fn frame_bytes(namespace: &str, src: &str, value: Value) -> Vec<u8> {
+pub(super) fn frame_bytes(namespace: &str, src: &str, value: Value) -> Vec<u8> {
     let data = Envelope {
         version: 0,
         source: src.into(),
@@ -34,24 +34,26 @@ fn frame_bytes(namespace: &str, src: &str, value: Value) -> Vec<u8> {
     frame
 }
 
-async fn answer(peer: &mut DuplexStream, src: &str, value: Value) {
+pub(super) async fn answer(peer: &mut DuplexStream, src: &str, value: Value) {
     peer.write_all(&frame_bytes(MEDIA, src, value))
         .await
         .unwrap();
 }
 
-fn session_pair() -> (Session, DuplexStream, tokio::task::JoinHandle<()>) {
+pub(super) fn session_pair() -> (Session, DuplexStream, tokio::task::JoinHandle<()>) {
     let (client, receiver) = tokio::io::duplex(8192);
     let (session, requests) = session_channel();
-    let driver = tokio::spawn(drive(client, requests));
+    let driver = tokio::spawn(drive(client, requests, "sender-0".into()));
     (session, receiver, driver)
 }
 
-fn session_channel() -> (Session, mpsc::Receiver<Request>) {
+pub(super) fn session_channel() -> (Session, mpsc::Receiver<Request>) {
     let (outgoing, requests) = mpsc::channel(8);
     let session = Session {
         outgoing,
-        local_ip: IpAddr::from([127, 0, 0, 1]),
+        local_addr: ([127, 0, 0, 1], 12345).into(),
+        peer_addr: ([127, 0, 0, 1], 8009).into(),
+        driver: None,
         transport: "synthetic-app".into(),
     };
     (session, requests)
@@ -228,7 +230,11 @@ async fn a_fragmented_heartbeat_and_status_in_one_read_complete_the_pending_requ
     // Each slice ends a separate successful read, splitting both the header and payload.
     let reader = ping[..2].chain(&ping[2..9]).chain(socket_read);
     let (session, requests) = session_channel();
-    let driver = drive(tokio::io::join(reader, socket_write), requests);
+    let driver = drive(
+        tokio::io::join(reader, socket_write),
+        requests,
+        "sender-0".into(),
+    );
     let transport = session.transport.clone();
     let receiver = async {
         let (_, req) = next_request(&mut peer).await;
@@ -311,4 +317,48 @@ async fn an_unanswered_request_expires_while_heartbeats_keep_the_session_usable(
         assert_eq!(session.status(7).await, Ok(Status::Paused));
     };
     tokio::join!(sender, receiver);
+}
+
+mod failures;
+mod media;
+
+#[tokio::test(start_paused = true)]
+async fn receiver_launch_retains_delivery_evidence_from_its_own_request() {
+    let (session, requests) = session_channel();
+    drop(requests);
+    let mut delivery = Delivery::NotSent;
+    assert_eq!(session.launch(&mut delivery).await, Err(Error::Unreachable));
+    assert_eq!(delivery, Delivery::NotSent);
+
+    for (response, expected, disposition) in [
+        (
+            Some(Err(Error::Refused)),
+            Err(Error::Refused),
+            Delivery::Acknowledged,
+        ),
+        (
+            Some(Ok(
+                json!({"status":{"applications":[{"appId":APP,"transportId":"generated"}]}}),
+            )),
+            Ok("generated".to_owned()),
+            Delivery::Acknowledged,
+        ),
+        (None, Err(Error::TimedOut), Delivery::MayHaveReachedReceiver),
+    ] {
+        let (session, mut requests) = session_channel();
+        let mut delivery = Delivery::NotSent;
+        let receiver = async {
+            let request = requests.recv().await.unwrap();
+            assert_eq!(request.namespace, RECEIVER);
+            assert_eq!(request.body["type"], "LAUNCH");
+            if let Some(response) = response {
+                request.reply.send(response).unwrap();
+            } else {
+                tokio::time::sleep(DEADLINE + Duration::from_secs(1)).await;
+            }
+        };
+        let (result, ()) = tokio::join!(session.launch(&mut delivery), receiver);
+        assert_eq!(result, expected);
+        assert_eq!(delivery, disposition);
+    }
 }

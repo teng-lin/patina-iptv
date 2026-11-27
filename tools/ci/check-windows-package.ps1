@@ -50,7 +50,7 @@ public static class PatinaPackageWindow {
 try {
     $setup = Start-Process -FilePath $installers[0].FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS', "/DIR=`"$installed`"") -WindowStyle Hidden -Wait -PassThru
     if ($setup.ExitCode -ne 0) { throw "Installer failed: $($setup.ExitCode)" }
-    foreach ($file in @('Patina.exe', 'libmpv-2.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'LICENSE', 'notices/THIRD-PARTY.html', 'notices/components.json', 'notices/libmpv/licenses', 'notices/libmpv/components.json', 'notices/libmpv/sources.lock.json', 'notices/libmpv/SOURCE.txt', 'notices/libmpv/NOTICE.txt', 'notices/libmpv/build-config')) {
+    foreach ($file in @('Patina.exe', 'libmpv-2.dll', 'vcruntime140.dll', 'vcruntime140_1.dll', 'LICENSE', 'notices/THIRD-PARTY.html', 'notices/components.json', 'notices/NOTICE-pyatv.md', 'notices/libmpv/licenses', 'notices/libmpv/components.json', 'notices/libmpv/sources.lock.json', 'notices/libmpv/SOURCE.txt', 'notices/libmpv/NOTICE.txt', 'notices/libmpv/build-config')) {
         if (!(Test-Path -LiteralPath (Join-Path $installed $file))) { throw "Installed file missing: $file" }
     }
     if ((Get-Content -LiteralPath (Join-Path $installed 'patina-package') -Raw) -cne 'exe') {

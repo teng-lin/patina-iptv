@@ -1,88 +1,78 @@
 use super::*;
 
 #[test]
-fn reasonless_idle_has_a_grace_period_that_playback_resets() {
-    let start = Instant::now();
-    let mut idle_since = None;
-    let mut sample = |status, seconds| {
-        observed_state(
-            status,
-            &mut idle_since,
-            start + Duration::from_secs(seconds),
-        )
-    };
-    assert_eq!(sample(Status::Idle, 0), RemoteState::Loading);
-    assert_eq!(sample(Status::Paused, 14), RemoteState::Paused);
-    assert_eq!(sample(Status::Idle, 15), RemoteState::Loading);
-    assert_eq!(sample(Status::Idle, 29), RemoteState::Loading);
-    assert_eq!(sample(Status::Idle, 30), RemoteState::Ended);
-    for status in [
-        Status::Failed,
-        Status::Finished,
-        Status::Canceled,
-        Status::Interrupted,
+fn a_sender_local_ipv6_zone_cannot_escape_into_the_receiver_url() {
+    for address in ["[fe80::1%3]:7000", "[fe80::1]:7000", "[fd12::1%5]:7000"] {
+        assert_eq!(
+            relay_listen_addr(address.parse().unwrap(), 49152),
+            Err(Error::AirPlayRelayAddress)
+        );
+    }
+    for (control, expected) in [
+        ("192.0.2.10:7000", "192.0.2.10:49152"),
+        ("[fd12::1]:7000", "[fd12::1]:49152"),
     ] {
-        assert_eq!(sample(Status::Playing, 31), RemoteState::Playing);
-        assert_eq!(sample(Status::Idle, 31), RemoteState::Loading);
-        assert_eq!(sample(status, 31), RemoteState::Ended);
+        assert_eq!(
+            relay_listen_addr(control.parse().unwrap(), 49152).unwrap(),
+            expected.parse().unwrap()
+        );
     }
 }
 
-#[tokio::test]
-async fn silent_connection_can_recover_after_its_status_deadline() {
-    let recovered = status_or_rejoin(
-        Instant::now(),
-        std::future::pending(),
-        Duration::from_secs(15),
-        async {
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            Ok(("replacement connection", Status::Paused))
-        },
-    )
-    .await;
-    assert_eq!(
-        recovered,
-        Ok((Some("replacement connection"), Status::Paused))
-    );
+#[test]
+fn cast_relay_uses_a_fixed_default_or_an_explicit_tcp_port() {
+    assert_eq!(configured_relay_port(None), Ok(49152));
+    assert_eq!(configured_relay_port(Some(OsStr::new("53317"))), Ok(53317));
+    for value in ["", "0", "65536", "abc"] {
+        assert_eq!(
+            configured_relay_port(Some(OsStr::new(value))),
+            Err(Error::Unavailable)
+        );
+    }
 }
 
+#[cfg(feature = "test-support")]
 #[tokio::test]
-async fn recovery_has_its_own_bound_and_propagates_lost_ownership() {
-    assert_eq!(
-        status_or_rejoin::<()>(
-            Instant::now() + Duration::from_secs(15),
-            std::future::ready(Err(googlecast::Error::Unreachable)),
-            Duration::ZERO,
-            std::future::pending(),
-        )
-        .await,
-        Err(googlecast::Error::Unknown)
-    );
-    assert_eq!(
-        status_or_rejoin::<()>(
-            Instant::now(),
-            std::future::pending(),
-            Duration::from_secs(15),
-            std::future::ready(Err(googlecast::Error::Ended)),
-        )
-        .await,
-        Err(googlecast::Error::Ended)
-    );
-}
+async fn locally_rejected_loads_release_the_relay_port_before_returning() {
+    use iptv_cast::test_support;
 
-#[tokio::test]
-async fn definitive_status_on_the_original_connection_skips_rejoin() {
-    for (status, expected) in [
-        (Ok(Status::Playing), Ok((None, Status::Playing))),
-        (Err(googlecast::Error::Ended), Err(googlecast::Error::Ended)),
+    for media in [
+        Media::live("invalid media URL"),
+        Media::live("http://example.test/generated-without-content-type"),
     ] {
-        let actual = status_or_rejoin::<()>(
-            Instant::now() + Duration::from_secs(15),
-            std::future::ready(status),
-            Duration::from_secs(15),
-            async { panic!("unexpected replacement connection") },
+        let key_pair = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+        let receiver = test_support::Receiver::start(
+            test_support::Load::Immediate,
+            key_pair.cert.der().to_vec(),
+            key_pair.key_pair.serialize_der(),
         )
         .await;
-        assert_eq!(actual, expected);
+        let cast = test_support::sender(receiver.address()).unwrap();
+        let routes = cast.discover(Duration::from_secs(1)).await.unwrap();
+        let Connect::Ready(connection) = cast.connect(&routes.routes()[0]).await.unwrap() else {
+            panic!("unexpected pairing for loopback Chromecast");
+        };
+        let loopback = receiver.address().ip();
+        let (relay, gate) = PlaybackRelay::start_cast(
+            "http://example.test/generated.m3u8",
+            &[],
+            Default::default(),
+            SocketAddr::new(loopback, 0),
+            loopback,
+        )
+        .unwrap();
+        let listen: SocketAddr = relay.url().split('/').nth(2).unwrap().parse().unwrap();
+        assert_eq!(
+            Pending::submit(connection, relay, gate, media).await.err(),
+            Some(Error::Unsupported),
+        );
+        let listener = std::net::TcpListener::bind(listen)
+            .expect("returning from a rejected load must make the same relay port reusable");
+        drop(listener);
+        assert!(receiver.events().is_empty());
+        timeout(Duration::from_secs(5), receiver.finish())
+            .await
+            .unwrap()
+            .unwrap();
     }
 }

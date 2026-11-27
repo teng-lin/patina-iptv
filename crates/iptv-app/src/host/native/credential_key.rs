@@ -4,6 +4,10 @@ use std::path::Path;
 
 use crate::runtime::{Error, model::DatabaseKey};
 #[cfg(all(target_os = "linux", not(feature = "test-support")))]
+mod cast_store;
+#[cfg(all(target_os = "linux", not(feature = "test-support")))]
+pub(super) use cast_store::CastStore;
+#[cfg(all(target_os = "linux", not(feature = "test-support")))]
 mod linux;
 #[cfg(all(
     any(target_os = "macos", target_os = "ios", windows),
@@ -191,6 +195,7 @@ mod tests {
             );
             return;
         }
+        super::cast_store::verify_disposable_pairing_store();
         let directory = tempfile::tempdir().unwrap();
         let owner = || {
             std::rc::Rc::new(crate::runtime::Runtime::new(crate::runtime::Ports::new(

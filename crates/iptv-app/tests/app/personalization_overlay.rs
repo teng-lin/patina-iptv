@@ -1,6 +1,5 @@
 use crate::personalization;
 use iptv_settings::{Settings, Value};
-use nsh_core::ViewKind;
 use personalization::*;
 use std::time::Duration;
 
@@ -20,7 +19,7 @@ fn player(app: &mut crate::headless::Headless) -> nsh_testing::LayoutNode {
         .screen()
         .layout_nodes()
         .into_iter()
-        .filter(|n| n.kind == ViewKind::Native)
+        .filter(|n| n.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(players.len(), 1, "one persistent player surface");
     players[0].clone()

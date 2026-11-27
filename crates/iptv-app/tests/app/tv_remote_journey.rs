@@ -324,6 +324,32 @@ fn guide_context_gestures_share_channel_actions_without_tuning() {
 }
 
 #[test]
+fn a_long_pause_override_toggles_while_short_pause_stays_idempotent() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, lifetime, _) = tv(home, |settings| {
+        settings
+            .set(
+                keys::KEY_OVERRIDES.as_str(),
+                Value::KeyBindings(vec![KeyBinding::new(
+                    Some("player"),
+                    "pause",
+                    PressKind::Long,
+                    "play_pause",
+                )]),
+            )
+            .unwrap();
+    });
+    let app = &mut fixture.app;
+    first_channel_fullscreen(app, &lifetime);
+    let props = crate::vod_library::observe_props(app);
+    step(app.remote_tap(RemoteKey::Pause));
+    step(app.remote_tap(RemoteKey::Pause));
+    assert_eq!(props.lock().unwrap()["paused"], true);
+    hold(app, RemoteKey::Pause, 700, true);
+    assert_eq!(props.lock().unwrap()["paused"], false);
+}
+
+#[test]
 fn a_custom_long_ok_action_is_not_replaced_by_the_guide_context_menu() {
     let Some(home) = tv_isolated!() else { return };
     let (mut fixture, _, _) = tv(home, |settings| {

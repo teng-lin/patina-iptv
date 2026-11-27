@@ -20,13 +20,14 @@ pub(crate) struct Envelope {
 pub(crate) const MAX_FRAME: usize = 64 * 1024;
 pub(crate) async fn send(
     socket: &mut (impl AsyncWrite + Unpin),
+    source: &str,
     namespace: &str,
     destination: &str,
     message: serde_json::Value,
 ) -> io::Result<()> {
     let bytes = Envelope {
         version: 0,
-        source: "sender-0".into(),
+        source: source.into(),
         destination: destination.into(),
         namespace: namespace.into(),
         kind: 0,
@@ -39,3 +40,6 @@ pub(crate) async fn send(
     socket.write_u32(bytes.len() as u32).await?;
     socket.write_all(&bytes).await
 }
+
+#[cfg(test)]
+mod tests;

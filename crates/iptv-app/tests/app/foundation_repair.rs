@@ -7,8 +7,7 @@ use iptv_providers::{
 };
 use iptv_store_sqlite::{GuideSource, SourcePolicy};
 use nsh_core::{
-    EventKind, EventPayload, MountItem, NodeId, Size, ViewKind, ViewProps, element::Root,
-    prelude::*,
+    EventKind, EventPayload, MountItem, NodeId, Size, ViewProps, element::Root, prelude::*,
 };
 use std::{
     collections::HashMap,
@@ -54,7 +53,7 @@ fn assert_playback_unchanged(
     let nodes = t.app.screen().layout_nodes();
     let players: Vec<_> = nodes
         .iter()
-        .filter(|node| node.kind == ViewKind::Native)
+        .filter(|node| node.test_id.as_deref() == Some("video-player"))
         .collect();
     assert_eq!(players.len(), 1);
     assert_eq!(players[0].id, player);
@@ -305,7 +304,7 @@ fn repair_journey(home: crate::isolated::Home, protected: bool) {
     let nodes = t.app.screen().layout_nodes();
     let player = nodes
         .iter()
-        .find(|node| node.kind == ViewKind::Native)
+        .find(|node| node.test_id.as_deref() == Some("video-player"))
         .unwrap()
         .id;
     t.app.engine().control().dispatch_event(

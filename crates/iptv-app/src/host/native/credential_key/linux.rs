@@ -2,25 +2,33 @@
 //! match keyring's existing item, so this does not create a second credential.
 use dbus_secret_service::{EncryptionType, SecretService};
 use std::collections::HashMap;
-pub(super) struct Entry(SecretService);
+pub(super) struct Entry {
+    broker: SecretService,
+    service: String,
+    account: String,
+}
 fn error(error: dbus_secret_service::Error) -> keyring::Error {
     keyring::Error::PlatformFailure(Box::new(error))
 }
-fn attributes() -> HashMap<&'static str, &'static str> {
-    HashMap::from([
-        ("service", "org.iptv-rs.database"),
-        ("username", "catalog-v1"),
-        ("target", "default"),
-    ])
-}
 impl Entry {
-    pub(super) fn new(_: &str, _: &str) -> Result<Self, keyring::Error> {
-        SecretService::connect_with_max_prompt_timeout(EncryptionType::Dh, 30)
-            .map(Self)
-            .map_err(error)
+    pub(super) fn new(service: &str, account: &str) -> Result<Self, keyring::Error> {
+        let broker = SecretService::connect_with_max_prompt_timeout(EncryptionType::Dh, 30)
+            .map_err(error)?;
+        Ok(Self {
+            broker,
+            service: service.to_owned(),
+            account: account.to_owned(),
+        })
+    }
+    fn attributes(&self) -> HashMap<&str, &str> {
+        HashMap::from([
+            ("service", self.service.as_str()),
+            ("username", self.account.as_str()),
+            ("target", "default"),
+        ])
     }
     pub(super) fn get_secret(&self) -> Result<Vec<u8>, keyring::Error> {
-        let found = self.0.search_items(attributes()).map_err(error)?;
+        let found = self.broker.search_items(self.attributes()).map_err(error)?;
         let count = found.locked.len() + found.unlocked.len();
         if count == 0 {
             return Err(keyring::Error::NoEntry);
@@ -39,21 +47,25 @@ impl Entry {
         item.get_secret().map_err(error)
     }
     pub(super) fn set_secret(&self, secret: &[u8]) -> Result<(), keyring::Error> {
-        let collection = self.0.get_default_collection().map_err(error)?;
+        let collection = self.broker.get_default_collection().map_err(error)?;
         if collection.is_locked().map_err(error)? {
             collection.unlock().map_err(error)?;
         }
-        let mut attributes = attributes();
+        let mut attributes = self.attributes();
         attributes.insert("application", "rust-keyring");
+        let label = match self.service.as_str() {
+            "org.iptv-rs.database" => "Patina catalog key",
+            _ => crate::i18n::tr("Patina AirPlay pairing"),
+        };
         collection
-            .create_item("Patina catalog key", attributes, secret, true, "text/plain")
+            .create_item(label, attributes, secret, true, "text/plain")
             .map_err(error)?;
         Ok(())
     }
 
     #[cfg(test)]
     pub(super) fn lock_collection(&self) -> Result<(), keyring::Error> {
-        self.0
+        self.broker
             .get_default_collection()
             .map_err(error)?
             .lock()
@@ -61,9 +73,27 @@ impl Entry {
     }
 
     #[cfg(test)]
+    pub(super) fn add_session_duplicate(&self, secret: &[u8]) -> Result<(), keyring::Error> {
+        self.broker
+            .get_collection_by_alias("session")
+            .map_err(error)?
+            .create_item(
+                "Generated duplicate pairing",
+                self.attributes(),
+                secret,
+                false,
+                "text/plain",
+            )
+            .map_err(error)?;
+        Ok(())
+    }
+
     pub(super) fn delete_secret(&self) -> Result<(), keyring::Error> {
-        let found = self.0.search_items(attributes()).map_err(error)?;
+        let found = self.broker.search_items(self.attributes()).map_err(error)?;
         for item in found.unlocked.iter().chain(&found.locked) {
+            if item.is_locked().map_err(error)? {
+                item.unlock().map_err(error)?;
+            }
             item.delete().map_err(error)?;
         }
         Ok(())
