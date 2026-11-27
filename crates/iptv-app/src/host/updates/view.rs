@@ -359,12 +359,14 @@ fn cancel_download(ui: Ui) {
 async fn until_cancelled<T>(
     operation: impl std::future::Future<Output = T>,
     cancellation: impl std::future::Future<Output = ()>,
+    cancelled: impl Fn() -> bool,
 ) -> Option<T> {
     let mut operation = std::pin::pin!(operation);
     let mut cancellation = std::pin::pin!(cancellation);
     std::future::poll_fn(move |context| {
-        // Cancellation wins when the result arrives before the next shell poll.
-        if cancellation.as_mut().poll(context).is_ready() {
+        // Read the flag on every poll: the wakeup future can still be waiting
+        // for its timer when a late authorization result wakes the shell task.
+        if cancelled() || cancellation.as_mut().poll(context).is_ready() {
             return std::task::Poll::Ready(None);
         }
         operation.as_mut().poll(context).map(Some)
@@ -408,6 +410,7 @@ fn download(ui: Ui) {
         let Some(result) = until_cancelled(
             crate::host::updates::action_for(&check),
             authorization_cancelled(ui),
+            move || !ui.owner.is_live() || ui.update_cancel_requested.get_untracked(),
         )
         .await
         else {

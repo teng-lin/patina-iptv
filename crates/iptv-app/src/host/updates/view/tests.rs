@@ -34,9 +34,11 @@ fn cancelling_authorization_drops_the_wait_and_busy_guard_without_dispatching_a_
         let busy = operation.busy;
         let dropped = Rc::new(Cell::new(false));
         let dispatched = Cell::new(false);
+        let cancel_requested = Cell::new(false);
+        let cancelled_flag = &cancel_requested;
         let guard = Dropped(Rc::clone(&dropped));
         let (complete, held) = futures_channel::oneshot::channel::<Result<(), &'static str>>();
-        let (cancel, cancelled) = futures_channel::oneshot::channel::<()>();
+        let (_cancel, cancelled) = futures_channel::oneshot::channel::<()>();
         let mut task = std::pin::pin!(async {
             let _operation = operation;
             let result = until_cancelled(
@@ -45,8 +47,11 @@ fn cancelling_authorization_drops_the_wait_and_busy_guard_without_dispatching_a_
                     held.await.unwrap()
                 },
                 async move {
-                    let _ = cancelled.await;
+                    if !cancelled_flag.get() {
+                        let _ = cancelled.await;
+                    }
                 },
+                || cancel_requested.get(),
             )
             .await;
             if result.is_some() {
@@ -57,7 +62,9 @@ fn cancelling_authorization_drops_the_wait_and_busy_guard_without_dispatching_a_
         assert_eq!(task.as_mut().poll(&mut context), Poll::Pending);
         assert!(busy.get_untracked());
         assert!(!dropped.get());
-        cancel.send(()).unwrap();
+        cancel_requested.set(true);
+        // The timer has not fired. Its cancellation future remains suspended
+        // in its oneshot wait when the authorization result wakes this task.
         // A late verification error is ready in the same shell turn. Cancel
         // still wins, so no notification, browser route or handoff is dispatched.
         complete
