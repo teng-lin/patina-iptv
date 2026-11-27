@@ -364,11 +364,17 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     app.answer_picks_myself();
     step(app.wait_for("id:wizard-welcome"));
 
+    let open_m3u_form = |app: &mut Headless| {
+        step(app.press("id:wizard-welcome-add"));
+        step(app.wait_for("id:wizard-form"));
+        step(app.press("id:wizard-source-type"));
+        step(app.wait_for("id:wizard-source-picker"));
+        step(app.press("text:Playlist link"));
+    };
+
     iptv_app::hold_reports(true);
     let _release_reports = ReleaseReports;
-    step(app.press("id:wizard-welcome-add"));
-    step(app.wait_for("id:wizard-source-picker"));
-    step(app.press("text:Playlist link"));
+    open_m3u_form(&mut app);
     let old_url = format!("{local}/empty.m3u");
     enter(&mut app, "http://…/playlist.m3u", &old_url);
     step(app.press("text:Add playlist"));
@@ -384,9 +390,7 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     step(app.press_key("backspace"));
     step(app.wait_for("id:wizard-welcome"));
 
-    step(app.press("id:wizard-welcome-add"));
-    step(app.wait_for("id:wizard-source-picker"));
-    step(app.press("text:Playlist link"));
+    open_m3u_form(&mut app);
     let new_url = format!("{local}/delayed.m3u");
     enter(&mut app, "http://…/playlist.m3u", &new_url);
     step(app.press("text:Add playlist"));
