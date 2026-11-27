@@ -199,7 +199,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
             let (id, _) = runtime.start_wizard_import(
                 job,
                 move |id, _store_epoch| {
-                    ui.wizard.update(|open| {
+                    ui.screens.wizard.update(|open| {
                         if let Some(open) = open {
                             open.wizard.admit_import(id);
                         }
