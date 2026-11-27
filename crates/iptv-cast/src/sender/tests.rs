@@ -76,10 +76,12 @@ struct Fixture {
     acknowledge: Arc<Semaphore>,
     pairing_gate: Arc<Semaphore>,
     fetch: Option<SocketAddr>,
+    connect_entered: Count,
     load_entered: Count,
     load_sent: Count,
     stops: Count,
     controls: Count,
+    block_command: AtomicBool,
     closes: Count,
     pairs: Count,
     cancelled_pairs: Count,
@@ -97,10 +99,12 @@ impl Default for Fixture {
             acknowledge: Arc::new(Semaphore::new(0)),
             pairing_gate: Arc::new(Semaphore::new(0)),
             fetch: None,
+            connect_entered: Count::default(),
             load_entered: Count::default(),
             load_sent: Count::default(),
             stops: Count::default(),
             controls: Count::default(),
+            block_command: AtomicBool::new(false),
             closes: Count::default(),
             pairs: Count::default(),
             cancelled_pairs: Count::default(),
@@ -123,6 +127,7 @@ impl Fixture {
             expires: false,
             unsent_load: false,
             insecure_pair: false,
+            block_connect: false,
         }
     }
 }
@@ -140,6 +145,7 @@ struct Fake {
     expires: bool,
     unsent_load: bool,
     insecure_pair: bool,
+    block_connect: bool,
 }
 
 impl Backend for Fake {
@@ -189,6 +195,10 @@ impl Backend for Fake {
     ) -> BoxFuture<'a, Result<BackendConnect, Error>> {
         Box::pin(async move {
             assert!(matches!(route.payload::<u8>(), Some(2 | 3)));
+            if self.block_connect {
+                self.fixture.connect_entered.bump();
+                std::future::pending::<()>().await;
+            }
             let driver = Receiver {
                 fixture: self.fixture.clone(),
                 events: self.fixture.events.subscribe(),
@@ -397,6 +407,9 @@ impl Driver for Receiver {
         Box::pin(async move {
             self.check_owner(Stage::Control)?;
             self.fixture.controls.bump();
+            if self.fixture.block_command.load(Ordering::Relaxed) {
+                std::future::pending::<()>().await;
+            }
             Ok(Confirmation::ReceiverConfirmed)
         })
     }
@@ -799,12 +812,13 @@ async fn cancellation_and_terminal_load_results_respect_delivery() {
         .load(media())
         .unwrap();
     let mut updates = session.subscribe();
+    let mut final_failure = None;
     while let Some(snapshot) = updates.next().await {
         if let Playback::Failed(error) = snapshot.playback() {
-            assert_eq!(error.delivery(), Delivery::NotSent);
-            assert_eq!(snapshot.link(), Link::Disconnected);
+            final_failure = Some((error.delivery(), snapshot.link()));
         }
     }
+    assert_eq!(final_failure, Some((Delivery::NotSent, Link::Disconnected)));
     assert_eq!(
         session.stop().await.unwrap(),
         StopOutcome::CancelledBeforeSend
@@ -1033,6 +1047,30 @@ async fn close_is_local_only_and_live_seek_is_disabled() {
     assert_eq!(fixture.stops.read(), 0);
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_stalled_command_retires_with_uncertainty_and_leaves_stop_available() {
+    let fixture = Arc::new(Fixture::default());
+    fixture.block_command.store(true, Ordering::Relaxed);
+    fixture.send_gate.add_permits(1);
+    fixture.acknowledge.add_permits(1);
+    let cast = cast(fixture.backend());
+    let route = route(&cast).await;
+    let mut session = connection(&cast, &route).await.load(media()).unwrap();
+    display_start(&session).await;
+    assert_error(
+        session.command(Command::Play).await.unwrap_err(),
+        ErrorKind::TimedOut,
+        Stage::Control,
+        Delivery::MayHaveReachedReceiver,
+    );
+    assert_eq!(fixture.controls.read(), 1);
+    assert_eq!(
+        session.stop().await.unwrap(),
+        StopOutcome::StopRequested(Confirmation::ReceiverConfirmed),
+    );
+    assert_eq!(fixture.closes.read(), 1);
+}
+
 #[tokio::test]
 async fn pairing_reuses_credentials_and_rejects_identity_mismatch() {
     let fixture = Arc::new(Fixture::default());
@@ -1065,6 +1103,32 @@ async fn pairing_reuses_credentials_and_rejects_identity_mismatch() {
     let pairing = pairing(&cast, &route).await;
     pairing.cancel().await;
     assert_eq!(fixture.cancelled_pairs.read(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupted_connect_reports_uncertainty_after_backend_dispatch() {
+    let fixture = Arc::new(Fixture::default());
+    let mut backend = fixture.backend();
+    backend.pair = true;
+    backend.block_connect = true;
+    let cast = cast(backend);
+    let route = route(&cast).await;
+    assert_error(
+        cast.connect(&route).await.err().unwrap(),
+        ErrorKind::TimedOut,
+        Stage::Connect,
+        Delivery::MayHaveReachedReceiver,
+    );
+    let (worker, selected) = (cast.clone(), route.clone());
+    let connecting = tokio::spawn(async move { worker.connect(&selected).await });
+    fixture.connect_entered.wait(2).await;
+    cast.forget(&route).await.unwrap();
+    assert_error(
+        connecting.await.unwrap().err().unwrap(),
+        ErrorKind::Cancelled,
+        Stage::Connect,
+        Delivery::MayHaveReachedReceiver,
+    );
 }
 
 #[tokio::test(start_paused = true)]

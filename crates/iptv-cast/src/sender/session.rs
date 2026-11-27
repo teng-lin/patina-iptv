@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::Duration,
 };
@@ -17,6 +17,7 @@ use super::{
 };
 
 const LOAD_TIMEOUT: Duration = Duration::from_secs(30);
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const STOP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// An idle receiver connection. A load consumes this handle.
@@ -126,6 +127,7 @@ type CommandResult = Result<Confirmation, Error>;
 
 struct Request {
     command: Command,
+    started: Arc<AtomicBool>,
     reply: oneshot::Sender<CommandResult>,
 }
 
@@ -176,16 +178,26 @@ impl Session {
     pub async fn command(&mut self, command: Command) -> CommandResult {
         check_command(&self.snapshot(), command)?;
         let (reply, response) = oneshot::channel();
+        let started = Arc::new(AtomicBool::new(false));
+        let unavailable = || {
+            check_command(&self.snapshot(), command)
+                .err()
+                .unwrap_or_else(|| command_error(ErrorKind::Unavailable))
+        };
         self.commands
-            .send(Request { command, reply })
+            .send(Request {
+                command,
+                started: started.clone(),
+                reply,
+            })
             .await
-            .map_err(|_| command_error(ErrorKind::Unavailable))?;
+            .map_err(|_| unavailable())?;
         response.await.unwrap_or_else(|_| {
-            Err(Error::new(
-                ErrorKind::Unavailable,
-                Stage::Control,
-                Delivery::MayHaveReachedReceiver,
-            ))
+            if started.load(Ordering::Acquire) {
+                Err(interrupted_command(ErrorKind::Unavailable))
+            } else {
+                Err(unavailable())
+            }
         })
     }
 
@@ -295,9 +307,13 @@ async fn run(
                     return finish_action(&mut *driver, Action::Close, &publish, snapshot, &dispatch).await;
                 };
                 if request.reply.is_closed() { continue; }
-                let result = match check_command(&snapshot, request.command) {
-                    Ok(()) => driver.command(request.command).await,
-                    Err(error) => Err(error),
+                let result = if let Err(error) = check_command(&snapshot, request.command) {
+                    Err(error)
+                } else {
+                    request.started.store(true, Ordering::Release);
+                    tokio::time::timeout(COMMAND_TIMEOUT, driver.command(request.command))
+                        .await
+                        .unwrap_or_else(|_| Err(interrupted_command(ErrorKind::TimedOut)))
                 };
                 let _ = request.reply.send(result);
             }
@@ -397,6 +413,10 @@ fn check_command(snapshot: &Snapshot, command: Command) -> Result<(), Error> {
 
 fn command_error(kind: ErrorKind) -> Error {
     Error::new(kind, Stage::Control, Delivery::NotSent)
+}
+
+fn interrupted_command(kind: ErrorKind) -> Error {
+    Error::new(kind, Stage::Control, Delivery::MayHaveReachedReceiver)
 }
 
 fn stop_error(kind: ErrorKind, delivery: Delivery) -> Error {

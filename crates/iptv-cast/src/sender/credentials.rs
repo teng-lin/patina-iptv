@@ -280,6 +280,10 @@ pub(super) async fn attempt_cancelled(attempt: Option<&Arc<Attempt>>) {
     }
 }
 
+pub(super) fn attempt_is_cancelled(attempt: Option<&Arc<Attempt>>) -> bool {
+    attempt.is_some_and(|attempt| attempt.cancelled.is_cancelled())
+}
+
 /// An ASCII PIN that preserves all digits, including leading zeroes.
 pub struct PinCode(String);
 
@@ -347,12 +351,15 @@ impl Pairing {
 
     pub async fn submit(mut self, pin: PinCode) -> Result<Connection, Error> {
         // If the worker already retired, join it to recover the specific error.
-        let _ = self.pin.take().unwrap().send(pin);
-        self.worker
-            .take()
-            .unwrap()
-            .await
-            .map_err(|_| pair_error(ErrorKind::Unavailable, Delivery::NotSent))?
+        let sent = self.pin.take().unwrap().send(pin).is_ok();
+        self.worker.take().unwrap().await.map_err(|_| {
+            let delivery = if sent {
+                Delivery::MayHaveReachedReceiver
+            } else {
+                Delivery::NotSent
+            };
+            pair_error(ErrorKind::Unavailable, delivery)
+        })?
     }
 
     pub async fn cancel(mut self) {

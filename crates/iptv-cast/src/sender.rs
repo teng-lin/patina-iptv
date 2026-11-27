@@ -74,6 +74,8 @@ pub(crate) trait PairDriver: Send {
     /// Cancellation may interrupt network I/O, then call `cancel`.
     fn submit(&mut self, pin: PinCode) -> BoxFuture<'_, Result<VerifiedConnection, Error>>;
 
+    /// Retire provisional resources without waiting for further user action.
+    /// Any network exchange used for cancellation must have its own deadline.
     fn cancel(&mut self) -> BoxFuture<'_, ()>;
 }
 
@@ -96,7 +98,8 @@ pub(crate) trait Driver: Send {
     fn observe(&mut self) -> BoxFuture<'_, Result<Observation, Error>>;
 
     /// Recheck current ownership and capability for each write. Serialize
-    /// protocol messages and report the command's own delivery evidence.
+    /// protocol messages and report the command's own delivery evidence. The
+    /// session can drop this wait at its command deadline before calling stop.
     fn command(&mut self, command: Command) -> BoxFuture<'_, Result<Confirmation, Error>>;
 
     /// Stop only the proven owned load. Reconcile late replies within a bound
@@ -104,5 +107,6 @@ pub(crate) trait Driver: Send {
     fn stop(&mut self) -> BoxFuture<'_, Result<StopOutcome, Error>>;
 
     /// Join local resources without issuing a remote stop command.
+    /// Closing must retire resources even if the peer never answers.
     fn close(&mut self) -> BoxFuture<'_, ()>;
 }

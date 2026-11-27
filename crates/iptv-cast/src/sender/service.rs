@@ -3,7 +3,7 @@ use std::{
     fmt,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -366,14 +366,16 @@ impl Cast {
         self.inner.runtime.check(Stage::Connect)?;
         let inner = self.inner.clone();
         let route = route.clone();
+        let started = Arc::new(AtomicBool::new(false));
+        let worker_started = started.clone();
         let connect = self
             .inner
             .runtime
             .handle
-            .spawn(async move { inner.connect(route).await });
+            .spawn(async move { inner.connect(route, &worker_started).await });
         AbortOnDropHandle::new(connect)
             .await
-            .map_err(|_| connect_error(ErrorKind::Unavailable))?
+            .map_err(|_| connect_interrupted(ErrorKind::Unavailable, &started))?
     }
 
     pub async fn forget(&self, route: &Route) -> Result<(), Error> {
@@ -467,7 +469,7 @@ impl CastInner {
         Ok(Discovery { routes, issues })
     }
 
-    async fn connect(&self, route: Route) -> Result<Connect, Error> {
+    async fn connect(&self, route: Route, started: &AtomicBool) -> Result<Connect, Error> {
         let backend = self
             .backend(&route)
             .ok_or_else(|| connect_error(ErrorKind::Unsupported))?;
@@ -476,24 +478,33 @@ impl CastInner {
             .filter(|_| backend.uses_credentials())
             .map(|key| self.credentials.begin_pair(key))
             .transpose()?;
+        let interrupted = |kind| connect_interrupted(kind, started);
         let connect = async {
             let credential = if let Some(attempt) = &attempt {
                 self.credentials.load(attempt).await?
             } else {
                 None
             };
+            started.store(true, Ordering::Relaxed);
             let result = tokio::time::timeout(CONNECT_TIMEOUT, backend.connect(&route, credential))
                 .await
-                .map_err(|_| connect_error(ErrorKind::TimedOut))??;
+                .map_err(|_| interrupted(ErrorKind::TimedOut))??;
             Ok::<_, Error>(result)
         };
         let result = tokio::select! {
             biased;
             _ = super::credentials::attempt_cancelled(attempt.as_ref()) => {
-                return Err(connect_error(ErrorKind::Cancelled));
+                return Err(interrupted(ErrorKind::Cancelled));
             }
             result = connect => result?,
         };
+        if super::credentials::attempt_is_cancelled(attempt.as_ref()) {
+            match result {
+                BackendConnect::Ready(mut driver) => driver.close().await,
+                BackendConnect::PinRequired(mut driver) => driver.cancel().await,
+            }
+            return Err(interrupted(ErrorKind::Cancelled));
+        }
         let needs_verification = attempt
             .as_ref()
             .is_some_and(|attempt| attempt.has_credential());
@@ -528,4 +539,13 @@ fn discovery_error(kind: ErrorKind) -> Error {
 
 fn connect_error(kind: ErrorKind) -> Error {
     Error::new(kind, Stage::Connect, Delivery::NotSent)
+}
+
+fn connect_interrupted(kind: ErrorKind, started: &AtomicBool) -> Error {
+    let delivery = if started.load(Ordering::Relaxed) {
+        Delivery::MayHaveReachedReceiver
+    } else {
+        Delivery::NotSent
+    };
+    Error::new(kind, Stage::Connect, delivery)
 }
