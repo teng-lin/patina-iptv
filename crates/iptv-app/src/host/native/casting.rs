@@ -218,7 +218,11 @@ impl Port for Sender {
                 .iter()
                 .filter_map(|route| {
                     let protocol = match route.protocol().as_str() {
-                        "googlecast" => NetworkProtocol::GoogleCast,
+                        "googlecast"
+                            if !cfg!(target_os = "android") || route.has_stable_identity() =>
+                        {
+                            NetworkProtocol::GoogleCast
+                        }
                         "airplay"
                             if client.airplay
                                 && matches!(
