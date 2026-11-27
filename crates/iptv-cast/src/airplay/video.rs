@@ -12,14 +12,14 @@ use std::{
     net::{SocketAddr, SocketAddrV6},
     num::NonZeroU16,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     net::UdpSocket,
-    sync::watch,
+    sync::Notify,
     task::JoinHandle,
     time::{self, timeout},
 };
@@ -307,23 +307,72 @@ pub(super) struct Evidence {
     pub(super) duration: Option<Duration>,
 }
 
-fn publish(updates: &watch::Sender<Option<Result<Evidence>>>, observation: Result<Evidence>) {
-    updates.send_if_modified(|current| {
-        if matches!(
-            current,
-            Some(
-                Err(_)
-                    | Ok(Evidence {
-                        state: MediaState::Ended | MediaState::Absent,
-                        ..
-                    })
-            )
-        ) {
-            return false;
+/// Coalesce progress updates, retaining the last one ahead of a terminal event.
+/// The dedicated event channel can report before the control channel acknowledges
+/// insertion. These observations become usable only after startup succeeds.
+#[derive(Default)]
+struct Observations {
+    pending: Mutex<PendingObservations>,
+    ready: Notify,
+}
+
+#[derive(Default)]
+struct PendingObservations {
+    accepted: bool,
+    observed_active: bool,
+    latest: Option<Evidence>,
+    terminal: Option<Result<Evidence>>,
+}
+
+impl Observations {
+    fn accept(&self) {
+        self.pending.lock().unwrap().accepted = true;
+        self.ready.notify_one();
+    }
+
+    fn media(&self, evidence: Evidence, explicitly_owned: bool) {
+        let mut pending = self.pending.lock().unwrap();
+        if pending.terminal.is_some() {
+            return;
         }
-        *current = Some(observation);
-        true
-    });
+        if matches!(evidence.state, MediaState::Ended | MediaState::Absent) {
+            if !explicitly_owned && !pending.observed_active {
+                return;
+            }
+            pending.terminal = Some(Ok(evidence));
+        } else {
+            pending.observed_active = true;
+            pending.latest = Some(evidence);
+        }
+        drop(pending);
+        self.ready.notify_one();
+    }
+
+    fn fault(&self, fault: VideoFault) {
+        self.pending
+            .lock()
+            .unwrap()
+            .terminal
+            .get_or_insert(Err(fault));
+        self.ready.notify_one();
+    }
+
+    async fn next(&self) -> Result<Evidence> {
+        loop {
+            let observation = {
+                let mut pending = self.pending.lock().unwrap();
+                if pending.accepted {
+                    pending.latest.take().map(Ok).or(pending.terminal)
+                } else {
+                    None
+                }
+            };
+            if let Some(observation) = observation {
+                return observation;
+            }
+            self.ready.notified().await;
+        }
+    }
 }
 
 fn time_property(dictionary: &Dictionary, property: &str) -> Option<Duration> {
@@ -334,12 +383,7 @@ fn time_property(dictionary: &Dictionary, property: &str) -> Option<Duration> {
     Duration::try_from_secs_f64(seconds).ok()
 }
 
-fn parse_event(
-    body: &[u8],
-    item_id: &str,
-    allow_stream_status: bool,
-    observed_active: bool,
-) -> Option<Evidence> {
+fn parse_event(body: &[u8], item_id: &str) -> Option<(Evidence, bool)> {
     let packet = unpack(body).ok()?;
     let bytes = find(find(&packet, "params")?, "data")?.as_data()?;
     let event = unpack(bytes).ok()?;
@@ -357,9 +401,6 @@ fn parse_event(
     } else {
         false
     };
-    if !explicitly_owned && !allow_stream_status {
-        return None;
-    }
     let observed = parameters
         .and_then(|fields| fields.get("playbackState"))
         .or_else(|| find(&event, "name"))?;
@@ -371,43 +412,32 @@ fn parse_event(
         "stopped" => MediaState::Absent,
         _ => return None,
     };
-    if !explicitly_owned
-        && !observed_active
-        && matches!(state, MediaState::Ended | MediaState::Absent)
-    {
-        return None;
-    }
-    Some(Evidence {
-        state,
-        position: parameters.and_then(|fields| time_property(fields, "position")),
-        duration: parameters.and_then(|fields| time_property(fields, "duration")),
-    })
+    Some((
+        Evidence {
+            state,
+            position: parameters.and_then(|fields| time_property(fields, "position")),
+            duration: parameters.and_then(|fields| time_property(fields, "duration")),
+        },
+        explicitly_owned,
+    ))
 }
 
 async fn event_loop(
     mut wire: Wire,
     item: String,
     dispatched: Arc<AtomicBool>,
-    queue_accepted: Arc<AtomicBool>,
-    evidence: watch::Sender<Option<Result<Evidence>>>,
+    evidence: &Observations,
 ) -> Result<()> {
-    let mut observed_active = false;
     loop {
         let message = wire.receive().await?;
         let was_dispatched = dispatched.load(Ordering::Acquire);
-        let was_accepted = queue_accepted.load(Ordering::Acquire);
         timeout(EXCHANGE_TIMEOUT, wire.ack_event(&message))
             .await
             .map_err(|_| VideoFault::TimedOut)??;
         if was_dispatched
-            && let Some(observation) =
-                parse_event(&message.body, &item, was_accepted, observed_active)
+            && let Some((observation, explicitly_owned)) = parse_event(&message.body, &item)
         {
-            observed_active |= matches!(
-                observation.state,
-                MediaState::Playing | MediaState::Buffering | MediaState::Paused
-            );
-            publish(&evidence, Ok(observation));
+            evidence.media(observation, explicitly_owned);
         }
     }
 }
@@ -502,9 +532,7 @@ pub(super) struct Video {
     addresses: (SocketAddr, SocketAddr),
     item: String,
     dispatched: Arc<AtomicBool>,
-    queue_accepted: Arc<AtomicBool>,
-    evidence: watch::Receiver<Option<Result<Evidence>>>,
-    updates: watch::Sender<Option<Result<Evidence>>>,
+    observations: Arc<Observations>,
     tasks: Vec<Task>,
 }
 
@@ -534,15 +562,12 @@ impl Video {
     pub(super) fn new(verified: Verified) -> Result<Self> {
         let addresses = verified.wire.addresses()?;
         let control = Rtsp::new(verified, addresses.0)?;
-        let (updates, evidence) = watch::channel(None);
         Ok(Self {
             control: Some(control),
             addresses,
             item: hap::uuid()?,
             dispatched: Arc::new(AtomicBool::new(false)),
-            queue_accepted: Arc::new(AtomicBool::new(false)),
-            evidence,
-            updates,
+            observations: Arc::new(Observations::default()),
             tasks: Vec::new(),
         })
     }
@@ -568,18 +593,15 @@ impl Video {
             local,
             timed_out: false,
         })?;
-        let updates = self.updates.clone();
+        let observations = self.observations.clone();
         let timing_replied = Arc::new(AtomicBool::new(false));
         let timing_observed = Arc::clone(&timing_replied);
         self.tasks.push(Task(tokio::spawn(async move {
             if timing_loop(socket, remote, &timing_observed).await.is_err() {
-                publish(
-                    &updates,
-                    Err(VideoFault::Timing {
-                        local,
-                        timed_out: false,
-                    }),
-                );
+                observations.fault(VideoFault::Timing {
+                    local,
+                    timed_out: false,
+                });
             }
         })));
 
@@ -593,15 +615,12 @@ impl Video {
             other => other,
         })?;
         let event = event_connection(remote, event_port(&session)?, &control.wire).await?;
-        let updates = self.updates.clone();
+        let observations = self.observations.clone();
         let dispatched = Arc::clone(&self.dispatched);
-        let queue_accepted = Arc::clone(&self.queue_accepted);
         let item = self.item.clone();
         self.tasks.push(Task(tokio::spawn(async move {
-            if let Err(error) =
-                event_loop(event, item, dispatched, queue_accepted, updates.clone()).await
-            {
-                publish(&updates, Err(error));
+            if let Err(error) = event_loop(event, item, dispatched, &observations).await {
+                observations.fault(error);
             }
         })));
 
@@ -647,21 +666,19 @@ impl Video {
     pub(super) async fn start(&mut self, queue: Queue) -> Result<()> {
         let control = self.control.as_mut().ok_or(VideoFault::Unavailable)?;
         self.dispatched.store(true, Ordering::Release);
-        let [insert, rest @ ..] = queue.commands;
-        control.command(&queue.stream, &insert).await?;
-        self.queue_accepted.store(true, Ordering::Release);
-        for command in rest {
+        for command in queue.commands {
             control.command(&queue.stream, &command).await?;
         }
+        self.observations.accept();
         let mut control = self.control.take().expect("control still owned");
-        let updates = self.updates.clone();
+        let observations = self.observations.clone();
         self.tasks.push(Task(tokio::spawn(async move {
             loop {
                 time::sleep(FEEDBACK_PERIOD).await;
                 // Some receivers decline feedback. A present reply is enough
                 // to establish liveness of this dedicated control transport.
                 if let Err(error) = control.exchange("POST", Some("/feedback"), &[]).await {
-                    publish(&updates, Err(error));
+                    observations.fault(error);
                     break;
                 }
             }
@@ -670,12 +687,7 @@ impl Video {
     }
 
     pub(super) async fn observe(&mut self) -> Result<Evidence> {
-        loop {
-            self.evidence.changed().await.map_err(|_| Fault::Closed)?;
-            if let Some(latest) = *self.evidence.borrow_and_update() {
-                return latest;
-            }
-        }
+        self.observations.next().await
     }
 
     pub(super) async fn close(&mut self) {

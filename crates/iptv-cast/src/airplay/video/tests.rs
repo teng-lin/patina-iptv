@@ -1,5 +1,6 @@
 use super::*;
 use crate::airplay::hap::tests::Accessory;
+use futures_util::FutureExt as _;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -9,7 +10,8 @@ use tokio::{
 pub(in crate::airplay) enum ReceiverEnding {
     CloseWithLoadPending,
     RefuseLoadAfterRequest,
-    AwaitTransportClose,
+    AwaitTransportClose(oneshot::Sender<()>),
+    EndBeforeLoadReply,
     LoseEventTransport(oneshot::Receiver<()>),
     LoseControlTransport(oneshot::Receiver<()>),
     PlayToEnd(oneshot::Receiver<()>),
@@ -34,7 +36,10 @@ pub(in crate::airplay) async fn serve(
         .unwrap()
         .as_unsigned_integer()
         .unwrap() as u16;
-    assert_eq!(timing_port, expected_timing_port);
+    assert_ne!(timing_port, 0);
+    if expected_timing_port != 0 {
+        assert_eq!(timing_port, expected_timing_port);
+    }
     let client_timing = SocketAddr::from(([127, 0, 0, 1], timing_port));
     let timing = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let mut request = [0; 32];
@@ -100,24 +105,21 @@ pub(in crate::airplay) async fn serve(
     let media_url = find(item, "Content-Location").unwrap().as_string().unwrap();
     let item_uuid = find(item, "uuid").unwrap().as_string().unwrap();
     assert_eq!(media_url, format!("http://{origin}/generated.m3u8"));
-    events
-        .request(
-            Version::Http,
-            "POST",
-            "/event",
-            &[],
-            &unaddressed_state("stopped"),
-        )
-        .await
-        .unwrap()
-        .require_ok()
-        .unwrap();
+    send_unaddressed_state(&mut events, "stopped").await;
     let mut upstream = TcpStream::connect(origin).await.unwrap();
     upstream
         .write_all(b"GET /generated.m3u8 HTTP/1.1\r\nHost: synthetic-origin\r\n\r\n")
         .await
         .unwrap();
 
+    if matches!(
+        ending,
+        ReceiverEnding::EndBeforeLoadReply | ReceiverEnding::RefuseLoadAfterRequest
+    ) {
+        send_state(&mut events, "unowned-item", "ended").await;
+        send_unaddressed_state(&mut events, "playing").await;
+        send_unaddressed_state(&mut events, "stopped").await;
+    }
     if matches!(ending, ReceiverEnding::CloseWithLoadPending) {
         assert!(matches!(control.receive().await, Err(Fault::Closed)));
         assert!(matches!(events.receive().await, Err(Fault::Closed)));
@@ -152,17 +154,21 @@ pub(in crate::airplay) async fn serve(
         control.respond(&command, 200, &[]).await;
     }
 
-    send_state(&mut events, "unowned-item", "playing").await;
-    send_state(&mut events, item_uuid, "playing").await;
+    if !matches!(ending, ReceiverEnding::EndBeforeLoadReply) {
+        send_state(&mut events, "unowned-item", "playing").await;
+        send_state(&mut events, item_uuid, "playing").await;
+    }
     match ending {
         ReceiverEnding::CloseWithLoadPending | ReceiverEnding::RefuseLoadAfterRequest => {
             unreachable!()
         }
-        ReceiverEnding::AwaitTransportClose => {
+        ReceiverEnding::AwaitTransportClose(replied) => {
             let feedback = control.receive().await.unwrap();
             assert_eq!(feedback.request_target, "POST /feedback");
             control.respond(&feedback, 200, &[]).await;
+            replied.send(()).unwrap();
         }
+        ReceiverEnding::EndBeforeLoadReply => {}
         ReceiverEnding::PlayToEnd(gate) => {
             gate.await.unwrap();
             send_state(&mut events, item_uuid, "stopped").await;
@@ -217,9 +223,24 @@ async fn send_state(socket: &mut Wire, item: &str, state: &str) {
     reply.require_ok().unwrap();
 }
 
+async fn send_unaddressed_state(socket: &mut Wire, state: &str) {
+    socket
+        .request(
+            Version::Http,
+            "POST",
+            "/event",
+            &[],
+            &unaddressed_state(state),
+        )
+        .await
+        .unwrap()
+        .require_ok()
+        .unwrap();
+}
+
 #[test]
 fn media_observations_require_owned_state_and_finite_times() {
-    assert!(parse_event(b"", "item", true, true).is_none());
+    assert!(parse_event(b"", "item").is_none());
     for (wire, state) in [
         ("buffering", MediaState::Buffering),
         ("paused", MediaState::Paused),
@@ -228,13 +249,14 @@ fn media_observations_require_owned_state_and_finite_times() {
         ("stopped", MediaState::Absent),
     ] {
         let event = state_event("item", wire);
-        assert!(parse_event(&event, "other", true, true).is_none());
-        let evidence = parse_event(&event, "item", true, true).unwrap();
+        assert!(parse_event(&event, "other").is_none());
+        let (evidence, explicitly_owned) = parse_event(&event, "item").unwrap();
+        assert!(explicitly_owned);
         assert_eq!(evidence.state, state);
         assert_eq!(evidence.duration, Some(Duration::from_secs(21)));
         assert_eq!(evidence.position, Some(Duration::from_millis(5_500)));
     }
-    assert!(parse_event(&state_event("item", "unrecognized"), "item", true, true).is_none());
+    assert!(parse_event(&state_event("item", "unrecognized"), "item").is_none());
     let mut values = Dictionary::new();
     values.insert("position".into(), (-1.5).into());
     assert!(time_property(&values, "position").is_none());
@@ -247,19 +269,38 @@ fn terminal_evidence_cannot_be_overwritten_by_a_late_event_or_socket_loss() {
         (MediaState::Ended, MediaState::Playing),
         (MediaState::Absent, MediaState::Paused),
     ] {
-        let (updates, receiver) = watch::channel(None);
-        let observation = |state| {
-            Ok(Evidence {
-                state,
-                position: None,
-                duration: None,
-            })
+        let observations = Observations::default();
+        let observation = |state| Evidence {
+            state,
+            position: None,
+            duration: None,
         };
-        publish(&updates, observation(first));
-        publish(&updates, observation(second));
-        publish(&updates, Err(VideoFault::Wire(Fault::Closed)));
-        assert_eq!(*receiver.borrow(), Some(observation(first)));
+        observations.accept();
+        observations.media(observation(first), true);
+        observations.media(observation(second), true);
+        observations.fault(VideoFault::Wire(Fault::Closed));
+        assert_eq!(
+            observations.next().now_or_never(),
+            Some(Ok(observation(first)))
+        );
     }
+}
+
+#[test]
+fn an_unread_playback_observation_is_delivered_before_transport_failure() {
+    let observations = Observations::default();
+    let (playing, explicitly_owned) = parse_event(&state_event("item", "playing"), "item").unwrap();
+    let closed = VideoFault::Wire(Fault::Closed);
+    observations.media(playing, explicitly_owned);
+    observations.fault(closed);
+    observations.accept();
+    assert_eq!(observations.next().now_or_never(), Some(Ok(playing)));
+    assert_eq!(observations.next().now_or_never(), Some(Err(closed)));
+
+    let empty = Observations::default();
+    empty.accept();
+    empty.fault(closed);
+    assert_eq!(empty.next().now_or_never(), Some(Err(closed)));
 }
 
 #[test]
@@ -300,26 +341,19 @@ fn unaddressed_state(state: &str) -> Vec<u8> {
 }
 
 #[test]
-fn unaddressed_events_need_queue_acceptance_and_terminal_needs_earlier_activity() {
-    let stopped = unaddressed_state("stopped");
-    let playing = unaddressed_state("playing");
-    assert!(parse_event(&stopped, "current", false, false).is_none());
-    assert!(parse_event(&playing, "current", false, false).is_none());
-    assert!(parse_event(&stopped, "current", true, false).is_none());
-    assert_eq!(
-        parse_event(&playing, "current", true, false).unwrap().state,
-        MediaState::Playing
-    );
-    assert_eq!(
-        parse_event(&stopped, "current", true, true).unwrap().state,
-        MediaState::Absent
-    );
-    assert_eq!(
-        parse_event(&state_event("current", "playing"), "current", false, false)
-            .unwrap()
-            .state,
-        MediaState::Playing
-    );
+fn unaddressed_events_wait_for_queue_acceptance_and_terminal_needs_earlier_activity() {
+    let observations = Observations::default();
+    let (stopped, addressed_stop) = parse_event(&unaddressed_state("stopped"), "current").unwrap();
+    let (playing, addressed_play) = parse_event(&unaddressed_state("playing"), "current").unwrap();
+    assert!(!addressed_stop);
+    assert!(!addressed_play);
+    observations.media(stopped, addressed_stop);
+    observations.media(playing, addressed_play);
+    observations.media(stopped, addressed_stop);
+    assert!(observations.next().now_or_never().is_none());
+    observations.accept();
+    assert_eq!(observations.next().now_or_never(), Some(Ok(playing)));
+    assert_eq!(observations.next().now_or_never(), Some(Ok(stopped)));
 }
 
 #[test]
@@ -353,16 +387,16 @@ pub(in crate::airplay) enum BaseSetupFailure {
 
 pub(in crate::airplay) async fn fail_base_setup(
     mut control: Wire,
-    expected_timing: u16,
     failure: BaseSetupFailure,
-) {
+) -> SocketAddr {
     let mut setup = control.receive().await.unwrap();
-    let address = SocketAddr::from(([127, 0, 0, 1], expected_timing));
     let payload = unpack(&setup.body).unwrap();
-    assert_eq!(
-        find(&payload, "timingPort").unwrap().as_unsigned_integer(),
-        Some(expected_timing.into()),
-    );
+    let port = find(&payload, "timingPort")
+        .unwrap()
+        .as_unsigned_integer()
+        .unwrap();
+    let address = SocketAddr::from(([127, 0, 0, 1], u16::try_from(port).unwrap()));
+    assert_ne!(address.port(), 0);
     match failure {
         BaseSetupFailure::WrongSequence => {
             setup.sequence = Some(setup.sequence.unwrap() + 1);
@@ -386,6 +420,7 @@ pub(in crate::airplay) async fn fail_base_setup(
         } => {}
     }
     assert!(matches!(control.receive().await, Err(Fault::Closed)));
+    address
 }
 
 #[test]

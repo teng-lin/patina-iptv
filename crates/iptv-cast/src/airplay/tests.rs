@@ -244,6 +244,7 @@ async fn feedback_runs_during_playback_and_explicit_retirement_closes_without_gl
         let udp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let port = udp.local_addr().unwrap().port();
         drop(udp);
+        let (reply, replied) = oneshot::channel();
         let server = tokio::spawn(async move {
             let (public, id) = accessory.pair().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
@@ -252,7 +253,7 @@ async fn feedback_runs_during_playback_and_explicit_retirement_closes_without_gl
                 &shared,
                 upstream,
                 port,
-                ReceiverEnding::AwaitTransportClose,
+                ReceiverEnding::AwaitTransportClose(reply),
             )
             .await;
         });
@@ -265,10 +266,50 @@ async fn feedback_runs_during_playback_and_explicit_retirement_closes_without_gl
         let (_, _) = origin.accept().await.unwrap();
         let mut updates = session.subscribe();
         while !matches!(updates.next().await.unwrap().playback(), Playback::Playing) {}
-        tokio::time::sleep(Duration::from_millis(2_100)).await;
+        replied.await.unwrap();
         assert_eq!(session.stop().await.unwrap(), StopOutcome::TransportClosed);
         server.await.unwrap();
         UdpSocket::bind(("127.0.0.1", port)).await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn playback_and_stop_reported_before_the_insert_reply_are_preserved() {
+    timeout(Duration::from_secs(10), async {
+        let accessory = Accessory::bind().await;
+        let address = accessory.address();
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = origin.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (public, id) = accessory.pair().await.unwrap();
+            let (control, shared) = accessory.verify(&public, &id).await.unwrap();
+            serve(
+                control,
+                &shared,
+                upstream,
+                0,
+                ReceiverEnding::EndBeforeLoadReply,
+            )
+            .await;
+        });
+        let cast = client(address, 0, TestStore::default());
+        let route = discovered(&cast).await;
+        let session = paired_connection(&cast, &route)
+            .await
+            .load(Media::on_demand(&format!("http://{upstream}/generated.m3u8")).unwrap())
+            .unwrap();
+        let mut updates = session.subscribe();
+        drop(origin.accept().await.unwrap());
+        let mut last = updates.next().await.unwrap();
+        while let Some(snapshot) = updates.next().await {
+            last = snapshot;
+        }
+        assert!(matches!(last.playback(), Playback::NoLongerPresent));
+        assert_eq!(last.link(), Link::Disconnected);
+        assert_eq!(session.stop().await.unwrap(), StopOutcome::AlreadyEnded);
+        server.await.unwrap();
     })
     .await
     .unwrap();
@@ -502,6 +543,10 @@ async fn receiver_refusal_after_fetch_preserves_delivery_uncertainty() {
         let mut updates = session.subscribe();
         drop(origin.accept().await.unwrap());
         while let Some(snapshot) = updates.next().await {
+            assert!(!matches!(
+                snapshot.playback(),
+                Playback::Playing | Playback::NoLongerPresent
+            ));
             if let Playback::Failed(error) = snapshot.playback() {
                 assert_eq!(error.kind(), ErrorKind::ReceiverRefused);
                 assert_eq!(error.stage(), Stage::Load);
@@ -630,16 +675,13 @@ async fn setup_failures_distinguish_rtsp_correlation_and_missing_timing() {
             timeout(Duration::from_secs(15), async move {
                 let accessory = Accessory::bind().await;
                 let address = accessory.address();
-                let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-                let timing = socket.local_addr().unwrap();
-                drop(socket);
                 let (credential, public, id) = accessory.saved_pairing();
                 let server = tokio::spawn(async move {
                     let (control, _) = accessory.verify(&public, &id).await.unwrap();
-                    fail_base_setup(control, timing.port(), failure).await;
+                    fail_base_setup(control, failure).await
                 });
                 let store = TestStore(Arc::new(Mutex::new(Some(Credential::from_bytes(credential)))));
-                let cast = client(address, timing.port(), store);
+                let cast = client(address, 0, store);
                 let route = discovered(&cast).await;
                 let Connect::Ready(connection) = cast.connect(&route).await.unwrap() else { panic!() };
                 let session = connection.load(Media::live("http://127.0.0.1/generated.m3u8").unwrap()).unwrap();
@@ -654,12 +696,12 @@ async fn setup_failures_distinguish_rtsp_correlation_and_missing_timing() {
                 assert_eq!(error.kind(), expect_kind);
                 assert_eq!(error.stage(), Stage::Load);
                 assert_eq!(error.delivery(), Delivery::NotSent);
+                let timing = server.await.unwrap();
                 assert_eq!(
                     matches!(error.diagnostic(), Some(Diagnostic::TimingListener { local_addr }) if *local_addr == timing),
                     expect_timing,
                 );
                 assert_eq!(session.stop().await.unwrap(), StopOutcome::CancelledBeforeSend);
-                server.await.unwrap();
             }).await.unwrap();
         });
     }
