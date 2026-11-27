@@ -352,7 +352,7 @@ fn auth_error(AuthFailure(fault, delivery): AuthFailure, stage: Stage) -> Error 
         AuthFault::ApprovalDenied => ErrorKind::ApprovalDenied,
         AuthFault::InvalidPin => ErrorKind::InvalidPin,
         AuthFault::IdentityMismatch => ErrorKind::IdentityMismatch,
-        AuthFault::InvalidCredential => ErrorKind::Storage,
+        AuthFault::InvalidCredential => ErrorKind::InvalidCredential,
         AuthFault::Unavailable => ErrorKind::Unavailable,
     };
     Error::new(kind, stage, delivery)

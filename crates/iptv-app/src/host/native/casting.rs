@@ -70,7 +70,7 @@ impl Sender {
         if let Some(address) = self.loopback {
             return iptv_cast::test_support::sender(address);
         }
-        Cast::builder().build()
+        Cast::builder().airplay_enabled(false).build()
     }
 
     fn cast(&self) -> Result<&Cast, Error> {

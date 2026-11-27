@@ -162,6 +162,15 @@ impl Accessory {
         client_key: &[u8; 32],
         client_id: &[u8],
     ) -> Option<(Wire, [u8; 32])> {
+        self.verify_with_reply(client_key, client_id, 200).await
+    }
+
+    async fn verify_with_reply(
+        &self,
+        client_key: &[u8; 32],
+        client_id: &[u8],
+        status: u16,
+    ) -> Option<(Wire, [u8; 32])> {
         let mut wire = self.accept().await;
         let first = wire.receive().await.unwrap();
         assert_eq!(first.request_target, "POST /pair-verify");
@@ -216,7 +225,11 @@ impl Accessory {
             plain.get(SIGNATURE).unwrap(),
         )
         .unwrap();
-        wire.respond(&second, 200, &tlv(&[(STATE, &[4])])).await;
+        wire.respond(&second, status, &tlv(&[(STATE, &[4])])).await;
+        if status != 200 {
+            assert!(matches!(wire.receive().await, Err(Fault::Closed)));
+            return None;
+        }
         wire.enable_encryption(
             &derive(&shared, b"Control-Salt", b"Control-Read-Encryption-Key"),
             &derive(&shared, b"Control-Salt", b"Control-Write-Encryption-Key"),
@@ -391,8 +404,9 @@ async fn rejects_pin_refusal_and_preserves_identity_on_replacement() {
     server.await.unwrap();
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn approval_can_be_denied_or_expire() {
+    let (received_approval, approval_received) = tokio::sync::oneshot::channel();
     let accessory = Accessory::bind().await;
     let address = accessory.address();
     let server = tokio::spawn(async move {
@@ -401,6 +415,7 @@ async fn approval_can_be_denied_or_expire() {
         first.respond(&request, 403, &[]).await;
         let mut second = accessory.accept().await;
         let _request = second.receive().await.unwrap();
+        received_approval.send(()).unwrap();
         assert!(matches!(second.receive().await, Err(Fault::Closed)));
     });
     let wire = start_pairing(address).await.unwrap();
@@ -413,7 +428,8 @@ async fn approval_can_be_denied_or_expire() {
         ))
     ));
     let wire = start_pairing(address).await.unwrap();
-    let expired = Challenge::receive(wire, address, Instant::now() + Duration::from_secs(1)).await;
+    approval_received.await.unwrap();
+    let expired = Challenge::receive(wire, address, Instant::now()).await;
     assert!(matches!(
         expired,
         Err(AuthFailure(
@@ -424,7 +440,25 @@ async fn approval_can_be_denied_or_expire() {
     server.await.unwrap();
 }
 
-#[tokio::test(start_paused = true)]
+async fn time_out_after_write<T>(
+    operation: impl std::future::Future<Output = T>,
+    received: tokio::sync::oneshot::Receiver<()>,
+) -> T {
+    tokio::pin!(operation);
+    // Poll the actual network request with a real clock until the receiver
+    // has read it. Only the unanswered response uses virtual time.
+    tokio::select! {
+        _ = &mut operation => panic!("the operation returned before the receiver read the request"),
+        signal = received => signal.unwrap(),
+    }
+    tokio::time::pause();
+    tokio::time::advance(HANDSHAKE_TIMEOUT + Duration::from_secs(1)).await;
+    let result = operation.await;
+    tokio::time::resume();
+    result
+}
+
+#[tokio::test]
 async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_reply() {
     let dead = Accessory::bind().await;
     let dead_address = dead.address();
@@ -439,16 +473,20 @@ async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_rep
 
     let accessory = Accessory::bind().await;
     let address = accessory.address();
+    let (received_setup, setup_received) = tokio::sync::oneshot::channel();
+    let (received_verify, verify_received) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let mut pair = accessory.accept().await;
         let approval = pair.receive().await.unwrap();
         pair.respond(&approval, 200, &[]).await;
         let request = pair.receive().await.unwrap();
         assert_eq!(request.request_target, "POST /pair-setup");
+        received_setup.send(()).unwrap();
         assert!(matches!(pair.receive().await, Err(Fault::Closed)));
         let mut verify = accessory.accept().await;
         let request = verify.receive().await.unwrap();
         assert_eq!(request.request_target, "POST /pair-verify");
+        received_verify.send(()).unwrap();
         assert!(matches!(verify.receive().await, Err(Fault::Closed)));
         let mut refusal = accessory.accept().await;
         let request = refusal.receive().await.unwrap();
@@ -457,7 +495,11 @@ async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_rep
 
     let wire = start_pairing(address).await.unwrap();
     assert!(matches!(
-        Challenge::receive(wire, address, Instant::now() + Duration::from_secs(15)).await,
+        time_out_after_write(
+            Challenge::receive(wire, address, Instant::now() + Duration::from_secs(15)),
+            setup_received,
+        )
+        .await,
         Err(AuthFailure(
             AuthFault::TimedOut,
             Delivery::MayHaveReachedReceiver
@@ -470,7 +512,7 @@ async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_rep
         client_id: b"synthetic-id".into(),
     };
     assert!(matches!(
-        verify(address, &record).await,
+        time_out_after_write(verify(address, &record), verify_received).await,
         Err(AuthFailure(
             AuthFault::TimedOut,
             Delivery::MayHaveReachedReceiver
@@ -484,4 +526,24 @@ async fn distinguishes_connect_failure_timeout_after_auth_write_and_explicit_rep
         ))
     ));
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn authenticated_receiver_can_explicitly_reject_the_saved_pairing() {
+    let accessory = Accessory::bind().await;
+    let address = accessory.address();
+    let (encoded, public, id) = accessory.saved_pairing();
+    let keys = StoredKeys::decode(&encoded).unwrap();
+    let (server, client) = tokio::join!(
+        accessory.verify_with_reply(&public, &id, 403),
+        verify(address, &keys),
+    );
+    assert!(server.is_none());
+    assert!(matches!(
+        client,
+        Err(AuthFailure(
+            AuthFault::InvalidCredential,
+            Delivery::Acknowledged
+        ))
+    ));
 }

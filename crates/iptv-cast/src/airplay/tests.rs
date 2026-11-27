@@ -512,7 +512,7 @@ async fn receiver_refusal_after_fetch_preserves_delivery_uncertainty() {
 #[test]
 fn pairing_failures_are_typed_without_peer_details() {
     for (fault, kind) in [
-        (AuthFault::InvalidCredential, ErrorKind::Storage),
+        (AuthFault::InvalidCredential, ErrorKind::InvalidCredential),
         (AuthFault::IdentityMismatch, ErrorKind::IdentityMismatch),
         (AuthFault::InvalidPin, ErrorKind::InvalidPin),
         (AuthFault::ApprovalDenied, ErrorKind::ApprovalDenied),
@@ -672,7 +672,7 @@ async fn corrupt_saved_credential_does_not_fall_back_to_an_unrequested_pairing()
         .await
         .err()
         .expect("invalid stored material");
-    assert_eq!(error.kind(), ErrorKind::Storage);
+    assert_eq!(error.kind(), ErrorKind::InvalidCredential);
     assert_eq!(error.delivery(), Delivery::NotSent);
     assert!(
         timeout(Duration::from_millis(30), accessory.accept())

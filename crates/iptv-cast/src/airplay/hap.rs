@@ -588,7 +588,7 @@ pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Reported<V
         &mut wire,
         "/pair-verify",
         &tlv(&[(STATE, &[3]), (ENCRYPTED, &ciphertext)]),
-        Fault::Integrity.into(),
+        AuthFault::InvalidCredential,
         4,
     )
     .await?;

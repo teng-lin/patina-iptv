@@ -1217,6 +1217,7 @@ struct BlockingStore {
     saving: Count,
     saving_gate: Notify,
     fail: AtomicBool,
+    invalid_load: AtomicBool,
 }
 
 fn store_error() -> StoreError {
@@ -1228,6 +1229,9 @@ impl CredentialStore for Arc<BlockingStore> {
         self.loading.bump();
         if self.block_load.load(Ordering::Relaxed) {
             pending::<()>().await;
+        }
+        if self.invalid_load.load(Ordering::Relaxed) {
+            return Err(StoreError::invalid_credential());
         }
         if self.fail.load(Ordering::Relaxed) {
             return Err(store_error());
@@ -1340,6 +1344,15 @@ async fn storage_failures_never_expose_sources() {
         assert!(error.source().is_none());
         assert_error(error, ErrorKind::Storage, Stage::Store, Delivery::NotSent);
     }
+    store.invalid_load.store(true, Ordering::Relaxed);
+    let corrupt = cast.connect(&route).await.err().unwrap();
+    assert!(corrupt.source().is_none());
+    assert_error(
+        corrupt,
+        ErrorKind::InvalidCredential,
+        Stage::Store,
+        Delivery::NotSent,
+    );
     let lan_client = Cast::builder()
         .credential_store(store)
         .build_with(vec![Arc::new(fixture.backend())])

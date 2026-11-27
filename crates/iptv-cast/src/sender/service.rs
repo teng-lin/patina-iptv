@@ -239,12 +239,21 @@ pub enum Connect {
 pub struct CastBuilder {
     credentials: CredentialBook,
     #[cfg(feature = "airplay")]
+    airplay_enabled: bool,
+    #[cfg(feature = "airplay")]
     airplay_timing_port: Option<std::num::NonZeroU16>,
 }
 
 impl CastBuilder {
     pub fn credential_store(mut self, store: impl CredentialStore + 'static) -> Self {
         self.credentials = CredentialBook::new(store);
+        self
+    }
+
+    /// Include the AirPlay backend in discovery. Enabled by default when compiled in.
+    #[cfg(feature = "airplay")]
+    pub fn airplay_enabled(mut self, enabled: bool) -> Self {
+        self.airplay_enabled = enabled;
         self
     }
 
@@ -256,14 +265,22 @@ impl CastBuilder {
     }
 
     /// Create a sender while entered in a live Tokio runtime with I/O and
-    /// time enabled. Returns an error when no protocol features are enabled.
+    /// time enabled. Returns an error when there are no enabled backends.
     pub fn build(self) -> Result<Cast, Error> {
         let backends: Vec<Arc<dyn Backend>> = vec![
             #[cfg(feature = "googlecast")]
             Arc::new(crate::googlecast::adapter::GoogleCast::default()),
-            #[cfg(feature = "airplay")]
-            Arc::new(crate::airplay::AirPlay::new(self.airplay_timing_port)),
         ];
+        #[cfg(feature = "airplay")]
+        let backends = {
+            let mut backends = backends;
+            if self.airplay_enabled {
+                backends.push(Arc::new(crate::airplay::AirPlay::new(
+                    self.airplay_timing_port,
+                )));
+            }
+            backends
+        };
         self.build_with(backends)
     }
 
@@ -353,6 +370,8 @@ impl Cast {
     pub fn builder() -> CastBuilder {
         CastBuilder {
             credentials: CredentialBook::new(MemoryStore::default()),
+            #[cfg(feature = "airplay")]
+            airplay_enabled: true,
             #[cfg(feature = "airplay")]
             airplay_timing_port: None,
         }
@@ -564,4 +583,26 @@ fn connect_interrupted(kind: ErrorKind, started: &AtomicBool) -> Error {
         Delivery::NotSent
     };
     Error::new(kind, Stage::Connect, delivery)
+}
+
+#[cfg(all(test, feature = "airplay"))]
+#[tokio::test]
+async fn app_can_disable_airplay_without_changing_the_compiled_protocols() {
+    let standalone = Cast::builder().build().unwrap();
+    assert!(
+        standalone
+            .inner
+            .backends
+            .iter()
+            .any(|backend| backend.protocol().as_str() == "airplay")
+    );
+    let opt_out = Cast::builder().airplay_enabled(false).build();
+    #[cfg(feature = "googlecast")]
+    {
+        let cast = opt_out.unwrap();
+        assert_eq!(cast.inner.backends.len(), 1);
+        assert_eq!(cast.inner.backends[0].protocol().as_str(), "googlecast");
+    }
+    #[cfg(not(feature = "googlecast"))]
+    assert_eq!(opt_out.err().unwrap().kind(), ErrorKind::Unavailable);
 }

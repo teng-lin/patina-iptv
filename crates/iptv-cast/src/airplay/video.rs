@@ -8,7 +8,7 @@ use plist::{
     stream::{Event, Reader},
 };
 use std::{
-    io::Cursor,
+    io::{self, Cursor},
     net::{SocketAddr, SocketAddrV6},
     num::NonZeroU16,
     sync::{
@@ -146,18 +146,42 @@ fn same_host(left: SocketAddr, right: SocketAddr) -> bool {
     }
 }
 
+fn datagram_result<T>(result: io::Result<T>) -> io::Result<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::Interrupted
+                    | io::ErrorKind::WouldBlock
+                    | io::ErrorKind::ConnectionRefused
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::NetworkUnreachable
+                    | io::ErrorKind::HostUnreachable
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 async fn timing_loop(
     socket: UdpSocket,
     peer: SocketAddr,
     replied: &AtomicBool,
 ) -> std::io::Result<()> {
-    let mut data = [0; 33];
+    // Receive the entire UDP datagram. Some platforms return an error
+    // instead of truncating packets that exceed the receive buffer.
+    let mut data = vec![0; u16::MAX.into()];
     loop {
-        let (len, source) = socket.recv_from(&mut data).await?;
+        let Some((len, source)) = datagram_result(socket.recv_from(&mut data).await)? else {
+            continue;
+        };
         if same_host(source, peer)
             && let Some(response) = timing_reply(&data[..len], SystemTime::now())
+            && datagram_result(socket.send_to(&response, source).await)?.is_some()
         {
-            socket.send_to(&response, source).await?;
             replied.store(true, Ordering::Release);
         }
     }

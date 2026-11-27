@@ -120,6 +120,7 @@ pub enum ErrorKind {
     Expired,
     InvalidPin,
     ApprovalDenied,
+    InvalidCredential,
     IdentityMismatch,
     Storage,
     Unreachable,

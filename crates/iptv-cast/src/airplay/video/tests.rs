@@ -400,3 +400,55 @@ fn udp_listener_reuses_tcp_scope_for_link_local_ipv6() {
         "[2001:db8::1]:0".parse().unwrap(),
     );
 }
+
+#[test]
+fn datagram_errors_distinguish_per_packet_failure_and_socket_failure() {
+    for kind in [
+        io::ErrorKind::Interrupted,
+        io::ErrorKind::WouldBlock,
+        io::ErrorKind::ConnectionRefused,
+        io::ErrorKind::ConnectionReset,
+        io::ErrorKind::NetworkUnreachable,
+        io::ErrorKind::HostUnreachable,
+    ] {
+        assert_eq!(datagram_result::<usize>(Err(kind.into())).unwrap(), None);
+    }
+    assert_eq!(
+        datagram_result::<usize>(Err(io::ErrorKind::InvalidInput.into()))
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
+}
+
+#[tokio::test]
+async fn timing_listener_drains_an_oversized_datagram_and_replies_to_the_next_packet() {
+    let receiver = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+    let sender = UdpSocket::bind(("127.0.0.1", 0)).await.unwrap();
+    let address = sender.local_addr().unwrap();
+    let peer = receiver.local_addr().unwrap();
+    let observed = Arc::new(AtomicBool::new(false));
+    let replied = observed.clone();
+    let worker = tokio::spawn(async move { timing_loop(sender, peer, &replied).await });
+
+    let mut oversized = vec![0; 4 * 1024];
+    oversized[..2].copy_from_slice(&[0x80, 0xd2]);
+    oversized[24..32].copy_from_slice(&[1; 8]);
+    receiver.send_to(&oversized, address).await.unwrap();
+    let mut valid = [0; 32];
+    valid[..2].copy_from_slice(&[0x80, 0xd2]);
+    valid[24..].copy_from_slice(&[2; 8]);
+    receiver.send_to(&valid, address).await.unwrap();
+
+    let mut response = [0; 32];
+    let (received, source) = timeout(Duration::from_secs(2), receiver.recv_from(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(source, address);
+    assert_eq!(received, 32);
+    assert_eq!(&response[8..16], &[2; 8]);
+    assert!(observed.load(Ordering::Acquire));
+    worker.abort();
+    assert!(worker.await.unwrap_err().is_cancelled());
+}
