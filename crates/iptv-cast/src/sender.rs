@@ -98,8 +98,9 @@ pub(crate) trait Driver: Send {
     fn observe(&mut self) -> BoxFuture<'_, Result<Observation, Error>>;
 
     /// Recheck current ownership and capability for each write. Serialize
-    /// protocol messages and report the command's own delivery evidence. The
-    /// session can drop this wait at its command deadline before calling stop.
+    /// protocol messages and report the command's own delivery evidence.
+    /// The session may drop this wait on timeout or local retirement, so
+    /// keep framing and ownership state usable for subsequent stop or close.
     fn command(&mut self, command: Command) -> BoxFuture<'_, Result<Confirmation, Error>>;
 
     /// Stop only the proven owned load. Reconcile late replies within a bound

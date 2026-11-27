@@ -203,11 +203,16 @@ impl Session {
 
     pub async fn stop(mut self) -> Result<StopOutcome, Error> {
         self.retire(Action::Stop);
+        let delivery = if self.dispatch.sent() {
+            Delivery::MayHaveReachedReceiver
+        } else {
+            Delivery::NotSent
+        };
         self.worker
             .take()
             .unwrap()
             .await
-            .map_err(|_| stop_error(ErrorKind::Unavailable, Delivery::MayHaveReachedReceiver))?
+            .map_err(|_| stop_error(ErrorKind::Unavailable, delivery))?
     }
 
     pub async fn close(mut self) {
@@ -307,13 +312,32 @@ async fn run(
                     return finish_action(&mut *driver, Action::Close, &publish, snapshot, &dispatch).await;
                 };
                 if request.reply.is_closed() { continue; }
-                let result = if let Err(error) = check_command(&snapshot, request.command) {
-                    Err(error)
-                } else {
+                if let Err(error) = check_command(&snapshot, request.command) {
+                    let _ = request.reply.send(Err(error));
+                    continue;
+                }
+                let command = async {
                     request.started.store(true, Ordering::Release);
-                    tokio::time::timeout(COMMAND_TIMEOUT, driver.command(request.command))
-                        .await
-                        .unwrap_or_else(|_| Err(interrupted_command(ErrorKind::TimedOut)))
+                    driver.command(request.command).await
+                };
+                let result = tokio::select! {
+                    biased;
+                    action = &mut retire => Err(action.unwrap_or(Action::Close)),
+                    result = tokio::time::timeout(COMMAND_TIMEOUT, command) => {
+                        Ok(result.unwrap_or_else(|_| Err(interrupted_command(ErrorKind::TimedOut))))
+                    }
+                };
+                let result = match result {
+                    Ok(result) => result,
+                    Err(action) => {
+                        let error = if request.started.load(Ordering::Acquire) {
+                            interrupted_command(ErrorKind::Cancelled)
+                        } else {
+                            command_error(ErrorKind::Cancelled)
+                        };
+                        let _ = request.reply.send(Err(error));
+                        return finish_action(&mut *driver, action, &publish, snapshot, &dispatch).await;
+                    }
                 };
                 let _ = request.reply.send(result);
             }

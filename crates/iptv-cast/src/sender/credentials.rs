@@ -76,6 +76,9 @@ impl fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
+/// A host-owned store. Keep each operation bounded, including platform
+/// prompts, and replace a record atomically. Forget waits for a committing
+/// write before removing the pairing.
 pub trait CredentialStore: Send + Sync {
     fn load(
         &self,
@@ -362,6 +365,8 @@ impl Pairing {
         })?
     }
 
+    /// Retire this attempt. A save that has already committed can leave a
+    /// verified credential in the store. Use `Cast::forget` to remove it.
     pub async fn cancel(mut self) {
         self.cancelled.cancel();
         let _ = self.worker.take().unwrap().await;

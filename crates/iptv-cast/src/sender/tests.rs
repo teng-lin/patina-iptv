@@ -1071,6 +1071,33 @@ async fn a_stalled_command_retires_with_uncertainty_and_leaves_stop_available() 
     assert_eq!(fixture.closes.read(), 1);
 }
 
+#[tokio::test(start_paused = true)]
+async fn retiring_a_session_interrupts_an_abandoned_command() {
+    let fixture = Arc::new(Fixture::default());
+    fixture.block_command.store(true, Ordering::Relaxed);
+    fixture.send_gate.add_permits(1);
+    fixture.acknowledge.add_permits(1);
+    let cast = cast(fixture.backend());
+    let route = route(&cast).await;
+    let mut session = connection(&cast, &route).await.load(media()).unwrap();
+    display_start(&session).await;
+    {
+        let command = session.command(Command::Play);
+        tokio::select! {
+            _ = command => panic!("stalled command resolved before retirement"),
+            () = fixture.controls.wait(1) => {}
+        }
+    }
+    assert_eq!(
+        timeout(Duration::from_secs(1), session.stop())
+            .await
+            .unwrap()
+            .unwrap(),
+        StopOutcome::StopRequested(Confirmation::ReceiverConfirmed),
+    );
+    assert_eq!(fixture.closes.read(), 1);
+}
+
 #[tokio::test]
 async fn pairing_reuses_credentials_and_rejects_identity_mismatch() {
     let fixture = Arc::new(Fixture::default());
