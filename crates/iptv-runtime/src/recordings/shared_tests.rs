@@ -154,7 +154,7 @@ impl Runtime {
     }
 }
 async fn open(owner: &Runtime, request: &Request) -> PlaySource {
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
@@ -259,9 +259,9 @@ async fn live_capture_uses_one_incoming_and_keeps_it_after_playback_stops() {
         until(&owner, id, |job| !job.status.active()).await.status,
         Status::Completed
     );
-    owner.recordings.retire_unused().await;
+    owner.recordings.shared().retire_unused().await;
     assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
-    assert!(owner.recordings.lock().inputs.is_empty());
+    assert!(owner.recordings.shared().lock().inputs.is_empty());
     assert!(owner.drain_services());
 }
 
@@ -273,7 +273,7 @@ async fn stopping_capture_preserves_local_playback_source_and_input() {
     let request = seed(&owner, &fixture.url).await;
     let local = open(&owner, &request).await;
     let mut playback = player(&local).await;
-    let incoming = owner.recordings.lock().viewers[&0]
+    let incoming = owner.recordings.shared().lock().viewers[&0]
         .input
         .as_ref()
         .unwrap()
@@ -281,9 +281,9 @@ async fn stopping_capture_preserves_local_playback_source_and_input() {
     let id = record_now(&owner, request).await;
     owner.stop_recording(id).await.unwrap();
     until(&owner, id, |job| !job.status.active()).await;
-    owner.recordings.retire_unused().await;
+    owner.recordings.shared().retire_unused().await;
     assert_eq!(
-        owner.recordings.lock().viewers[&0]
+        owner.recordings.shared().lock().viewers[&0]
             .input
             .as_ref()
             .unwrap()
@@ -415,7 +415,7 @@ async fn pending_account_owner_stays_budgeted_when_its_surface_switches_accounts
     xtream_account(&owner, &sibling, &a, "generated-a").await;
     let other = seed(&owner, &b.url).await;
     xtream_account(&owner, &other, &b, "generated-b").await;
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     assert!(owner.reserve_live_viewing(0, SourceId(old.source), &old.channel));
@@ -481,7 +481,7 @@ async fn reused_incarnation_cannot_attach_the_old_incoming_at_the_same_url() {
         })
         .await
         .unwrap();
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     assert!(!owner.reserve_live_viewing(1, source_id, &request.channel));
@@ -514,10 +514,16 @@ async fn suspended_shared_viewer_retains_capture_budget_and_resumes_the_same_inp
     let id = record_now(&owner, request.clone()).await;
     drop(playback);
     host::suspend_viewing(dir.path());
-    assert!(owner.recordings.lock().viewers.is_empty());
-    assert!(!owner.recordings.lock().capacity(request.source, None));
+    assert!(owner.recordings.shared().lock().viewers.is_empty());
+    assert!(
+        !owner
+            .recordings
+            .shared()
+            .lock()
+            .capacity(request.source, None)
+    );
     assert!(host::resume_viewing(dir.path()));
-    assert!(owner.recordings.lock().viewers[&0].input.is_some());
+    assert!(owner.recordings.shared().lock().viewers[&0].input.is_some());
     let resumed = player(&local).await;
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
     owner.stop_recording(id).await.unwrap();
@@ -544,7 +550,7 @@ async fn background_shared_input_outlives_the_ui_executor_and_finishes_once() {
         job.status == Status::Recording && job.bytes >= 188
     })
     .await;
-    let state = owner.recordings.clone();
+    let state = owner.recordings.shared().clone();
     drop(playback);
     assert!(owner.drain_services());
     drop(owner);
@@ -578,10 +584,11 @@ async fn adaptive_master_retires_probe_then_preserves_native_handoff_and_capture
     let fallback = open(&owner, &request).await;
     assert_ne!(fallback.url, fixture.url);
     assert!(fallback.headers.is_empty());
-    assert_eq!(owner.recordings.lock().inputs.len(), 1);
+    assert_eq!(owner.recordings.shared().lock().inputs.len(), 1);
     assert!(
         owner
             .recordings
+            .shared()
             .lock()
             .shared_for(request.source, &request.channel)
             .is_none()
@@ -620,7 +627,7 @@ async fn actual_app_source_without_a_user_agent_shares_with_recording_defaults()
     let dir = tempfile::tempdir().unwrap();
     let owner = owner(dir.path());
     let request = seed(&owner, &fixture.url).await;
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     assert!(owner.reserve_live_viewing(0, SourceId(request.source), &request.channel));
@@ -677,7 +684,7 @@ async fn per_channel_user_agent_precedes_playlist_and_network_defaults_when_shar
     let local = open(&owner, &request).await;
     let playback = player(&local).await;
     assert_eq!(
-        owner.recordings.lock().viewers[&0]
+        owner.recordings.shared().lock().viewers[&0]
             .input
             .as_ref()
             .unwrap()
@@ -718,7 +725,14 @@ async fn a_new_incarnation_uses_fresh_provider_limit_after_a_stale_view_reservat
     assert!(owner.reserve_live_viewing(0, source_id, &request.channel));
     // Model a provisional reservation made before the source-incarnation poll
     // discarded the old provider's observed hard allowance.
-    owner.recordings.lock().viewers.get_mut(&0).unwrap().limit = 1;
+    owner
+        .recordings
+        .shared()
+        .lock()
+        .viewers
+        .get_mut(&0)
+        .unwrap()
+        .limit = 1;
     let prepared = owner
         .prepare_current_live_source(
             0,
@@ -731,14 +745,15 @@ async fn a_new_incarnation_uses_fresh_provider_limit_after_a_stale_view_reservat
     assert_ne!(first.url, prepared.url);
     owner
         .recordings
+        .shared()
         .lock()
         .provider_limits
         .insert(source_id.0, 3);
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     assert!(
-        owner.recordings.lock().capacity(source_id.0, None),
+        owner.recordings.shared().lock().capacity(source_id.0, None),
         "the newly registered owner must not retain the old incarnation's hard allowance"
     );
     assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
@@ -754,7 +769,7 @@ async fn owned_native_fallback_and_on_demand_retire_before_next_live_probe() {
         let dir = tempfile::tempdir().unwrap();
         let owner = owner(dir.path());
         let request = seed(&owner, &fixture.url).await;
-        refresh_accounts(&owner.services(), &owner.recordings)
+        refresh_accounts(&owner.services(), owner.recordings.shared())
             .await
             .unwrap();
         let fallback = if let Some(context) = context {
@@ -802,7 +817,7 @@ async fn rejected_live_and_independent_zaps_preserve_current_pending_preparation
     xtream_account(&owner, &recording, &capture, "generated-capture").await;
     let viewing = seed(&owner, &pending.url).await;
     xtream_account(&owner, &viewing, &pending, "generated-viewing").await;
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     let id = record_now(&owner, recording.clone()).await;
@@ -814,10 +829,13 @@ async fn rejected_live_and_independent_zaps_preserve_current_pending_preparation
         source(&owner, &viewing).await,
     ));
     wait(|| pending.requests.load(Ordering::SeqCst) == 1).await;
-    let revision = owner.recordings.lock().viewer_revision[&0];
+    let revision = owner.recordings.shared().lock().viewer_revision[&0];
     assert!(!owner.reserve_viewing(0, SourceId(recording.source)));
     assert!(!owner.reserve_live_viewing(0, SourceId(recording.source), &recording.channel));
-    assert_eq!(owner.recordings.lock().viewer_revision[&0], revision);
+    assert_eq!(
+        owner.recordings.shared().lock().viewer_revision[&0],
+        revision
+    );
     pending.held.store(false, Ordering::SeqCst);
     let local = prepared.await.unwrap().unwrap();
     let playback = player(&local).await;
@@ -837,7 +855,7 @@ async fn live_preparation_revalidates_enabled_membership_and_channel_authority_a
         let dir = tempfile::tempdir().unwrap();
         let owner = owner(dir.path());
         let request = seed(&owner, &fixture.url).await;
-        refresh_accounts(&owner.services(), &owner.recordings)
+        refresh_accounts(&owner.services(), owner.recordings.shared())
             .await
             .unwrap();
         let source_id = SourceId(request.source);
@@ -892,7 +910,7 @@ async fn live_preparation_revalidates_enabled_membership_and_channel_authority_a
             preparation.await.unwrap().is_err(),
             "late {mutation} invalidates the original preparation"
         );
-        assert!(owner.recordings.lock().inputs.is_empty());
+        assert!(owner.recordings.shared().lock().inputs.is_empty());
         wait(|| fixture.active.load(Ordering::SeqCst) == 0).await;
         assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
         assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
@@ -953,7 +971,7 @@ async fn rejected_reused_viewer_releases_only_its_own_capture_input_reference() 
             .await
             .is_err()
     );
-    assert!(owner.recordings.lock().viewers[&1].input.is_none());
+    assert!(owner.recordings.shared().lock().viewers[&1].input.is_none());
     assert_eq!(
         fixture.active.load(Ordering::SeqCst),
         1,
@@ -965,12 +983,12 @@ async fn rejected_reused_viewer_releases_only_its_own_capture_input_reference() 
     // capture task's lease release and the registry's acknowledged shutdown.
     // Observe the actual owner release, then join retirement before inspecting
     // accounting; a closing entry deliberately remains counted until that join.
-    wait(|| !owner.recordings.lock().active.contains_key(&id)).await;
+    wait(|| !owner.recordings.shared().lock().active.contains_key(&id)).await;
     tokio::time::timeout(Duration::from_secs(5), owner.retire_viewing_inputs(1))
         .await
         .expect("capture input retirement acknowledged");
     wait(|| fixture.active.load(Ordering::SeqCst) == 0).await;
-    assert!(owner.recordings.lock().inputs.is_empty());
+    assert!(owner.recordings.shared().lock().inputs.is_empty());
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.peak.load(Ordering::SeqCst), 1);
     owner.release_viewing(1);
@@ -1057,7 +1075,7 @@ async fn recording_link_resolution_revalidates_member_authority_before_shared_at
         )
         .unwrap();
         let session = StalkerSession::resume(portal, Secret::new("generated-session-token"), None);
-        owner.recordings.contexts.lock().unwrap().insert(
+        owner.recordings.shared().contexts.lock().unwrap().insert(
             source_id.0,
             ContextEntry {
                 pointer: 0,
@@ -1067,7 +1085,7 @@ async fn recording_link_resolution_revalidates_member_authority_before_shared_at
         );
         let services = owner.services();
         let work = services.clone();
-        let state = owner.recordings.clone();
+        let state = owner.recordings.shared().clone();
         let resolving =
             services.spawn(async move { resolve(&work, &state, &job, &CancelToken::new()).await });
         tokio::time::timeout(Duration::from_secs(5), seen)
@@ -1138,7 +1156,7 @@ async fn matching_owner_at_capacity(capture: bool) {
     let owner = owner(dir.path());
     crate::settings::load(&owner);
     let request = seed(&owner, &fixture.url).await;
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     let mut sockets = Vec::new();
@@ -1160,7 +1178,7 @@ async fn matching_owner_at_capacity(capture: bool) {
     // Hash iteration order is irrelevant: choose the other actual ready owner
     // after observing which owner the provisional identity-only search picks.
     let wanted = {
-        let data = owner.recordings.lock();
+        let data = owner.recordings.shared().lock();
         let first = data.shared_for(request.source, &request.channel).unwrap();
         data.viewers
             .values()
@@ -1191,7 +1209,7 @@ async fn matching_owner_at_capacity(capture: bool) {
             .unwrap();
         let job = record_now(&owner, request.clone()).await;
         assert_eq!(
-            owner.recordings.lock().active[&job]
+            owner.recordings.shared().lock().active[&job]
                 .0
                 .input
                 .as_ref()
@@ -1232,7 +1250,7 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
             let owner = owner(dir.path());
             let request = seed(&owner, &fixture.url).await;
             xtream_account(&owner, &request, &fixture, "generated-account-a").await;
-            refresh_accounts(&owner.services(), &owner.recordings)
+            refresh_accounts(&owner.services(), owner.recordings.shared())
                 .await
                 .unwrap();
             let id = SourceId(request.source);
@@ -1250,7 +1268,7 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
             let stream = source(&owner, &request).await;
             assert!(owner.reserve_live_viewing(0, id, &request.channel));
             let gate = {
-                let mut slots = owner.recordings.preparations.lock().unwrap();
+                let mut slots = owner.recordings.shared().preparations.lock().unwrap();
                 slots
                     .entry(0)
                     .or_insert_with(|| (CancelToken::new(), Arc::default()))
@@ -1271,6 +1289,7 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
                 let (arrived, arrival) = tokio::sync::oneshot::channel();
                 owner
                     .recordings
+                    .shared()
                     .preparation_arrivals
                     .lock()
                     .unwrap()
@@ -1317,14 +1336,14 @@ async fn resolved_authority_cannot_be_rebound_to_an_edited_account_or_channel() 
             );
             // Even an updated account cache cannot relabel the caller's older
             // credentials/channel snapshot while it waits at this surface.
-            refresh_accounts(&owner.services(), &owner.recordings)
+            refresh_accounts(&owner.services(), owner.recordings.shared())
                 .await
                 .unwrap();
             let prepared = queued.unwrap_or_else(|| tokio::spawn(prepare()));
             drop(held);
             assert!(prepared.await.unwrap().is_err(), "{timing}/{mutation}");
             assert_eq!(fixture.requests.load(Ordering::SeqCst), 0);
-            assert!(owner.recordings.lock().inputs.is_empty());
+            assert!(owner.recordings.shared().lock().inputs.is_empty());
             owner.release_viewing(0);
             // A fresh resolution using the new, supported public store state
             // remains usable; rejection does not poison the numeric source ID.
@@ -1395,7 +1414,7 @@ async fn a_first_segment_failing_after_its_first_packets_falls_back_on_retry() {
     let dir = tempfile::tempdir().unwrap();
     let owner = owner(dir.path());
     let request = seed(&owner, &url).await;
-    refresh_accounts(&owner.services(), &owner.recordings)
+    refresh_accounts(&owner.services(), owner.recordings.shared())
         .await
         .unwrap();
     let mut attempt = 0;

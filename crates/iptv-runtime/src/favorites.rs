@@ -8,8 +8,8 @@
 //! one writer thread in order, so a toggle never waits for the store (on a
 //! host without workers, a browser, to the store's writer lane in order,
 //! [`queue_on_writer`]). They are read when a source is shown, on the
-//! store's reader unless writes of this module are still queued
-//! ([`load`]). The synthetic guide keeps them in memory only.
+//! store's reader. Queued favorites edits flush before a writer-lane read.
+//! The synthetic guide keeps them in memory only.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, VecDeque};
@@ -18,11 +18,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use iptv_core::favorites::{Favorites, KeyIndex, RECENT_LIMIT, Recent, diff};
+use crate::error::AdapterError as StoreError;
+use crate::store_service::FavoriteWrite;
+use iptv_core::favorites::{Favorites, KeyIndex, Recent, diff};
 use iptv_core::guide::Schedule;
-use iptv_providers::ContentId;
+use iptv_library::SourceId;
+#[cfg(test)]
 use iptv_providers::model::ContentKind;
-use iptv_store_sqlite::{SourceId, Store, StoreError};
+#[cfg(test)]
+use iptv_store_sqlite::Store;
+
+pub(crate) const UNSAVED_EDITS: StoreError =
+    StoreError::Unavailable("recent favorite edits are not saved");
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -99,22 +106,7 @@ impl State {
     }
 }
 
-/// Whether `source` has movies or shows by its last import's counts.
-fn source_has_vod(store: &Store, source: SourceId) -> Result<bool, StoreError> {
-    let counts = store.import_status(source)?.counts;
-    Ok(counts.vod > 0 || counts.series > 0)
-}
-
-/// Whether any enabled source has movies or shows: one status read per
-/// configured playlist, never a catalog scan.
-fn any_enabled_vod(store: &Store) -> Result<bool, StoreError> {
-    for source in store.sources()? {
-        if store.source_policy(source.id)?.enabled && source_has_vod(store, source.id)? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
+type PendingWrite = FavoriteWrite;
 
 struct VodRequest {
     epoch: Rc<()>,
@@ -123,7 +115,7 @@ struct VodRequest {
 
 /// Reserve before queuing work, independently from the newest applied result.
 fn begin_vod_request(owner: &super::Runtime) -> VodRequest {
-    owner.favorites.with(|state| {
+    owner.organization.favorites().with(|state| {
         let mut state = state.borrow_mut();
         state.vod_requested = match state.vod_requested.checked_add(1) {
             Some(next) => next,
@@ -160,7 +152,7 @@ pub(crate) fn refresh_vod_availability(
 ) -> impl std::future::Future<Output = ()> + use<> {
     let request = begin_vod_request(owner);
     let services = owner.services();
-    let read = services.read(any_enabled_vod);
+    let read = services.favorites().any_enabled_vod();
     let owner = owner.clone();
     async move {
         let Ok(any_vod) = read.await else { return };
@@ -168,7 +160,8 @@ pub(crate) fn refresh_vod_availability(
             return;
         }
         let changed = owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| apply_vod_availability(&mut state.borrow_mut(), &request, any_vod));
         if changed {
             publish(&owner);
@@ -204,63 +197,22 @@ enum Write {
     },
 }
 
-#[derive(Clone)]
-enum PendingWrite {
-    ClearHistory,
-    MoveFavorite {
-        source: SourceId,
-        key: String,
-        index: usize,
-    },
-    Favorite {
-        source: SourceId,
-        key: String,
-        on: bool,
-    },
-    Watched {
-        source: SourceId,
-        key: String,
-        at: i64,
-    },
-    WatchTime {
-        source: SourceId,
-        key: String,
-        elapsed_ms: u64,
-    },
-}
-
 /// Writes sent to the writer thread and not yet committed (or dropped with
 /// their deleted playlist).
 fn unsaved(owner: &super::Runtime) -> Arc<AtomicUsize> {
-    owner.favorites.borrow().unsaved.clone()
+    owner.organization.favorites().borrow().unsaved.clone()
 }
 
 fn cooperative_failure(owner: &super::Runtime) -> Arc<AtomicBool> {
-    owner.favorites.borrow().failed.clone()
+    owner.organization.favorites().borrow().failed.clone()
 }
 
 /// Reads saved favorites. The store's reader does not wait for a long
 /// publish, but it cannot see a write still queued: while any of ours is,
 /// a favorites-inbox barrier must finish before queuing the read.
-async fn load<R: Send + 'static>(
-    owner: &super::Runtime,
-    read: impl FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
-) -> Result<R, StoreError> {
-    if unsaved(owner).load(Ordering::Acquire) > 0 {
-        if !flush(owner).await {
-            return Err(StoreError::Unavailable(
-                "recent favorite edits are not saved",
-            ));
-        }
-        owner.services().call(move |store| read(store)).await
-    } else {
-        owner.services().read(read).await
-    }
-}
-
 /// A new app root must reload persisted favorites, including an applied restore.
 pub fn reset(owner: &super::Runtime) {
-    owner.favorites.borrow_mut().reset();
+    owner.organization.favorites().borrow_mut().reset();
 }
 
 /// The source whose catalog is about to be shown: its saved favorites
@@ -270,42 +222,43 @@ pub async fn prepare_source(
     owner: &std::rc::Rc<super::Runtime>,
     source: Option<SourceId>,
 ) -> Option<impl FnOnce()> {
-    let generation = owner.generation.get();
+    let generation = owner.imports.generation.get();
     let id = source?;
     let services = owner.services();
     let history_revision = owner
-        .favorites
+        .organization
+        .favorites()
         .with(|state| state.borrow().history_revision);
     let request = begin_vod_request(owner);
-    let loaded = load(owner, move |store| {
-        let has_vod = source_has_vod(store, id).unwrap_or(false);
-        // Another enabled playlist's films keep the cross-source shelves
-        // reachable while a live-only playlist is on screen.
-        // An unrelated playlist's metadata error must not block this guide.
-        // None preserves the last known cross-source availability.
-        let any_vod = if has_vod {
-            Some(true)
-        } else {
-            any_enabled_vod(store).ok()
-        };
-        let keys = store.favorite_keys(id)?;
-        let recent = store.recent(Some(id), Some(ContentKind::Live), RECENT_LIMIT as u32)?;
-        Ok(((has_vod, any_vod), keys, recent))
-    })
-    .await;
-    if !services.is_current() || owner.generation.get() != generation {
+    let after_writes = unsaved(owner).load(Ordering::Acquire) > 0;
+    let loaded = if after_writes && !flush(owner).await {
+        Err(UNSAVED_EDITS)
+    } else {
+        owner
+            .services()
+            .favorites()
+            .source_data(id, after_writes)
+            .await
+    };
+    if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
-    let ((has_vod, any_vod), keys, recent) = match loaded {
+    let loaded = match loaded {
         Ok(loaded) => loaded,
         Err(error) => {
             log::warn!("iptv favorites: store unavailable ({error})");
             return None;
         }
     };
+    let (has_vod, any_vod, keys, recent) = (
+        loaded.has_vod,
+        loaded.any_vod,
+        loaded.favorites,
+        loaded.recent,
+    );
     let owner = owner.clone();
     Some(move || {
-        owner.favorites.with(|state| {
+        owner.organization.favorites().with(|state| {
             let mut state = state.borrow_mut();
             state.has_vod = has_vod;
             if services.is_current()
@@ -323,8 +276,7 @@ pub async fn prepare_source(
             state.recent = Recent::from_keys(
                 recent
                     .into_iter()
-                    .filter(|_| state.history_revision == history_revision)
-                    .map(|row| row.item_id.as_str().to_owned()),
+                    .filter(|_| state.history_revision == history_revision),
             );
         })
     })
@@ -333,44 +285,37 @@ pub async fn prepare_source(
 /// Load enabled-source favorites while preserving edits already held in memory.
 pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<impl FnOnce()> {
     let history_revision = owner
-        .favorites
+        .organization
+        .favorites()
         .with(|state| state.borrow().history_revision);
-    let generation = owner.generation.get();
+    let generation = owner.imports.generation.get();
     let services = owner.services();
     let request = begin_vod_request(owner);
     use iptv_guide::combined::{qualified_key, split_key};
-    let loaded = load(owner, |store| {
-        let mut ids = Vec::new();
-        let mut favorites = Vec::new();
-        let mut has_vod = false;
-        let mut availability_known = true;
-        for source in store.sources()? {
-            if store.source_policy(source.id)?.enabled {
-                ids.push(source.id);
-                match source_has_vod(store, source.id) {
-                    Ok(available) => has_vod |= available,
-                    Err(_) => availability_known = false,
-                }
-                favorites.push((source.id, store.favorite_keys(source.id)?));
-            }
-        }
-        Ok((
-            ids,
-            favorites,
-            store.recent(None, Some(ContentKind::Live), RECENT_LIMIT as u32)?,
-            (has_vod || availability_known).then_some(has_vod),
-        ))
-    })
-    .await;
-    if !services.is_current() || owner.generation.get() != generation {
+    let after_writes = unsaved(owner).load(Ordering::Acquire) > 0;
+    if after_writes && !flush(owner).await {
         return None;
     }
-    let Ok((ids, favorites, recent, has_vod)) = loaded else {
+    let loaded = owner
+        .services()
+        .favorites()
+        .combined_data(after_writes)
+        .await;
+    if !services.is_current() || owner.imports.generation.get() != generation {
+        return None;
+    }
+    let Ok(loaded) = loaded else {
         return None;
     };
+    let (ids, favorites, recent, has_vod) = (
+        loaded.sources,
+        loaded.favorites,
+        loaded.recent,
+        loaded.has_vod,
+    );
     let owner = owner.clone();
     Some(move || {
-        owner.favorites.with(|state| {
+        owner.organization.favorites().with(|state| {
             let mut state = state.borrow_mut();
             let previous = state.combined_sources.clone();
             let mut keys: Vec<_> = state
@@ -401,8 +346,8 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
                 state.recent = Recent::from_keys(
                     recent
                         .into_iter()
-                        .filter(|row| ids.contains(&row.source_id))
-                        .map(|row| qualified_key(row.source_id.0, row.item_id.as_str())),
+                        .filter(|(source, _)| ids.contains(source))
+                        .map(|(source, key)| qualified_key(source.0, &key)),
                 );
             }
             // Every enabled playlist is on screen.
@@ -431,18 +376,21 @@ fn write_owner(state: &State, key: &str) -> Option<(SourceId, String)> {
 /// Index the installed catalog before the shell restores its lists.
 pub(crate) fn rebuild_index(owner: &super::Runtime, catalog: &dyn Schedule) {
     let index = KeyIndex::build(catalog);
-    owner.favorites.with(|s| s.borrow_mut().index = index);
+    owner
+        .organization
+        .favorites()
+        .with(|s| s.borrow_mut().index = index);
 }
 
 pub(crate) fn vod_availability(owner: &super::Runtime) -> (bool, bool) {
-    owner.favorites.with(|s| {
+    owner.organization.favorites().with(|s| {
         let state = s.borrow();
         (state.has_vod, state.any_vod)
     })
 }
 
 pub fn publish(owner: &super::Runtime) {
-    let (set, has_vod, any_vod) = owner.favorites.with(|s| {
+    let (set, has_vod, any_vod) = owner.organization.favorites().with(|s| {
         let s = s.borrow();
         (s.favorites.set_of(&s.index), s.has_vod, s.any_vod)
     });
@@ -455,7 +403,7 @@ pub fn publish(owner: &super::Runtime) {
 
 /// The favorites on screen as catalog channels, in their order.
 pub fn favorite_channels(owner: &super::Runtime) -> Vec<usize> {
-    owner.favorites.with(|s| {
+    owner.organization.favorites().with(|s| {
         let s = s.borrow();
         s.favorites.channels(&s.index)
     })
@@ -463,7 +411,7 @@ pub fn favorite_channels(owner: &super::Runtime) -> Vec<usize> {
 
 /// The recently watched channels on screen, newest first.
 pub fn recent_channels(owner: &super::Runtime) -> Vec<usize> {
-    owner.favorites.with(|s| {
+    owner.organization.favorites().with(|s| {
         let s = s.borrow();
         s.recent.channels(&s.index)
     })
@@ -471,13 +419,16 @@ pub fn recent_channels(owner: &super::Runtime) -> Vec<usize> {
 
 /// The catalog channel with `key`.
 pub fn channel_of(owner: &super::Runtime, key: &str) -> Option<usize> {
-    owner.favorites.with(|s| s.borrow().index.get(key))
+    owner
+        .organization
+        .favorites()
+        .with(|s| s.borrow().index.get(key))
 }
 
 /// Changes favorites through their catalog channels (the editor works on
 /// sets of them): what `f` adds or removes is saved by key.
 pub fn edit(owner: &super::Runtime, f: impl FnOnce(&mut BTreeSet<usize>)) {
-    let before = owner.favorites.with(|state| {
+    let before = owner.organization.favorites().with(|state| {
         let state = state.borrow();
         state.favorites.set_of(&state.index)
     });
@@ -530,7 +481,7 @@ impl FavoriteChange {
 }
 
 fn set_key(owner: &super::Runtime, key: &str, on: bool) {
-    let source = owner.favorites.with(|s| {
+    let source = owner.organization.favorites().with(|s| {
         let mut s = s.borrow_mut();
         if s.favorites.set(key, on) {
             let owned = write_owner(&s, key);
@@ -557,13 +508,17 @@ fn set_key(owner: &super::Runtime, key: &str, on: bool) {
 
 /// A live channel started playing (by key).
 pub fn played(owner: &super::Runtime, key: &str) {
-    let source = owner.favorites.with(|s| {
+    let source = owner.organization.favorites().with(|s| {
         let mut s = s.borrow_mut();
         s.recent.played(key);
         write_owner(&s, key)
     });
     if let Some((source, key)) = source {
-        owner.watch_sort_dirty.borrow_mut().insert(source);
+        owner
+            .organization
+            .watch_sort_dirty()
+            .borrow_mut()
+            .insert(source);
         send(
             owner,
             Write::Watched {
@@ -576,7 +531,11 @@ pub fn played(owner: &super::Runtime, key: &str) {
 }
 
 pub(crate) fn watch_time(owner: &super::Runtime, source: SourceId, key: String, elapsed_ms: u64) {
-    owner.watch_sort_dirty.borrow_mut().insert(source);
+    owner
+        .organization
+        .watch_sort_dirty()
+        .borrow_mut()
+        .insert(source);
     send(
         owner,
         Write::WatchTime {
@@ -593,11 +552,15 @@ fn send(owner: &super::Runtime, write: Write) {
         queue_on_writer(owner, write);
         return;
     }
-    owner.favorites.borrow_mut().send(services, write);
+    owner
+        .organization
+        .favorites()
+        .borrow_mut()
+        .send(services, write);
 }
 
 /// Keeps a write counted in [`unsaved`] until it ran or was dropped.
-struct Counted(std::sync::Arc<AtomicUsize>);
+pub(crate) struct Counted(std::sync::Arc<AtomicUsize>);
 
 impl Counted {
     fn new(owner: &super::Runtime) -> Self {
@@ -638,7 +601,7 @@ fn queue_on_writer(owner: &super::Runtime, write: Write) {
         let failed = failed.clone();
         // A barrier that cannot be queued is dropped, and its waiter hears
         // that nothing was saved.
-        drop(services.call(move |_| {
+        drop(services.writer_barrier(move || {
             done(!failed.swap(false, Ordering::AcqRel));
             Ok(())
         }));
@@ -675,57 +638,33 @@ fn queue_on_writer(owner: &super::Runtime, write: Write) {
     };
     let counted = Counted::new(owner);
     let failure = ReportFailure(Some(failed));
-    drop(services.call(move |store| {
-        let _counted = counted;
-        let mut failure = failure;
-        match persist(store, operation) {
-            Ok(()) | Err(StoreError::SourceNotFound(_)) => {
-                failure.0 = None;
-                Ok(())
+    services
+        .favorites()
+        .enqueue_write(operation, move |result| {
+            let _counted = &counted;
+            let mut failure = failure;
+            match result {
+                Ok(()) | Err(StoreError::SourceNotFound(_)) => {
+                    failure.0 = None;
+                }
+                Err(error) => {
+                    log::warn!("iptv favorites: could not save ({error})");
+                }
             }
-            Err(error) => {
-                log::warn!("iptv favorites: could not save ({error})");
-                Err(error)
-            }
-        }
-    }));
-}
-
-/// One write, on the store.
-fn persist(store: &mut Store, write: PendingWrite) -> Result<(), StoreError> {
-    match write {
-        PendingWrite::ClearHistory => store.clear_history(None).map(|_| ()),
-        PendingWrite::MoveFavorite { source, key, index } => store
-            .move_favorite(source, &ContentId::from_stored(key), index)
-            .map(|_| ()),
-        PendingWrite::Favorite { source, key, on } => {
-            store.set_favorite(source, &ContentId::from_stored(key), on)
-        }
-        PendingWrite::WatchTime {
-            source,
-            key,
-            elapsed_ms,
-        } => store.add_channel_watch_time(source, &ContentId::from_stored(key), elapsed_ms),
-        PendingWrite::Watched { source, key, at } => store.record_watch(
-            source,
-            &ContentId::from_stored(key),
-            ContentKind::Live,
-            at,
-            None,
-        ),
-    }
+        });
 }
 
 /// Clear in writer order so older queued plays cannot resurrect deleted history.
 pub fn clear_history(owner: &super::Runtime) -> impl std::future::Future<Output = bool> + use<> {
     owner
-        .watch_sort_dirty
+        .organization
+        .watch_sort_dirty()
         .borrow_mut()
         .extend(owner.shown_sources());
     send(owner, Write::ClearHistory);
     let (tx, rx) = futures_channel::oneshot::channel();
     send(owner, Write::Barrier(tx));
-    owner.favorites.with(|state| {
+    owner.organization.favorites().with(|state| {
         let mut state = state.borrow_mut();
         state.history_revision += 1;
         state.recent = Recent::default();
@@ -743,7 +682,7 @@ pub async fn flush(owner: &super::Runtime) -> bool {
 
 /// Root teardown only: queued edits outlive their UI owner and drain first.
 pub fn flush_on_shutdown(owner: &super::Runtime) -> bool {
-    let writer = owner.favorites.borrow_mut().writer.take();
+    let writer = owner.organization.favorites().borrow_mut().writer.take();
     let Some(writer) = writer else { return true };
     let deadline = crate::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
@@ -771,13 +710,10 @@ fn write_all(
 ) {
     write_all_with(rx, |write| {
         let operation = write.clone();
-        let result = services.blocking(move |store| persist(store, operation));
+        let result = services.favorites().persist_blocking(operation);
         // Deleting a playlist also deletes its customization/history. A queued
         // change whose owner was explicitly removed must not block other sources.
-        if matches!(
-            &result,
-            Err(iptv_store_sqlite::StoreError::SourceNotFound(_))
-        ) {
+        if matches!(&result, Err(StoreError::SourceNotFound(_))) {
             unsaved.fetch_sub(1, Ordering::AcqRel);
             return true;
         }
@@ -862,7 +798,7 @@ fn write_all_with(rx: Receiver<Write>, mut persist: impl FnMut(&PendingWrite) ->
 /// Ordered keys of the displayed source. Reorders use the same writer queue
 /// as membership changes, so rapid add/move/remove cannot race persistence.
 pub fn ordered_keys(owner: &super::Runtime) -> Vec<String> {
-    owner.favorites.with(|s| {
+    owner.organization.favorites().with(|s| {
         let s = s.borrow();
         s.favorites
             .keys()
@@ -873,7 +809,7 @@ pub fn ordered_keys(owner: &super::Runtime) -> Vec<String> {
     })
 }
 pub fn reorder(owner: &super::Runtime, key: &str, index: usize) {
-    let write = owner.favorites.with(|s| {
+    let write = owner.organization.favorites().with(|s| {
         let mut s = s.borrow_mut();
         let State {
             favorites,
@@ -916,7 +852,7 @@ pub(crate) async fn save_order(
         source,
         changes: RefCell::new(Vec::new()),
     });
-    let mut updated = owner.favorites.with(|state| {
+    let mut updated = owner.organization.favorites().with(|state| {
         let mut state = state.borrow_mut();
         if state.source != Some(source) || state.pending_order.upgrade().is_some() {
             return Err(StoreError::Unavailable(
@@ -937,11 +873,10 @@ pub(crate) async fn save_order(
             Write::SaveOrder(Box::new(move |prior_saved| {
                 let result = if prior_saved {
                     services
-                        .blocking(move |store| store.save_favorite_order(source, &original, &order))
+                        .favorites()
+                        .save_order_blocking(source, original, order)
                 } else {
-                    Err(StoreError::Unavailable(
-                        "recent favorite edits are not saved",
-                    ))
+                    Err(UNSAVED_EDITS)
                 };
                 pending.fetch_sub(1, Ordering::AcqRel);
                 let _ = done.send(result);
@@ -958,18 +893,11 @@ pub(crate) async fn save_order(
         let counted = Counted::new(owner);
         owner
             .services()
-            .call(move |store| {
-                let _counted = counted;
-                if failed.swap(false, Ordering::AcqRel) {
-                    return Err(StoreError::Unavailable(
-                        "recent favorite edits are not saved",
-                    ));
-                }
-                store.save_favorite_order(source, &original, &order)
-            })
+            .favorites()
+            .save_order_cooperatively(source, original, order, failed, counted)
             .await?;
     }
-    let changed = owner.favorites.with(|state| {
+    let changed = owner.organization.favorites().with(|state| {
         let mut state = state.borrow_mut();
         if !state.pending_order.ptr_eq(&Rc::downgrade(&changes)) {
             return false;
@@ -1070,16 +998,12 @@ mod reorder_tests {
         use std::task::{Context, Poll, Waker};
         let runtime = std::rc::Rc::new(super::super::Runtime::default());
         let (writer, inbox) = mpsc::channel();
-        runtime.favorites.borrow_mut().writer = Some(writer);
+        runtime.organization.favorites().borrow_mut().writer = Some(writer);
         unsaved(&runtime).store(1, Ordering::Release);
         let task = {
             let runtime = runtime.clone();
             async move {
-                let result = load::<()>(&runtime, |_| {
-                    panic!("failed edits must not produce a stale read")
-                })
-                .await;
-                assert!(matches!(result, Err(StoreError::Unavailable(_))));
+                assert!(prepare_source(&runtime, Some(SourceId(1))).await.is_none());
             }
         };
         let mut task = std::pin::pin!(task);
@@ -1298,7 +1222,8 @@ mod vod_availability_tests {
         })));
         owner.start_services();
         owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| state.borrow_mut().any_vod = true);
         let events = Rc::new(Cell::new(0));
         let reported = events.clone();
@@ -1311,27 +1236,29 @@ mod vod_availability_tests {
         let earlier = refresh_vod_availability(&owner);
         let newer = refresh_vod_availability(&owner);
         owner.services().block_on(newer);
-        assert!(!owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(!owner.organization.favorites().with(|s| s.borrow().any_vod));
         assert_eq!(events.get(), 1);
         owner.services().block_on(earlier);
-        assert!(!owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(!owner.organization.favorites().with(|s| s.borrow().any_vod));
         assert_eq!(events.get(), 1);
         owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| state.borrow_mut().any_vod = true);
         let retired = refresh_vod_availability(&owner);
         assert!(owner.drain_services());
         owner.start_services();
         owner.services().block_on(retired);
-        assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(owner.organization.favorites().with(|s| s.borrow().any_vod));
         assert_eq!(events.get(), 1);
         let reset_request = refresh_vod_availability(&owner);
         reset(&owner);
         owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| state.borrow_mut().any_vod = true);
         owner.services().block_on(reset_request);
-        assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(owner.organization.favorites().with(|s| s.borrow().any_vod));
         assert_eq!(events.get(), 1);
         assert!(owner.drain_services());
     }
@@ -1347,10 +1274,13 @@ mod vod_availability_tests {
             Ok(crate::model::DatabaseKey::from_bytes([0x74; 32]))
         })));
         owner.start_services();
-        owner.favorites.with(|s| s.borrow_mut().any_vod = true);
+        owner
+            .organization
+            .favorites()
+            .with(|s| s.borrow_mut().any_vod = true);
         let valid = refresh_vod_availability(&owner); // reads the empty library
         let (writer, inbox) = mpsc::channel();
-        owner.favorites.borrow_mut().writer = Some(writer);
+        owner.organization.favorites().borrow_mut().writer = Some(writer);
         unsaved(&owner).store(1, Ordering::Release);
         // A newer guide preparation reserves, but a failed persistence barrier
         // prevents its read/install. Its reservation carries no new authority.
@@ -1366,8 +1296,8 @@ mod vod_availability_tests {
         reply.send(false).unwrap();
         assert!(owner.services().block_on(failed).is_none());
         owner.services().block_on(valid);
-        assert!(!owner.favorites.with(|s| s.borrow().any_vod));
-        owner.favorites.borrow_mut().writer.take();
+        assert!(!owner.organization.favorites().with(|s| s.borrow().any_vod));
+        owner.organization.favorites().borrow_mut().writer.take();
         unsaved(&owner).store(0, Ordering::Release);
         assert!(owner.drain_services());
     }
@@ -1377,7 +1307,7 @@ mod vod_availability_tests {
         let owner = Runtime::default();
         let older = begin_vod_request(&owner);
         let newer = begin_vod_request(&owner);
-        owner.favorites.with(|s| {
+        owner.organization.favorites().with(|s| {
             let mut state = s.borrow_mut();
             assert!(!apply_vod_availability(&mut state, &newer, false));
             assert!(!apply_vod_availability(&mut state, &older, true));
@@ -1417,7 +1347,7 @@ mod vod_availability_tests {
         owner.start_services();
         let mounted = owner.schedule();
         let channel = mounted.channel_key(0).unwrap();
-        owner.favorites.with(|state| {
+        owner.organization.favorites().with(|state| {
             let mut state = state.borrow_mut();
             state.source = Some(old);
             state.index = KeyIndex::build(mounted.as_ref());
@@ -1444,11 +1374,14 @@ mod vod_availability_tests {
             .unwrap();
         owner.services().block_on(refresh_vod_availability(&owner));
         assert!(Rc::ptr_eq(&mounted, &owner.schedule()));
-        assert_eq!(owner.favorites.with(|s| s.borrow().source), Some(old));
+        assert_eq!(
+            owner.organization.favorites().with(|s| s.borrow().source),
+            Some(old)
+        );
         assert_eq!(*events.borrow(), vec![(BTreeSet::from([0]), true, false)]);
         // A superseded availability ticket must not discard the prepared guide.
         install();
-        owner.favorites.with(|state| {
+        owner.organization.favorites().with(|state| {
             let state = state.borrow();
             assert_eq!(state.source, Some(next));
             assert!(state.favorites.keys().is_empty());
@@ -1466,10 +1399,11 @@ mod vod_availability_tests {
         })));
         owner.start_services();
         owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| state.borrow_mut().any_vod = true);
         owner.services().block_on(refresh_vod_availability(&owner));
-        assert!(owner.favorites.with(|s| s.borrow().any_vod));
+        assert!(owner.organization.favorites().with(|s| s.borrow().any_vod));
         assert!(owner.drain_services());
     }
 }
@@ -1537,7 +1471,8 @@ mod start_tests {
             })
             .unwrap();
         owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| state.borrow_mut().source = Some(source));
         (owner, source)
     }
@@ -1615,7 +1550,8 @@ mod start_tests {
         // A playlist the store does not have is dropped, as natively; a
         // store error is not.
         owner
-            .favorites
+            .organization
+            .favorites()
             .with(|state| state.borrow_mut().source = Some(SourceId(999)));
         set_key(&owner, "synthetic-gone", true);
         let first = flush(&owner);
@@ -1678,7 +1614,7 @@ mod start_tests {
     fn reset_retires_the_writer_and_keeps_counting_previous_writes() {
         let owner = crate::Runtime::default();
         let (writer, inbox) = mpsc::channel();
-        owner.favorites.borrow_mut().writer = Some(writer);
+        owner.organization.favorites().borrow_mut().writer = Some(writer);
         let pending = Counted::new(&owner);
         let previous_failure = cooperative_failure(&owner);
 
@@ -1704,7 +1640,7 @@ mod start_tests {
         watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
         watch_time(&owner, SourceId(1), "synthetic-channel".into(), 1_000);
         assert_eq!(unsaved(&owner).load(Ordering::Acquire), 0);
-        assert!(owner.favorites.borrow().writer.is_none());
+        assert!(owner.organization.favorites().borrow().writer.is_none());
         assert!(owner.drain_services());
     }
 }

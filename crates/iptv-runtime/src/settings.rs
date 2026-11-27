@@ -5,8 +5,33 @@ use crate::network::NetworkConfig;
 use futures_channel::oneshot;
 use iptv_settings::keys::{self, BoolKey, DurationKey, EnumKey};
 use iptv_settings::{Settings, SettingsError, Target, Value};
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, PoisonError, RwLock};
+
+type SavedSettings = Option<(u64, Arc<Settings>)>;
+
+pub(crate) struct State {
+    saved: crate::Slot<RefCell<SavedSettings>>,
+    changed: crate::Slot<Cell<u64>>,
+    read_only: Cell<Option<std::io::ErrorKind>>,
+    session_only_noted: Cell<bool>,
+}
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            saved: crate::Slot::default(),
+            changed: crate::Slot::default(),
+            read_only: Cell::new(None),
+            session_only_noted: Cell::new(false),
+        }
+    }
+}
+impl State {
+    pub(super) fn session_only_noted(&self) -> &Cell<bool> {
+        &self.session_only_noted
+    }
+}
 
 /// One owner's effective settings, shared with its workers.
 pub(crate) type Shared = RwLock<Option<Arc<Settings>>>;
@@ -44,11 +69,12 @@ fn path(directory: &Path) -> PathBuf {
 pub(crate) fn load(owner: &super::Runtime) {
     let services = owner.services();
     let (settings, read_only) = read_file(services.files(), &path(services.directory()));
-    owner.settings_read_only.set(read_only);
+    owner.settings.read_only.set(read_only);
     let settings = Arc::new(adopt_retired(settings));
     owner
-        .settings_saved
-        .with(|saved| *saved.borrow_mut() = Some((owner.settings_changed.get(), settings.clone())));
+        .settings
+        .saved
+        .with(|saved| *saved.borrow_mut() = Some((owner.settings.changed.get(), settings.clone())));
     replace(services.shared_settings(), settings);
 }
 
@@ -202,7 +228,7 @@ pub(crate) fn check_setting_write(owner: &super::Runtime, key: &str) -> Result<(
 }
 
 fn check_writable(owner: &super::Runtime) -> Result<(), SaveError> {
-    match owner.settings_read_only.get() {
+    match owner.settings.read_only.get() {
         Some(error) => Err(SaveError::Storage(error)),
         None => Ok(()),
     }
@@ -411,8 +437,8 @@ fn apply_with_reply(
         log::info!("iptv settings: {key} changed");
         owner.emit(super::RuntimeEvent::SettingsChanged);
     }
-    let revision = owner.settings_changed.get() + 1;
-    owner.settings_changed.set(revision);
+    let revision = owner.settings.changed.get() + 1;
+    owner.settings.changed.set(revision);
     if !services.files().can_write() {
         // Neither a file writer nor a host keeps the files here: the
         // settings apply for this session.
@@ -430,15 +456,15 @@ fn apply_with_reply(
         let owner = task_owner;
         let result = saved.await;
         match settle(result) {
-            Settled::Saved => owner.settings_saved.with(|saved| {
+            Settled::Saved => owner.settings.saved.with(|saved| {
                 let mut saved = saved.borrow_mut();
                 if saved.as_ref().is_none_or(|(at, _)| *at < revision) {
                     *saved = Some((revision, next));
                 }
             }),
-            Settled::Failed if owner.settings_changed.get() == revision => {
+            Settled::Failed if owner.settings.changed.get() == revision => {
                 if let Some((_, previous)) =
-                    owner.settings_saved.with(|saved| saved.borrow().clone())
+                    owner.settings.saved.with(|saved| saved.borrow().clone())
                 {
                     publish(&owner, &services.settings(), previous);
                     owner.emit(super::RuntimeEvent::SettingsChanged);
@@ -513,6 +539,49 @@ pub fn add_user_agent(headers: &mut Vec<(String, String)>, ua: Option<String>) {
 /// `remote.long_press`, in ms.
 pub fn long_press_ms(settings: &Settings) -> u64 {
     u64::try_from(duration_ms(settings, keys::LONG_PRESS)).unwrap_or(0)
+}
+
+impl crate::Runtime {
+    /// Reads a global boolean setting using the effective settings snapshot.
+    pub fn setting_flag(&self, key: BoolKey) -> bool {
+        flag(&self.settings(), key)
+    }
+
+    /// Reads a global choice setting using the effective settings snapshot.
+    pub fn setting_choice(&self, key: EnumKey) -> &'static str {
+        choice(&self.settings(), key)
+    }
+
+    /// Returns the configured remote long-press threshold in milliseconds.
+    pub fn long_press_ms(&self) -> u64 {
+        long_press_ms(&self.settings())
+    }
+
+    /// Returns the effective network settings for provider requests.
+    pub fn network_config(&self) -> NetworkConfig {
+        network_config(&self.settings())
+    }
+
+    /// Supplies the effective user agent unless a stream names its own.
+    pub fn apply_user_agent(&self, headers: &mut Vec<(String, String)>) {
+        add_user_agent(headers, user_agent(&self.settings()));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn the_user_agent_goes_where_none_is_named() {
+    let mut headers = Vec::new();
+    add_user_agent(&mut headers, None);
+    assert!(headers.is_empty());
+    add_user_agent(&mut headers, Some("SyntheticPlayer/1.0".into()));
+    assert_eq!(
+        headers,
+        [("User-Agent".to_owned(), "SyntheticPlayer/1.0".to_owned())]
+    );
+    let mut own = vec![("user-agent".to_owned(), "ChannelAgent".to_owned())];
+    add_user_agent(&mut own, Some("SyntheticPlayer/1.0".into()));
+    assert_eq!(own.len(), 1, "the channel's own agent wins");
 }
 
 #[cfg(all(test, feature = "native"))]

@@ -7,6 +7,7 @@ use iptv_core::{
 };
 use iptv_import::CancelToken;
 use std::{
+    cell::RefCell,
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex, mpsc},
@@ -127,6 +128,13 @@ pub(crate) struct Worker {
     done: mpsc::Receiver<()>,
 }
 
+#[derive(Default)]
+pub(crate) struct State {
+    active: RefCell<Option<Active>>,
+    workers: RefCell<Vec<Worker>>,
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
 /// Releasing provider capacity depends on closing the local relay. A receiver that has
 /// left the network can take much longer to answer STOP; its owned media ID scopes that command.
 async fn retire_abandoned(
@@ -150,16 +158,18 @@ impl Runtime {
     /// Invalidates outstanding handoffs when a new playback intent replaces them.
     pub fn next_cast_intent(&self) -> u64 {
         let next = self
-            .cast_generation
+            .cast
+            .generation
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
             .wrapping_add(1);
-        for worker in self.cast_workers.borrow().iter() {
+        for worker in self.cast.workers.borrow().iter() {
             worker.cancel.cancel();
         }
         next
     }
     pub fn cast_intent(&self) -> u64 {
-        self.cast_generation
+        self.cast
+            .generation
             .load(std::sync::atomic::Ordering::Acquire)
     }
     pub fn cast_intent_current(&self, ticket: u64) -> bool {
@@ -207,12 +217,14 @@ impl Runtime {
     }
     pub fn cast_target(&self) -> Option<(Target, String)> {
         self.cast
+            .active
             .borrow()
             .as_ref()
             .map(|active| (active.receiver.clone(), active.key.clone()))
     }
     pub fn cast_controls(&self) -> Option<Controls> {
         self.cast
+            .active
             .borrow()
             .as_ref()
             .and_then(|active| active.remote.controls())
@@ -257,7 +269,7 @@ impl Runtime {
             .cast
             .clone()
             .ok_or(Error::Unavailable)?;
-        let generation = self.cast_generation.clone();
+        let generation = self.cast.generation.clone();
         let services = self.services();
         if !services.tasks_ready() {
             return Err(Error::Unavailable);
@@ -295,7 +307,7 @@ impl Runtime {
         mut prepared: Box<dyn Prepared>,
         grant: ExternalPlaybackAuthorization,
     ) -> Result<Box<dyn Prepared>, Error> {
-        let generation = self.cast_generation.clone();
+        let generation = self.cast.generation.clone();
         self.spawn_network(async move {
             if generation.load(std::sync::atomic::Ordering::Acquire) != ticket
                 || !grant.is_current()
@@ -320,10 +332,13 @@ impl Runtime {
         claim: Box<dyn Send>,
         grant: ExternalPlaybackAuthorization,
     ) -> Result<bool, Error> {
-        if self.shutdown_requested.get() || self.cast.borrow().is_some() || !grant.is_current() {
+        if self.lifecycle.shutdown_requested().get()
+            || self.cast.active.borrow().is_some()
+            || !grant.is_current()
+        {
             return Err(Error::Denied);
         }
-        let generation = self.cast_generation.clone();
+        let generation = self.cast.generation.clone();
         let guarded_generation = generation.clone();
         let guarded_grant = grant.clone();
         prepared.guard(Box::new(move || {
@@ -377,14 +392,14 @@ impl Runtime {
         let job = self.spawn_cast_worker(cancel.0.clone(), admission);
         if let Ok((admitted, claim)) = offered.await
             && self.cast_intent_current(ticket)
-            && !self.shutdown_requested.get()
-            && self.cast.borrow().is_none()
+            && !self.lifecycle.shutdown_requested().get()
+            && self.cast.active.borrow().is_none()
             && let Some(claim) = claim
                 .lock()
                 .expect("cast claim poisoned")
                 .take_if(|_| authorization.grant.is_current())
         {
-            *self.cast.borrow_mut() = Some(Active {
+            *self.cast.active.borrow_mut() = Some(Active {
                 receiver: destination.receiver,
                 key: destination.key,
                 authority: destination.authority,
@@ -406,7 +421,7 @@ impl Runtime {
         work: impl Future<Output = Result<T, Error>> + crate::MaybeSend + 'static,
     ) -> crate::execution::Join<Result<T, Error>> {
         let (done, waiting) = mpsc::channel();
-        let mut workers = self.cast_workers.borrow_mut();
+        let mut workers = self.cast.workers.borrow_mut();
         workers.retain(|worker| matches!(worker.done.try_recv(), Err(mpsc::TryRecvError::Empty)));
         workers.push(Worker {
             cancel,
@@ -425,7 +440,7 @@ impl Runtime {
     /// Stop admission and revoke open relays while the other services start draining.
     pub(crate) fn close_cast(&self) {
         self.next_cast_intent();
-        if let Some(active) = self.cast.borrow_mut().take() {
+        if let Some(active) = self.cast.active.borrow_mut().take() {
             self.parental_end_transfer(&iptv_core::parental::Target::live(
                 active.authority.source(),
                 active.authority.channel().id.as_str(),
@@ -440,7 +455,7 @@ impl Runtime {
 
     pub(crate) fn drain_cast(&self, deadline: crate::time::Instant) -> bool {
         let mut complete = true;
-        self.cast_workers.borrow_mut().retain(|worker| {
+        self.cast.workers.borrow_mut().retain(|worker| {
             let left = deadline.saturating_duration_since(crate::time::Instant::now());
             let result = if self.services().has_workers() {
                 worker.done.recv_timeout(left)
@@ -458,6 +473,7 @@ impl Runtime {
     pub async fn cast_command(&self, command: Command) -> Result<(), Error> {
         let remote = self
             .cast
+            .active
             .borrow()
             .as_ref()
             .ok_or(Error::Unavailable)?
@@ -484,6 +500,7 @@ impl Runtime {
     pub async fn replace_native_cast(&self) -> Result<(), Error> {
         let remote = self
             .cast
+            .active
             .borrow()
             .as_ref()
             .filter(|active| active.receiver == Target::AirPlay)
@@ -497,7 +514,7 @@ impl Runtime {
         Ok(())
     }
     fn clear_cast(&self, remote: &Arc<dyn Remote>) {
-        let mut slot = self.cast.borrow_mut();
+        let mut slot = self.cast.active.borrow_mut();
         if slot
             .as_ref()
             .is_some_and(|active| Arc::ptr_eq(&active.remote, remote))
@@ -510,7 +527,7 @@ impl Runtime {
         }
     }
     pub fn cast_parental_target(&self) -> Option<iptv_core::parental::Target> {
-        self.cast.borrow().as_ref().map(|a| {
+        self.cast.active.borrow().as_ref().map(|a| {
             iptv_core::parental::Target::live(
                 a.authority.source(),
                 a.authority.channel().id.as_str(),
@@ -518,12 +535,17 @@ impl Runtime {
         })
     }
     pub fn active_cast_ticket(&self) -> Option<u64> {
-        self.cast.borrow().as_ref().map(|active| active.ticket)
+        self.cast
+            .active
+            .borrow()
+            .as_ref()
+            .map(|active| active.ticket)
     }
 
     pub async fn poll_cast(&self, ticket: u64) -> Result<RemoteState, Error> {
         let (authority, remote) = self
             .cast
+            .active
             .borrow()
             .as_ref()
             .filter(|active| active.ticket == ticket)
@@ -544,7 +566,7 @@ impl Runtime {
                 .spawn_network(async move { worker.state().await })
                 .await
                 .map_err(|_| Error::Unknown)?;
-            let mut slot = self.cast.borrow_mut();
+            let mut slot = self.cast.active.borrow_mut();
             let active = slot
                 .as_mut()
                 .filter(|active| active.ticket == ticket)

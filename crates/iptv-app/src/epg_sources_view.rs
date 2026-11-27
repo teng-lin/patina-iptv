@@ -349,7 +349,7 @@ fn update_status(playlist: SourceId) -> (String, bool) {
         return (tr("Updating…").to_owned(), false);
     }
     let state = crate::runtime_owner::runtime().cached_guide_state(playlist);
-    match stored::status_of(state.as_ref()) {
+    match GuideStatus::from_snapshot(state.as_ref()) {
         GuideStatus::Updated { at, channels } => (
             trf(
                 "{count, plural, one {Last update {when} · # channel with a guide} \

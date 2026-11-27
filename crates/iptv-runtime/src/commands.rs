@@ -1,63 +1,34 @@
 //! Named library operations. Views send values and await results; only this
 //! module creates database work items.
 use super::store_service::Services;
-use crate::operations::ExternalPlaybackAuthorization;
+use crate::error::AdapterError as StoreError;
+use crate::model::{ChannelScope, CustomGroup};
 use iptv_core::membership::Member;
-use iptv_core::parental::Target;
-use iptv_guide::playback::ResolutionAuthority;
 use iptv_library::{CustomGroupId, SourceId};
 use iptv_providers::ContentId;
-use iptv_store_sqlite::{ChannelQuery, ChannelScope, CustomGroup, Store, StoreError};
 use std::{collections::BTreeSet, future::Future};
 
 fn custom_groups_native(
     services: &Services,
     source: SourceId,
-) -> impl Future<Output = Result<Vec<CustomGroup>, StoreError>> + use<> {
-    services.read(move |store| store.custom_groups(source))
-}
-
-fn member_rows(
-    store: &Store,
-    source: SourceId,
-    scope: ChannelScope,
-) -> Result<Vec<Member>, StoreError> {
-    Ok(store
-        .load_channels(
-            source,
-            &ChannelQuery {
-                scope,
-                include_hidden: true,
-                ..Default::default()
-            },
-        )?
-        .into_iter()
-        .map(|row| Member {
-            id: row.channel.id.as_str().into(),
-            name: row.name,
-        })
-        .collect())
+) -> impl Future<Output = Result<Vec<CustomGroup>, StoreError>> + '_ {
+    services.catalog().custom_groups(source)
 }
 
 fn members_native(
     services: &Services,
     source: SourceId,
     scope: ChannelScope,
-) -> impl Future<Output = Result<Vec<Member>, StoreError>> + use<> {
-    services.read(move |store| member_rows(store, source, scope))
+) -> impl Future<Output = Result<Vec<Member>, StoreError>> + '_ {
+    services.catalog().members(source, scope)
 }
 
 fn group_members_native(
     services: &Services,
     source: SourceId,
     scope: ChannelScope,
-) -> impl Future<Output = Result<(Vec<CustomGroup>, Vec<Member>), StoreError>> + use<> {
-    services.read(move |store| {
-        Ok((
-            store.custom_groups(source)?,
-            member_rows(store, source, scope)?,
-        ))
-    })
+) -> impl Future<Output = Result<(Vec<CustomGroup>, Vec<Member>), StoreError>> + '_ {
+    services.catalog().group_members(source, scope)
 }
 
 fn save_custom_group_native(
@@ -66,10 +37,7 @@ fn save_custom_group_native(
     group: Option<CustomGroupId>,
     name: String,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| match group {
-        Some(group) => store.rename_custom_group(group, &name),
-        None => store.create_custom_group(source, &name).map(|_| ()),
-    })
+    services.catalog().save_custom_group(source, group, name)
 }
 
 fn remove_custom_members_native(
@@ -78,10 +46,9 @@ fn remove_custom_members_native(
     members: Vec<ContentId>,
     access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| {
-        crate::parental::require_group_edit(store, group, &access)?;
-        store.remove_custom_members(group, &members)
-    })
+    services
+        .catalog()
+        .remove_custom_members(group, members, access)
 }
 
 fn transfer_custom_members_native(
@@ -93,12 +60,9 @@ fn transfer_custom_members_native(
     moving: bool,
     access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<usize, StoreError>> + use<> {
-    services.call(move |store| {
-        if moving && let Some(group) = from {
-            crate::parental::require_group_edit(store, group, &access)?;
-        }
-        store.transfer_custom_members(source, from, to, &members, moving)
-    })
+    services
+        .catalog()
+        .transfer_custom_members(source, from, to, members, moving, access)
 }
 
 fn delete_custom_group_native(
@@ -106,10 +70,7 @@ fn delete_custom_group_native(
     group: CustomGroupId,
     access: crate::parental::Snapshot,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| {
-        crate::parental::require_group_edit(store, group, &access)?;
-        store.delete_custom_group(group).map(|_| ())
-    })
+    services.catalog().delete_custom_group(group, access)
 }
 
 fn hide_channel_native(
@@ -117,181 +78,35 @@ fn hide_channel_native(
     source: SourceId,
     channel: String,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| store.set_hidden(source, &ContentId::from_stored(channel), true))
+    services.catalog().hide_channel(source, channel)
 }
 
 fn remember_combined_channel_native(
     services: &Services,
     key: String,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| store.set_combined_last_channel(&key))
+    services.catalog().remember_combined_channel(key)
 }
 
 fn channel_native(
     services: &Services,
     source: SourceId,
     channel: ContentId,
-    mut access: crate::parental::Snapshot,
-) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, StoreError>> + use<> {
-    let current = services.clone();
-    services.read(move |store| {
-        access.access.policy = crate::parental::policy_settings(&current.settings());
-        let target = Target::live(source.0, channel.as_str());
-        if store.guide_channel_blocked(source, channel.as_str())?
-            || !crate::parental::native_allowed(store, &target, &access)?
-        {
-            return Ok(None);
-        }
-        Ok(store
-            .channel(source, &channel)?
-            .map(|row| crate::model::PlaybackChannel {
-                channel: row.channel,
-                blocked: row.blocked,
-            }))
-    })
-}
-
-pub(crate) fn playback_handoff_check(
-    store: &Store,
-    authority: &ResolutionAuthority,
-    external_group: Option<&str>,
     access: crate::parental::Snapshot,
-) -> Result<Option<ExternalPlaybackAuthorization>, StoreError> {
-    let source = SourceId(authority.source());
-    let channel = &authority.channel().id;
-    let target = Target::live(source.0, channel.as_str());
-    store.read_snapshot(|store| {
-        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
-            return Ok(None);
-        };
-        if !store.source_policy(source)?.enabled
-            || store.guide_channel_blocked(source, channel.as_str())?
-        {
-            return Ok(None);
-        }
-        let Some(stored) = store.source(source)? else {
-            return Ok(None);
-        };
-        if let Some(group) = external_group {
-            let scope = Kind::group_channels(group);
-            if !store
-                .guide_group_preferences(source, group)?
-                .external_player
-                || !store
-                    .ordered_guide_channels(source, &scope)?
-                    .iter()
-                    .any(|row| &row.channel.id == channel)
-            {
-                return Ok(None);
-            }
-        }
-        let Some(row) = store.channel(source, channel)? else {
-            return Ok(None);
-        };
-        let allowed = !row.blocked
-            && stored.incarnation == authority.incarnation()
-            && &stored.source.config == authority.config()
-            && &row.channel == authority.channel()
-            && access.playback_current(&target, &grants);
-        Ok(allowed.then(|| ExternalPlaybackAuthorization::new(access, target, grants)))
-    })
+) -> impl Future<Output = Result<Option<crate::model::PlaybackChannel>, StoreError>> + use<> {
+    services.catalog().channel(source, channel, access)
 }
 
 fn save_search_history_native(
     services: &Services,
     history: Vec<String>,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| store.set_search_history(&history))
+    services.system().set_search_history(history)
 }
 
 use iptv_core::organization::{BlockKind, Blocks, Edit, Item, Sort};
-use iptv_guide::Organization;
 use iptv_library::OrganizationScope as Kind;
-use iptv_providers::GroupId;
-use iptv_store_sqlite::{ChannelOrder, OrderScope};
 
-fn organization_rows_in(
-    store: &Store,
-    source: SourceId,
-    kind: &Kind,
-    favorites: Vec<String>,
-    sort: Option<Sort>,
-) -> Result<Vec<Item>, StoreError> {
-    if *kind == Kind::Groups {
-        return match sort {
-            Some(sort) => store.guide_groups_with_sort(source, sort),
-            None => store.guide_groups(source),
-        };
-    }
-    let scope = if *kind == Kind::Favorites {
-        &Kind::Channels
-    } else {
-        kind
-    };
-    let rows = match sort {
-        Some(sort) => store.guide_channels_with_sort(source, scope, sort),
-        None => store.ordered_guide_channels(source, scope),
-    }?;
-    if *kind == Kind::Favorites {
-        // The source's favorite writer publishes membership and order optimistically.
-        let mut by_id: std::collections::HashMap<_, _> = rows
-            .into_iter()
-            .map(|row| (row.channel.id.as_str().to_owned(), row))
-            .collect();
-        return Ok(favorites
-            .into_iter()
-            .filter_map(|id| {
-                let row = by_id.remove(&id)?;
-                Some(Item {
-                    id,
-                    name: row.name,
-                    hidden: row.hidden,
-                })
-            })
-            .collect());
-    }
-    Ok(rows
-        .into_iter()
-        .map(|row| Item {
-            id: row.channel.id.as_str().to_owned(),
-            name: row.name,
-            hidden: row.hidden,
-        })
-        .collect())
-}
-
-pub(crate) fn organization_in(store: &Store, source: SourceId) -> Result<Organization, StoreError> {
-    let channels = store
-        .ordered_guide_channels(source, &Kind::Channels)?
-        .into_iter()
-        .map(|r| (r.channel.id.as_str().to_owned(), r.name, r.hidden))
-        .collect();
-    let mut group_preferences = std::collections::HashMap::new();
-    let mut groups = Vec::new();
-    let group_sort = store.guide_sort(source, &Kind::Groups)?;
-    for item in store.guide_groups_with_sort(source, group_sort)? {
-        group_preferences.insert(
-            item.id.clone(),
-            store.guide_group_preferences(source, &item.id)?,
-        );
-        groups.push((item.id, item.name, item.hidden));
-    }
-    if !group_preferences.contains_key("__other__") {
-        group_preferences.insert(
-            "__other__".into(),
-            store.guide_group_preferences(source, "__other__")?,
-        );
-    }
-    Ok(Organization {
-        channels,
-        groups,
-        blocks: store.guide_blocks(source)?,
-        group_preferences,
-        renamed_groups: store.renamed_groups(source)?,
-        group_sort,
-        channel_sort: store.guide_sort(source, &Kind::Channels)?,
-    })
-}
 fn edit_organization_native(
     services: &Services,
     source: SourceId,
@@ -301,82 +116,9 @@ fn edit_organization_native(
     edit: Edit,
     selected: BTreeSet<String>,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    #[derive(PartialEq)]
-    enum StoredKind {
-        Channels,
-        Groups,
-        GroupChannels(GroupId),
-        CustomChannels(CustomGroupId),
-    }
-    let kind = match kind {
-        Kind::Channels => Ok(StoredKind::Channels),
-        Kind::Groups => Ok(StoredKind::Groups),
-        Kind::GroupChannels(group) => Ok(StoredKind::GroupChannels(group)),
-        Kind::CustomChannels(group) => Ok(StoredKind::CustomChannels(group)),
-        Kind::Favorites
-            if !matches!(
-                edit,
-                Edit::Earlier | Edit::Later | Edit::First | Edit::Last | Edit::ResetOrder
-            ) =>
-        {
-            Ok(StoredKind::Channels)
-        }
-        Kind::Favorites => Err(StoreError::Unavailable(
-            "favorites use their ordered writer",
-        )),
-    };
-    services.call(move |store| {
-        let kind = kind?;
-        let id = ContentId::from_stored(&item.id);
-        let group = GroupId::from_stored(&item.id);
-        let to = match edit {
-            Edit::Earlier => iptv_store_sqlite::MoveTarget::Step(-1),
-            Edit::Later => iptv_store_sqlite::MoveTarget::Step(1),
-            Edit::Last => iptv_store_sqlite::MoveTarget::Index(usize::MAX),
-            _ => iptv_store_sqlite::MoveTarget::Index(0),
-        };
-        match edit {
-            Edit::Visibility => match &kind {
-                StoredKind::Groups => store.hide_group(source, &group, !item.hidden)?,
-                _ => store.set_hidden(source, &id, !item.hidden)?,
-            },
-            Edit::ResetName => match &kind {
-                StoredKind::Groups => store.rename_group(source, &group, None)?,
-                _ => store.rename_channel(source, &id, None)?,
-            },
-            Edit::Earlier | Edit::Later | Edit::First | Edit::Last => match &kind {
-                StoredKind::Channels => {
-                    store.move_channel_to(source, &OrderScope::All, &id, to)?;
-                }
-                StoredKind::GroupChannels(g) => {
-                    store.move_channel_to(source, &OrderScope::Group(g.clone()), &id, to)?;
-                }
-                StoredKind::CustomChannels(g) => {
-                    store.move_in_custom_group_to(*g, &id, to)?;
-                }
-                StoredKind::Groups => store.move_group_to(source, &group, to)?,
-            },
-            Edit::ResetOrder => match &kind {
-                StoredKind::Channels => store.reset_manual_order(source, &OrderScope::All)?,
-                StoredKind::GroupChannels(g) => {
-                    store.reset_manual_order(source, &OrderScope::Group(g.clone()))?
-                }
-                StoredKind::CustomChannels(g) => store.reset_custom_group_order(*g)?,
-                StoredKind::Groups => store.reset_group_order(source)?,
-            },
-            Edit::HideSelected | Edit::ShowSelected | Edit::HideAll | Edit::ShowAll => {
-                let all = matches!(edit, Edit::HideAll | Edit::ShowAll);
-                let hidden = matches!(edit, Edit::HideSelected | Edit::HideAll);
-                let ids: Vec<_> = items
-                    .into_iter()
-                    .filter(|i| all || selected.contains(&i.id))
-                    .map(|i| i.id)
-                    .collect();
-                store.set_library_visibility(source, &ids, kind == StoredKind::Groups, hidden)?;
-            }
-        }
-        Ok(())
-    })
+    services
+        .catalog()
+        .edit_organization(source, kind, items, item, edit, selected)
 }
 
 fn favorite_provider_order_native(
@@ -384,21 +126,7 @@ fn favorite_provider_order_native(
     source: SourceId,
     keys: Vec<String>,
 ) -> impl Future<Output = Result<Vec<String>, StoreError>> + use<> {
-    services.call(move |store| {
-        Ok(store
-            .load_channels(
-                source,
-                &ChannelQuery {
-                    include_hidden: true,
-                    order: ChannelOrder::Provider,
-                    ..Default::default()
-                },
-            )?
-            .into_iter()
-            .filter(|row| keys.iter().any(|key| key == row.channel.id.as_str()))
-            .map(|row| row.channel.id.as_str().to_owned())
-            .collect::<Vec<_>>())
-    })
+    services.catalog().favorite_provider_order(source, keys)
 }
 
 fn rename_organization_item_native(
@@ -408,92 +136,31 @@ fn rename_organization_item_native(
     id: String,
     text: String,
 ) -> impl Future<Output = Result<(), StoreError>> + use<> {
-    services.call(move |store| {
-        let text = (!text.trim().is_empty()).then_some(text.trim());
-        match kind {
-            Kind::Groups => store.rename_group(source, &GroupId::from_stored(&id), text),
-            _ => store.rename_channel(source, &ContentId::from_stored(&id), text),
-        }
-    })
-}
-
-pub(crate) fn import_legacy_history(
-    store: &mut iptv_store_sqlite::Store,
-    path: &std::path::Path,
-) -> Result<(), iptv_store_sqlite::StoreError> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Ok(());
-    };
-    let list: Vec<String> = serde_json::from_slice(&bytes).unwrap_or_default();
-    if !list.is_empty() && store.search_history()?.is_empty() {
-        let list = SearchHistory::from_list(list, SearchHistory::DEFAULT_CAPACITY).to_list();
-        store.set_search_history(&list)?;
-        log::info!(
-            "iptv search: moved {} recent searches into the store",
-            list.len()
-        );
-    }
-    if let Err(error) = std::fs::remove_file(path)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        log::warn!(
-            "iptv search: could not delete the old recent searches file ({})",
-            error.kind()
-        );
-    }
-    Ok(())
+    services
+        .catalog()
+        .rename_organization_item(source, kind, id, text)
 }
 
 fn load_search_history_native(
     services: &Services,
     legacy: std::path::PathBuf,
 ) -> impl Future<Output = Result<Vec<String>, StoreError>> + use<> {
-    services.call(move |store| {
-        import_legacy_history(store, &legacy)?;
-        store.search_history()
-    })
+    services.system().load_search_history(legacy)
 }
-
-use iptv_search::SearchHistory;
 
 use super::state::OrganizationSnapshot;
 async fn load_organization_native(
     services: &Services,
     source: SourceId,
 ) -> Result<OrganizationSnapshot, StoreError> {
-    services
-        .read(move |store| {
-            store.read_snapshot(|store| {
-                let organization = organization_in(store, source)?;
-                let lists = group_lists_in(store, source, &organization.groups)?;
-                Ok(OrganizationSnapshot {
-                    organization,
-                    lists,
-                })
-            })
-        })
-        .await
-}
-
-/// Includes empty custom groups so their membership can be populated later.
-fn group_lists_in(
-    store: &Store,
-    source: SourceId,
-    groups: &[(String, String, bool)],
-) -> Result<Vec<(String, String, Vec<String>)>, StoreError> {
-    groups
-        .iter()
-        .filter(|(_, _, hidden)| !hidden)
-        .map(|(id, name, _)| {
-            let scope = Kind::group_channels(id);
-            let channels = store
-                .ordered_guide_channels(source, &scope)?
-                .into_iter()
-                .map(|row| row.channel.id.as_str().to_owned())
-                .collect();
-            Ok((id.clone(), name.clone(), channels))
-        })
-        .collect()
+    let (organization, lists) = services
+        .catalog()
+        .organization_with_group_lists(source)
+        .await?;
+    Ok(OrganizationSnapshot {
+        organization,
+        lists,
+    })
 }
 
 fn startup_library_native(
@@ -501,7 +168,7 @@ fn startup_library_native(
 ) -> impl std::future::Future<
     Output = Result<
         (
-            Option<iptv_store_sqlite::StoredSource>,
+            Option<crate::model::StoredSource>,
             bool,
             bool,
             super::library::Snapshot,
@@ -509,76 +176,13 @@ fn startup_library_native(
         StoreError,
     >,
 > + use<> {
-    let directory = services.directory().to_owned();
-    services.call_at_startup(move |store| {
-        iptv_store_sqlite::EpgStage::remove_stale(&directory);
-        iptv_store_sqlite::CatalogStage::remove_stale(&directory);
-        let sources = store.sources()?;
-        let mut enabled = 0;
-        for source in &sources {
-            enabled += usize::from(store.source_policy(source.id)?.enabled);
-        }
-        Ok((
-            super::library::startup_source(store)?,
-            store.all_playlists()? || enabled > 1,
-            !sources.is_empty(),
-            super::library::snapshot_in(store)?,
-        ))
-    })
-}
-
-fn source_policies_native(
-    services: &Services,
-) -> impl std::future::Future<
-    Output = Result<
-        Vec<(iptv_store_sqlite::SourceSummary, iptv_library::SourcePolicy)>,
-        StoreError,
-    >,
-> + use<> {
-    services.call(|store| {
-        store
-            .sources()?
-            .into_iter()
-            .map(|source| {
-                let policy = store.source_policy(source.id)?;
-                Ok((source, policy))
-            })
-            .collect::<Result<Vec<_>, StoreError>>()
-    })
+    services.catalog().startup_library()
 }
 
 fn guide_status_snapshot_native(
     services: &Services,
 ) -> impl std::future::Future<Output = Result<super::state::StatusSnapshot, StoreError>> + use<> {
-    services.call(|store| {
-        let mut snapshot = super::state::StatusSnapshot {
-            library: Some(super::library::snapshot_in(store)?),
-            combined: store.all_playlists()?,
-            ..Default::default()
-        };
-        for source in store.sources()? {
-            if store.source_policy(source.id)?.enabled {
-                snapshot.enabled.push(source.id);
-            }
-            if let Some(guide) = store.epg_guide(source.id)? {
-                snapshot.guides.insert(source.id, guide);
-            }
-            let results = store.epg_feed_results(source.id)?;
-            let lines = store
-                .guide_sources(source.id)?
-                .into_iter()
-                .map(|source| iptv_library::SourceLine {
-                    result: results
-                        .iter()
-                        .find(|result| result.feed == source.feed)
-                        .cloned(),
-                    source,
-                })
-                .collect();
-            snapshot.lines.insert(source.id, lines);
-        }
-        Ok(snapshot)
-    })
+    services.catalog().status_snapshot()
 }
 
 fn description_native(
@@ -587,22 +191,7 @@ fn description_native(
     key: iptv_epg::ChannelKey,
     start: iptv_epg::UnixTime,
 ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + use<> {
-    services.read(move |store| store.epg_description(source, &key, start))
-}
-
-fn guide_sources_native(
-    services: &Services,
-    source: SourceId,
-) -> impl std::future::Future<
-    Output = Result<
-        (
-            Option<iptv_store_sqlite::StoredGuide>,
-            Vec<iptv_library::GuideSource>,
-        ),
-        StoreError,
-    >,
-> + use<> {
-    services.call(move |store| Ok((store.epg_guide(source)?, store.guide_sources(source)?)))
+    services.epg().description(source, key, start)
 }
 
 fn clear_guides_native(
@@ -610,29 +199,7 @@ fn clear_guides_native(
     sources: Vec<SourceId>,
 ) -> impl std::future::Future<Output = Result<(bool, Vec<super::imports::Imported>), StoreError>> + use<>
 {
-    services.call(move |store| {
-        let mut deleted = true;
-        let mut imports = Vec::new();
-        for source in sources {
-            if let Err(e) = store.delete_epg(source) {
-                log::warn!("iptv data: could not delete stored guide: {e}");
-                deleted = false;
-                continue;
-            }
-            if let Ok((groups, channels)) = super::stored::catalog_in(store, source) {
-                imports.push(super::imports::Imported {
-                    groups,
-                    channels,
-                    playback: super::imports::Streams::Current,
-                    guide: iptv_epg::GuideStore::default(),
-                    now: crate::time::now_unix(),
-                    source,
-                    resume: false,
-                });
-            }
-        }
-        Ok((deleted, imports))
-    })
+    services.epg().clear_guides(sources)
 }
 
 fn guide_page_native(
@@ -641,48 +208,13 @@ fn guide_page_native(
     incarnation: Option<String>,
     request: iptv_guide::pages::PageRequest,
 ) -> impl std::future::Future<Output = Result<iptv_epg::GuideStore, StoreError>> + use<> {
-    services.read(move |store| {
-        store.read_snapshot(|store| {
-            let Some(incarnation) = incarnation else {
-                return Err(StoreError::Unavailable(
-                    "guide page has no source authority",
-                ));
-            };
-            if store.source(source)?.is_none()
-                || !store.source_policy(source)?.enabled
-                || store.source_incarnation(source)? != incarnation
-            {
-                return Err(StoreError::Unavailable("guide page source changed"));
-            }
-            let window = iptv_store_sqlite::EpgWindow {
-                from: request.from,
-                to: request.to,
-                ..iptv_store_sqlite::EpgWindow::from(0, 0)
-            };
-            store.load_epg(source, &window)
-        })
-    })
-}
-
-fn combined_resume_key_native(
-    services: &Services,
-) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + use<> {
-    let files = services.clone();
-    services.read(move |store| {
-        let s = store;
-        Ok(super::playback::load_combined_channel(&files)
-            .or(s.combined_last_channel()?)
-            .or_else(|| {
-                // On first opening the combined browser, keep the previous
-                // single-source startup preference, including legacy files.
-                let source = s.active_source().ok().flatten()?;
-                if !s.source_policy(source).ok()?.enabled {
-                    return None;
-                }
-                let key = super::playback::load_last_channel(&files, Some(source))?;
-                Some(iptv_guide::combined::qualified_key(source.0, &key))
-            }))
-    })
+    let services = services.clone();
+    async move {
+        services
+            .epg()
+            .authorized_page(source, incarnation, request)
+            .await
+    }
 }
 
 pub fn custom_groups(
@@ -834,16 +366,7 @@ pub fn clear_search_history(
     owner: &crate::Runtime,
     legacy: std::path::PathBuf,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
-    let cleared = owner.services().call(move |store| {
-        store.set_search_history(&[])?;
-        match std::fs::remove_file(legacy) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(_) => Err(StoreError::Unavailable(
-                "legacy search history could not be removed",
-            )),
-        }
-    });
+    let cleared = owner.services().system().clear_search_history(legacy);
     async move { cleared.await.map_err(crate::Error::from) }
 }
 
@@ -853,9 +376,10 @@ pub fn organization_items(
     kind: Kind,
     favorites: Vec<String>,
 ) -> impl Future<Output = Result<Vec<Item>, crate::Error>> + use<> {
-    let result = owner.services().read(move |store| {
-        store.read_snapshot(|store| organization_rows_in(store, source, &kind, favorites, None))
-    });
+    let result = owner
+        .services()
+        .catalog()
+        .organization_rows(source, kind, favorites, None);
     async move { Ok(result.await?) }
 }
 
@@ -864,10 +388,7 @@ pub async fn guide_blocks(
     owner: &crate::Runtime,
     source: SourceId,
 ) -> Result<Blocks, crate::Error> {
-    Ok(owner
-        .services()
-        .read(move |store| store.guide_blocks(source))
-        .await?)
+    Ok(owner.services().catalog().guide_blocks(source).await?)
 }
 
 /// Checks the current store before accessing the channel's stream.
@@ -878,7 +399,8 @@ pub async fn guide_channel_blocked(
 ) -> Result<bool, crate::Error> {
     Ok(owner
         .services()
-        .read(move |store| store.guide_channel_blocked(source, &id))
+        .catalog()
+        .guide_channel_blocked(source, id)
         .await?)
 }
 
@@ -890,10 +412,11 @@ pub fn set_guide_block(
     id: String,
     blocked: bool,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
-    let result = owner
+    let saved = owner
         .services()
-        .call(move |store| store.set_guide_block(source, kind, &id, blocked));
-    async move { Ok(result.await?) }
+        .catalog()
+        .set_guide_block(source, kind, id, blocked);
+    async move { saved.await.map_err(crate::Error::from) }
 }
 
 /// One consistent snapshot of a guide editor's rows and preferences.
@@ -912,18 +435,12 @@ pub async fn organization_editor(
     favorites: Vec<String>,
     draft_sort: Option<Sort>,
 ) -> Result<OrganizationItems, crate::Error> {
-    Ok(owner
+    let (rows, sort, blocks) = owner
         .services()
-        .read(move |store| {
-            store.read_snapshot(|store| {
-                Ok(OrganizationItems {
-                    rows: organization_rows_in(store, source, &scope, favorites, draft_sort)?,
-                    sort: store.guide_sort(source, &scope)?,
-                    blocks: store.guide_blocks(source)?,
-                })
-            })
-        })
-        .await?)
+        .catalog()
+        .organization_editor(source, scope, favorites, draft_sort)
+        .await?;
+    Ok(OrganizationItems { rows, sort, blocks })
 }
 
 pub fn set_group_preference(
@@ -934,8 +451,9 @@ pub fn set_group_preference(
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
     let saved = owner
         .services()
-        .call(move |store| store.set_guide_group_preference(source, &group, preference));
-    async move { Ok(saved.await?) }
+        .catalog()
+        .set_group_preference(source, group, preference);
+    async move { saved.await.map_err(crate::Error::from) }
 }
 
 /// Publishes a sort preference on the native writer.
@@ -947,7 +465,8 @@ pub fn set_organization_sort(
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
     let result = owner
         .services()
-        .call(move |store| store.set_guide_sort(source, &scope, sort));
+        .catalog()
+        .set_guide_sort(source, scope, sort);
     async move { Ok(result.await?) }
 }
 
@@ -957,9 +476,7 @@ pub fn hide_group(
     source: SourceId,
     id: String,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
-    let result = owner
-        .services()
-        .call(move |store| store.hide_group(source, &GroupId::from_stored(&id), true));
+    let result = owner.services().catalog().hide_group(source, id);
     async move { Ok(result.await?) }
 }
 
@@ -973,17 +490,15 @@ pub fn save_organization_order(
     expected_sort: Sort,
     from_custom: bool,
 ) -> impl Future<Output = Result<(), crate::Error>> + use<> {
-    let result = owner.services().call(move |store| {
-        store.save_guide_order_from(
-            source,
-            &scope,
-            &original,
-            &order,
-            Some(expected_sort),
-            from_custom,
-        )
-    });
-    async move { Ok(result.await?) }
+    let saved = owner.services().catalog().save_guide_order_from(
+        source,
+        scope,
+        original,
+        order,
+        expected_sort,
+        from_custom,
+    );
+    async move { saved.await.map_err(crate::Error::from) }
 }
 
 /// Applies an edit using the items and selection from the caller's view.
@@ -1058,7 +573,7 @@ pub(crate) fn startup_library(
 ) -> impl std::future::Future<
     Output = Result<
         (
-            Option<iptv_store_sqlite::StoredSource>,
+            Option<crate::model::StoredSource>,
             bool,
             bool,
             super::library::Snapshot,
@@ -1068,22 +583,6 @@ pub(crate) fn startup_library(
 > + use<> {
     let startup = startup_library_native(services);
     async move { startup.await.map_err(crate::Error::from) }
-}
-
-pub(crate) fn source_policies(
-    owner: &crate::Runtime,
-) -> impl std::future::Future<
-    Output = Result<
-        Vec<(iptv_store_sqlite::SourceSummary, iptv_library::SourcePolicy)>,
-        crate::Error,
-    >,
-> + use<> {
-    let services = owner.services();
-    async move {
-        source_policies_native(&services)
-            .await
-            .map_err(crate::Error::from)
-    }
 }
 
 pub(crate) fn guide_status_snapshot(
@@ -1106,26 +605,6 @@ pub(crate) fn description(
     let services = owner.services();
     async move {
         description_native(&services, source, key, start)
-            .await
-            .map_err(crate::Error::from)
-    }
-}
-
-pub(crate) fn guide_sources(
-    owner: &crate::Runtime,
-    source: SourceId,
-) -> impl std::future::Future<
-    Output = Result<
-        (
-            Option<iptv_store_sqlite::StoredGuide>,
-            Vec<iptv_library::GuideSource>,
-        ),
-        crate::Error,
-    >,
-> + use<> {
-    let services = owner.services();
-    async move {
-        guide_sources_native(&services, source)
             .await
             .map_err(crate::Error::from)
     }
@@ -1154,9 +633,7 @@ pub(crate) fn guide_listing_starts(
         crate::Error,
     >,
 > + use<> {
-    let starts = owner
-        .services()
-        .read(move |store| store.epg_listing_starts(source, cutoff));
+    let starts = owner.services().epg().listing_starts(source, cutoff);
     async move { Ok(starts.await?) }
 }
 
@@ -1179,7 +656,9 @@ pub fn combined_resume_key(
 ) -> impl std::future::Future<Output = Result<Option<String>, crate::Error>> + use<> {
     let services = owner.services();
     async move {
-        combined_resume_key_native(&services)
+        services
+            .catalog()
+            .combined_resume_key()
             .await
             .map_err(crate::Error::from)
     }
@@ -1192,8 +671,6 @@ pub fn stored_guide(
     now: iptv_epg::UnixTime,
 ) -> impl Future<Output = Result<iptv_epg::GuideStore, super::Error>> + use<> {
     let window = super::paging::window(now, super::stored::stored_past_days());
-    let read = owner
-        .services()
-        .call(move |store| store.load_epg(source, &super::paging::store_window(window)));
+    let read = owner.services().epg().page_after_writes(source, window);
     async move { Ok(read.await?) }
 }

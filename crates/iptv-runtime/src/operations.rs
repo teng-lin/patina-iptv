@@ -1,6 +1,5 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use crate::commands::playback_handoff_check;
 use crate::data::Update;
 use iptv_core::add_playlist::{FailureKind, ImportFailure, ImportId};
 use iptv_core::parental::Target;
@@ -45,11 +44,14 @@ impl Runtime {
         on_admitted: impl FnOnce(ImportId, u64),
         on_update: impl Fn(ImportId, Update) + 'static,
     ) -> (ImportId, u64) {
-        let ticket = self.wizard_tickets.get().wrapping_add(1).max(1);
-        self.wizard_tickets.set(ticket);
+        let ticket = self.imports.wizard_tickets.get().wrapping_add(1).max(1);
+        self.imports.wizard_tickets.set(ticket);
         let id = ImportId(ticket);
         let cancel = CancelToken::new();
-        let previous = self.wizard_import.replace(Some((id, cancel.clone())));
+        let previous = self
+            .imports
+            .wizard_import
+            .replace(Some((id, cancel.clone())));
         if let Some((_, cancel)) = previous {
             cancel.cancel();
         }
@@ -77,6 +79,7 @@ impl Runtime {
                     owner.finish_wizard_import(id).is_some()
                 } else {
                     owner
+                        .imports
                         .wizard_import
                         .borrow()
                         .as_ref()
@@ -99,13 +102,13 @@ impl Runtime {
     }
 
     pub fn browser_generation(&self) -> u64 {
-        self.generation.get()
+        self.imports.generation.get()
     }
     pub fn account_limit(&self) -> Option<u32> {
-        self.account_streams.get()
+        self.catalog.account_streams()
     }
     pub fn update_account_limit(&self, limit: Option<u32>) {
-        self.account_streams.set(limit);
+        self.catalog.set_account_streams(limit);
     }
     pub fn set_foreground(&self, foreground: bool) {
         self.set_foreground_for_external(foreground, None);
@@ -116,7 +119,7 @@ impl Runtime {
         foreground: bool,
         external: Option<&iptv_core::parental::Target>,
     ) {
-        self.foreground.set(foreground);
+        self.lifecycle.foreground().set(foreground);
         if !foreground {
             if let Some(target) = external {
                 self.parental_content_transferred(target);
@@ -127,7 +130,8 @@ impl Runtime {
     }
     pub fn cancel_link_resolution(&self, surface: usize) {
         let running = self
-            .resolving
+            .catalog
+            .pending_resolutions()
             .borrow_mut()
             .get_mut(surface)
             .and_then(Option::take);
@@ -138,13 +142,22 @@ impl Runtime {
     pub fn begin_link_resolution(&self, surface: usize, session: u64) -> CancelToken {
         self.cancel_link_resolution(surface);
         let cancel = CancelToken::new();
-        if let Some(slot) = self.resolving.borrow_mut().get_mut(surface) {
+        if let Some(slot) = self
+            .catalog
+            .pending_resolutions()
+            .borrow_mut()
+            .get_mut(surface)
+        {
             *slot = Some((session, cancel.clone()));
         }
         cancel
     }
     pub fn finish_link_resolution(&self, surface: usize, session: u64) {
-        if let Some(slot) = self.resolving.borrow_mut().get_mut(surface)
+        if let Some(slot) = self
+            .catalog
+            .pending_resolutions()
+            .borrow_mut()
+            .get_mut(surface)
             && slot.as_ref().is_some_and(|(at, _)| *at == session)
         {
             *slot = None;
@@ -154,7 +167,8 @@ impl Runtime {
     /// matching terminal reply to distinguish cancellation from a durable add.
     pub fn cancel_wizard_import(&self, id: ImportId, wait_for_commit: bool) {
         let token = if wait_for_commit {
-            self.wizard_import
+            self.imports
+                .wizard_import
                 .borrow()
                 .as_ref()
                 .filter(|(at, _)| *at == id)
@@ -168,7 +182,7 @@ impl Runtime {
         }
     }
     fn finish_wizard_import(&self, id: ImportId) -> Option<CancelToken> {
-        let mut running = self.wizard_import.borrow_mut();
+        let mut running = self.imports.wizard_import.borrow_mut();
         if running.as_ref().is_some_and(|(at, _)| *at == id) {
             running.take().map(|(_, token)| token)
         } else {
@@ -236,7 +250,7 @@ impl Runtime {
     /// Tells the user, once per owner, that settings last for the session:
     /// this host has neither a file writer nor a file host to save them.
     pub(crate) fn note_session_only(&self) {
-        if !self.session_only_noted.replace(true) {
+        if !self.settings.session_only_noted().replace(true) {
             self.emit(crate::RuntimeEvent::Notify(
                 "Changes are not saved on this device: they last until you show another playlist or close Patina.",
             ));
@@ -316,15 +330,15 @@ impl Runtime {
     /// session read it. A playlist's own `playlists.max_connections`
     /// overrides it; the playlists screen shows both.
     pub fn reported_streams(&self, source: SourceId) -> Option<u32> {
-        if self.shown.get() == Some(source)
-            && let Some(limit) = self.account_streams.get()
+        if self.catalog.shown_source() == Some(source)
+            && let Some(limit) = self.catalog.account_streams()
         {
             return Some(limit);
         }
-        if let Some(Some(limit)) = self.limits.borrow().get(&source) {
+        if let Some(Some(limit)) = self.catalog.provider_limits().borrow().get(&source) {
             return Some(*limit);
         }
-        if let Some(single) = self.single.borrow().as_ref()
+        if let Some(single) = self.catalog.single_schedule().borrow().as_ref()
             && single.source == source
             && single.limit.is_some()
         {
@@ -357,10 +371,10 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .read(move |store| {
-                Ok(playback_handoff_check(store, &authority, Some(&group), access)?.is_some())
-            })
-            .await?)
+            .catalog()
+            .playback_handoff(authority, Some(group), access)
+            .await?
+            .is_some())
     }
 
     /// Orders final admission behind queued parental changes. The returned
@@ -373,7 +387,8 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .call(move |store| playback_handoff_check(store, &authority, Some(&group), access))
+            .catalog()
+            .playback_handoff_ordered(authority, Some(group), access)
             .await?)
     }
 
@@ -386,7 +401,8 @@ impl Runtime {
         let access = self.parental_snapshot();
         Ok(self
             .services()
-            .call(move |store| playback_handoff_check(store, &authority, None, access))
+            .catalog()
+            .playback_handoff_ordered(authority, None, access)
             .await?)
     }
 
@@ -469,14 +485,18 @@ impl Runtime {
 
     /// Applies new statistics on entering the guide or selecting a different list.
     pub fn refresh_watch_order(self: &Rc<Self>) {
-        let dirty = std::mem::take(&mut *self.watch_sort_dirty.borrow_mut());
+        let dirty = std::mem::take(&mut *self.organization.watch_sort_dirty().borrow_mut());
         if dirty.is_empty() {
             return;
         }
         let owner = self.clone();
         self.spawn(async move {
             if !crate::favorites::flush(&owner).await {
-                owner.watch_sort_dirty.borrow_mut().extend(dirty);
+                owner
+                    .organization
+                    .watch_sort_dirty()
+                    .borrow_mut()
+                    .extend(dirty);
                 return;
             }
             let sources = owner
@@ -500,7 +520,11 @@ impl Runtime {
                         crate::data::watch_order_changed(&owner, source);
                     }
                 }
-                Err(_) => owner.watch_sort_dirty.borrow_mut().extend(dirty),
+                Err(_) => owner
+                    .organization
+                    .watch_sort_dirty()
+                    .borrow_mut()
+                    .extend(dirty),
             }
         });
     }
@@ -568,7 +592,7 @@ impl Runtime {
     }
 
     pub fn is_browsing_all(&self) -> bool {
-        self.all.get()
+        self.catalog.combined()
     }
 }
 
@@ -604,7 +628,7 @@ impl Runtime {
     ) -> (std::sync::mpsc::Receiver<()>, std::sync::mpsc::Sender<()>) {
         let (entered, observed) = std::sync::mpsc::channel();
         let (release, resume) = std::sync::mpsc::channel();
-        *self.inspection_scan.borrow_mut() = Some(Box::new(move || {
+        self.inspection.set_scan_hook(Box::new(move || {
             let _ = entered.send(());
             let _ = resume.recv_timeout(std::time::Duration::from_secs(10));
         }));

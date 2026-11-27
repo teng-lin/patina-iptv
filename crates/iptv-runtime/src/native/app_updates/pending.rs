@@ -44,7 +44,9 @@ pub(super) struct DownloadGuard<'a> {
 impl DownloadGuard<'_> {
     pub(super) fn is_current(&self) -> bool {
         self.owner
-            .app_update_download
+            .lifecycle
+            .app_updates
+            .download
             .borrow()
             .as_ref()
             .is_some_and(|active| Arc::ptr_eq(&active.progress, &self.progress))
@@ -53,7 +55,7 @@ impl DownloadGuard<'_> {
 
 impl Drop for DownloadGuard<'_> {
     fn drop(&mut self) {
-        let mut active = self.owner.app_update_download.borrow_mut();
+        let mut active = self.owner.lifecycle.app_updates.download.borrow_mut();
         if active
             .as_ref()
             .is_some_and(|active| Arc::ptr_eq(&active.progress, &self.progress))
@@ -97,28 +99,35 @@ impl crate::Runtime {
     /// caller keeps this borrowed guard until the worker's result is handled.
     #[cfg(any(target_os = "linux", test))]
     pub fn begin_app_update_file_commit(&self) -> impl Drop + '_ {
-        self.app_update_file_commits
-            .set(self.app_update_file_commits.get() + 1);
-        FileCommitGuard(&self.app_update_file_commits)
+        self.lifecycle
+            .app_updates
+            .file_commits
+            .set(self.lifecycle.app_updates.file_commits.get() + 1);
+        FileCommitGuard(&self.lifecycle.app_updates.file_commits)
     }
 
     #[cfg(any(target_os = "linux", test))]
     pub fn app_update_file_commit_active(&self) -> bool {
-        self.app_update_file_commits.get() != 0
+        self.lifecycle.app_updates.file_commits.get() != 0
     }
 
     pub fn app_update_download_progress(&self) -> Option<(u64, u64)> {
-        self.app_update_download.borrow().as_ref().map(|active| {
-            (
-                active.progress.received.load(Ordering::Relaxed),
-                active.progress.total,
-            )
-        })
+        self.lifecycle
+            .app_updates
+            .download
+            .borrow()
+            .as_ref()
+            .map(|active| {
+                (
+                    active.progress.received.load(Ordering::Relaxed),
+                    active.progress.total,
+                )
+            })
     }
 
     /// Stops the owned network operation. Its worker releases the partial file.
     pub fn cancel_app_update_download(&self) {
-        self.app_update_download.take();
+        self.lifecycle.app_updates.download.take();
     }
 
     pub(super) fn begin_update_download(
@@ -135,7 +144,7 @@ impl crate::Runtime {
             total,
         });
         let (send, receive) = tokio::sync::oneshot::channel();
-        self.app_update_download.replace(Some(Active {
+        self.lifecycle.app_updates.download.replace(Some(Active {
             progress: Arc::clone(&progress),
             _cancel: send,
         }));
@@ -152,7 +161,7 @@ impl crate::Runtime {
     /// Retains the verified bytes without transferring ownership to a view.
     /// A new operation replaces and cleans the previous operation's guard.
     pub fn retain_update_download(&self, asset: ReleaseAsset, path: TempPath) {
-        self.pending_app_update.replace(Some(Pending {
+        self.lifecycle.app_updates.pending.replace(Some(Pending {
             asset,
             ready: Ready::Download(path),
         }));
@@ -170,7 +179,7 @@ impl crate::Runtime {
 
     #[cfg(target_os = "linux")]
     pub fn retain_appimage(&self, asset: ReleaseAsset, image: super::appimage::StagedImage) {
-        self.pending_app_update.replace(Some(Pending {
+        self.lifecycle.app_updates.pending.replace(Some(Pending {
             asset,
             ready: Ready::AppImage(image),
         }));
@@ -186,7 +195,7 @@ impl crate::Runtime {
 
     #[cfg(windows)]
     pub fn retain_windows_setup(&self, asset: ReleaseAsset, setup: super::windows::PendingSetup) {
-        self.pending_app_update.replace(Some(Pending {
+        self.lifecycle.app_updates.pending.replace(Some(Pending {
             asset,
             ready: Ready::Windows(setup),
         }));
@@ -201,23 +210,25 @@ impl crate::Runtime {
     }
 
     pub fn pending_app_update_asset(&self) -> Option<ReleaseAsset> {
-        self.pending_app_update
+        self.lifecycle
+            .app_updates
+            .pending
             .borrow()
             .as_ref()
             .map(|pending| pending.asset.clone())
     }
 
     pub fn has_pending_app_update(&self) -> bool {
-        self.pending_app_update.borrow().is_some()
+        self.lifecycle.app_updates.pending.borrow().is_some()
     }
 
     /// Explicitly cancel the retained update and release its file/installer guard.
     pub fn cancel_pending_app_update(&self) {
-        self.pending_app_update.take();
+        self.lifecycle.app_updates.pending.take();
     }
 
     fn take_pending_update(&self, asset: &ReleaseAsset, kind: Kind) -> Option<Pending> {
-        let mut pending = self.pending_app_update.borrow_mut();
+        let mut pending = self.lifecycle.app_updates.pending.borrow_mut();
         let stored = pending.as_ref()?;
         if &stored.asset != asset || stored.kind() != kind {
             return None;

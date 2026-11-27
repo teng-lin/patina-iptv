@@ -46,53 +46,48 @@ const NATIVE_ONLY: &[&str] = &["native.rs", "native/", "recordings.rs", "recordi
 /// Test-only additions.
 const DEV_DEPENDENCIES: &[&str] = &["rusqlite", "tempfile"];
 
-/// The runtime modules that may name the store adapter: the service that
-/// owns its connections, the modules that write store work items, and the
-/// two boundary modules that give its values runtime names (`model`,
-/// `error`). Everything else, the orchestration in `data` and the owner's
-/// named operations included, reaches the store through these.
+/// Shipped runtime modules that may name the store adapter. Test fixtures
+/// are tracked separately below.
 const STORE_ADAPTER_USERS: &[&str] = &[
-    "assign.rs",
-    "guide_repair.rs",
-    "guide_repair/prepare.rs",
-    "guide_repair/publication.rs",
-    "guide_repair/tests.rs",
-    "guide_repair/write.rs",
     "backup.rs",
     "backup/error.rs",
-    "backup/tests.rs",
-    "commands.rs",
     "credential_store.rs",
     "error.rs",
-    "favorites.rs",
+    "guide_repair.rs",
+    "guide_repair/prepare.rs",
     "imports.rs",
     "inspection.rs",
     "inspection/probe.rs",
-    "library.rs",
     "model.rs",
     "opening.rs",
-    "opening/revocation.rs",
-    "guide_checks/retry.rs",
-    "paging.rs",
-    "parental.rs",
     "private_files.rs",
-    // The sliced publish where the host keeps the store, and that host's
-    // port (opening, persistence, the publish copy).
     "publish.rs",
-    "publish/tests/catalog_import_tests.rs", // Encrypted fixture for the cooperative publication driver.
-    "store_host.rs",
     "recordings.rs",
-    "recordings/completion.rs",
-    "recordings/shared.rs", // Owned transport preparation queues durable authority reads.
-    "recordings/shared_tests.rs", // Synthetic ownership and authority fixtures.
-    "recordings/tests.rs",
-    "search.rs",
+    "recordings/shared.rs",
     "state.rs",
-    "store_service.rs",
+    "store_host.rs",
+    "store_service/",
     "stored.rs",
     "vod.rs",
+];
+
+/// Test-only adapter references do not widen the shipped runtime surface.
+const STORE_ADAPTER_TEST_USERS: &[&str] = &[
+    "backup/tests.rs",
+    "favorites.rs",
+    "guide_checks/retry.rs",
+    "guide_repair/tests.rs",
+    "opening/revocation.rs",
+    "parental.rs",
+    "publish/tests/catalog_import_tests.rs",
+    "recordings/shared_tests.rs",
+    "recordings/tests.rs",
     "vod/recovery_tests.rs",
 ];
+
+/// Ratchet the owner shape as PR2 extracts domain state. Includes fields
+/// behind `test-support`, matching the source inventory rather than one build.
+const RUNTIME_FIELD_LIMIT: usize = 14;
 
 /// Process-lifetime facts and explicitly opted-in native recording services.
 /// UI Runtime owners are never discovered globally. The recording registry
@@ -170,6 +165,35 @@ fn runtime_sources() -> Vec<(String, String)> {
             (name, code)
         })
         .collect()
+}
+
+fn runtime_fields() -> BTreeSet<String> {
+    let source =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs")).unwrap();
+    let body = source
+        .split_once("pub struct Runtime {")
+        .expect("Runtime declaration")
+        .1;
+    let mut depth = 1_i32;
+    let mut fields = BTreeSet::new();
+    for line in body.lines() {
+        if depth == 1 && line.starts_with("    ") && !line.starts_with("        ") {
+            let line = line.trim();
+            if !line.starts_with("#[")
+                && let Some((field, _)) = line.split_once(':')
+                && field.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_')
+                && !field.is_empty()
+            {
+                fields.insert(field.to_owned());
+            }
+        }
+        depth += line.matches('{').count() as i32;
+        depth -= line.matches('}').count() as i32;
+        if depth == 0 {
+            break;
+        }
+    }
+    fields
 }
 
 /// The dependency names of each manifest section.
@@ -260,12 +284,72 @@ fn runtime_sources_name_only_listed_workspace_crates_and_no_toolkit() {
 
 #[test]
 fn the_store_adapter_is_named_only_by_the_listed_runtime_modules() {
-    let users: BTreeSet<String> = runtime_sources()
-        .into_iter()
-        .filter(|(_, code)| code.contains("iptv_store_sqlite"))
-        .map(|(name, _)| name)
+    assert!(
+        STORE_ADAPTER_USERS.len() <= 20,
+        "the shipped store adapter boundary exceeded 20 users"
+    );
+    let sources = runtime_sources();
+    let test_modules = test_modules(&sources);
+    let users: BTreeSet<String> = sources
+        .iter()
+        .filter(|(name, code)| {
+            !test_modules.contains(name.as_str()) && shipped(code).contains("iptv_store_sqlite")
+        })
+        .map(|(name, _)| {
+            if name.starts_with("store_service/") {
+                "store_service/".to_owned()
+            } else {
+                name.clone()
+            }
+        })
         .collect();
-    exact(&users, STORE_ADAPTER_USERS, "store adapter user");
+    exact(&users, STORE_ADAPTER_USERS, "shipped store adapter user");
+    for (name, code) in &sources {
+        if adapter_reexport(&shipped(code)) {
+            assert!(
+                matches!(name.as_str(), "model.rs" | "error.rs"),
+                "{name} re-exports the SQLite adapter"
+            );
+        }
+    }
+    let test_users: BTreeSet<String> = sources
+        .iter()
+        .filter(|(name, code)| {
+            code.contains("iptv_store_sqlite")
+                && (test_modules.contains(name) || !shipped(code).contains("iptv_store_sqlite"))
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    exact(
+        &test_users,
+        STORE_ADAPTER_TEST_USERS,
+        "test-only store adapter user",
+    );
+}
+
+fn adapter_reexport(code: &str) -> bool {
+    let compact: String = code.chars().filter(|ch| !ch.is_whitespace()).collect();
+    ["pub", "pub(crate)", "pub(super)", "pub(self)"]
+        .into_iter()
+        .any(|visibility| {
+            [
+                "iptv_store_sqlite",
+                "::iptv_store_sqlite",
+                "{iptv_store_sqlite",
+            ]
+            .into_iter()
+            .any(|adapter| compact.contains(&format!("{visibility}use{adapter}")))
+        })
+}
+
+#[test]
+fn runtime_field_count_only_shrinks() {
+    let fields = runtime_fields();
+    assert_eq!(
+        fields.len(),
+        RUNTIME_FIELD_LIMIT,
+        "Runtime fields changed; extract them into cohesive per-domain owners and update the ratchet only as PR2 progresses: {fields:?}"
+    );
 }
 
 #[test]
@@ -360,17 +444,36 @@ fn test_modules(sources: &[(String, String)]) -> BTreeSet<String> {
     for (name, code) in sources {
         let parent = match name.as_str() {
             "lib.rs" => String::new(),
+            other if other.ends_with("/mod.rs") => other.trim_end_matches("mod.rs").into(),
             other => format!("{}/", other.trim_end_matches(".rs")),
         };
         let mut lines = code.lines().map(str::trim).peekable();
         while let Some(line) = lines.next() {
-            if (line == "#[cfg(test)]" || line.starts_with("#[cfg(all(test,"))
-                && let Some(module) = lines
-                    .peek()
-                    .and_then(|next| next.strip_prefix("mod "))
-                    .and_then(|rest| rest.strip_suffix(';'))
-            {
+            if line != "#[cfg(test)]" && !line.starts_with("#[cfg(all(test,") {
+                continue;
+            }
+            let Some(module) = lines.peek().and_then(|next| next.strip_prefix("mod ")) else {
+                continue;
+            };
+            if let Some(module) = module.strip_suffix(';') {
                 found.insert(format!("{parent}{module}.rs"));
+            } else if let Some(module) = module.strip_suffix(" {") {
+                // An external module declared inside a test-only inline module
+                // inherits the enclosing module's cfg.
+                let mut depth = 0i64;
+                for body in lines.by_ref() {
+                    if depth == 1
+                        && let Some(child) = body
+                            .strip_prefix("mod ")
+                            .and_then(|rest| rest.strip_suffix(';'))
+                    {
+                        found.insert(format!("{parent}{module}/{child}.rs"));
+                    }
+                    depth += body.matches('{').count() as i64 - body.matches('}').count() as i64;
+                    if depth <= 0 {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -397,6 +500,15 @@ fn shipped(code: &str) -> String {
                     break;
                 }
             }
+            continue;
+        }
+        if test_only
+            && lines.peek().is_some_and(|next| {
+                let next = next.trim_start();
+                next.starts_with("use ") || next.starts_with("pub use ")
+            })
+        {
+            lines.next();
             continue;
         }
         shipped.push(line);

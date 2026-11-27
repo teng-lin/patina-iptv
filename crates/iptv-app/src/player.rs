@@ -39,6 +39,7 @@ use nsh_core::platform::Lifecycle;
 use nsh_core::prelude::*;
 
 use crate::guide::{ProgramSelection, Schedule};
+use crate::runtime::Runtime;
 use crate::runtime_owner::runtime;
 use crate::{Playback, Ui, ViewMode, browse_playback, external_player, lists, parental_view};
 use crate::{recordings_view, seek};
@@ -245,7 +246,7 @@ impl Stream {
 /// Playback state beside [`Ui`]'s `playing`/`playback` (signals are `Copy`).
 #[derive(Clone, Copy)]
 pub struct Player {
-    pub vod: Signal<Option<(iptv_runtime::vod::Playing, PlaySource)>>,
+    pub vod: Signal<Option<(iptv_core::vod::Playing, PlaySource)>>,
     pub recorded: Signal<Option<(iptv_core::recording::Job, PlaySource)>>,
     /// By surface; 0 is the full-screen player.
     pub streams: [Stream; SURFACES],
@@ -313,11 +314,6 @@ pub fn target(ui: Ui, surface: usize) -> Option<(usize, Playback)> {
     }
 }
 
-/// The playback context of an imported source: what its streams need from
-/// it (headers, account, session). Attach it with
-/// `EpgSchedule::with_playback`.
-pub use crate::runtime::playback::stored_context;
-
 /// `f` after `delay`, under the app's owner.
 fn later(ui: Ui, delay: Duration, f: impl FnOnce() + 'static) {
     ui.player.owner.run(|| {
@@ -329,7 +325,7 @@ fn later(ui: Ui, delay: Duration, f: impl FnOnce() + 'static) {
 /// start for catch-up: date placeholders describe that instant).
 fn clock(at: Option<i64>) -> Clock {
     let now = crate::clock::wall_unix();
-    crate::runtime::playback::clock(now, at)
+    crate::runtime::time::playback_clock(now, at)
 }
 
 /// Identity and UTC survive a catalog reorder or a different guide epoch.
@@ -640,12 +636,7 @@ pub fn play_recording(ui: Ui, job: iptv_core::recording::Job, source: PlaySource
 /// Plays a movie or an episode on surface 0: full screen, or (`full_screen`
 /// false) where the screen shows the player now, the preview behind a
 /// series' details for its next episode (#187).
-pub fn play_vod(
-    ui: Ui,
-    playing: iptv_runtime::vod::Playing,
-    source: PlaySource,
-    full_screen: bool,
-) {
+pub fn play_vod(ui: Ui, playing: iptv_core::vod::Playing, source: PlaySource, full_screen: bool) {
     if crate::casting::local_blocked(ui) {
         return;
     }
@@ -786,9 +777,9 @@ fn open(ui: Ui, surface: usize, session: u64) {
                 Err(_) => {
                     let allowed = ui.player.vod.with_untracked(|p| {
                         p.as_ref().is_some_and(|(p, _)| {
-                            owner.parental_allowed(&iptv_runtime::vod::target(&p.key))
+                            owner.parental_allowed(&Runtime::vod_target(&p.key))
                                 && p.parent.as_ref().is_none_or(|key| {
-                                    owner.parental_allowed(&iptv_runtime::vod::target(key))
+                                    owner.parental_allowed(&Runtime::vod_target(key))
                                 })
                         })
                     });
@@ -1017,11 +1008,11 @@ fn source_allowed(ui: Ui, surface: usize) -> bool {
     if surface == 0
         && let Some((playing, _)) = ui.player.vod.get_untracked()
     {
-        owner.parental_allowed(&iptv_runtime::vod::target(&playing.key))
+        owner.parental_allowed(&Runtime::vod_target(&playing.key))
             && playing
                 .parent
                 .as_ref()
-                .is_none_or(|p| owner.parental_allowed(&iptv_runtime::vod::target(p)))
+                .is_none_or(|p| owner.parental_allowed(&Runtime::vod_target(p)))
     } else if surface == 0
         && let Some((job, _)) = ui.player.recorded.get_untracked()
     {
@@ -1100,7 +1091,7 @@ fn load_authorized(
         return;
     }
 
-    crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
+    owner.apply_user_agent(&mut source.headers);
     // Callers set a resume request immediately after load(). Preparation may
     // finish later, so clear the previous session before that request is set.
     stream.resume_ms.set(None);

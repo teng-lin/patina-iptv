@@ -63,7 +63,7 @@ pub fn get() -> Arc<Settings> {
     crate::runtime_owner::runtime().settings()
 }
 
-pub use crate::runtime::settings::{SaveError, add_user_agent};
+pub use crate::runtime::model::SaveError;
 /// Loads the saved settings (startup).
 pub fn load() {
     crate::runtime_owner::runtime().load_settings();
@@ -73,16 +73,16 @@ pub fn set(key: &str, value: Value) -> Result<(), SaveError> {
 }
 
 pub fn flag(key: iptv_settings::keys::BoolKey) -> bool {
-    crate::runtime::settings::flag(&get(), key)
+    crate::runtime_owner::runtime().setting_flag(key)
 }
 
 pub fn choice(key: iptv_settings::keys::EnumKey) -> &'static str {
-    crate::runtime::settings::choice(&get(), key)
+    crate::runtime_owner::runtime().setting_choice(key)
 }
 
 /// `remote.long_press`, in ms.
 pub fn long_press_ms() -> u64 {
-    crate::runtime::settings::long_press_ms(&get())
+    crate::runtime_owner::runtime().long_press_ms()
 }
 
 /// Playlists are listed in their hand order (`playlists.sort`), which
@@ -91,32 +91,7 @@ pub fn playlists_by_hand() -> bool {
     choice(keys::PLAYLIST_SORT) == "manual"
 }
 
-/// `general.user_agent`, when set.
-pub fn user_agent() -> Option<String> {
-    crate::runtime::settings::user_agent(&get())
-}
-
 /// The network settings of provider requests.
 pub fn network_config() -> crate::runtime::network::NetworkConfig {
-    crate::runtime::settings::network_config(&get())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_user_agent_goes_where_none_is_named() {
-        let mut headers = Vec::new();
-        add_user_agent(&mut headers, None);
-        assert!(headers.is_empty());
-        add_user_agent(&mut headers, Some("SyntheticPlayer/1.0".into()));
-        assert_eq!(
-            headers,
-            [("User-Agent".to_owned(), "SyntheticPlayer/1.0".to_owned())]
-        );
-        let mut own = vec![("user-agent".to_owned(), "ChannelAgent".to_owned())];
-        add_user_agent(&mut own, Some("SyntheticPlayer/1.0".into()));
-        assert_eq!(own.len(), 1, "the channel's own agent wins");
-    }
+    crate::runtime_owner::runtime().network_config()
 }

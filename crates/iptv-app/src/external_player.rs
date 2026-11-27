@@ -350,7 +350,7 @@ fn open_from(
         return Outcome::Handled;
     }
     let at = archive.map(|p| crate::guide::unix_of(&*schedule, p.start));
-    let clock = crate::runtime::playback::clock(crate::clock::wall_unix(), at);
+    let clock = crate::runtime::time::playback_clock(crate::clock::wall_unix(), at);
     let epoch = schedule.epoch_unix();
     let epg_offset = epg.epg_offset_minutes(local);
     let expected = authority.clone();
@@ -370,7 +370,7 @@ fn open_from(
             if selected != channel {
                 return None;
             }
-            let clock = crate::runtime::playback::clock(
+            let clock = crate::runtime::time::playback_clock(
                 crate::time::wall_unix(),
                 Some(crate::guide::unix_of(&*schedule, program.start)),
             );
@@ -455,7 +455,7 @@ fn open_from(
                 unavailable();
                 return;
             };
-            crate::settings::add_user_agent(&mut source.headers, crate::settings::user_agent());
+            owner.apply_user_agent(&mut source.headers);
             let pending = PendingHandoff::new(ui, ticket, owner.clone());
             let handoff = host::connect_external_player(source, || {
                 if current() {

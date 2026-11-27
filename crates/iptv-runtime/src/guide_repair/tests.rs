@@ -1392,7 +1392,7 @@ fn repair_analysis_on_100k_channels_and_1k_groups_keeps_display_lane_responsive(
     let (entered, observed) = mpsc::sync_channel(1);
     let (release, resume) = mpsc::channel();
     let (resumed, continuation) = mpsc::channel();
-    *fixture.owner.inspection_scan.borrow_mut() = Some(Box::new(move || {
+    fixture.owner.inspection.set_scan_hook(Box::new(move || {
         let _ = entered.send(());
         // Dropping the sender on assertion failure also releases the worker.
         let _ = resume.recv_timeout(Duration::from_secs(30));

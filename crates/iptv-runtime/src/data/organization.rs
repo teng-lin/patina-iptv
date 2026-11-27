@@ -4,7 +4,7 @@ use iptv_guide::EpgSchedule;
 use std::rc::Rc;
 
 pub(super) fn revision(owner: &Rc<crate::Runtime>) -> u64 {
-    owner.organization_revision.get()
+    owner.organization.revision().get()
 }
 
 use crate::commands::load_organization as load;

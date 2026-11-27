@@ -335,15 +335,23 @@ fn persist_document(
 
 impl crate::Runtime {
     pub fn app_update_snapshot(&self) -> Snapshot {
-        self.app_update_state.borrow().snapshot()
+        self.lifecycle.app_updates.controller.borrow().snapshot()
     }
 
     pub fn queue_manual_app_update_check(&self) {
-        self.app_update_state.borrow_mut().queue_manual_check();
+        self.lifecycle
+            .app_updates
+            .controller
+            .borrow_mut()
+            .queue_manual_check();
     }
 
     pub fn app_update_manual_check_pending(&self) -> bool {
-        self.app_update_state.borrow().manual_check_pending()
+        self.lifecycle
+            .app_updates
+            .controller
+            .borrow()
+            .manual_check_pending()
     }
 
     pub fn begin_app_update_check(
@@ -352,7 +360,9 @@ impl crate::Runtime {
         trigger: Trigger,
         frequency: Frequency,
     ) -> Option<CheckToken> {
-        self.app_update_state
+        self.lifecycle
+            .app_updates
+            .controller
             .borrow_mut()
             .begin_check(now, trigger, frequency)
     }
@@ -363,17 +373,27 @@ impl crate::Runtime {
         now: i64,
         result: Result<ReleaseCheck, CheckError>,
     ) -> bool {
-        self.app_update_state
+        self.lifecycle
+            .app_updates
+            .controller
             .borrow_mut()
             .finish_check(token, now, result)
     }
 
     pub fn skip_app_update_version(&self, version: &str) {
-        self.app_update_state.borrow_mut().skip_version(version);
+        self.lifecycle
+            .app_updates
+            .controller
+            .borrow_mut()
+            .skip_version(version);
     }
 
     pub fn acknowledge_app_update_notice(&self) {
-        self.app_update_state.borrow_mut().acknowledge_notice();
+        self.lifecycle
+            .app_updates
+            .controller
+            .borrow_mut()
+            .acknowledge_notice();
     }
 
     /// Call once, before starting scheduled or manual discovery. Errors leave the
@@ -408,7 +428,11 @@ impl crate::Runtime {
             .await
             .map_err(io::Error::other)??;
         if let Some(document) = document {
-            self.app_update_state.borrow_mut().restore(document)?;
+            self.lifecycle
+                .app_updates
+                .controller
+                .borrow_mut()
+                .restore(document)?;
         }
         Ok(())
     }
@@ -418,7 +442,7 @@ impl crate::Runtime {
     pub async fn persist_app_update_state(&self) -> io::Result<()> {
         let file = path(self.data_dir());
         let (document, revision, writes) = {
-            let state = self.app_update_state.borrow();
+            let state = self.lifecycle.app_updates.controller.borrow();
             (state.document(), state.revision, Arc::clone(&state.writes))
         };
         self.services()

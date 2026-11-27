@@ -22,6 +22,24 @@
 //! The reader's connection is made by the writer ([`Store::open_reader`]):
 //! the platform key is fetched, and the file migrated, only there.
 
+mod catalog_repo;
+mod epg_repo;
+mod favorites_repo;
+mod parental_repo;
+#[cfg(feature = "native")]
+mod recording_repo;
+mod system_repo;
+mod vod_repo;
+
+pub(crate) use catalog_repo::CatalogRepo;
+pub(crate) use epg_repo::EpgRepo;
+pub(crate) use favorites_repo::{FavoriteWrite, FavoritesRepo};
+pub(crate) use parental_repo::ParentalRepo;
+#[cfg(feature = "native")]
+pub(crate) use recording_repo::RecordingRepo;
+pub(crate) use system_repo::SystemRepo;
+pub(crate) use vod_repo::VodRepo;
+
 use crate::time::Instant;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -37,7 +55,8 @@ use std::time::Duration;
 
 use futures_channel::oneshot;
 use iptv_import::CancelToken;
-use iptv_store_sqlite::{Store, StoreError};
+use iptv_store_sqlite::Store;
+use iptv_store_sqlite::StoreError;
 
 /// What a lane's thread keeps between jobs: its connection, and when a
 /// failed open may be tried again.
@@ -368,7 +387,7 @@ impl Service {
         self.drain_on_shutdown_with(|| {})
     }
 
-    #[cfg(any(feature = "native", test))]
+    #[cfg(any(test, feature = "native"))]
     pub(crate) fn drain_on_shutdown_with(self: &Arc<Self>, after_writer: impl FnOnce()) -> bool {
         self.drain_on_shutdown_until(Instant::now() + self.drain_limit(), after_writer)
     }
@@ -502,8 +521,60 @@ async fn cooperative_import_turn<'a>(
 }
 
 impl Services {
+    pub(crate) fn parental(&self) -> ParentalRepo {
+        ParentalRepo {
+            services: self.clone(),
+        }
+    }
+
     pub(crate) fn tasks_ready(&self) -> bool {
         self.service.tasks().ready()
+    }
+
+    /// Queue a callback after all writes already accepted by this owner.
+    /// The callback receives no Store handle and cannot perform an ad hoc query.
+    pub(crate) fn writer_barrier(
+        &self,
+        callback: impl FnOnce() -> Result<(), StoreError> + Send + 'static,
+    ) -> impl Future<Output = Result<(), StoreError>> {
+        self.call(move |_| callback())
+    }
+
+    pub(crate) fn favorites(&self) -> FavoritesRepo {
+        FavoritesRepo {
+            services: self.clone(),
+        }
+    }
+
+    pub(crate) fn catalog(&self) -> CatalogRepo {
+        CatalogRepo {
+            services: self.clone(),
+        }
+    }
+
+    pub(crate) fn epg(&self) -> EpgRepo {
+        EpgRepo {
+            services: self.clone(),
+        }
+    }
+
+    #[cfg(feature = "native")]
+    pub(crate) fn recordings(&self) -> RecordingRepo {
+        RecordingRepo {
+            services: self.clone(),
+        }
+    }
+
+    pub(crate) fn system(&self) -> SystemRepo {
+        SystemRepo {
+            services: self.clone(),
+        }
+    }
+
+    pub(crate) fn vod(&self) -> VodRepo {
+        VodRepo {
+            services: self.clone(),
+        }
     }
 
     pub(crate) fn service(&self) -> &Arc<Service> {
@@ -967,33 +1038,6 @@ impl Service {
             self.persist(store);
         }
         result
-    }
-
-    /// A host that keeps the store persists what the last writer job
-    /// committed (natively the file is the persistence: nothing to do).
-    pub(crate) fn persist(&self, store: &Store) {
-        let Some(host) = &self.ports.store_host else {
-            return;
-        };
-        let me = self.me.get().cloned().unwrap_or_default();
-        host.committed(
-            store,
-            Arc::new(move || {
-                if let Some(service) = me.upgrade() {
-                    service.queue_persist();
-                }
-            }),
-        );
-    }
-
-    /// Persists again on the writer, after what is queued there.
-    fn queue_persist(self: &Arc<Self>) {
-        let owner = self.clone();
-        let _ = self.writer.queue(Box::new(move |connection| {
-            if let Some(store) = &connection.store {
-                owner.persist(store);
-            }
-        }));
     }
 
     /// Queues a sliced job on the writer lane (a publish, `publish.rs`).
@@ -2043,15 +2087,13 @@ mod tests {
 
     #[test]
     fn application_database_opening_is_confined_to_the_service() {
-        fn inspect(directory: &std::path::Path) {
+        fn inspect(directory: &std::path::Path, service: &std::path::Path) {
             for entry in std::fs::read_dir(directory).unwrap() {
                 let path = entry.unwrap().path();
                 if path.is_dir() {
-                    inspect(&path);
+                    inspect(&path, service);
                 } else if path.extension().is_some_and(|extension| extension == "rs")
-                    && path
-                        .file_name()
-                        .is_none_or(|name| name != "store_service.rs")
+                    && path != service
                 {
                     let source = std::fs::read_to_string(&path).unwrap();
                     assert!(
@@ -2062,6 +2104,7 @@ mod tests {
                 }
             }
         }
-        inspect(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"));
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        inspect(&source, &source.join("store_service/mod.rs"));
     }
 }

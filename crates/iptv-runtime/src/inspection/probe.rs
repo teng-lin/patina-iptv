@@ -27,14 +27,20 @@ pub const STAGE_BUDGET: u64 = 512 << 20;
 pub const STAGE_TTL: i64 = 24 * 60 * 60;
 const RESERVATION: u64 = iptv_store_sqlite::INSPECTION_STAGE_BYTES;
 
+/// The input to inspect into a private staged guide snapshot.
 #[derive(Clone, Debug)]
 pub enum ProbeTarget {
+    /// A feed already configured for the source.
     Configured(FeedId),
+    /// An explicit guide URL whose contents have no durable feed identity.
     Supplied(SecretUrl),
 }
+/// A guide probe scoped to one playlist.
 #[derive(Clone, Debug)]
 pub struct ProbeRequest {
+    /// The playlist whose access policy and channel identities scope the result.
     pub source: iptv_library::SourceId,
+    /// The configured or supplied guide input to inspect.
     pub target: ProbeTarget,
 }
 
@@ -102,6 +108,8 @@ pub(crate) struct Vault {
     next_call: AtomicU64,
     workers: Arc<Workers>,
     #[cfg(feature = "test-support")]
+    scan_hook: std::cell::RefCell<Option<crate::inspection::ScanHook>>,
+    #[cfg(feature = "test-support")]
     stage_hook: Arc<Mutex<Option<Arc<crate::testing::GateState>>>>,
 }
 impl Vault {
@@ -119,8 +127,18 @@ impl Vault {
             next_call: AtomicU64::new(0),
             workers: Arc::default(),
             #[cfg(feature = "test-support")]
+            scan_hook: std::cell::RefCell::default(),
+            #[cfg(feature = "test-support")]
             stage_hook: Arc::default(),
         }
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) fn set_scan_hook(&self, hook: crate::inspection::ScanHook) {
+        *self.scan_hook.borrow_mut() = Some(hook);
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) fn take_scan_hook(&self) -> Option<crate::inspection::ScanHook> {
+        self.scan_hook.borrow_mut().take()
     }
     pub(crate) fn context(&self, epoch: u64) -> String {
         format!(
@@ -440,12 +458,15 @@ impl ProbeLease {
     pub fn location(&self) -> SecretUrl {
         self.0.location.clone()
     }
+    /// Confirms the stage is still in its owning runtime epoch and within its lifetime.
     pub fn validate_alive(&self) -> InspectionResult<()> {
         self.check()
     }
+    /// Reads the staged feed's listed channels within the default probe budget.
     pub fn listed_channels(&self) -> InspectionResult<Vec<iptv_epg::XmltvChannel>> {
         self.listed_channels_with_control(&CancelToken::new(), Instant::now() + PROBE_DEADLINE)
     }
+    /// Reads the staged feed's listed channels under the caller's deadline and cancellation.
     pub fn listed_channels_with_control(
         &self,
         cancel: &CancelToken,
@@ -478,9 +499,11 @@ impl ProbeLease {
         check(&self.0.services, cancel, deadline)?;
         storage(result)
     }
+    /// Evidence identifying the exact leased stage.
     pub fn evidence(&self) -> &ProbeEvidence {
         &self.0.evidence
     }
+    /// The playlist incarnation that admitted the probe.
     pub fn source_incarnation(&self) -> &str {
         &self.0.source_incarnation
     }
@@ -562,6 +585,7 @@ impl ProbeLease {
         Ok(())
     }
 
+    /// Confirms the candidate occurs in this staged snapshot.
     pub fn validate_candidate(&self, candidate: &CandidateRef) -> InspectionResult<()> {
         self.validate_candidates_with_control(
             std::slice::from_ref(candidate),
@@ -613,6 +637,7 @@ impl ProbeLease {
         }
         self.check()
     }
+    /// Checks the owner epoch and expiry without opening the staged database.
     pub fn check(&self) -> InspectionResult<()> {
         if !self.0.services.is_current() {
             return Err(InspectionError::OwnerClosed);
@@ -826,6 +851,7 @@ impl Runtime {
         gate
     }
 
+    /// Fetches and parses a guide into bounded, disposable private staging.
     pub fn probe_feed(
         &self,
         request: ProbeRequest,
@@ -1066,6 +1092,7 @@ impl Runtime {
         await_worker(services, control, deadline, task, operation_cancel, guard)
     }
 
+    /// Pins the exact retained snapshot for the supplied evidence.
     pub fn lease_probe(&self, evidence: &ProbeEvidence) -> InspectionResult<ProbeLease> {
         let stages = self
             .inspection
@@ -1084,6 +1111,7 @@ impl Runtime {
         Ok(lease)
     }
 
+    /// Queries a bounded page of guide channels from the exact retained snapshot.
     pub fn probe_candidates(
         &self,
         evidence: ProbeEvidence,
@@ -1187,6 +1215,7 @@ impl Runtime {
         await_worker(services, control, deadline, task, operation_cancel, guard)
     }
 
+    /// Samples programs for a candidate in the exact retained snapshot.
     pub fn probe_schedule(
         &self,
         evidence: ProbeEvidence,

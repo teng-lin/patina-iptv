@@ -363,7 +363,11 @@ fn fixture(url: &str, embedded: Vec<u32>) -> (tempfile::TempDir, Rc<Runtime>, Ke
     let schedule = iptv_guide::EpgSchedule::new(vec![], Default::default(), 0).with_playback(Some(
         iptv_guide::playback::PlaybackContext::stalker(session),
     ));
-    owner.parts.borrow_mut().insert(source, Rc::new(schedule));
+    owner
+        .catalog
+        .schedule_parts()
+        .borrow_mut()
+        .insert(source, Rc::new(schedule));
     (
         directory,
         owner,

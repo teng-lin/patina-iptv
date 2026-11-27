@@ -10,7 +10,7 @@ pub use crate::runtime::data::{
     toggle_playlist, try_details, update_policy,
 };
 pub use crate::runtime::data::{assign, combined};
-pub use crate::runtime::guides;
+pub use iptv_library::guides;
 pub use library::Library;
 use std::path::PathBuf;
 

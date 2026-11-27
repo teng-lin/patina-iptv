@@ -369,7 +369,7 @@ fn run_search(ui: Ui, query: &str) {
         catchup_days: Some(&days),
         // As far back as a guide keeps finished programs (a catch-up
         // archive of up to 14 days, #282); pruning bounds what is there.
-        look_back: i64::from(iptv_runtime::stored::stored_past_days()) * 86_400,
+        look_back: i64::from(crate::data::stored::MAX_STORED_GUIDE_PAST_DAYS) * 86_400,
         favorites: Some(&favorites),
         favorites_first: true,
         limit: LIMIT,

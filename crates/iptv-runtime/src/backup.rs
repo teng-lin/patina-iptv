@@ -4,6 +4,7 @@
 
 pub mod error;
 mod instance;
+use std::cell::Cell;
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -16,6 +17,19 @@ use super::store_service::Services;
 use iptv_settings::Settings;
 use iptv_store_sqlite::Store;
 use serde_json::json;
+
+pub(crate) struct State {
+    busy: Cell<bool>,
+    progress: Cell<crate::model::BackupProgress>,
+}
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            busy: Cell::new(false),
+            progress: Cell::new(crate::model::BackupProgress::Idle),
+        }
+    }
+}
 
 const MAGIC: &[u8; 9] = b"PATINABK\x01";
 use iptv_import::backup_manifest::{
@@ -50,14 +64,14 @@ pub fn report(operation: &str, error: Error) -> &'static str {
 pub use crate::model::BackupProgress as Progress;
 
 fn progress(runtime: &super::Runtime, phase: Progress) {
-    runtime.backup_progress.set(phase);
+    runtime.backup.progress.set(phase);
     runtime.emit(super::RuntimeEvent::BackupProgress(phase));
 }
 /// One backup operation at a time per owner; ends when dropped.
 pub struct Busy(std::rc::Rc<super::Runtime>);
 impl Busy {
     pub(crate) fn begin(runtime: std::rc::Rc<super::Runtime>) -> Option<Self> {
-        if runtime.backup_busy.replace(true) {
+        if runtime.backup.busy.replace(true) {
             runtime.emit(super::RuntimeEvent::Notify(
                 "A backup operation is already running",
             ));
@@ -70,8 +84,8 @@ impl Busy {
 }
 impl Drop for Busy {
     fn drop(&mut self) {
-        self.0.backup_busy.set(false);
-        self.0.backup_progress.set(Progress::Idle);
+        self.0.backup.busy.set(false);
+        self.0.backup.progress.set(Progress::Idle);
         self.0
             .emit(super::RuntimeEvent::BackupProgress(Progress::Idle));
     }

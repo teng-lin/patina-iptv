@@ -1,6 +1,9 @@
 //! UI-independent source queries and guide evidence inspection.
 //! All expensive reads run on a bounded analysis lane; probes use the owner's
 //! bounded worker pool and existing transport policy. No browser state is read.
+
+#![warn(missing_docs)]
+
 mod probe;
 use crate::time::Instant;
 use crate::{Runtime, store_service::Services};
@@ -15,12 +18,15 @@ use std::{
     time::Duration,
 };
 
+/// Default and maximum end-to-end budget for an inspection query.
 pub const QUERY_DEADLINE: Duration = Duration::from_secs(3);
 #[cfg(feature = "test-support")]
 pub(crate) type ScanHook = Box<dyn FnMut() + Send>;
 
+/// Cancellation and deadline for one inspection call.
 #[derive(Clone, Debug)]
 pub struct InspectionControl {
+    /// Caller-controlled cancellation, independent of sibling operations.
     pub cancel: CancelToken,
     /// Requested end-to-end budget, capped by the operation's public maximum.
     pub timeout: Duration,
@@ -88,7 +94,7 @@ where
     let operation_cancel = token.clone();
     let slot = owner.inspection.admit();
     #[cfg(feature = "test-support")]
-    let mut scan = owner.inspection_scan.borrow_mut().take();
+    let mut scan = owner.inspection.take_scan_hook();
     let read: std::pin::Pin<
         Box<dyn Future<Output = iptv_store_sqlite::Result<InspectionResult<T>>> + Send>,
     > = match slot {
@@ -148,6 +154,33 @@ where
     query_with_deadline(owner, control, QUERY_DEADLINE, operation)
 }
 
+fn inspection_access(snapshot: &crate::parental::Snapshot) -> iptv_store_sqlite::InspectionAccess {
+    use iptv_core::parental::ContentKind;
+    use std::sync::atomic::Ordering;
+
+    let current = snapshot.epoch.load(Ordering::SeqCst) == snapshot.at;
+    let now = crate::parental::now_ms();
+    iptv_store_sqlite::InspectionAccess {
+        unrestricted: !snapshot.access.policy.protects(ContentKind::Live)
+            || (current && snapshot.access.all_content_granted(now)),
+        grants: if current {
+            snapshot.access.content_grants().cloned().collect()
+        } else {
+            Vec::new()
+        },
+    }
+}
+
+fn inspection_context(snapshot: &crate::parental::Snapshot) -> String {
+    use sha2::Digest;
+
+    let access = inspection_access(snapshot);
+    format!(
+        "{:x}",
+        sha2::Sha256::digest(format!("{}:{access:?}", snapshot.policy_at).as_bytes())
+    )
+}
+
 fn authorized_query<T, F, K>(
     owner: &Runtime,
     control: InspectionControl,
@@ -165,14 +198,16 @@ where
     let services = owner.services();
     let reading = authorization.clone();
     let read = query(owner, control, move |store| {
-        store.inspection_with_access(reading.inspection_access(), |store| {
+        store.inspection_with_access(inspection_access(&reading), |store| {
             let value = match operation(store)? {
                 Ok(value) => value,
                 Err(error) => return Ok(Err(error)),
             };
             let mut grants = Vec::new();
             for channel in channels(&value) {
-                grants.extend(reading.inspection_dependencies(store, &channel)?);
+                grants.extend(crate::store_service::ParentalRepo::inspection_dependencies(
+                    store, &reading, &channel,
+                )?);
             }
             Ok(Ok((value, grants)))
         })
@@ -190,6 +225,7 @@ where
 }
 
 impl Runtime {
+    /// Looks up a single source-scoped channel under the current access policy.
     pub fn inspect_channel(
         &self,
         key: ChannelRef,
@@ -204,6 +240,7 @@ impl Runtime {
             |channel| vec![channel.key.clone()],
         )
     }
+    /// Queries a bounded page of channels in the explicitly requested source scope.
     pub fn query_channels(
         &self,
         mut request: Query,
@@ -213,7 +250,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,
@@ -237,6 +274,7 @@ impl Runtime {
             },
         )
     }
+    /// Queries a bounded page of programs in a half-open UTC interval.
     pub fn query_programs(
         &self,
         mut request: Query,
@@ -249,7 +287,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,
@@ -272,6 +310,7 @@ impl Runtime {
             },
         )
     }
+    /// Lists configured-feed alternatives and matching evidence for a channel.
     pub fn epg_candidates(
         &self,
         key: ChannelRef,
@@ -283,7 +322,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,
@@ -301,6 +340,7 @@ impl Runtime {
             move |_| vec![subject],
         )
     }
+    /// Reports guide coverage in a UTC interval for the requested channels.
     pub fn epg_audit(
         &self,
         mut request: Query,
@@ -311,7 +351,7 @@ impl Runtime {
         let owner = format!(
             "{}:{}",
             self.inspection.context(self.services().epoch()),
-            authorization.inspection_context()
+            inspection_context(&authorization)
         );
         authorized_query(
             self,

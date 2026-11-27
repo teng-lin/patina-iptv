@@ -90,12 +90,14 @@ impl Runtime {
         &self,
         source: i64,
     ) -> Option<std::rc::Rc<iptv_guide::playback::PlaybackContext>> {
-        self.parts
+        self.catalog
+            .schedule_parts()
             .borrow()
             .get(&SourceId(source))
             .and_then(|s| s.shared_playback())
             .or_else(|| {
-                self.single
+                self.catalog
+                    .single_schedule()
                     .borrow()
                     .as_ref()
                     .filter(|s| s.source.0 == source)
@@ -185,24 +187,10 @@ impl Runtime {
         ),
         Error,
     > {
-        const PAGE: u32 = 80;
         let mut result = self
             .services()
-            .read(move |s| {
-                s.vod_read_snapshot(|s| {
-                    let mut cards = Vec::new();
-                    let mut more = true;
-                    let mut read = 0;
-                    // `read` counts store rows consumed, as Load more does.
-                    while more && read < at_least {
-                        let (page, next) = s.vod_page(&query, offset.saturating_add(read), PAGE)?;
-                        read = read.saturating_add(u32::try_from(page.len()).unwrap_or(u32::MAX));
-                        more = next;
-                        cards.extend(page);
-                    }
-                    Ok((cards, more, s.vod_sources()?, s.vod_categories(&query)?))
-                })
-            })
+            .vod()
+            .catalog_pages(query, offset, at_least)
             .await?;
         self.vod_redact_protected(&mut result.0).await?;
         Ok(result)
@@ -228,9 +216,7 @@ impl Runtime {
         let token = self.vod.begin_discovery();
         let services = self.services();
         async move {
-            let mut page = services
-                .analyze(move |s| s.vod_discovery_cancelable(query, &token))
-                .await?;
+            let mut page = services.vod().discovery(query, token).await?;
             self.vod_redact_protected(&mut page.cards).await?;
             Ok(page)
         }
@@ -250,9 +236,7 @@ impl Runtime {
         let token = self.vod.begin_discovery();
         let services = self.services();
         async move {
-            let mut page = services
-                .analyze(move |s| s.vod_discovery_around_cancelable(shelf, &key, &token))
-                .await?;
+            let mut page = services.vod().discovery_around(shelf, key, token).await?;
             self.vod_redact_protected(&mut page.cards).await?;
             Ok(page)
         }
@@ -1019,6 +1003,13 @@ pub fn target(key: &Key) -> iptv_core::parental::Target {
             Kind::Series => ContentKind::Series,
             Kind::Episode => ContentKind::Episode,
         },
+    }
+}
+
+impl Runtime {
+    /// Derives the parental authorization target of an on-demand identity.
+    pub fn vod_target(key: &Key) -> iptv_core::parental::Target {
+        target(key)
     }
 }
 

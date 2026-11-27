@@ -184,8 +184,12 @@ async fn send_stored_after(
     }
     let started = Instant::now();
     let window = super::paging::window(now, stored::stored_past_days());
+    let window = EpgWindow {
+        from: window.loaded_from,
+        ..EpgWindow::from(0, 0)
+    };
     let guide = services
-        .read(move |store| store.load_epg(id, &super::paging::store_window(window)))
+        .read(move |store| store.load_epg(id, &window))
         .await
         .unwrap_or_default();
     let (bound, kib) = (guide.bound_count(), guide.heap_bytes() / 1024);

@@ -1,95 +1,6 @@
 //! Preserve committed results while cache publication/refresh runs separately.
 use super::*;
-use crate::{
-    imports::{Imported, Streams},
-    stored::{self, Matching},
-};
-use iptv_epg::ChannelKey;
-use iptv_store_sqlite::{EpgOverride, Store, StoreError};
-
-fn rebind(
-    store: &mut Store,
-    id: &str,
-    keep: u32,
-) -> std::result::Result<Option<Box<Imported>>, StoreError> {
-    let Some(iptv_store_sqlite::RepairPublication {
-        commit,
-        choices,
-        config_changed,
-    }) = store.guide_repair_publication(id)?
-    else {
-        return Err(StoreError::Unavailable("guide repair commit is missing"));
-    };
-    let revisions = store.guide_revisions(commit.source)?;
-    if revisions.mapping != commit.mapping_revision
-        || revisions.configuration != commit.configuration_revision
-    {
-        return Err(StoreError::Unavailable("guide repair was superseded"));
-    }
-    if config_changed || choices.iter().any(|(_, choice)| choice.is_none()) {
-        return Ok(None);
-    }
-    for (_, choice) in &choices {
-        if let Some(value @ EpgOverride::Xmltv { .. }) = choice {
-            let Some(feed) = value.feed() else {
-                return Ok(None);
-            };
-            if store
-                .inspection_stored_feed_incarnation(commit.source, feed)?
-                .is_none()
-            {
-                return Ok(None);
-            }
-        }
-    }
-    let cached = store
-        .epg_guide(commit.source)?
-        .is_some_and(|guide| guide.replaced_at.is_some());
-    let (groups, channels) = stored::catalog_in(store, commit.source)?;
-    let overrides = store
-        .epg_overrides(commit.source)?
-        .into_iter()
-        .map(|(key, value)| (ChannelKey::new(key.as_str()), value.to_override()))
-        .collect();
-    let fingerprint = Matching {
-        channels: &channels,
-        overrides: &overrides,
-    }
-    .fingerprint();
-    let mut all = true;
-    for (channel, choice) in choices {
-        let selected = match &choice {
-            Some(EpgOverride::Disabled) if !cached => continue,
-            Some(EpgOverride::Disabled) => None,
-            Some(value @ EpgOverride::Xmltv { epg_channel, .. }) => {
-                value.feed().map(|feed| (feed, epg_channel.as_str()))
-            }
-            None => return Ok(None),
-        };
-        all &= store.rebind_epg(
-            commit.source,
-            &ChannelKey::new(channel.as_str()),
-            selected,
-            fingerprint,
-        )?;
-    }
-    if !all {
-        return Ok(None);
-    }
-    let now = now();
-    Ok(Some(Box::new(Imported {
-        guide: store.load_epg(
-            commit.source,
-            &crate::paging::store_window(crate::paging::window(now, keep)),
-        )?,
-        groups,
-        channels,
-        playback: Streams::Current,
-        now,
-        source: commit.source,
-        resume: false,
-    })))
-}
+use crate::stored;
 
 pub(super) async fn after_commit(
     owner: &Rc<Runtime>,
@@ -175,10 +86,7 @@ pub(super) async fn after_commit(
         }
         let keep = stored::stored_past_days();
         let read = id.clone();
-        let published = owner
-            .services()
-            .call(move |store| rebind(store, &read, keep))
-            .await;
+        let published = owner.services().epg().repair_publication(read, keep).await;
         let still_current = crate::stored::guide_edit_revision(&owner, source) == edit;
         let effective = match published {
             Ok(Some(imported)) => {

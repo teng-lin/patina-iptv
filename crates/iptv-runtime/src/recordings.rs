@@ -74,7 +74,11 @@ impl Admission {
         if !self.services.is_current()
             || self.recordings.is_stopping()
             || store.source_incarnation(self.source)? != self.incarnation
-            || !crate::parental::native_allowed(store, &self.target, &self.parental)?
+            || !crate::store_service::ParentalRepo::native_allowed(
+                store,
+                &self.target,
+                &self.parental,
+            )?
         {
             return Err(iptv_store_sqlite::StoreError::Unavailable(
                 "Recording access changed",
@@ -418,6 +422,30 @@ impl State {
     }
 }
 
+pub(crate) struct OwnerState {
+    shared: Arc<State>,
+    detached: std::cell::Cell<bool>,
+}
+impl OwnerState {
+    pub(crate) fn new(shared: Arc<State>) -> Self {
+        Self {
+            shared,
+            detached: std::cell::Cell::new(false),
+        }
+    }
+    pub(crate) fn shared(&self) -> &std::sync::Arc<State> {
+        &self.shared
+    }
+    pub(crate) fn is_detached(&self) -> bool {
+        self.detached.get()
+    }
+    pub(crate) fn detach_ui(&self) {
+        if !self.detached.replace(true) {
+            self.shared.detach_ui();
+        }
+    }
+}
+
 /// Media lives beside the catalog directory, so catalog restore cannot delete
 /// recordings. This app-managed directory is private and excluded from OS backup.
 pub fn media_directory(root: &Path) -> PathBuf {
@@ -484,6 +512,7 @@ impl Runtime {
     /// The allowance the recording host learned for `source`'s provider.
     pub(crate) fn recorded_provider_limit(&self, source: SourceId) -> Option<u32> {
         self.recordings
+            .shared()
             .lock()
             .provider_limits
             .get(&source.0)
@@ -495,11 +524,12 @@ impl Runtime {
     }
     /// Synchronize imported sessions/limits without sharing UI-owned Rc state.
     pub fn sync_recording_contexts(&self) {
-        if self.recordings_detached.get() {
+        if self.recordings.is_detached() {
             return;
         }
         if let Some(host) = self
             .recordings
+            .shared()
             .host
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -512,17 +542,20 @@ impl Runtime {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) =
                 Some(self.services().settings());
         }
-        let mut data = self.recordings.lock();
-        if let (Some(source), Some(limit)) = (self.shown.get(), self.account_streams.get()) {
+        let mut data = self.recordings.shared().lock();
+        if let (Some(source), Some(limit)) =
+            (self.catalog.shown_source(), self.catalog.account_streams())
+        {
             data.provider_limits.insert(source.0, limit);
         }
-        for (source, limit) in self.limits.borrow().iter() {
+        for (source, limit) in self.catalog.provider_limits().borrow().iter() {
             if let Some(limit) = limit {
                 data.provider_limits.insert(source.0, *limit);
             }
         }
         let mut contexts = self
             .recordings
+            .shared()
             .contexts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -553,10 +586,10 @@ impl Runtime {
                 );
             }
         };
-        for (source, schedule) in self.parts.borrow().iter() {
+        for (source, schedule) in self.catalog.schedule_parts().borrow().iter() {
             keep(*source, schedule);
         }
-        if let Some(single) = self.single.borrow().as_ref() {
+        if let Some(single) = self.catalog.single_schedule().borrow().as_ref() {
             keep(single.source, &single.schedule);
             if let Some(limit) = single.limit {
                 data.provider_limits.insert(single.source.0, limit);
@@ -566,7 +599,7 @@ impl Runtime {
     /// The external player replaces the primary viewer and keeps its own
     /// account claim even when Android suspends its native surfaces.
     pub fn reserve_external_viewing(&self, source: SourceId) -> Option<Box<dyn Send>> {
-        if self.recordings_detached.get() {
+        if self.recordings.is_detached() {
             return None;
         }
         struct ExternalViewer(Arc<State>);
@@ -575,18 +608,18 @@ impl Runtime {
                 self.0.lock().external_viewer.take();
             }
         }
-        let mut data = self.recordings.lock();
+        let mut data = self.recordings.shared().lock();
         if data.external_viewer.is_some() || !data.capacity(source.0, Some(0)) {
             return None;
         }
         data.external_viewer = Some(data.lease(source.0));
-        Some(Box::new(ExternalViewer(self.recordings.clone())))
+        Some(Box::new(ExternalViewer(self.recordings.shared().clone())))
     }
 
     /// Reserves a Cast session's upstream slot while replacing the main viewer.
     /// The HLS relay opens its input after the local transport has retired.
     pub fn reserve_cast_viewing(&self, source: SourceId) -> Option<Box<dyn Send>> {
-        if self.recordings_detached.get() {
+        if self.recordings.is_detached() {
             return None;
         }
         struct Claim(Arc<State>, u64);
@@ -595,23 +628,27 @@ impl Runtime {
                 self.0.lock().cast_viewers.remove(&self.1);
             }
         }
-        let mut data = self.recordings.lock();
+        let mut data = self.recordings.shared().lock();
         if !data.capacity(source.0, Some(0)) {
             return None;
         }
-        let id = self.recordings.next_input.fetch_add(1, Ordering::Relaxed);
+        let id = self
+            .recordings
+            .shared()
+            .next_input
+            .fetch_add(1, Ordering::Relaxed);
         let lease = data.lease(source.0);
         data.cast_viewers.insert(id, lease);
-        Some(Box::new(Claim(self.recordings.clone(), id)))
+        Some(Box::new(Claim(self.recordings.shared().clone(), id)))
     }
 
     /// Called before changing a viewing surface, including multiview. A retry of
     /// an existing surface retains its reservation; PiP adds no reservation.
     pub fn reserve_viewing(&self, surface: usize, source: SourceId) -> bool {
-        if self.recordings_detached.get() {
+        if self.recordings.is_detached() {
             return false;
         }
-        let mut data = self.recordings.lock();
+        let mut data = self.recordings.shared().lock();
         if (!data.active.is_empty()
             || data.external_viewer.is_some()
             || !data.cast_viewers.is_empty())
@@ -619,7 +656,7 @@ impl Runtime {
         {
             return false;
         }
-        self.recordings.cancel_preparation(surface);
+        self.recordings.shared().cancel_preparation(surface);
         let lease = data.lease(source.0);
         data.suspended_viewers.remove(&surface);
         *data.viewer_revision.entry(surface).or_default() += 1;
@@ -629,11 +666,11 @@ impl Runtime {
         true
     }
     pub fn release_viewing(&self, surface: usize) {
-        self.recordings.cancel_preparation(surface);
-        if self.recordings_detached.get() {
+        self.recordings.shared().cancel_preparation(surface);
+        if self.recordings.is_detached() {
             return;
         }
-        let mut data = self.recordings.lock();
+        let mut data = self.recordings.shared().lock();
         *data.viewer_revision.entry(surface).or_default() += 1;
         data.viewers.remove(&surface);
         data.suspended_viewers.remove(&surface);
@@ -641,7 +678,7 @@ impl Runtime {
         self.retire_previous_viewing(surface);
     }
     pub fn recording_snapshot(&self) -> Vec<Job> {
-        self.recordings.lock().jobs.clone()
+        self.recordings.shared().lock().jobs.clone()
     }
 
     async fn recording_admission(&self, request: &Request) -> Result<Admission, Error> {
@@ -657,7 +694,7 @@ impl Runtime {
         let parental = self.parental_snapshot();
         Ok(Admission {
             services,
-            recordings: self.recordings.clone(),
+            recordings: self.recordings.shared().clone(),
             source,
             incarnation,
             target,
@@ -673,14 +710,14 @@ impl Runtime {
             .validate(now())
             .map_err(Error::from_recording_request_refusal)?;
         let admission = self.recording_admission(&request).await?;
-        if self.recordings.is_stopping() || !self.services().is_current() {
+        if self.recordings.shared().is_stopping() || !self.services().is_current() {
             return Err(Error::unavailable("Recording service unavailable"));
         }
         self.sync_recording_contexts();
         self.start_recordings();
         // Startup reconciliation must precede newly accepted record-now jobs.
         for _ in 0..100 {
-            if self.recordings.lock().ready {
+            if self.recordings.shared().lock().ready {
                 break;
             }
             self.services()
@@ -688,18 +725,25 @@ impl Runtime {
                 .await
                 .map_err(|_| Error::unavailable("Recording service unavailable"))?;
         }
-        if !self.recordings.lock().ready {
+        if !self.recordings.shared().lock().ready {
             return Err(Error::unavailable("Recording service unavailable"));
         }
-        refresh_accounts(&self.services(), &self.recordings)
+        refresh_accounts(&self.services(), self.recordings.shared())
             .await
             .map_err(|_| Error::unavailable("Recording sources unavailable"))?;
-        self.recordings.retire_unused().await;
+        self.recordings.shared().retire_unused().await;
         // Say why a capture cannot complete before it starts: the library's
         // budget and the free space it needs, then a provider connection.
         if request.start <= now() {
             let root = self.services().directory().to_owned();
-            let active: Vec<_> = self.recordings.lock().active.keys().copied().collect();
+            let active: Vec<_> = self
+                .recordings
+                .shared()
+                .lock()
+                .active
+                .keys()
+                .copied()
+                .collect();
             let seconds = request.end - now();
             let checked = self
                 .services()
@@ -707,7 +751,7 @@ impl Runtime {
                 .await;
             checked.map_err(|_| Error::unavailable("Recording service unavailable"))??;
         }
-        if request.start <= now() && !self.recordings.lock().recording_capacity(&request) {
+        if request.start <= now() && !self.recordings.shared().lock().recording_capacity(&request) {
             return Err(Error::unavailable(
                 "No provider connection available; stop another stream or check Streams at once",
             ));
@@ -730,10 +774,14 @@ impl Runtime {
                 )
             })?;
         #[cfg(feature = "test-support")]
-        self.recordings.observe_operation(id, "intent persisted");
+        self.recordings
+            .shared()
+            .observe_operation(id, "intent persisted");
         self.acknowledge_recording(id).await?;
         #[cfg(feature = "test-support")]
-        self.recordings.observe_operation(id, "start acknowledged");
+        self.recordings
+            .shared()
+            .observe_operation(id, "start acknowledged");
         Ok(id)
     }
     pub(crate) async fn acknowledge_recording(&self, id: JobId) -> Result<(), Error> {
@@ -743,7 +791,7 @@ impl Runtime {
             .await?
         {
             {
-                let mut data = self.recordings.lock();
+                let mut data = self.recordings.shared().lock();
                 data.intent_revision += 1;
                 data.jobs.retain(|existing| existing.id != id);
                 data.jobs.push(job);
@@ -760,14 +808,14 @@ impl Runtime {
             if !services.is_current() {
                 return Err(Error::unavailable("Recording service unavailable"));
             }
-            let revision = self.recordings.lock().intent_revision;
-            let state = self.recordings.clone();
+            let revision = self.recordings.shared().lock().intent_revision;
+            let state = self.recordings.shared().clone();
             let work = services.clone();
             let published = services
                 .spawn_blocking(move || state.publish_schedule(&work, revision, true))
                 .await
                 .map_err(|_| Error::unavailable("Recording service unavailable"))?;
-            if published && self.recordings.lock().intent_revision == revision {
+            if published && self.recordings.shared().lock().intent_revision == revision {
                 return Ok(());
             }
         }
@@ -775,7 +823,9 @@ impl Runtime {
 
     pub async fn stop_recording(&self, id: JobId) -> Result<(), Error> {
         #[cfg(feature = "test-support")]
-        self.recordings.observe_operation(id, "stop requested");
+        self.recordings
+            .shared()
+            .observe_operation(id, "stop requested");
         if let Some(job) = self
             .services()
             .read(move |store| store.recording_job(id))
@@ -812,7 +862,7 @@ impl Runtime {
                 return Ok(());
             }
         }
-        if let Some((_, stop)) = self.recordings.lock().active.get(&id) {
+        if let Some((_, stop)) = self.recordings.shared().lock().active.get(&id) {
             stop.cancel();
         }
         self.services()
@@ -829,6 +879,7 @@ impl Runtime {
             .await?;
         #[cfg(feature = "test-support")]
         self.recordings
+            .shared()
             .observe_operation(id, "stop request processed");
         Ok(())
     }
@@ -854,7 +905,14 @@ impl Runtime {
             .await
             .map_err(|_| Error::unavailable("Recordings unavailable"))?;
         for job in &mut jobs {
-            if job.status.active() && self.recordings.lock().finalization_errors.contains(&job.id) {
+            if job.status.active()
+                && self
+                    .recordings
+                    .shared()
+                    .lock()
+                    .finalization_errors
+                    .contains(&job.id)
+            {
                 job.message =
                     "Recording state could not be saved; check storage and restart to recover"
                         .into();
@@ -865,7 +923,7 @@ impl Runtime {
     #[cfg(test)]
     async fn recording_playback_checkpoint(&self, stage: &'static str) {
         let held = {
-            let mut completion = self.recordings.playback_completion.lock().unwrap();
+            let mut completion = self.recordings.shared().playback_completion.lock().unwrap();
             if completion
                 .as_ref()
                 .is_some_and(|(expected, _, _)| *expected == stage)
@@ -904,7 +962,7 @@ impl Runtime {
             .await?)
     }
     pub async fn open_recording(&self, id: JobId) -> Result<PlaySource, Error> {
-        let _operation = self.recordings.media_ops.lock().await;
+        let _operation = self.recordings.shared().media_ops.lock().await;
         let (file, target) = self.recording_file_with_target(id).await?;
         let relay = self
             .services()
@@ -921,6 +979,7 @@ impl Runtime {
         source.public_only = false;
         *self
             .recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((id, relay));
@@ -953,6 +1012,7 @@ impl Runtime {
     ) {
         let playback = self
             .recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -968,6 +1028,7 @@ impl Runtime {
     }
     pub fn close_recording_playback(&self) {
         self.recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1022,9 +1083,10 @@ impl Runtime {
     pub async fn delete_recording(&self, id: JobId) -> Result<(), Error> {
         // Admission and deletion stay mutually exclusive across store/file awaits.
         // Cancellation drops this guard too, so a failed operation cannot strand it.
-        let _operation = self.recordings.media_ops.lock().await;
+        let _operation = self.recordings.shared().media_ops.lock().await;
         if self
             .recordings
+            .shared()
             .playback
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1148,10 +1210,16 @@ async fn transition(
     bytes: u64,
     message: &'static str,
 ) -> completion::Transition {
-    let (id, from) = (job.id, job.status);
-    completion::retry(services, move |store| {
-        store.transition_recording(id, from, to, bytes, message)
-    })
+    completion::retry(
+        services,
+        completion::RecordingOperation::Transition {
+            id: job.id,
+            from: job.status,
+            to,
+            bytes,
+            message,
+        },
+    )
     .await
 }
 

@@ -1,5 +1,8 @@
 //! Runtime failures retain their cause without exposing a storage implementation type.
 
+// Store adapters retain their original error until the runtime classifies it.
+pub(crate) use iptv_store_sqlite::StoreError as AdapterError;
+
 use iptv_core::recording::{RequestRefusal, SpaceRefusal};
 
 #[derive(Debug)]

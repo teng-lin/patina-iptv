@@ -7,7 +7,7 @@ use std::rc::Rc;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::imports::Msg;
-use crate::model::{SourceId, StoredGuide};
+use crate::model::SourceId;
 use crate::stored::{configs, download_now, with_storage};
 use crate::{Error, GuideWork, Runtime};
 use iptv_epg::{ChannelKey, UnixTime};
@@ -16,21 +16,22 @@ use iptv_import::{CancelToken, EpgSourceConfig};
 /// Refresh the stored status and report whether the library snapshot changed.
 pub(super) fn load_status(owner: &Rc<Runtime>) -> impl Future<Output = Option<bool>> + use<> {
     owner
+        .imports
         .status_revision
-        .set(owner.status_revision.get().wrapping_add(1));
-    let expected = owner.status_revision.get();
+        .set(owner.imports.status_revision.get().wrapping_add(1));
+    let expected = owner.imports.status_revision.get();
     let loaded = crate::commands::guide_status_snapshot(owner);
     let owner = owner.clone();
     async move {
         let mut snapshot = loaded.await.ok()?;
-        if owner.status_revision.get() != expected {
+        if owner.imports.status_revision.get() != expected {
             return None;
         }
         let changed = snapshot
             .library
             .take()
             .is_some_and(|snapshot| crate::library::install(&owner, snapshot));
-        *owner.status.borrow_mut() = snapshot;
+        *owner.imports.status.borrow_mut() = snapshot;
         Some(changed)
     }
 }
@@ -98,14 +99,14 @@ pub(crate) fn supersede(owner: &Rc<crate::Runtime>, source: SourceId) -> Superse
 }
 
 pub(super) fn has_enabled_guides(owner: &Runtime, source: SourceId) -> bool {
-    owner.status.with(|status| {
+    owner.imports.status.with(|status| {
         let status = status.borrow();
         match status.lines.get(&source) {
             Some(lines) if !lines.is_empty() => lines.iter().any(|line| line.source.enabled),
             _ => status
                 .guides
                 .get(&source)
-                .is_some_and(|guide| !guide.configs().is_empty()),
+                .is_some_and(|guide| guide.has_feeds),
         }
     })
 }
@@ -114,15 +115,15 @@ pub(super) async fn configured_guides(
     owner: &Runtime,
     source: SourceId,
 ) -> Result<Vec<EpgSourceConfig>, Error> {
-    match crate::commands::guide_sources(owner, source).await {
-        Ok((stored, sources)) if sources.is_empty() => Ok(with_storage(
-            stored
-                .as_ref()
-                .map(StoredGuide::configs)
-                .unwrap_or_default(),
-        )),
-        Ok((_, sources)) => Ok(configs(&sources)),
-        Err(error) => Err(error),
+    let (fallback, sources) = owner
+        .services()
+        .epg()
+        .guide_sources_with_legacy_configs(source)
+        .await?;
+    if sources.is_empty() {
+        Ok(with_storage(fallback))
+    } else {
+        Ok(configs(&sources))
     }
 }
 

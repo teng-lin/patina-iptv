@@ -199,19 +199,19 @@ impl State {
 }
 impl Runtime {
     pub(crate) fn start_recording_host(&self) {
-        self.recordings.start(Some(&self.services()));
+        self.recordings.shared().start(Some(&self.services()));
     }
     /// OS hosts must explicitly stop work before process shutdown/restore.
     /// A capture cut short is recovered by the next host.
     pub fn shutdown_recording_host(&self) -> bool {
-        self.recordings.stop()
+        self.recordings.shared().stop()
     }
     /// [`stop_captures`] for this runtime's recordings.
     pub fn stop_captures(&self, why: EarlyStop) -> usize {
-        self.recordings.stop_captures(why)
+        self.recordings.shared().stop_captures(why)
     }
     pub fn recording_background_needed(&self) -> bool {
-        let data = self.recordings.lock();
+        let data = self.recordings.shared().lock();
         data.jobs.iter().any(|job| job.status.active())
     }
 }

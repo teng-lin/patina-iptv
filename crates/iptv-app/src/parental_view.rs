@@ -2,6 +2,7 @@
 //! credentials and access. Callbacks run only after the authoritative gate.
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
+use crate::runtime::Runtime;
 use crate::{Ui, scale::Scale, tint, ui_kit};
 use iptv_core::parental::{ContentKind, Target};
 use iptv_nav::{Action, RemoteKey};
@@ -336,7 +337,7 @@ pub fn enforce(ui: Ui) {
             .map(|c| &c.key)
             .chain(s.preview.iter().map(|d| &d.item.key))
             .filter(|key| {
-                !crate::runtime_owner::runtime().parental_allowed(&iptv_runtime::vod::target(key))
+                !crate::runtime_owner::runtime().parental_allowed(&Runtime::vod_target(key))
             })
             .cloned()
             .collect::<Vec<_>>()
@@ -347,7 +348,7 @@ pub fn enforce(ui: Ui) {
     let blocked_details = ui.vod.with_untracked(|s| {
         s.details.as_ref().and_then(|d| {
             let key = &d.item.key;
-            (!crate::runtime_owner::runtime().parental_allowed(&iptv_runtime::vod::target(key)))
+            (!crate::runtime_owner::runtime().parental_allowed(&Runtime::vod_target(key)))
                 .then(|| key.clone())
         })
     });
@@ -357,11 +358,11 @@ pub fn enforce(ui: Ui) {
 
     if let Some((playing, _)) = ui.player.vod.get_untracked() {
         let owner = crate::runtime_owner::runtime();
-        if !owner.parental_allowed(&iptv_runtime::vod::target(&playing.key))
+        if !owner.parental_allowed(&Runtime::vod_target(&playing.key))
             || playing
                 .parent
                 .as_ref()
-                .is_some_and(|parent| !owner.parental_allowed(&iptv_runtime::vod::target(parent)))
+                .is_some_and(|parent| !owner.parental_allowed(&Runtime::vod_target(parent)))
         {
             crate::player::stop(ui);
         }

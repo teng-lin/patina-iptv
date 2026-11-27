@@ -25,7 +25,7 @@ pub(super) async fn refresh_cache(owner: &Rc<crate::Runtime>) -> Result<(), Stor
 
 /// A committed mutation must retain its cleanup even if a subsequent read fails.
 async fn refresh_after_commit(owner: &Rc<crate::Runtime>, patch: impl FnOnce(&mut Snapshot)) {
-    owner.library.with(|snapshot| {
+    owner.catalog.library_snapshot().with(|snapshot| {
         if let Some(snapshot) = snapshot.borrow_mut().as_mut() {
             patch(snapshot);
         }
@@ -94,7 +94,7 @@ pub(super) fn prepare_import(
     let due = !matches!(
         purpose,
         Purpose::Startup | Purpose::Switch | Purpose::Combined
-    ) || owner.library.with(|snapshot| {
+    ) || owner.catalog.library_snapshot().with(|snapshot| {
         let snapshot = snapshot.borrow();
         let Some(snapshot) = snapshot.as_ref() else {
             return true;
@@ -114,6 +114,7 @@ pub(super) fn prepare_import(
     });
     if due {
         owner
+            .imports
             .attempts
             .with(|a| a.borrow_mut().insert(id, crate::time::now_unix()));
     }
@@ -122,7 +123,7 @@ pub(super) fn prepare_import(
         id.0,
         stored.source.kind()
     );
-    let ticket = owner.tickets.with(|t| {
+    let ticket = owner.imports.tickets.with(|t| {
         t.set(t.get() + 1);
         t.get()
     });
@@ -130,6 +131,7 @@ pub(super) fn prepare_import(
         let owner = owner.clone();
         move || {
             owner
+                .imports
                 .imports
                 .with(|r| r.borrow().get(&id).is_some_and(|(at, _)| *at == ticket))
         }
@@ -143,6 +145,7 @@ pub(super) fn prepare_import(
     };
     let token = CancelToken::new();
     owner
+        .imports
         .imports
         .with(|r| r.borrow_mut().insert(id, (ticket, token.clone())));
     crate::library::set_activity(
@@ -172,7 +175,7 @@ pub(super) fn prepare_import(
             Update::Progress(p) => Activity::Running(Some(p)),
             Update::Done(Err(f)) if edit => {
                 log::warn!("iptv data: the new details did not import ({f:?}); the old ones stay");
-                owner.imports.with(|r| r.borrow_mut().remove(&id));
+                owner.imports.imports.with(|r| r.borrow_mut().remove(&id));
                 changed(owner);
                 Activity::Rejected(f)
             }
@@ -183,7 +186,7 @@ pub(super) fn prepare_import(
                         log::warn!("iptv data: refresh failed ({f:?}); the stored data stays")
                     }
                 }
-                owner.imports.with(|r| r.borrow_mut().remove(&id));
+                owner.imports.imports.with(|r| r.borrow_mut().remove(&id));
                 changed(owner);
                 if let Err(failure) = &result {
                     // The import records the precise kind of a failed

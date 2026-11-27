@@ -66,6 +66,59 @@ fn response_server(
     (url, observed, release, task)
 }
 
+fn catalog_and_guide_server(now: i64) -> (String, std::thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+    let playlist = "#EXTM3U\n#EXTINF:-1 tvg-id=\"amber.main\",Generated incoming\n\
+https://media.example.test/incoming.ts\n";
+    let guide = format!(
+        "<tv><channel id=\"amber.main\"><display-name>Generated Amber</display-name></channel>\
+<programme channel=\"amber.main\" start=\"{}\" stop=\"{}\"><title>Generated Program</title></programme></tv>",
+        iptv_epg::format_xmltv_time(now - 60),
+        iptv_epg::format_xmltv_time(now + 3600),
+    );
+    let task = std::thread::spawn(move || {
+        let deadline = std::time::Instant::now() + LIMIT;
+        for _ in 0..2 {
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "expected guide request"
+                        );
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("generated server failed: {error}"),
+                }
+            };
+            stream.set_read_timeout(Some(LIMIT)).unwrap();
+            stream.set_write_timeout(Some(LIMIT)).unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+                assert!(request.len() < 8192);
+            }
+            let body = if request.starts_with(b"GET /guide.xml ") {
+                guide.as_str()
+            } else {
+                playlist
+            };
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+    });
+    (format!("http://{address}/playlist.m3u"), task)
+}
+
 fn source(url: &str, name: &str) -> Source {
     Source {
         name: name.into(),
@@ -525,6 +578,52 @@ async fn added_and_edited_playback_contexts_retain_the_committed_source_authorit
         server.join().unwrap();
         assert!(owner.drain_services());
     }
+}
+
+#[tokio::test]
+async fn automatic_guide_completion_keeps_the_imported_source_playback_context() {
+    let directory = tempfile::tempdir().unwrap();
+    let now = now_unix();
+    let (playlist_url, server) = catalog_and_guide_server(now);
+    let (owner, job) = fixture(directory.path(), &playlist_url).await;
+    let source = job.stored.unwrap();
+    let guide = GuideSource {
+        feed: iptv_epg::FeedId(81),
+        provider_index: None,
+        url: SecretUrl::new(format!(
+            "{}/guide.xml",
+            playlist_url.strip_suffix("/playlist.m3u").unwrap()
+        )),
+        name: Some("Generated EPG".into()),
+        enabled: true,
+        shift_minutes: 0,
+    };
+    owner
+        .services()
+        .call(move |store| store.set_guide_sources(source, &[guide]))
+        .await
+        .unwrap();
+
+    let (task, mut messages) = start(&owner, job, &CancelToken::new());
+    tokio::time::timeout(LIMIT, task).await.unwrap().unwrap();
+    let mut guide_completion = None;
+    while let Ok(message) = messages.try_recv() {
+        if let Msg::Guide(imported) = message {
+            guide_completion = Some(imported);
+        }
+    }
+    let imported = guide_completion.expect("automatic guide refresh sends its completed guide");
+    assert!(
+        imported.resume,
+        "guide completion retains import resume semantics"
+    );
+    let Streams::New(context, _, authority) = imported.playback else {
+        panic!("guide completion retains the source playback context");
+    };
+    assert!(context.is_some());
+    assert_eq!(authority.source(), imported.source.0);
+    server.join().unwrap();
+    assert!(owner.drain_services());
 }
 
 #[tokio::test]

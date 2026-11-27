@@ -14,6 +14,7 @@ mod verifier;
 mod windows;
 pub use selection::{InstalledPackage, ReleaseAsset, UpdateResult};
 
+use std::cell::RefCell;
 use std::{sync::Arc, time::Duration};
 
 use iptv_net::{NetClient, NetConfig};
@@ -190,6 +191,16 @@ async fn verified_index(
         .await
         .ok()?;
     selection::select(&bytes, installed)
+}
+
+/// Per-owner update admission and publication state.
+#[derive(Default)]
+pub(crate) struct OwnerState {
+    #[cfg(any(target_os = "linux", test))]
+    file_commits: std::cell::Cell<usize>,
+    controller: RefCell<state::Controller>,
+    pending: RefCell<Option<pending::Pending>>,
+    download: RefCell<Option<pending::Active>>,
 }
 
 #[cfg(test)]

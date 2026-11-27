@@ -185,49 +185,57 @@ impl crate::Runtime {
         generation: u64,
         work: GuideWork,
     ) -> Option<(u64, CancelToken)> {
-        (self.generation.get() == generation)
-            .then(|| self.guide_checks.borrow_mut().replace(source, work))
+        (self.imports.generation.get() == generation)
+            .then(|| self.imports.guide_checks.borrow_mut().replace(source, work))
     }
     pub fn replace_guide_check(&self, source: SourceId) -> (u64, CancelToken) {
-        self.guide_checks
+        self.imports
+            .guide_checks
             .borrow_mut()
             .replace(source, GuideWork::Check)
     }
     pub fn guide_check_current(&self, source: SourceId, ticket: u64) -> bool {
-        self.guide_checks.borrow().current(source, ticket)
+        self.imports.guide_checks.borrow().current(source, ticket)
     }
     pub fn has_guide_check(&self, source: SourceId) -> bool {
-        self.guide_checks.borrow().entries.contains_key(&source)
+        self.imports
+            .guide_checks
+            .borrow()
+            .entries
+            .contains_key(&source)
     }
     /// Other work takes `source`'s guide over (see `GuideChecks::cancel`).
     pub fn cancel_guide_check(&self, source: SourceId) {
-        self.guide_checks.borrow_mut().cancel(source);
+        self.imports.guide_checks.borrow_mut().cancel(source);
     }
     /// `source`'s own read ended (see `GuideChecks::end`).
     pub fn end_guide_check(&self, source: SourceId) {
-        self.guide_checks.borrow_mut().end(source);
+        self.imports.guide_checks.borrow_mut().end(source);
     }
     /// A guide action replaces what `source`'s in-flight read would show
     /// or store (see `GuideChecks::interrupt_read`).
     pub fn interrupt_guide_read(&self, source: SourceId) -> Option<GuideWork> {
-        self.guide_checks.borrow_mut().interrupt_read(source)
+        self.imports
+            .guide_checks
+            .borrow_mut()
+            .interrupt_read(source)
     }
     /// The work that owned `source`'s guide answered with no next check,
     /// or the caller keeps the owed one itself.
     pub fn take_owed_guide_check(&self, source: SourceId) -> Option<i64> {
-        self.guide_checks.borrow_mut().take_owed(source)
+        self.imports.guide_checks.borrow_mut().take_owed(source)
     }
     /// See `GuideChecks::owe`.
     pub fn owe_guide_check(&self, source: SourceId, at: i64) {
-        self.guide_checks.borrow_mut().owe(source, at);
+        self.imports.guide_checks.borrow_mut().owe(source, at);
     }
     pub fn cancel_guide_checks(&self) {
-        self.guide_checks.borrow_mut().clear(None);
+        self.imports.guide_checks.borrow_mut().clear(None);
     }
     /// A new generation begins while `shown` is on screen (see
     /// `GuideChecks::clear`).
     pub fn cancel_guide_checks_keeping(&self, shown: Option<SourceId>) {
-        self.guide_checks.borrow_mut().clear(shown);
+        self.imports.guide_checks.borrow_mut().clear(shown);
     }
 }
 #[cfg(test)]

@@ -1,5 +1,6 @@
 //! A queued command may be canceled; an in-flight atomic commit is reconciled.
 use super::*;
+use crate::error::AdapterError as StoreError;
 use crate::store_service::Services;
 use std::{
     future::poll_fn,
@@ -42,7 +43,7 @@ pub(super) struct Wait {
 pub(super) async fn wait(
     services: &Services,
     command: Wait,
-    reply: impl Future<Output = iptv_store_sqlite::Result<Result<Commit>>> + Send + 'static,
+    reply: impl Future<Output = std::result::Result<Result<Commit>, StoreError>> + Send + 'static,
 ) -> Result<Commit> {
     let Wait {
         control,

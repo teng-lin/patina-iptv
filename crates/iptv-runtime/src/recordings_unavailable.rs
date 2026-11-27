@@ -18,8 +18,22 @@ fn unavailable() -> Error {
 /// The recording state of one owner: nothing to hold without capture.
 #[derive(Default)]
 pub(crate) struct State;
-impl State {
-    pub(crate) fn detach_ui(&self) {}
+
+pub(crate) struct OwnerState {
+    detached: std::cell::Cell<bool>,
+}
+impl OwnerState {
+    pub(crate) fn new(_: std::sync::Arc<State>) -> Self {
+        Self {
+            detached: std::cell::Cell::new(false),
+        }
+    }
+    fn is_detached(&self) -> bool {
+        self.detached.get()
+    }
+    pub(crate) fn detach_ui(&self) {
+        self.detached.set(true);
+    }
 }
 
 pub mod host {
@@ -83,7 +97,7 @@ impl Runtime {
         None
     }
     pub fn reserve_viewing(&self, _surface: usize, _source: SourceId) -> bool {
-        !self.recordings_detached.get()
+        !self.recordings.is_detached()
     }
     pub fn release_viewing(&self, _surface: usize) {}
     pub fn recording_snapshot(&self) -> Vec<Job> {

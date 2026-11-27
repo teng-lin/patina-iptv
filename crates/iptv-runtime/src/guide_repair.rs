@@ -1,4 +1,7 @@
 //! Application-owned immutable repair previews, atomic commit and observed status.
+
+#![warn(missing_docs)]
+
 mod prepare;
 mod publication;
 #[cfg(all(test, feature = "native"))]
@@ -235,6 +238,7 @@ impl Runtime {
         .collect()
     }
 
+    /// Prepares a digest-bound, immutable preview without changing stored choices.
     pub fn preview_guide_repair(
         self: &Rc<Self>,
         request: Request,
@@ -313,6 +317,7 @@ impl Runtime {
         }
     }
 
+    /// Returns bounded mapping and indirect-effect pages from an existing preview.
     pub fn guide_repair_plan(
         &self,
         id: &str,
@@ -357,6 +362,7 @@ impl Runtime {
         Ok(page)
     }
 
+    /// Releases an uncommitted preview if its digest still matches.
     pub fn release_guide_repair_plan(&self, id: &str, digest: [u8; 32]) -> Result<bool> {
         let mut state = self.repairs.borrow_mut();
         if state.applying.contains(id) {
@@ -370,6 +376,7 @@ impl Runtime {
         Ok(state.plans.remove(id).is_some())
     }
 
+    /// Atomically commits the reviewed choices and returns their publication outcome.
     pub fn apply_guide_repair(
         self: &Rc<Self>,
         id: String,
@@ -497,6 +504,7 @@ impl Runtime {
         }
     }
 
+    /// Commits a conditional inverse if the affected values still match the receipt.
     pub fn undo_guide_repair(
         self: &Rc<Self>,
         id: String,
@@ -578,6 +586,7 @@ impl Runtime {
         }
     }
 
+    /// Inspects observed bindings and program coverage for a committed repair.
     pub fn verify_guide_repair(
         self: &Rc<Self>,
         id: String,
@@ -695,6 +704,7 @@ impl Runtime {
         }
     }
 
+    /// Lists recent durable receipts for one source, up to 50.
     pub fn recent_guide_repairs(
         &self,
         source: SourceId,
@@ -718,6 +728,7 @@ impl Runtime {
         async move { read.await.map_err(Error::from) }
     }
 
+    /// Reads an operation's current status, reconstructing its durable receipt if needed.
     pub fn guide_repair_operation(
         self: &Rc<Self>,
         id: String,
@@ -789,6 +800,7 @@ impl Runtime {
         }
     }
 
+    /// Cancels remaining transient work without reverting durable choices.
     pub fn cancel_guide_repair_operation(self: &Rc<Self>, id: &str) -> Result<()> {
         let source = {
             let mut state = self.repairs.borrow_mut();

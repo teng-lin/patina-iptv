@@ -36,7 +36,7 @@ iptv-runtime/src/error.rs	cannot start store worker
 iptv-runtime/src/error.rs	recording request refused
 iptv-runtime/src/error.rs	recording space refused
 iptv-runtime/src/error.rs	storage operation failed
-iptv-runtime/src/store_service.rs	cannot start store worker
+iptv-runtime/src/store_service/mod.rs	cannot start store worker
 iptv-runtime/src/native/execution.rs	network runtime initialization failed
 # Fixed Windows system interpreter and module paths.
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\Modules
@@ -59,7 +59,7 @@ iptv-app/src/search_view/view.rs	minmax(0, 1fr) auto
 # Logical key name from the raw keyboard event.
 iptv-app/src/input/keys.rs	Escape
 # Privacy command returns a fixed localized failure at the shell, never this diagnostic.
-iptv-runtime/src/commands.rs	legacy search history could not be removed
+iptv-runtime/src/store_service/system_repo.rs	legacy search history could not be removed
 # Redacted Debug type/variant labels; views render typed state with their own wording.
 iptv-core/src/playback.rs	PlaySource
 iptv-presentation/src/wizard.rs	Back
@@ -88,7 +88,7 @@ iptv-presentation/src/library/playlists.rs	Editing
 # Search build errors are logged; the screen uses translated Programs status labels.
 iptv-app/src/search_view/program_index.rs	Search guide is unavailable
 iptv-app/src/search_view/program_index.rs	Search source is unavailable
-iptv-runtime/src/search.rs	search source changed while indexing
+iptv-runtime/src/store_service/epg_repo.rs	search source changed while indexing
 # Guide identity diagnostics become typed failures in the import wizard;
 # guide edits log their error. Neither path displays the Display implementation.
 iptv-library/src/guides.rs	duplicate guide feed id {}
@@ -96,8 +96,8 @@ iptv-library/src/guides.rs	duplicate provider guide index {index}
 iptv-library/src/guides.rs	guide feed identity space exhausted
 iptv-library/src/guides.rs	{count} provider guides exceed the limit of {MAX_PROVIDER_GUIDES}
 # Page-reader causes are logged; playback maps the completion to its translated notice.
-iptv-runtime/src/commands.rs	guide page has no source authority
-iptv-runtime/src/commands.rs	guide page source changed
+iptv-runtime/src/store_service/epg_repo.rs	guide page has no source authority
+iptv-runtime/src/store_service/epg_repo.rs	guide page source changed
 iptv-runtime/src/data/pages.rs	guide page read failed
 # Opaque authority type names in redacted Rust diagnostics, never rendered.
 iptv-guide/src/playback.rs	ResolutionAuthority
@@ -254,12 +254,12 @@ iptv-runtime/src/private_files.rs	document byte budget exceeded
 iptv-runtime/src/private_files.rs	invalid private document path
 iptv-runtime/src/private_files.rs	linked private documents are refused
 iptv-runtime/src/private_files.rs	total document deadline exceeded
-iptv-runtime/src/store_service.rs	cannot create data directory
-iptv-runtime/src/store_service.rs	credential storage is temporarily unavailable
-iptv-runtime/src/store_service.rs	recursive store request
-iptv-runtime/src/store_service.rs	request belongs to a closed application
-iptv-runtime/src/store_service.rs	store reply lost
-iptv-runtime/src/store_service.rs	store worker stopped
+iptv-runtime/src/store_service/mod.rs	cannot create data directory
+iptv-runtime/src/store_service/mod.rs	credential storage is temporarily unavailable
+iptv-runtime/src/store_service/mod.rs	recursive store request
+iptv-runtime/src/store_service/mod.rs	request belongs to a closed application
+iptv-runtime/src/store_service/mod.rs	store reply lost
+iptv-runtime/src/store_service/mod.rs	store worker stopped
 # A host-kept store (the browser's) fails to open as the native store does
 # (store_service open_store); its sliced publishes refuse with store errors
 # that imports and guide updates turn into typed failures; the restored size
@@ -318,12 +318,12 @@ iptv-app/src/playlists_view.rs	show all playlists
 iptv-app/src/playlists_view.rs	try new details of {}
 # Internal store refusal classes: the shell logs the reason and presents a
 # translated generic edit failure; a superseded guide reply is never displayed.
-iptv-runtime/src/commands.rs	favorites use their ordered writer
+iptv-runtime/src/store_service/catalog_repo.rs	favorites use their ordered writer
 iptv-runtime/src/stored.rs	the guide download was superseded
 # Only the thread-affinity assertion uses these operation names; they never
 # enter a result, RuntimeEvent, or visible notice.
-iptv-runtime/src/store_service.rs	blocking store read
-iptv-runtime/src/store_service.rs	blocking store request
+iptv-runtime/src/store_service/mod.rs	blocking store read
+iptv-runtime/src/store_service/mod.rs	blocking store request
 # Internal staged-evidence read failures become typed inspection errors.
 iptv-runtime/src/inspection/probe.rs	probe channel inspection stopped
 iptv-runtime/src/inspection/probe.rs	probe channel limit exceeded
@@ -331,8 +331,8 @@ iptv-runtime/src/inspection/probe.rs	probe integrity failed
 iptv-runtime/src/inspection/probe.rs	probe integrity inspection stopped
 
 # Native repair cache adapter errors become portable Storage; never rendered verbatim.
-iptv-runtime/src/guide_repair/publication.rs	guide repair commit is missing
-iptv-runtime/src/guide_repair/publication.rs	guide repair was superseded
+iptv-runtime/src/store_service/epg_repo.rs	guide repair commit is missing
+iptv-runtime/src/store_service/epg_repo.rs	guide repair was superseded
 
 iptv-app/src/ui_kit/icons.rs	<circle cx='12' cy='12' r='6' fill='currentColor' stroke='none'/>
 

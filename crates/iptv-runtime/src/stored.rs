@@ -15,7 +15,6 @@ use iptv_store_sqlite::{
     ChannelOrder, ChannelQuery, EpgCounts, EpgFeedMeta, EpgWindow, GuideSource, ImportErrorKind,
     SourceId, Store, StoreError, StoredGuide,
 };
-use std::cell::Cell;
 use tokio::sync::mpsc::UnboundedSender as Sender;
 
 /// How many days of finished programs reads of the stored guide reach:
@@ -23,7 +22,7 @@ use tokio::sync::mpsc::UnboundedSender as Sender;
 /// What is stored is pruned to the longest catch-up archive
 /// (`prune_before`), so a read finds no more than that.
 pub fn stored_past_days() -> u32 {
-    iptv_import::KEEP_PAST_MAX_DAYS
+    crate::model::MAX_STORED_GUIDE_PAST_DAYS
 }
 
 /// When finished programs stop being kept: [`iptv_import::keep_past_days`]
@@ -93,7 +92,11 @@ pub(crate) fn load_guide(
     now: UnixTime,
 ) -> Option<GuideStore> {
     let window = super::paging::window(now, stored_past_days());
-    read_guide(services, source, &super::paging::store_window(window))
+    let window = EpgWindow {
+        from: window.loaded_from,
+        ..EpgWindow::from(0, 0)
+    };
+    read_guide(services, source, &window)
 }
 
 /// [`load_guide`] for a read that restores the screen: an error when the
@@ -105,8 +108,11 @@ pub(crate) fn try_load_guide(
     now: UnixTime,
 ) -> Result<GuideStore, StoreError> {
     let window = super::paging::window(now, stored_past_days());
-    services
-        .blocking_read(move |store| store.load_epg(source, &super::paging::store_window(window)))
+    let window = EpgWindow {
+        from: window.loaded_from,
+        ..EpgWindow::from(0, 0)
+    };
+    services.blocking_read(move |store| store.load_epg(source, &window))
 }
 
 /// `window` of `source`'s stored guide; `None` when nothing is stored.
@@ -711,32 +717,16 @@ pub fn error_kind(error: &ImportError) -> ImportErrorKind {
 
 /// `data.rs` put `source`'s schedule on screen.
 pub fn note_shown(owner: &super::Runtime, source: Option<SourceId>) {
-    owner.shown.with(|s| s.set(source));
+    owner.catalog.set_shown_source(source);
 }
 
-/// How the guide on screen was last updated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum GuideStatus {
-    /// No playlist on screen.
-    NoSource,
-    Updating,
-    /// Nothing stored (not downloaded yet, or cleared).
-    Empty,
-    Updated {
-        at: UnixTime,
-        channels: u64,
-    },
-    Failed {
-        at: UnixTime,
-        kind: ImportErrorKind,
-    },
-}
+pub use crate::model::{GuideStatus, SourceLine};
 
 /// The status of the guide on screen (one indexed read of the store).
 pub fn guide_status(owner: &super::Runtime) -> GuideStatus {
     let sources = shown_sources(owner);
     if sources.is_empty() {
-        return if owner.status.with(|status| status.borrow().combined) {
+        return if owner.imports.status.with(|status| status.borrow().combined) {
             GuideStatus::Empty
         } else {
             GuideStatus::NoSource
@@ -766,10 +756,10 @@ pub fn guide_status(owner: &super::Runtime) -> GuideStatus {
 /// Individual mode has one guide owner; aggregate commands cover every
 /// enabled source, with failures and feeds still managed per playlist.
 pub fn shown_sources(owner: &super::Runtime) -> Vec<SourceId> {
-    if let Some(source) = owner.shown.with(Cell::get) {
+    if let Some(source) = owner.catalog.shown_source() {
         return vec![source];
     }
-    owner.status.with(|status| {
+    owner.imports.status.with(|status| {
         let status = status.borrow();
         if status.combined {
             status.enabled.clone()
@@ -781,13 +771,14 @@ pub fn shown_sources(owner: &super::Runtime) -> Vec<SourceId> {
 
 /// The source whose guide is on screen.
 pub fn shown(owner: &super::Runtime) -> Option<SourceId> {
-    owner.shown.with(Cell::get)
+    owner.catalog.shown_source()
 }
 
 /// An update of `source`'s guide asked for by hand is running, or one a
 /// guide action superseded still unwinds.
 pub fn updating(owner: &super::Runtime, source: SourceId) -> bool {
     owner
+        .imports
         .updating
         .with(|u| u.borrow().iter().any(|(id, _)| *id == source))
 }
@@ -797,7 +788,7 @@ pub fn updating(owner: &super::Runtime, source: SourceId) -> bool {
 /// guide chosen, the guide data deleted) downloads nothing any more, and
 /// a request made while it unwinds needs an update of its own.
 pub fn update_current(owner: &super::Runtime, source: SourceId) -> bool {
-    owner.updating.with(|u| {
+    owner.imports.updating.with(|u| {
         u.borrow()
             .iter()
             .any(|(id, job)| *id == source && super::library::import_is_current(owner, source, job))
@@ -810,7 +801,7 @@ pub fn unwinding_updates(
     owner: &super::Runtime,
     source: SourceId,
 ) -> Vec<super::library::ImportCompletion> {
-    owner.updating.with(|u| {
+    owner.imports.updating.with(|u| {
         u.borrow()
             .iter()
             .filter(|(id, job)| {
@@ -827,6 +818,7 @@ pub fn begin_update(
     job: &super::library::ImportCompletion,
 ) {
     owner
+        .imports
         .updating
         .with(|u| u.borrow_mut().push((source, job.clone())));
 }
@@ -836,18 +828,16 @@ pub fn end_update(
     source: SourceId,
     job: &super::library::ImportCompletion,
 ) {
-    owner.updating.with(|u| {
+    owner.imports.updating.with(|u| {
         u.borrow_mut()
             .retain(|(id, other)| *id != source || !std::rc::Rc::ptr_eq(other, job))
     });
 }
 
-pub use iptv_library::SourceLine;
-
 /// `source`'s guide sources in order, each with its last result (one
 /// short read of the store).
 pub fn source_lines(owner: &super::Runtime, source: SourceId) -> Vec<SourceLine> {
-    owner.status.with(|status| {
+    owner.imports.status.with(|status| {
         status
             .borrow()
             .lines
@@ -858,31 +848,25 @@ pub fn source_lines(owner: &super::Runtime, source: SourceId) -> Vec<SourceLine>
 }
 
 pub fn status_of(stored: Option<&iptv_library::GuideSnapshot>) -> GuideStatus {
-    let Some(g) = stored else {
-        return GuideStatus::Empty;
-    };
-    match (g.last_error, g.attempted_at, g.replaced_at) {
-        (Some(kind), Some(at), _) => GuideStatus::Failed { at, kind },
-        (_, _, Some(at)) => GuideStatus::Updated {
-            at,
-            channels: g.bound_channels,
-        },
-        _ => GuideStatus::Empty,
-    }
+    GuideStatus::from_snapshot(stored)
 }
 
 pub fn cached_guide_state(
     owner: &super::Runtime,
     source: SourceId,
 ) -> Option<iptv_library::GuideSnapshot> {
-    owner
-        .status
-        .with(|status| status.borrow().guides.get(&source).map(guide_snapshot))
+    owner.imports.status.with(|status| {
+        status
+            .borrow()
+            .guides
+            .get(&source)
+            .map(|guide| guide.summary.clone())
+    })
 }
 
 /// What the views see of a stored guide: how its last update went, without
 /// its feeds or their configuration.
-fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
+pub(crate) fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
     iptv_library::GuideSnapshot {
         replaced_at: guide.replaced_at,
         attempted_at: guide.attempted_at,
@@ -892,11 +876,17 @@ fn guide_snapshot(guide: &StoredGuide) -> iptv_library::GuideSnapshot {
 }
 
 pub(crate) fn guide_edit_revision(owner: &super::Runtime, source: SourceId) -> u64 {
-    owner.edits.borrow().get(&source).copied().unwrap_or(0)
+    owner
+        .imports
+        .edits
+        .borrow()
+        .get(&source)
+        .copied()
+        .unwrap_or(0)
 }
 
 pub fn next_guide_edit(owner: &super::Runtime, source: SourceId) -> u64 {
-    owner.edits.with(|edits| {
+    owner.imports.edits.with(|edits| {
         let mut edits = edits.borrow_mut();
         let generation = edits.entry(source).or_default();
         *generation += 1;
@@ -906,6 +896,7 @@ pub fn next_guide_edit(owner: &super::Runtime, source: SourceId) -> u64 {
 
 pub fn guide_edit_is_current(owner: &super::Runtime, source: SourceId, generation: u64) -> bool {
     owner
+        .imports
         .edits
         .with(|edits| edits.borrow().get(&source) == Some(&generation))
 }

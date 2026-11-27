@@ -2,8 +2,7 @@
 use iptv_core::guide::Schedule;
 use iptv_epg::{ChannelKey, UnixTime};
 use iptv_library::SourceId;
-use iptv_search::{ChannelIndex, ProgramIndex, ProgramIndexBuilder};
-use iptv_store_sqlite::StoreError;
+use iptv_search::{ChannelIndex, ProgramIndex};
 use std::cell::{Cell, RefCell};
 
 /// Search lifetime state stays together; only this module can mutate it.
@@ -31,39 +30,8 @@ fn programs_native(
     sources: Vec<(SourceId, String, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
-) -> impl std::future::Future<Output = Result<ProgramIndex, StoreError>> + use<> {
-    services.read(move |store| {
-        store.read_snapshot(|store| {
-            let mut builder = ProgramIndexBuilder::new(rows);
-            for (source, incarnation, keys, offset) in sources {
-                if store.source_incarnation(source)? != incarnation {
-                    return Err(StoreError::Unavailable(
-                        "search source changed while indexing",
-                    ));
-                }
-                for (channel, key) in keys.iter().enumerate() {
-                    builder.set_identity(
-                        channel + offset,
-                        iptv_search::ChannelId::in_source(
-                            source.0,
-                            incarnation.clone(),
-                            key.as_str(),
-                        ),
-                    );
-                }
-                store.for_each_epg_title(
-                    source,
-                    &keys,
-                    from,
-                    UnixTime::MAX,
-                    |channel, start, stop, title| {
-                        builder.push(channel + offset, start, stop, title)
-                    },
-                )?;
-            }
-            Ok(builder.finish())
-        })
-    })
+) -> impl std::future::Future<Output = Result<ProgramIndex, crate::error::AdapterError>> + use<> {
+    services.epg().program_index(sources, rows, from)
 }
 
 impl crate::Runtime {
@@ -140,7 +108,7 @@ impl crate::Runtime {
             .and_then(|value| value.downcast_ref::<EpgSchedule>())
             && let Some(authority) = epg.source_authority()
         {
-            if self.shown.get().map(|source| source.0) != Some(authority.source()) {
+            if self.catalog.shown_source().map(|source| source.0) != Some(authority.source()) {
                 return None;
             }
             return Some(iptv_search::ChannelId::in_source(
@@ -150,8 +118,8 @@ impl crate::Runtime {
             ));
         }
         // A standalone synthetic schedule has no stored source authority.
-        self.shown
-            .get()
+        self.catalog
+            .shown_source()
             .is_none()
             .then(|| iptv_search::ChannelId::new(None, key))
     }
@@ -174,7 +142,7 @@ impl crate::Runtime {
                 source,
                 &identity.content,
             ))?
-        } else if identity.source == self.shown.get().map(|source| source.0) {
+        } else if identity.source == self.catalog.shown_source().map(|source| source.0) {
             schedule.find_channel(&identity.content)?
         } else {
             return None;
@@ -316,6 +284,7 @@ mod identity_tests {
     use iptv_guide::playback::SourceAuthority;
     use iptv_providers::SecretUrl;
     use iptv_providers::model::{M3uSourceConfig, Source, SourceConfig};
+    use iptv_search::ProgramIndexBuilder;
     use std::rc::Rc;
 
     fn config(source: i64) -> SourceConfig {
@@ -351,7 +320,7 @@ mod identity_tests {
     #[test]
     fn results_resolve_reorders_sources_and_combined_offsets_by_content() {
         let owner = crate::Runtime::default();
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         let original = schedule(1, "generated-first", &["A", "B"]);
         owner.prepare_search_channels(1, &*original);
         let hit = owner
@@ -376,7 +345,7 @@ mod identity_tests {
             owner.resolve_search_channel(&hit.identity, &*schedule(1, "generated-first", &["B"])),
             None
         );
-        owner.shown.set(Some(SourceId(2)));
+        owner.catalog.set_shown_source(Some(SourceId(2)));
         assert_eq!(
             owner.resolve_search_channel(&hit.identity, &*replacement),
             None
@@ -453,7 +422,7 @@ mod identity_tests {
     #[test]
     fn same_numeric_source_and_content_cannot_adopt_a_new_incarnation() {
         let owner = crate::Runtime::default();
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         let original = schedule(1, "generated-original", &["A"]);
         owner.prepare_search_channels(1, &*original);
         let hit = owner
@@ -481,7 +450,7 @@ mod identity_tests {
     fn failed_program_build_completion_allows_retry_without_accepting_stale_versions() {
         let owner = crate::Runtime::default();
         let guide = schedule(1, "generated-original", &["A"]);
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         owner.prepare_search_channels(1, &*guide);
         assert!(owner.begin_program_index(1));
         assert!(!owner.begin_program_index(1));
@@ -503,7 +472,7 @@ mod identity_tests {
     #[test]
     fn program_visibility_archive_and_limit_use_resolved_rows() {
         let owner = crate::Runtime::default();
-        owner.shown.set(Some(SourceId(1)));
+        owner.catalog.set_shown_source(Some(SourceId(1)));
         let before = schedule(1, "generated-original", &["A", "B"]);
         owner.prepare_search_channels(1, &*before);
         let mut builder = ProgramIndexBuilder::new(2);

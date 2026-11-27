@@ -3,7 +3,6 @@
 use crate::Runtime;
 use iptv_core::parental::{Access, ContentKind, Pin, Policy, Target, UnlockWindow};
 use iptv_library::SourceId;
-use iptv_store_sqlite::parental::ParentalCredential;
 use std::{
     collections::BTreeSet,
     sync::{
@@ -11,10 +10,8 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
-const ITERATIONS: u32 = 210_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
     Locked,
@@ -56,13 +53,13 @@ pub(crate) struct State {
 
 /// A group unlock authorizes the handoff subject without unlocking its siblings.
 #[derive(Clone)]
-struct TransferredGroups {
+pub(crate) struct TransferredGroups {
     channel: Target,
     groups: Vec<Target>,
 }
 
 impl TransferredGroups {
-    fn allows(transfer: Option<&Self>, channel: &Target, group: &Target) -> bool {
+    pub(crate) fn allows(transfer: Option<&Self>, channel: &Target, group: &Target) -> bool {
         transfer
             .is_some_and(|transfer| transfer.channel == *channel && transfer.groups.contains(group))
     }
@@ -119,7 +116,7 @@ fn apply_policy(state: &mut State, new: Policy) {
         state.access.unlock(Target::settings(), now_ms());
     }
 }
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     crate::time::since_epoch()
         .as_millis()
         .try_into()
@@ -148,113 +145,23 @@ pub(crate) fn policy_settings(settings: &iptv_settings::Settings) -> Policy {
         window,
     }
 }
-fn hash(secret: &[u8], salt: &[u8]) -> [u8; 32] {
-    let mut out = [0; 32];
-    pbkdf2::pbkdf2_hmac::<sha2::Sha256>(secret, salt, ITERATIONS, &mut out);
-    out
-}
-fn verify(
-    store: &mut iptv_store_sqlite::Store,
-    secret: &[u8],
-    recovery: bool,
-    now: i64,
-) -> Result<(), Error> {
-    let mut record = store
-        .parental_credential()
-        .map_err(|_| Error::Storage)?
-        .ok_or(Error::NoPin)?;
-    if record.retry_after > now {
-        return Err(Error::RetryAfter((record.retry_after - now) as u64));
-    }
-    let digest = Zeroizing::new(hash(secret, &record.salt));
-    let expected = if recovery {
-        &record.recovery_verifier
-    } else {
-        &record.verifier
-    };
-    if bool::from(digest.as_slice().ct_eq(expected)) {
-        record.failures = 0;
-        record.retry_after = 0;
-        store
-            .set_parental_credential(&record)
-            .map_err(|_| Error::Storage)?;
-        Ok(())
-    } else {
-        record.failures = record.failures.saturating_add(1);
-        // Persisted backoff survives process termination and clock rollback.
-        if record.failures >= 5 {
-            record.retry_after = now.saturating_add(
-                30_i64.saturating_mul(1_i64 << record.failures.saturating_sub(5).min(7)),
-            );
-        }
-        store
-            .set_parental_credential(&record)
-            .map_err(|_| Error::Storage)?;
-        Err(Error::Incorrect)
-    }
-}
-fn replace_pin(
-    store: &mut iptv_store_sqlite::Store,
-    new: &Pin,
-    entropy: crate::ports::Entropy,
-) -> Result<Zeroizing<String>, Error> {
-    if !new.valid() {
-        return Err(Error::InvalidPin);
-    }
-    let mut salt = [0; 16];
-    let mut recovery = Zeroizing::new([0; 16]);
-    entropy(&mut salt).map_err(|_| Error::Storage)?;
-    entropy(recovery.as_mut()).map_err(|_| Error::Storage)?;
-    let code = Zeroizing::new(
-        recovery
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>(),
-    );
-    let record = ParentalCredential {
-        salt,
-        verifier: hash(new.bytes(), &salt),
-        recovery_verifier: hash(code.as_bytes(), &salt),
-        failures: 0,
-        retry_after: 0,
-    };
-    store
-        .set_parental_credential(&record)
-        .map_err(|_| Error::Storage)?;
-    Ok(code)
-}
 impl Runtime {
     /// Refresh public policy metadata without returning any credential verifier.
     pub async fn parental_refresh(&self) -> Result<(), Error> {
         let services = self.services();
-        let (has_pin, blocked, ancestry, names) = services
-            .read(|store| {
-                store.read_snapshot(|store| {
-                    let blocked = store.parental_blocks()?;
-                    let mut names = std::collections::BTreeMap::new();
-                    for target in &blocked {
-                        if let Some(name) = store.parental_name(target)? {
-                            names.insert(target.clone(), name);
-                        }
-                    }
-                    Ok((
-                        store.parental_credential()?.is_some(),
-                        blocked,
-                        store.parental_memberships()?,
-                        names,
-                    ))
-                })
-            })
+        let snapshot = services
+            .parental()
+            .catalog()
             .await
             .map_err(|_| Error::Storage)?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
         let mut state = self.parental.borrow_mut();
-        state.has_pin = has_pin;
+        state.has_pin = snapshot.has_pin;
         state.ready = true;
-        let blocked: BTreeSet<_> = blocked.into_iter().collect();
-        let mut ancestry = ancestry;
+        let blocked: BTreeSet<_> = snapshot.blocked.into_iter().collect();
+        let mut ancestry = snapshot.ancestry;
         for parents in ancestry.values_mut() {
             parents.sort_unstable();
             parents.dedup();
@@ -280,7 +187,7 @@ impl Runtime {
         state.complete = true;
         state.blocked = blocked;
         state.ancestry = ancestry;
-        state.names = names;
+        state.names = snapshot.names;
         apply_policy(&mut state, policy(self));
         Ok(())
     }
@@ -297,44 +204,21 @@ impl Runtime {
     ) -> Result<bool, Error> {
         let services = self.services();
         let result = services
-            .read(move |store| {
-                store.read_snapshot(|store| {
-                    let mut entries = Vec::new();
-                    for target in targets {
-                        let mut parents = store.parental_ancestors(&target)?;
-                        parents.sort_unstable();
-                        parents.dedup();
-                        let blocked = std::iter::once(&target)
-                            .chain(parents.iter())
-                            .map(|candidate| {
-                                Ok((candidate.clone(), store.parental_target_blocked(candidate)?))
-                            })
-                            .collect::<iptv_store_sqlite::Result<Vec<_>>>()?;
-                        entries.push((target, parents, blocked));
-                    }
-                    let guide_blocked = match guide_channel {
-                        Some(channel) => {
-                            store.guide_channel_blocked(SourceId(channel.source), &channel.id)?
-                        }
-                        None => false,
-                    };
-                    Ok((
-                        store.parental_credential()?.is_some(),
-                        entries,
-                        guide_blocked,
-                    ))
-                })
-            })
+            .parental()
+            .targets(targets, guide_channel)
             .await
             .map_err(|_| Error::Storage)?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
         let mut state = self.parental.borrow_mut();
-        state.has_pin = result.0;
+        state.has_pin = result.has_pin;
         state.ready = true;
         let mut changed = false;
-        for (target, parents, blocked) in result.1 {
+        for entry in result.entries {
+            let target = entry.target;
+            let parents = entry.parents;
+            let blocked = entry.blocked;
             let known_target = state.complete || state.ancestry.contains_key(&target);
             changed |= state
                 .ancestry
@@ -365,7 +249,7 @@ impl Runtime {
             state.policy_revision.fetch_add(1, Ordering::SeqCst);
         }
         apply_policy(&mut state, policy(self));
-        Ok(result.2)
+        Ok(result.guide_blocked)
     }
     pub(crate) fn parental_policy_changed(&self) {
         apply_policy(&mut self.parental.borrow_mut(), policy(self));
@@ -429,20 +313,10 @@ impl Runtime {
         let now = (now_ms() / 1000) as i64;
         let epoch = self.parental.borrow().epoch.clone();
         let expected = epoch.load(Ordering::SeqCst);
-        let verification_epoch = epoch.clone();
         services
-            .call(move |store| {
-                if verification_epoch.load(Ordering::SeqCst) != expected {
-                    return Ok(Err(Error::Locked));
-                }
-                let verified = verify(store, pin.bytes(), false, now);
-                if verification_epoch.load(Ordering::SeqCst) != expected {
-                    return Ok(Err(Error::Locked));
-                }
-                Ok(verified)
-            })
-            .await
-            .map_err(|_| Error::Storage)??;
+            .parental()
+            .verify_pin(pin, epoch.clone(), expected, now)
+            .await?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
@@ -462,33 +336,9 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
-        let entropy = services.ports().entropy;
         let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
-        let result = services
-            .call(move |store| {
-                let result = (|| {
-                    if store
-                        .parental_credential()
-                        .map_err(|_| Error::Storage)?
-                        .is_some()
-                    {
-                        verify(
-                            store,
-                            old.as_ref().ok_or(Error::Locked)?.bytes(),
-                            false,
-                            now,
-                        )?;
-                    }
-                    replace_pin(store, &new, entropy)
-                })();
-                if result.is_ok() {
-                    epoch.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(|_| Error::Storage)??;
+        let result = services.parental().change_pin(old, new, epoch, now).await?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
@@ -508,20 +358,12 @@ impl Runtime {
         new: Pin,
     ) -> Result<Zeroizing<String>, Error> {
         let services = self.services();
-        let entropy = services.ports().entropy;
         let epoch = self.parental.borrow().epoch.clone();
         let now = (now_ms() / 1000) as i64;
         let result = services
-            .call(move |store| {
-                let result = verify(store, recovery.trim().as_bytes(), true, now)
-                    .and_then(|()| replace_pin(store, &new, entropy));
-                if result.is_ok() {
-                    epoch.fetch_add(1, Ordering::SeqCst);
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(|_| Error::Storage)??;
+            .parental()
+            .recover_pin(recovery, new, epoch, now)
+            .await?;
         if !services.is_current() {
             return Err(Error::OwnerClosed);
         }
@@ -629,10 +471,8 @@ impl Runtime {
         let access = self.parental_snapshot();
         access.policy_revision.fetch_add(1, Ordering::SeqCst);
         self.services()
-            .call(move |store| {
-                require_admin(store, &access)?;
-                store.set_parental_blocked(&target, blocked)
-            })
+            .parental()
+            .set_blocked(target, blocked, access)
             .await
             .map_err(|_| Error::Storage)?;
         self.parental_refresh().await
@@ -650,58 +490,13 @@ impl Runtime {
 #[derive(Clone)]
 pub(crate) struct Snapshot {
     pub access: Access,
-    transferred_groups: Option<TransferredGroups>,
-    epoch: Arc<AtomicU64>,
-    at: u64,
-    policy_revision: Arc<AtomicU64>,
-    policy_at: u64,
+    pub(crate) transferred_groups: Option<TransferredGroups>,
+    pub(crate) epoch: Arc<AtomicU64>,
+    pub(crate) at: u64,
+    pub(crate) policy_revision: Arc<AtomicU64>,
+    pub(crate) policy_at: u64,
 }
 impl Snapshot {
-    pub(crate) fn inspection_access(&self) -> iptv_store_sqlite::InspectionAccess {
-        let current = self.epoch.load(Ordering::SeqCst) == self.at;
-        let now = now_ms();
-        iptv_store_sqlite::InspectionAccess {
-            unrestricted: !self.access.policy.protects(ContentKind::Live)
-                || (current && self.access.all_content_granted(now)),
-            grants: if current {
-                self.access.content_grants().cloned().collect()
-            } else {
-                Vec::new()
-            },
-        }
-    }
-    pub(crate) fn inspection_context(&self) -> String {
-        let access = self.inspection_access();
-        use sha2::Digest;
-        format!(
-            "{:x}",
-            sha2::Sha256::digest(format!("{}:{access:?}", self.policy_at).as_bytes())
-        )
-    }
-    pub(crate) fn inspection_dependencies(
-        &self,
-        store: &iptv_store_sqlite::Store,
-        key: &iptv_library::inspection::ChannelRef,
-    ) -> iptv_store_sqlite::Result<Vec<Target>> {
-        if !self.access.policy.protects(ContentKind::Live) {
-            return Ok(Vec::new());
-        }
-        let target = Target::live(key.source.0, key.content.as_str());
-        let mut blocked = Vec::new();
-        for candidate in std::iter::once(target.clone()).chain(store.parental_ancestors(&target)?) {
-            if store.parental_target_blocked(&candidate)? {
-                blocked.push(candidate);
-            }
-        }
-        if blocked.is_empty() {
-            return Ok(Vec::new());
-        }
-        if self.access.granted(&target, now_ms()) {
-            Ok(vec![target])
-        } else {
-            Ok(blocked)
-        }
-    }
     pub(crate) fn inspection_current(&self, grants: &[Target]) -> bool {
         self.grants_current(grants, |grant, now| self.access.granted(grant, now))
     }
@@ -721,124 +516,42 @@ impl Snapshot {
                     && grants.iter().all(|grant| allows(grant, now))))
     }
 
-    fn policy_current(&self) -> bool {
+    pub(crate) fn policy_current(&self) -> bool {
         self.policy_revision.load(Ordering::SeqCst) == self.policy_at
     }
 }
-
-/// Settings-protected writes can outlive the grant that admitted them.
-pub(crate) fn require_settings_write(
-    store: &iptv_store_sqlite::Store,
-    snapshot: &Snapshot,
-    settings: &iptv_settings::Settings,
-) -> iptv_store_sqlite::Result<()> {
-    let policy = policy_settings(settings);
-    if !policy.settings {
-        return Ok(());
-    }
-    if policy != snapshot.access.policy || !snapshot.policy_current() {
-        return Err(settings_locked());
-    }
-    require_admin(store, snapshot)
-}
-
 pub(crate) const SETTINGS_LOCKED_REASON: &str = "Unlock parental controls before changing settings";
-
-fn settings_locked() -> iptv_store_sqlite::StoreError {
-    iptv_store_sqlite::StoreError::Unavailable(SETTINGS_LOCKED_REASON)
-}
-
-/// Administrative changes are gated against the credential that exists at
-/// execution time, including PIN setup or relock after work was queued.
-pub(crate) fn require_admin(
-    store: &iptv_store_sqlite::Store,
-    snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<()> {
-    if !admin_allowed(store, snapshot)? {
-        return Err(settings_locked());
-    }
-    Ok(())
-}
-fn admin_allowed(
-    store: &iptv_store_sqlite::Store,
-    snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<bool> {
-    Ok(store.parental_credential()?.is_none()
-        || (snapshot.epoch.load(Ordering::SeqCst) == snapshot.at
-            && snapshot.access.granted(&Target::settings(), now_ms())))
-}
-
-/// Only a refresh of the exact, durably authorized provider configuration is
-/// exempt. Caller-controlled purpose/edit flags never grant that exemption.
-pub(crate) fn import_allowed(
-    store: &iptv_store_sqlite::Store,
-    job: &crate::imports::Job,
-    snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<bool> {
-    let same = job
-        .stored
-        .map(|id| store.source(id))
-        .transpose()?
-        .flatten()
-        .is_some_and(|stored| stored.source.config == job.source.config);
-    if same && !job.edit {
-        Ok(true)
-    } else {
-        admin_allowed(store, snapshot)
-    }
-}
-pub(crate) fn require_group_edit(
-    store: &iptv_store_sqlite::Store,
-    group: iptv_store_sqlite::CustomGroupId,
-    snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<()> {
-    if store.parental_custom_group_blocked(group)?
-        && (snapshot.epoch.load(Ordering::SeqCst) != snapshot.at
-            || !snapshot.access.granted(&Target::settings(), now_ms()))
-    {
-        return Err(settings_locked());
-    }
-    Ok(())
-}
-pub(crate) fn native_allowed(
-    store: &iptv_store_sqlite::Store,
-    target: &Target,
-    snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<bool> {
-    Ok(native_grants(store, target, snapshot)?.is_some())
-}
-
-/// The grants an allowed decision depends on. An unprotected decision has
-/// no dependencies and survives unrelated content changes.
-pub(crate) fn native_grants(
-    store: &iptv_store_sqlite::Store,
-    target: &Target,
-    snapshot: &Snapshot,
-) -> iptv_store_sqlite::Result<Option<Vec<Target>>> {
-    if !snapshot.inspection_current(&[]) {
-        return Ok(None);
-    }
-    if !snapshot.access.policy.protects(target.kind) {
-        return Ok(Some(Vec::new()));
-    }
-    let blocked = store.parental_target_blocked(target)?;
-    let mut blocked_parents = Vec::new();
-    for parent in store.parental_ancestors(target)? {
-        if store.parental_target_blocked(&parent)? {
-            blocked_parents.push(parent);
-        }
-    }
-    if !blocked && snapshot.playback_current(target, &blocked_parents) {
-        return Ok(Some(blocked_parents));
-    }
-    Ok(snapshot
-        .playback_current(target, std::slice::from_ref(target))
-        .then(|| vec![target.clone()]))
-}
 
 #[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
+    use crate::error::AdapterError as StoreError;
+    use crate::store_service::ParentalRepo;
+    use iptv_store_sqlite::Store;
+
+    fn native_allowed(
+        store: &Store,
+        target: &Target,
+        snapshot: &Snapshot,
+    ) -> Result<bool, StoreError> {
+        ParentalRepo::native_allowed(store, target, snapshot)
+    }
+
+    fn replace_pin(
+        store: &mut Store,
+        pin: &Pin,
+        entropy: crate::ports::Entropy,
+    ) -> Result<Zeroizing<String>, Error> {
+        ParentalRepo::replace_pin(store, pin, entropy)
+    }
+
+    fn verify(store: &mut Store, secret: &[u8], recovery: bool, now: i64) -> Result<(), Error> {
+        ParentalRepo::verify(store, secret, recovery, now)
+    }
+
+    fn require_admin(store: &Store, snapshot: &Snapshot) -> Result<(), StoreError> {
+        ParentalRepo::require_admin(store, snapshot)
+    }
 
     #[test]
     fn external_transfer_keeps_only_the_existing_per_use_grant() {
