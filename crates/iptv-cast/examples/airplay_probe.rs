@@ -89,10 +89,15 @@ async fn main() -> Result<()> {
     };
 
     let connection = connect(&cast, route).await?;
-    if !matches!(connection.peer_trust(), PeerTrust::VerifiedPairing) {
+    let trust = connection.peer_trust();
+    if !matches!(
+        trust,
+        PeerTrust::VerifiedPairing | PeerTrust::TransientPairing
+    ) {
         connection.close().await;
-        return Err("Receiver identity could not be verified".into());
+        return Err("The receiver did not establish an AirPlay session".into());
     }
+    println!("AirPlay connection: {trust:?}");
     let session = connection.load(media)?;
     let mut updates = session.subscribe();
     let mut playing = false;
@@ -124,12 +129,17 @@ async fn main() -> Result<()> {
     })
     .await;
     println!("Stop outcome: {:?}", session.stop().await?);
-    // A second connection in the same sender must verify without any new PIN.
     match cast.connect(route).await? {
-        Connect::Ready(connection) => connection.close().await,
+        Connect::Ready(connection) => {
+            let second_trust = connection.peer_trust();
+            connection.close().await;
+            if second_trust != trust {
+                return Err("The second connection changed the AirPlay trust type".into());
+            }
+        }
         Connect::PinRequired(pairing) => {
             pairing.cancel().await;
-            return Err("Receiver requested a second PIN for the saved pairing".into());
+            return Err("The receiver requested another PIN".into());
         }
         _ => return Err("Receiver offered an unexpected pairing method".into()),
     }

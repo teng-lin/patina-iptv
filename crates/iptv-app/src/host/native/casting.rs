@@ -331,7 +331,10 @@ impl Port for Sender {
                 return Err(error);
             }
             if receiver.protocol == NetworkProtocol::AirPlay
-                && connection.peer_trust() != PeerTrust::VerifiedPairing
+                && !matches!(
+                    connection.peer_trust(),
+                    PeerTrust::VerifiedPairing | PeerTrust::TransientPairing
+                )
             {
                 connection.close().await;
                 return Err(Error::PairingIdentityChanged);
