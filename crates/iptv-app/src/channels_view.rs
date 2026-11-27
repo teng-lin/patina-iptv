@@ -235,6 +235,13 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             untracked(|| close(ui));
         }
     });
+    effect(move || {
+        // Settings or a catalog refresh can remove the last group while
+        // its column is open. Keep the channel list and its current row.
+        if groups_shown(ui) && visible_entries(ui).is_empty() {
+            untracked(|| back(ui));
+        }
+    });
     let open = move || is_open(ui);
     let state = move || ui.channels.get();
     // Over the video in the overlay layout, and in the preview layout of a

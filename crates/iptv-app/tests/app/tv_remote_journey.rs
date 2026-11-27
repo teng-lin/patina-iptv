@@ -1726,3 +1726,42 @@ fn double_back_arms_only_at_the_rail_and_resets_on_timeout_or_navigation() {
     assert!(!shows(app, prompt), "a second Back clears the pending exit");
     assert_eq!(exits(), 1, "one Back reaches the platform on confirmation");
 }
+
+#[test]
+fn player_browse_without_any_categories_keeps_the_channel_list() {
+    let Some(home) = tv_isolated!() else { return };
+    let (mut fixture, _, _) = tv_with(
+        home,
+        |settings| {
+            for key in [
+                keys::SHOW_FAVORITES,
+                keys::SHOW_RECENT,
+                keys::SHOW_ALL_CHANNELS,
+            ] {
+                settings.set(key.as_str(), Value::Bool(false)).unwrap();
+            }
+        },
+        |path, source| {
+            let text = personalization::M3U
+                .replace(" group-title=\"News\"", "")
+                .replace(" group-title=\"Sport\"", "");
+            let m3u = iptv_providers::m3u::parse_m3u(&text);
+            assert!(m3u.groups.is_empty());
+            crate::isolated::open_database(path)
+                .unwrap()
+                .replace_catalog(source, &m3u.groups, &m3u.channels.items, &[], &[])
+                .unwrap();
+        },
+    );
+    let app = &mut fixture.app;
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("text:▶"));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.remote_tap(RemoteKey::Left));
+    step(app.wait_for("id:channel-list >> text:/Local A/"));
+    step(app.remote_tap(RemoteKey::Left));
+    assert!(!shows(app, "id:channel-list-groups"));
+    step(app.remote_tap(RemoteKey::Down));
+    step(app.remote_tap(RemoteKey::Ok));
+    step(app.wait_for("id:channel-list >> text:/Local B.*▶/"));
+}
