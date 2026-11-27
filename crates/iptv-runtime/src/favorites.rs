@@ -103,7 +103,6 @@ impl State {
     }
 }
 
-/// Whether `source` has movies or shows by its last import's counts.
 type PendingWrite = FavoriteWrite;
 
 struct VodRequest {
@@ -228,10 +227,18 @@ pub async fn prepare_source(
         .favorites()
         .with(|state| state.borrow().history_revision);
     let request = begin_vod_request(owner);
-    if unsaved(owner).load(Ordering::Acquire) > 0 && !flush(owner).await {
-        return None;
-    }
-    let loaded = services.favorites().source_data(id).await;
+    let after_writes = unsaved(owner).load(Ordering::Acquire) > 0;
+    let loaded = if after_writes && !flush(owner).await {
+        Err(StoreError::Unavailable(
+            "recent favorite edits are not saved",
+        ))
+    } else {
+        owner
+            .services()
+            .favorites()
+            .source_data(id, after_writes)
+            .await
+    };
     if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
@@ -284,10 +291,15 @@ pub async fn prepare_combined(owner: &std::rc::Rc<super::Runtime>) -> Option<imp
     let services = owner.services();
     let request = begin_vod_request(owner);
     use iptv_guide::combined::{qualified_key, split_key};
-    if unsaved(owner).load(Ordering::Acquire) > 0 && !flush(owner).await {
+    let after_writes = unsaved(owner).load(Ordering::Acquire) > 0;
+    if after_writes && !flush(owner).await {
         return None;
     }
-    let loaded = services.favorites().combined_data().await;
+    let loaded = owner
+        .services()
+        .favorites()
+        .combined_data(after_writes)
+        .await;
     if !services.is_current() || owner.imports.generation.get() != generation {
         return None;
     }
@@ -547,7 +559,7 @@ fn send(owner: &super::Runtime, write: Write) {
 }
 
 /// Keeps a write counted in [`unsaved`] until it ran or was dropped.
-struct Counted(std::sync::Arc<AtomicUsize>);
+pub(crate) struct Counted(std::sync::Arc<AtomicUsize>);
 
 impl Counted {
     fn new(owner: &super::Runtime) -> Self {
@@ -880,16 +892,10 @@ pub(crate) async fn save_order(
         // one of them failed.
         let failed = cooperative_failure(owner);
         let counted = Counted::new(owner);
-        if failed.swap(false, Ordering::AcqRel) {
-            drop(counted);
-            return Err(StoreError::Unavailable(
-                "recent favorite edits are not saved",
-            ));
-        }
         owner
             .services()
             .favorites()
-            .save_order(source, original, order)
+            .save_order_cooperatively(source, original, order, failed, counted)
             .await?;
     }
     let changed = owner.organization.favorites().with(|state| {

@@ -5,10 +5,6 @@ use crate::model::StoredSource;
 use iptv_import::CancelToken;
 use iptv_library::{Playlist, SourceId, SourcePolicy};
 use iptv_providers::model::Source;
-#[cfg(test)]
-use iptv_providers::model::SourceConfig;
-#[cfg(test)]
-use iptv_store_sqlite::Store;
 use std::{
     cell::{Cell, RefCell},
     rc::{Rc, Weak},
@@ -172,22 +168,6 @@ pub fn reorder_sources(
         .catalog()
         .set_source_order(order, owner.parental_snapshot())
 }
-/// The playlist to open at startup: the one shown last, else the newest.
-#[cfg(test)]
-pub(crate) fn startup_source(store: &Store) -> Result<Option<StoredSource>, StoreError> {
-    if let Some(id) = store.active_source()?
-        && store.source_policy(id)?.enabled
-    {
-        return store.source(id);
-    }
-    for summary in store.sources()?.iter().rev() {
-        if store.source_policy(summary.id)?.enabled {
-            return store.source(summary.id);
-        }
-    }
-    Ok(None)
-}
-
 pub fn newest(owner: &super::Runtime) -> Result<Option<StoredSource>, StoreError> {
     newest_excluding(owner, None)
 }
@@ -272,8 +252,7 @@ pub fn source_details(owner: &super::Runtime, id: SourceId) -> Option<Source> {
 pub fn snapshot(
     owner: &super::Runtime,
 ) -> impl std::future::Future<Output = Result<Snapshot, StoreError>> + use<> {
-    let services = owner.services();
-    async move { services.catalog().snapshot().await }
+    owner.services().catalog().snapshot()
 }
 
 pub fn update_policy(
@@ -281,14 +260,10 @@ pub fn update_policy(
     id: SourceId,
     edit: impl FnOnce(&mut iptv_library::SourcePolicy) + Send + 'static,
 ) -> impl std::future::Future<Output = Result<(iptv_library::SourcePolicy, bool), StoreError>> {
-    let services = owner.services();
-    let access = owner.parental_snapshot();
-    async move {
-        services
-            .catalog()
-            .update_source_policy(id, access, edit)
-            .await
-    }
+    owner
+        .services()
+        .catalog()
+        .update_source_policy(id, owner.parental_snapshot(), edit)
 }
 
 pub fn remember_shown(
@@ -351,17 +326,13 @@ pub fn save_all(
     owner: &super::Runtime,
     all: bool,
 ) -> impl std::future::Future<Output = Result<(), StoreError>> + use<> {
-    owner
-        .services()
-        .catalog()
-        .set_all_playlists(all, owner.parental_snapshot())
+    owner.services().catalog().set_all_playlists(all)
 }
 
 pub fn collapsed(
     owner: &super::Runtime,
 ) -> impl std::future::Future<Output = Result<Vec<i64>, StoreError>> + use<> {
-    let services = owner.services();
-    async move { services.catalog().collapsed_playlists().await }
+    owner.services().catalog().collapsed_playlists()
 }
 
 pub fn save_collapsed(
@@ -452,38 +423,6 @@ mod order_tests {
             sort_playlists(&mut sorted, mode);
             assert_eq!(sorted.map(|p| p.id.0), expected, "{mode}");
         }
-    }
-}
-
-#[cfg(test)]
-mod policy_tests {
-    use super::*;
-    use iptv_providers::{SecretUrl, model::M3uSourceConfig};
-    #[test]
-    fn startup_ignores_disabled_active_source_and_recovers_when_reenabled() {
-        let mut s = Store::open_in_memory().unwrap();
-        let source = |name: &str| Source {
-            name: name.into(),
-            config: SourceConfig::M3u(M3uSourceConfig {
-                location: SecretUrl::new("http://example.test/list.m3u"),
-                user_agent: None,
-                referrer: None,
-            }),
-        };
-        let a = s.add_source(&source("A")).unwrap();
-        let b = s.add_source(&source("B")).unwrap();
-        s.set_active_source(a).unwrap();
-        assert_eq!(startup_source(&s).unwrap().unwrap().id, a);
-        let off = iptv_store_sqlite::SourcePolicy {
-            enabled: false,
-            ..Default::default()
-        };
-        s.set_source_policy(a, off).unwrap();
-        assert_eq!(startup_source(&s).unwrap().unwrap().id, b);
-        s.set_source_policy(b, off).unwrap();
-        assert!(startup_source(&s).unwrap().is_none());
-        s.set_source_policy(a, Default::default()).unwrap();
-        assert_eq!(startup_source(&s).unwrap().unwrap().id, a);
     }
 }
 

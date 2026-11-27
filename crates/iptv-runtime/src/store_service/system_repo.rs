@@ -2,6 +2,7 @@
 
 use super::{Connection, Service, Services, Store, StoreError};
 use iptv_search::SearchHistory;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,56 +11,57 @@ pub(crate) struct SystemRepo {
 }
 
 impl SystemRepo {
-    pub(crate) async fn load_search_history(
+    pub(crate) fn load_search_history(
         self,
         legacy: PathBuf,
-    ) -> Result<Vec<String>, StoreError> {
-        self.services
-            .call(move |store| {
-                if let Ok(bytes) = std::fs::read(&legacy) {
-                    let list: Vec<String> = serde_json::from_slice(&bytes).unwrap_or_default();
-                    if !list.is_empty() && store.search_history()?.is_empty() {
-                        let list = SearchHistory::from_list(list, SearchHistory::DEFAULT_CAPACITY)
-                            .to_list();
-                        store.set_search_history(&list)?;
-                        log::info!(
-                            "iptv search: moved {} recent searches into the store",
-                            list.len()
-                        );
-                    }
-                    if let Err(error) = std::fs::remove_file(&legacy)
-                        && error.kind() != std::io::ErrorKind::NotFound
-                    {
-                        log::warn!(
-                            "iptv search: could not delete the old recent searches file ({})",
-                            error.kind()
-                        );
-                    }
+    ) -> impl Future<Output = Result<Vec<String>, StoreError>> + use<> {
+        self.services.call(move |store| {
+            if let Ok(bytes) = std::fs::read(&legacy) {
+                let list: Vec<String> = serde_json::from_slice(&bytes).unwrap_or_default();
+                if !list.is_empty() && store.search_history()?.is_empty() {
+                    let list =
+                        SearchHistory::from_list(list, SearchHistory::DEFAULT_CAPACITY).to_list();
+                    store.set_search_history(&list)?;
+                    log::info!(
+                        "iptv search: moved {} recent searches into the store",
+                        list.len()
+                    );
                 }
-                store.search_history()
-            })
-            .await
+                if let Err(error) = std::fs::remove_file(&legacy)
+                    && error.kind() != std::io::ErrorKind::NotFound
+                {
+                    log::warn!(
+                        "iptv search: could not delete the old recent searches file ({})",
+                        error.kind()
+                    );
+                }
+            }
+            store.search_history()
+        })
     }
 
-    pub(crate) async fn set_search_history(self, history: Vec<String>) -> Result<(), StoreError> {
+    pub(crate) fn set_search_history(
+        self,
+        history: Vec<String>,
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.set_search_history(&history))
-            .await
     }
 
-    pub(crate) async fn clear_search_history(self, legacy: PathBuf) -> Result<(), StoreError> {
-        self.services
-            .call(move |store| {
-                store.set_search_history(&[])?;
-                match std::fs::remove_file(legacy) {
-                    Ok(()) => Ok(()),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                    Err(_) => Err(StoreError::Unavailable(
-                        "legacy search history could not be removed",
-                    )),
-                }
-            })
-            .await
+    pub(crate) fn clear_search_history(
+        self,
+        legacy: PathBuf,
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
+        self.services.call(move |store| {
+            store.set_search_history(&[])?;
+            match std::fs::remove_file(legacy) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(_) => Err(StoreError::Unavailable(
+                    "legacy search history could not be removed",
+                )),
+            }
+        })
     }
 }
 

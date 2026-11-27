@@ -176,8 +176,7 @@ fn startup_library_native(
         StoreError,
     >,
 > + use<> {
-    let services = services.clone();
-    async move { services.catalog().startup_library().await }
+    services.catalog().startup_library()
 }
 
 fn source_policies_native(
@@ -238,22 +237,6 @@ fn guide_page_native(
             .epg()
             .authorized_page(source, incarnation, request)
             .await
-    }
-}
-
-fn combined_resume_key_native(
-    services: &Services,
-) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + use<> {
-    let file_combined = super::playback::load_combined_channel(services);
-    let files = services.clone();
-    let state = services.catalog().combined_resume_state();
-    async move {
-        let (combined, active) = state.await?;
-        Ok(file_combined.or(combined).or_else(|| {
-            let source = active?;
-            let key = super::playback::load_last_channel(&files, Some(source))?;
-            Some(iptv_guide::combined::qualified_key(source.0, &key))
-        }))
     }
 }
 
@@ -729,7 +712,9 @@ pub fn combined_resume_key(
 ) -> impl std::future::Future<Output = Result<Option<String>, crate::Error>> + use<> {
     let services = owner.services();
     async move {
-        combined_resume_key_native(&services)
+        services
+            .catalog()
+            .combined_resume_key()
             .await
             .map_err(crate::Error::from)
     }
@@ -742,6 +727,6 @@ pub fn stored_guide(
     now: iptv_epg::UnixTime,
 ) -> impl Future<Output = Result<iptv_epg::GuideStore, super::Error>> + use<> {
     let window = super::paging::window(now, super::stored::stored_past_days());
-    let services = owner.services();
-    async move { Ok(services.epg().page_after_writes(source, window).await?) }
+    let read = owner.services().epg().page_after_writes(source, window);
+    async move { Ok(read.await?) }
 }

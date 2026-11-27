@@ -77,7 +77,6 @@ const STORE_ADAPTER_TEST_USERS: &[&str] = &[
     "favorites.rs",
     "guide_checks/retry.rs",
     "guide_repair/tests.rs",
-    "library.rs",
     "opening/revocation.rs",
     "parental.rs",
     "publish/tests/catalog_import_tests.rs",

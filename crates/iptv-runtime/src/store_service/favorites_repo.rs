@@ -4,6 +4,11 @@ use super::{Services, Store, StoreError};
 use iptv_core::favorites::RECENT_LIMIT;
 use iptv_library::SourceId;
 use iptv_providers::{ContentId, model::ContentKind};
+use std::future::Future;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Clone)]
 pub(crate) enum FavoriteWrite {
@@ -87,63 +92,80 @@ fn persist(store: &mut Store, write: FavoriteWrite) -> Result<(), StoreError> {
 }
 
 impl FavoritesRepo {
-    pub(crate) async fn source_data(self, source: SourceId) -> Result<SourceData, StoreError> {
-        self.services
-            .read(move |store| {
-                let has_vod = source_has_vod(store, source)?;
-                let any_vod = if has_vod {
-                    Some(true)
-                } else {
-                    any_enabled_vod(store).ok()
-                };
-                Ok(SourceData {
-                    has_vod,
-                    any_vod,
-                    favorites: store.favorite_keys(source)?,
-                    recent: store
-                        .recent(Some(source), Some(ContentKind::Live), RECENT_LIMIT as u32)?
-                        .into_iter()
-                        .map(|row| row.item_id.as_str().to_owned())
-                        .collect(),
-                })
-            })
-            .await
+    async fn read<R: Send + 'static>(
+        &self,
+        after_writes: bool,
+        load: impl FnOnce(&Store) -> Result<R, StoreError> + Send + 'static,
+    ) -> Result<R, StoreError> {
+        if after_writes {
+            self.services.call(move |store| load(store)).await
+        } else {
+            self.services.read(load).await
+        }
     }
 
-    pub(crate) async fn combined_data(self) -> Result<CombinedData, StoreError> {
-        self.services
-            .read(|store| {
-                let mut sources = Vec::new();
-                let mut favorites = Vec::new();
-                let mut has_vod = false;
-                let mut availability_known = true;
-                for source in store.sources()? {
-                    if store.source_policy(source.id)?.enabled {
-                        sources.push(source.id);
-                        match source_has_vod(store, source.id) {
-                            Ok(available) => has_vod |= available,
-                            Err(_) => availability_known = false,
-                        }
-                        favorites.push((source.id, store.favorite_keys(source.id)?));
-                    }
-                }
-                let recent = store
-                    .recent(None, Some(ContentKind::Live), RECENT_LIMIT as u32)?
+    pub(crate) async fn source_data(
+        self,
+        source: SourceId,
+        after_writes: bool,
+    ) -> Result<SourceData, StoreError> {
+        self.read(after_writes, move |store| {
+            let has_vod = source_has_vod(store, source).unwrap_or(false);
+            let any_vod = if has_vod {
+                Some(true)
+            } else {
+                any_enabled_vod(store).ok()
+            };
+            Ok(SourceData {
+                has_vod,
+                any_vod,
+                favorites: store.favorite_keys(source)?,
+                recent: store
+                    .recent(Some(source), Some(ContentKind::Live), RECENT_LIMIT as u32)?
                     .into_iter()
-                    .map(|row| (row.source_id, row.item_id.as_str().to_owned()))
-                    .collect();
-                Ok(CombinedData {
-                    sources,
-                    favorites,
-                    recent,
-                    has_vod: (has_vod || availability_known).then_some(has_vod),
-                })
+                    .map(|row| row.item_id.as_str().to_owned())
+                    .collect(),
             })
-            .await
+        })
+        .await
     }
 
-    pub(crate) async fn any_enabled_vod(self) -> Result<bool, StoreError> {
-        self.services.read(any_enabled_vod).await
+    pub(crate) async fn combined_data(
+        self,
+        after_writes: bool,
+    ) -> Result<CombinedData, StoreError> {
+        self.read(after_writes, |store| {
+            let mut sources = Vec::new();
+            let mut favorites = Vec::new();
+            let mut has_vod = false;
+            let mut availability_known = true;
+            for source in store.sources()? {
+                if store.source_policy(source.id)?.enabled {
+                    sources.push(source.id);
+                    match source_has_vod(store, source.id) {
+                        Ok(available) => has_vod |= available,
+                        Err(_) => availability_known = false,
+                    }
+                    favorites.push((source.id, store.favorite_keys(source.id)?));
+                }
+            }
+            let recent = store
+                .recent(None, Some(ContentKind::Live), RECENT_LIMIT as u32)?
+                .into_iter()
+                .map(|row| (row.source_id, row.item_id.as_str().to_owned()))
+                .collect();
+            Ok(CombinedData {
+                sources,
+                favorites,
+                recent,
+                has_vod: (has_vod || availability_known).then_some(has_vod),
+            })
+        })
+        .await
+    }
+
+    pub(crate) fn any_enabled_vod(self) -> impl Future<Output = Result<bool, StoreError>> + use<> {
+        self.services.read(any_enabled_vod)
     }
 
     pub(crate) fn enqueue_write(
@@ -162,14 +184,24 @@ impl FavoritesRepo {
         self.services.blocking(move |store| persist(store, write))
     }
 
-    pub(crate) async fn save_order(
+    pub(crate) async fn save_order_cooperatively(
         self,
         source: SourceId,
         original: Vec<String>,
         order: Vec<String>,
+        failed: Arc<AtomicBool>,
+        counted: crate::favorites::Counted,
     ) -> Result<(), StoreError> {
         self.services
-            .call(move |store| store.save_favorite_order(source, &original, &order))
+            .call(move |store| {
+                let _counted = counted;
+                if failed.swap(false, Ordering::AcqRel) {
+                    return Err(StoreError::Unavailable(
+                        "recent favorite edits are not saved",
+                    ));
+                }
+                store.save_favorite_order(source, &original, &order)
+            })
             .await
     }
 

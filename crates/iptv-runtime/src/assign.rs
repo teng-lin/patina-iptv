@@ -38,9 +38,8 @@ pub fn current(
     key: &str,
 ) -> impl std::future::Future<Output = Current> + use<> {
     let key = key.to_owned();
-    let services = owner.services();
+    let read = owner.services().epg().current(source, key);
     async move {
-        let read = services.epg().current(source, key);
         read.await.unwrap_or_else(|e: crate::error::AdapterError| {
             log::warn!("iptv data: a channel's guide: {e}");
             Current::default()
@@ -53,9 +52,8 @@ pub fn guide_channels(
     owner: &crate::Runtime,
     source: SourceId,
 ) -> impl std::future::Future<Output = Vec<GuideChannel>> + use<> {
-    let services = owner.services();
+    let read = owner.services().epg().guide_channels(source);
     async move {
-        let read = services.epg().guide_channels(source);
         read.await.unwrap_or_else(|e| {
             log::warn!("iptv data: guide channels: {e}");
             Vec::new()
@@ -69,13 +67,10 @@ pub(crate) fn save(
     key: String,
     choice: Choice,
 ) -> impl std::future::Future<Output = Result<Option<Box<Imported>>, crate::Error>> + use<> {
-    let services = owner.services();
     let keep = stored::stored_past_days();
-    async move {
-        services
-            .epg()
-            .save_choice(source, key, choice, keep)
-            .await
-            .map_err(crate::Error::from)
-    }
+    let saved = owner
+        .services()
+        .epg()
+        .save_choice(source, key, choice, keep);
+    async move { saved.await.map_err(crate::Error::from) }
 }

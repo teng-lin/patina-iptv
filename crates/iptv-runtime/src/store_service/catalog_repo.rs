@@ -15,6 +15,7 @@ use iptv_store_sqlite::{
     SourceSummary, Store, StoredSource,
 };
 use std::collections::BTreeMap;
+use std::future::Future;
 
 fn snapshot_in(store: &Store) -> Result<crate::library::Snapshot, StoreError> {
     let playlists = playlists_in(store)?;
@@ -96,6 +97,28 @@ fn playlists_in(store: &Store) -> Result<Vec<Playlist>, StoreError> {
         .collect()
 }
 
+fn member_rows(
+    store: &Store,
+    source: SourceId,
+    scope: ChannelScope,
+) -> Result<Vec<Member>, StoreError> {
+    Ok(store
+        .load_channels(
+            source,
+            &ChannelQuery {
+                scope,
+                include_hidden: true,
+                ..Default::default()
+            },
+        )?
+        .into_iter()
+        .map(|row| Member {
+            id: row.channel.id.as_str().into(),
+            name: row.name,
+        })
+        .collect())
+}
+
 pub(crate) struct CatalogRepo {
     pub(super) services: Services,
 }
@@ -105,11 +128,14 @@ impl CatalogRepo {
         self,
     ) -> Result<Vec<(SourceSummary, SourcePolicy)>, StoreError> {
         self.services
-            .read(|store| {
+            .call(|store| {
                 store
                     .sources()?
                     .into_iter()
-                    .map(|source| Ok((source.clone(), store.source_policy(source.id)?)))
+                    .map(|source| {
+                        let policy = store.source_policy(source.id)?;
+                        Ok((source, policy))
+                    })
                     .collect()
             })
             .await
@@ -149,84 +175,89 @@ impl CatalogRepo {
             .await
     }
 
-    pub(crate) async fn hide_group(self, source: SourceId, id: String) -> Result<(), StoreError> {
+    pub(crate) fn hide_group(
+        self,
+        source: SourceId,
+        id: String,
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.hide_group(source, &GroupId::from_stored(&id), true))
-            .await
     }
 
-    pub(crate) async fn set_guide_sort(
+    pub(crate) fn set_guide_sort(
         self,
         source: SourceId,
         scope: Scope,
         sort: Sort,
-    ) -> Result<(), StoreError> {
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.set_guide_sort(source, &scope, sort))
-            .await
     }
 
-    pub(crate) async fn combined_resume_state(
-        self,
-    ) -> Result<(Option<String>, Option<SourceId>), StoreError> {
+    pub(crate) async fn combined_resume_key(self) -> Result<Option<String>, StoreError> {
+        let files = self.services.clone();
         self.services
-            .read(|store| {
-                let combined = store.combined_last_channel()?;
-                let active = store.active_source()?;
-                let active = active.filter(|source| {
-                    store
-                        .source_policy(*source)
-                        .is_ok_and(|policy| policy.enabled)
-                });
-                Ok((combined, active))
+            .read(move |store| {
+                Ok(crate::playback::load_combined_channel(&files)
+                    .or(store.combined_last_channel()?)
+                    .or_else(|| {
+                        // The first combined browse may still use a legacy single-source file.
+                        let source = store.active_source().ok().flatten()?;
+                        if !store.source_policy(source).ok()?.enabled {
+                            return None;
+                        }
+                        let key = crate::playback::load_last_channel(&files, Some(source))?;
+                        Some(iptv_guide::combined::qualified_key(source.0, &key))
+                    }))
             })
             .await
     }
 
-    pub(crate) async fn startup_library(
+    pub(crate) fn startup_library(
         &self,
-    ) -> Result<(Option<StoredSource>, bool, bool, crate::library::Snapshot), StoreError> {
+    ) -> impl Future<
+        Output = Result<(Option<StoredSource>, bool, bool, crate::library::Snapshot), StoreError>,
+    > + use<> {
         let directory = self.services.directory().to_owned();
-        self.services
-            .call_at_startup(move |store| {
-                iptv_store_sqlite::EpgStage::remove_stale(&directory);
-                iptv_store_sqlite::CatalogStage::remove_stale(&directory);
-                let sources = store.sources()?;
-                let mut enabled = 0;
-                for source in &sources {
-                    enabled += usize::from(store.source_policy(source.id)?.enabled);
-                }
-                Ok((
-                    startup_source_in(store)?,
-                    store.all_playlists()? || enabled > 1,
-                    !sources.is_empty(),
-                    snapshot_in(store)?,
-                ))
-            })
-            .await
+        self.services.call_at_startup(move |store| {
+            iptv_store_sqlite::EpgStage::remove_stale(&directory);
+            iptv_store_sqlite::CatalogStage::remove_stale(&directory);
+            let sources = store.sources()?;
+            let mut enabled = 0;
+            for source in &sources {
+                enabled += usize::from(store.source_policy(source.id)?.enabled);
+            }
+            Ok((
+                startup_source_in(store)?,
+                store.all_playlists()? || enabled > 1,
+                !sources.is_empty(),
+                snapshot_in(store)?,
+            ))
+        })
     }
 
-    pub(crate) async fn update_source_policy(
+    pub(crate) fn update_source_policy<F>(
         self,
         id: SourceId,
         access: crate::parental::Snapshot,
-        edit: impl FnOnce(&mut SourcePolicy) + Send + 'static,
-    ) -> Result<(SourcePolicy, bool), StoreError> {
+        edit: F,
+    ) -> impl Future<Output = Result<(SourcePolicy, bool), StoreError>> + use<F>
+    where
+        F: FnOnce(&mut SourcePolicy) + Send + 'static,
+    {
         let services = self.services.clone();
-        self.services
-            .call(move |store| {
-                crate::store_service::ParentalRepo::require_settings_write(
-                    store,
-                    &access,
-                    &services.settings(),
-                )?;
-                let mut policy = store.source_policy(id)?;
-                let was_enabled = policy.enabled;
-                edit(&mut policy);
-                store.set_source_policy(id, policy)?;
-                Ok((policy, was_enabled != policy.enabled))
-            })
-            .await
+        self.services.call(move |store| {
+            crate::store_service::ParentalRepo::require_settings_write(
+                store,
+                &access,
+                &services.settings(),
+            )?;
+            let mut policy = store.source_policy(id)?;
+            let was_enabled = policy.enabled;
+            edit(&mut policy);
+            store.set_source_policy(id, policy)?;
+            Ok((policy, was_enabled != policy.enabled))
+        })
     }
 
     pub(crate) async fn organization_with_group_lists(
@@ -260,16 +291,15 @@ impl CatalogRepo {
             .await
     }
 
-    pub(crate) async fn set_guide_block(
+    pub(crate) fn set_guide_block(
         self,
         source: SourceId,
         kind: BlockKind,
         id: String,
         blocked: bool,
-    ) -> Result<(), StoreError> {
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.set_guide_block(source, kind, &id, blocked))
-            .await
     }
 
     pub(crate) async fn organization_editor(
@@ -292,18 +322,17 @@ impl CatalogRepo {
             .await
     }
 
-    pub(crate) async fn set_group_preference(
+    pub(crate) fn set_group_preference(
         self,
         source: SourceId,
         group: String,
         preference: iptv_core::organization::GroupPreference,
-    ) -> Result<(), StoreError> {
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.set_guide_group_preference(source, &group, preference))
-            .await
     }
 
-    pub(crate) async fn save_guide_order_from(
+    pub(crate) fn save_guide_order_from(
         self,
         source: SourceId,
         scope: Scope,
@@ -311,105 +340,97 @@ impl CatalogRepo {
         order: Vec<String>,
         expected_sort: Sort,
         from_custom: bool,
-    ) -> Result<(), StoreError> {
-        self.services
-            .call(move |store| {
-                store.save_guide_order_from(
-                    source,
-                    &scope,
-                    &original,
-                    &order,
-                    Some(expected_sort),
-                    from_custom,
-                )
-            })
-            .await
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
+        self.services.call(move |store| {
+            store.save_guide_order_from(
+                source,
+                &scope,
+                &original,
+                &order,
+                Some(expected_sort),
+                from_custom,
+            )
+        })
     }
-    pub(crate) async fn snapshot(&self) -> Result<crate::library::Snapshot, StoreError> {
-        self.services.read(snapshot_in).await
+    pub(crate) fn snapshot(
+        &self,
+    ) -> impl Future<Output = Result<crate::library::Snapshot, StoreError>> + use<> {
+        self.services.read(snapshot_in)
     }
 
-    pub(crate) async fn set_source_order(
+    pub(crate) fn set_source_order(
         self,
         order: Vec<SourceId>,
         access: crate::parental::Snapshot,
-    ) -> Result<(), StoreError> {
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         let services = self.services.clone();
-        self.services
-            .call(move |store| {
-                crate::store_service::ParentalRepo::require_settings_write(
-                    store,
-                    &access,
-                    &services.settings(),
-                )?;
-                store.set_source_order(&order)
-            })
-            .await
+        self.services.call(move |store| {
+            crate::store_service::ParentalRepo::require_settings_write(
+                store,
+                &access,
+                &services.settings(),
+            )?;
+            store.set_source_order(&order)
+        })
     }
 
-    pub(crate) async fn set_active_source(self, source: SourceId) -> Result<(), StoreError> {
+    pub(crate) fn set_active_source(
+        self,
+        source: SourceId,
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.set_active_source(source))
-            .await
     }
 
-    pub(crate) async fn rename_source(self, id: SourceId, name: String) -> Result<(), StoreError> {
+    pub(crate) fn rename_source(
+        self,
+        id: SourceId,
+        name: String,
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.rename_source(id, &name))
-            .await
     }
 
-    pub(crate) async fn delete_source(
+    pub(crate) fn delete_source(
         self,
         id: SourceId,
         access: crate::parental::Snapshot,
-    ) -> Result<bool, StoreError> {
-        self.services
-            .call(move |store| {
-                crate::store_service::ParentalRepo::require_admin(store, &access)?;
-                store.delete_source(id)
-            })
-            .await
+    ) -> impl Future<Output = Result<bool, StoreError>> + use<> {
+        self.services.call(move |store| {
+            crate::store_service::ParentalRepo::require_admin(store, &access)?;
+            store.delete_source(id)
+        })
     }
 
-    pub(crate) async fn edit_guide_sources(
+    pub(crate) fn edit_guide_sources(
         self,
         id: SourceId,
         edit: iptv_library::guides::Edit,
-    ) -> Result<bool, StoreError> {
+    ) -> impl Future<Output = Result<bool, StoreError>> + use<> {
         self.services
             .call(move |store| store.edit_guide_sources(id, &edit))
-            .await
     }
 
-    pub(crate) async fn set_all_playlists(
+    pub(crate) fn set_all_playlists(
         self,
         all: bool,
-        access: crate::parental::Snapshot,
-    ) -> Result<(), StoreError> {
-        let services = self.services.clone();
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
-            .call(move |store| {
-                crate::store_service::ParentalRepo::require_settings_write(
-                    store,
-                    &access,
-                    &services.settings(),
-                )?;
-                store.set_all_playlists(all)
-            })
-            .await
+            .call(move |store| store.set_all_playlists(all))
     }
 
-    pub(crate) async fn collapsed_playlists(&self) -> Result<Vec<i64>, StoreError> {
-        self.services
-            .read(|store| store.collapsed_playlists())
-            .await
+    pub(crate) fn collapsed_playlists(
+        &self,
+    ) -> impl Future<Output = Result<Vec<i64>, StoreError>> + use<> {
+        self.services.call(|store| store.collapsed_playlists())
     }
 
-    pub(crate) async fn set_collapsed_playlists(self, ids: Vec<i64>) -> Result<(), StoreError> {
+    pub(crate) fn set_collapsed_playlists(
+        self,
+        ids: Vec<i64>,
+    ) -> impl Future<Output = Result<(), StoreError>> + use<> {
         self.services
             .call(move |store| store.set_collapsed_playlists(&ids))
-            .await
     }
 
     pub(crate) async fn custom_groups(
@@ -426,26 +447,9 @@ impl CatalogRepo {
         source: SourceId,
         scope: ChannelScope,
     ) -> Result<Vec<Member>, StoreError> {
-        let rows = self
-            .services
-            .read(move |store| {
-                store.load_channels(
-                    source,
-                    &ChannelQuery {
-                        scope,
-                        include_hidden: true,
-                        ..Default::default()
-                    },
-                )
-            })
-            .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| Member {
-                id: row.channel.id.as_str().into(),
-                name: row.name,
-            })
-            .collect())
+        self.services
+            .read(move |store| member_rows(store, source, scope))
+            .await
     }
 
     pub(crate) async fn group_members(
@@ -453,30 +457,14 @@ impl CatalogRepo {
         source: SourceId,
         scope: ChannelScope,
     ) -> Result<(Vec<CustomGroup>, Vec<Member>), StoreError> {
-        let groups = self
-            .services
-            .read(move |store| store.custom_groups(source))
-            .await?;
-        let members = self
-            .services
+        self.services
             .read(move |store| {
-                store.load_channels(
-                    source,
-                    &ChannelQuery {
-                        scope,
-                        include_hidden: true,
-                        ..Default::default()
-                    },
-                )
+                Ok((
+                    store.custom_groups(source)?,
+                    member_rows(store, source, scope)?,
+                ))
             })
-            .await?
-            .into_iter()
-            .map(|row| Member {
-                id: row.channel.id.as_str().into(),
-                name: row.name,
-            })
-            .collect();
-        Ok((groups, members))
+            .await
     }
 
     pub(crate) async fn save_custom_group(
@@ -561,10 +549,10 @@ impl CatalogRepo {
         channel: ContentId,
         mut access: crate::parental::Snapshot,
     ) -> Result<Option<crate::model::PlaybackChannel>, StoreError> {
-        let settings = self.services.settings();
+        let services = self.services.clone();
         self.services
             .read(move |store| {
-                access.access.policy = crate::parental::policy_settings(&settings);
+                access.access.policy = crate::parental::policy_settings(&services.settings());
                 let target = Target::live(source.0, channel.as_str());
                 if store.guide_channel_blocked(source, channel.as_str())?
                     || !crate::store_service::ParentalRepo::native_allowed(store, &target, &access)?
@@ -607,16 +595,16 @@ impl CatalogRepo {
             .await
     }
 
-    pub(crate) async fn organization_rows(
+    pub(crate) fn organization_rows(
         self,
         source: SourceId,
         kind: Scope,
         favorites: Vec<String>,
         sort: Option<Sort>,
-    ) -> Result<Vec<Item>, StoreError> {
-        self.services
-            .read(move |store| organization_rows_in(store, source, &kind, favorites, sort))
-            .await
+    ) -> impl Future<Output = Result<Vec<Item>, StoreError>> + use<> {
+        self.services.read(move |store| {
+            store.read_snapshot(|store| organization_rows_in(store, source, &kind, favorites, sort))
+        })
     }
 
     pub(crate) async fn edit_organization(
@@ -917,4 +905,39 @@ fn playback_handoff_in(
         Ok(allowed
             .then(|| crate::operations::ExternalPlaybackAuthorization::new(access, target, grants)))
     })
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    use iptv_providers::{
+        SecretUrl,
+        model::{M3uSourceConfig, Source},
+    };
+    #[test]
+    fn startup_ignores_disabled_active_source_and_recovers_when_reenabled() {
+        let mut s = Store::open_in_memory().unwrap();
+        let source = |name: &str| Source {
+            name: name.into(),
+            config: SourceConfig::M3u(M3uSourceConfig {
+                location: SecretUrl::new("http://example.test/list.m3u"),
+                user_agent: None,
+                referrer: None,
+            }),
+        };
+        let a = s.add_source(&source("A")).unwrap();
+        let b = s.add_source(&source("B")).unwrap();
+        s.set_active_source(a).unwrap();
+        assert_eq!(startup_source_in(&s).unwrap().unwrap().id, a);
+        let off = SourcePolicy {
+            enabled: false,
+            ..Default::default()
+        };
+        s.set_source_policy(a, off).unwrap();
+        assert_eq!(startup_source_in(&s).unwrap().unwrap().id, b);
+        s.set_source_policy(b, off).unwrap();
+        assert!(startup_source_in(&s).unwrap().is_none());
+        s.set_source_policy(a, Default::default()).unwrap();
+        assert_eq!(startup_source_in(&s).unwrap().unwrap().id, a);
+    }
 }

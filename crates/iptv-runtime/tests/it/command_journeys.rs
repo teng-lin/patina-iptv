@@ -348,6 +348,30 @@ fn privacy_clears_remove_durable_watch_and_search_history() {
 }
 
 #[test]
+fn a_guide_preference_is_persisted_after_its_reply_is_dropped() {
+    let (dir, key, source, _, channels) = seeded();
+    let runtime = owner(dir.path(), &key);
+    let channel = channels[0].as_str();
+    drop(commands::set_guide_block(
+        &runtime,
+        source,
+        iptv_core::organization::BlockKind::Channel,
+        channel.to_owned(),
+        true,
+    ));
+    block_on(commands::save_search_history(&runtime, Vec::new())).unwrap();
+    assert!(
+        block_on(commands::guide_channel_blocked(
+            &runtime,
+            source,
+            channel.into()
+        ))
+        .unwrap()
+    );
+    assert!(runtime.drain_services());
+}
+
+#[test]
 fn search_history_clear_orders_unpolled_saves_and_consumes_legacy_input() {
     let (dir, key, _, _, _) = seeded();
     let legacy = dir.path().join("generated-history.json");

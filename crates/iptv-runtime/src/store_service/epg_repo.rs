@@ -6,6 +6,7 @@ use iptv_library::{Choice, Current, SourceId};
 use iptv_providers::ContentId;
 use iptv_search::{ChannelId, ProgramIndex, ProgramIndexBuilder};
 use iptv_store_sqlite::{EpgOverride, EpgWindow, GuideChannel, GuideSource, Store, StoredGuide};
+use std::future::Future;
 
 fn held_window(window: iptv_guide::pages::PagedWindow) -> EpgWindow<'static> {
     EpgWindow {
@@ -47,18 +48,18 @@ impl EpgRepo {
         source: SourceId,
     ) -> Result<(Option<StoredGuide>, Vec<GuideSource>), StoreError> {
         self.services
-            .read(move |store| Ok((store.epg_guide(source)?, store.guide_sources(source)?)))
+            .call(move |store| Ok((store.epg_guide(source)?, store.guide_sources(source)?)))
             .await
     }
 
-    pub(crate) async fn listing_starts(
+    pub(crate) fn listing_starts(
         self,
         source: SourceId,
         cutoff: UnixTime,
-    ) -> Result<std::collections::HashMap<ChannelKey, UnixTime>, StoreError> {
+    ) -> impl Future<Output = Result<std::collections::HashMap<ChannelKey, UnixTime>, StoreError>> + use<>
+    {
         self.services
             .read(move |store| store.epg_listing_starts(source, cutoff))
-            .await
     }
 
     pub(crate) async fn clear_guides(
@@ -102,44 +103,41 @@ impl EpgRepo {
             .await
     }
 
-    pub(crate) async fn current(
+    pub(crate) fn current(
         self,
         source: SourceId,
         key: String,
-    ) -> Result<Current, StoreError> {
-        self.services
-            .read(move |store| {
-                let overlay = store
-                    .channel(source, &ContentId::from_stored(&key))?
-                    .and_then(|row| row.epg_override);
-                let bound = store.epg_binding(source, &ChannelKey::new(&key))?;
-                Ok(Current {
-                    choice: Some(choice_of(overlay)),
-                    bound,
-                })
+    ) -> impl Future<Output = Result<Current, StoreError>> + use<> {
+        self.services.read(move |store| {
+            let overlay = store
+                .channel(source, &ContentId::from_stored(&key))?
+                .and_then(|row| row.epg_override);
+            let bound = store.epg_binding(source, &ChannelKey::new(&key))?;
+            Ok(Current {
+                choice: Some(choice_of(overlay)),
+                bound,
             })
-            .await
+        })
     }
 
-    pub(crate) async fn guide_channels(
+    pub(crate) fn guide_channels(
         self,
         source: SourceId,
-    ) -> Result<Vec<GuideChannel>, StoreError> {
+    ) -> impl Future<Output = Result<Vec<GuideChannel>, StoreError>> + use<> {
         self.services
             .read(move |store| store.guide_channels(source))
-            .await
     }
 
-    pub(crate) async fn save_choice(
+    pub(crate) fn save_choice(
         self,
         source: SourceId,
         key: String,
         choice: Choice,
         keep_past_days: u32,
-    ) -> Result<Option<Box<crate::imports::Imported>>, StoreError> {
+    ) -> impl Future<Output = Result<Option<Box<crate::imports::Imported>>, StoreError>> + use<>
+    {
         self.services
             .call(move |store| save_and_rebind(store, source, &key, &choice, keep_past_days))
-            .await
     }
 
     pub(crate) async fn description(
@@ -153,15 +151,14 @@ impl EpgRepo {
             .await
     }
 
-    pub(crate) async fn page_after_writes(
+    pub(crate) fn page_after_writes(
         &self,
         source: SourceId,
         window: iptv_guide::pages::PagedWindow,
-    ) -> Result<GuideStore, StoreError> {
+    ) -> impl Future<Output = Result<GuideStore, StoreError>> + use<> {
         let epg_window = held_window(window);
         self.services
             .call(move |store| store.load_epg(source, &epg_window))
-            .await
     }
 
     pub(crate) async fn authorized_page(
