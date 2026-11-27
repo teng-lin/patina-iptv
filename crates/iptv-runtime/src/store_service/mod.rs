@@ -25,6 +25,7 @@
 mod catalog_repo;
 mod epg_repo;
 mod favorites_repo;
+mod parental_repo;
 mod recording_repo;
 mod system_repo;
 mod vod_repo;
@@ -32,6 +33,7 @@ mod vod_repo;
 pub(crate) use catalog_repo::CatalogRepo;
 pub(crate) use epg_repo::EpgRepo;
 pub(crate) use favorites_repo::{FavoriteWrite, FavoritesRepo};
+pub(crate) use parental_repo::ParentalRepo;
 pub(crate) use recording_repo::RecordingRepo;
 pub(crate) use system_repo::SystemRepo;
 pub(crate) use vod_repo::VodRepo;
@@ -52,7 +54,7 @@ use std::time::Duration;
 use futures_channel::oneshot;
 use iptv_import::CancelToken;
 use iptv_store_sqlite::Store;
-pub(crate) use iptv_store_sqlite::StoreError;
+use iptv_store_sqlite::StoreError;
 
 /// What a lane's thread keeps between jobs: its connection, and when a
 /// failed open may be tried again.
@@ -433,13 +435,12 @@ impl Service {
                 // The other native lanes may already own connections even
                 // though the writer never started. Retire those handles with
                 // whatever remains of the same shutdown deadline.
-                let reader = self.reader.barrier(remaining(deadline), |connection| {
+                self.reader.barrier(remaining(deadline), |connection| {
                     *connection = Connection::default();
                 });
-                let analysis = self.analysis.barrier(remaining(deadline), |connection| {
+                self.analysis.barrier(remaining(deadline), |connection| {
                     *connection = Connection::default();
                 });
-                let _ = reader && analysis;
                 return false;
             }
         }
@@ -517,6 +518,16 @@ async fn cooperative_import_turn<'a>(
 }
 
 impl Services {
+    pub(crate) fn parental(&self) -> ParentalRepo {
+        ParentalRepo {
+            services: self.clone(),
+        }
+    }
+
+    pub(crate) fn tasks_ready(&self) -> bool {
+        self.service.tasks().ready()
+    }
+
     /// Queue a callback after all writes already accepted by this owner.
     /// The callback receives no Store handle and cannot perform an ad hoc query.
     pub(crate) fn writer_barrier(
@@ -729,7 +740,7 @@ impl Services {
         F: Future<Output = ()> + 'static,
     {
         if self.has_workers() {
-            if !self.service.tasks().ready() {
+            if !self.tasks_ready() {
                 unavailable();
                 return true;
             }
@@ -1472,9 +1483,7 @@ mod tests {
         }
         fn spawn(&self, _: crate::execution::Task) {}
         fn spawn_blocking(&self, _: crate::execution::Job) {}
-        fn block_on(&self, _: crate::execution::LocalTask<'_>) -> bool {
-            false
-        }
+        fn block_on(&self, _: crate::execution::LocalTask<'_>) {}
         fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
             Box::pin(std::future::ready(()))
         }

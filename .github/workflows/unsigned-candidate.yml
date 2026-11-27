@@ -273,7 +273,18 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/desktop-cargo
           IPTV_CARGO_TIMINGS: '1'
-        run: bash tools/package-macos.sh
+          # Public bootstrap configuration only. Private updater keys never
+          # enter the candidate build or the app bundle.
+          PATINA_SPARKLE_FEED: ${{ vars.PATINA_SPARKLE_FEED }}
+          PATINA_SPARKLE_PUBLIC_KEY: ${{ vars.PATINA_SPARKLE_PUBLIC_KEY }}
+        run: |
+          if [ -n "$PATINA_SPARKLE_FEED$PATINA_SPARKLE_PUBLIC_KEY" ]; then
+            export PATINA_SPARKLE_ARCHIVE="$RUNNER_TEMP/Sparkle-2.10.1.tar.xz"
+            curl --fail --location --silent --show-error --max-time 120 \
+              https://github.com/sparkle-project/Sparkle/releases/download/2.10.1/Sparkle-2.10.1.tar.xz \
+              --output "$PATINA_SPARKLE_ARCHIVE"
+          fi
+          bash tools/package-macos.sh
       - name: Check and smoke-test the unsigned macOS DMG
         if: matrix.platform == 'macos'
         run: bash tools/ci/package-macos.sh

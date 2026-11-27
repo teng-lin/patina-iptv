@@ -367,6 +367,55 @@ pub struct Ui {
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     update_dialog_open: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_revision: Signal<u64>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_ready: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_install_busy: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_cancel_requested: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_pending_dismissed: Signal<bool>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_focus: Signal<usize>,
+    #[cfg(any(
+        target_os = "android",
+        target_os = "linux",
+        target_os = "windows",
+        target_os = "macos"
+    ))]
+    update_notes_scroll: ui_kit::FocusScroll,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
@@ -508,6 +557,55 @@ impl Ui {
             parental: signal(None),
             settings_screen: signal(None),
             update_dialog_open: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_revision: signal(0),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_ready: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_install_busy: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_cancel_requested: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_pending_dismissed: signal(false),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_focus: signal(0),
+            #[cfg(any(
+                target_os = "android",
+                target_os = "linux",
+                target_os = "windows",
+                target_os = "macos"
+            ))]
+            update_notes_scroll: ui_kit::FocusScroll::new(),
             player,
             player_surface: 0,
             media: media::Media::new(),
@@ -733,6 +831,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     performance_probe::bind(ui);
     runtime_wiring::start(ui);
     guide_clock::start(ui);
+    settings_view::updates::bind(ui);
     player::bind(ui);
     player::watch_time::bind(ui);
     data::pages::bind(ui);
@@ -928,6 +1027,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
         .child(backup::layer(ui))
+        .child(settings_view::updates::layer(ui))
         .child(cast_pairing::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup_view::store_failure_layer(ui))
@@ -1184,6 +1284,14 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::RestoreReview) => backup::back(ui),
+            _ if top == Some(Overlay::AppUpdateNotice) => {
+                settings_view::updates::dismiss_notice(ui);
+                true
+            }
+            _ if top == Some(Overlay::AppUpdate) => {
+                settings_view::updates::close(ui);
+                true
+            }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::Vod) => vod_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),
@@ -1282,6 +1390,14 @@ pub fn hold_reports(held: bool) {
 pub fn reports_waiting() -> usize {
     host::host_handle().map_or(0, |owner| owner.reports_waiting())
 }
+
+#[cfg(feature = "test-support")]
+pub fn wizard_reports_delivered() -> usize {
+    host::host_handle().map_or(0, |owner| owner.wizard_reports_delivered())
+}
+
+#[doc(hidden)]
+pub use iptv_runtime::execution::recovering_worker_spawn;
 
 /// Keeps the store's writer busy, as a long catalog or guide publish does,
 /// for the headless tests of what must not wait for it.

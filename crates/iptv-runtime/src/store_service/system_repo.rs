@@ -41,10 +41,6 @@ impl SystemRepo {
             .await
     }
 
-    pub(crate) async fn search_history(&self) -> Result<Vec<String>, StoreError> {
-        self.services.read(|store| store.search_history()).await
-    }
-
     pub(crate) async fn set_search_history(self, history: Vec<String>) -> Result<(), StoreError> {
         self.services
             .call(move |store| store.set_search_history(&history))

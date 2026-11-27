@@ -271,7 +271,7 @@ pub async fn delete(owner: &Rc<crate::Runtime>, id: SourceId) -> Result<(), Stor
 
 pub(super) fn run_import(owner: &Rc<Runtime>, source: StoredSource, purpose: Purpose, edit: bool) {
     let (job, cancel, report) = library::prepare_import(owner, source, purpose, edit);
-    let _ = start_import_with(owner, job, cancel, |_| report);
+    start_import_with(owner, job, cancel, owner.services(), report);
 }
 
 pub fn start(owner: &std::rc::Rc<crate::Runtime>) {

@@ -44,6 +44,9 @@ pub struct Open {
 }
 
 fn open_with(ui: Ui, wizard: Wizard) {
+    if let Some(Step::Processing { id, .. } | Step::Canceling { id }) = read(ui, Wizard::step) {
+        crate::runtime_owner::runtime().cancel_wizard_import(id, false);
+    }
     ui.wizard.set(Some(Open {
         wizard,
         editing: None,
@@ -199,21 +202,7 @@ fn perform(ui: Ui, effect: WizardEffect) {
                         }
                     });
                 },
-                move |id, store_epoch| move |update| {
-                    let runtime = crate::runtime_owner::runtime();
-                    let current_import = read(ui, |wizard| {
-                            matches!(wizard.step(),
-                                Step::Processing { id: current, .. } | Step::Canceling { id: current }
-                                    if current == id)
-                        })
-                        .unwrap_or(false);
-                    let current_epoch = runtime.browser_generation() == store_epoch;
-                    if !current_import || (!current_epoch && matches!(&update, Update::Progress(_))) {
-                        return;
-                    }
-                    if matches!(&update, Update::Done(_)) {
-                        runtime.finish_wizard_import(id);
-                    }
+                move |id, update| {
                     send(
                         ui,
                         match update {
@@ -227,21 +216,13 @@ fn perform(ui: Ui, effect: WizardEffect) {
             log::info!("iptv wizard: import {id:?} of {source_kind:?}");
         }
         WizardEffect::CancelImport { id } => {
-            let runtime = crate::runtime_owner::runtime();
-            runtime.cancel_wizard_import(id);
-            runtime.finish_wizard_import(id);
+            let wait_for_commit = read(ui, Wizard::step) == Some(Step::Canceling { id });
+            crate::runtime_owner::runtime().cancel_wizard_import(id, wait_for_commit);
         }
         WizardEffect::Close(exit) => {
             let runtime = crate::runtime_owner::runtime();
             runtime.parental_content_closed();
             log::info!("iptv wizard: closed ({exit:?})");
-            let import_id = match exit {
-                WizardExit::Added { id } => Some(id),
-                WizardExit::Dismissed => None,
-            };
-            if let Some(id) = import_id {
-                runtime.finish_wizard_import(id);
-            }
             if let WizardExit::Added { .. } = exit {
                 // Added from the playlists or settings screen: "Watch"
                 // goes to the guide.

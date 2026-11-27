@@ -280,6 +280,9 @@ impl Runtime {
         let drained = self
             .store
             .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests());
+        if let Some((_, cancel)) = self.imports.wizard_import.borrow_mut().take() {
+            cancel.cancel();
+        }
         let probes_drained = self
             .inspection
             .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()));
@@ -384,16 +387,24 @@ impl Drop for Runtime {
         // if a noncooperative lane did not close. Do not spend it again in Drop.
         if !self.lifecycle.shutdown_requested().replace(true) {
             let deadline = crate::time::Instant::now() + self.store.drain_limit();
+            self.inspection.close_workers();
             self.close_cast();
             if !self
                 .store
-                .drain_on_shutdown_with(|| self.inspection.cancel_requests())
+                .drain_on_shutdown_until(deadline, || self.inspection.cancel_requests())
             {
                 log::error!("iptv persistence: fallback store drain did not finish at disposal");
+            }
+            if !self
+                .inspection
+                .drain_workers(deadline.saturating_duration_since(crate::time::Instant::now()))
+            {
+                log::error!("iptv inspection: fallback worker drain did not finish at disposal");
             }
             if !self.drain_cast(deadline) {
                 log::error!("iptv cast: relay shutdown exceeded the owner's drain deadline");
             }
+            self.inspection.clear();
         }
         if !self.store.files().flush(std::time::Duration::from_secs(2)) {
             log::error!("iptv persistence: fallback file flush did not finish at disposal");
@@ -468,6 +479,17 @@ impl HostHandle {
         self.0
             .upgrade()
             .map_or(0, |service| service.hooks.reports_waiting())
+    }
+
+    /// Number of wizard terminal reports processed, including stale reports.
+    #[cfg(feature = "test-support")]
+    pub fn wizard_reports_delivered(&self) -> usize {
+        self.0.upgrade().map_or(0, |service| {
+            service
+                .hooks
+                .wizard_reports_delivered
+                .load(std::sync::atomic::Ordering::Relaxed)
+        })
     }
 
     /// Pause a FIFO writer job; the returned gate acknowledges actual entry.

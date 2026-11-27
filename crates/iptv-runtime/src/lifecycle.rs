@@ -7,6 +7,16 @@ pub(crate) struct State {
     foreground: Cell<bool>,
     scheduler_started: Cell<bool>,
     shutdown_requested: Cell<bool>,
+    #[cfg(all(
+        feature = "native",
+        any(
+            target_os = "linux",
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "android"
+        )
+    ))]
+    pub(super) app_updates: crate::app_updates::OwnerState,
 }
 
 impl Default for State {
@@ -18,6 +28,16 @@ impl Default for State {
             foreground: Cell::new(true),
             scheduler_started: Cell::new(false),
             shutdown_requested: Cell::new(false),
+            #[cfg(all(
+                feature = "native",
+                any(
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "android"
+                )
+            ))]
+            app_updates: crate::app_updates::OwnerState::default(),
         }
     }
 }

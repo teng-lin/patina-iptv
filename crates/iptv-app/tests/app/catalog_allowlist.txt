@@ -22,6 +22,11 @@ iptv-runtime/src/error.rs	WorkerUnavailable
 iptv-runtime/src/error.rs	RecordingRequest
 iptv-runtime/src/error.rs	RecordingSpace
 iptv-runtime/src/error.rs	Storage
+iptv-runtime/src/error.rs	Sqlite
+iptv-runtime/src/error.rs	Migration
+iptv-runtime/src/error.rs	SourceNotFound
+iptv-runtime/src/error.rs	CustomGroupNotFound
+iptv-runtime/src/error.rs	InvalidData
 iptv-runtime/src/error.rs	settings are locked
 iptv-runtime/src/error.rs	provider viewing capacity is full
 iptv-runtime/src/error.rs	store unavailable: {reason}
@@ -37,8 +42,14 @@ iptv-runtime/src/native/execution.rs	network runtime initialization failed
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\Modules
 iptv-runtime/src/native/app_updates/windows.rs	WindowsPowerShell\\v1.0\\powershell.exe
 # Transport identifier, invariant product name and internal verification diagnostics.
-iptv-app/src/host/updates.rs	Patina
 iptv-runtime/src/native/app_updates.rs	Patina
+iptv-runtime/src/native/app_updates/github.rs	Accept
+iptv-runtime/src/native/app_updates/github.rs	Patina
+iptv-runtime/src/native/app_updates/github.rs	Patina-{latest}-{suffix}
+iptv-runtime/src/native/app_updates/state.rs	invalid update schedule
+iptv-runtime/src/native/app_updates/state.rs	missing update schedule directory
+iptv-runtime/src/native/app_updates/state.rs	update schedule lock poisoned
+iptv-runtime/src/native/app_updates/state.rs	update schedule too large
 iptv-runtime/src/native/app_updates/trust.rs	invalid trusted root version
 
 # The persisted fallback group name is also used to recognize the generated bucket.
@@ -364,6 +375,7 @@ iptv-app/src/ui_kit/icons.rs	<path d='M12 3L2 21h20zM12 9v5'/><circle cx='12' cy
 iptv-app/src/ui_kit/icons.rs	<path d='M4 12l5 5L20 6'/>
 iptv-app/src/ui_kit/icons.rs	<path d='M4 6h16M4 12h11M4 18h6'/>
 # Execution and entropy port failures are diagnostics; operations report typed errors.
+iptv-runtime/src/execution.rs	OS can't spawn worker thread:
 iptv-runtime/src/execution.rs	the task ended without an output
 iptv-runtime/src/execution/cooperative.rs	a cooperative executor has no workers
 iptv-runtime/src/inspection/probe.rs	staged probes need a native store

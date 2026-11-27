@@ -250,7 +250,6 @@ pub fn evict(owner: &Rc<crate::Runtime>) {
 #[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
-    use crate::paging::store_window;
     use iptv_epg::DAY;
     use std::cell::RefCell;
 
@@ -854,8 +853,6 @@ mod tests {
         let w = window(NOW, 7);
         assert_eq!(w.loaded_from, 1_800_000_000 - DAY);
         assert_eq!(w.oldest, NOW - 7 * DAY);
-        assert_eq!(store_window(w).from, w.loaded_from);
-        assert_eq!(store_window(w).to, UnixTime::MAX);
         // Keeping less than a day holds no more than is kept.
         assert_eq!(window(NOW, 0).loaded_from, 1_800_000_000);
         // Keeping everything (`u32::MAX`): no oldest day.

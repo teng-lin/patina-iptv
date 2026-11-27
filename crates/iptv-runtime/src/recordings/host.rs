@@ -162,6 +162,9 @@ impl State {
         } else {
             ui.expect("application recording services").clone()
         };
+        if !services.tasks_ready() {
+            return false;
+        }
         drop(host);
         let shutdown = CancelToken::new();
         execution.started = true;

@@ -1,7 +1,7 @@
 //! A queued command may be canceled; an in-flight atomic commit is reconciled.
 use super::*;
+use crate::error::AdapterError as StoreError;
 use crate::store_service::Services;
-use crate::store_service::StoreError;
 use std::{
     future::poll_fn,
     pin::pin,

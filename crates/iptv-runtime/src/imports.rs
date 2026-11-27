@@ -76,7 +76,7 @@ impl Publication {
         let job = job.clone();
         let auth = authorization.clone();
         let source = services.blocking(move |store| {
-            if !crate::parental::import_allowed(store, &job, &auth)? {
+            if !crate::store_service::ParentalRepo::import_allowed(store, &job, &auth)? {
                 return Ok(Err(PublicationError::Denied));
             }
             let source = match job.stored {
@@ -221,6 +221,8 @@ pub enum Msg {
     NoCheck {
         source: SourceId,
     },
+    /// A guide worker could not run. The refresh policy did not answer.
+    WorkerUnavailable,
     Playlist(Result<(ImportCounts, Box<Imported>), ImportFailure>),
     /// What the store has (before the playlist), or the source's guide
     /// loaded after the playlist was reported.
@@ -1144,7 +1146,11 @@ pub(crate) fn save(
         if !publication.current(store)? {
             return Ok(Err(PublicationError::Superseded));
         }
-        if !crate::parental::import_allowed(store, &job, &publication.authorization)? {
+        if !crate::store_service::ParentalRepo::import_allowed(
+            store,
+            &job,
+            &publication.authorization,
+        )? {
             return Ok(Err(PublicationError::Denied));
         }
         let mut stage = stage;
@@ -1268,7 +1274,11 @@ impl crate::publish::Publish for CatalogPublish {
                 .store(SUPERSEDED, std::sync::atomic::Ordering::Relaxed);
             return Err(StoreError::Unavailable("import superseded"));
         }
-        if !crate::parental::import_allowed(live, &self.job, &self.publication.authorization)? {
+        if !crate::store_service::ParentalRepo::import_allowed(
+            live,
+            &self.job,
+            &self.publication.authorization,
+        )? {
             self.outcome
                 .store(DENIED, std::sync::atomic::Ordering::Relaxed);
             return Err(StoreError::Unavailable(

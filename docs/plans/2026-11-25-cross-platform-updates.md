@@ -2,6 +2,10 @@
 
 Implementation proposal for [issue #213](https://github.com/teng-lin/patina-iptv/issues/213), revised November 26, 2026.
 
+Implementation status: [app updates](../app-updates.md) documents the GitHub
+checker, weekly default, calendar-month option and current installation gates.
+This proposal records the original phased rollout and acceptance requirements.
+
 A viewer watching on a phone, tablet, TV or desktop should be able to check whether their installed copy of Patina has an update. On Android TV, the viewer should eventually be able to complete that update with the remote and reopen the same library.
 
 | Delivery milestone | What viewers receive | Release decision |

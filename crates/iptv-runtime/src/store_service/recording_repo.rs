@@ -22,6 +22,7 @@ impl RecordingRepo {
             .await
     }
 
+    #[cfg(all(test, feature = "native"))]
     pub(crate) async fn job(self, id: JobId) -> Result<Option<Job>, StoreError> {
         self.services
             .read(move |store| store.recording_job(id))

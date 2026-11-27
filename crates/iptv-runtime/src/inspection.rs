@@ -178,7 +178,9 @@ where
             };
             let mut grants = Vec::new();
             for channel in channels(&value) {
-                grants.extend(reading.inspection_dependencies(store, &channel)?);
+                grants.extend(crate::store_service::ParentalRepo::inspection_dependencies(
+                    store, &reading, &channel,
+                )?);
             }
             Ok(Ok((value, grants)))
         })

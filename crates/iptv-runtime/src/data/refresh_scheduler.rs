@@ -178,7 +178,7 @@ pub(super) fn start_update(
             }
             let guides = stored::configured_guides(&owner, source).await;
             let current = crate::library::import_is_current(&owner, source, &completion);
-            let (accepted, mut rx) =
+            let (mut accepted, mut rx) =
                 stored::download(&owner, source, guides, cancel, current, || {
                     source_is_visible(&owner, source)
                 });
@@ -210,6 +210,12 @@ pub(super) fn start_update(
                     Some(Msg::NoCheck { .. }) if current() => {
                         owner.take_owed_guide_check(source);
                         answered = true;
+                    }
+                    Some(Msg::WorkerUnavailable) => {
+                        accepted = false;
+                        if current() && !force {
+                            owner.emit(RuntimeEvent::Notify("Program guide could not be loaded"));
+                        }
                     }
                     Some(_) => {}
                     None => break,
@@ -555,7 +561,7 @@ pub(super) async fn read_guide(
             guide_pipeline(&worker, source, &tx, read, &cancel).await;
         },
         move || {
-            let _ = failed_tx.send(Msg::NoCheck { source });
+            let _ = failed_tx.send(Msg::WorkerUnavailable);
         },
     ) {
         owner.end_guide_check(source);

@@ -85,6 +85,19 @@ impl StoreError {
             if error.code == rusqlite::ErrorCode::NotADatabase)
     }
 
+    /// Positive corruption evidence from a store open or operation.
+    pub fn is_corrupt_database(&self) -> bool {
+        match self {
+            Self::SchemaCorrupt(_) => true,
+            Self::Sqlite(error) | Self::Migration { source: error, .. } => matches!(
+                error,
+                rusqlite::Error::SqliteFailure(error, _)
+                    if error.code == rusqlite::ErrorCode::DatabaseCorrupt
+            ),
+            _ => false,
+        }
+    }
+
     /// Positive content-error classification for [`crate::Store::validate_snapshot`]
     /// results only. Its fixed queries decode untrusted schema versions and text,
     /// so type, integer-range and UTF-8 failures establish invalid snapshot data.

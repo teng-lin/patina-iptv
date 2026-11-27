@@ -30,8 +30,7 @@ fn programs_native(
     sources: Vec<(SourceId, String, Vec<ChannelKey>, usize)>,
     rows: usize,
     from: UnixTime,
-) -> impl std::future::Future<Output = Result<ProgramIndex, crate::store_service::StoreError>> + use<>
-{
+) -> impl std::future::Future<Output = Result<ProgramIndex, crate::error::AdapterError>> + use<> {
     services.epg().program_index(sources, rows, from)
 }
 

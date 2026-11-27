@@ -30,7 +30,7 @@ pub(crate) fn splash() -> impl nsh_core::prelude::IntoElement {
 enum Cause {
     Newer { found: u32, supported: u32 },
     RestartRequired(&'static str),
-    Other(String),
+    Other(&'static str),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -46,19 +46,20 @@ pub(crate) fn store_failed(
     error: crate::runtime::Error,
 ) {
     let retryable = error.retryable_open();
+    let diagnostic = || {
+        error
+            .unavailable_reason()
+            .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
+            .unwrap_or_else(|| crate::i18n::key("The saved library could not be opened"))
+    };
     let cause = if let Some((found, supported)) = error.newer_schema() {
         Cause::Newer { found, supported }
-    } else if let Some(reason) = error.reopen_reason() {
-        Cause::RestartRequired(reason)
-    } else if let Some(reason) = error
-        .unavailable_reason()
-        .filter(|reason| iptv_presentation::i18n::is_cataloged(reason))
-    {
-        log::warn!("iptv storage initialization failed: {error}");
-        Cause::Other(crate::i18n::tr(reason).to_owned())
+    } else if error.reopen_reason().is_some() {
+        log::warn!("iptv storage initialization failed: {error:?}");
+        Cause::RestartRequired(diagnostic())
     } else {
-        log::warn!("iptv storage initialization failed: {error}");
-        Cause::Other(crate::i18n::tr("The saved library could not be opened").to_owned())
+        log::warn!("iptv storage initialization failed: {error:?}");
+        Cause::Other(diagnostic())
     };
     ui.store_startup_failure.update(|failure| {
         let retrying = failure
@@ -271,8 +272,7 @@ fn failure_details(
                         "Database schema version {found} is newer than this build supports ({supported}).",
                         &[("found", (*found).into()), ("supported", (*supported).into())],
                     ),
-                    Cause::RestartRequired(reason) => (*reason).to_owned(),
-                    Cause::Other(message) => message.clone(),
+                    Cause::RestartRequired(reason) | Cause::Other(reason) => crate::i18n::tr(reason).to_owned(),
                 };
                 view()
                     .test_id("store-recovery-details")

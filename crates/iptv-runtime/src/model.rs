@@ -11,6 +11,7 @@ pub use iptv_library::{
 /// The sole adapter-owned boundary value: the credential broker supplies an
 /// opaque, redacting key; commands never return storage records or errors.
 pub use iptv_store_sqlite::DatabaseKey;
+pub(crate) use iptv_store_sqlite::InspectionAccess;
 pub(crate) use iptv_store_sqlite::RecordingCompletion;
 pub(crate) use iptv_store_sqlite::SourceSummary;
 pub(crate) use iptv_store_sqlite::StoredGuide;

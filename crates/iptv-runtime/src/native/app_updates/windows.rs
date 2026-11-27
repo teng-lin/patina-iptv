@@ -1,11 +1,15 @@
 //! Verify the timestamped Authenticode publisher and launch the per-user setup.
 use super::ReleaseAsset;
+use super::verifier::{CancelOnDrop, Verification, verified};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::Write,
     os::windows::{ffi::OsStringExt, process::CommandExt},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tempfile::TempPath;
@@ -19,23 +23,31 @@ const VERIFIER: &str = concat!(
 pub struct PendingSetup {
     child: Child,
     _stage: TempPath,
+    armed: bool,
 }
 
 impl PendingSetup {
     /// The helper starts Setup only after this process has exited. Closing stdin cancels.
     pub fn install_after_exit(&mut self) -> bool {
-        self.child
+        let armed = self
+            .child
             .stdin
             .take()
-            .is_some_and(|mut pipe| pipe.write_all(b"install\n").is_ok())
+            .is_some_and(|mut pipe| pipe.write_all(b"install\n").is_ok());
+        self.armed |= armed;
+        armed
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-enum Verification {
-    Digest,
-    Signature,
-    Unavailable,
+impl Drop for PendingSetup {
+    fn drop(&mut self) {
+        if !self.armed {
+            // This also handles a verified result whose caller was cancelled
+            // before receiving it. Reap the helper before deleting locked bytes.
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
 }
 
 impl crate::Runtime {
@@ -47,9 +59,23 @@ impl crate::Runtime {
         publisher: &'static str,
         failure_message: &'static str,
     ) -> Option<PendingSetup> {
+        self.prepare_windows_setup_with_script(stage, asset, publisher, failure_message, VERIFIER)
+            .await
+    }
+
+    async fn prepare_windows_setup_with_script(
+        &self,
+        stage: TempPath,
+        asset: ReleaseAsset,
+        publisher: &'static str,
+        failure_message: &'static str,
+        script: &'static str,
+    ) -> Option<PendingSetup> {
         if publisher.trim().is_empty() {
             return None;
         }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let _cancel_on_drop = CancelOnDrop(Arc::clone(&cancelled));
         self.services()
             .spawn_blocking(move || {
                 prepare(
@@ -58,7 +84,8 @@ impl crate::Runtime {
                     publisher,
                     std::process::id(),
                     failure_message,
-                    VERIFIER,
+                    script,
+                    &cancelled,
                 )
                 .ok()
             })
@@ -88,7 +115,11 @@ fn prepare(
     parent: u32,
     failure_message: &str,
     script: &str,
+    cancelled: &AtomicBool,
 ) -> Result<PendingSetup, Verification> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(Verification::Unavailable);
+    }
     let system = system_directory().ok_or(Verification::Unavailable)?;
     let interpreter = system.join(r"WindowsPowerShell\v1.0\powershell.exe");
     let mut child = Command::new(interpreter)
@@ -115,7 +146,7 @@ fn prepare(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|_| Verification::Unavailable)?;
-    if let Err(reason) = verified(&mut child, Duration::from_secs(90)) {
+    if let Err(reason) = verified(&mut child, Duration::from_secs(90), cancelled) {
         // Release any verifier lock before the stage guard removes its file.
         let _ = child.kill();
         let _ = child.wait();
@@ -124,36 +155,168 @@ fn prepare(
     Ok(PendingSetup {
         child,
         _stage: stage,
+        armed: false,
     })
-}
-
-fn verified(child: &mut Child, timeout: Duration) -> Result<(), Verification> {
-    let output = child.stdout.take().ok_or(Verification::Unavailable)?;
-    let (send, recv) = mpsc::channel();
-    std::thread::Builder::new()
-        .spawn(move || {
-            let mut line = String::new();
-            let result = BufReader::new(output).read_line(&mut line).map(|_| line);
-            let _ = send.send(result);
-        })
-        .map_err(|_| Verification::Unavailable)?;
-    let line = recv
-        .recv_timeout(timeout)
-        .ok()
-        .and_then(Result::ok)
-        .ok_or(Verification::Unavailable)?;
-    match line.trim_end() {
-        "verified" => Ok(()),
-        "digest" => Err(Verification::Digest),
-        "signature" => Err(Verification::Signature),
-        _ => Err(Verification::Unavailable),
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
+
+    fn asset(bytes: &[u8]) -> ReleaseAsset {
+        let index = serde_json::json!({
+            "schema": 1,
+            "packages": [{
+                "version": "9.8.7", "source": "github-release",
+                "platform": "windows", "format": "exe", "architectures": ["x86_64"],
+                "minimum": {"windows": "10.0"}, "signing": "signed",
+                "notes": "https://github.com/teng-lin/patina-iptv/releases/tag/v9.8.7",
+                "url": "https://github.com/teng-lin/patina-iptv/releases/download/v9.8.7/Patina-9.8.7-windows-x86_64-setup.exe",
+                "length": bytes.len(), "sha256": format!("{:x}", Sha256::digest(bytes))
+            }]
+        });
+        let installed = super::super::InstalledPackage {
+            platform: "windows",
+            architecture: "x86_64",
+            format: Some("exe".into()),
+            version: "9.8.6",
+            android_code: None,
+            minimum: serde_json::json!({"windows": "10.0"}),
+        };
+        let Some(super::super::UpdateResult::Available { asset, .. }) =
+            super::super::selection::select(&serde_json::to_vec(&index).unwrap(), installed)
+        else {
+            panic!("expected generated installer record")
+        };
+        asset
+    }
+
+    #[tokio::test]
+    async fn dropping_the_runtime_waiter_kills_the_held_verifier_before_cleaning_locked_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut stage = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        let bytes = b"synthetic installer";
+        stage.write_all(bytes).unwrap();
+        let stage = stage.into_temp_path();
+        let location = stage.to_path_buf();
+        let marker = PathBuf::from(format!("{}.waiting", location.display()));
+        let owner = crate::Runtime::default();
+        let mut waiter = Box::pin(owner.prepare_windows_setup_with_script(
+            stage,
+            asset(bytes),
+            "CN=Synthetic Patina",
+            "",
+            concat!(
+                "$held = [IO.File]::Open($env:PATINA_STAGED_SETUP, 'Open', 'Read', 'Read'); ",
+                "[IO.File]::WriteAllText($env:PATINA_STAGED_SETUP + '.waiting', 'locked'); ",
+                "[Threading.Thread]::Sleep(60000)"
+            ),
+        ));
+        tokio::select! {
+            _ = &mut waiter => panic!("held verifier unexpectedly completed"),
+            _ = async {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !marker.exists() {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                }).await.expect("verifier did not acquire the stage lock");
+            } => {}
+        }
+        assert!(location.exists());
+        drop(waiter);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while location.exists() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("cancellation must kill the verifier and clean its locked stage promptly");
+    }
+
+    #[test]
+    fn dropping_an_unarmed_successful_result_reaps_the_helper_and_removes_its_locked_stage() {
+        let directory = tempfile::tempdir().unwrap();
+        let stage = tempfile::NamedTempFile::new_in(directory.path())
+            .unwrap()
+            .into_temp_path();
+        let location = stage.to_path_buf();
+        let setup = prepare(
+            stage,
+            "",
+            "",
+            std::process::id(),
+            "",
+            concat!(
+                "$held = [IO.File]::Open($env:PATINA_STAGED_SETUP, 'Open', 'Read', 'Read'); ",
+                "[Console]::Out.WriteLine('verified'); [Console]::Out.Flush(); ",
+                "[Threading.Thread]::Sleep(60000)"
+            ),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(location.exists());
+        drop(setup);
+        assert!(
+            !location.exists(),
+            "the helper's read lock is released before deleting its stage"
+        );
+    }
+
+    #[test]
+    fn an_armed_handoff_survives_owner_drop_and_finishes_after_the_viewer_exits() {
+        let directory = tempfile::tempdir().unwrap();
+        let system = system_directory().unwrap();
+        let mut parent = Command::new(system.join(r"WindowsPowerShell\v1.0\powershell.exe"))
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "[Console]::In.ReadLine()",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let bytes = std::fs::read(system.join("whoami.exe")).unwrap();
+        let mut stage = tempfile::Builder::new()
+            .suffix(".exe")
+            .tempfile_in(directory.path())
+            .unwrap();
+        stage.write_all(&bytes).unwrap();
+        let stage = stage.into_temp_path();
+        let location = stage.to_path_buf();
+        let mut setup = prepare(
+            stage,
+            &format!("{:x}", Sha256::digest(&bytes)),
+            "",
+            parent.id(),
+            "",
+            concat!(
+                "function Test-PatinaPublisher { return $true }\n",
+                include_str!("windows.ps1")
+            ),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(setup.install_after_exit());
+        drop(setup);
+        assert!(
+            location.exists(),
+            "the armed helper keeps its staged file locked"
+        );
+        drop(parent.stdin.take());
+        parent.wait().unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while location.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the armed handoff did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     #[test]
     fn refuses_and_cleans_up_unsigned_or_changed_installer_bytes() {
         let dir = tempfile::tempdir().unwrap();
@@ -176,7 +339,8 @@ mod tests {
                     "CN=Synthetic Patina",
                     std::process::id(),
                     "",
-                    VERIFIER
+                    VERIFIER,
+                    &AtomicBool::new(false)
                 )
                 .err(),
                 Some(reason)
@@ -216,7 +380,16 @@ mod tests {
             stage.write_all(&bytes).unwrap();
             let stage = stage.into_temp_path();
             let location = stage.to_path_buf();
-            let mut setup = prepare(stage, &digest, "", parent.id(), "", script).unwrap();
+            let mut setup = prepare(
+                stage,
+                &digest,
+                "",
+                parent.id(),
+                "",
+                script,
+                &AtomicBool::new(false),
+            )
+            .unwrap();
             if confirm {
                 assert!(setup.install_after_exit());
                 assert!(setup.child.try_wait().unwrap().is_none());

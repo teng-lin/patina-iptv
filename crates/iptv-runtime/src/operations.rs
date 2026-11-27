@@ -1,6 +1,7 @@
 //! Named shell operations; mutable cells never cross the runtime boundary.
 use crate::Runtime;
-use iptv_core::add_playlist::ImportId;
+use crate::data::Update;
+use iptv_core::add_playlist::{FailureKind, ImportFailure, ImportId};
 use iptv_core::parental::Target;
 use iptv_guide::playback::ResolutionAuthority;
 use iptv_import::CancelToken;
@@ -35,25 +36,67 @@ impl ExternalPlaybackAuthorization {
 }
 
 impl Runtime {
-    /// Starts a wizard import with a runtime-owned identity and its actual
-    /// presentation generation before constructing the callback.
-    pub fn start_wizard_import<F>(
+    /// Starts a wizard import with a runtime-owned identity and the storage
+    /// epoch that accepted the work before constructing its callback.
+    pub fn start_wizard_import(
         self: &Rc<Self>,
         job: crate::data::Job,
         on_admitted: impl FnOnce(ImportId, u64),
-        on_update: impl FnOnce(ImportId, u64) -> F,
-    ) -> (ImportId, u64)
-    where
-        F: Fn(crate::data::Update) + 'static,
-    {
+        on_update: impl Fn(ImportId, Update) + 'static,
+    ) -> (ImportId, u64) {
         let ticket = self.imports.wizard_tickets.get().wrapping_add(1).max(1);
         self.imports.wizard_tickets.set(ticket);
         let id = ImportId(ticket);
         let cancel = CancelToken::new();
-        self.remember_wizard_import(id, cancel.clone());
-        let store_epoch = crate::data::start_import_with(self, job, cancel.clone(), |epoch| {
-            on_admitted(id, epoch);
-            on_update(id, epoch)
+        let previous = self
+            .imports
+            .wizard_import
+            .replace(Some((id, cancel.clone())));
+        if let Some((_, cancel)) = previous {
+            cancel.cancel();
+        }
+        let services = self.services();
+        let store_epoch = services.epoch();
+        on_admitted(id, store_epoch);
+        let refused = if !services.is_current() {
+            Some(FailureKind::Unavailable)
+        } else if cancel.is_canceled() {
+            Some(FailureKind::Canceled)
+        } else {
+            None
+        };
+        if let Some(kind) = refused {
+            if self.finish_wizard_import(id).is_some() {
+                on_update(id, Update::Done(Err(ImportFailure::new(kind))));
+            }
+            return (id, store_epoch);
+        }
+        let owner = Rc::downgrade(self);
+        crate::data::start_import_with(self, job, cancel, services.clone(), move |update| {
+            let terminal = matches!(&update, Update::Done(_));
+            if let Some(owner) = owner.upgrade() {
+                let current = if terminal {
+                    owner.finish_wizard_import(id).is_some()
+                } else {
+                    owner
+                        .imports
+                        .wizard_import
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|(at, _)| *at == id)
+                };
+                if current && services.is_current() {
+                    on_update(id, update);
+                }
+            }
+            #[cfg(feature = "test-support")]
+            if terminal {
+                services
+                    .service()
+                    .hooks
+                    .wizard_reports_delivered
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
         });
         (id, store_epoch)
     }
@@ -120,22 +163,30 @@ impl Runtime {
             *slot = None;
         }
     }
-    pub fn remember_wizard_import(&self, id: ImportId, cancel: CancelToken) {
-        *self.imports.wizard_import.borrow_mut() = Some((id, cancel));
-    }
-    pub fn cancel_wizard_import(&self, id: ImportId) {
-        let mut running = self.imports.wizard_import.borrow_mut();
-        if running.as_ref().is_some_and(|(at, _)| *at == id)
-            && let Some((_, token)) = running.take()
-        {
+    /// Cancels the import. A wizard with a required guide still needs the
+    /// matching terminal reply to distinguish cancellation from a durable add.
+    pub fn cancel_wizard_import(&self, id: ImportId, wait_for_commit: bool) {
+        let token = if wait_for_commit {
+            self.imports
+                .wizard_import
+                .borrow()
+                .as_ref()
+                .filter(|(at, _)| *at == id)
+                .map(|(_, token)| token.clone())
+        } else {
+            self.finish_wizard_import(id)
+        };
+        if let Some(token) = token {
             log::info!("iptv wizard: import {id:?} canceled");
             token.cancel();
         }
     }
-    pub fn finish_wizard_import(&self, id: ImportId) {
+    fn finish_wizard_import(&self, id: ImportId) -> Option<CancelToken> {
         let mut running = self.imports.wizard_import.borrow_mut();
         if running.as_ref().is_some_and(|(at, _)| *at == id) {
-            running.take();
+            running.take().map(|(_, token)| token)
+        } else {
+            None
         }
     }
     /// Starts a backup operation unless one is running (the user is told).

@@ -1,7 +1,7 @@
 //! Library snapshots, refresh tickets and named persistence commands.
+use crate::error::AdapterError as StoreError;
 use crate::model::Activity;
 use crate::model::StoredSource;
-use crate::store_service::StoreError;
 use iptv_import::CancelToken;
 use iptv_library::{Playlist, SourceId, SourcePolicy};
 use iptv_providers::model::Source;

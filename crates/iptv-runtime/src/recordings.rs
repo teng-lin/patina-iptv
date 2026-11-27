@@ -74,7 +74,11 @@ impl Admission {
         if !self.services.is_current()
             || self.recordings.is_stopping()
             || store.source_incarnation(self.source)? != self.incarnation
-            || !crate::parental::native_allowed(store, &self.target, &self.parental)?
+            || !crate::store_service::ParentalRepo::native_allowed(
+                store,
+                &self.target,
+                &self.parental,
+            )?
         {
             return Err(iptv_store_sqlite::StoreError::Unavailable(
                 "Recording access changed",
@@ -749,9 +753,7 @@ impl Runtime {
                 .services()
                 .spawn_blocking(move || space_admission(&root, &active, seconds))
                 .await;
-            if let Ok(Err(error)) = checked {
-                return Err(error);
-            }
+            checked.map_err(|_| Error::unavailable("Recording service unavailable"))??;
         }
         if request.start <= now() && !self.recordings.shared().lock().recording_capacity(&request) {
             return Err(Error::unavailable(
@@ -1072,8 +1074,7 @@ impl Runtime {
             .services()
             .spawn_blocking(move || retained_media(&services, id, job.status == Status::Partial))
             .await
-            .ok()
-            .flatten()
+            .map_err(|_| Error::unavailable("Recording unavailable"))?
             .map(|(file, _)| file)
             .ok_or_else(|| Error::unavailable("The recording file is missing"))?;
         #[cfg(test)]

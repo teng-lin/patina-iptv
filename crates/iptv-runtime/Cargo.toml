@@ -12,7 +12,7 @@ default = ["native"]
 # What only native hosts have: the iptv-net adapter, thread-based executors
 # and the native-only services (recording, backup files, the credential
 # store, staged probes). Without it the crate builds for wasm32.
-native = ["dep:iptv-net", "dep:getrandom", "tokio/fs", "tokio/io-util", "dep:tough", "dep:url", "dep:tempfile", "dep:futures-util", "tokio/rt", "tokio/rt-multi-thread", "tokio/time"]
+native = ["dep:iptv-net", "dep:getrandom", "tokio/fs", "tokio/io-util", "dep:tough", "dep:url", "dep:tempfile", "dep:futures-util", "dep:semver", "tokio/rt", "tokio/rt-multi-thread", "tokio/time"]
 # Synthetic latency controls, absent from production packages.
 test-support = []
 
@@ -44,6 +44,7 @@ tough = { version = "0.24", default-features = false, optional = true }
 url = { workspace = true, optional = true }
 tempfile = { workspace = true, optional = true }
 futures-util = { version = "0.3", optional = true }
+semver = { version = "1", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "1", features = ["fs"] }

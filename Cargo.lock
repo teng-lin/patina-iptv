@@ -2703,6 +2703,7 @@ dependencies = [
  "pbkdf2",
  "rusqlite",
  "rustix",
+ "semver",
  "serde_json",
  "sha2",
  "subtle",

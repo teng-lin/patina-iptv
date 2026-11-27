@@ -86,11 +86,7 @@ pub(super) async fn after_commit(
         }
         let keep = stored::stored_past_days();
         let read = id.clone();
-        let published = owner
-            .services()
-            .epg()
-            .repair_publication(read, keep, now())
-            .await;
+        let published = owner.services().epg().repair_publication(read, keep).await;
         let still_current = crate::stored::guide_edit_revision(&owner, source) == edit;
         let effective = match published {
             Ok(Some(imported)) => {

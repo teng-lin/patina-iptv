@@ -76,51 +76,70 @@ pub use schedule_view::{
 };
 pub(crate) use schedule_view::{repair_source_shown, show_repair};
 #[cfg(test)]
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 #[cfg(test)]
 use std::rc::Rc;
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 use tokio::sync::mpsc::unbounded_channel;
 
 #[cfg(all(test, feature = "native"))]
 mod playlist_lifecycle_tests {
     use super::*;
+    use crate::imports::GuideRead;
     use iptv_providers::{SecretUrl, model::M3uSourceConfig};
 
     #[test]
-    fn unbound_import_reports_unavailable_instead_of_losing_its_completion() {
-        let directory = tempfile::tempdir().unwrap();
-        let owner = Rc::new(Runtime::new(crate::Ports::new(
-            directory.path().into(),
-            |_| Ok(crate::model::DatabaseKey::from_bytes([0x72; 32])),
-        )));
-        owner.start_services();
-        let reports = Rc::new(RefCell::new(Vec::new()));
-        let sink = reports.clone();
-        start_import(
-            &owner,
-            Job {
-                source: synthetic("Synthetic unbound import"),
-                epg_url: None,
-                stored: None,
-                purpose: Purpose::Add,
-                edit: false,
-            },
-            move |update| sink.borrow_mut().push(update),
-        );
-        assert!(matches!(
-            reports.borrow().as_slice(),
-            [Update::Done(Err(failure))] if failure.kind == FailureKind::Unavailable
-        ));
-        assert!(owner.drain_services());
+    fn wizard_import_rejects_unstarted_storage_or_an_unbound_task_host() {
+        for start_services in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let owner = Rc::new(Runtime::new(crate::Ports::new(
+                directory.path().into(),
+                |_| Ok(crate::model::DatabaseKey::from_bytes([0x72; 32])),
+            )));
+            if start_services {
+                owner.start_services();
+            }
+            let admitted = Rc::new(Cell::new(None));
+            let request = admitted.clone();
+            let reports = Rc::new(RefCell::new(Vec::new()));
+            let sink = reports.clone();
+            let (id, epoch) = owner.start_wizard_import(
+                Job {
+                    source: synthetic("Synthetic unbound import"),
+                    epg_url: None,
+                    stored: None,
+                    purpose: Purpose::Add,
+                    edit: false,
+                },
+                |id, epoch| admitted.set(Some((id, epoch))),
+                move |id, update| {
+                    assert_eq!(request.get().map(|(admitted, _)| admitted), Some(id));
+                    sink.borrow_mut().push(update);
+                },
+            );
+            assert_eq!(admitted.get(), Some((id, epoch)));
+            assert!(matches!(
+                reports.borrow().as_slice(),
+                [Update::Done(Err(failure))] if failure.kind == FailureKind::Unavailable
+            ));
+            assert!(owner.imports.wizard_import.borrow().is_none());
+            if start_services {
+                assert!(owner.drain_services());
+            }
+        }
     }
 
     fn run(test: impl AsyncFnOnce(Rc<Runtime>)) {
+        run_with(|_| {}, test);
+    }
+
+    fn run_with(configure: impl FnOnce(&mut crate::Ports), test: impl AsyncFnOnce(Rc<Runtime>)) {
         let directory = tempfile::tempdir().unwrap();
-        let owner = Rc::new(Runtime::new(crate::Ports::new(
-            directory.path().into(),
-            |_| Ok(crate::model::DatabaseKey::from_bytes([0x73; 32])),
-        )));
+        let mut ports = crate::Ports::new(directory.path().into(), |_| {
+            Ok(crate::model::DatabaseKey::from_bytes([0x73; 32]))
+        });
+        configure(&mut ports);
+        let owner = Rc::new(Runtime::new(ports));
         owner.bind_tasks(
             |task| drop(tokio::task::spawn_local(task)),
             |duration| Box::pin(tokio::time::sleep(duration)),
@@ -136,6 +155,69 @@ mod playlist_lifecycle_tests {
                 .expect("playlist lifecycle scenario timed out");
         });
         assert!(owner.drain_services());
+    }
+
+    #[test]
+    fn guide_worker_refusal_reports_failure_and_leaves_a_check_owed() {
+        use crate::execution::{Execution, Job, Lane, LocalTask, Task, Tasks};
+        use crate::native::execution::NativeExecution;
+
+        struct RefusingGuideExecution;
+        impl Execution for RefusingGuideExecution {
+            fn lane(&self, name: &'static str) -> std::io::Result<Box<dyn Lane>> {
+                NativeExecution.lane(name)
+            }
+            fn worker(&self, name: String, job: Job) -> std::io::Result<()> {
+                NativeExecution.worker(name, job)
+            }
+            fn tasks(&self) -> Box<dyn Tasks> {
+                struct Refused;
+                impl Tasks for Refused {
+                    fn ready(&self) -> bool {
+                        false
+                    }
+                    fn spawn(&self, _: Task) {}
+                    fn spawn_blocking(&self, _: Job) {}
+                    fn block_on(&self, _: LocalTask<'_>) {}
+                    fn delay(&self, _: Duration) -> Task {
+                        Box::pin(std::future::ready(()))
+                    }
+                }
+                Box::new(Refused)
+            }
+        }
+
+        run_with(
+            |ports| ports.execution = std::sync::Arc::new(RefusingGuideExecution),
+            async |owner| {
+                let source = owner
+                    .services()
+                    .call(|store| {
+                        let source = store.add_source(&synthetic("Synthetic guide retry"))?;
+                        let feed = crate::guides::user_source(
+                            crate::guides::FIRST_USER_FEED,
+                            SecretUrl::new("http://127.0.0.1:9/synthetic.xml"),
+                            None,
+                        );
+                        store.set_guide_sources(source, &[feed])?;
+                        Ok(source)
+                    })
+                    .await
+                    .unwrap();
+                owner.catalog.set_shown_source(Some(source));
+                let generation = owner.imports.generation.get();
+                let (done, result) = futures_channel::oneshot::channel();
+                assert!(start_update(&owner, source, None, true, move |accepted| {
+                    let _ = done.send(accepted);
+                }));
+                assert!(!result.await.unwrap(), "the manual update never ran");
+                assert!(owner.has_guide_check(source));
+
+                owner.end_guide_check(source);
+                read_guide(&owner, source, generation, GuideRead::Check, None, true).await;
+                assert!(owner.has_guide_check(source));
+            },
+        );
     }
 
     fn synthetic(name: &str) -> Source {

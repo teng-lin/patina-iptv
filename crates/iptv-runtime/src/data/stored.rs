@@ -175,7 +175,7 @@ pub(super) fn download(
                     download_now(&worker, source, guides, &tx, &cancel).await;
                 },
                 move || {
-                    let _ = failed.send(Msg::NoCheck { source });
+                    let _ = failed.send(Msg::WorkerUnavailable);
                 },
             );
             if !accepted && current {

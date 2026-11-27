@@ -8,7 +8,7 @@ use iptv_guide::playback::ResolutionAuthority;
 use iptv_library::OrganizationScope as Scope;
 use iptv_library::SourceId;
 use iptv_library::{Playlist, SourcePolicy};
-use iptv_providers::model::{Source, SourceConfig};
+use iptv_providers::model::SourceConfig;
 use iptv_providers::{ContentId, GroupId};
 use iptv_store_sqlite::{
     ChannelOrder, ChannelQuery, ChannelScope, CustomGroup, CustomGroupId, MoveTarget, OrderScope,
@@ -215,7 +215,11 @@ impl CatalogRepo {
         let services = self.services.clone();
         self.services
             .call(move |store| {
-                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                crate::store_service::ParentalRepo::require_settings_write(
+                    store,
+                    &access,
+                    &services.settings(),
+                )?;
                 let mut policy = store.source_policy(id)?;
                 let was_enabled = policy.enabled;
                 edit(&mut policy);
@@ -325,16 +329,6 @@ impl CatalogRepo {
         self.services.read(snapshot_in).await
     }
 
-    pub(crate) async fn startup_source(&self) -> Result<Option<StoredSource>, StoreError> {
-        self.services
-            .call_at_startup(|store| startup_source_in(store))
-            .await
-    }
-
-    pub(crate) async fn source_details(self, id: SourceId) -> Result<Option<Source>, StoreError> {
-        Ok(self.source(id).await?.map(|stored| stored.source))
-    }
-
     pub(crate) async fn set_source_order(
         self,
         order: Vec<SourceId>,
@@ -343,7 +337,11 @@ impl CatalogRepo {
         let services = self.services.clone();
         self.services
             .call(move |store| {
-                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                crate::store_service::ParentalRepo::require_settings_write(
+                    store,
+                    &access,
+                    &services.settings(),
+                )?;
                 store.set_source_order(&order)
             })
             .await
@@ -368,7 +366,7 @@ impl CatalogRepo {
     ) -> Result<bool, StoreError> {
         self.services
             .call(move |store| {
-                crate::parental::require_admin(store, &access)?;
+                crate::store_service::ParentalRepo::require_admin(store, &access)?;
                 store.delete_source(id)
             })
             .await
@@ -384,23 +382,6 @@ impl CatalogRepo {
             .await
     }
 
-    pub(crate) async fn set_source_policy(
-        self,
-        id: SourceId,
-        policy: SourcePolicy,
-        access: crate::parental::Snapshot,
-    ) -> Result<bool, StoreError> {
-        let services = self.services.clone();
-        self.services
-            .call(move |store| {
-                crate::parental::require_settings_write(store, &access, &services.settings())?;
-                let was_enabled = store.source_policy(id)?.enabled;
-                store.set_source_policy(id, policy)?;
-                Ok(was_enabled != policy.enabled)
-            })
-            .await
-    }
-
     pub(crate) async fn set_all_playlists(
         self,
         all: bool,
@@ -409,7 +390,11 @@ impl CatalogRepo {
         let services = self.services.clone();
         self.services
             .call(move |store| {
-                crate::parental::require_settings_write(store, &access, &services.settings())?;
+                crate::store_service::ParentalRepo::require_settings_write(
+                    store,
+                    &access,
+                    &services.settings(),
+                )?;
                 store.set_all_playlists(all)
             })
             .await
@@ -425,24 +410,6 @@ impl CatalogRepo {
         self.services
             .call(move |store| store.set_collapsed_playlists(&ids))
             .await
-    }
-
-    pub(crate) async fn source(self, id: SourceId) -> Result<Option<StoredSource>, StoreError> {
-        self.services.read(move |store| store.source(id)).await
-    }
-
-    pub(crate) async fn sources(&self) -> Result<Vec<SourceSummary>, StoreError> {
-        self.services.read(|store| store.sources()).await
-    }
-
-    pub(crate) async fn source_policy(self, id: SourceId) -> Result<SourcePolicy, StoreError> {
-        self.services
-            .read(move |store| store.source_policy(id))
-            .await
-    }
-
-    pub(crate) async fn all_playlists(&self) -> Result<bool, StoreError> {
-        self.services.read(|store| store.all_playlists()).await
     }
 
     pub(crate) async fn custom_groups(
@@ -534,7 +501,7 @@ impl CatalogRepo {
     ) -> Result<(), StoreError> {
         self.services
             .call(move |store| {
-                crate::parental::require_group_edit(store, group, &access)?;
+                crate::store_service::ParentalRepo::require_group_edit(store, group, &access)?;
                 store.remove_custom_members(group, &members)
             })
             .await
@@ -552,7 +519,7 @@ impl CatalogRepo {
         self.services
             .call(move |store| {
                 if moving && let Some(group) = from {
-                    crate::parental::require_group_edit(store, group, &access)?;
+                    crate::store_service::ParentalRepo::require_group_edit(store, group, &access)?;
                 }
                 store.transfer_custom_members(source, from, to, &members, moving)
             })
@@ -566,7 +533,7 @@ impl CatalogRepo {
     ) -> Result<(), StoreError> {
         self.services
             .call(move |store| {
-                crate::parental::require_group_edit(store, group, &access)?;
+                crate::store_service::ParentalRepo::require_group_edit(store, group, &access)?;
                 store.delete_custom_group(group).map(|_| ())
             })
             .await
@@ -600,7 +567,7 @@ impl CatalogRepo {
                 access.access.policy = crate::parental::policy_settings(&settings);
                 let target = Target::live(source.0, channel.as_str());
                 if store.guide_channel_blocked(source, channel.as_str())?
-                    || !crate::parental::native_allowed(store, &target, &access)?
+                    || !crate::store_service::ParentalRepo::native_allowed(store, &target, &access)?
                 {
                     return Ok(None);
                 }
@@ -637,15 +604,6 @@ impl CatalogRepo {
             .call(move |store| {
                 playback_handoff_in(store, &authority, external_group.as_deref(), access)
             })
-            .await
-    }
-
-    pub(crate) async fn organization(
-        self,
-        source: SourceId,
-    ) -> Result<iptv_guide::Organization, StoreError> {
-        self.services
-            .read(move |store| organization_in(store, source))
             .await
     }
 
@@ -922,7 +880,9 @@ fn playback_handoff_in(
     let channel = &authority.channel().id;
     let target = Target::live(source.0, channel.as_str());
     store.read_snapshot(|store| {
-        let Some(grants) = crate::parental::native_grants(store, &target, &access)? else {
+        let Some(grants) =
+            crate::store_service::ParentalRepo::native_grants(store, &target, &access)?
+        else {
             return Ok(None);
         };
         if !store.source_policy(source)?.enabled

@@ -16,10 +16,11 @@
 //! pool (`workers.rs`): their pipelines call the store with blocking
 //! requests, which must not hold this runtime's workers.
 
-use std::io;
-use std::sync::{Mutex, OnceLock, mpsc};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread::ThreadId;
 use std::time::Duration;
+use std::{cell::Cell, io};
 
 use tokio::runtime::{Builder, Runtime};
 
@@ -101,6 +102,30 @@ struct TokioTasks {
     initializing: Mutex<()>,
 }
 
+thread_local! {
+    static STARTING_TOKIO_WORKER: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(crate) fn recovering_worker_spawn(payload: &(dyn std::any::Any + Send)) -> bool {
+    STARTING_TOKIO_WORKER.try_with(Cell::get).unwrap_or(false)
+        && crate::execution::worker_spawn_refusal(payload).is_some()
+}
+
+/// The pinned Tokio runtime panics if its pool cannot spawn a worker, even
+/// when that happens inside the fallible runtime builder.
+fn try_spawn_worker<T>(start: impl FnOnce() -> T) -> io::Result<T> {
+    let previous = STARTING_TOKIO_WORKER.replace(true);
+    let result = catch_unwind(AssertUnwindSafe(start));
+    STARTING_TOKIO_WORKER.set(previous);
+    match result {
+        Ok(value) => Ok(value),
+        Err(panic) => match crate::execution::worker_spawn_refusal(&*panic) {
+            Some(reason) => Err(io::Error::other(reason.to_owned())),
+            None => resume_unwind(panic),
+        },
+    }
+}
+
 impl TokioTasks {
     fn try_runtime(&self) -> io::Result<&Runtime> {
         self.try_runtime_with(|| {
@@ -121,7 +146,7 @@ impl TokioTasks {
             if let Some(runtime) = self.runtime.get() {
                 return Ok(runtime);
             }
-            let runtime = build()?;
+            let runtime = try_spawn_worker(build)??;
             // Only this initializer can reach `set` while holding the mutex.
             let _ = self.runtime.set(runtime);
         }
@@ -158,22 +183,39 @@ impl Tasks for TokioTasks {
     }
 
     fn spawn_blocking(&self, work: Job) {
-        match self.try_runtime() {
-            Ok(runtime) => drop(runtime.spawn_blocking(work)),
-            Err(error) => log::error!("iptv blocking task could not start: {error}"),
+        let result = self.try_runtime().and_then(|runtime| {
+            // Tokio can leave a task queued when spawning its worker fails.
+            // Recover the closure so its caller gets a closed reply channel,
+            // and a worker started later will not run that refused operation.
+            let work = Arc::new(Mutex::new(Some(work)));
+            let queued = work.clone();
+            let mut admission = work.lock().unwrap_or_else(|e| e.into_inner());
+            let result = try_spawn_worker(|| {
+                runtime.spawn_blocking(move || {
+                    let job = queued.lock().unwrap_or_else(|e| e.into_inner()).take();
+                    if let Some(job) = job {
+                        job();
+                    }
+                })
+            });
+            let refused = if result.is_err() {
+                admission.take()
+            } else {
+                None
+            };
+            drop(admission);
+            drop(refused);
+            result.map(drop)
+        });
+        if let Err(error) = result {
+            log::error!("iptv blocking task could not start: {error}");
         }
     }
 
-    fn block_on(&self, future: LocalTask<'_>) -> bool {
+    fn block_on(&self, future: LocalTask<'_>) {
         match self.try_runtime() {
-            Ok(runtime) => {
-                runtime.block_on(future);
-                true
-            }
-            Err(error) => {
-                log::error!("iptv network runtime could not drive task: {error}");
-                false
-            }
+            Ok(runtime) => runtime.block_on(future),
+            Err(error) => log::error!("iptv network runtime could not drive task: {error}"),
         }
     }
 
@@ -203,5 +245,16 @@ mod tests {
             .try_runtime_with(|| Err(std::io::Error::other("synthetic runtime spawn refusal")));
         assert!(result.is_err());
         assert!(tasks.runtime.get().is_none());
+    }
+
+    #[test]
+    fn tokio_worker_spawn_panic_does_not_poison_startup() {
+        let tasks = TokioTasks::default();
+        let result = tasks.try_runtime_with(|| {
+            panic!("OS can't spawn worker thread: synthetic refusal");
+        });
+        assert!(result.is_err());
+        assert!(tasks.runtime.get().is_none());
+        assert!(tasks.try_runtime().is_ok());
     }
 }

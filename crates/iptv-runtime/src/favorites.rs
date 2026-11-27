@@ -18,7 +18,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use crate::store_service::{FavoriteWrite, StoreError};
+use crate::error::AdapterError as StoreError;
+use crate::store_service::FavoriteWrite;
 use iptv_core::favorites::{Favorites, KeyIndex, Recent, diff};
 use iptv_core::guide::Schedule;
 use iptv_library::SourceId;
@@ -997,11 +998,7 @@ mod reorder_tests {
         let task = {
             let runtime = runtime.clone();
             async move {
-                let result = load::<()>(&runtime, |_| {
-                    panic!("failed edits must not produce a stale read")
-                })
-                .await;
-                assert!(matches!(result, Err(StoreError::Unavailable(_))));
+                assert!(prepare_source(&runtime, Some(SourceId(1))).await.is_none());
             }
         };
         let mut task = std::pin::pin!(task);

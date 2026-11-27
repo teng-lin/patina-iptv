@@ -67,7 +67,7 @@ pub(super) async fn retry(services: &Services, operation: RecordingOperation) ->
 async fn retry_with<F, Fut>(mut operation: F) -> Transition
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<bool, crate::store_service::StoreError>>,
+    Fut: std::future::Future<Output = Result<bool, crate::error::AdapterError>>,
 {
     for attempt in 0..3 {
         let result = operation().await;
@@ -91,7 +91,7 @@ where
 async fn retry_for_test<F, Fut>(operation: F) -> Transition
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = Result<bool, crate::store_service::StoreError>>,
+    Fut: std::future::Future<Output = Result<bool, crate::error::AdapterError>>,
 {
     retry_with(operation).await
 }
@@ -555,7 +555,7 @@ mod tests {
             let outcome = retry_for_test(move || {
                 counted.fetch_add(1, Ordering::SeqCst);
                 let result = if failure {
-                    Err(crate::store_service::StoreError::Sqlite(
+                    Err(crate::error::AdapterError::Sqlite(
                         rusqlite::Error::SqliteFailure(
                             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_FULL),
                             None,

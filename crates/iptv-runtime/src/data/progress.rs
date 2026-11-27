@@ -5,6 +5,7 @@ use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline
 use crate::model::{StoreError, StoredSource};
 #[allow(unused_imports)]
 use crate::state::SingleSchedule;
+use crate::store_service::Services;
 #[allow(unused_imports)]
 use crate::time::now_unix;
 #[allow(unused_imports)]
@@ -44,20 +45,24 @@ pub fn start_import(
     on_update: impl Fn(Update) + 'static,
 ) -> CancelToken {
     let cancel = CancelToken::new();
-    let _ = start_import_with(owner, job, cancel.clone(), |_| on_update);
+    start_import_with(owner, job, cancel.clone(), owner.services(), on_update);
     cancel
 }
 
-/// [`start_import`] with the caller's cancel token.
-pub(crate) fn start_import_with<F>(
+/// [`start_import`] with the caller's cancel token and storage admission.
+pub(crate) fn start_import_with(
     owner: &std::rc::Rc<crate::Runtime>,
     job: Job,
     cancel: CancelToken,
-    on_update: impl FnOnce(u64) -> F,
-) -> u64
-where
-    F: Fn(Update) + 'static,
-{
+    services: Services,
+    on_update: impl Fn(Update) + 'static,
+) {
+    if !owner.has_tasks() {
+        on_update(Update::Done(Err(ImportFailure::new(
+            FailureKind::Unavailable,
+        ))));
+        return;
+    }
     let purpose = job.purpose;
     let mut import_source = job.stored;
     let completion = crate::library::import_completion(cancel.clone());
@@ -75,13 +80,6 @@ where
     } else {
         owner.imports.generation.with(Cell::get)
     };
-    let on_update = on_update(generation);
-    if !owner.has_tasks() {
-        on_update(Update::Done(Err(ImportFailure::new(
-            FailureKind::Unavailable,
-        ))));
-        return generation;
-    }
     // Only the startup refresh may start the last channel.
     let resume = purpose == Purpose::Startup;
     let (tx, mut rx) = unbounded_channel();
@@ -95,7 +93,6 @@ where
                 purpose,
                 Purpose::Add | Purpose::Startup | Purpose::Switch | Purpose::Refresh
             );
-        let services = owner.services();
         owner.spawn({
             let owner = owner.clone();
             async move {
@@ -112,7 +109,8 @@ where
                 let admission = job.clone();
                 let auth = authorization.clone();
                 let admission = services
-                    .read(move |store| crate::parental::import_allowed(store, &admission, &auth))
+                    .parental()
+                    .import_allowed_for(admission, auth)
                     .await;
                 let failure = match admission {
                     _ if cancel.is_canceled() || !services.is_current() => {
@@ -299,6 +297,7 @@ where
                                 answered = true;
                             }
                         }
+                        Ok(Msg::WorkerUnavailable) => {}
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
                             open = false;
@@ -355,5 +354,4 @@ where
             }
         }
     });
-    generation
 }

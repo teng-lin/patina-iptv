@@ -1,6 +1,7 @@
 //! Named library operations. Views send values and await results; only this
 //! module creates database work items.
-use super::store_service::{Services, StoreError};
+use super::store_service::Services;
+use crate::error::AdapterError as StoreError;
 use crate::model::{ChannelScope, CustomGroup};
 use iptv_core::membership::Member;
 use iptv_library::{CustomGroupId, SourceId};

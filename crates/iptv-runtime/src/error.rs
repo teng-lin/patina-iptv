@@ -1,5 +1,8 @@
 //! Runtime failures retain their cause without exposing a storage implementation type.
 
+// Store adapters retain their original error until the runtime classifies it.
+pub(crate) use iptv_store_sqlite::StoreError as AdapterError;
+
 use iptv_core::recording::{RequestRefusal, SpaceRefusal};
 
 #[derive(Debug)]
@@ -13,7 +16,7 @@ enum ErrorKind {
         found: u32,
         supported: u32,
     },
-    CorruptDatabase,
+    CorruptDatabase(iptv_store_sqlite::StoreError),
     WorkerUnavailable,
     #[cfg(feature = "native")]
     RecordingRequest(RequestRefusal),
@@ -104,8 +107,9 @@ impl Error {
         }
     }
 
+    /// The store positively identified database or schema corruption.
     pub fn is_corrupt_database(&self) -> bool {
-        matches!(self.0, ErrorKind::CorruptDatabase)
+        matches!(self.0, ErrorKind::CorruptDatabase(_))
     }
 
     /// A failure involving host state that is only initialized on launch.
@@ -117,6 +121,7 @@ impl Error {
         match reason {
             PROVIDER_CAPACITY_REASON => Self(ErrorKind::ProviderCapacity),
             crate::parental::SETTINGS_LOCKED_REASON => Self(ErrorKind::SettingsLocked),
+            "cannot start store worker" => Self(ErrorKind::WorkerUnavailable),
             _ => Self(ErrorKind::Unavailable(reason)),
         }
     }
@@ -147,9 +152,7 @@ impl Error {
             ErrorKind::SchemaTooNew { found, supported } => {
                 iptv_store_sqlite::StoreError::SchemaTooNew { found, supported }
             }
-            ErrorKind::CorruptDatabase => {
-                iptv_store_sqlite::StoreError::Unavailable("database is corrupt")
-            }
+            ErrorKind::CorruptDatabase(error) => error,
             ErrorKind::WorkerUnavailable => {
                 iptv_store_sqlite::StoreError::Unavailable("cannot start store worker")
             }
@@ -179,7 +182,7 @@ impl std::fmt::Debug for Error {
                 .field("found", found)
                 .field("supported", supported)
                 .finish(),
-            ErrorKind::CorruptDatabase => f.write_str("CorruptDatabase"),
+            ErrorKind::CorruptDatabase(_) => f.write_str("CorruptDatabase"),
             ErrorKind::WorkerUnavailable => f.write_str("WorkerUnavailable"),
             #[cfg(feature = "native")]
             ErrorKind::RecordingRequest(refusal) => {
@@ -189,7 +192,14 @@ impl std::fmt::Debug for Error {
             ErrorKind::RecordingSpace(refusal) => {
                 f.debug_tuple("RecordingSpace").field(refusal).finish()
             }
-            ErrorKind::Storage(_) => f.write_str("Storage"),
+            ErrorKind::Storage(error) => f.write_str(match error {
+                iptv_store_sqlite::StoreError::Sqlite(_) => "Sqlite",
+                iptv_store_sqlite::StoreError::Migration { .. } => "Migration",
+                iptv_store_sqlite::StoreError::SourceNotFound(_) => "SourceNotFound",
+                iptv_store_sqlite::StoreError::CustomGroupNotFound(_) => "CustomGroupNotFound",
+                iptv_store_sqlite::StoreError::InvalidData(_) => "InvalidData",
+                _ => "Storage",
+            }),
         }
     }
 }
@@ -204,7 +214,7 @@ impl std::fmt::Display for Error {
                 f,
                 "database schema version {found} is newer than this build supports ({supported})"
             ),
-            ErrorKind::CorruptDatabase => f.write_str("database is corrupt"),
+            ErrorKind::CorruptDatabase(_) => f.write_str("database is corrupt"),
             ErrorKind::WorkerUnavailable => f.write_str("cannot start store worker"),
             #[cfg(feature = "native")]
             ErrorKind::RecordingRequest(_) => f.write_str("recording request refused"),
@@ -237,7 +247,7 @@ impl From<iptv_store_sqlite::StoreError> for Error {
             iptv_store_sqlite::StoreError::SchemaTooNew { found, supported } => {
                 ErrorKind::SchemaTooNew { found, supported }
             }
-            error if error.is_not_database() => ErrorKind::CorruptDatabase,
+            error if error.is_corrupt_database() => ErrorKind::CorruptDatabase(error),
             iptv_store_sqlite::StoreError::Unavailable(reason) => ErrorKind::Unavailable(reason),
             error => ErrorKind::Storage(error),
         };
@@ -248,6 +258,29 @@ impl From<iptv_store_sqlite::StoreError> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corruption_requires_positive_evidence_and_preserves_the_store_cause() {
+        use iptv_store_sqlite::StoreError;
+        let mismatched_key = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_NOTADB),
+            None,
+        ));
+        let error = Error::from(mismatched_key);
+        assert!(!error.is_corrupt_database());
+        assert!(!error.retryable_open());
+        assert!(error.into_store_error().is_not_database());
+
+        let malformed = StoreError::Sqlite(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CORRUPT),
+            None,
+        ));
+        for error in [malformed, StoreError::SchemaCorrupt("synthetic".to_owned())] {
+            let error = Error::from(error);
+            assert!(error.is_corrupt_database());
+            assert!(error.into_store_error().is_corrupt_database());
+        }
+    }
 
     #[test]
     fn storage_details_are_not_exposed_in_runtime_display() {
