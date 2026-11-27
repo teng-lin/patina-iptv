@@ -461,7 +461,16 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
         && let Some(channel) = schedule().find_channel(&key)
     {
         // The monitor retired the cast while its last command was still pending.
-        chooser::close(ui);
+        if ui.chooser.with_untracked(|open| {
+            open.as_ref().is_some_and(|open| {
+                matches!(
+                    open.kind,
+                    chooser::Kind::Cast | chooser::Kind::AirPlay | chooser::Kind::CastEnded
+                )
+            })
+        }) {
+            chooser::close(ui);
+        }
         ui.play(channel, Playback::Live);
     }
 }
