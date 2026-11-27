@@ -570,3 +570,56 @@ async fn authenticated_receiver_can_explicitly_reject_the_saved_pairing() {
         ))
     ));
 }
+
+#[tokio::test(start_paused = true)]
+async fn pending_dual_stack_attempts_leave_time_for_later_candidates() {
+    use std::{cell::RefCell, future::pending};
+
+    let addresses: Vec<SocketAddr> = [
+        "127.0.0.1:7000",
+        "127.0.0.2:7000",
+        "127.0.0.3:7000",
+        "127.0.0.4:7000",
+        "[::1]:7000",
+        "[::1]:7001",
+        "[::1]:7002",
+    ]
+    .into_iter()
+    .map(|address| address.parse().unwrap())
+    .collect();
+    let reachable = addresses[6];
+    let attempted = RefCell::new(Vec::new());
+    let started = Instant::now();
+    let (address, _) = first_reachable_endpoint(&addresses, |address| {
+        let attempted = &attempted;
+        async move {
+            attempted.borrow_mut().push(address);
+            if address == reachable {
+                Ok(())
+            } else {
+                pending().await
+            }
+        }
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(address, reachable);
+    assert_eq!(
+        &attempted.borrow()[..TCP_BATCH_SIZE],
+        &[addresses[0], addresses[4], addresses[1], addresses[5]]
+    );
+    assert!(started.elapsed() >= CONNECTION_TIMEOUT / 2);
+    assert!(started.elapsed() < CONNECTION_TIMEOUT);
+}
+
+#[tokio::test(start_paused = true)]
+async fn pending_endpoint_attempts_share_the_original_connection_deadline() {
+    let addresses = ["127.0.0.1:7000".parse().unwrap(); TCP_BATCH_SIZE + 1];
+    let started = Instant::now();
+    let error = first_reachable_endpoint::<(), _>(&addresses, |_| std::future::pending())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AuthFault::TimedOut);
+    assert_eq!(started.elapsed(), CONNECTION_TIMEOUT);
+}

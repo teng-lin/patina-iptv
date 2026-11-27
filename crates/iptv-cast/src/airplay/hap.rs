@@ -11,7 +11,7 @@ use ring::{
 };
 use sha2::{Digest as _, Sha512};
 use srp::{client::SrpClient, groups::G_3072, utils};
-use std::{collections::BTreeMap, net::SocketAddr, time::Duration};
+use std::{collections::BTreeMap, future::Future, net::SocketAddr, time::Duration};
 use subtle::ConstantTimeEq as _;
 use tokio::time::{Instant, timeout, timeout_at};
 use zeroize::Zeroizing;
@@ -34,6 +34,7 @@ const ERROR: u8 = 7;
 const SIGNATURE: u8 = 10;
 const NAME: u8 = 17;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
+const TCP_BATCH_SIZE: usize = 4;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const PAIR_SETUP_USER: &[u8] = b"Pair-Setup";
 const SRP_BYTES: usize = 384;
@@ -348,19 +349,55 @@ async fn open(address: SocketAddr) -> Result<Wire> {
 }
 
 pub(super) async fn open_candidates(addresses: &[SocketAddr]) -> Result<(SocketAddr, Wire)> {
-    let attempts = stream::iter(addresses.iter().copied().map(|address| async move {
-        Wire::connect(address)
-            .await
-            .ok()
-            .map(|wire| (address, wire))
-    }))
-    .buffer_unordered(4)
-    .filter_map(std::future::ready);
-    tokio::pin!(attempts);
-    timeout(CONNECTION_TIMEOUT, attempts.next())
-        .await
-        .map_err(|_| AuthFault::TimedOut)?
-        .ok_or_else(|| Fault::Unreachable.into())
+    first_reachable_endpoint(addresses, Wire::connect).await
+}
+
+async fn first_reachable_endpoint<T, F>(
+    addresses: &[SocketAddr],
+    connect: impl Fn(SocketAddr) -> F,
+) -> Result<(SocketAddr, T)>
+where
+    F: Future<Output = wire::Result<T>>,
+{
+    let mut ipv4 = addresses.iter().copied().filter(SocketAddr::is_ipv4);
+    let mut ipv6 = addresses.iter().copied().filter(SocketAddr::is_ipv6);
+    let addresses: Vec<_> = std::iter::from_fn(|| {
+        let pair = [ipv4.next(), ipv6.next()];
+        pair.iter().any(Option::is_some).then_some(pair)
+    })
+    .flatten()
+    .flatten()
+    .collect();
+    let batches = addresses.chunks(TCP_BATCH_SIZE);
+    let count = batches.len();
+    let start = Instant::now();
+    let deadline = start + CONNECTION_TIMEOUT;
+    let mut timed_out = false;
+    // Reserve part of the original budget for each batch. Several pending
+    // addresses cannot occupy all slots until the overall deadline.
+    for (index, batch) in batches.enumerate() {
+        if Instant::now() >= deadline {
+            return Err(AuthFault::TimedOut);
+        }
+        let expiry = start + CONNECTION_TIMEOUT.mul_f64((index + 1) as f64 / count as f64);
+        let attempts = stream::iter(batch.iter().copied().map(|address| {
+            let attempt = connect(address);
+            async move { attempt.await.ok().map(|socket| (address, socket)) }
+        }))
+        .buffer_unordered(TCP_BATCH_SIZE)
+        .filter_map(std::future::ready);
+        tokio::pin!(attempts);
+        match timeout_at(expiry, attempts.next()).await {
+            Ok(Some(available)) => return Ok(available),
+            Ok(None) => {}
+            Err(_) => timed_out = true,
+        }
+    }
+    if timed_out {
+        Err(AuthFault::TimedOut)
+    } else {
+        Err(Fault::Unreachable.into())
+    }
 }
 
 pub(super) struct Challenge {
