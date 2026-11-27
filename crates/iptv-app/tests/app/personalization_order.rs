@@ -678,6 +678,66 @@ fn tablet_channel_grip_keeps_a_diagonal_drag_across_the_timeline() {
 }
 
 #[test]
+fn tablet_channel_drop_uses_the_position_delivered_on_finger_up() {
+    use nsh_core::{
+        EventKind, EventPayload, PointerType, ROOT_ID, TouchEvent, TouchPhase, TouchPoint,
+        geometry::point, platform::Idiom, prelude::px,
+    };
+
+    let Some(home) = isolated!() else { return };
+    let mut fixture = start(home, Settings::new(), false);
+    let app = &mut fixture.app;
+    step(app.set_environment("iPad", |env| {
+        env.idiom = Idiom::Pad;
+        env.os = nsh_core::platform::Os::Ios;
+    }));
+    open_inline_order(app);
+    step(app.wait_for("id:reorder-grip-strip"));
+    let strip = app
+        .screen()
+        .layout_nodes()
+        .into_iter()
+        .find(|node| node.test_id.as_deref() == Some("reorder-grip-strip"))
+        .unwrap();
+    let center = strip.bounds.center();
+    // The middle row is B. A quick drag can lift over A without a move sample.
+    for (phase, timestamp, y) in [
+        (TouchPhase::Start, 0.0, center.y),
+        (TouchPhase::End, 100.0, center.y - px(50.0)),
+    ] {
+        let event = TouchEvent {
+            phase,
+            timestamp,
+            points: vec![TouchPoint {
+                id: 1,
+                target: strip.id,
+                path: if phase == TouchPhase::Start {
+                    vec![strip.id]
+                } else {
+                    vec![]
+                },
+                page: point(center.x, y),
+                location: point(center.x - strip.bounds.origin.x, y - strip.bounds.origin.y),
+                changed: true,
+                pointer_type: PointerType::Touch,
+                pressure: TouchPoint::default_pressure(phase, true),
+                tilt_x: 0.0,
+                tilt_y: 0.0,
+            }],
+            modifiers: Default::default(),
+            activated: None,
+        };
+        app.engine().control().dispatch_event(
+            ROOT_ID,
+            EventKind::Touch,
+            EventPayload::Touch(Box::new(event)),
+        );
+        app.settle();
+    }
+    step(app.wait_for("id:guide-row >> nth=0 >> text:★ Local B"));
+}
+
+#[test]
 fn channel_context_reorders_inline_with_the_pointer() {
     use nsh_core::{geometry::point, platform::Idiom, prelude::px};
 
