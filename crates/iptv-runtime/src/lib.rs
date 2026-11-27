@@ -118,6 +118,26 @@ pub struct Runtime {
         )
     ))]
     app_update_state: RefCell<app_updates::state::Controller>,
+    #[cfg(all(
+        feature = "native",
+        any(
+            target_os = "linux",
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "android"
+        )
+    ))]
+    pending_app_update: RefCell<Option<app_updates::pending::Pending>>,
+    #[cfg(all(
+        feature = "native",
+        any(
+            target_os = "linux",
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "android"
+        )
+    ))]
+    app_update_download: RefCell<Option<app_updates::pending::Active>>,
     cast: RefCell<Option<cast::Active>>,
     cast_workers: RefCell<Vec<cast::Worker>>,
     cast_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -204,6 +224,26 @@ impl Runtime {
                 )
             ))]
             app_update_state: RefCell::default(),
+            #[cfg(all(
+                feature = "native",
+                any(
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "android"
+                )
+            ))]
+            pending_app_update: RefCell::default(),
+            #[cfg(all(
+                feature = "native",
+                any(
+                    target_os = "linux",
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "android"
+                )
+            ))]
+            app_update_download: RefCell::default(),
             cast: RefCell::default(),
             cast_workers: RefCell::default(),
             cast_generation: Default::default(),

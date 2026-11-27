@@ -64,31 +64,47 @@ impl PackageAction {
                         "Finish recording before installing the update.",
                     ));
                 }
-                crate::settings_view::notify(tr("Downloading…"));
-                let Some(stage) = owner
-                    .download_update(asset.clone(), std::env::temp_dir())
-                    .await
-                else {
-                    return crate::settings_view::notify(tr("Update download failed. Try again."));
+                let mut setup = if let Some(setup) = owner.take_windows_setup(&asset) {
+                    setup
+                } else {
+                    crate::settings_view::notify(tr("Downloading…"));
+                    let stage = if let Some(stage) = owner.take_update_download(&asset) {
+                        Some(stage)
+                    } else {
+                        owner
+                            .download_update(asset.clone(), std::env::temp_dir())
+                            .await
+                    };
+                    let Some(stage) = stage else {
+                        return crate::settings_view::notify(tr(
+                            "Update download failed. Try again.",
+                        ));
+                    };
+                    if !crate::settings_view::updates::is_open(_ui) {
+                        owner.retain_update_download(asset, stage);
+                        return;
+                    }
+                    crate::settings_view::notify(tr("Verifying installer…"));
+                    let Some(setup) = owner
+                        .prepare_windows_setup(
+                            stage,
+                            asset.clone(),
+                            publisher,
+                            tr("The installer could not be verified or opened."),
+                        )
+                        .await
+                    else {
+                        return crate::settings_view::notify(tr(
+                            "The installer could not be verified or opened.",
+                        ));
+                    };
+                    setup
                 };
-                if !crate::settings_view::updates::is_open(_ui) {
+                if _ui.update_cancel_requested.get_untracked() {
                     return;
                 }
-                crate::settings_view::notify(tr("Verifying installer…"));
-                let Some(mut setup) = owner
-                    .prepare_windows_setup(
-                        stage,
-                        asset,
-                        publisher,
-                        tr("The installer could not be verified or opened."),
-                    )
-                    .await
-                else {
-                    return crate::settings_view::notify(tr(
-                        "The installer could not be verified or opened.",
-                    ));
-                };
                 if !crate::settings_view::updates::is_open(_ui) {
+                    owner.retain_windows_setup(asset, setup);
                     return;
                 }
                 let confirmed = nsh_base::alert_dialog()
@@ -100,20 +116,24 @@ impl PackageAction {
                     .show()
                     .await;
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
+                    owner.retain_windows_setup(asset, setup);
                     return;
                 }
                 if owner.recording_background_needed() {
+                    owner.retain_windows_setup(asset, setup);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
                 }
                 if !owner.shutdown_recording_host() {
+                    owner.retain_windows_setup(asset, setup);
                     return crate::settings_view::notify(tr(
                         "The recording host is still closing. Try updating again.",
                     ));
                 }
                 if owner.recording_background_needed() {
                     owner.start_recordings();
+                    owner.retain_windows_setup(asset, setup);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
@@ -148,27 +168,26 @@ impl PackageAction {
                         "Finish recording before installing the update.",
                     ));
                 }
-                let progress = nsh_base::alert_dialog()
-                    .title(tr("Downloading…"))
-                    .cancel("cancel", tr("Cancel"))
-                    .close_on_escape(true)
-                    .show();
-                let closer = progress.closer();
-                let path = tokio::select! {
-                    biased;
-                    _ = progress => return,
-                    path = owner.download_update(asset, directory) => path,
+                let path = if let Some(path) = owner.take_update_download(&asset) {
+                    Some(path)
+                } else {
+                    owner.download_update(asset.clone(), directory).await
                 };
-                if let Some(closer) = closer {
-                    closer.close();
-                }
                 let Some(path) = path else {
-                    return crate::settings_view::notify(tr("Update download failed. Try again."));
+                    if !_ui.update_cancel_requested.get_untracked() {
+                        crate::settings_view::notify(tr("Update download failed. Try again."));
+                    }
+                    return;
                 };
+                if _ui.update_cancel_requested.get_untracked() {
+                    return;
+                }
                 if !crate::settings_view::updates::is_open(_ui) {
+                    owner.retain_update_download(asset, path);
                     return;
                 }
                 if owner.recording_background_needed() {
+                    owner.retain_update_download(asset, path);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));
@@ -182,9 +201,11 @@ impl PackageAction {
                     .show()
                     .await;
                 if confirmed.ok().and_then(|r| r.action).as_deref() != Some("install") {
+                    owner.retain_update_download(asset, path);
                     return;
                 }
                 if owner.recording_background_needed() {
+                    owner.retain_update_download(asset, path);
                     return crate::settings_view::notify(tr(
                         "Finish recording before installing the update.",
                     ));

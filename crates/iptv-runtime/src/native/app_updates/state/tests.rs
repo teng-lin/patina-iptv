@@ -240,6 +240,123 @@ fn opening_updates_joins_scheduled_work_without_a_second_request_or_duplicate_no
 }
 
 #[test]
+fn pending_notice_refresh_is_not_a_repeating_check_and_clear_actions_are_durable() {
+    for frequency in [Frequency::Weekly, Frequency::Monthly] {
+        let mut state = Controller::default();
+        complete(&mut state, 1000, Trigger::Startup, frequency, "2.0.0");
+        assert_eq!(state.document()["pending_version"], "2.0.0");
+        // A notice deferred by full-screen viewing is already held by this owner.
+        assert!(
+            state
+                .begin_check(1001, Trigger::Automatic, frequency)
+                .is_none()
+        );
+        for action in ["acknowledge", "skip", "manual", "current"] {
+            let mut restarted = Controller::default();
+            restarted.restore(state.document()).unwrap();
+            complete(&mut restarted, 1002, Trigger::Startup, frequency, "2.0.0");
+            assert!(restarted.snapshot().notice.is_some());
+            match action {
+                "acknowledge" => restarted.acknowledge_notice(),
+                "skip" => restarted.skip_version("2.0.0"),
+                "manual" => complete(&mut restarted, 1003, Trigger::Manual, frequency, "2.0.0"),
+                _ => {
+                    let token = restarted
+                        .begin_check(1003, Trigger::Manual, frequency)
+                        .unwrap();
+                    let mut current = release("2.0.0");
+                    current.status = ReleaseStatus::Current;
+                    restarted.finish_check(token, 1003, Ok(current));
+                }
+            }
+            assert!(
+                restarted.document()["pending_version"].is_null(),
+                "{action}"
+            );
+            let mut again = Controller::default();
+            again.restore(restarted.document()).unwrap();
+            assert!(
+                again
+                    .begin_check(1004, Trigger::Startup, frequency)
+                    .is_none(),
+                "{action}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn unseen_release_is_refreshed_after_disk_restart_before_normal_due_time() {
+    let temp = tempfile::tempdir().unwrap();
+    let directory = temp.path().join("profile");
+    let make = || {
+        crate::Runtime::new(crate::Ports::new(directory.clone(), |_| {
+            Err(crate::model::StoreError::unavailable(
+                "synthetic unavailable key",
+            ))
+        }))
+    };
+    {
+        let owner = make();
+        owner.start_services();
+        owner.restore_app_update_state().await.unwrap();
+        let token = owner
+            .begin_app_update_check(1000, Trigger::Startup, Frequency::Monthly)
+            .unwrap();
+        owner.finish_app_update_check(token, 1001, Ok(release("2.0.0")));
+        // Full-screen playback prevents this notice being shown before exit.
+        assert!(owner.app_update_snapshot().notice.is_some());
+        owner.persist_app_update_state().await.unwrap();
+    }
+    {
+        let owner = make();
+        owner.start_services();
+        owner.restore_app_update_state().await.unwrap();
+        assert!(owner.app_update_snapshot().cached.is_none());
+        assert!(
+            owner
+                .begin_app_update_check(1002, Trigger::Startup, Frequency::Never)
+                .is_none()
+        );
+        let token = owner
+            .begin_app_update_check(1002, Trigger::Startup, Frequency::Monthly)
+            .unwrap();
+        owner.finish_app_update_check(token, 1003, Err(CheckError::Network));
+        owner.persist_app_update_state().await.unwrap();
+    }
+    {
+        let owner = make();
+        owner.start_services();
+        owner.restore_app_update_state().await.unwrap();
+        assert!(
+            owner
+                .begin_app_update_check(1902, Trigger::Startup, Frequency::Monthly)
+                .is_none()
+        );
+        let token = owner
+            .begin_app_update_check(1903, Trigger::Automatic, Frequency::Monthly)
+            .unwrap();
+        owner.finish_app_update_check(token, 1904, Ok(release("2.0.0")));
+        assert_eq!(owner.app_update_snapshot().notice, Some(release("2.0.0")));
+        assert!(
+            owner
+                .begin_app_update_check(1905, Trigger::Automatic, Frequency::Monthly)
+                .is_none()
+        );
+        owner.acknowledge_app_update_notice();
+        owner.persist_app_update_state().await.unwrap();
+    }
+    let owner = make();
+    owner.start_services();
+    owner.restore_app_update_state().await.unwrap();
+    assert!(
+        owner
+            .begin_app_update_check(2000, Trigger::Startup, Frequency::Monthly)
+            .is_none()
+    );
+}
+
+#[test]
 fn current_or_ahead_results_clear_obsolete_notice_and_clock_rollback_remains_usable() {
     let mut state = Controller::default();
     complete(

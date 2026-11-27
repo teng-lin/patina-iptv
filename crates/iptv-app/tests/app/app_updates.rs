@@ -55,6 +55,7 @@ impl Api {
                     }
                     Err(error) => panic!("fixture accept: {error}"),
                 };
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -219,4 +220,36 @@ fn newer_release_without_matching_package_is_not_reported_as_up_to_date() {
     step(app.wait_for("text:A newer version is available, but there is no compatible package for this installation."));
     step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
     assert!(!app.screen().matches("text:Patina is up to date.").unwrap());
+}
+
+#[test]
+fn default_weekly_notice_is_remote_actionable_and_monthly_choice_is_saved() {
+    let Some(home) = isolated!() else { return };
+    let api = Api::start();
+    api.serve(200, release("9.8.7", true));
+    let mut fixture = personalization::launch(home, Settings::new(), false, |_| {}, |_| {});
+    let app = &mut fixture.app;
+    step(app.wait_for("id:app-update-notice"));
+    // Review is the initial remote focus; no touch or browser is required.
+    step(app.press_key("enter"));
+    step(app.wait_for("id:app-update-panel"));
+    step(app.wait_for("id:app-update-notes >> text:/The complete ending of the notes/"));
+    step(app.press("id:app-update-panel >> text:Later"));
+    step(app.wait_for_gone("id:app-update-notice", Duration::from_secs(5)));
+    about(app);
+    step(app.wait_for("id:settings-content >> text:Weekly"));
+    step(app.press("id:app-update-panel >> text:Later"));
+    step(app.press("id:settings-content >> text:Automatically check for app updates"));
+    step(app.wait_for("role:option[/Monthly/]"));
+    step(app.press("role:option[/Monthly/]"));
+    personalization::saved_settings(
+        app,
+        &fixture.path.parent().unwrap().join("settings.json"),
+        |settings| {
+            settings.choice(
+                iptv_settings::keys::APP_UPDATE_FREQUENCY,
+                &iptv_settings::Target::Global,
+            ) == "monthly"
+        },
+    );
 }

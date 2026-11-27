@@ -5,7 +5,10 @@ use std::{ffi::CString, time::Duration};
 
 unsafe extern "C" {
     fn patina_sparkle_supported() -> bool;
-    fn patina_sparkle_start(version: *const std::ffi::c_char) -> u64;
+    fn patina_sparkle_start(
+        version: *const std::ffi::c_char,
+        failure: *const std::ffi::c_char,
+    ) -> u64;
     fn patina_sparkle_status(session: u64) -> u8;
     fn patina_sparkle_allow_restart(session: u64);
     fn patina_sparkle_cancel(session: u64);
@@ -17,6 +20,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         // Root disposal revokes pending restart authorization synchronously.
         // The native side dismisses its UI on AppKit's main queue.
+        // SAFETY: the native mailbox accepts generation values from any thread.
         unsafe { patina_sparkle_cancel(self.0) };
     }
 }
@@ -35,30 +39,38 @@ pub(super) async fn update(ui: Ui, version: String) {
     let Ok(version) = CString::new(version) else {
         return notify(tr("The installer could not be verified or opened."));
     };
+    let Ok(failure) = CString::new(tr("The installer could not be verified or opened.")) else {
+        return;
+    };
     // SAFETY: the bridge copies the version before returning. All following
     // operations use a generation token, never a pointer to Ui or the runtime.
-    let token = unsafe { patina_sparkle_start(version.as_ptr()) };
+    let token = unsafe { patina_sparkle_start(version.as_ptr(), failure.as_ptr()) };
     if token == 0 {
         return notify(tr("The installer could not be verified or opened."));
     }
     let session = Session(token);
-    loop {
+    let mut host_stopped = false;
+    let failed = loop {
         if !ui.owner.is_live() {
             return;
         }
+        if ui.update_cancel_requested.get_untracked() {
+            break false;
+        }
         // This future belongs to the app root, so owner/Ui access remains on
         // its shell thread. AppKit callbacks publish only mailbox status.
+        // SAFETY: status reads the synchronized generation mailbox only.
         match unsafe { patina_sparkle_status(session.0) } {
-            0 | 4 => return,
-            5 => return notify(tr("The installer could not be verified or opened.")),
-            3 => {
-                if !owner.recording_background_needed() && owner.shutdown_recording_host() {
-                    if owner.recording_background_needed() {
-                        owner.start_recordings();
-                    } else {
-                        crate::player::watch_time::flush(ui);
-                        unsafe { patina_sparkle_allow_restart(session.0) };
-                    }
+            0 | 4 => break false,
+            5 => break true,
+            3 if !owner.recording_background_needed() && owner.shutdown_recording_host() => {
+                if owner.recording_background_needed() {
+                    owner.start_recordings();
+                } else {
+                    host_stopped = true;
+                    crate::player::watch_time::flush(ui);
+                    // SAFETY: the native generation fence accepts approval only for this live session.
+                    unsafe { patina_sparkle_allow_restart(session.0) };
                 }
             }
             _ => {}
@@ -68,5 +80,13 @@ pub(super) async fn update(ui: Ui, version: String) {
             let _ = send.send(());
         });
         let _ = reply.await;
+    };
+    // A failed or dismissed installation may leave this process running after
+    // its recording host was stopped for relaunch. Restore normal operation.
+    if host_stopped {
+        owner.start_recordings();
+    }
+    if failed {
+        notify(tr("The installer could not be verified or opened."));
     }
 }

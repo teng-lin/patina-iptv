@@ -67,6 +67,9 @@ struct Durable {
     failures: u32,
     skipped_version: Option<String>,
     notified_version: Option<String>,
+    /// A release discovered while its notice could not yet be acknowledged.
+    /// Persist only its identity; refresh GitHub metadata after a restart.
+    pending_version: Option<String>,
 }
 
 #[derive(Default)]
@@ -118,16 +121,26 @@ impl Controller {
             {
                 return None;
             }
-            let due = match frequency {
-                Frequency::Never => false,
-                Frequency::OnLaunch => trigger == Trigger::Startup && !self.startup_attempted,
-                Frequency::Daily | Frequency::Weekly | Frequency::Monthly => {
-                    self.durable.last_success.is_none_or(|last| {
-                        // A clock correction must not suppress checks for months.
-                        now < last || now >= next_due(last, frequency)
-                    })
-                }
-            };
+            let pending = self.cached.is_none()
+                && self
+                    .durable
+                    .pending_version
+                    .as_ref()
+                    .is_some_and(|version| {
+                        self.durable.skipped_version.as_ref() != Some(version)
+                            && self.durable.notified_version.as_ref() != Some(version)
+                    });
+            let due = pending
+                || match frequency {
+                    Frequency::Never => false,
+                    Frequency::OnLaunch => trigger == Trigger::Startup && !self.startup_attempted,
+                    Frequency::Daily | Frequency::Weekly | Frequency::Monthly => {
+                        self.durable.last_success.is_none_or(|last| {
+                            // A clock correction must not suppress checks for months.
+                            now < last || now >= next_due(last, frequency)
+                        })
+                    }
+                };
             if !due {
                 return None;
             }
@@ -169,6 +182,7 @@ impl Controller {
                 if trigger == Trigger::Manual {
                     // A manual result is always visible, including a skipped version.
                     self.notice = None;
+                    self.durable.pending_version = None;
                     if newer {
                         self.durable.notified_version = Some(check.release.version.clone());
                     }
@@ -176,8 +190,10 @@ impl Controller {
                     && self.durable.skipped_version.as_deref() != Some(&check.release.version)
                     && self.durable.notified_version.as_deref() != Some(&check.release.version)
                 {
+                    self.durable.pending_version = Some(check.release.version.clone());
                     self.notice = Some(check.clone());
                 } else {
+                    self.durable.pending_version = None;
                     self.notice = None;
                 }
                 self.cached = Some(check);
@@ -201,6 +217,9 @@ impl Controller {
 
     pub fn skip_version(&mut self, version: &str) {
         self.durable.skipped_version = Some(version.to_owned());
+        if self.durable.pending_version.as_deref() == Some(version) {
+            self.durable.pending_version = None;
+        }
         self.acknowledge_notice();
     }
 
@@ -208,6 +227,7 @@ impl Controller {
     pub fn acknowledge_notice(&mut self) {
         if let Some(check) = self.notice.take() {
             self.durable.notified_version = Some(check.release.version);
+            self.durable.pending_version = None;
         }
         self.revision += 1;
     }
@@ -232,6 +252,7 @@ impl Controller {
             failures: value["failures"].as_u64().unwrap_or(0).min(u32::MAX as u64) as u32,
             skipped_version: string("skipped_version"),
             notified_version: string("notified_version"),
+            pending_version: string("pending_version"),
         };
         Ok(())
     }
@@ -245,6 +266,7 @@ impl Controller {
             "failures": self.durable.failures,
             "skipped_version": self.durable.skipped_version,
             "notified_version": self.durable.notified_version,
+            "pending_version": self.durable.pending_version,
         })
     }
 }

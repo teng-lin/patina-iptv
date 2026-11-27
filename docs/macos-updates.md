@@ -11,6 +11,9 @@ check frequency and requires an explicit installation action. Sparkle's own
 automatic checks, automatic downloading/installing and JavaScript release notes
 are disabled. Its appcast version must match the GitHub version the viewer chose.
 Relaunch waits until the recording host can close safely and flushes watch time.
+AppKit publishes a token-scoped restart request; the owning NSH shell task checks
+the runtime and approves it. Native callbacks never access shell state. Disposing
+that root revokes queued approval and releases the updater, aborting its cycle.
 
 ## Public configuration and packaging
 
@@ -64,7 +67,8 @@ and the manual package route remain usable.
 transport/key validation, the pinned archive boundary, version preservation and
 disabled automatic installation. On macOS it also compiles the actual bridge
 against AppKit/Security and checks preview refusal, appcast/GitHub version
-agreement and deferred relaunch while a synthetic recording guard is busy.
+agreement, requests from a separate native thread, shell-authorized relaunch,
+root disposal after queued approval and a replacement session's stale-event fence.
 
 Before enabling production, stage two differently versioned Developer ID builds
 using the same public updater key. Install the older build with a synthetic

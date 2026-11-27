@@ -66,6 +66,7 @@ bool patina_sparkle_supported(void) {
 
 @interface PatinaSparkleDelegate : NSObject
 @property(copy) NSString *expectedVersion;
+@property(copy) NSString *failureMessage;
 @property uint64_t session;
 @property(copy) void (^restartHandler)(void);
 @end
@@ -94,7 +95,7 @@ static void PatinaPublish(uint64_t session, uint8_t status) {
     NSString *version = [item valueForKey:@"displayVersionString"];
     if (PatinaMatches(self.session) && [version isEqual:self.expectedVersion]) return YES;
     if (error) *error = [NSError errorWithDomain:@"PatinaUpdate" code:1
-        userInfo:@{NSLocalizedDescriptionKey: NSLocalizedString(@"The installer could not be verified or opened.", nil)}];
+        userInfo:@{NSLocalizedDescriptionKey: self.failureMessage}];
     return NO;
 }
 - (BOOL)updater:(id)updater shouldPostponeRelaunchForUpdate:(id)item untilInvokingBlock:(void (^)(void))install {
@@ -118,7 +119,7 @@ uint8_t patina_sparkle_status(uint64_t session) {
     @synchronized(PatinaSparkleDelegate.class) { return PatinaSession == session ? PatinaStatus : 0; }
 }
 
-static uint64_t PatinaStart(NSString *expected) {
+static uint64_t PatinaStart(NSString *expected, NSString *failure) {
     uint64_t session;
     @synchronized(PatinaSparkleDelegate.class) {
         if (PatinaSession != 0) return 0;
@@ -130,35 +131,37 @@ static uint64_t PatinaStart(NSString *expected) {
         if (!PatinaMatches(session)) return;
         if (PatinaUpdaterController.updater.sessionInProgress) { PatinaPublish(session, 5); return; }
         if (!PatinaUpdaterController) {
-        NSURL *path = [NSBundle.mainBundle.privateFrameworksURL URLByAppendingPathComponent:@"Sparkle.framework"];
-        NSBundle *framework = [NSBundle bundleWithURL:path];
-        if (![framework loadAndReturnError:NULL]) { PatinaPublish(session, 5); return; }
-        Class controller = NSClassFromString(@"SPUStandardUpdaterController");
-        if (!controller) { PatinaPublish(session, 5); return; }
-        PatinaUpdaterDelegate = [PatinaSparkleDelegate new];
-        PatinaUpdaterController = [(id<PatinaSparkleController>)[controller alloc]
-            initWithStartingUpdater:NO updaterDelegate:PatinaUpdaterDelegate userDriverDelegate:nil];
-        PatinaUpdaterController.updater.automaticallyChecksForUpdates = NO;
-        PatinaUpdaterController.updater.automaticallyDownloadsUpdates = NO;
-        if (![PatinaUpdaterController.updater startUpdater:NULL]) {
-            PatinaUpdaterController = nil;
-            PatinaUpdaterDelegate = nil;
-            PatinaPublish(session, 5);
-            return;
-        }
+            NSURL *path = [NSBundle.mainBundle.privateFrameworksURL URLByAppendingPathComponent:@"Sparkle.framework"];
+            NSBundle *framework = [NSBundle bundleWithURL:path];
+            if (![framework loadAndReturnError:NULL]) { PatinaPublish(session, 5); return; }
+            Class controller = NSClassFromString(@"SPUStandardUpdaterController");
+            if (!controller) { PatinaPublish(session, 5); return; }
+            PatinaUpdaterDelegate = [PatinaSparkleDelegate new];
+            PatinaUpdaterController = [(id<PatinaSparkleController>)[controller alloc]
+                initWithStartingUpdater:NO updaterDelegate:PatinaUpdaterDelegate userDriverDelegate:nil];
+            PatinaUpdaterController.updater.automaticallyChecksForUpdates = NO;
+            PatinaUpdaterController.updater.automaticallyDownloadsUpdates = NO;
+            if (![PatinaUpdaterController.updater startUpdater:NULL]) {
+                PatinaUpdaterController = nil;
+                PatinaUpdaterDelegate = nil;
+                PatinaPublish(session, 5);
+                return;
+            }
         }
         PatinaUpdaterDelegate.session = session;
         PatinaUpdaterDelegate.expectedVersion = expected;
+        PatinaUpdaterDelegate.failureMessage = failure;
         PatinaPublish(session, 2);
         [PatinaUpdaterController.updater checkForUpdates];
     });
     return session;
 }
 
-uint64_t patina_sparkle_start(const char *version) {
-    if (!version || !patina_sparkle_supported()) return 0;
+uint64_t patina_sparkle_start(const char *version, const char *failure) {
+    if (!version || !failure || !patina_sparkle_supported()) return 0;
     NSString *expected = [NSString stringWithUTF8String:version];
-    return expected.length ? PatinaStart(expected) : 0;
+    NSString *message = [NSString stringWithUTF8String:failure];
+    return expected.length && message.length ? PatinaStart(expected, message) : 0;
 }
 
 void patina_sparkle_allow_restart(uint64_t session) {
@@ -178,11 +181,16 @@ void patina_sparkle_cancel(uint64_t session) {
     @synchronized(PatinaSparkleDelegate.class) {
         if (PatinaSession != session) return;
         PatinaSession = 0;
+        // Enqueue teardown before a replacement root can enqueue its start.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (PatinaUpdaterDelegate.session != session) return;
+            PatinaUpdaterDelegate.restartHandler = nil;
+            id<PatinaSparkleDriver> driver = PatinaUpdaterController.userDriver;
+            if ([driver respondsToSelector:@selector(dismissUpdateInstallation)]) [driver dismissUpdateInstallation];
+            // SPUUpdater.dealloc aborts the current driver and invalidates its
+            // timers. Dismissing userDriver alone would leave a busy session.
+            PatinaUpdaterController = nil;
+            PatinaUpdaterDelegate = nil;
+        });
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (PatinaUpdaterDelegate.session != session) return;
-        PatinaUpdaterDelegate.restartHandler = nil;
-        id<PatinaSparkleDriver> driver = PatinaUpdaterController.userDriver;
-        if ([driver respondsToSelector:@selector(dismissUpdateInstallation)]) [driver dismissUpdateInstallation];
-    });
 }

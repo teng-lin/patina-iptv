@@ -369,6 +369,8 @@ pub struct Ui {
     update_revision: Signal<u64>,
     update_ready: Signal<bool>,
     update_install_busy: Signal<bool>,
+    update_cancel_requested: Signal<bool>,
+    update_pending_dismissed: Signal<bool>,
     update_focus: Signal<usize>,
     update_notes_scroll: ui_kit::FocusScroll,
     /// Each player surface's stream, health, position, size and tracks;
@@ -514,6 +516,8 @@ impl Ui {
             update_revision: signal(0),
             update_ready: signal(false),
             update_install_busy: signal(false),
+            update_cancel_requested: signal(false),
+            update_pending_dismissed: signal(false),
             update_focus: signal(0),
             update_notes_scroll: ui_kit::FocusScroll::new(),
             player,

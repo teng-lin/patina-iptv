@@ -5,6 +5,7 @@ use iptv_net::{NetClient, NetConfig};
 use iptv_providers::HttpRequest;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::Ordering};
 use tempfile::TempPath;
 use tokio::io::AsyncWriteExt;
 
@@ -18,21 +19,35 @@ impl crate::Runtime {
         // Dropping the caller while its dialog closes must stop the background
         // request and let the private partial file's guard clean up.
         let (_cancel_on_drop, cancel) = tokio::sync::oneshot::channel::<()>();
-        self.services()
+        let (owned_download, progress, owner_cancel) = self.begin_update_download(asset.length);
+        let result = self
+            .services()
             .spawn(async move {
                 tokio::select! {
                     biased;
                     _ = cancel => None,
-                    path = fetch(asset, directory) => path,
+                    _ = owner_cancel => None,
+                    path = fetch(asset, directory, progress) => path,
                 }
             })
             .await
             .ok()
-            .flatten()
+            .flatten();
+        // Cancellation or replacement can win after the worker sent its
+        // result but before this caller resumed. Never publish that stale file.
+        if owned_download.is_current() {
+            result
+        } else {
+            None
+        }
     }
 }
 
-async fn fetch(asset: ReleaseAsset, directory: PathBuf) -> Option<TempPath> {
+async fn fetch(
+    asset: ReleaseAsset,
+    directory: PathBuf,
+    progress: Arc<super::pending::Progress>,
+) -> Option<TempPath> {
     let client = NetClient::new(NetConfig {
         user_agent: super::USER_AGENT.into(),
         allow_files: false,
@@ -51,7 +66,14 @@ async fn fetch(asset: ReleaseAsset, directory: PathBuf) -> Option<TempPath> {
     {
         return None;
     }
-    receive(response.body, directory, asset.length, &asset.sha256).await
+    receive_tracked(
+        response.body,
+        directory,
+        asset.length,
+        &asset.sha256,
+        Some(progress),
+    )
+    .await
 }
 
 fn endpoint(asset: &ReleaseAsset) -> Option<(String, bool)> {
@@ -65,11 +87,22 @@ fn endpoint(asset: &ReleaseAsset) -> Option<(String, bool)> {
     Some((asset.url.clone(), true))
 }
 
+#[cfg(test)]
 pub(super) async fn receive(
+    body: impl BodyStream,
+    directory: PathBuf,
+    expected_length: u64,
+    expected_digest: &str,
+) -> Option<TempPath> {
+    receive_tracked(body, directory, expected_length, expected_digest, None).await
+}
+
+async fn receive_tracked(
     mut body: impl BodyStream,
     directory: PathBuf,
     expected_length: u64,
     expected_digest: &str,
+    progress: Option<Arc<super::pending::Progress>>,
 ) -> Option<TempPath> {
     let (file, path) = tokio::task::spawn_blocking(move || {
         tempfile::Builder::new()
@@ -97,6 +130,9 @@ pub(super) async fn receive(
         }
         hash.update(&chunk);
         file.write_all(&chunk).await.ok()?;
+        if let Some(progress) = &progress {
+            progress.received.store(length, Ordering::Relaxed);
+        }
     }
     if length != expected_length || format!("{:x}", hash.finalize()) != expected_digest {
         return None;

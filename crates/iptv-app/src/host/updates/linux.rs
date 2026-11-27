@@ -62,19 +62,32 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
     let Some(parent) = image.path().parent() else {
         return;
     };
-    let Some(directory) = owner.stage_appimage(parent.to_owned()).await else {
-        return notify(tr("Could not replace the AppImage. Try Save as…"));
+    let file = if let Some(file) = owner.take_appimage(&asset) {
+        Some(file)
+    } else {
+        let Some(directory) = owner.stage_appimage(parent.to_owned()).await else {
+            return notify(tr("Could not replace the AppImage. Try Save as…"));
+        };
+        notify(tr("Downloading…"));
+        owner.download_appimage(asset.clone(), directory).await
     };
-    notify(tr("Downloading…"));
-    let Some(file) = owner.download_appimage(asset, directory).await else {
+    let Some(file) = file else {
+        if ui.update_cancel_requested.get_untracked() {
+            return;
+        }
         return notify(tr(
             "Download failed. Try Save as… to choose another location.",
         ));
     };
+    if ui.update_cancel_requested.get_untracked() {
+        return;
+    }
     if !is_open(ui) {
+        owner.retain_appimage(asset, file);
         return;
     }
     if owner.recording_background_needed() {
+        owner.retain_appimage(asset, file);
         return notify(tr("Finish recording before installing the update."));
     }
     let confirm = alert_dialog()
@@ -86,9 +99,11 @@ pub(super) async fn update(ui: Ui, asset: ReleaseAsset) {
         .show()
         .await;
     if confirm.ok().and_then(|r| r.action).as_deref() != Some("install") {
+        owner.retain_appimage(asset, file);
         return;
     }
     if owner.recording_background_needed() {
+        owner.retain_appimage(asset, file);
         return notify(tr("Finish recording before installing the update."));
     }
     let Some(previous) = owner.replace_appimage(image, file).await else {

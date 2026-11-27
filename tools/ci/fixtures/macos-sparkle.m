@@ -11,13 +11,14 @@
 @interface SyntheticUpdater : NSObject <PatinaSparkleUpdater>
 @property BOOL automaticallyChecksForUpdates;
 @property BOOL automaticallyDownloadsUpdates;
-@property(readonly) BOOL sessionInProgress;
+@property BOOL sessionInProgress;
 @property BOOL checked;
 @end
+static NSUInteger Aborted;
 @implementation SyntheticUpdater
-- (BOOL)sessionInProgress { return NO; }
 - (BOOL)startUpdater:(NSError **)error { assert(NSThread.isMainThread); return YES; }
-- (void)checkForUpdates { assert(NSThread.isMainThread); self.checked = YES; }
+- (void)checkForUpdates { assert(NSThread.isMainThread); self.checked = YES; self.sessionInProgress = YES; }
+- (void)dealloc { if (_sessionInProgress) Aborted++; }
 @end
 
 @interface SyntheticController : NSObject <PatinaSparkleController>
@@ -72,58 +73,68 @@ int main(void) {
         background(^{
             assert(!NSThread.isMainThread);
             assert(!patina_sparkle_supported());
-            assert(patina_sparkle_start("0.2.0") == 0);
+            assert(patina_sparkle_start("0.2.0", "Synthetic localized failure") == 0);
         });
-        PatinaSparkleDelegate *delegate = [PatinaSparkleDelegate new];
-        PatinaUpdaterDelegate = delegate;
-        SyntheticUpdater *updater = [SyntheticUpdater new];
-        SyntheticController *controller = [SyntheticController new];
-        controller.updater = updater;
-        PatinaUpdaterController = controller;
         __block uint64_t session;
-        background(^{
-            session = PatinaStart(@"0.2.0");
-            assert(session != 0);
-            assert(patina_sparkle_status(session) == 1);
-            assert(PatinaStart(@"0.3.0") == 0);
-        });
-        assert(!updater.checked);
-        drainMain();
-        assert(updater.checked);
-        assert(patina_sparkle_status(session) == 2);
-        SyntheticUpdateItem *item = [SyntheticUpdateItem new];
-        NSError *error = nil;
-        item.displayVersionString = @"0.3.0";
-        assert(![delegate updater:nil shouldProceedWithUpdate:item updateCheck:0 error:&error]);
-        assert(error != nil);
-        item.displayVersionString = @"0.2.0";
-        assert([delegate updater:nil shouldProceedWithUpdate:item updateCheck:0 error:NULL]);
         __block NSUInteger installs = 0;
-        assert([delegate updater:nil shouldPostponeRelaunchForUpdate:item untilInvokingBlock:^{ installs++; }]);
-        assert(patina_sparkle_status(session) == 3);
-        assert(installs == 0);
-        background(^{
-            patina_sparkle_allow_restart(session);
-            assert(patina_sparkle_status(session) == 6);
-        });
-        assert(installs == 0);
-        drainMain();
-        assert(installs == 1);
-        assert(delegate.restartHandler == nil);
-        // Root disposal wins even after approval was queued to AppKit main.
-        assert([delegate updater:nil shouldPostponeRelaunchForUpdate:item untilInvokingBlock:^{ installs++; }]);
-        background(^{
-            patina_sparkle_allow_restart(session);
-            patina_sparkle_cancel(session);
-            assert(patina_sparkle_status(session) == 0);
-        });
-        drainMain();
-        assert(installs == 1);
-        assert(delegate.restartHandler == nil);
+        __weak SyntheticUpdater *updater;
+        @autoreleasepool {
+            PatinaSparkleDelegate *delegate = [PatinaSparkleDelegate new];
+            PatinaUpdaterDelegate = delegate;
+            PatinaUpdaterController = [SyntheticController new];
+            ((SyntheticController *)PatinaUpdaterController).updater = [SyntheticUpdater new];
+            updater = (SyntheticUpdater *)PatinaUpdaterController.updater;
+            background(^{
+                session = PatinaStart(@"0.2.0", @"Synthetic localized failure");
+                assert(session != 0);
+                assert(patina_sparkle_status(session) == 1);
+                assert(PatinaStart(@"0.3.0", @"Synthetic localized failure") == 0);
+            });
+            assert(!updater.checked);
+            drainMain();
+            assert(updater.checked);
+            assert(patina_sparkle_status(session) == 2);
+            SyntheticUpdateItem *item = [SyntheticUpdateItem new];
+            NSError *error = nil;
+            item.displayVersionString = @"0.3.0";
+            assert(![delegate updater:nil shouldProceedWithUpdate:item updateCheck:0 error:&error]);
+            assert(error != nil);
+            assert([error.localizedDescription isEqual:@"Synthetic localized failure"]);
+            item.displayVersionString = @"0.2.0";
+            assert([delegate updater:nil shouldProceedWithUpdate:item updateCheck:0 error:NULL]);
+            assert([delegate updater:nil shouldPostponeRelaunchForUpdate:item untilInvokingBlock:^{ installs++; }]);
+            assert(patina_sparkle_status(session) == 3);
+            assert(installs == 0);
+            background(^{
+                patina_sparkle_allow_restart(session);
+                assert(patina_sparkle_status(session) == 6);
+            });
+            assert(installs == 0);
+            drainMain();
+            assert(installs == 1);
+            assert(delegate.restartHandler == nil);
+            // Root disposal wins even after approval was queued to AppKit main.
+            assert([delegate updater:nil shouldPostponeRelaunchForUpdate:item untilInvokingBlock:^{ installs++; }]);
+            background(^{
+                patina_sparkle_allow_restart(session);
+                patina_sparkle_cancel(session);
+                assert(patina_sparkle_status(session) == 0);
+            });
+            drainMain();
+            assert(installs == 1);
+            assert(delegate.restartHandler == nil);
+            assert(PatinaUpdaterController == nil);
+            assert(PatinaUpdaterDelegate == nil);
+        }
+        assert(updater == nil);
+        assert(Aborted == 1);
         // A stale callback/approval cannot modify or authorize a new root.
+        PatinaUpdaterController = [SyntheticController new];
+        ((SyntheticController *)PatinaUpdaterController).updater = [SyntheticUpdater new];
+        PatinaUpdaterDelegate = [PatinaSparkleDelegate new];
         __block uint64_t replacement;
         background(^{
-            replacement = PatinaStart(@"0.3.0");
+            replacement = PatinaStart(@"0.3.0", @"Synthetic localized failure");
             PatinaPublish(session, 5);
             patina_sparkle_allow_restart(session);
         });

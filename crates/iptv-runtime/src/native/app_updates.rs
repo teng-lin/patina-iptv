@@ -4,6 +4,7 @@
 pub mod appimage;
 mod download;
 pub mod github;
+pub(crate) mod pending;
 mod selection;
 pub mod state;
 mod trust;
