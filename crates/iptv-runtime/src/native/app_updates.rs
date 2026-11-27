@@ -3,7 +3,9 @@
 #[cfg(target_os = "linux")]
 pub mod appimage;
 mod download;
+pub mod github;
 mod selection;
+pub mod state;
 mod trust;
 #[cfg(windows)]
 mod windows;

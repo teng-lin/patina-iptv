@@ -122,7 +122,7 @@ pub static PAGES: &[Page] = &[
         key: "about",
         parts: &[
             Part::Keys(&["general.about"]),
-            Part::Offered(&["general.check_updates"]),
+            Part::Offered(&["general.check_updates", "general.app_update_frequency"]),
             Part::Keys(&["about.privacy_policy"]),
         ],
     },

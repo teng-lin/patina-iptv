@@ -366,6 +366,11 @@ pub struct Ui {
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
     update_dialog_open: Signal<bool>,
+    update_revision: Signal<u64>,
+    update_ready: Signal<bool>,
+    update_install_busy: Signal<bool>,
+    update_focus: Signal<usize>,
+    update_notes_scroll: ui_kit::FocusScroll,
     /// Each player surface's stream, health, position, size and tracks;
     /// the channel history (`player.rs`).
     pub player: player::Player,
@@ -506,6 +511,11 @@ impl Ui {
             parental: signal(None),
             settings_screen: signal(None),
             update_dialog_open: signal(false),
+            update_revision: signal(0),
+            update_ready: signal(false),
+            update_install_busy: signal(false),
+            update_focus: signal(0),
+            update_notes_scroll: ui_kit::FocusScroll::new(),
             player,
             player_surface: 0,
             media: media::Media::new(),
@@ -730,6 +740,7 @@ fn ready_app(input: Stored<Option<input::InputScope>>) -> impl IntoElement {
     performance_probe::bind(ui);
     runtime_wiring::start(ui);
     guide_clock::start(ui);
+    settings_view::updates::bind(ui);
     player::bind(ui);
     player::watch_time::bind(ui);
     data::pages::bind(ui);
@@ -923,6 +934,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
         .child(backup::layer(ui))
+        .child(settings_view::updates::layer(ui))
         .child(cast_pairing::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup_view::store_failure_layer(ui))
@@ -1172,6 +1184,14 @@ pub(crate) fn go_back(ui: Ui) -> bool {
                 true
             }
             _ if top == Some(Overlay::RestoreReview) => backup::back(ui),
+            _ if top == Some(Overlay::AppUpdateNotice) => {
+                settings_view::updates::dismiss_notice(ui);
+                true
+            }
+            _ if top == Some(Overlay::AppUpdate) => {
+                settings_view::updates::close(ui);
+                true
+            }
             _ if top == Some(Overlay::Wizard) => wizard_view::back(ui),
             _ if top == Some(Overlay::Vod) => vod_view::back(ui),
             _ if top == Some(Overlay::Recordings) => recordings_view::back(ui),

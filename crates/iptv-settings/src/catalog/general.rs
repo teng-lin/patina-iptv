@@ -114,6 +114,13 @@ pub static GENERAL: &[Setting] = &[
     // default: ours
     general(
         "updates",
+        "general.app_update_frequency",
+        choice(&APP_UPDATE_FREQUENCY, "weekly"),
+        key("How often to check for new app versions. Downloads and installation require confirmation."),
+    ),
+    // Legacy backup key; never grants permission to download or install.
+    general(
+        "updates",
         "general.auto_update",
         boolean(false),
         key("Install new versions automatically where the app distributes its own updates."),

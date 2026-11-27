@@ -7,9 +7,23 @@ app=$1
 find "$app/Contents" -type f \( -name '*.dylib' -o -perm -111 \) -print0 |
   while IFS= read -r -d '' binary; do
     if file "$binary" | grep -q 'Mach-O'; then
-      codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$binary"
+      codesign --force --options runtime --timestamp --preserve-metadata=entitlements --sign "$MACOS_SIGN_IDENTITY" "$binary"
     fi
   done
+# Framework/XPC/app resource envelopes must be sealed after their executable
+# children. Sparkle includes nested helper bundles; signing only loose binaries
+# leaves their enclosing signatures invalid. Do not use --deep for signing.
+python3 - "$app" "$MACOS_SIGN_IDENTITY" <<'PY'
+from pathlib import Path
+import subprocess
+import sys
+app, identity = Path(sys.argv[1]), sys.argv[2]
+bundles = [p for p in (app / "Contents").rglob("*")
+           if p.is_dir() and not p.is_symlink() and p.suffix in (".app", ".xpc", ".framework")]
+for bundle in sorted(bundles, key=lambda p: len(p.parts), reverse=True):
+    subprocess.run(["codesign", "--force", "--options", "runtime", "--timestamp",
+                    "--preserve-metadata=entitlements", "--sign", identity, str(bundle)], check=True)
+PY
 codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$app"
 # Every Mach-O, the pinned libmpv runtime in Contents/Frameworks included,
 # must carry this identity's signature with the hardened runtime: notarization

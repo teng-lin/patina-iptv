@@ -40,8 +40,9 @@ async fn fetch(asset: ReleaseAsset, directory: PathBuf) -> Option<TempPath> {
         ..Default::default()
     })
     .ok()?;
-    let mut request = HttpRequest::get(&asset.url);
-    request.public_only = true;
+    let (url, public_only) = endpoint(&asset)?;
+    let mut request = HttpRequest::get(url);
+    request.public_only = public_only;
     let response = client.fetch_stream(request).await.ok()?;
     if response.status != 200
         || response
@@ -51,6 +52,17 @@ async fn fetch(asset: ReleaseAsset, directory: PathBuf) -> Option<TempPath> {
         return None;
     }
     receive(response.body, directory, asset.length, &asset.sha256).await
+}
+
+fn endpoint(asset: &ReleaseAsset) -> Option<(String, bool)> {
+    // Test the real streaming/hash/cleanup path without changing the immutable
+    // asset selected from authenticated metadata. Never present in a package.
+    #[cfg(all(feature = "test-support", debug_assertions))]
+    if let Some(value) = std::env::var_os("IPTV_TEST_UPDATE_DOWNLOAD_API") {
+        let value = value.into_string().ok()?;
+        return super::github::fixture_endpoint(&value).then_some((value, false));
+    }
+    Some((asset.url.clone(), true))
 }
 
 pub(super) async fn receive(
