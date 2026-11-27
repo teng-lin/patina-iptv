@@ -7,6 +7,11 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+### Added
+
+- Cast live channels from Android phones and tablets to Chromecast and AirPlay
+  receivers on the local network. Use **Play here** to return to your device.
+
 ## [0.1.11] - 2026-11-27
 
 ### Added
