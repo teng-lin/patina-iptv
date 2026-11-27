@@ -237,13 +237,15 @@ def stage_cast_apks(root, apk, cast_test):
     return app_copy, test_copy
 
 
-def run_cast_test(serial, apk, test_apk, output, collect):
+def run_cast_test(serial, apk, test_apk, output, token, collect):
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise ValueError("Cast platform tests require an owned-run token")
     adb(serial, "install", "-r", str(apk))
     adb(serial, "install", "-t", "-r", str(test_apk))
     adb(serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP")
     adb(serial, "shell", "wm", "dismiss-keyguard")
     adb(serial, "shell", "settings", "put", "secure", "immersive_mode_confirmations", "confirmed")
-    command = ["adb", "-s", serial, "shell", "am", "instrument", "-w", "-r"]
+    command = ["adb", "-s", serial, "shell", "am", "instrument", "-w", "-r", "-e", "patinaOwnedRun", token]
     if collect:
         command += ["-e", "coverage", "true"]
     command.append(f"{CAST_TEST_PACKAGE}/{CAST_TEST_RUNNER}")
@@ -372,7 +374,7 @@ def main():
         else:
             raise RuntimeError("owned emulator boot timed out")
         if cast_test:
-            run_cast_test(serial, apk, cast_test, output, args.cast_platform_coverage)
+            run_cast_test(serial, apk, cast_test, output, token, args.cast_platform_coverage)
         else:
             command = (["python3", str(ROOT / "tools/ci/android-release-smoke.py")] if args.release else
                        ["bash", str(ROOT / "tools/ci/android-smoke.sh")])

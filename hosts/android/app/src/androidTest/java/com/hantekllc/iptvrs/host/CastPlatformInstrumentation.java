@@ -40,11 +40,13 @@ public final class CastPlatformInstrumentation extends Instrumentation {
     private static final int CAN_PAUSE = 2;
 
     private boolean collectCoverage;
+    private String ownedRunToken;
 
     @Override
     public void onCreate(Bundle arguments) {
         super.onCreate(arguments);
         collectCoverage = arguments != null && "true".equals(arguments.getString("coverage"));
+        ownedRunToken = arguments == null ? null : arguments.getString("patinaOwnedRun");
         start();
     }
 
@@ -59,6 +61,8 @@ public final class CastPlatformInstrumentation extends Instrumentation {
         test.putInt("current", 1);
         sendStatus(1, test);
         try {
+            require(ownedRunToken != null && ownedRunToken.matches("[0-9a-f]{32}"),
+                    "start the test with the owned disposable profile runner");
             require(VALIDATION_PACKAGE.equals(context.getPackageName())
                     && (context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0,
                     "debuggable validation app required");
@@ -172,24 +176,21 @@ public final class CastPlatformInstrumentation extends Instrumentation {
         Field instance = field("instance");
         Field media = field("media");
         Field wake = field("wake");
+        Field lastStart = field("lastStart");
         long stale = CAST_ID - 1;
         long replacement = CAST_ID + 1;
-        require(CastHost.start(stale, address, topology + ",stale"), "queued old topology");
         try {
-            waitForIdleSync();
-            await("obsolete route has no service",
-                    () -> onMain(() -> instance.get(null) == null) && !isForeground(activities));
             require(CastHost.start(CAST_ID, address, topology), "start selected LAN");
             ServiceSnapshot running = awaitValue("connected-device service and wake lock",
                     () -> isForeground(activities) ? onMain(() -> {
-                        Object service = instance.get(null);
+                        CastPlaybackService service = (CastPlaybackService) instance.get(null);
                         if (service == null) {
                             return null;
                         }
                         PowerManager.WakeLock lock = (PowerManager.WakeLock) wake.get(service);
                         MediaSession session = (MediaSession) media.get(service);
                         return lock != null && lock.isHeld() && session != null
-                            ? new ServiceSnapshot(lock, session.getController()) : null;
+                            ? new ServiceSnapshot(service, lock, session.getController()) : null;
                     }) : null);
             PowerManager.WakeLock wakeLock = running.wakeLock;
             MediaController controller = running.controller;
@@ -201,15 +202,19 @@ public final class CastPlatformInstrumentation extends Instrumentation {
                 .filter(action -> action.getAction().equals("STOP"))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("session has Stop casting control"));
+            int liveStart = onMain(() -> lastStart.getInt(running.service));
+            require(CastHost.start(stale, address, topology + ",stale"), "queued old topology");
+            await("active service processed the stale start", () -> onMain(() ->
+                instance.get(null) == running.service && lastStart.getInt(running.service) > liveStart));
+            // Keep the stale request present so an incorrectly admitted lease
+            // would publish Paused on the current media session.
+            CastHost.playback(stale, PAUSED, CAN_PLAY | CAN_PAUSE);
+            waitForIdleSync();
+            require(state(controller) == PlaybackState.STATE_PLAYING, "stale playback cannot change the session");
             controller.getTransportControls().play();
             controller.getTransportControls().pause();
             controller.getTransportControls().stop();
             controller.getTransportControls().sendCustomAction(stop, new Bundle());
-            // Leave the stale request present until this observable check. An
-            // incorrectly admitted lease would publish the Paused state here.
-            CastHost.playback(stale, PAUSED, CAN_PLAY | CAN_PAUSE);
-            waitForIdleSync();
-            require(state(controller) == PlaybackState.STATE_PLAYING, "stale playback cannot change the session");
 
             require(CastHost.start(replacement, address, topology), "replacement route queued");
             // A playback update follows the new lease becoming available to the service.
@@ -332,10 +337,12 @@ public final class CastPlatformInstrumentation extends Instrumentation {
     }
 
     private static final class ServiceSnapshot {
+        final CastPlaybackService service;
         final PowerManager.WakeLock wakeLock;
         final MediaController controller;
 
-        ServiceSnapshot(PowerManager.WakeLock wakeLock, MediaController controller) {
+        ServiceSnapshot(CastPlaybackService service, PowerManager.WakeLock wakeLock, MediaController controller) {
+            this.service = service;
             this.wakeLock = wakeLock;
             this.controller = controller;
         }

@@ -110,8 +110,8 @@ commands to the Rust sender and playback on a receiver are outside its scope.
 
 After preparing the native validation library with `tools/sync-host.sh`,
 build the app and test APKs together. Gradle creates the debug instrumentation
-variant only for the validation application ID. Run it through the Python
-disposable profile runner.
+variant only for the validation application ID. The Python disposable profile
+runner supplies the owned-run token required by the instrumentation test.
 
 ```sh
 (cd hosts/android && IPTV_VALIDATION_APP_ID=com.hantekllc.iptvrs.validation \
@@ -123,8 +123,8 @@ python3 tools/ci/disposable-avd.py "$HOME/.android/avd/tab36.avd" \
 
 The runner snapshots and verifies both APKs before launching the disposable
 profile, then installs those copies. The run directory records the two APK
-hashes and the instrumentation result. For
-an app APK built with JaCoCo Android test coverage enabled, pass
+hashes and the instrumentation result. For an app APK built with JaCoCo
+Android test coverage enabled, pass
 `--cast-platform-coverage` to save the execution data in that run directory.
 
 ## Physical-device acceptance
