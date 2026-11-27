@@ -2145,12 +2145,16 @@ name = "iptv-cast"
 version = "0.1.11"
 dependencies = [
  "dbus",
+ "futures-util",
  "mdns-sd",
+ "mime",
  "prost",
  "rustls-webpki",
  "serde_json",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
+ "url",
  "x509-cert",
 ]
 
@@ -4828,6 +4832,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
