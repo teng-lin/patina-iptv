@@ -9,8 +9,39 @@ use iptv_core::{
     capabilities::FormFactor,
     cast::{Command, Controls, Error, Receiver, RemoteState, Target},
 };
-use nsh_core::prelude::set_timeout;
+use iptv_presentation::cast::{Prompt, State};
+use nsh_core::prelude::{Memo, Signal, Stored, computed, set_timeout, signal, stored};
 use std::time::Duration;
+
+#[derive(Clone, Copy)]
+pub(crate) struct CastUi {
+    pub(crate) state: Signal<State>,
+    pub(crate) busy: Memo<bool>,
+    pub(crate) controls: Memo<Controls>,
+    pub(crate) picker_open: Memo<bool>,
+    pub(crate) discovering: Memo<bool>,
+    pub(crate) remote: Memo<bool>,
+    pub(crate) prompt: Memo<Option<Prompt>>,
+    pub(crate) pairing: Stored<Option<iptv_runtime::cast::PairingRequest>>,
+    pub(crate) external: crate::external_player::ExternalUi,
+}
+
+impl CastUi {
+    pub(crate) fn new() -> Self {
+        let state = signal(State::default());
+        Self {
+            state,
+            busy: computed(move || state.with(|state| state.busy)),
+            controls: computed(move || state.with(|state| state.controls)),
+            picker_open: computed(move || state.with(|state| state.picker_open)),
+            discovering: computed(move || state.with(|state| state.discovering)),
+            remote: computed(move || state.with(|state| state.remote)),
+            prompt: computed(move || state.with(State::prompt)),
+            pairing: stored(None),
+            external: crate::external_player::ExternalUi::new(),
+        }
+    }
+}
 
 pub(super) fn available(ui: Ui) -> bool {
     runtime().cast_available()
@@ -18,12 +49,12 @@ pub(super) fn available(ui: Ui) -> bool {
         && ui.player_surface == 0
         && !crate::multiview::is_open(ui)
         && !crate::pip::in_window(ui)
-        && (ui.cast_remote.get()
+        && (ui.cast.remote.get()
             || (ui.playing.get().is_some() && ui.playback.get() == Playback::Live))
 }
 
 pub(super) fn local_blocked(ui: Ui) -> bool {
-    if ui.cast_remote.get_untracked() || ui.cast_busy.get_untracked() {
+    if ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked() {
         notify(tr("Stop casting before starting local playback."));
         true
     } else {
@@ -35,18 +66,18 @@ pub(super) fn open(ui: Ui) {
     discover(ui);
 }
 pub(super) fn discover(ui: Ui) {
-    if ui.cast_discovering.get_untracked() {
+    if ui.cast.discovering.get_untracked() {
         return;
     }
     chooser::show_receivers(ui, Vec::new());
     if !runtime().network_cast_available() {
         return;
     }
-    ui.cast_discovering.set(true);
+    ui.cast.state.update(|state| state.discovering = true);
     let channel = ui.player.main().key.get_untracked();
     crate::tasks::spawn_in_app(async move {
         let result = runtime().cast_receivers().await;
-        ui.cast_discovering.set(false);
+        ui.cast.state.update(|state| state.discovering = false);
         let still_open = ui.chooser.with_untracked(|open| {
             open.as_ref()
                 .is_some_and(|open| open.kind == chooser::Kind::Cast)
@@ -68,9 +99,9 @@ pub(super) fn destination_selected(value: &str) -> bool {
     }
 }
 pub(super) fn play_here(ui: Ui) {
-    if ui.cast_busy.get_untracked() {
+    if ui.cast.busy.get_untracked() {
         let owner = runtime();
-        let ticket = if ui.cast_remote.get_untracked() {
+        let ticket = if ui.cast.remote.get_untracked() {
             // Let an outstanding command finish on the current receiver.
             owner.cast_intent()
         } else {
@@ -80,8 +111,10 @@ pub(super) fn play_here(ui: Ui) {
             owner.cancel_pending_native_cast();
             ticket
         };
-        ui.cast_local_pending.set(Some(ticket));
-    } else if ui.cast_remote.get_untracked() {
+        ui.cast
+            .state
+            .update(|state| state.local_pending = Some(ticket));
+    } else if ui.cast.remote.get_untracked() {
         control(ui, Command::Stop, true);
     }
 }
@@ -98,7 +131,7 @@ pub(super) fn select(ui: Ui, receiver: Receiver) {
 }
 pub(super) fn select_airplay(ui: Ui) {
     if runtime().native_cast_available()
-        && !ui.cast_busy.get_untracked()
+        && !ui.cast.busy.get_untracked()
         && !runtime()
             .cast_target()
             .is_some_and(|(target, _)| target == Target::AirPlay)
@@ -116,7 +149,7 @@ pub(super) fn change(ui: Ui, channel: usize) -> bool {
     }
 }
 fn start(ui: Ui, channel: usize, receiver: Target) {
-    if ui.cast_busy.get_untracked() {
+    if ui.cast.busy.get_untracked() {
         return;
     }
     let airplay = receiver == Target::AirPlay;
@@ -147,7 +180,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
     let old_paused = ui.paused.get_untracked();
     let ticket = owner.next_cast_intent();
     let current = move || runtime().cast_intent_current(ticket);
-    ui.cast_busy.set(true);
+    ui.cast.state.update(|state| state.busy = true);
     if airplay && runtime().native_cast_view().is_none() {
         chooser::open(ui, chooser::Kind::AirPlay);
     }
@@ -240,7 +273,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
                     }
                 }
                 retired = true;
-                ui.cast_remote.set(false);
+                ui.cast.state.update(|state| state.remote = false);
             }
             let prepared = match prepared {
                 Some(prepared) => prepared,
@@ -281,9 +314,10 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
             }
             ui.player.main().key.set(Some(key.clone()));
             ui.playing.set(schedule().find_channel(&key));
-            ui.cast_controls
-                .set(owner.cast_controls().unwrap_or(Controls::NONE));
-            ui.cast_remote.set(true);
+            ui.cast
+                .state
+                .update(|state| state.controls = owner.cast_controls().unwrap_or(Controls::NONE));
+            ui.cast.state.update(|state| state.remote = true);
             ui.paused.set(paused);
             monitor(ui, ticket);
             Ok(())
@@ -292,7 +326,7 @@ fn start(ui: Ui, channel: usize, receiver: Target) {
         if airplay && result.is_err() {
             owner.flush_native_cast().await;
         }
-        ui.cast_busy.set(false);
+        ui.cast.state.update(|state| state.busy = false);
         if let Err(e) = result {
             let returning_local = pending_local_current(ui);
             if matches!(e, Error::PairingIdentityChanged | Error::PairingInvalid)
@@ -350,21 +384,21 @@ fn monitor(ui: Ui, ticket: u64) {
         crate::tasks::spawn_in_app(async move {
             match runtime().poll_cast(ticket).await {
                 ended @ (Ok(RemoteState::Ended) | Err(Error::StopUnconfirmed))
-                    if runtime().cast_target().is_none() && ui.cast_remote.get_untracked() =>
+                    if runtime().cast_target().is_none() && ui.cast.remote.get_untracked() =>
                 {
-                    ui.cast_remote.set(false);
+                    ui.cast.state.update(|state| state.remote = false);
                     ui.playing.set(None);
                     if let Err(error) = ended {
                         report(error);
                     }
-                    if !ui.cast_busy.get_untracked() {
+                    if !ui.cast.busy.get_untracked() {
                         chooser::open(ui, chooser::Kind::CastEnded);
                     }
                 }
                 Ok(state) => {
                     if runtime().active_cast_ticket() == Some(ticket) {
                         if let Some(controls) = runtime().cast_controls() {
-                            ui.cast_controls.set(controls);
+                            ui.cast.state.update(|state| state.controls = controls);
                         }
                         if matches!(state, RemoteState::Playing | RemoteState::Paused) {
                             ui.paused.set(state == RemoteState::Paused);
@@ -389,34 +423,36 @@ pub(crate) fn set_paused(ui: Ui, paused: bool) {
     }
 }
 pub(crate) fn supports(ui: Ui, command: Command) -> bool {
-    !ui.cast_remote.get() || ui.cast_controls.with(|controls| controls.supports(command))
+    !ui.cast.remote.get() || ui.cast.controls.with(|controls| controls.supports(command))
 }
 pub(crate) fn stop(ui: Ui) {
     control(ui, Command::Stop, false);
 }
 fn control(ui: Ui, command: Command, resume_local: bool) {
-    if ui.cast_busy.get_untracked() {
+    if ui.cast.busy.get_untracked() {
         if command == Command::Stop && !resume_local {
-            ui.cast_stop_pending.set(Some(runtime().cast_intent()));
+            ui.cast
+                .state
+                .update(|state| state.stop_pending = Some(runtime().cast_intent()));
         }
         return;
     }
     let Some((_, key)) = runtime().cast_target() else {
         return;
     };
-    ui.cast_busy.set(true);
+    ui.cast.state.update(|state| state.busy = true);
     crate::tasks::spawn_in_app(async move {
         let result = runtime().cast_command(command).await;
-        ui.cast_busy.set(false);
+        ui.cast.state.update(|state| state.busy = false);
         match result {
             Ok(()) | Err(Error::StopUnconfirmed) if command == Command::Stop => {
                 // The monitor may already have reported this result and cleared the cast.
-                if ui.cast_remote.get_untracked()
+                if ui.cast.remote.get_untracked()
                     && let Err(error) = result
                 {
                     report(error);
                 }
-                ui.cast_remote.set(false);
+                ui.cast.state.update(|state| state.remote = false);
                 ui.playing.set(None);
                 if resume_local
                     && !pending_stop_current(ui)
@@ -425,7 +461,7 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
                     ui.play(ch, Playback::Live);
                 }
             }
-            _ if command != Command::Stop && !ui.cast_remote.get_untracked() => {}
+            _ if command != Command::Stop && !ui.cast.remote.get_untracked() => {}
             Ok(()) => ui.paused.set(command == Command::Pause),
             Err(e) => report(e),
         }
@@ -433,21 +469,23 @@ fn control(ui: Ui, command: Command, resume_local: bool) {
     });
 }
 fn pending_stop_current(ui: Ui) -> bool {
-    ui.cast_stop_pending
-        .get_untracked()
+    ui.cast
+        .state
+        .with_untracked(|state| state.stop_pending)
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
 fn pending_local_current(ui: Ui) -> bool {
-    ui.cast_local_pending
-        .get_untracked()
+    ui.cast
+        .state
+        .with_untracked(|state| state.local_pending)
         .is_some_and(|ticket| runtime().cast_intent_current(ticket))
 }
 pub(crate) fn finish_pending_stop(ui: Ui) {
     let stop_requested = pending_stop_current(ui);
-    ui.cast_stop_pending.set(None);
+    ui.cast.state.update(|state| state.stop_pending = None);
     let local = pending_local_current(ui);
-    ui.cast_local_pending.set(None);
-    if ui.cast_remote.get_untracked() {
+    ui.cast.state.update(|state| state.local_pending = None);
+    if ui.cast.remote.get_untracked() {
         if stop_requested {
             stop(ui);
         } else if local {
@@ -475,7 +513,7 @@ pub(crate) fn finish_pending_stop(ui: Ui) {
     }
 }
 pub(crate) fn volume(ui: Ui, command: Command) -> bool {
-    if !ui.cast_remote.get_untracked() {
+    if !ui.cast.remote.get_untracked() {
         return false;
     }
     if supports(ui, command) {
@@ -525,5 +563,55 @@ fn report(error: Error) {
         Error::Denied => notify(tr("Playback is no longer authorized.")),
         Error::Unsupported => notify(tr("This channel cannot be cast.")),
         Error::StopUnconfirmed => notify(tr("Could not confirm that the TV stopped playback.")),
+    }
+}
+
+#[cfg(test)]
+mod projection_tests {
+    use super::*;
+    use nsh_core::prelude::*;
+
+    #[component]
+    fn CastProjections() -> impl IntoElement {
+        let cast = CastUi::new();
+        let remote_updates = signal(0);
+        effect(move || {
+            cast.remote.get();
+            cast.controls.get();
+            untracked(|| remote_updates.update(|updates| *updates += 1));
+        });
+        view()
+            .child(text(move || {
+                format!("Remote updates {}", remote_updates.get())
+            }))
+            .child(text(move || {
+                format!("Discovery {}", cast.discovering.get())
+            }))
+            .child(
+                view()
+                    .label("Start discovery")
+                    .h(px(40.0))
+                    .on_press(move || cast.state.update(|state| state.discovering = true)),
+            )
+            .child(
+                view()
+                    .label("Connect remotely")
+                    .h(px(40.0))
+                    .on_press(move || cast.state.update(|state| state.remote = true)),
+            )
+    }
+
+    #[test]
+    fn receiver_discovery_does_not_notify_remote_controls() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<CastProjections>(),
+        ))
+        .unwrap();
+        app.wait_for("text:Remote updates 1").unwrap();
+        app.press("label:Start discovery").unwrap();
+        app.wait_for("text:Discovery true").unwrap();
+        assert!(app.screen().matches("text:Remote updates 1").unwrap());
+        app.press("label:Connect remotely").unwrap();
+        app.wait_for("text:Remote updates 2").unwrap();
     }
 }

@@ -1,6 +1,78 @@
 //! Dialog flow for setting, changing and entering a parental PIN.
 
-use iptv_core::parental::Pin;
+use iptv_core::parental::{Pin, Target};
+use std::rc::Rc;
+
+#[derive(Clone)]
+pub struct PromptState {
+    pub dialog: Dialog,
+    pub target: Target,
+    request: Rc<()>,
+    retired_verify: Option<Rc<()>>,
+    pub blocks: Option<Vec<Target>>,
+    pub locked_on_hide: bool,
+}
+
+impl PartialEq for PromptState {
+    fn eq(&self, other: &Self) -> bool {
+        self.dialog == other.dialog
+            && self.target == other.target
+            && self.blocks == other.blocks
+            && self.locked_on_hide == other.locked_on_hide
+            && Rc::ptr_eq(&self.request, &other.request)
+            && match (&self.retired_verify, &other.retired_verify) {
+                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+impl PromptState {
+    pub fn new(phase: Phase, target: Target, blocks: Option<Vec<Target>>) -> Self {
+        Self {
+            dialog: Dialog::new(phase),
+            target,
+            request: Rc::new(()),
+            retired_verify: None,
+            blocks,
+            locked_on_hide: false,
+        }
+    }
+
+    pub fn request(&self) -> Rc<()> {
+        self.request.clone()
+    }
+
+    pub fn matches_request(&self, request: &Rc<()>) -> bool {
+        Rc::ptr_eq(&self.request, request)
+    }
+
+    /// Retire verification and suspend any recovery code until the viewer returns.
+    pub fn hide(&mut self) {
+        self.locked_on_hide = true;
+        if self.dialog.busy
+            && self.dialog.phase == Phase::Unlock
+            && self.dialog.has_held_notice()
+            && self.retired_verify.is_none()
+        {
+            self.retired_verify = Some(std::mem::replace(&mut self.request, Rc::new(())));
+        }
+        self.dialog.suspend_notice();
+    }
+
+    /// Acknowledge the retired reply so the viewer can try the PIN again.
+    pub fn acknowledge_retired(&mut self, request: &Rc<()>) {
+        if self
+            .retired_verify
+            .as_ref()
+            .is_some_and(|retired| Rc::ptr_eq(retired, request))
+        {
+            self.retired_verify = None;
+            self.dialog.fail(String::new());
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {

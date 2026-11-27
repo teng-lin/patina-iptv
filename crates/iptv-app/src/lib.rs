@@ -123,6 +123,7 @@ mod player_panels;
 mod playlists_view;
 mod rail;
 mod remote_editor;
+mod request_ui;
 mod runtime_events;
 mod runtime_owner;
 mod runtime_wiring;
@@ -271,17 +272,7 @@ pub struct Ui {
     /// Guide autoplay held after the main window closed with recordings
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
-    pub(crate) cast_busy: Signal<bool>,
-    pub(crate) cast_controls: Signal<iptv_core::cast::Controls>,
-    pub(crate) cast_pairing: Signal<Option<cast_pairing::Pending>>,
-    pub(crate) cast_picker_open: Signal<bool>,
-    pub(crate) cast_discovering: Signal<bool>,
-    pub(crate) cast_local_pending: Signal<Option<u64>>,
-    pub(crate) cast_stop_pending: Signal<Option<u64>>,
-    pub(crate) cast_remote: Signal<bool>,
-    pub(crate) external_request: Signal<u64>,
-    pub(crate) external_handoff_target: Signal<Option<(u64, iptv_core::parental::Target)>>,
-    pub(crate) external_playback: Signal<Option<external_player::Active>>,
+    pub(crate) cast: casting::CastUi,
     pub pending_zap: Signal<Option<iptv_presentation::browse_playback::Target>>,
     /// The pending zap is a touch's (a swipe, the play bar's channel
     /// buttons, a screen reader's action): its banner shows when it tunes,
@@ -337,9 +328,8 @@ pub struct Ui {
     pub chooser: Signal<Option<chooser::Open>>,
     /// The favorites editor, when open.
     pub editor: Signal<Option<FavoritesEditor>>,
-    pub organization: Signal<Option<organization_view::Open>>,
-    organization_generation: Signal<u64>,
-    pub custom_groups: Signal<Option<custom_groups::Open>>,
+    pub(crate) organization: request_ui::RequestUi<organization_view::Open>,
+    pub(crate) custom_groups: request_ui::RequestUi<custom_groups::Open>,
     pub remote_editor: Signal<Option<iptv_nav::remap::Editor>>,
     /// The search screen, while open (also while a result it chose plays).
     pub search: Signal<Option<search_view::Screen>>,
@@ -362,7 +352,7 @@ pub struct Ui {
     pub guide_repair_cancel: Stored<Option<iptv_import::CancelToken>>,
     pub guide_inspect_cancel: Stored<Option<iptv_import::CancelToken>>,
     /// The guide data chooser of a channel, when open.
-    pub guide_assign: Signal<Option<guide_assign_view::Open>>,
+    pub(crate) guide_assign: request_ui::RequestUi<guide_assign_view::Open>,
     /// The settings screen, when open.
     pub parental: Signal<Option<parental_view::Open>>,
     pub settings_screen: Signal<Option<iptv_presentation::settings::screen::Screen>>,
@@ -468,17 +458,7 @@ impl Ui {
             focus: signal(Focus::default()),
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
-            cast_busy: signal(false),
-            cast_controls: signal(iptv_core::cast::Controls::NONE),
-            cast_pairing: signal_with(None, SignalEquals::Never),
-            cast_picker_open: signal(false),
-            cast_discovering: signal(false),
-            cast_local_pending: signal(None),
-            cast_stop_pending: signal(None),
-            cast_remote: signal(false),
-            external_request: signal(0),
-            external_handoff_target: signal(None),
-            external_playback: signal(None),
+            cast: casting::CastUi::new(),
             pending_zap: signal(None),
             touch_zapped: signal(false),
             swipe: signal(None),
@@ -533,9 +513,8 @@ impl Ui {
             sleep: signal(SleepTimer::default()),
             chooser: signal(None),
             editor: signal(None),
-            organization: signal(None),
-            organization_generation: signal(0),
-            custom_groups: signal(None),
+            organization: request_ui::RequestUi::new(),
+            custom_groups: request_ui::RequestUi::new(),
             remote_editor: signal(None),
             search: signal(None),
             search_history_revision: signal(0),
@@ -553,7 +532,7 @@ impl Ui {
             guide_repair: signal(None),
             guide_repair_cancel: stored(None),
             guide_inspect_cancel: stored(None),
-            guide_assign: signal(None),
+            guide_assign: request_ui::RequestUi::new(),
             parental: signal(None),
             settings_screen: signal(None),
             update_dialog_open: signal(false),

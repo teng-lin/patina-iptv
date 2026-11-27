@@ -28,44 +28,10 @@ use crate::{Playback, Ui, tint};
 /// Rows shown at once; longer lists scroll (seven fit a TV's 540 dp).
 const MAX_ROWS: usize = 7;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    Picture,
-    Cast,
-    AirPlay,
-    CastEnded,
-    More,
-    Volume,
-    Sleep,
-    Track(Track),
-    AudioDelay,
-    /// The recently watched channels.
-    History,
-    /// No or Yes before the app leaves (`crate::confirm_leaving`).
-    Leave,
-}
+pub use iptv_presentation::chooser::Kind;
+use iptv_presentation::chooser::More;
 
-/// The open chooser.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Open {
-    pub kind: Kind,
-    pub labels: Vec<String>,
-    /// What each entry sets, for tracks (a track id, `auto`, `off`) and
-    /// history (a channel key).
-    values: Vec<String>,
-    /// Snapshot behind both the translated labels and their opaque pick values.
-    tracks: Option<iptv_core::tracks::Tracks>,
-    receivers: Vec<iptv_core::cast::Receiver>,
-    // Preserve action identity for a press and keep the originating desktop window.
-    more: Option<More>,
-    pub list: Chooser,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct More {
-    controls: Vec<iptv_presentation::play_bar::Control>,
-    window: Option<nsh_core::element::desktop::WindowRef>,
-}
+pub type Open = iptv_presentation::chooser::Open<nsh_core::element::desktop::WindowRef>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum RowKey {
@@ -268,7 +234,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             ui.player.main().key.get_untracked().into_iter().collect(),
             0,
         ),
-        Kind::AirPlay if ui.cast_busy.get_untracked() => {
+        Kind::AirPlay if ui.cast.busy.get_untracked() => {
             (vec![tr("Cancel").to_owned()], Vec::new(), 0)
         }
         Kind::AirPlay => (
@@ -315,35 +281,10 @@ fn history(ui: Ui) -> (Vec<String>, Vec<String>, usize) {
     (labels, keys, h.playing.unwrap_or(0))
 }
 
-impl Open {
-    fn for_tracks(kind: Track, tracks: iptv_core::tracks::Tracks) -> Self {
-        let labels = entries_in(&tracks, kind, crate::i18n::language());
-        let values = (0..labels.len())
-            .map(|i| tracks.pick(kind, i).unwrap_or_default())
-            .collect();
-        Self {
-            kind: Kind::Track(kind),
-            list: Chooser::new(labels.len(), tracks.selected_entry(kind)),
-            labels,
-            values,
-            tracks: Some(tracks),
-            receivers: Vec::new(),
-            more: None,
-        }
-    }
-
-    fn track_labels_in(&self, language: &iptv_presentation::i18n::Language) -> Vec<String> {
-        match (self.kind, self.tracks.as_ref()) {
-            (Kind::Track(kind), Some(tracks)) => entries_in(tracks, kind, language),
-            _ => Vec::new(),
-        }
-    }
-}
-
 pub fn open(ui: Ui, kind: Kind) {
     if let Kind::Track(kind) = kind {
         let tracks = ui.player.main().tracks.get_untracked();
-        let open = Open::for_tracks(kind, tracks);
+        let open = Open::for_tracks(kind, tracks, crate::i18n::language());
         if !open.labels.is_empty() {
             ui.chooser.set(Some(open));
         }
@@ -365,7 +306,7 @@ pub fn open(ui: Ui, kind: Kind) {
 }
 
 pub fn close(ui: Ui) {
-    if ui.cast_busy.get_untracked()
+    if ui.cast.busy.get_untracked()
         && ui
             .chooser
             .with_untracked(|open| open.as_ref().is_some_and(|open| open.kind == Kind::AirPlay))
@@ -402,7 +343,7 @@ pub fn pick(ui: Ui, index: usize) {
         return;
     };
     let value = open.values.get(index).cloned().unwrap_or_default();
-    if open.kind == Kind::Cast && value == "local" && ui.cast_busy.get_untracked() {
+    if open.kind == Kind::Cast && value == "local" && ui.cast.busy.get_untracked() {
         crate::casting::play_here(ui);
         return;
     }
@@ -459,7 +400,7 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::AirPlay => {
-            if !ui.cast_busy.get_untracked() {
+            if !ui.cast.busy.get_untracked() {
                 crate::casting::play_here(ui);
             }
         }
@@ -849,7 +790,7 @@ mod snapshot_tests {
             selected_text: Some("original-text-track".into()),
             ..Default::default()
         };
-        let open = Open::for_tracks(Track::Text, live.clone());
+        let open = Open::for_tracks(Track::Text, live.clone(), crate::i18n::language());
         // A late host report replaces/reorders tracks while this chooser stays open.
         live.text = vec![TextTrack {
             id: "late-text-track".into(),

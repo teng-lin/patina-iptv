@@ -2,304 +2,25 @@
 use crate::i18n::{tr, trf};
 use crate::input::dismiss_keyboard;
 use crate::list_rows::{self, Mark, ROW};
-use crate::runtime::{Error, commands::OrganizationItems, model::SourceId};
+use crate::runtime::{Error, model::SourceId};
 use crate::scale::Scale;
 use crate::wizard_view::entry::{self, TextSheet};
 use crate::{Ui, data, ui_kit};
-use iptv_core::organization::{Block, BlockKind, Blocks, Item, Sort};
+use iptv_core::organization::{Block, BlockKind, Item, Sort};
 use iptv_nav::Action;
 use iptv_presentation::guide::Pane;
 use iptv_presentation::lists::ListId;
 use iptv_presentation::organization::{
-    ACTIONS, Action as Edit, Editor, GROUP_SORTS, LEAVE_CHOICES, Mode, step_choice,
+    Action as Edit, Editor, Items, LEAVE_CHOICES, Mode, OrderSave, Placement, step_choice,
 };
 use iptv_presentation::reorder::{Key, LeaveChoice, Outcome};
 use nsh_core::{Checked, prelude::*};
 use std::collections::{HashMap, HashSet};
 
 pub use iptv_library::OrganizationScope as Kind;
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-enum Placement {
-    #[default]
-    Screen,
-    Panel(ListId),
-    Sort(ListId),
-    RenameGroup {
-        restore_name: bool,
-    },
-    Groups,
-    Guide {
-        list: ListId,
-        return_to_groups: bool,
-    },
-}
+pub use iptv_presentation::organization::Open;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Open {
-    /// A source-scoped organization editor, or the whole playlist library.
-    scope: Option<(SourceId, Kind)>,
-    editor: Editor,
-    saving: bool,
-    blocks: Blocks,
-    placement: Placement,
-    custom_from: Option<Sort>,
-    saved_playlist_positions: Option<Vec<SourceId>>,
-    bulk_visibility: Option<(Edit, bool)>,
-    dragging: bool,
-}
-enum OrderSave {
-    Unchanged,
-    Playlists {
-        ids: Vec<SourceId>,
-        already_saved: bool,
-    },
-    Pending {
-        source: SourceId,
-        kind: Kind,
-        original: Vec<String>,
-        order: Vec<String>,
-        expected_sort: Sort,
-        from_custom: bool,
-    },
-}
-
-impl Open {
-    fn new(source: SourceId, kind: Kind, mode: Mode, placement: Placement) -> Self {
-        let mut editor = Editor::new(Vec::new(), None);
-        editor.mode = mode;
-        Self::with_editor(Some((source, kind)), editor, placement)
-    }
-
-    fn with_editor(scope: Option<(SourceId, Kind)>, editor: Editor, placement: Placement) -> Self {
-        Self {
-            scope,
-            editor,
-            saving: false,
-            blocks: Blocks::default(),
-            placement,
-            custom_from: None,
-            saved_playlist_positions: None,
-            bulk_visibility: None,
-            dragging: false,
-        }
-    }
-
-    fn kind(&self) -> Option<&Kind> {
-        self.scope.as_ref().map(|(_, kind)| kind)
-    }
-
-    fn load(
-        &mut self,
-        loaded: OrganizationItems,
-        focus: Option<String>,
-        mode: Mode,
-        initial: Option<Edit>,
-        guide_keys: Option<&HashMap<String, usize>>,
-    ) {
-        let OrganizationItems { rows, sort, blocks } = loaded;
-        self.blocks = blocks;
-        self.editor = Editor::new(rows, focus.clone());
-        self.editor.sort = sort;
-        self.custom_from = (initial == Some(Edit::Sort(Sort::Manual))).then_some(sort);
-        self.editor.mode = mode;
-        self.configure_actions();
-        match initial {
-            Some(Edit::SortOptions) => self.editor.sort_focus = Some(sort),
-            Some(Edit::Rename) if self.editor.focus == focus => {
-                self.editor.text = self.editor.focused().map(|item| item.name.clone());
-            }
-            Some(Edit::Visibility) if self.editor.focus == focus => {
-                if let Some(id) = focus {
-                    self.editor.open_actions(id);
-                }
-            }
-            _ => {}
-        }
-        if mode == Mode::Reorder {
-            let include_hidden = self.placement == Placement::Screen;
-            self.editor.start_reorder(|item| match guide_keys {
-                Some(keys) => keys.contains_key(&item.id),
-                None => include_hidden || !item.hidden,
-            });
-        }
-    }
-
-    fn configure_actions(&mut self) {
-        if self.kind() == Some(&Kind::Groups) {
-            self.editor.set_sorts(GROUP_SORTS);
-        }
-        let mut actions = vec![Edit::Visibility, Edit::Blocking];
-        if self.kind() == Some(&Kind::Groups) {
-            actions.push(Edit::Channels);
-        }
-        if self.kind() != Some(&Kind::Favorites) {
-            actions.push(Edit::SortOptions);
-        }
-        if self.kind() == Some(&Kind::Groups) {
-            actions.extend([Edit::Reorder, Edit::SortChannels]);
-        }
-        actions.extend(ACTIONS.iter().copied().skip(1));
-        self.editor.set_actions(actions);
-    }
-
-    fn restore_items(&mut self, loaded: OrganizationItems) {
-        self.blocks = loaded.blocks;
-        self.editor.sort = loaded.sort;
-        self.editor.reload(loaded.rows);
-    }
-
-    fn refresh(&mut self, loaded: OrganizationItems) {
-        if !self.saving && self.editor.reorder.is_none() {
-            self.restore_items(loaded);
-        }
-    }
-
-    fn begin_save(&mut self) {
-        self.saving = true;
-    }
-
-    fn finish_save(&mut self) {
-        self.saving = false;
-    }
-
-    fn begin_block(&mut self) {
-        self.editor.action = None;
-        self.begin_save();
-    }
-
-    fn finish_block(&mut self, blocks: Blocks) {
-        self.blocks = blocks;
-        self.finish_save();
-    }
-
-    fn finish_edit(&mut self, expected: &Self, loaded: Option<OrganizationItems>) {
-        self.finish_save();
-        if let Some(loaded) = loaded {
-            self.restore_items(loaded);
-        }
-        if self.editor.action == expected.editor.action {
-            self.editor.action = None;
-        }
-        if self.editor.text == expected.editor.text {
-            self.editor.text = None;
-        }
-    }
-
-    fn request_bulk_visibility(&mut self, edit: Edit) {
-        if !self.saving {
-            self.bulk_visibility = Some((edit, false));
-        }
-    }
-
-    fn focus_bulk_visibility(&mut self, confirm: bool) {
-        if let Some((_, focus)) = &mut self.bulk_visibility {
-            *focus = confirm;
-        }
-    }
-
-    fn dismiss_bulk_visibility(&mut self) -> Option<Edit> {
-        self.bulk_visibility.take().map(|(edit, _)| edit)
-    }
-
-    fn activate_row(&mut self, id: String) -> Option<Edit> {
-        if self.saving {
-            return None;
-        }
-        let edit = match self.editor.mode {
-            Mode::Options => {
-                self.editor.open_actions(id);
-                return None;
-            }
-            Mode::Reorder => {
-                if self.scope.is_none()
-                    && let Some(order) = self.editor.reorder.as_mut()
-                    && let Some(item) = order.items().iter().find(|row| row.id == id).cloned()
-                {
-                    if order.selected().is_some() {
-                        order.toggle_selection();
-                    } else {
-                        order.focus_on(&item);
-                        order.toggle_selection();
-                    }
-                }
-                return None;
-            }
-            Mode::Visibility => Edit::Visibility,
-            Mode::Blocking => Edit::Blocking,
-        };
-        self.editor.focus_item(id);
-        Some(edit)
-    }
-
-    fn reorder_key(&mut self, key: Key, drag_editing: bool) -> Outcome<Item> {
-        if self.saving {
-            return Outcome::Ignored;
-        }
-        let Some(order) = &mut self.editor.reorder else {
-            return Outcome::Ignored;
-        };
-        let outcome = if key == Key::Back {
-            order.leave_with_changes(
-                !drag_editing
-                    && (self.custom_from.is_some_and(|sort| sort != Sort::Manual)
-                        || self.saved_playlist_positions.is_some()),
-            )
-        } else {
-            order.key(key)
-        };
-        if matches!(outcome, Outcome::ConfirmLeave) {
-            self.editor.leave_choice = LeaveChoice::Save;
-        }
-        outcome
-    }
-
-    fn resolve_order(&mut self, choice: LeaveChoice) -> Outcome<Item> {
-        if self.saving {
-            return Outcome::Ignored;
-        }
-        self.editor
-            .reorder
-            .as_mut()
-            .map_or(Outcome::Ignored, |order| order.resolve_leave(choice))
-    }
-
-    fn begin_order_save(&mut self) -> Option<OrderSave> {
-        if self.saving || self.dragging {
-            return None;
-        }
-        let (original, order) = self.editor.order_ids()?;
-        if original == order
-            && self.saved_playlist_positions.is_none()
-            && self.custom_from.is_none_or(|sort| sort == Sort::Manual)
-        {
-            return Some(OrderSave::Unchanged);
-        }
-        let Some((source, kind)) = self.scope.clone() else {
-            let ids = order
-                .iter()
-                .map(|id| id.parse().ok().map(SourceId))
-                .collect::<Option<_>>()?;
-            let already_saved = self.saved_playlist_positions.as_ref() == Some(&ids);
-            self.begin_save();
-            return Some(OrderSave::Playlists { ids, already_saved });
-        };
-        self.begin_save();
-        Some(OrderSave::Pending {
-            source,
-            kind,
-            original,
-            order,
-            expected_sort: self.editor.sort,
-            from_custom: self.custom_from.is_some(),
-        })
-    }
-}
-
-async fn items(
-    source: SourceId,
-    kind: &Kind,
-    order: Option<Sort>,
-) -> Result<OrganizationItems, Error> {
+async fn items(source: SourceId, kind: &Kind, order: Option<Sort>) -> Result<Items, Error> {
     crate::runtime::commands::organization_editor(
         &crate::runtime_owner::runtime(),
         source,
@@ -308,16 +29,15 @@ async fn items(
         order,
     )
     .await
-}
-
-fn next_open(ui: Ui) -> u64 {
-    let next = ui.organization_generation.get_untracked().wrapping_add(1);
-    ui.organization_generation.set(next);
-    next
+    .map(|loaded| Items {
+        rows: loaded.rows,
+        sort: loaded.sort,
+        blocks: loaded.blocks,
+    })
 }
 
 fn still_open(ui: Ui, generation: u64) -> bool {
-    untracked(|| ui.organization_generation.try_get()) == Some(generation)
+    ui.organization.is_current(generation)
 }
 
 pub fn open(ui: Ui, source: SourceId, kind: Kind, focus: Option<String>) {
@@ -381,9 +101,8 @@ pub fn open_playlist_reorder(ui: Ui, preferred: Option<SourceId>) {
             .apply(crate::mode::Action::Restore(crate::ViewMode::Guide));
         crate::lists::open_groups(ui);
         crate::browse_playback::hold(ui);
-        next_open(ui);
         ui.organization
-            .set(Some(Open::with_editor(None, editor, Placement::Groups)));
+            .open(Open::with_editor(None, editor, Placement::Groups));
     });
 }
 
@@ -487,9 +206,9 @@ fn open_with(
     initial: Option<Edit>,
     placement: Placement,
 ) {
-    let generation = next_open(ui);
-    ui.organization
-        .set(Some(Open::new(source, kind.clone(), mode, placement)));
+    let generation = ui
+        .organization
+        .open(Open::new(source, kind.clone(), mode, placement));
     crate::tasks::spawn_in_app(async move {
         let custom = initial == Some(Edit::Sort(Sort::Manual));
         let loaded = items(source, &kind, custom.then_some(Sort::Manual)).await;
@@ -544,7 +263,7 @@ fn block_state(state: &Open, id: &str) -> Block {
 }
 
 pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked: bool) {
-    let generation = ui.organization_generation.get_untracked();
+    let generation = ui.organization.epoch();
     let owner = crate::runtime_owner::runtime();
     let save = crate::runtime::commands::set_guide_block(&owner, source, kind, id, blocked);
     crate::tasks::spawn_in_app(async move {
@@ -583,17 +302,13 @@ pub fn set_block(ui: Ui, source: SourceId, kind: BlockKind, id: String, blocked:
 }
 
 pub fn is_open(ui: Ui) -> bool {
-    ui.organization.with(Option::is_some)
+    ui.organization.is_open()
 }
 fn state<R>(ui: Ui, f: impl FnOnce(&Open) -> R) -> Option<R> {
-    ui.organization.with(|s| s.as_ref().map(f))
+    ui.organization.read(f)
 }
 fn update(ui: Ui, f: impl FnOnce(&mut Open)) {
-    ui.organization.update(|s| {
-        if let Some(s) = s {
-            f(s)
-        }
-    })
+    ui.organization.update(f)
 }
 pub fn back(ui: Ui) -> bool {
     if state(ui, |s| s.saving).unwrap_or(false) {
@@ -637,8 +352,7 @@ fn close(ui: Ui) {
     {
         crate::lists::open_groups(ui);
     }
-    next_open(ui);
-    ui.organization.set(None);
+    ui.organization.close();
     dismiss_keyboard();
 }
 pub fn key(ui: Ui, action: Action) {
@@ -762,7 +476,7 @@ fn resolve_order(ui: Ui, choice: LeaveChoice) {
 
 fn save_order(ui: Ui) {
     if state(ui, |s| s.scope.is_none()) == Some(true) {
-        let generation = ui.organization_generation.get_untracked();
+        let generation = ui.organization.epoch();
         crate::settings_view::settings_guarded(ui, move || {
             if !still_open(ui, generation) {
                 return;
@@ -820,7 +534,7 @@ fn persist_order(ui: Ui) {
     if playlists && !check_playlist_order_catalog(ui) {
         return;
     }
-    let generation = ui.organization_generation.get_untracked();
+    let generation = ui.organization.epoch();
     let owner = crate::runtime_owner::runtime();
     crate::tasks::spawn_in_app(async move {
         let mut saved_positions = None;
@@ -943,7 +657,7 @@ fn perform(ui: Ui, edit: Edit) {
 }
 
 fn apply_edit(ui: Ui, edit: Edit) {
-    let generation = ui.organization_generation.get_untracked();
+    let generation = ui.organization.epoch();
     let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
@@ -1164,7 +878,7 @@ fn finish(ui: Ui, s: &Open, generation: u64, result: Result<(), Error>) {
 }
 
 fn commit(ui: Ui) {
-    let generation = ui.organization_generation.get_untracked();
+    let generation = ui.organization.epoch();
     let Some(s) = state(ui, |s| (!s.saving).then(|| s.clone())).flatten() else {
         return;
     };
@@ -2073,7 +1787,7 @@ pub fn layer(ui: Ui) -> impl IntoElement {
             })
             .flatten()
         }) {
-            let generation = ui.organization_generation.get_untracked();
+            let generation = ui.organization.epoch();
             crate::tasks::spawn_in_app(async move {
                 if let Ok(loaded) = items(source, &kind, None).await
                     && still_open(ui, generation)
@@ -2241,80 +1955,4 @@ pub fn layer(ui: Ui) -> impl IntoElement {
                 ))
         },
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn loaded(ids: &[&str], sort: Sort) -> OrganizationItems {
-        OrganizationItems {
-            rows: ids
-                .iter()
-                .map(|id| Item {
-                    id: (*id).into(),
-                    name: format!("Generated {id}"),
-                    hidden: false,
-                })
-                .collect(),
-            sort,
-            blocks: Blocks::default(),
-        }
-    }
-
-    #[test]
-    fn preference_conversion_can_save_an_unchanged_custom_order() {
-        let mut screen = Open::new(SourceId(1), Kind::Groups, Mode::Reorder, Placement::Screen);
-        screen.load(
-            loaded(&["amber", "birch"], Sort::Name),
-            Some("birch".into()),
-            Mode::Reorder,
-            Some(Edit::Sort(Sort::Manual)),
-            None,
-        );
-        let Some(OrderSave::Pending {
-            source,
-            kind,
-            original,
-            order,
-            expected_sort,
-            from_custom,
-        }) = screen.begin_order_save()
-        else {
-            panic!("the custom order has not yet been saved");
-        };
-        assert_eq!(source, SourceId(1));
-        assert_eq!(kind, Kind::Groups);
-        assert!(from_custom);
-        assert_eq!(expected_sort, Sort::Name);
-        assert_eq!(original, order);
-        screen.refresh(loaded(&["oak"], Sort::Provider));
-        assert_eq!(screen.editor.focus.as_deref(), Some("birch"));
-    }
-
-    #[test]
-    fn edit_completion_preserves_new_input_and_restores_row_identity() {
-        let mut screen = Open::new(SourceId(1), Kind::Groups, Mode::Options, Placement::Screen);
-        screen.load(
-            loaded(&["amber", "birch"], Sort::Name),
-            Some("birch".into()),
-            Mode::Options,
-            Some(Edit::Rename),
-            None,
-        );
-        let expected = screen.clone();
-        screen.begin_save();
-        screen.editor.text = Some("New input".into());
-        screen.finish_edit(&expected, Some(loaded(&["birch", "amber"], Sort::Provider)));
-        assert!(!screen.saving);
-        assert_eq!(screen.editor.focus.as_deref(), Some("birch"));
-        assert_eq!(screen.editor.text.as_deref(), Some("New input"));
-        assert_eq!(screen.editor.sort, Sort::Provider);
-
-        screen.request_bulk_visibility(Edit::HideAll);
-        screen.focus_bulk_visibility(true);
-        assert_eq!(screen.bulk_visibility, Some((Edit::HideAll, true)));
-        assert_eq!(screen.dismiss_bulk_visibility(), Some(Edit::HideAll));
-        assert!(screen.bulk_visibility.is_none());
-    }
 }

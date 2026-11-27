@@ -1,5 +1,8 @@
 //! Identity-based organization editor. Imported items are never deleted.
 
+mod open;
+pub use open::{Items, Open, OrderSave, Placement};
+
 use crate::reorder::{LeaveChoice, Reorder};
 use iptv_core::organization::{Edit, Item, Sort};
 use std::collections::{BTreeSet, HashSet};

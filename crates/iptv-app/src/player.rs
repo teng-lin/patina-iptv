@@ -97,7 +97,7 @@ impl Ui {
 
     /// Starts `channel` live or from the archive.
     pub fn play(&self, channel: usize, playback: Playback) {
-        if self.cast_busy.get_untracked() {
+        if self.cast.busy.get_untracked() {
             crate::settings_view::notify(crate::i18n::tr(
                 "Wait for the current cast request to finish.",
             ));
@@ -445,7 +445,7 @@ pub fn start(ui: &Ui, channel: usize) {
 /// toggle_pause; dedicated media keys use this same local/remote dispatch.
 pub(crate) fn set_paused(ui: Ui, paused: bool) {
     crate::interruption::viewer_acted(ui);
-    if ui.cast_remote.get_untracked() {
+    if ui.cast.remote.get_untracked() {
         crate::casting::set_paused(ui, paused);
     } else if !paused
         && crate::on_demand::active(ui)
@@ -461,7 +461,7 @@ pub(crate) fn set_paused(ui: Ui, paused: bool) {
 }
 
 pub fn toggle_pause(ui: Ui) {
-    let replay = !ui.cast_remote.get_untracked()
+    let replay = !ui.cast.remote.get_untracked()
         && crate::on_demand::active(ui)
         && ui.player.main().finished.get_untracked()
         && ui.player.main().accepts_native(None);
