@@ -347,9 +347,16 @@ impl CastDriver {
             }
         }
         self.wire()
-            .command(id, wire)
+            .command_owned(id, wire, Some(&self.token))
             .await
-            .map_err(|error| translate(error, Stage::Control, Delivery::MayHaveReachedReceiver))?;
+            .map_err(|error| {
+                let delivery = if error == WireError::OwnershipLost {
+                    Delivery::NotSent
+                } else {
+                    Delivery::MayHaveReachedReceiver
+                };
+                translate(error, Stage::Control, delivery)
+            })?;
         Ok(match command {
             Command::Output { .. } => Confirmation::Accepted,
             _ => Confirmation::ReceiverConfirmed,
@@ -515,12 +522,8 @@ fn other_active_media(reply: &Value, id: i64) -> bool {
 }
 
 fn replaced(reply: &Value, id: i64, token: &str) -> bool {
-    super::media_entry(reply, id).is_ok_and(|entry| {
-        entry
-            .pointer("/media/customData/castRsLoad")
-            .and_then(Value::as_str)
-            .is_some_and(|observed| observed != token)
-    })
+    super::media_entry(reply, id)
+        .is_ok_and(|entry| super::load_tag(entry).is_some_and(|observed| observed != token))
 }
 
 fn owned_active_entry<'a>(
@@ -597,6 +600,7 @@ fn translate(error: WireError, stage: Stage, delivery: Delivery) -> Error {
         WireError::Refused | WireError::LoadFailed => ErrorKind::ReceiverRefused,
         WireError::Unknown => ErrorKind::Protocol,
         WireError::Ended => ErrorKind::Unavailable,
+        WireError::OwnershipLost => ErrorKind::OwnershipLost,
     };
     Error::new(kind, stage, delivery)
 }

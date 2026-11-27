@@ -9,6 +9,18 @@ fn status(request: &Value, entries: Value) -> Value {
     json!({"type":"MEDIA_STATUS", "requestId":request["requestId"], "status":entries})
 }
 
+async fn assert_only_heartbeats_until_closed(receiver: &mut tokio::io::DuplexStream) {
+    use prost::Message;
+    use tokio::io::AsyncReadExt;
+
+    while let Ok(length) = receiver.read_u32().await {
+        let mut frame = vec![0; length as usize];
+        receiver.read_exact(&mut frame).await.unwrap();
+        let envelope = super::super::Envelope::decode(frame.as_slice()).unwrap();
+        assert_eq!(envelope.namespace, super::super::HEARTBEAT);
+    }
+}
+
 fn owned(load: &Value, id: i64, state: &str) -> Value {
     json!({"mediaSessionId":id, "media":load["media"], "playerState":state,
         "currentTime":4.5, "supportedMediaCommands":3})
@@ -121,7 +133,6 @@ async fn stop_can_reconcile_a_late_load_reply_after_cancellation() {
 
 #[tokio::test(start_paused = true)]
 async fn absent_load_reply_never_stops_another_sender_at_the_same_url() {
-    use tokio::io::AsyncReadExt;
     for include_own_tag in [false, true] {
         let (wire, mut receiver, socket) = session_pair();
         let mut cast = CastDriver::new(wire).unwrap();
@@ -169,7 +180,7 @@ async fn absent_load_reply_never_stops_another_sender_at_the_same_url() {
                     answer(&mut receiver, TRANSPORT, status(&request, entries)).await;
                 }
             }
-            assert!(receiver.read_u8().await.is_err());
+            assert_only_heartbeats_until_closed(&mut receiver).await;
         };
         tokio::join!(sender, peer);
         socket.await.unwrap();
@@ -436,11 +447,10 @@ async fn scoped_stop_waits_for_proof_and_reports_incomplete_or_replaced_state() 
             cast.close().await;
         };
         let peer = async {
-            use tokio::io::AsyncReadExt;
             let (_, request) = next_request(&mut receiver).await;
             assert_eq!(request["type"], "GET_STATUS");
             answer(&mut receiver, TRANSPORT, status(&request, entries)).await;
-            assert!(receiver.read_u8().await.is_err());
+            assert_only_heartbeats_until_closed(&mut receiver).await;
         };
         tokio::join!(sender, peer);
         socket.await.unwrap();
@@ -490,4 +500,54 @@ async fn endpoint_selection_rejects_missing_ambiguous_and_expired_identities() {
     assert_eq!(ephemeral.resolve().await.unwrap(), address);
     tokio::time::advance(RECENT_SCAN).await;
     assert!(ephemeral.resolve().await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn replacement_during_a_receiver_volume_read_never_applies_the_relative_change() {
+    use crate::googlecast::tests::frame_bytes;
+    use tokio::io::AsyncWriteExt;
+
+    let (wire, mut receiver, socket) = session_pair();
+    let mut cast = CastDriver::new(wire).unwrap();
+    let dispatch = Dispatch::default();
+    let sender = async {
+        cast.load(Media::live(URL).unwrap(), &dispatch)
+            .await
+            .unwrap();
+        let error = cast
+            .command(Command::Output {
+                scope: VolumeScope::Receiver,
+                change: OutputChange::StepVolume(5),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (error.kind(), error.delivery()),
+            (ErrorKind::OwnershipLost, Delivery::NotSent)
+        );
+        cast.close().await;
+    };
+    let peer = async {
+        let (_, load) = next_request(&mut receiver).await;
+        let mut item = owned(&load, 17, "PLAYING");
+        answer(&mut receiver, TRANSPORT, status(&load, json!([item]))).await;
+        let (_, query) = next_request(&mut receiver).await;
+        assert_eq!(query["type"], "GET_STATUS");
+        answer(&mut receiver, TRANSPORT, status(&query, json!([item]))).await;
+        let (frame, query) = next_request(&mut receiver).await;
+        assert_eq!(frame.namespace, super::super::RECEIVER);
+        assert_eq!(query["type"], "GET_STATUS");
+        receiver.write_all(&frame_bytes(
+            super::super::RECEIVER,
+            super::super::ROOT,
+            json!({"type":"RECEIVER_STATUS","requestId":query["requestId"],"status":{"volume":{"level":0.45}}}),
+        )).await.unwrap();
+        let (_, query) = next_request(&mut receiver).await;
+        assert_eq!(query["type"], "GET_STATUS");
+        item["media"]["customData"]["castRsLoad"] = json!("different-instance");
+        answer(&mut receiver, TRANSPORT, status(&query, json!([item]))).await;
+        assert_only_heartbeats_until_closed(&mut receiver).await;
+    };
+    tokio::join!(sender, peer);
+    socket.await.unwrap();
 }

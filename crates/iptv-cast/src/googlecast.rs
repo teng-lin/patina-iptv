@@ -36,6 +36,7 @@ pub enum Error {
     LoadFailed,
     Unknown,
     Ended,
+    OwnershipLost,
 }
 type Result<T> = std::result::Result<T, Error>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -248,6 +249,15 @@ impl Session {
         state(&reply, id)
     }
     pub async fn command(&self, id: i64, cmd: Command) -> Result<()> {
+        self.command_owned(id, cmd, None).await
+    }
+
+    pub(crate) async fn command_owned(
+        &self,
+        id: i64,
+        cmd: Command,
+        token: Option<&str>,
+    ) -> Result<()> {
         let value = match cmd {
             Command::Volume(level) => Some(json!({"level":f64::from(level.min(100))/100.0})),
             Command::SetMuted(muted) => Some(json!({"muted":muted})),
@@ -255,7 +265,10 @@ impl Session {
                 let status = self.receiver_status().await?;
                 let volume = &status["status"]["volume"];
                 Some(if let Command::StepVolume(step) = cmd {
-                    let level = volume["level"].as_f64().ok_or(Error::Unknown)?;
+                    let level = volume["level"]
+                        .as_f64()
+                        .filter(|level| (0.0..=1.0).contains(level))
+                        .ok_or(Error::Unknown)?;
                     json!({"level":(level+f64::from(step)/100.0).clamp(0.0,1.0)})
                 } else {
                     json!({"muted":!volume["muted"].as_bool().ok_or(Error::Unknown)?})
@@ -264,7 +277,16 @@ impl Session {
             _ => None,
         };
         if let Some(volume) = value {
-            match self.status(id).await? {
+            // For receiver-wide changes this status check is the last wire
+            // round trip before the write, including after reading output.
+            let report = self.media(json!({"type":"GET_STATUS"})).await?;
+            if let Some(token) = token
+                && media_entry(&report, id)
+                    .is_ok_and(|entry| load_tag(entry).is_some_and(|observed| observed != token))
+            {
+                return Err(Error::OwnershipLost);
+            }
+            match state(&report, id)? {
                 Status::Playing | Status::Paused | Status::Buffering => {}
                 Status::Unknown => return Err(Error::Unknown),
                 _ => return Err(Error::Ended),
@@ -363,10 +385,7 @@ pub(crate) fn load_body(url: &str, content_type: &str, live: bool, token: Option
 pub(crate) fn load_instance(reply: &Value, url: &str, token: Option<&str>) -> Result<i64> {
     let mut matches = media_entries(reply)?.iter().filter(|entry| {
         entry.pointer("/media/contentId").and_then(Value::as_str) == Some(url)
-            && entry
-                .pointer("/media/customData/castRsLoad")
-                .and_then(Value::as_str)
-                .is_none_or(|tag| Some(tag) == token)
+            && load_tag(entry).is_none_or(|tag| Some(tag) == token)
     });
     let entry = matches.next().ok_or(Error::Unknown)?;
     if matches.next().is_some() {
@@ -378,12 +397,9 @@ pub(crate) fn load_instance(reply: &Value, url: &str, token: Option<&str>) -> Re
 /// Status queries may recover a lost load reply only if its unique tag was
 /// echoed by the receiver. The media URL alone does not distinguish senders.
 pub(crate) fn tagged_instance(reply: &Value, token: &str) -> Result<Option<i64>> {
-    let mut matches = media_entries(reply)?.iter().filter(|entry| {
-        entry
-            .pointer("/media/customData/castRsLoad")
-            .and_then(Value::as_str)
-            == Some(token)
-    });
+    let mut matches = media_entries(reply)?
+        .iter()
+        .filter(|entry| load_tag(entry) == Some(token));
     let id = matches
         .next()
         .and_then(|entry| entry["mediaSessionId"].as_i64());
@@ -391,6 +407,12 @@ pub(crate) fn tagged_instance(reply: &Value, token: &str) -> Result<Option<i64>>
         return Err(Error::Unknown);
     }
     Ok(id)
+}
+
+pub(crate) fn load_tag(entry: &Value) -> Option<&str> {
+    entry
+        .pointer("/media/customData/castRsLoad")
+        .and_then(Value::as_str)
 }
 
 pub(crate) fn media_entries(reply: &Value) -> Result<&[Value]> {
