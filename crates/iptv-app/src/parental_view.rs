@@ -6,7 +6,7 @@ use crate::runtime::Runtime;
 use crate::{Ui, scale::Scale, tint, ui_kit};
 use iptv_core::parental::{ContentKind, Target};
 use iptv_nav::{Action, RemoteKey};
-use iptv_presentation::parental::{Dialog, Phase, Submission};
+use iptv_presentation::parental::{Phase, PromptState, Submission};
 use nsh_core::element::input;
 use nsh_core::prelude::*;
 use std::{cell::RefCell, rc::Rc};
@@ -16,28 +16,13 @@ type AfterUnlock = Rc<Unlock>;
 
 #[derive(Clone)]
 pub struct Open {
-    dialog: Dialog,
-    target: Target,
+    state: PromptState,
     done: AfterUnlock,
-    request: Rc<()>,
-    retired_verify: Option<Rc<()>>,
-    blocks: Option<Vec<Target>>,
     recovery_input: ElementRef,
-    locked_on_hide: bool,
 }
 impl PartialEq for Open {
     fn eq(&self, other: &Self) -> bool {
-        self.dialog == other.dialog
-            && self.target == other.target
-            && self.blocks == other.blocks
-            && self.locked_on_hide == other.locked_on_hide
-            && Rc::ptr_eq(&self.done, &other.done)
-            && Rc::ptr_eq(&self.request, &other.request)
-            && match (&self.retired_verify, &other.retired_verify) {
-                (Some(a), Some(b)) => Rc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
+        self.state == other.state && Rc::ptr_eq(&self.done, &other.done)
     }
 }
 pub fn is_open(ui: Ui) -> bool {
@@ -80,22 +65,11 @@ pub fn hidden(ui: Ui) {
         || phase(ui) == Some(Phase::RecoveryNotice)
         || ui
             .parental
-            .with_untracked(|o| o.as_ref().is_some_and(|o| o.dialog.has_held_notice()));
+            .with_untracked(|o| o.as_ref().is_some_and(|o| o.state.dialog.has_held_notice()));
     if keep {
         ui.parental.update(|open| {
             if let Some(open) = open {
-                open.locked_on_hide = true;
-                // An in-flight verify may not have reached its runtime epoch
-                // check yet. Retire its UI request but keep the private result;
-                // its completion unlocks no UI and acknowledges when retry is safe.
-                if open.dialog.busy
-                    && open.dialog.phase == Phase::Unlock
-                    && open.dialog.has_held_notice()
-                    && open.retired_verify.is_none()
-                {
-                    open.retired_verify = Some(std::mem::replace(&mut open.request, Rc::new(())));
-                }
-                open.dialog.suspend_notice();
+                open.state.hide();
             }
         });
         crate::runtime_owner::runtime().parental_lock();
@@ -123,14 +97,9 @@ fn finish(ui: Ui) {
 }
 fn show(ui: Ui, target: Target, phase: Phase, done: impl FnOnce() + 'static) {
     ui.parental.set(Some(Open {
-        dialog: Dialog::new(phase),
-        target,
+        state: PromptState::new(phase, target, None),
         done: Rc::new(RefCell::new(Some(Box::new(done)))),
-        request: Rc::new(()),
-        retired_verify: None,
-        blocks: None,
         recovery_input: element_ref(),
-        locked_on_hide: false,
     }));
 }
 /// Always re-resolve durable ancestry before executing a content action.
@@ -295,21 +264,16 @@ pub fn manage(ui: Ui) {
     request(ui, Target::settings(), move || {
         let blocks = crate::runtime_owner::runtime().parental_blocked_targets();
         ui.parental.set(Some(Open {
-            dialog: Dialog::new(Phase::Unlock),
-            target: Target::settings(),
+            state: PromptState::new(Phase::Unlock, Target::settings(), Some(blocks)),
             done: Rc::new(RefCell::new(None)),
-            request: Rc::new(()),
-            retired_verify: None,
-            blocks: Some(blocks),
             recovery_input: element_ref(),
-            locked_on_hide: false,
         }));
     });
 }
 fn manage_pick(ui: Ui, index: usize) {
     if ui.parental.with_untracked(|o| {
         o.as_ref()
-            .and_then(|o| o.blocks.as_ref())
+            .and_then(|o| o.state.blocks.as_ref())
             .is_some_and(|blocks| index == blocks.len() + 1)
     }) {
         close(ui);
@@ -317,7 +281,7 @@ fn manage_pick(ui: Ui, index: usize) {
     }
     let target = ui
         .parental
-        .with_untracked(|o| o.as_ref()?.blocks.as_ref()?.get(index).cloned());
+        .with_untracked(|o| o.as_ref()?.state.blocks.as_ref()?.get(index).cloned());
     if let Some(target) = target {
         finish(ui);
         block(ui, target, false);
@@ -395,7 +359,7 @@ pub fn key(ui: Ui, action: Action) {
         Action::Select => {
             let at = ui
                 .parental
-                .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
+                .with_untracked(|o| o.as_ref().map_or(0, |o| o.state.dialog.focus));
             activate(ui, at);
         }
         _ => {}
@@ -408,7 +372,7 @@ pub fn remote(ui: Ui, key: RemoteKey) {
     }
     if ui
         .parental
-        .with_untracked(|o| o.as_ref().is_some_and(|o| o.blocks.is_some()))
+        .with_untracked(|o| o.as_ref().is_some_and(|o| o.state.blocks.is_some()))
     {
         match key {
             RemoteKey::Up => move_focus(ui, -1),
@@ -416,7 +380,7 @@ pub fn remote(ui: Ui, key: RemoteKey) {
             RemoteKey::Ok => {
                 let at = ui
                     .parental
-                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
+                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.state.dialog.focus));
                 manage_pick(ui, at);
             }
             RemoteKey::Back => close(ui),
@@ -427,7 +391,7 @@ pub fn remote(ui: Ui, key: RemoteKey) {
     match key {
         RemoteKey::Digit(d) => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.key_digit(d);
+                o.state.dialog.key_digit(d);
             }
         }),
         RemoteKey::Up => self::key(ui, Action::MoveUp),
@@ -442,21 +406,22 @@ pub fn remote(ui: Ui, key: RemoteKey) {
             {
                 let at = ui
                     .parental
-                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
+                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.state.dialog.focus));
                 activate(ui, at);
             } else if ui.parental.with_untracked(|o| {
                 // One rule for every remote (#282): after digits typed on
                 // number keys, OK on a digit key submits; otherwise it
                 // presses the focused key (a digit, Delete, Continue,
                 // Forgot PIN?), so the keypad enters any PIN length.
-                o.as_ref()
-                    .is_some_and(|o| matches!(o.dialog.focus, 0..=8 | 10) && o.dialog.ok_submits())
+                o.as_ref().is_some_and(|o| {
+                    matches!(o.state.dialog.focus, 0..=8 | 10) && o.state.dialog.ok_submits()
+                })
             }) {
                 submit(ui);
             } else {
                 let at = ui
                     .parental
-                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.dialog.focus));
+                    .with_untracked(|o| o.as_ref().map_or(0, |o| o.state.dialog.focus));
                 activate(ui, at);
             }
         }
@@ -476,15 +441,15 @@ fn vertical_step(ui: Ui) -> isize {
 fn move_focus(ui: Ui, step: isize) {
     ui.parental.update(|o| {
         if let Some(o) = o {
-            let count = o.blocks.as_ref().map_or_else(
-                || match o.dialog.phase {
+            let count = o.state.blocks.as_ref().map_or_else(
+                || match o.state.dialog.phase {
                     Phase::Recovery => 3,
                     Phase::RecoveryNotice => 2,
                     _ => 14,
                 },
                 |b| b.len() + 2,
             );
-            o.dialog.move_focus(step, count);
+            o.state.dialog.move_focus(step, count);
         }
     });
     if phase(ui) == Some(Phase::Recovery) && !focused(ui, 0) {
@@ -503,7 +468,7 @@ fn activate(ui: Ui, index: usize) {
     }
     if ui
         .parental
-        .with_untracked(|o| o.as_ref().is_some_and(|o| o.blocks.is_some()))
+        .with_untracked(|o| o.as_ref().is_some_and(|o| o.state.blocks.is_some()))
     {
         manage_pick(ui, index);
         return;
@@ -523,23 +488,23 @@ fn activate(ui: Ui, index: usize) {
     match index {
         0..=8 => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.digit(index as u8 + 1);
+                o.state.dialog.digit(index as u8 + 1);
             }
         }),
         9 => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.erase();
+                o.state.dialog.erase();
             }
         }),
         10 => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.digit(0);
+                o.state.dialog.digit(0);
             }
         }),
         11 => submit(ui),
         12 => ui.parental.update(|o| {
             if let Some(o) = o {
-                o.dialog.recover();
+                o.state.dialog.recover();
             }
         }),
         _ => close(ui),
@@ -550,11 +515,11 @@ fn submit(ui: Ui) {
     let mut target = Target::settings();
     let token = ui
         .parental
-        .with_untracked(|o| o.as_ref().map(|o| o.request.clone()));
+        .with_untracked(|o| o.as_ref().map(|o| o.state.request()));
     ui.parental.update(|o| {
         if let Some(o) = o {
-            target = o.target.clone();
-            submission = o.dialog.submit();
+            target = o.state.target.clone();
+            submission = o.state.dialog.submit();
         }
     });
     match submission {
@@ -577,33 +542,27 @@ fn submit(ui: Ui) {
             if !ui.parental.with_untracked(|o| {
                 o.as_ref()
                     .zip(token.as_ref())
-                    .is_some_and(|(o, token)| Rc::ptr_eq(&o.request, token))
+                    .is_some_and(|(o, token)| o.state.matches_request(token))
             }) {
                 owner.parental_lock();
                 ui.parental.update(|o| {
-                    if let Some(o) = o
-                        && o.retired_verify
-                            .as_ref()
-                            .zip(token.as_ref())
-                            .is_some_and(|(retired, token)| Rc::ptr_eq(retired, token))
-                    {
-                        o.retired_verify = None;
-                        o.dialog.fail(String::new());
+                    if let (Some(o), Some(token)) = (o, token.as_ref()) {
+                        o.state.acknowledge_retired(token);
                     }
                 });
                 return;
             }
             let locked = ui
                 .parental
-                .with_untracked(|o| o.as_ref().is_some_and(|o| o.locked_on_hide));
+                .with_untracked(|o| o.as_ref().is_some_and(|o| o.state.locked_on_hide));
             match result {
                 Ok(None) => {
                     let mut resumed = false;
                     ui.parental.update(|o| {
                         if let Some(o) = o {
-                            resumed = o.dialog.resume_notice();
+                            resumed = o.state.dialog.resume_notice();
                             if resumed {
-                                o.locked_on_hide = false;
+                                o.state.locked_on_hide = false;
                             }
                         }
                     });
@@ -620,16 +579,16 @@ fn submit(ui: Ui) {
                     ui.parental.update(|o| {
                         if let Some(o) = o {
                             if locked {
-                                o.dialog.hold_notice(code);
+                                o.state.dialog.hold_notice(code);
                             } else {
-                                o.dialog.notice(code);
+                                o.state.dialog.notice(code);
                             }
                         }
                     });
                 }
                 Err(error) => ui.parental.update(|o| {
                     if let Some(o) = o {
-                        o.dialog.fail(error.to_string());
+                        o.state.dialog.fail(error.to_string());
                     }
                 }),
             }
@@ -637,15 +596,16 @@ fn submit(ui: Ui) {
     }
 }
 fn phase(ui: Ui) -> Option<Phase> {
-    ui.parental.with(|o| o.as_ref().map(|o| o.dialog.phase))
+    ui.parental
+        .with(|o| o.as_ref().map(|o| o.state.dialog.phase))
 }
 fn label(ui: Ui) -> String {
     ui.parental.with(|o| {
         o.as_ref().map_or(String::new(), |o| {
-            if o.blocks.is_some() {
+            if o.state.blocks.is_some() {
                 return "Blocked content".into();
             }
-            match o.dialog.phase {
+            match o.state.dialog.phase {
                 Phase::Unlock => "Enter parental PIN",
                 Phase::Old => "Enter current PIN",
                 Phase::New => "Choose a new PIN",
@@ -668,38 +628,41 @@ fn notify_message(message: &str) {
 }
 fn focused(ui: Ui, index: usize) -> bool {
     ui.parental
-        .with(|o| o.as_ref().is_some_and(|o| o.dialog.focus == index))
+        .with(|o| o.as_ref().is_some_and(|o| o.state.dialog.focus == index))
 }
 fn cancel_focused(ui: Ui) -> bool {
     ui.parental.with(|o| {
         o.as_ref().is_some_and(|o| {
-            let cancel = o.blocks.as_ref().map_or_else(
-                || match o.dialog.phase {
+            let cancel = o.state.blocks.as_ref().map_or_else(
+                || match o.state.dialog.phase {
                     Phase::Recovery => 2,
                     Phase::RecoveryNotice => 1,
                     _ => 13,
                 },
                 |b| b.len() + 1,
             );
-            o.dialog.focus == cancel
+            o.state.dialog.focus == cancel
         })
     })
 }
 fn managing(ui: Ui) -> bool {
     ui.parental
-        .with(|o| o.as_ref().is_some_and(|o| o.blocks.is_some()))
+        .with(|o| o.as_ref().is_some_and(|o| o.state.blocks.is_some()))
 }
 fn manager(ui: Ui, size: Scale) -> View {
     let count = move || {
         ui.parental.with(|o| {
             o.as_ref()
-                .and_then(|o| o.blocks.as_ref())
+                .and_then(|o| o.state.blocks.as_ref())
                 .map_or(1, |b| b.len() + 1)
         })
     };
     let list = element_ref();
     effect(move || {
-        if let Some(focus) = ui.parental.with(|o| o.as_ref().map(|o| o.dialog.focus)) {
+        if let Some(focus) = ui
+            .parental
+            .with(|o| o.as_ref().map(|o| o.state.dialog.focus))
+        {
             list.scroll_to_index(focus as u32, percentage(0.5), px(0.0), false);
         }
     });
@@ -708,7 +671,7 @@ fn manager(ui: Ui, size: Scale) -> View {
             let label = move || {
                 ui.parental.with(|o| {
                     o.as_ref()
-                        .and_then(|o| o.blocks.as_ref())
+                        .and_then(|o| o.state.blocks.as_ref())
                         .and_then(|blocks| blocks.get(at.index()))
                         .map_or_else(|| crate::i18n::tr("Lock now").to_owned(), display_target)
                 })
@@ -728,13 +691,13 @@ fn manager(ui: Ui, size: Scale) -> View {
 }
 fn busy(ui: Ui) -> bool {
     ui.parental
-        .with(|o| o.as_ref().is_some_and(|o| o.dialog.busy))
+        .with(|o| o.as_ref().is_some_and(|o| o.state.dialog.busy))
 }
 fn keypad(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     let mut keypad = view().gap(px(6.0)).child(ui_kit::title(size, move || {
         ui.parental.with(|o| {
             o.as_ref()
-                .map_or(String::new(), |o| o.dialog.masked_input())
+                .map_or(String::new(), |o| o.state.dialog.masked_input())
         })
     }));
     for row in 0..4 {
@@ -787,27 +750,27 @@ fn credentials(ui: Ui, size: Scale, scrolling: ui_kit::FocusScroll) -> View {
     let recovery = recovery_input(ui).unwrap_or_else(element_ref);
     view().gap(px(8.0))
         .child(ui_kit::body(size,move||ui.parental.with(|o|o.as_ref()
-            .map_or(String::new(),|o|if o.dialog.busy {tr("Checking…").into()}
-                else {let message=o.dialog.message.as_str();tr(message).into()}))))
+            .map_or(String::new(),|o|if o.state.dialog.busy {tr("Checking…").into()}
+                else {let message=o.state.dialog.message.as_str();tr(message).into()}))))
         .child(when(move||phase(ui)==Some(Phase::RecoveryNotice),move||{
             view().gap(px(8.0))
                 .child(ui_kit::body(size,tr("Keep this recovery code private. A new code replaces the previous code.")))
                 .child(ui_kit::body(size,move||ui.parental.with(|o|o.as_ref()
-                    .map_or(String::new(),|o|o.dialog.recovery.to_string()))))
+                    .map_or(String::new(),|o|o.state.dialog.recovery.to_string()))))
                 .child(scrolling.control(ui_kit::button(ui,size,tr("I saved the code"),move||focused(ui,0),move||finish(ui)),move||focused(ui,0)))
         }))
         .child(when(move||phase(ui)==Some(Phase::Recovery),move||{
             view().gap(px(8.0)).child(scrolling.control(view().child(ui_kit::field(size,input())
                 .test_id("parental-recovery-input").element_ref(&recovery).masked(true).max_length(32)
-                .on_focus(move||ui.parental.update(|o|{if let Some(o)=o{o.dialog.focus=0;}}))
+                .on_focus(move||ui.parental.update(|o|{if let Some(o)=o{o.state.dialog.focus=0;}}))
                 .label(move || tr("Recovery code").to_owned())
                 .border(px(1.0)).border_color(move||ui_kit::field_border(ui,focused(ui,0)))
                 .disabled(move || busy(ui))
                 .auto_correct(false).auto_capitalize(AutoCapitalize::None)
                 .placeholder(tr("Recovery code"))
                 .on_change(move|text:&str|ui.parental.update(|o|{
-                    if let Some(o)=o {o.dialog.recovery.clear();
-                        o.dialog.recovery.push_str(&text.to_ascii_lowercase());}
+                    if let Some(o)=o {o.state.dialog.recovery.clear();
+                        o.state.dialog.recovery.push_str(&text.to_ascii_lowercase());}
                 })).on_submit(move|_:&str|{submit(ui);dismiss_keyboard();})),move||focused(ui,0)))
                 .child(scrolling.control(ui_kit::button(ui,size,tr("Continue"),move||focused(ui,1),move||submit(ui))
                     .disabled(move||busy(ui)),move||focused(ui,1)))

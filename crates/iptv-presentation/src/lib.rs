@@ -7,6 +7,7 @@ pub mod browse_playback;
 pub mod capabilities;
 pub mod cast;
 pub mod channel_number;
+pub mod chooser;
 pub mod custom_groups;
 pub mod editor;
 pub mod external_player;
