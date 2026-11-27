@@ -24,6 +24,7 @@ use std::{
 use tokio::runtime::Handle;
 use tokio::{
     sync::{OnceCell, watch},
+    task::JoinHandle,
     time::{Instant, timeout, timeout_at},
 };
 
@@ -723,7 +724,7 @@ async fn stop_remote(session: Session) -> Result<(), Error> {
 
 struct Playing {
     session: Arc<tokio::sync::Mutex<Option<Session>>>,
-    relay: Arc<tokio::sync::Mutex<Option<PlaybackRelay>>>,
+    relay: Arc<tokio::sync::Mutex<RelayRetirement>>,
     stop_result: OnceLock<watch::Receiver<Option<Result<(), Error>>>>,
     #[cfg(target_os = "android")]
     service: Mutex<Option<android::PlaybackLease>>,
@@ -733,7 +734,10 @@ impl Playing {
     fn new(session: Session, relay: PlaybackRelay) -> Self {
         Self {
             session: Arc::new(tokio::sync::Mutex::new(Some(session))),
-            relay: Arc::new(tokio::sync::Mutex::new(Some(relay))),
+            relay: Arc::new(tokio::sync::Mutex::new(RelayRetirement {
+                relay: Some(relay),
+                shutdown: None,
+            })),
             stop_result: OnceLock::new(),
             #[cfg(target_os = "android")]
             service: Mutex::default(),
@@ -774,10 +778,21 @@ impl Playing {
     }
 }
 
-async fn retire_relay(slot: &tokio::sync::Mutex<Option<PlaybackRelay>>) {
+struct RelayRetirement {
+    relay: Option<PlaybackRelay>,
+    shutdown: Option<JoinHandle<()>>,
+}
+
+async fn retire_relay(slot: &tokio::sync::Mutex<RelayRetirement>) {
     let mut slot = slot.lock().await;
-    if let Some(relay) = slot.take() {
-        relay.shutdown().await;
+    if let Some(relay) = slot.relay.take() {
+        slot.shutdown = Some(tokio::spawn(relay.shutdown()));
+    }
+    // Borrow the handle so cancellation cannot abandon the listener's close
+    // acknowledgement. Another waiter will join the same shutdown.
+    if let Some(shutdown) = slot.shutdown.as_mut() {
+        let _ = shutdown.await;
+        slot.shutdown = None;
     }
 }
 

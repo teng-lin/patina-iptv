@@ -78,8 +78,8 @@ async fn locally_rejected_loads_release_the_relay_port_before_returning() {
 }
 
 #[cfg(feature = "test-support")]
-#[tokio::test]
-async fn stopping_an_owned_receiver_joins_once_and_keeps_a_refusal_after_cancellation() {
+#[tokio::test(flavor = "current_thread")]
+async fn canceled_retirement_and_stop_waiters_share_one_relay_shutdown() {
     use iptv_cast::test_support::{self, Event};
     use std::{future::poll_fn, task::Poll};
 
@@ -120,10 +120,30 @@ async fn stopping_an_owned_receiver_joins_once_and_keeps_a_refusal_after_cancell
     .unwrap();
     let playing = Arc::new(Playing::new(session, relay));
 
+    let mut joined_retirement = playing.retire();
+    poll_fn(|cx| {
+        // There is no executor turn between starting shutdown, canceling the
+        // waiter, and joining it again. The real listener is still bound.
+        let mut abandoned_retirement = playing.retire();
+        assert!(abandoned_retirement.as_mut().poll(cx).is_pending());
+        drop(abandoned_retirement);
+        assert!(joined_retirement.as_mut().poll(cx).is_pending());
+        assert_eq!(
+            std::net::TcpListener::bind(listen).unwrap_err().kind(),
+            std::io::ErrorKind::AddrInUse,
+        );
+        Poll::Ready(())
+    })
+    .await;
+
     let first = tokio::spawn({
         let playing = playing.clone();
         async move { playing.stop_checked().await }
     });
+    timeout(Duration::from_secs(5), joined_retirement)
+        .await
+        .unwrap();
+    drop(std::net::TcpListener::bind(listen).expect("retirement must close the listener"));
     timeout(Duration::from_secs(5), async {
         while !receiver.events().contains(&Event::Stop) {
             tokio::time::sleep(Duration::from_millis(1)).await;
