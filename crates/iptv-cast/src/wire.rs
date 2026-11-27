@@ -39,3 +39,6 @@ pub(crate) async fn send(
     socket.write_u32(bytes.len() as u32).await?;
     socket.write_all(&bytes).await
 }
+
+#[cfg(test)]
+mod tests;

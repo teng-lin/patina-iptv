@@ -312,3 +312,6 @@ async fn an_unanswered_request_expires_while_heartbeats_keep_the_session_usable(
     };
     tokio::join!(sender, receiver);
 }
+
+mod failures;
+mod media;
