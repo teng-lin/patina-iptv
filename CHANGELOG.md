@@ -7,10 +7,20 @@ is below 1.0, a minor release may change behavior.
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-11-27
+
 ### Added
 
 - Cast live channels from Android phones and tablets to Chromecast and AirPlay
   receivers on the local network. Use **Play here** to return to your device.
+  You can also use Android’s media controls while the screen is off.
+
+### Fixed
+
+- The guide-data chooser exposes the full channel name to screen readers,
+  including when large text shortens the visible title.
+- If you delete stored guide data during an update, Patina keeps the deletion
+  confirmation visible when the canceled update finishes.
 
 ## [0.1.11] - 2026-11-27
 
@@ -600,7 +610,8 @@ First public release, for Android TV and tablets, Linux and macOS.
 - Packages: a signed Android APK, Linux `.deb`, `.rpm`, pacman package and
   AppImage, and an ad hoc signed macOS disk image.
 
-[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/teng-lin/patina-iptv/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/teng-lin/patina-iptv/compare/v0.1.11...v0.1.12
 [0.1.11]: https://github.com/teng-lin/patina-iptv/compare/v0.1.10...v0.1.11
 [0.1.10]: https://github.com/teng-lin/patina-iptv/compare/v0.1.9...v0.1.10
 [0.1.9]: https://github.com/teng-lin/patina-iptv/compare/v0.1.8...v0.1.9
