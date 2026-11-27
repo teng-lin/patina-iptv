@@ -690,6 +690,7 @@ fn shown(ui: Ui, control: Control) -> bool {
 }
 
 fn enabled(ui: Ui, control: Control) -> bool {
+    use iptv_core::cast::Command;
     match control {
         Control::Rewind | Control::Forward | Control::Timeline => {
             matches!(ui.playback.get(), Playback::CatchUp { .. }) || crate::on_demand::seekable(ui)
@@ -704,7 +705,17 @@ fn enabled(ui: Ui, control: Control) -> bool {
         }
         Control::Cast => crate::casting::available(ui),
         Control::Pip => !ui.cast_remote.get() && crate::pip::can_enter(ui),
-        Control::Volume | Control::Fullscreen => desktop_controls(),
+        Control::PlayPause => crate::casting::supports(
+            ui,
+            if ui.paused.get() {
+                Command::Play
+            } else {
+                Command::Pause
+            },
+        ),
+        Control::Mute => crate::casting::supports(ui, Command::ToggleMute),
+        Control::Volume => desktop_controls() && crate::casting::supports(ui, Command::Volume(0)),
+        Control::Fullscreen => desktop_controls(),
         Control::Listen => crate::listen::choice(ui) && !crate::listen::heard(ui),
         _ => true,
     }

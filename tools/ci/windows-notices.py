@@ -63,6 +63,7 @@ for name in runtime_notices:
         shutil.copy2(source, native / name)
 shutil.copy2("LICENSE", stage / "LICENSE")
 shutil.copy2("crates/iptv-app/fonts/OFL.txt", notices / "OFL.txt")
+shutil.copy2("crates/iptv-cast/NOTICE-pyatv.md", notices / "NOTICE-pyatv.md")
 (notices / "MSVC-RUNTIME.txt").write_text(
     "Microsoft Visual C++ Runtime (vcruntime140.dll and vcruntime140_1.dll)\n"
     "Copyright Microsoft Corporation. Distributed with Patina under the Visual Studio redistributable license.\n"

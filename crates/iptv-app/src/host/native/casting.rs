@@ -1,37 +1,55 @@
 //! Network casting via the shared sender. The runtime authorizes relay admission.
 use iptv_cast::{
-    Cast, Confirmation, Connect, Connection, Delivery, Diagnostic, ErrorKind, Link, Media,
-    OutputChange, Playback, Route, Session, Snapshot, Stage, StopOutcome, Updates, Volume,
-    VolumeScope,
+    Availability, Cast, Confirmation, Connect, Connection, Delivery, Diagnostic, ErrorKind,
+    Feature, Link, Media, OutputChange, PeerTrust, Playback, Route, Session, Snapshot, Stage,
+    StopOutcome, Updates, Volume, VolumeScope,
 };
 use iptv_core::{
-    cast::{Command, Error, NetworkProtocol, Receiver, RemoteState},
+    cast::{Command, Controls, Error, NetworkProtocol, Receiver, RemoteState},
     playback::PlaySource,
 };
 use iptv_net::playback::{ExternalAdmission, PlaybackRelay};
-use iptv_runtime::cast::{Admitted, Authorization, Port, Prepared, Remote, Retirement, Task};
+use iptv_runtime::cast::{
+    Admitted, Authorization, PairingPrompt, Port, Prepared, Remote, Retirement, Task,
+};
 use std::{
     collections::HashMap,
     ffi::OsStr,
     net::SocketAddr,
     num::NonZeroU16,
-    sync::{Arc, Mutex, OnceLock},
+    path::Path,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tokio::runtime::Handle;
-use tokio::time::{Instant, timeout, timeout_at};
+use tokio::{
+    sync::OnceCell,
+    time::{Instant, timeout, timeout_at},
+};
 
-#[derive(Default)]
+#[cfg(target_os = "linux")]
+mod airplay;
+
 pub(super) struct Sender {
-    cast: OnceLock<Cast>,
+    client: OnceCell<Client>,
     routes: Mutex<HashMap<String, Route>>,
     #[cfg(feature = "test-support")]
     loopback: Option<SocketAddr>,
+    #[cfg(target_os = "linux")]
+    airplay: Option<airplay::Configuration>,
+}
+
+struct Client {
+    cast: Cast,
+    airplay: bool,
 }
 
 const DISCOVERY_WINDOW: Duration = Duration::from_secs(5);
 const DEFAULT_PORT: u16 = 49152;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+// Give the sender's bounded setup time to surface a timing diagnostic before
+// treating a missing HTTP request as a relay reachability problem.
+const AIRPLAY_FETCH_TIMEOUT: Duration = Duration::from_secs(35);
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn configured_relay_port(value: Option<&OsStr>) -> Result<u16, Error> {
@@ -46,12 +64,30 @@ fn configured_relay_port(value: Option<&OsStr>) -> Result<u16, Error> {
 }
 
 fn map_error(error: &iptv_cast::Error) -> Error {
+    if let Some(Diagnostic::TimingListener { local_addr }) = error.diagnostic() {
+        let port = local_addr.port();
+        match error.kind() {
+            ErrorKind::TimedOut => return Error::AirPlayTiming { port },
+            ErrorKind::Unavailable => {
+                return Error::AirPlayTimingSocket {
+                    port: NonZeroU16::new(port).map(NonZeroU16::get),
+                };
+            }
+            _ => {}
+        }
+    }
     match error.kind() {
         ErrorKind::Unavailable | ErrorKind::Unreachable => Error::Unavailable,
         ErrorKind::ReceiverRefused => Error::Refused,
         ErrorKind::Cancelled => Error::Cancelled,
         ErrorKind::Unsupported | ErrorKind::InvalidInput => Error::Unsupported,
         ErrorKind::Busy => Error::Busy,
+        ErrorKind::ApprovalDenied | ErrorKind::InvalidPin | ErrorKind::Expired => {
+            Error::PairingRejected
+        }
+        ErrorKind::Storage => Error::PairingStorage,
+        ErrorKind::InvalidCredential => Error::PairingInvalid,
+        ErrorKind::IdentityMismatch => Error::PairingIdentityChanged,
         _ => Error::Unknown,
     }
 }
@@ -60,33 +96,86 @@ impl Sender {
     #[cfg(feature = "test-support")]
     pub(super) fn for_loopback(address: SocketAddr) -> Self {
         Self {
+            client: OnceCell::new(),
+            routes: Mutex::new(HashMap::new()),
             loopback: Some(address),
-            ..Self::default()
+            #[cfg(target_os = "linux")]
+            airplay: None,
         }
     }
 
-    fn new_cast(&self) -> Result<Cast, iptv_cast::Error> {
-        #[cfg(feature = "test-support")]
-        if let Some(address) = self.loopback {
-            return iptv_cast::test_support::sender(address);
+    pub(super) fn new(directory: &Path) -> Self {
+        #[cfg(not(target_os = "linux"))]
+        let _ = directory;
+        Self {
+            client: OnceCell::new(),
+            routes: Mutex::new(HashMap::new()),
+            #[cfg(feature = "test-support")]
+            loopback: None,
+            #[cfg(target_os = "linux")]
+            airplay: airplay::Configuration::from_env(directory),
         }
-        Cast::builder().build()
     }
 
-    fn cast(&self) -> Result<&Cast, Error> {
-        if let Some(cast) = self.cast.get() {
-            return Ok(cast);
-        }
-        let cast = self.new_cast().map_err(|error| map_error(&error))?;
-        Ok(self.cast.get_or_init(|| cast))
+    async fn client(&self) -> Result<&Client, Error> {
+        self.client
+            .get_or_try_init(|| async {
+                #[cfg(feature = "test-support")]
+                if let Some(address) = self.loopback {
+                    return Ok(Client {
+                        cast: iptv_cast::test_support::sender(address)
+                            .map_err(|error| map_error(&error))?,
+                        airplay: false,
+                    });
+                }
+                #[cfg(target_os = "linux")]
+                if let Some(config) = &self.airplay {
+                    return Ok(Client {
+                        cast: config
+                            .configure(Cast::builder())
+                            .build()
+                            .map_err(|error| map_error(&error))?,
+                        airplay: true,
+                    });
+                }
+                Ok(Client {
+                    cast: Cast::builder()
+                        .airplay_enabled(false)
+                        .build()
+                        .map_err(|error| map_error(&error))?,
+                    airplay: false,
+                })
+            })
+            .await
+    }
+
+    fn route(&self, receiver: &Receiver) -> Result<Route, Error> {
+        self.routes
+            .lock()
+            .map_err(|_| Error::Unavailable)?
+            .get(&receiver.id)
+            .cloned()
+            .ok_or(Error::Unavailable)
     }
 }
 
 impl Port for Sender {
+    fn forget(&self, receiver: Receiver) -> Task<'_, ()> {
+        Box::pin(async move {
+            self.client()
+                .await?
+                .cast
+                .forget(&self.route(&receiver)?)
+                .await
+                .map_err(|error| map_error(&error))
+        })
+    }
+
     fn discover(&self) -> Task<'_, Vec<Receiver>> {
         Box::pin(async {
-            let discovery = self
-                .cast()?
+            let client = self.client().await?;
+            let discovery = client
+                .cast
                 .discover(DISCOVERY_WINDOW)
                 .await
                 .map_err(|error| map_error(&error))?;
@@ -95,22 +184,45 @@ impl Port for Sender {
             Ok(discovery
                 .routes()
                 .iter()
-                .filter(|route| route.protocol().as_str() == "googlecast")
-                .map(|route| {
+                .filter_map(|route| {
+                    let protocol = match route.protocol().as_str() {
+                        "googlecast" => NetworkProtocol::GoogleCast,
+                        "airplay"
+                            if client.airplay
+                                && matches!(
+                                    route.availability(Feature::LoadVideoUrl),
+                                    Availability::Available | Availability::Unknown
+                                ) =>
+                        {
+                            NetworkProtocol::AirPlay
+                        }
+                        _ => return None,
+                    };
                     let id = route.id().as_str().to_owned();
                     route_cache.insert(id.clone(), route.clone());
-                    Receiver {
+                    Some(Receiver {
                         id,
                         name: route.name().to_owned(),
-                        protocol: NetworkProtocol::GoogleCast,
-                    }
+                        protocol,
+                    })
                 })
                 .collect())
         })
     }
 
-    fn prepare(&self, receiver: Receiver, source: PlaySource) -> Task<'_, Box<dyn Prepared>> {
+    fn prepare(
+        &self,
+        receiver: Receiver,
+        source: PlaySource,
+        pairing_prompt: PairingPrompt,
+    ) -> Task<'_, Box<dyn Prepared>> {
         Box::pin(async move {
+            #[cfg(target_os = "linux")]
+            if receiver.protocol == NetworkProtocol::AirPlay
+                && let Some(config) = &self.airplay
+            {
+                config.validate()?;
+            }
             let relay_port =
                 configured_relay_port(std::env::var_os("PATINA_CAST_RELAY_PORT").as_deref())?;
             #[cfg(feature = "test-support")]
@@ -119,33 +231,51 @@ impl Port for Sender {
             } else {
                 relay_port
             };
-            let route = self
-                .routes
-                .lock()
-                .map_err(|_| Error::Unavailable)?
-                .get(&receiver.id)
-                .cloned()
-                .ok_or(Error::Unavailable)?;
+            let route = self.route(&receiver)?;
             let connection = match self
-                .cast()?
+                .client()
+                .await?
+                .cast
                 .connect(&route)
                 .await
                 .map_err(|error| map_error(&error))?
             {
                 Connect::Ready(connection) => connection,
                 Connect::PinRequired(pairing) => {
-                    pairing.cancel().await;
-                    return Err(Error::Unsupported);
+                    #[cfg(target_os = "linux")]
+                    {
+                        airplay::pair(pairing, pairing_prompt).await?
+                    }
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        drop(pairing_prompt);
+                        pairing.cancel().await;
+                        return Err(Error::Unsupported);
+                    }
                 }
                 _ => return Err(Error::Unsupported),
             };
+            if receiver.protocol == NetworkProtocol::AirPlay
+                && connection.peer_trust() != PeerTrust::VerifiedPairing
+            {
+                connection.close().await;
+                return Err(Error::PairingIdentityChanged);
+            }
             let (local, remote) = connection.control_addrs().ok_or(Error::Unavailable)?;
+            let listen = match relay_listen_addr(local, relay_port) {
+                Ok(listen) => listen,
+                Err(error) => {
+                    connection.close().await;
+                    return Err(error);
+                }
+            };
             Ok(Box::new(Handoff {
                 ready: Some(Ready {
                     connection,
                     source,
-                    listen: SocketAddr::new(local.ip(), relay_port),
+                    listen,
                     remote,
+                    protocol: receiver.protocol,
                 }),
                 pending: None,
                 handle: Handle::current(),
@@ -155,11 +285,23 @@ impl Port for Sender {
     }
 }
 
+fn relay_listen_addr(mut local: SocketAddr, port: u16) -> Result<SocketAddr, Error> {
+    // An IPv6 interface zone belongs to the sender. The shared Media URL
+    // validator and the receiver cannot use a sender-local zone identifier.
+    if matches!(local, SocketAddr::V6(addr) if addr.scope_id() != 0 || addr.ip().is_unicast_link_local())
+    {
+        return Err(Error::AirPlayRelayAddress);
+    }
+    local.set_port(port);
+    Ok(local)
+}
+
 struct Ready {
     connection: Connection,
     source: PlaySource,
     listen: SocketAddr,
     remote: SocketAddr,
+    protocol: NetworkProtocol,
 }
 
 struct Pending {
@@ -243,6 +385,7 @@ impl Prepared for Handoff {
                 source,
                 listen,
                 remote,
+                protocol,
             } = self.ready.take().ok_or(Error::Unknown)?;
             // The old relay's listener is joined before the runtime calls load.
             let (relay, gate) = tokio::task::spawn_blocking(move || {
@@ -280,6 +423,11 @@ impl Prepared for Handoff {
                 &mut pending.gate,
                 &mut updates,
                 relay_port,
+                if protocol == NetworkProtocol::AirPlay {
+                    AIRPLAY_FETCH_TIMEOUT
+                } else {
+                    FETCH_TIMEOUT
+                },
                 self.guard.as_deref(),
             )
             .await;
@@ -348,10 +496,11 @@ async fn wait_for_request(
     gate: &mut ExternalAdmission,
     updates: &mut Updates,
     relay_port: u16,
+    budget: Duration,
     guard: Option<&(dyn Fn() -> bool + Send + Sync)>,
 ) -> Result<(), Error> {
     let no_request = Error::NoRequest { relay_port };
-    let deadline = Instant::now() + FETCH_TIMEOUT;
+    let deadline = Instant::now() + budget;
     tokio::select! {
         result = timeout_at(deadline, gate.connected()) => {
             if result == Ok(true) { Ok(()) } else { Err(no_request) }
@@ -436,28 +585,48 @@ struct Playing {
 }
 
 impl Remote for Playing {
+    fn controls(&self) -> Option<Controls> {
+        self.session
+            .try_lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(Session::snapshot))
+            .map(|snapshot| {
+                let available = |feature| snapshot.availability(feature) == Availability::Available;
+                let output = snapshot.volume_scope().is_some();
+                Controls {
+                    play: available(Feature::Play),
+                    pause: available(Feature::Pause),
+                    volume: output && available(Feature::SetVolume),
+                    step_volume: output && available(Feature::StepVolume),
+                    toggle_mute: output && available(Feature::ToggleMute),
+                }
+            })
+    }
+
     fn command(&self, command: Command) -> Task<'_, ()> {
         Box::pin(async move {
+            let mut slot = self.session.lock().await;
+            if command == Command::Stop {
+                return if let Some(session) = slot.take() {
+                    drop(slot);
+                    stop_remote(session).await
+                } else {
+                    Ok(())
+                };
+            }
+            let session = slot.as_mut().ok_or(Error::Unavailable)?;
+            let output = |change| output_control(session.snapshot().volume_scope(), change);
             let command = match command {
-                Command::Volume(value) => output_control(OutputChange::SetVolume(
+                Command::Volume(value) => output(OutputChange::SetVolume(
                     Volume::percent(value).map_err(|error| map_error(&error))?,
-                )),
-                Command::StepVolume(value) => output_control(OutputChange::StepVolume(value)),
-                Command::ToggleMute => output_control(OutputChange::ToggleMute),
+                ))?,
+                Command::StepVolume(value) => output(OutputChange::StepVolume(value))?,
+                Command::ToggleMute => output(OutputChange::ToggleMute)?,
                 Command::Play => iptv_cast::Command::Play,
                 Command::Pause => iptv_cast::Command::Pause,
-                Command::Stop => {
-                    return if let Some(session) = self.session.lock().await.take() {
-                        stop_remote(session).await
-                    } else {
-                        Ok(())
-                    };
-                }
+                Command::Stop => unreachable!(),
             };
-            let mut session = self.session.lock().await;
             session
-                .as_mut()
-                .ok_or(Error::Unavailable)?
                 .command(command)
                 .await
                 .map(drop)
@@ -501,11 +670,14 @@ impl Remote for Playing {
     }
 }
 
-fn output_control(change: OutputChange) -> iptv_cast::Command {
-    iptv_cast::Command::Output {
-        scope: VolumeScope::Receiver,
+fn output_control(
+    scope: Option<VolumeScope>,
+    change: OutputChange,
+) -> Result<iptv_cast::Command, Error> {
+    Ok(iptv_cast::Command::Output {
+        scope: scope.ok_or(Error::Unavailable)?,
         change,
-    }
+    })
 }
 
 #[cfg(test)]

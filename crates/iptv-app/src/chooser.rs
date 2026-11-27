@@ -106,7 +106,7 @@ pub(super) fn open_more(
 }
 
 pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receiver>) {
-    use iptv_core::cast::Target;
+    use iptv_core::cast::{NetworkProtocol, Target};
     let owner = crate::runtime_owner::runtime();
     if let Some((Target::Network(current), _)) = owner.cast_target()
         && !receivers.iter().any(|receiver| receiver.id == current.id)
@@ -115,7 +115,16 @@ pub(crate) fn show_receivers(ui: Ui, mut receivers: Vec<iptv_core::cast::Receive
     }
     let mut labels = vec![tr("This device").to_owned()];
     let mut values = vec!["local".to_owned()];
-    labels.extend(receivers.iter().map(|r| r.name.clone()));
+    let mixed = receivers
+        .iter()
+        .any(|receiver| receiver.protocol == NetworkProtocol::AirPlay);
+    labels.extend(receivers.iter().map(|receiver| match receiver.protocol {
+        NetworkProtocol::AirPlay => trf("{name} · AirPlay", &[("name", (&receiver.name).into())]),
+        NetworkProtocol::GoogleCast if mixed => {
+            trf("{name} · Chromecast", &[("name", (&receiver.name).into())])
+        }
+        NetworkProtocol::GoogleCast => receiver.name.clone(),
+    }));
     values.extend(receivers.iter().map(|r| r.id.clone()));
     // Production Apple hosts provide the real named-device control. The
     // fallback supports native ports without a mounted platform view.

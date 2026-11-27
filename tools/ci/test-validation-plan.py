@@ -253,7 +253,7 @@ class Selection(unittest.TestCase):
 
     def test_packaging_helper_dependency_closure(self):
         for path in ("tools/ci/notices.hbs", "tools/ci/component-inventory.py", "tools/ci/crypto-native-notices.py",
-                     "tools/ci/check-package-lock.py"):
+                     "tools/ci/check-package-lock.py", "crates/iptv-cast/NOTICE-pyatv.md"):
             plan = v.select([path])
             self.assertTrue(plan["packages"], path)
             self.assertFalse(plan["android_package"], path)

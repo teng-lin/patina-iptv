@@ -51,6 +51,7 @@ pub use backup::{Pickers, set_pickers_for_test};
 mod browse_playback;
 mod capabilities;
 mod capture_limits;
+mod cast_pairing;
 mod casting;
 mod channels_view;
 mod chooser;
@@ -270,6 +271,8 @@ pub struct Ui {
     /// running: the channel key focused then (`browse_playback::hold`).
     pub autoplay_held: Signal<Option<Option<String>>>,
     pub(crate) cast_busy: Signal<bool>,
+    pub(crate) cast_controls: Signal<iptv_core::cast::Controls>,
+    pub(crate) cast_pairing: Signal<Option<cast_pairing::Pending>>,
     pub(crate) cast_picker_open: Signal<bool>,
     pub(crate) cast_discovering: Signal<bool>,
     pub(crate) cast_local_pending: Signal<Option<u64>>,
@@ -415,6 +418,8 @@ impl Ui {
             browse_playback: signal(Default::default()),
             autoplay_held: signal(None),
             cast_busy: signal(false),
+            cast_controls: signal(iptv_core::cast::Controls::NONE),
+            cast_pairing: signal_with(None, SignalEquals::Never),
             cast_picker_open: signal(false),
             cast_discovering: signal(false),
             cast_local_pending: signal(None),
@@ -918,6 +923,7 @@ fn ui_layers(ui: Ui, groups: ElementRef, rows: ElementRef) -> View {
         .child(guide_repair_view::layer(ui))
         .child(wizard_view::layer(ui))
         .child(backup::layer(ui))
+        .child(cast_pairing::layer(ui))
         .child(parental_view::layer(ui))
         .child(startup_view::store_failure_layer(ui))
         .child(desktop::quit_confirm::layer(ui))
@@ -1159,6 +1165,10 @@ pub(crate) fn go_back(ui: Ui) -> bool {
             _ if top == Some(Overlay::StoreStartupFailure) => startup_view::store_failure_back(ui),
             _ if top == Some(Overlay::Parental) => {
                 parental_view::close(ui);
+                true
+            }
+            _ if top == Some(Overlay::CastPairing) => {
+                cast_pairing::close(ui);
                 true
             }
             _ if top == Some(Overlay::RestoreReview) => backup::back(ui),

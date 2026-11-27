@@ -878,6 +878,10 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
         crate::parental_view::key(ui, action);
         return;
     }
+    if top == Some(Overlay::CastPairing) {
+        crate::cast_pairing::key(ui, action);
+        return;
+    }
     if top == Some(Overlay::RestoreReview) {
         crate::backup::key(ui, action);
         return;

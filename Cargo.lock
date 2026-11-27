@@ -2529,15 +2529,23 @@ dependencies = [
  "futures-util",
  "mdns-sd",
  "mime",
+ "num-bigint",
+ "plist",
  "prost",
  "rcgen",
+ "ring",
+ "rpassword",
  "rustls-webpki",
  "serde_json",
+ "sha2",
+ "srp",
+ "subtle",
  "tokio",
  "tokio-rustls",
  "tokio-util",
  "url",
  "x509-cert",
+ "zeroize",
 ]
 
 [[package]]
@@ -3008,6 +3016,12 @@ dependencies = [
  "polycool",
  "smallvec",
 ]
+
+[[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "libc"
@@ -4150,6 +4164,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
+name = "plist"
+version = "1.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d86a77b7d9cdebd9643c180c158748db7d894b24a3935ed4b5843e698ae086eb"
+dependencies = [
+ "base64 0.23.1",
+ "indexmap",
+ "quick-xml",
+ "time",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4660,12 +4686,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rpassword"
+version = "7.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa2c5d9304b618df61ff17f3d3485c6e1854a3d94902a49abbb8d43dfbe0464"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "rsqlite-vfs"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "353b74f9810d5b085b6c42c9d86a5f0fdb795553235cdd48753b32e3809d18a7"
 dependencies = [
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a1efe12a1469752d0e6ff5ebec0b6ef4924cc5c4c71046b0ec730040535819d"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5278,6 +5325,19 @@ dependencies = [
  "cc",
  "rsqlite-vfs",
  "sqlcipher-src",
+]
+
+[[package]]
+name = "srp"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4cdd40049b29ab1315ccba7ffcf1eece8162982eab14edfac3cf2c2ffab18193"
+dependencies = [
+ "digest",
+ "generic-array",
+ "lazy_static",
+ "num-bigint",
+ "subtle",
 ]
 
 [[package]]

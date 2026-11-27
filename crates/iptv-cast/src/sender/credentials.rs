@@ -58,13 +58,22 @@ impl fmt::Debug for Credential {
 
 #[derive(Debug)]
 pub struct StoreError {
-    _private: (),
+    invalid_credential: bool,
 }
 
 impl StoreError {
     /// Map a storage failure without retaining a potentially sensitive source.
     pub fn new(_source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self { _private: () }
+        Self {
+            invalid_credential: false,
+        }
+    }
+
+    /// An existing record was read but its stored representation was invalid.
+    pub fn invalid_credential() -> Self {
+        Self {
+            invalid_credential: true,
+        }
     }
 }
 
@@ -204,11 +213,17 @@ impl CredentialBook {
 
     pub(super) async fn load(&self, attempt: &Attempt) -> Result<Option<Credential>, Error> {
         let _guard = attempt.record.io.lock().await;
-        let credential = self
-            .store
-            .load(&attempt.key)
-            .await
-            .map_err(|_| storage_error())?;
+        let credential = self.store.load(&attempt.key).await.map_err(|error| {
+            if error.invalid_credential {
+                Error::new(
+                    ErrorKind::InvalidCredential,
+                    Stage::Store,
+                    Delivery::NotSent,
+                )
+            } else {
+                storage_error()
+            }
+        })?;
         attempt
             .has_credential
             .store(credential.is_some(), Ordering::Relaxed);
@@ -299,8 +314,8 @@ impl PinCode {
     }
 
     #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "AirPlay integration follows this contract")
+        not(any(test, feature = "airplay")),
+        expect(dead_code, reason = "used by the AirPlay backend")
     )]
     pub(crate) fn as_str(&self) -> &str {
         &self.0
