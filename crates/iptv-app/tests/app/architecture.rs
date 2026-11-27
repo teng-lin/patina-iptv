@@ -537,7 +537,7 @@ fn host_has_no_view_or_wiring_dependency() {
         let source = shipped(&code(&file));
         for path in rooted_paths(&source, &name) {
             assert!(
-                !is_view_dependency(&root, path[0]),
+                path != ["runtime"] && !is_view_dependency(&root, path[0]),
                 "{name} depends on application path {}",
                 path.join("::")
             );
@@ -654,11 +654,12 @@ fn host_cannot_reach_views_through_root_imports() {
         ("host.rs", "use super::{App as Root};"),
         ("host/bridge.rs", "use super::super::i18n::tr;"),
         ("host/bridge.rs", "use crate::{settings_view as screen};"),
+        ("host/bridge.rs", "let _ = crate::runtime();"),
     ] {
         assert!(
             rooted_paths(source, file)
                 .iter()
-                .any(|path| is_view_dependency(&root, path[0]))
+                .any(|path| path == &["runtime"] || is_view_dependency(&root, path[0]))
         );
     }
     assert!(is_module_in(&root, "screens", "parental_view"));

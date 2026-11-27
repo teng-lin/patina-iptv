@@ -71,12 +71,16 @@ fn platform_key(path: &Path) -> Result<DatabaseKey, Error> {
         .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
     lock.lock()
         .map_err(|_| Error::unavailable("cannot lock the credential broker"))?;
+    #[cfg(target_os = "linux")]
     let entry = Entry::new(
         "org.iptv-rs.database",
         "catalog-v1",
         "Patina catalog key".to_owned(),
-    )
-    .map_err(|_| Error::unavailable("platform credential broker could not be opened"))?;
+    );
+    #[cfg(not(target_os = "linux"))]
+    let entry = Entry::new("org.iptv-rs.database", "catalog-v1");
+    let entry =
+        entry.map_err(|_| Error::unavailable("platform credential broker could not be opened"))?;
     let secret = match entry.get_secret() {
         Ok(secret) => Zeroizing::new(secret),
         Err(keyring::Error::NoEntry) => {

@@ -80,6 +80,10 @@ IOS = (*BUILD, "crates/**/*.rs", "crates/iptv-app/nsh.json", "tools/fetch-mpvkit
        "crates/iptv-app/src/host/native/apple_airplay.m",
        "tools/mpv-runtime-ios/**", "hosts/ios/**")
 CREDENTIALS = (*BUILD, "crates/iptv-app/src/host/native/credential_key*", "crates/iptv-app/src/host/native/credential_key/**",
+               "crates/iptv-app/src/wiring/runtime_owner.rs",
+               "crates/iptv-app/src/host/native.rs",
+               "crates/iptv-app/src/host/native/casting.rs",
+               "crates/iptv-app/src/host/native/casting/airplay.rs",
                "crates/iptv-store-sqlite/**", "crates/iptv-sqlcipher-init/**",
                "tools/ci/isolated-credentials.py")
 DOCS = ("docs/**", ".gitignore", ".editorconfig")
