@@ -74,7 +74,8 @@ pub(crate) fn with_runtime<R>(owner: Rc<Runtime>, run: impl FnOnce() -> R) -> R 
 pub(crate) fn new_runtime(directory: std::path::PathBuf) -> Runtime {
     let mut ports = host::ports(
         directory,
-        crate::chrome::i18n::tr("Patina AirPlay pairing").to_owned(),
+        crate::chrome::i18n::system_text(crate::chrome::i18n::key("Patina AirPlay pairing"))
+            .to_owned(),
     );
     ports.startup_mark = crate::chrome::startup::mark_with;
     Runtime::new(ports)
@@ -95,4 +96,18 @@ pub(crate) fn in_runtime(
 /// The guide data in use (synthetic until a playlist is imported).
 pub fn schedule() -> Rc<dyn Schedule> {
     runtime().schedule()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn localized_host_ports_can_be_created_while_installing_an_owner() {
+        let directory = tempfile::tempdir().unwrap();
+        RUNTIME.with(|slot| {
+            let _installing = slot.borrow_mut();
+            let _owner = new_runtime(directory.path().to_owned());
+        });
+    }
 }

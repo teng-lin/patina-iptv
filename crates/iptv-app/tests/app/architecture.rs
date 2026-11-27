@@ -332,6 +332,14 @@ fn declarations_include_macro_and_local_statics_but_not_lifetimes() {
     assert!(statics("unsafe extern \"C\" { static HOST_NAME: &str; }").is_empty());
     assert!(statics("fn f() -> &'static str { x } struct A(&'static [u8]);").is_empty());
 }
+const VIEW_TREES: [&str; 6] = [
+    "chrome",
+    "guide",
+    "library_ui",
+    "playback",
+    "screens",
+    "wiring",
+];
 const TREE_SEAMS: [&str; 2] = ["screens", "library_ui"];
 
 /// Existing lateral dependencies. Remove rows as callers move to shared
@@ -479,6 +487,45 @@ fn expand_path<'a>(
     }
 }
 
+fn is_module_in(root: &Path, tree: &str, name: &str) -> bool {
+    let module = root.join(tree).join(name);
+    module.with_extension("rs").is_file() || module.join("mod.rs").is_file()
+}
+
+fn is_view_dependency(root: &Path, name: &str) -> bool {
+    matches!(
+        name,
+        "*" | "self"
+            | "App"
+            | "Ui"
+            | "SharedUi"
+            | "GuideUi"
+            | "PlaybackUi"
+            | "ChromeUi"
+            | "ScreensUi"
+            | "ViewMode"
+            | "Playback"
+            | "debug_overlay"
+            | "schedule"
+    ) || VIEW_TREES
+        .into_iter()
+        .any(|tree| name == tree || is_module_in(root, tree, name))
+}
+
+/// Root private imports are visible to descendants. Check short crate paths
+/// and relative paths that climb from the current file to the crate root.
+fn rooted_paths<'a>(source: &'a str, file: &str) -> BTreeSet<Vec<&'a str>> {
+    let mut absolute = paths_from(source, "crate");
+    let depth = file.split('/').count();
+    for path in paths_from(source, "super") {
+        let parents = path.iter().take_while(|part| **part == "super").count() + 1;
+        if parents >= depth && parents <= path.len() {
+            absolute.insert(path[parents - 1..].to_vec());
+        }
+    }
+    absolute
+}
+
 #[test]
 fn host_has_no_view_or_wiring_dependency() {
     let (root, files) = app_sources();
@@ -488,26 +535,9 @@ fn host_has_no_view_or_wiring_dependency() {
             continue;
         }
         let source = shipped(&code(&file));
-        for path in paths_from(&source, "crate") {
+        for path in rooted_paths(&source, &name) {
             assert!(
-                !matches!(
-                    path[0],
-                    "*" | "App"
-                        | "Ui"
-                        | "SharedUi"
-                        | "GuideUi"
-                        | "PlaybackUi"
-                        | "ChromeUi"
-                        | "ScreensUi"
-                        | "ViewMode"
-                        | "Playback"
-                        | "guide"
-                        | "playback"
-                        | "library_ui"
-                        | "screens"
-                        | "chrome"
-                        | "wiring"
-                ),
+                !is_view_dependency(&root, path[0]),
                 "{name} depends on application path {}",
                 path.join("::")
             );
@@ -570,21 +600,20 @@ fn direct_screen_imports_follow_the_shrink_only_list() {
             continue;
         };
         let source = code(&file);
-        for path in ["crate", "super", "self"]
-            .into_iter()
-            .flat_map(|scope| paths_from(&source, scope))
-        {
-            let mut path = path
-                .into_iter()
-                .skip_while(|component| *component == "super");
-            if path.next() == Some(other) {
-                let module = path.next().unwrap_or("*");
-                assert!(
-                    !matches!(module, "*" | "self"),
-                    "{name} imports all of {other}"
-                );
-                found.insert((name.clone(), format!("{other}::{module}")));
-            }
+        for path in rooted_paths(&source, &name) {
+            let first = path[0];
+            let module = if first == other {
+                path.get(1).copied().unwrap_or("*")
+            } else if is_module_in(&root, other, first) {
+                first
+            } else {
+                continue;
+            };
+            assert!(
+                !matches!(module, "*" | "self"),
+                "{name} imports all of {other}"
+            );
+            found.insert((name.clone(), format!("{other}::{module}")));
         }
     }
     let expected = CROSS_SCREEN_IMPORTS
@@ -616,4 +645,21 @@ fn grouped_and_aliased_paths_expose_their_dependencies() {
         ])
     );
     assert!(paths_from(&source, "super").contains(&vec!["super", "wiring", "data", "catalog"]));
+}
+
+#[test]
+fn host_cannot_reach_views_through_root_imports() {
+    let (root, _) = app_sources();
+    for (file, source) in [
+        ("host.rs", "use super::{App as Root};"),
+        ("host/bridge.rs", "use super::super::i18n::tr;"),
+        ("host/bridge.rs", "use crate::{settings_view as screen};"),
+    ] {
+        assert!(
+            rooted_paths(source, file)
+                .iter()
+                .any(|path| is_view_dependency(&root, path[0]))
+        );
+    }
+    assert!(is_module_in(&root, "screens", "parental_view"));
 }

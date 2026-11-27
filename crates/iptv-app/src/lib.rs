@@ -24,7 +24,7 @@ mod wiring;
 
 use chrome::{
     chooser, desktop, exit_confirmation, fonts, i18n, input, keyboard, menu_view, mode, overlays,
-    rail, remote_editor, scale, startup_view, toast, ui_kit,
+    rail, remote_editor, startup_view, toast, ui_kit,
 };
 use guide::{fav_editor, favorites, grid, guide_clock, header, lists};
 use iptv_runtime as runtime;
@@ -1319,7 +1319,7 @@ pub fn desktop_guide_header(width: f32, height: f32) -> crate::chrome::layout::G
     crate::chrome::layout::GuideHeader::of(
         width,
         height,
-        scale::scale_for(width, height, true),
+        chrome::scale::scale_for(width, height, true),
         1.0,
     )
 }
@@ -1333,5 +1333,5 @@ pub fn phone_guide_header(
     height: f32,
     text: f32,
 ) -> crate::chrome::layout::GuideHeader {
-    crate::chrome::layout::GuideHeader::of(width, height, scale::PHONE, text)
+    crate::chrome::layout::GuideHeader::of(width, height, chrome::scale::PHONE, text)
 }

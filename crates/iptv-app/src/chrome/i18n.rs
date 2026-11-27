@@ -93,6 +93,11 @@ fn system_locale() -> Option<String> {
     }
 }
 
+/// Labels for the operating system's services use its locale.
+pub(crate) fn system_text(source: &str) -> &str {
+    i18n::translate(i18n::resolve("system", system()), source)
+}
+
 /// Only call for application-owned messages, never provider content.
 pub fn tr(source: &str) -> &str {
     #[cfg(feature = "test-support")]

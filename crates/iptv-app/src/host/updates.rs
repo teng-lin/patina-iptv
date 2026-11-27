@@ -113,3 +113,18 @@ pub(crate) async fn until_update_cancelled<T>(
     })
     .await
 }
+
+// Native update tests can exercise the actual runtime methods. The other
+// updater view tests use only the portable model and reactive handles.
+#[cfg(test)]
+macro_rules! native_update_tests {
+    ($($item:item)*) => {
+        $(
+            #[cfg(any(target_os = "android", target_os = "linux", target_os = "windows", target_os = "macos"))]
+            $item
+        )*
+    };
+}
+
+#[cfg(test)]
+pub(crate) use native_update_tests;

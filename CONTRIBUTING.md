@@ -58,7 +58,7 @@ Two extra checks are worth running when they apply:
 ### When a device run is needed
 
 A change to the Android host (`hosts/android`), to the video layer
-(`crates/iptv-app/src/video.rs`, `player.rs`, the `tv.player` contract), to
+(`crates/iptv-app/src/playback/video.rs`, `player.rs`, the `tv.player` contract), to
 input handling on Android, or to threading and storage that Android exercises
 differently needs a run on a real device before it merges. Use an Android tablet,
 an Android TV device, or both when the change affects both form factors. Run the

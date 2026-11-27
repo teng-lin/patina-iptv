@@ -225,102 +225,104 @@ fn manual_package_route_is_reachable_between_install_and_skip_without_hidden_foc
     );
 }
 
-#[component]
-fn UpdateOverlap() -> impl IntoElement {
-    use iptv_runtime::app_updates::github::{DownloadLink, ReleaseCheck, ReleaseInfo};
-    use std::rc::Rc;
-    let directory = tempfile::tempdir().unwrap();
-    crate::wiring::tasks::bind_owner();
-    let application = Rc::new(crate::wiring::runtime_owner::new_runtime(
-        directory.path().to_owned(),
-    ));
-    let ui = crate::wiring::runtime_owner::with_runtime(application.clone(), || {
-        let ui = Ui::new(
-            crate::SharedUi::new(),
-            crate::playback::player::Player::new(),
-        );
-        update_ui(ui).ready.set(true);
-        let release = |version: &str| ReleaseCheck {
-            installed_version: "1.0.0".into(),
-            status: ReleaseStatus::UpdateAvailable,
-            release: ReleaseInfo {
-                version: version.into(),
-                notes: "Generated notes".into(),
-                published_at: None,
-                url: "https://github.com/synthetic/patina/releases".into(),
-                download: Some(DownloadLink {
-                    name: "synthetic-package".into(),
-                    url: format!("https://example.test/synthetic-{version}"),
-                    size: 9,
-                }),
-            },
-        };
-        let token = application
-            .begin_app_update_check(1, Trigger::Manual, Frequency::Never)
-            .unwrap();
-        assert!(application.finish_app_update_check(token, 2, Ok(release("2.0.0"))));
+host::native_update_tests! {
+    #[component]
+    fn UpdateOverlap() -> impl IntoElement {
+        use iptv_runtime::app_updates::github::{DownloadLink, ReleaseCheck, ReleaseInfo};
+        use std::rc::Rc;
+        let directory = tempfile::tempdir().unwrap();
+        crate::wiring::tasks::bind_owner();
+        let application = Rc::new(crate::wiring::runtime_owner::new_runtime(
+            directory.path().to_owned(),
+        ));
+        let ui = crate::wiring::runtime_owner::with_runtime(application.clone(), || {
+            let ui = Ui::new(
+                crate::SharedUi::new(),
+                crate::playback::player::Player::new(),
+            );
+            update_ui(ui).ready.set(true);
+            let release = |version: &str| ReleaseCheck {
+                installed_version: "1.0.0".into(),
+                status: ReleaseStatus::UpdateAvailable,
+                release: ReleaseInfo {
+                    version: version.into(),
+                    notes: "Generated notes".into(),
+                    published_at: None,
+                    url: "https://github.com/synthetic/patina/releases".into(),
+                    download: Some(DownloadLink {
+                        name: "synthetic-package".into(),
+                        url: format!("https://example.test/synthetic-{version}"),
+                        size: 9,
+                    }),
+                },
+            };
+            let token = application
+                .begin_app_update_check(1, Trigger::Manual, Frequency::Never)
+                .unwrap();
+            assert!(application.finish_app_update_check(token, 2, Ok(release("2.0.0"))));
 
-        // An accepted installation holds its displayed release stable across
-        // manual, startup and timer checks until its guard completes.
-        update_ui(ui).install_busy.set(true);
-        let installation = InstallOperation::new(ui);
-        for trigger in [Trigger::Manual, Trigger::Startup, Trigger::Automatic] {
-            check(ui, trigger);
-            let state = application.app_update_snapshot();
-            assert!(!state.checking, "a competing release check was not started");
-            assert_eq!(state.cached.unwrap().release.version, "2.0.0");
-        }
-        drop(installation);
+            // An accepted installation holds its displayed release stable across
+            // manual, startup and timer checks until its guard completes.
+            update_ui(ui).install_busy.set(true);
+            let installation = InstallOperation::new(ui);
+            for trigger in [Trigger::Manual, Trigger::Startup, Trigger::Automatic] {
+                check(ui, trigger);
+                let state = application.app_update_snapshot();
+                assert!(!state.checking, "a competing release check was not started");
+                assert_eq!(state.cached.unwrap().release.version, "2.0.0");
+            }
+            drop(installation);
 
-        // Conversely, a held check must finish before a cached older release
-        // can authorize any installation or browser download action.
-        let token = application
-            .begin_app_update_check(3, Trigger::Manual, Frequency::Never)
-            .unwrap();
-        download(ui);
-        manual_download(ui);
-        update_ui(ui).focus.set(1);
-        key(ui, Action::Select);
-        update_ui(ui).focus.set(5);
-        key(ui, Action::Select);
-        assert!(!update_ui(ui).install_busy.get_untracked());
-        assert!(application.app_update_snapshot().checking);
-        assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
-        assert_eq!(
-            application
-                .app_update_snapshot()
-                .cached
-                .unwrap()
-                .release
-                .version,
-            "3.0.0"
-        );
-        assert!(!application.has_pending_app_update());
-        ui
-    });
-    cleanup(move || drop(directory));
-    view()
-        .child(text("No overlapping update operations"))
-        .child(text("Open verified fixture route").on_press(move || {
-            crate::wiring::runtime_owner::with_runtime(application.clone(), || manual_download(ui));
-        }))
-}
+            // Conversely, a held check must finish before a cached older release
+            // can authorize any installation or browser download action.
+            let token = application
+                .begin_app_update_check(3, Trigger::Manual, Frequency::Never)
+                .unwrap();
+            download(ui);
+            manual_download(ui);
+            update_ui(ui).focus.set(1);
+            key(ui, Action::Select);
+            update_ui(ui).focus.set(5);
+            key(ui, Action::Select);
+            assert!(!update_ui(ui).install_busy.get_untracked());
+            assert!(application.app_update_snapshot().checking);
+            assert!(application.finish_app_update_check(token, 4, Ok(release("3.0.0"))));
+            assert_eq!(
+                application
+                    .app_update_snapshot()
+                    .cached
+                    .unwrap()
+                    .release
+                    .version,
+                "3.0.0"
+            );
+            assert!(!application.has_pending_app_update());
+            ui
+        });
+        cleanup(move || drop(directory));
+        view()
+            .child(text("No overlapping update operations"))
+            .child(text("Open verified fixture route").on_press(move || {
+                crate::wiring::runtime_owner::with_runtime(application.clone(), || manual_download(ui));
+            }))
+    }
 
-#[test]
-fn release_checks_and_accepted_installation_cannot_replace_each_others_version() {
-    let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
-        nsh_core::element::Root::of::<UpdateOverlap>(),
-    ))
-    .unwrap();
-    app.wait_for("text:No overlapping update operations")
+    #[test]
+    fn release_checks_and_accepted_installation_cannot_replace_each_others_version() {
+        let mut app = nsh_testing::Headless::start(nsh_engine::EngineConfig::new(
+            nsh_core::element::Root::of::<UpdateOverlap>(),
+        ))
         .unwrap();
-    assert!(
-        app.screen().opened_urls().is_empty(),
-        "held check blocks browser actions"
-    );
-    app.press("text:Open verified fixture route").unwrap();
-    assert_eq!(
-        app.screen().opened_urls(),
-        ["https://example.test/synthetic-3.0.0"]
-    );
+        app.wait_for("text:No overlapping update operations")
+            .unwrap();
+        assert!(
+            app.screen().opened_urls().is_empty(),
+            "held check blocks browser actions"
+        );
+        app.press("text:Open verified fixture route").unwrap();
+        assert_eq!(
+            app.screen().opened_urls(),
+            ["https://example.test/synthetic-3.0.0"]
+        );
+    }
 }
