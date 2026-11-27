@@ -1,6 +1,6 @@
-//! PIN-approved AirPlay pair-setup and identity-bound pair-verify.
+//! AirPlay transient pair-setup, PIN approval, and saved identity verification.
 use super::wire::{self, Fault, Version, Wire};
-use crate::sender::Delivery;
+use crate::sender::{Delivery, PeerTrust};
 use futures_util::{StreamExt, stream};
 use num_bigint::BigUint;
 use ring::{
@@ -23,6 +23,38 @@ const AUTH_HEADERS: &[(&str, &str)] = &[
     ("Content-Type", "application/octet-stream"),
 ];
 
+const TRANSIENT_HEADERS: &[(&str, &str)] = &[
+    ("User-Agent", "AirPlay/870.14.1"),
+    ("Connection", "keep-alive"),
+    ("X-Apple-HKP", "4"),
+    ("Content-Type", "application/octet-stream"),
+];
+
+#[derive(Clone, Copy)]
+enum Hkp {
+    Normal,
+    Transient,
+}
+
+impl Hkp {
+    fn headers(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Self::Normal => AUTH_HEADERS,
+            Self::Transient => TRANSIENT_HEADERS,
+        }
+    }
+
+    fn auth_error(self, status: u16, normal: AuthFault) -> AuthFault {
+        match (self, status) {
+            // HTTP 401 can request a receiver password, and 403 can mean
+            // the receiver requires Home membership rather than a PIN.
+            (Self::Transient, 470) => AuthFault::ApprovalDenied,
+            (Self::Normal, 401 | 403 | 470) => normal,
+            _ => Fault::Refused(status).into(),
+        }
+    }
+}
+
 const METHOD: u8 = 0;
 const IDENTIFIER: u8 = 1;
 const SALT: u8 = 2;
@@ -33,6 +65,7 @@ const STATE: u8 = 6;
 const ERROR: u8 = 7;
 const SIGNATURE: u8 = 10;
 const NAME: u8 = 17;
+const FLAGS: u8 = 19;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 const TCP_BATCH_SIZE: usize = 4;
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -44,6 +77,7 @@ pub(super) enum AuthFault {
     Wire(Fault),
     TimedOut,
     ApprovalDenied,
+    GuestRefused,
     InvalidPin,
     IdentityMismatch,
     InvalidCredential,
@@ -309,6 +343,14 @@ impl SrpExchange {
         })
     }
 
+    fn request(&self) -> Vec<u8> {
+        tlv(&[
+            (STATE, &[3]),
+            (PUBLIC_KEY, &self.public),
+            (PROOF, &self.client_proof),
+        ])
+    }
+
     fn verify_server(&self, received: &[u8]) -> Result<()> {
         if bool::from(self.server_proof.ct_eq(received)) {
             Ok(())
@@ -321,19 +363,22 @@ impl SrpExchange {
 async fn auth_request(
     wire: &mut Wire,
     path: &str,
+    hkp: Hkp,
     data: &[u8],
     authentication_error: AuthFault,
     expected_state: u8,
 ) -> Reported<Fields> {
     let response = timeout(
         HANDSHAKE_TIMEOUT,
-        wire.request(Version::Http, "POST", path, AUTH_HEADERS, data),
+        wire.request(Version::Http, "POST", path, hkp.headers(), data),
     )
     .await
     .map_err(|_| in_flight(AuthFault::TimedOut))?
     .map_err(in_flight)?;
     match response.require_ok() {
-        Err(Fault::Refused(401 | 403 | 470)) => acknowledged(Err(authentication_error)),
+        Err(Fault::Refused(status)) => {
+            acknowledged(Err(hkp.auth_error(status, authentication_error)))
+        }
         Err(error) => acknowledged(Err(error.into())),
         Ok(response) => acknowledged(
             Fields::parse(&response.body)
@@ -400,19 +445,41 @@ where
     }
 }
 
-pub(super) struct Challenge {
-    wire: Wire,
-    address: SocketAddr,
+struct SrpChallenge {
     public: Vec<u8>,
     salt: [u8; 16],
 }
 
-#[cfg(test)]
+impl SrpChallenge {
+    fn read(fields: &Fields) -> Reported<Self> {
+        let salt = acknowledged(fields.array(SALT))?;
+        let public = acknowledged(fields.get(PUBLIC_KEY))?;
+        if public.len() > SRP_BYTES {
+            return acknowledged(Err(Fault::InvalidMessage.into()));
+        }
+        Ok(Self {
+            public: public.to_vec(),
+            salt,
+        })
+    }
+
+    fn exchange(&self, pin: &[u8]) -> Result<SrpExchange> {
+        let secret = Zeroizing::new(random::<32>()?);
+        SrpExchange::start(&secret, pin, &self.salt, &self.public)
+    }
+}
+
+pub(super) struct Challenge {
+    wire: Wire,
+    address: SocketAddr,
+    srp: SrpChallenge,
+}
+
 pub(super) async fn start_pairing(address: SocketAddr) -> Reported<Wire> {
     start_pairing_on_wire(open(address).await?).await
 }
 
-pub(super) async fn start_pairing_on_wire(mut wire: Wire) -> Reported<Wire> {
+async fn start_pairing_on_wire(mut wire: Wire) -> Reported<Wire> {
     // The receiver may wait for approval before replying. Return after the
     // request is sent so the caller can display the pending approval prompt.
     timeout(
@@ -446,39 +513,26 @@ impl Challenge {
         let fields = auth_request(
             &mut wire,
             "/pair-setup",
+            Hkp::Normal,
             &request,
             AuthFault::ApprovalDenied,
             2,
         )
         .await?;
-        let salt = acknowledged(fields.array(SALT))?;
-        let public = acknowledged(fields.get(PUBLIC_KEY))?;
-        if public.len() > SRP_BYTES {
-            return acknowledged(Err(Fault::InvalidMessage.into()));
-        }
-        Ok(Self {
-            wire,
-            address,
-            public: public.to_vec(),
-            salt,
-        })
+        let srp = SrpChallenge::read(&fields)?;
+        Ok(Self { wire, address, srp })
     }
 
-    pub(super) async fn finish(mut self, pin: &str) -> Reported<(Verified, StoredKeys)> {
+    pub(super) async fn finish(mut self, pin: &str) -> Reported<(SecureSession, StoredKeys)> {
         if pin.len() != 4 || !pin.bytes().all(|digit| digit.is_ascii_digit()) {
             return Err(AuthFault::InvalidPin.into());
         }
-        let srp_secret = Zeroizing::new(random::<32>()?);
-        let exchange = SrpExchange::start(&srp_secret, pin.as_bytes(), &self.salt, &self.public)?;
-
-        let request = tlv(&[
-            (STATE, &[3]),
-            (PUBLIC_KEY, &exchange.public),
-            (PROOF, &exchange.client_proof),
-        ]);
+        let exchange = self.srp.exchange(pin.as_bytes())?;
+        let request = exchange.request();
         let response = auth_request(
             &mut self.wire,
             "/pair-setup",
+            Hkp::Normal,
             &request,
             AuthFault::InvalidPin,
             4,
@@ -520,6 +574,7 @@ impl Challenge {
         let response = auth_request(
             &mut self.wire,
             "/pair-setup",
+            Hkp::Normal,
             &tlv(&[(STATE, &[5]), (ENCRYPTED, &ciphertext)]),
             AuthFault::InvalidPin,
             6,
@@ -563,27 +618,78 @@ impl Challenge {
     }
 }
 
-pub(super) struct Verified {
-    pub(super) wire: Wire,
-    shared: Zeroizing<[u8; 32]>,
-    pub(super) device_id: String,
+pub(super) async fn transient_on_wire(mut wire: Wire) -> Reported<SecureSession> {
+    let device = random::<6>()?;
+    // Receiver-supported guest mode. The SRP session ends at M4 and does
+    // not register a controller or request a PIN on the receiver.
+    let request = tlv(&[(METHOD, &[0]), (STATE, &[1]), (FLAGS, &[0x10])]);
+    let fields = auth_request(
+        &mut wire,
+        "/pair-setup",
+        Hkp::Transient,
+        &request,
+        AuthFault::GuestRefused,
+        2,
+    )
+    .await?;
+    let exchange = acknowledged(SrpChallenge::read(&fields)?.exchange(b"3939"))?;
+    let response = auth_request(
+        &mut wire,
+        "/pair-setup",
+        Hkp::Transient,
+        &exchange.request(),
+        AuthFault::GuestRefused,
+        4,
+    )
+    .await?;
+    // An invalid server proof is a protocol failure. It cannot authorize
+    // another handshake or encrypted playback on this connection.
+    acknowledged(response.get(PROOF).and_then(|proof| {
+        exchange
+            .verify_server(proof)
+            .map_err(|_| Fault::InvalidMessage.into())
+    }))?;
+    Ok(SecureSession::new(
+        wire,
+        exchange.shared.as_ref(),
+        device,
+        PeerTrust::TransientPairing,
+    ))
 }
 
-impl Verified {
-    pub(super) fn encrypt_events(&self, wire: &mut Wire) {
-        // This is a reverse channel: the receiver initiates requests.
+pub(super) struct SecureSession {
+    pub(super) wire: Wire,
+    event_write: Zeroizing<[u8; 32]>,
+    event_read: Zeroizing<[u8; 32]>,
+    pub(super) device_id: String,
+    pub(super) trust: PeerTrust,
+}
+
+impl SecureSession {
+    fn new(mut wire: Wire, shared: &[u8], mut device: [u8; 6], trust: PeerTrust) -> Self {
         wire.enable_encryption(
-            &derive(
-                self.shared.as_ref(),
-                b"Events-Salt",
-                b"Events-Read-Encryption-Key",
-            ),
-            &derive(
-                self.shared.as_ref(),
-                b"Events-Salt",
-                b"Events-Write-Encryption-Key",
-            ),
+            &derive(shared, b"Control-Salt", b"Control-Write-Encryption-Key"),
+            &derive(shared, b"Control-Salt", b"Control-Read-Encryption-Key"),
         );
+        // Locally administered unicast address without exposing host identifiers.
+        device[0] = (device[0] & !1) | 2;
+        let device_id = device
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(":");
+        Self {
+            wire,
+            // Reverse channel. The receiver initiates requests.
+            event_write: derive(shared, b"Events-Salt", b"Events-Read-Encryption-Key"),
+            event_read: derive(shared, b"Events-Salt", b"Events-Write-Encryption-Key"),
+            device_id,
+            trust,
+        }
+    }
+
+    pub(super) fn encrypt_events(&self, wire: &mut Wire) {
+        wire.enable_encryption(&self.event_write, &self.event_read);
     }
 }
 
@@ -593,11 +699,11 @@ fn verify_signature(key: &[u8; 32], message: &[&[u8]], signature: &[u8]) -> Resu
         .map_err(|_| AuthFault::IdentityMismatch)
 }
 
-pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Reported<Verified> {
+pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Reported<SecureSession> {
     verify_on_wire(open(address).await?, keys).await
 }
 
-pub(super) async fn verify_on_wire(mut wire: Wire, keys: &StoredKeys) -> Reported<Verified> {
+pub(super) async fn verify_on_wire(mut wire: Wire, keys: &StoredKeys) -> Reported<SecureSession> {
     let private = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
         .map_err(|_| AuthFault::Unavailable)?;
     let public = private
@@ -606,6 +712,7 @@ pub(super) async fn verify_on_wire(mut wire: Wire, keys: &StoredKeys) -> Reporte
     let response = auth_request(
         &mut wire,
         "/pair-verify",
+        Hkp::Normal,
         &tlv(&[(STATE, &[1]), (PUBLIC_KEY, public.as_ref())]),
         Fault::Integrity.into(),
         2,
@@ -650,37 +757,22 @@ pub(super) async fn verify_on_wire(mut wire: Wire, keys: &StoredKeys) -> Reporte
     auth_request(
         &mut wire,
         "/pair-verify",
+        Hkp::Normal,
         &tlv(&[(STATE, &[3]), (ENCRYPTED, &ciphertext)]),
         AuthFault::InvalidCredential,
         4,
     )
     .await?;
 
-    wire.enable_encryption(
-        &derive(
-            shared.as_ref(),
-            b"Control-Salt",
-            b"Control-Write-Encryption-Key",
-        ),
-        &derive(
-            shared.as_ref(),
-            b"Control-Salt",
-            b"Control-Read-Encryption-Key",
-        ),
-    );
-    let mut device = key.public_key().as_ref()[..6].to_vec();
-    // A stable locally administered unicast address without exposing host identifiers.
-    device[0] = (device[0] & !1) | 2;
-    let device_id = device
-        .iter()
-        .map(|byte| format!("{byte:02X}"))
-        .collect::<Vec<_>>()
-        .join(":");
-    Ok(Verified {
+    let device = key.public_key().as_ref()[..6]
+        .try_into()
+        .expect("six address bytes");
+    Ok(SecureSession::new(
         wire,
-        shared,
-        device_id,
-    })
+        shared.as_ref(),
+        device,
+        PeerTrust::VerifiedPairing,
+    ))
 }
 
 #[cfg(test)]

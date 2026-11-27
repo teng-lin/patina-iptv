@@ -13,7 +13,7 @@ use crate::sender::{
     Observation, PairDriver, PeerTrust, PinCode, Playback, ProtocolId, Route, ScanSink, Stage,
     StopOutcome, VerifiedConnection,
 };
-use hap::{AuthFailure, AuthFault, Challenge, StoredKeys, Verified};
+use hap::{AuthFailure, AuthFault, Challenge, SecureSession, StoredKeys};
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent};
 use std::{
     collections::BTreeMap,
@@ -109,7 +109,19 @@ impl AirPlay {
             )?)));
         }
 
-        let wire = hap::start_pairing_on_wire(wire)
+        match hap::transient_on_wire(wire).await {
+            Ok(secure) => {
+                return Ok(BackendConnect::Ready(Box::new(AirDriver::new(
+                    secure,
+                    self.timing_port,
+                )?)));
+            }
+            Err(AuthFailure(AuthFault::ApprovalDenied, Delivery::Acknowledged)) => {}
+            Err(fault) => return Err(auth_error(fault, Stage::Connect)),
+        }
+        // Only an explicit rejection of guest access can request PIN approval.
+        // Open a fresh connection to the same endpoint that refused guest access.
+        let wire = hap::start_pairing(address)
             .await
             .map_err(|fault| auth_error(fault, Stage::Pair))?;
         let expires = Instant::now() + APPROVAL_WINDOW;
@@ -379,6 +391,7 @@ fn auth_error(AuthFailure(fault, delivery): AuthFailure, stage: Stage) -> Error 
         AuthFault::Wire(fault) => wire_kind(fault),
         AuthFault::TimedOut => ErrorKind::TimedOut,
         AuthFault::ApprovalDenied => ErrorKind::ApprovalDenied,
+        AuthFault::GuestRefused => ErrorKind::ReceiverRefused,
         AuthFault::InvalidPin => ErrorKind::InvalidPin,
         AuthFault::IdentityMismatch => ErrorKind::IdentityMismatch,
         AuthFault::InvalidCredential => ErrorKind::InvalidCredential,
@@ -458,14 +471,20 @@ impl PairDriver for AirPairing {
 
 struct AirDriver {
     video: Video,
+    trust: PeerTrust,
     timing_port: Option<NonZeroU16>,
 }
 
 impl AirDriver {
-    fn new(verified: Verified, timing_port: Option<NonZeroU16>) -> Result<Self, Error> {
-        let video = Video::new(verified)
+    fn new(secure: SecureSession, timing_port: Option<NonZeroU16>) -> Result<Self, Error> {
+        let trust = secure.trust;
+        let video = Video::new(secure)
             .map_err(|fault| video_error(fault, Stage::Connect, Delivery::NotSent))?;
-        Ok(Self { video, timing_port })
+        Ok(Self {
+            video,
+            trust,
+            timing_port,
+        })
     }
 }
 
@@ -481,7 +500,7 @@ impl Driver for AirDriver {
     }
 
     fn peer_trust(&self) -> PeerTrust {
-        PeerTrust::VerifiedPairing
+        self.trust
     }
 
     fn validate(&self, _media: &Media) -> Result<(), Error> {

@@ -1,6 +1,13 @@
 use super::*;
 use tokio::net::TcpListener;
 
+#[derive(Clone, Copy)]
+pub(in crate::airplay) enum ProofReply {
+    Valid,
+    Invalid,
+    Refused,
+}
+
 pub(in crate::airplay) const PIN: &str = "0123";
 const ACCESSORY_ID: &[u8] = b"patina-synthetic-accessory";
 const SALT_BYTES: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -50,6 +57,27 @@ impl Accessory {
         Wire::new(stream)
     }
 
+    pub(in crate::airplay) async fn deny_transient(&self) {
+        reject_transient(&mut self.accept().await).await;
+    }
+
+    pub(in crate::airplay) async fn pair_for_cast(&self) -> Option<([u8; 32], Vec<u8>)> {
+        self.deny_transient().await;
+        self.pair().await
+    }
+
+    pub(in crate::airplay) async fn transient(&self, proof: ProofReply) -> (Wire, [u8; 64]) {
+        let mut wire = self.accept().await;
+        let first = wire.receive().await.unwrap();
+        assert_transient_start(&first);
+        let shared = serve_srp(&mut wire, &first, b"3939", proof).await.unwrap();
+        wire.enable_encryption(
+            &derive(&shared, b"Control-Salt", b"Control-Read-Encryption-Key"),
+            &derive(&shared, b"Control-Salt", b"Control-Write-Encryption-Key"),
+        );
+        (wire, shared)
+    }
+
     pub(in crate::airplay) async fn pair(&self) -> Option<([u8; 32], Vec<u8>)> {
         let mut wire = self.accept().await;
         let prompt = wire.receive().await.unwrap();
@@ -57,56 +85,7 @@ impl Accessory {
         wire.respond(&prompt, 200, &[]).await;
 
         let first = wire.receive().await.unwrap();
-        assert_eq!(first.request_target, "POST /pair-setup");
-        let first_fields = Fields::parse(&first.body).unwrap();
-        assert_eq!(first_fields.get(METHOD).unwrap(), &[0]);
-        assert_eq!(first_fields.get(STATE).unwrap(), &[1]);
-        let (public, verifier, private) = server_srp();
-        wire.respond(
-            &first,
-            200,
-            &tlv(&[
-                (STATE, &[2]),
-                (SALT, &SALT_BYTES),
-                (PUBLIC_KEY, &public.to_bytes_be()),
-            ]),
-        )
-        .await;
-
-        let Ok(proof) = wire.receive().await else {
-            return None;
-        };
-        let proof_fields = Fields::parse(&proof.body).unwrap();
-        assert_eq!(proof_fields.get(STATE).unwrap(), &[3]);
-        let client = BigUint::from_bytes_be(proof_fields.get(PUBLIC_KEY).unwrap());
-        let nonce = utils::compute_u::<Sha512>(&pad(&client), &pad(&public));
-        let group = &G_3072;
-        let premaster =
-            ((&client * verifier.modpow(&nonce, &group.n)) % &group.n).modpow(&private, &group.n);
-        let shared = digest(&[&premaster.to_bytes_be()]);
-        let mut group_proof = digest(&[&group.n.to_bytes_be()]);
-        for (byte, other) in group_proof
-            .iter_mut()
-            .zip(digest(&[&group.g.to_bytes_be()]))
-        {
-            *byte ^= other;
-        }
-        let expected = digest(&[
-            &group_proof,
-            &digest(&[PAIR_SETUP_USER]),
-            &SALT_BYTES,
-            &client.to_bytes_be(),
-            &public.to_bytes_be(),
-            &shared,
-        ]);
-        if expected != proof_fields.get(PROOF).unwrap() {
-            wire.respond(&proof, 200, &tlv(&[(STATE, &[4]), (ERROR, &[2])]))
-                .await;
-            return None;
-        }
-        let own_proof = digest(&[&client.to_bytes_be(), &expected, &shared]);
-        wire.respond(&proof, 200, &tlv(&[(STATE, &[4]), (PROOF, &own_proof)]))
-            .await;
+        let shared = serve_srp(&mut wire, &first, PIN.as_bytes(), ProofReply::Valid).await?;
 
         let exchange = wire.receive().await.unwrap();
         let exchange_fields = Fields::parse(&exchange.body).unwrap();
@@ -237,7 +216,7 @@ impl Accessory {
         Some((wire, shared))
     }
 
-    pub(in crate::airplay) fn encrypt_events(shared: &[u8; 32], wire: &mut Wire) {
+    pub(in crate::airplay) fn encrypt_events(shared: &[u8], wire: &mut Wire) {
         wire.enable_encryption(
             &derive(shared, b"Events-Salt", b"Events-Write-Encryption-Key"),
             &derive(shared, b"Events-Salt", b"Events-Read-Encryption-Key"),
@@ -245,14 +224,93 @@ impl Accessory {
     }
 }
 
-fn server_srp() -> (BigUint, BigUint, BigUint) {
+pub(in crate::airplay) fn assert_transient_start(first: &wire::Message) {
+    assert_eq!(first.request_target, "POST /pair-setup");
+    let fields = Fields::parse(&first.body).unwrap();
+    assert_eq!(fields.get(METHOD).unwrap(), &[0]);
+    assert_eq!(fields.get(STATE).unwrap(), &[1]);
+    assert_eq!(fields.get(FLAGS).unwrap(), &[0x10]);
+}
+
+pub(in crate::airplay) async fn reject_transient(wire: &mut Wire) {
+    let first = wire.receive().await.unwrap();
+    assert_transient_start(&first);
+    wire.respond(&first, 470, &[]).await;
+    assert!(matches!(wire.receive().await, Err(Fault::Closed)));
+}
+
+async fn serve_srp(
+    wire: &mut Wire,
+    first: &wire::Message,
+    pin: &[u8],
+    proof_reply: ProofReply,
+) -> Option<[u8; 64]> {
+    assert_eq!(first.request_target, "POST /pair-setup");
+    let first_fields = Fields::parse(&first.body).unwrap();
+    assert_eq!(first_fields.get(METHOD).unwrap(), &[0]);
+    assert_eq!(first_fields.get(STATE).unwrap(), &[1]);
+    let (public, verifier, private) = server_srp(pin);
+    wire.respond(
+        first,
+        200,
+        &tlv(&[
+            (STATE, &[2]),
+            (SALT, &SALT_BYTES),
+            (PUBLIC_KEY, &public.to_bytes_be()),
+        ]),
+    )
+    .await;
+
+    let Ok(proof) = wire.receive().await else {
+        return None;
+    };
+    assert_eq!(proof.request_target, "POST /pair-setup");
+    let proof_fields = Fields::parse(&proof.body).unwrap();
+    assert_eq!(proof_fields.get(STATE).unwrap(), &[3]);
+    let client = BigUint::from_bytes_be(proof_fields.get(PUBLIC_KEY).unwrap());
+    let nonce = utils::compute_u::<Sha512>(&pad(&client), &pad(&public));
+    let group = &G_3072;
+    let premaster =
+        ((&client * verifier.modpow(&nonce, &group.n)) % &group.n).modpow(&private, &group.n);
+    let shared = digest(&[&premaster.to_bytes_be()]);
+    let mut group_proof = digest(&[&group.n.to_bytes_be()]);
+    for (byte, other) in group_proof
+        .iter_mut()
+        .zip(digest(&[&group.g.to_bytes_be()]))
+    {
+        *byte ^= other;
+    }
+    let expected = digest(&[
+        &group_proof,
+        &digest(&[PAIR_SETUP_USER]),
+        &SALT_BYTES,
+        &client.to_bytes_be(),
+        &public.to_bytes_be(),
+        &shared,
+    ]);
+    if expected != proof_fields.get(PROOF).unwrap() {
+        wire.respond(&proof, 200, &tlv(&[(STATE, &[4]), (ERROR, &[2])]))
+            .await;
+        return None;
+    }
+    let mut own_proof = digest(&[&client.to_bytes_be(), &expected, &shared]);
+    let reply = match proof_reply {
+        ProofReply::Valid => tlv(&[(STATE, &[4]), (PROOF, &own_proof)]),
+        ProofReply::Invalid => {
+            own_proof[0] ^= 1;
+            tlv(&[(STATE, &[4]), (PROOF, &own_proof)])
+        }
+        ProofReply::Refused => tlv(&[(STATE, &[4]), (ERROR, &[2])]),
+    };
+    wire.respond(&proof, 200, &reply).await;
+    Some(shared)
+}
+
+fn server_srp(pin: &[u8]) -> (BigUint, BigUint, BigUint) {
     let group = &G_3072;
     let client = SrpClient::<Sha512>::new(group);
-    let verifier = BigUint::from_bytes_be(&client.compute_verifier(
-        PAIR_SETUP_USER,
-        PIN.as_bytes(),
-        &SALT_BYTES,
-    ));
+    let verifier =
+        BigUint::from_bytes_be(&client.compute_verifier(PAIR_SETUP_USER, pin, &SALT_BYTES));
     let private = BigUint::from_bytes_be(&[0xba; 32]);
     let public = (utils::compute_k::<Sha512>(group) * &verifier
         + group.g.modpow(&private, &group.n))
@@ -262,7 +320,7 @@ fn server_srp() -> (BigUint, BigUint, BigUint) {
 
 #[test]
 fn srp_matches_pinned_reference_for_leading_zero_pin() {
-    let (public, _, _) = server_srp();
+    let (public, _, _) = server_srp(PIN.as_bytes());
     let exchange = SrpExchange::start(
         &[0xca; 32],
         PIN.as_bytes(),

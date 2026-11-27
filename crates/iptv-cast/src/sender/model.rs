@@ -142,6 +142,8 @@ pub enum Delivery {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PeerTrust {
     VerifiedPairing,
+    /// Encrypted AirPlay transport accepted by the receiver without a saved peer identity.
+    TransientPairing,
     LanEndpoint,
 }
 

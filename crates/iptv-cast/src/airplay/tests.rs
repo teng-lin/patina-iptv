@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     Cast, Connect, CredentialKey, CredentialStore, Link, StoreError,
     airplay::{
-        hap::tests::{Accessory, PIN},
+        hap::tests::{Accessory, PIN, ProofReply, assert_transient_start, reject_transient},
         video::tests::{ReceiverEnding, serve},
     },
 };
@@ -101,7 +101,7 @@ async fn discovered(cast: &Cast) -> Route {
 
 async fn paired_connection(cast: &Cast, route: &Route) -> crate::Connection {
     let Connect::PinRequired(challenge) = cast.connect(route).await.unwrap() else {
-        panic!("first connection must require approved PIN");
+        panic!("the receiver requires an approved PIN");
     };
     assert!(challenge.expires_at().is_some());
     let connection = challenge
@@ -111,6 +111,133 @@ async fn paired_connection(cast: &Cast, route: &Route) -> crate::Connection {
     assert_eq!(connection.peer_trust(), PeerTrust::VerifiedPairing);
     assert!(connection.control_addrs().is_some());
     connection
+}
+
+#[tokio::test]
+async fn guest_playback_encrypts_control_and_events_without_saving_a_pairing() {
+    timeout(Duration::from_secs(10), async {
+        let accessory = Accessory::bind().await;
+        let address = accessory.address();
+        let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = origin.local_addr().unwrap();
+        let (finish, gate) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (control, shared) = accessory.transient(ProofReply::Valid).await;
+            serve(
+                control,
+                &shared,
+                upstream,
+                0,
+                ReceiverEnding::PlayToEnd(gate),
+            )
+            .await;
+        });
+
+        let store = TestStore::default();
+        let cast = client(address, 0, store.clone());
+        let route = discovered(&cast).await;
+        let Connect::Ready(connection) = cast.connect(&route).await.unwrap() else {
+            panic!("open receiver must accept guest playback without a PIN");
+        };
+        assert_eq!(connection.peer_trust(), PeerTrust::TransientPairing);
+        let session = connection
+            .load(Media::on_demand(&format!("http://{upstream}/generated.m3u8")).unwrap())
+            .unwrap();
+        let (mut request, _) = origin.accept().await.unwrap();
+        let mut verb = [0; 23];
+        request.read_exact(&mut verb).await.unwrap();
+        assert_eq!(&verb, b"GET /generated.m3u8 HTT");
+
+        let mut updates = session.subscribe();
+        loop {
+            let snapshot = updates.next().await.unwrap();
+            if matches!(snapshot.playback(), Playback::Playing) {
+                assert_eq!(snapshot.duration(), Some(Duration::from_secs(21)));
+                break;
+            }
+        }
+        finish.send(()).unwrap();
+        let terminal = updates.next().await.unwrap();
+        assert!(matches!(terminal.playback(), Playback::NoLongerPresent));
+        assert_eq!(session.stop().await.unwrap(), StopOutcome::AlreadyEnded);
+        server.await.unwrap();
+        assert!(store.0.lock().unwrap().is_none());
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn rejected_or_invalid_guest_proof_does_not_trigger_pin_approval() {
+    for (proof, expected) in [
+        (ProofReply::Invalid, ErrorKind::Protocol),
+        (ProofReply::Refused, ErrorKind::ReceiverRefused),
+    ] {
+        let accessory = Accessory::bind().await;
+        let address = accessory.address();
+        let server = tokio::spawn(async move {
+            let (mut wire, _) = accessory.transient(proof).await;
+            assert!(matches!(wire.receive().await, Err(Fault::Closed)));
+            assert!(
+                timeout(Duration::from_millis(30), accessory.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let cast = client(address, 0, TestStore::default());
+        let route = discovered(&cast).await;
+        let error = cast
+            .connect(&route)
+            .await
+            .err()
+            .expect("guest proof failed");
+        assert_eq!(error.kind(), expected);
+        assert_eq!(error.stage(), Stage::Connect);
+        assert_eq!(error.delivery(), Delivery::Acknowledged);
+        timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn password_home_membership_and_ambiguous_auth_failures_do_not_show_pin_prompt() {
+    for (status, body, expected) in [
+        (401, &[][..], ErrorKind::ReceiverRefused),
+        (403, &[][..], ErrorKind::ReceiverRefused),
+        (200, &[6, 1, 2, 7, 1, 2][..], ErrorKind::ReceiverRefused),
+        (200, &[6, 1, 2, 7, 1, 3][..], ErrorKind::Unavailable),
+    ] {
+        let accessory = Accessory::bind().await;
+        let address = accessory.address();
+        let server = tokio::spawn(async move {
+            let mut wire = accessory.accept().await;
+            let first = wire.receive().await.unwrap();
+            assert_transient_start(&first);
+            wire.respond(&first, status, body).await;
+            assert!(matches!(wire.receive().await, Err(Fault::Closed)));
+            assert!(
+                timeout(Duration::from_millis(30), accessory.accept())
+                    .await
+                    .is_err()
+            );
+        });
+        let cast = client(address, 0, TestStore::default());
+        let route = discovered(&cast).await;
+        let error = cast
+            .connect(&route)
+            .await
+            .err()
+            .expect("receiver rejected guest setup");
+        assert_eq!(error.kind(), expected);
+        assert_eq!(error.stage(), Stage::Connect);
+        assert_eq!(error.delivery(), Delivery::Acknowledged);
+        timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -124,7 +251,7 @@ async fn receiver_can_fetch_before_load_reply_and_cancel_joins_all_transports() 
         let port = udp.local_addr().unwrap().port();
         drop(udp);
         let server = tokio::spawn(async move {
-            let (public, id) = accessory.pair().await.unwrap();
+            let (public, id) = accessory.pair_for_cast().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
             serve(
                 control,
@@ -174,7 +301,7 @@ async fn vod_reports_owned_playback_and_reuses_saved_identity_in_a_fresh_client(
         drop(udp);
         let (finish, gate) = oneshot::channel();
         let server = tokio::spawn(async move {
-            let (public, id) = accessory.pair().await.unwrap();
+            let (public, id) = accessory.pair_for_cast().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
             serve(
                 control,
@@ -246,7 +373,7 @@ async fn feedback_runs_during_playback_and_explicit_retirement_closes_without_gl
         drop(udp);
         let (reply, replied) = oneshot::channel();
         let server = tokio::spawn(async move {
-            let (public, id) = accessory.pair().await.unwrap();
+            let (public, id) = accessory.pair_for_cast().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
             serve(
                 control,
@@ -283,7 +410,7 @@ async fn playback_and_stop_reported_before_the_insert_reply_are_preserved() {
         let origin = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let upstream = origin.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (public, id) = accessory.pair().await.unwrap();
+            let (public, id) = accessory.pair_for_cast().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
             serve(
                 control,
@@ -321,14 +448,18 @@ async fn declining_pending_approval_closes_before_sending_a_pairing_proof() {
     let address = accessory.address();
     let cast = client(address, 0, TestStore::default());
     let route = discovered(&cast).await;
+    let server = tokio::spawn(async move {
+        accessory.deny_transient().await;
+        let mut socket = accessory.accept().await;
+        let message = socket.receive().await.unwrap();
+        assert_eq!(message.request_target, "POST /pair-pin-start");
+        assert!(matches!(socket.receive().await, Err(Fault::Closed)));
+    });
     let Connect::PinRequired(challenge) = cast.connect(&route).await.unwrap() else {
         panic!()
     };
-    let mut socket = accessory.accept().await;
-    let message = socket.receive().await.unwrap();
-    assert_eq!(message.request_target, "POST /pair-pin-start");
     challenge.cancel().await;
-    assert!(matches!(socket.receive().await, Err(Fault::Closed)));
+    server.await.unwrap();
 }
 
 #[test]
@@ -370,6 +501,7 @@ async fn discovers_loopback_advertisements_and_revalidates_the_selected_identity
     let address = accessory.address();
     let (confirm, cancelled) = oneshot::channel();
     let server = tokio::spawn(async move {
+        accessory.deny_transient().await;
         let mut control = accessory.accept().await;
         let request = control.receive().await.unwrap();
         assert_eq!(request.request_target, "POST /pair-pin-start");
@@ -488,7 +620,7 @@ async fn required_timing_port_conflict_is_reported_before_submission() {
     let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let timing = socket.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        let (public, id) = accessory.pair().await.unwrap();
+        let (public, id) = accessory.pair_for_cast().await.unwrap();
         let (mut control, _) = accessory.verify(&public, &id).await.unwrap();
         assert!(matches!(control.receive().await, Err(Fault::Closed)));
     });
@@ -533,7 +665,7 @@ async fn receiver_refusal_after_fetch_preserves_delivery_uncertainty() {
         let port = udp.local_addr().unwrap().port();
         drop(udp);
         let server = tokio::spawn(async move {
-            let (public, id) = accessory.pair().await.unwrap();
+            let (public, id) = accessory.pair_for_cast().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
             serve(
                 control,
@@ -614,7 +746,7 @@ async fn exercise_transport_loss(lose_control: bool) {
         drop(udp);
         let (disconnect, gate) = oneshot::channel();
         let server = tokio::spawn(async move {
-            let (public, id) = accessory.pair().await.unwrap();
+            let (public, id) = accessory.pair_for_cast().await.unwrap();
             let (control, shared) = accessory.verify(&public, &id).await.unwrap();
             serve(
                 control,
@@ -811,18 +943,23 @@ async fn alternate_service_addresses_fail_over_before_any_pairing_request() {
     let refused = unused.local_addr().unwrap();
     let addresses = [refused, listener.local_addr().unwrap()];
 
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        reject_transient(&mut wire::Wire::new(socket)).await;
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut socket = wire::Wire::new(socket);
+        let request = socket.receive().await.unwrap();
+        assert_eq!(request.request_target, "POST /pair-pin-start");
+        assert!(matches!(socket.receive().await, Err(Fault::Closed)));
+    });
     let backend = AirPlay::new(None);
     let BackendConnect::PinRequired(mut pairing) =
         backend.connect_addresses(&addresses, None).await.unwrap()
     else {
         panic!("the reachable address must start pairing");
     };
-    let (socket, _) = listener.accept().await.unwrap();
-    let mut socket = wire::Wire::new(socket);
-    let request = socket.receive().await.unwrap();
-    assert_eq!(request.request_target, "POST /pair-pin-start");
     pairing.cancel().await;
-    assert!(matches!(socket.receive().await, Err(Fault::Closed)));
+    server.await.unwrap();
     let error = backend
         .connect_addresses(&[refused], None)
         .await
