@@ -150,7 +150,7 @@ pub(crate) fn play_pause(ui: Ui, key: RemoteKey, press: Press) {
 pub(crate) fn stop_playback(ui: Ui) {
     crate::runtime_owner::runtime().next_cast_intent();
     crate::runtime_owner::runtime().cancel_pending_native_cast();
-    if ui.cast_remote.get_untracked() {
+    if ui.cast.remote.get_untracked() {
         crate::casting::stop(ui);
         return;
     }

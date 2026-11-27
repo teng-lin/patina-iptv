@@ -13,9 +13,9 @@ pub(crate) fn button(ui: Ui, size: f32, id: &'static str) -> View {
         native("tv.cast-picker")
             .test_id(id)
             .accessibility_state(move || AccessibilityState {
-                busy: ui.cast_busy.get(),
+                busy: ui.cast.busy.get(),
                 has_popup: true,
-                expanded: Some(ui.cast_picker_open.get()),
+                expanded: Some(ui.cast.picker_open.get()),
                 ..Default::default()
             })
             .w(px(size))
@@ -50,7 +50,7 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                 .prop("owner", move || json!(runtime().native_cast_view()))
                 .prop("finishedChoice", move || {
                     json!(choice_reply.get().and_then(|(serial, started)| {
-                        (!started || !ui.cast_busy.get()).then_some(serial)
+                        (!started || !ui.cast.busy.get()).then_some(serial)
                     }))
                 })
                 .on_native_event(move |event: &NativeEvent| match event.name.as_ref() {
@@ -59,12 +59,12 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                             runtime().cast_intent(),
                             ui.player.main().key.get_untracked(),
                         )));
-                        ui.cast_picker_open.set(true);
+                        ui.cast.state.update(|state| state.picker_open = true);
                         ui.touched();
                     }
                     "routes-closed" => {
-                        ui.cast_picker_open.set(false);
-                        if !ui.cast_busy.get_untracked() {
+                        ui.cast.state.update(|state| state.picker_open = false);
+                        if !ui.cast.busy.get_untracked() {
                             crate::chooser::close(ui);
                         }
                     }
@@ -75,9 +75,9 @@ pub(crate) fn picker(ui: Ui, _shown: impl Fn() -> bool + Copy + 'static) -> View
                                 && channel == ui.player.main().key.get_untracked()
                                 && crate::casting::available(ui)
                         });
-                        let started = if valid && !ui.cast_busy.get_untracked() {
+                        let started = if valid && !ui.cast.busy.get_untracked() {
                             crate::casting::select_airplay(ui);
-                            ui.cast_busy.get_untracked()
+                            ui.cast.busy.get_untracked()
                         } else {
                             false
                         };

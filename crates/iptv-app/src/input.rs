@@ -820,13 +820,13 @@ fn apply(ui: Ui, key: RemoteKey, press: Press, action: Action, repeat: bool) {
     }
     // Transport keys control the owned receiver even while its destination
     // picker or another overlay has focus.
-    if ui.player_surface == 0 && ui.cast_remote.get_untracked() && action == Action::PlayPause {
+    if ui.player_surface == 0 && ui.cast.remote.get_untracked() && action == Action::PlayPause {
         crate::player_keys::play_pause(ui, key, press);
         return;
     }
     if action == Action::Stop
         && ui.player_surface == 0
-        && (ui.cast_remote.get_untracked() || ui.cast_busy.get_untracked())
+        && (ui.cast.remote.get_untracked() || ui.cast.busy.get_untracked())
     {
         crate::player_keys::stop_playback(ui);
         return;
@@ -1159,7 +1159,7 @@ mod tests {
         crate::external_player::cancel_pending(ui);
         view()
             .child(text(move || {
-                format!("Request {}", ui.external_request.get())
+                format!("Request {}", ui.cast.external.request.get())
             }))
             .child(
                 view().label("Repeat select").h(px(40.0)).on_press(move || {

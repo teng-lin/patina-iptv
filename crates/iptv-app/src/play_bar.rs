@@ -139,7 +139,7 @@ pub fn bind(ui: Ui) {
     let popup = computed(move || {
         ui.chooser.with(Option::is_some)
             || ui.description.with(Option::is_some)
-            || ui.cast_picker_open.get()
+            || ui.cast.picker_open.get()
     });
     effect(move || {
         let open = popup.get();
@@ -580,7 +580,7 @@ fn button(ui: Ui, control: Control, size: f32) -> View {
         .test_id(control_id(control))
         .disabled(move || !shown(ui, control))
         .accessibility_state(move || AccessibilityState {
-            busy: control == Control::Cast && ui.cast_busy.get(),
+            busy: control == Control::Cast && ui.cast.busy.get(),
             selected: focused(ui, control),
             has_popup: control == Control::More,
             expanded: (control == Control::More).then(|| {
@@ -745,10 +745,10 @@ fn enabled(ui: Ui, control: Control) -> bool {
         Control::Favorite | Control::Details => ui.playing.get().is_some(),
         Control::Tracks => tracks(ui).is_some(),
         Control::Multiview => {
-            !ui.cast_remote.get() && crate::multiview::availability(ui).available()
+            !ui.cast.remote.get() && crate::multiview::availability(ui).available()
         }
         Control::Cast => crate::casting::available(ui),
-        Control::Pip => !ui.cast_remote.get() && crate::pip::can_enter(ui),
+        Control::Pip => !ui.cast.remote.get() && crate::pip::can_enter(ui),
         Control::PlayPause => crate::casting::supports(
             ui,
             if ui.paused.get() {

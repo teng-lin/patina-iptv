@@ -268,7 +268,7 @@ fn entries(ui: Ui, kind: Kind) -> (Vec<String>, Vec<String>, usize) {
             ui.player.main().key.get_untracked().into_iter().collect(),
             0,
         ),
-        Kind::AirPlay if ui.cast_busy.get_untracked() => {
+        Kind::AirPlay if ui.cast.busy.get_untracked() => {
             (vec![tr("Cancel").to_owned()], Vec::new(), 0)
         }
         Kind::AirPlay => (
@@ -365,7 +365,7 @@ pub fn open(ui: Ui, kind: Kind) {
 }
 
 pub fn close(ui: Ui) {
-    if ui.cast_busy.get_untracked()
+    if ui.cast.busy.get_untracked()
         && ui
             .chooser
             .with_untracked(|open| open.as_ref().is_some_and(|open| open.kind == Kind::AirPlay))
@@ -402,7 +402,7 @@ pub fn pick(ui: Ui, index: usize) {
         return;
     };
     let value = open.values.get(index).cloned().unwrap_or_default();
-    if open.kind == Kind::Cast && value == "local" && ui.cast_busy.get_untracked() {
+    if open.kind == Kind::Cast && value == "local" && ui.cast.busy.get_untracked() {
         crate::casting::play_here(ui);
         return;
     }
@@ -459,7 +459,7 @@ pub fn pick(ui: Ui, index: usize) {
             }
         }
         Kind::AirPlay => {
-            if !ui.cast_busy.get_untracked() {
+            if !ui.cast.busy.get_untracked() {
                 crate::casting::play_here(ui);
             }
         }

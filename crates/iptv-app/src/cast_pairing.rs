@@ -9,123 +9,83 @@ use crate::{
     wizard_view::entry::{frame, sheet_buttons, sheet_field},
 };
 use iptv_core::cast::{Error, Receiver};
-use iptv_runtime::cast::{PairingPrompt, PairingRequest, pairing_prompt};
+use iptv_presentation::cast::{Effect, Prompt, State};
+use iptv_runtime::cast::{PairingPrompt, pairing_prompt};
 use nsh_core::prelude::*;
-use std::{cell::RefCell, rc::Rc};
-use zeroize::{Zeroize, Zeroizing};
-
-#[derive(Clone)]
-pub(crate) struct Pending {
-    ticket: u64,
-    request: Request,
-}
-
-#[derive(Clone)]
-enum Request {
-    Pin(Rc<RefCell<InputState>>),
-    Forget {
-        receiver: Receiver,
-        reason: Error,
-        selected: bool,
-    },
-}
-
-struct InputState {
-    request: Option<PairingRequest>,
-    pin: Zeroizing<String>,
-}
 
 pub(crate) fn prompt(ui: Ui, ticket: u64) -> PairingPrompt {
     let (prompt, request) = pairing_prompt();
     crate::tasks::spawn_in_app(async move {
         if let Ok(request) = request.await
             && runtime().cast_intent_current(ticket)
-            && ui.cast_busy.try_get() == Some(true)
+            && ui.cast.busy.try_get() == Some(true)
         {
-            ui.cast_pairing.try_set(Some(Pending {
-                ticket,
-                request: Request::Pin(Rc::new(RefCell::new(InputState {
-                    request: Some(request),
-                    pin: Zeroizing::new(String::new()),
-                }))),
-            }));
+            ui.cast.pairing.replace(Some(request));
+            ui.cast.state.update(|state| state.open_pin(ticket));
         }
     });
     prompt
 }
 
 pub(crate) fn offer_forget(ui: Ui, ticket: u64, receiver: Receiver, reason: Error) {
-    ui.cast_pairing.set(Some(Pending {
-        ticket,
-        request: Request::Forget {
-            receiver,
-            reason,
-            selected: false,
-        },
-    }));
+    ui.cast.pairing.replace(None);
+    ui.cast
+        .state
+        .update(|state| state.offer_forget(ticket, receiver, reason));
 }
 
 pub(crate) fn is_open(ui: Ui) -> bool {
-    ui.cast_pairing.with(Option::is_some)
+    ui.cast.prompt.with(Option::is_some)
 }
 
 pub(crate) fn close_for(ui: Ui, ticket: u64) {
-    if ui
-        .cast_pairing
-        .try_get()
-        .flatten()
-        .is_some_and(|p| p.ticket == ticket)
+    if untracked(|| ui.cast.prompt.try_get()).is_some()
+        && ui.cast.state.with_untracked(State::pairing_ticket) == Some(ticket)
     {
         close(ui);
     }
 }
 
 pub(crate) fn close(ui: Ui) {
-    ui.cast_pairing.set(None);
+    ui.cast.pairing.replace(None);
+    ui.cast.state.update(State::close_pairing);
     dismiss_keyboard();
 }
 
 fn submit(ui: Ui) {
-    let Some(Pending {
-        request: Request::Pin(input),
-        ..
-    }) = ui.cast_pairing.get_untracked()
-    else {
-        return;
-    };
-    let mut input = input.borrow_mut();
-    if input.pin.len() != 4 {
-        drop(input);
-        crate::settings_view::notify(tr("Enter the four digits shown on the receiver."));
+    if ui.cast.prompt.get_untracked() != Some(Prompt::Pin) {
         return;
     }
-    if let Some(request) = input.request.take() {
-        let pin = std::mem::take(&mut input.pin);
-        drop(input);
+    let mut effect = None;
+    ui.cast.state.update(|state| effect = state.submit_pin());
+    let Some(Effect::SubmitPin { ticket, pin }) = effect else {
+        crate::settings_view::notify(tr("Enter the four digits shown on the receiver."));
+        return;
+    };
+    if let Some(request) = ui.cast.pairing.replace(None) {
         close(ui);
-        let _ = request.submit(pin);
+        if runtime().cast_intent_current(ticket) {
+            let _ = request.submit(pin);
+        }
     }
 }
 
 fn forget(ui: Ui) {
-    if ui.cast_busy.get_untracked() {
+    if ui.cast.busy.get_untracked() {
         return;
     }
-    let Some(Pending {
-        ticket,
-        request: Request::Forget { receiver, .. },
-    }) = ui.cast_pairing.get_untracked()
-    else {
+    let Some((ticket, receiver)) = ui.cast.state.with_untracked(State::forget_receiver) else {
         return;
     };
     close(ui);
     if !runtime().cast_intent_current(ticket) {
         return;
     }
-    ui.cast_busy.set(true);
+    ui.cast.state.update(|state| state.busy = true);
     crate::tasks::spawn_in_app(async move {
         let result = runtime().forget_cast_pairing(receiver).await;
-        if ui.cast_busy.try_set(false) {
+        if ui.cast.busy.try_get().is_some() {
+            ui.cast.state.update(|state| state.busy = false);
             if result.is_err() {
                 crate::settings_view::notify(tr("Could not forget the AirPlay pairing."));
             }
@@ -136,21 +96,12 @@ fn forget(ui: Ui) {
 
 pub(crate) fn key(ui: Ui, action: iptv_nav::Action) {
     use iptv_nav::Action;
-    if let Some(Pending {
-        request: Request::Forget { selected, .. },
-        ..
-    }) = ui.cast_pairing.get_untracked()
-    {
+    if let Some(Prompt::Forget { selected, .. }) = ui.cast.prompt.get_untracked() {
         match action {
-            Action::MoveLeft | Action::MoveRight => ui.cast_pairing.update(|open| {
-                if let Some(Pending {
-                    request: Request::Forget { selected, .. },
-                    ..
-                }) = open
-                {
-                    *selected = action == Action::MoveRight;
-                }
-            }),
+            Action::MoveLeft | Action::MoveRight => ui
+                .cast
+                .state
+                .update(|state| state.select_forget(action == Action::MoveRight)),
             Action::Select if selected => forget(ui),
             Action::Select | Action::Back | Action::ShowMenu => close(ui),
             _ => {}
@@ -177,17 +128,7 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
                 .child(
                     card.child(
                         when(
-                            move || {
-                                ui.cast_pairing.with(|open| {
-                                    matches!(
-                                        open,
-                                        Some(Pending {
-                                            request: Request::Forget { .. },
-                                            ..
-                                        })
-                                    )
-                                })
-                            },
+                            move || matches!(ui.cast.prompt.get(), Some(Prompt::Forget { .. })),
                             move || forget_card(ui, scale),
                         )
                         .otherwise(move || pin_card(ui, scale)),
@@ -199,31 +140,21 @@ pub(crate) fn layer(ui: Ui) -> impl IntoElement {
 
 fn forget_card(ui: Ui, scale: Scale) -> View {
     let wants_forget = move || {
-        ui.cast_pairing.with(|open| {
-            matches!(
-                open,
-                Some(Pending {
-                    request: Request::Forget { selected: true, .. },
-                    ..
-                })
-            )
-        })
+        matches!(
+            ui.cast.prompt.get(),
+            Some(Prompt::Forget { selected: true, .. })
+        )
     };
     view()
         .gap(move || scale.px(14.0))
         .child(ui_kit::title(scale, move || {
-            let storage = ui.cast_pairing.with(|open| {
-                matches!(
-                    open,
-                    Some(Pending {
-                        request: Request::Forget {
-                            reason: Error::PairingInvalid,
-                            ..
-                        },
-                        ..
-                    })
-                )
-            });
+            let storage = matches!(
+                ui.cast.prompt.get(),
+                Some(Prompt::Forget {
+                    reason: Error::PairingInvalid,
+                    ..
+                })
+            );
             if storage {
                 tr("The saved AirPlay pairing is invalid.")
             } else {
@@ -250,7 +181,7 @@ fn forget_card(ui: Ui, scale: Scale) -> View {
                     ui_kit::button(ui, scale, tr("Forget pairing"), wants_forget, move || {
                         forget(ui)
                     })
-                    .disabled(move || ui.cast_busy.get()),
+                    .disabled(move || ui.cast.busy.get()),
                 ),
         )
 }
@@ -273,19 +204,7 @@ fn pin_card(ui: Ui, scale: Scale) -> View {
                 .keyboard_type(KeyboardType::Number)
                 .max_length(4)
                 .auto_correct(false)
-                .on_change(move |text: &str| {
-                    if let Some(Pending {
-                        request: Request::Pin(input),
-                        ..
-                    }) = ui.cast_pairing.get_untracked()
-                    {
-                        let mut input = input.borrow_mut();
-                        input.pin.zeroize();
-                        if text.len() <= 4 && text.bytes().all(|c| c.is_ascii_digit()) {
-                            input.pin.push_str(text);
-                        }
-                    }
-                })
+                .on_change(move |text: &str| ui.cast.state.update(|state| state.set_pin(text)))
                 .on_submit(move |_: &str| submit(ui)),
         )
         .child(sheet_buttons(ui, scale, close, submit))

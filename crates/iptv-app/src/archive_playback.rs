@@ -159,11 +159,11 @@ pub(crate) fn select(
     // Internal fallback uses the same captured choice after PIN entry. Ui::play
     // remains the internal player operation and still applies its own gates.
     crate::external_player::cancel_pending(ui);
-    let ticket = ui.external_request.get_untracked();
+    let ticket = ui.cast.external.request.get_untracked();
     crate::browse_playback::hold(ui);
     let guarded = choice.clone();
     let current =
-        move || ui.external_request.get_untracked() == ticket && guarded.resolve(ui).is_some();
+        move || ui.cast.external.request.get_untracked() == ticket && guarded.resolve(ui).is_some();
     let before_play = current.clone();
     let play = move || {
         if !before_play() {
