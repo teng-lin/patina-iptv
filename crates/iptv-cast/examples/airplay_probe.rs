@@ -96,7 +96,7 @@ async fn main() -> Result<()> {
     let session = connection.load(media)?;
     let mut updates = session.subscribe();
     let mut playing = false;
-    let mut terminal = false;
+    let mut ended = false;
     let mut live_playback = false;
     let observed = tokio::time::timeout(Duration::from_secs(seconds.get().into()), async {
         while let Some(snapshot) = updates.next().await {
@@ -119,10 +119,7 @@ async fn main() -> Result<()> {
             }
             playing |= matches!(snapshot.playback(), Playback::Playing);
             live_playback = snapshot.link() == Link::Connected && matches!(snapshot.playback(), Playback::Playing);
-            terminal |= matches!(
-                snapshot.playback(),
-                Playback::Ended | Playback::NoLongerPresent
-            );
+            ended |= matches!(snapshot.playback(), Playback::Ended);
         }
     })
     .await;
@@ -139,10 +136,8 @@ async fn main() -> Result<()> {
     if !playing {
         return Err("No receiver-confirmed playback during the observation window".into());
     }
-    if mode == "vod" && (observed.is_err() || !terminal) {
-        return Err(
-            "VOD session did not reach a terminal media state within the observation window".into(),
-        );
+    if mode == "vod" && (observed.is_err() || !ended) {
+        return Err("VOD playback did not finish naturally within the observation window".into());
     }
     if mode == "live" && (observed.is_ok() || !live_playback) {
         return Err("Live playback did not stay active through the observation window".into());
