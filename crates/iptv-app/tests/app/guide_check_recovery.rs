@@ -956,17 +956,21 @@ fn manual_guide_updates_keep_the_backoff_when_work_ends_under_an_older_generatio
     s.delete_guide_data();
     s.server.serve("not a guide".to_owned());
     s.update_now();
-    s.until_pending("the failed download set its back-off");
+    // The timer can be visible before the guide sources screen shows the
+    // failed update. Wait for the action that belongs to that result.
+    let retry = "id:guide-sources-screen >> text:Retry";
+    let source = s.source;
+    until(
+        &mut s.app,
+        "the failed download set its back-off and showed Retry",
+        IMPORT,
+        |app| iptv_app::guide_check_pending(source) && app.screen().matches(retry).unwrap(),
+    );
     let asked = s.server.requests();
     // The update waits for the store; the workers refuse the Add, then it.
     iptv_app::occupy_writer(Duration::from_secs(3));
     iptv_app::refuse_work(2);
-    let action = if s.app.screen().matches("text:Retry").unwrap() {
-        "text:Retry"
-    } else {
-        "text:Update the guide now"
-    };
-    step(s.app.press(action));
+    step(s.app.press(retry));
     to_guide(&mut s.app);
     let second = Server::start("second.m3u", "audio/x-mpegurl", String::new());
     s.add_playlist(&second.link);
