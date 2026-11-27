@@ -74,26 +74,33 @@ impl AirPlay {
             self.new_daemon()
                 .map_err(|kind| failure(kind, Stage::Connect))?,
             Instant::now() + ROUTE_RESOLVE,
+            Some(identity),
             None,
         )
         .await
         .map_err(|kind| failure(kind, Stage::Connect))?;
-        let address = records
-            .unique(identity)
-            .ok_or_else(|| failure(ErrorKind::Unreachable, Stage::Connect))?
-            .address;
-        self.connect_address(address, credential).await
+        let record = records
+            .resolve_unique(identity)
+            .map_err(|kind| failure(kind, Stage::Connect))?;
+        self.connect_addresses(&record.addresses, credential).await
     }
 
-    async fn connect_address(
+    async fn connect_addresses(
         &self,
-        address: SocketAddr,
+        addresses: &[SocketAddr],
         credential: Option<Credential>,
     ) -> Result<BackendConnect, Error> {
-        if let Some(credential) = credential {
-            let keys = StoredKeys::decode(credential.as_bytes())
-                .map_err(|fault| auth_error(fault.into(), Stage::Connect))?;
-            let verified = hap::verify(address, &keys)
+        let keys = credential
+            .map(|credential| StoredKeys::decode(credential.as_bytes()))
+            .transpose()
+            .map_err(|fault| auth_error(fault.into(), Stage::Connect))?;
+        // Fail over only while opening TCP. Once a socket wins, its peer alone
+        // receives trust messages, even if it rejects them or disappears.
+        let (address, wire) = hap::open_candidates(addresses)
+            .await
+            .map_err(|fault| auth_error(fault.into(), Stage::Connect))?;
+        if let Some(keys) = keys {
+            let verified = hap::verify_on_wire(wire, &keys)
                 .await
                 .map_err(|fault| auth_error(fault, Stage::Connect))?;
             return Ok(BackendConnect::Ready(Box::new(AirDriver::new(
@@ -102,7 +109,7 @@ impl AirPlay {
             )?)));
         }
 
-        let wire = hap::start_pairing(address)
+        let wire = hap::start_pairing_on_wire(wire)
             .await
             .map_err(|fault| auth_error(fault, Stage::Pair))?;
         let expires = Instant::now() + APPROVAL_WINDOW;
@@ -130,6 +137,7 @@ impl Backend for AirPlay {
                 self.new_daemon()
                     .map_err(|kind| failure(kind, Stage::Discovery))?,
                 deadline,
+                None,
                 Some(&sink),
             )
             .await
@@ -151,7 +159,7 @@ impl Backend for AirPlay {
 struct Record {
     identity: Option<String>,
     name: String,
-    address: SocketAddr,
+    addresses: Vec<SocketAddr>,
 }
 
 impl Record {
@@ -172,7 +180,7 @@ impl Record {
         if port == 0 {
             return None;
         }
-        let address = info
+        let mut addresses: Vec<_> = info
             .get_addresses()
             .iter()
             .filter_map(|ip| match ip {
@@ -196,7 +204,12 @@ impl Record {
                 }
                 _ => None,
             })
-            .min()?;
+            .collect();
+        addresses.sort_unstable();
+        addresses.dedup();
+        if addresses.is_empty() {
+            return None;
+        }
         Some(Self {
             identity: info
                 .get_property_val_str("deviceid")
@@ -206,7 +219,7 @@ impl Record {
             } else {
                 name
             },
-            address,
+            addresses,
         })
     }
 
@@ -240,16 +253,26 @@ fn normalize_identity(value: &str) -> Option<String> {
 }
 
 #[derive(Default)]
-struct Records(BTreeMap<String, Record>);
+struct Records {
+    instances: BTreeMap<String, Record>,
+    saturated: bool,
+}
 
 impl Records {
     fn unique(&self, id: &str) -> Option<&Record> {
         let mut matches = self
-            .0
+            .instances
             .values()
             .filter(|record| record.identity.as_deref() == Some(id));
         let first = matches.next()?;
         matches.next().is_none().then_some(first)
+    }
+
+    fn resolve_unique(&self, id: &str) -> Result<&Record, ErrorKind> {
+        if self.saturated {
+            return Err(ErrorKind::Unavailable);
+        }
+        self.unique(id).ok_or(ErrorKind::Unreachable)
     }
 
     fn update(&mut self, name: String, replacement: Option<Record>, sink: Option<&ScanSink>) {
@@ -258,12 +281,13 @@ impl Records {
             .as_ref()
             .and_then(|record| record.identity.clone());
         let previous = if let Some(replacement) = replacement {
-            if self.0.len() >= MAX_ROUTES && !self.0.contains_key(&name) {
+            if self.instances.len() >= MAX_ROUTES && !self.instances.contains_key(&name) {
+                self.saturated = true;
                 return;
             }
-            self.0.insert(name, replacement)
+            self.instances.insert(name, replacement)
         } else {
-            self.0.remove(&name)
+            self.instances.remove(&name)
         };
         let Some(sink) = sink else { return };
         let previous_id = previous.and_then(|record| record.identity);
@@ -276,14 +300,18 @@ impl Records {
         }
     }
 
-    fn record_event(&mut self, event: ServiceEvent, sink: Option<&ScanSink>) {
+    fn record_event(
+        &mut self,
+        event: ServiceEvent,
+        identity: Option<&str>,
+        sink: Option<&ScanSink>,
+    ) {
         match event {
             ServiceEvent::ServiceResolved(info) => {
-                self.update(
-                    info.get_fullname().into(),
-                    Record::from_service(&info),
-                    sink,
-                );
+                let record = Record::from_service(&info).filter(|record| {
+                    identity.is_none_or(|identity| record.identity.as_deref() == Some(identity))
+                });
+                self.update(info.get_fullname().into(), record, sink);
             }
             ServiceEvent::ServiceRemoved(_, name) => self.update(name, None, sink),
             _ => {}
@@ -294,6 +322,7 @@ impl Records {
 async fn browse(
     daemon: ServiceDaemon,
     deadline: Instant,
+    identity: Option<&str>,
     sink: Option<&ScanSink>,
 ) -> Result<Records, ErrorKind> {
     struct Browse(ServiceDaemon);
@@ -317,13 +346,13 @@ async fn browse(
             biased;
             _ = &mut sleep => break,
             event = receiver.recv_async() => {
-                records.record_event(event.map_err(|_| ErrorKind::Unavailable)?, sink);
+                records.record_event(event.map_err(|_| ErrorKind::Unavailable)?, identity, sink);
             }
         }
     }
     if let Some(sink) = sink {
         for record in records
-            .0
+            .instances
             .values()
             .filter(|record| record.identity.is_none())
         {

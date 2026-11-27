@@ -1,6 +1,7 @@
 //! PIN-approved AirPlay pair-setup and identity-bound pair-verify.
 use super::wire::{self, Fault, Version, Wire};
 use crate::sender::Delivery;
+use futures_util::{StreamExt, stream};
 use num_bigint::BigUint;
 use ring::{
     agreement::{self, EphemeralPrivateKey, UnparsedPublicKey, X25519},
@@ -346,6 +347,22 @@ async fn open(address: SocketAddr) -> Result<Wire> {
         .map_err(|_| AuthFault::TimedOut)??)
 }
 
+pub(super) async fn open_candidates(addresses: &[SocketAddr]) -> Result<(SocketAddr, Wire)> {
+    let attempts = stream::iter(addresses.iter().copied().map(|address| async move {
+        Wire::connect(address)
+            .await
+            .ok()
+            .map(|wire| (address, wire))
+    }))
+    .buffer_unordered(4)
+    .filter_map(std::future::ready);
+    tokio::pin!(attempts);
+    timeout(CONNECTION_TIMEOUT, attempts.next())
+        .await
+        .map_err(|_| AuthFault::TimedOut)?
+        .ok_or_else(|| Fault::Unreachable.into())
+}
+
 pub(super) struct Challenge {
     wire: Wire,
     address: SocketAddr,
@@ -353,8 +370,12 @@ pub(super) struct Challenge {
     salt: [u8; 16],
 }
 
+#[cfg(test)]
 pub(super) async fn start_pairing(address: SocketAddr) -> Reported<Wire> {
-    let mut wire = open(address).await?;
+    start_pairing_on_wire(open(address).await?).await
+}
+
+pub(super) async fn start_pairing_on_wire(mut wire: Wire) -> Reported<Wire> {
     // The receiver may wait for approval before replying. Return after the
     // request is sent so the caller can display the pending approval prompt.
     timeout(
@@ -536,7 +557,10 @@ fn verify_signature(key: &[u8; 32], message: &[&[u8]], signature: &[u8]) -> Resu
 }
 
 pub(super) async fn verify(address: SocketAddr, keys: &StoredKeys) -> Reported<Verified> {
-    let mut wire = open(address).await?;
+    verify_on_wire(open(address).await?, keys).await
+}
+
+pub(super) async fn verify_on_wire(mut wire: Wire, keys: &StoredKeys) -> Reported<Verified> {
     let private = EphemeralPrivateKey::generate(&X25519, &SystemRandom::new())
         .map_err(|_| AuthFault::Unavailable)?;
     let public = private

@@ -54,7 +54,7 @@ impl Backend for LocalAirPlay {
             let record = Record {
                 identity: Some("021122334455".into()),
                 name: "Synthetic TV".into(),
-                address: self.address,
+                addresses: vec![self.address],
             };
             sink.push(record.candidate());
             Ok(())
@@ -67,8 +67,10 @@ impl Backend for LocalAirPlay {
         credential: Option<Credential>,
     ) -> BoxFuture<'a, Result<BackendConnect, Error>> {
         Box::pin(async move {
-            assert_eq!(route.payload::<Record>().unwrap().address, self.address);
-            self.backend.connect_address(self.address, credential).await
+            assert_eq!(route.payload::<Record>().unwrap().addresses, [self.address]);
+            self.backend
+                .connect_addresses(&[self.address], credential)
+                .await
         })
     }
 }
@@ -295,11 +297,14 @@ fn service_id_changes_and_duplicates_are_resolved_by_the_current_scan() {
     let record = Record {
         identity: normalize_identity("02:12:34:56:78:9A"),
         name: "TV".into(),
-        address,
+        addresses: vec![address],
     };
     let identity = "02123456789a";
     records.update("name".into(), Some(record.clone()), None);
-    assert_eq!(records.unique(identity).unwrap().address, address);
+    assert_eq!(
+        records.resolve_unique(identity).unwrap().addresses,
+        [address]
+    );
     records.update("collision".into(), Some(record.clone()), None);
     assert!(records.unique(identity).is_none());
     records.update("collision".into(), None, None);
@@ -402,24 +407,27 @@ fn advertisements_reject_unsafe_addresses_and_sanitize_names() {
     advertisement.fullname = format!("\u{7}Living room.{}", SERVICE.to_ascii_uppercase());
     let parsed = Record::from_service(&advertisement).unwrap();
     assert_eq!(parsed.name, "Living room");
-    assert_eq!(parsed.address, "[::1]:7000".parse().unwrap());
+    assert_eq!(parsed.addresses, ["[::1]:7000".parse().unwrap()]);
     advertisement.fullname = format!("  .{SERVICE}");
     assert_eq!(
         Record::from_service(&advertisement).unwrap().name,
         "AirPlay"
     );
     for input in ["::", "ff02::fb", "fe80::1", "0.0.0.0", "224.0.0.251"] {
-        advertisement.addresses = [ScopedIp::from(input.parse::<std::net::IpAddr>().unwrap())]
+        let mut bad_address = advertisement.clone();
+        bad_address.addresses = [ScopedIp::from(input.parse::<std::net::IpAddr>().unwrap())]
             .into_iter()
             .collect();
-        assert!(Record::from_service(&advertisement).is_none(), "{input}");
+        assert!(Record::from_service(&bad_address).is_none(), "{input}");
     }
-    advertisement.port = 0;
-    assert!(Record::from_service(&advertisement).is_none());
-    advertisement.fullname = "malformed".into();
-    assert!(Record::from_service(&advertisement).is_none());
-    advertisement.fullname = "fake._chromecast._tcp.local.".into();
-    assert!(Record::from_service(&advertisement).is_none());
+    let mut bad_port = advertisement.clone();
+    bad_port.port = 0;
+    assert!(Record::from_service(&bad_port).is_none());
+    for fullname in ["malformed", "fake._chromecast._tcp.local."] {
+        let mut bad_name = advertisement.clone();
+        bad_name.fullname = fullname.into();
+        assert!(Record::from_service(&bad_name).is_none(), "{fullname}");
+    }
 }
 
 #[tokio::test]
@@ -678,5 +686,154 @@ async fn corrupt_saved_credential_does_not_fall_back_to_an_unrequested_pairing()
         timeout(Duration::from_millis(30), accessory.accept())
             .await
             .is_err()
+    );
+}
+
+#[test]
+fn revalidation_tracks_only_the_selected_identity_and_rejects_saturation() {
+    use mdns_sd::ServiceInfo;
+    let identified = ServiceInfo::new(
+        SERVICE,
+        "Selected",
+        "patina-fixture.local.",
+        "127.0.0.1",
+        7000,
+        std::collections::HashMap::from([("deviceid".into(), "02:12:34:56:78:9A".into())]),
+    )
+    .unwrap()
+    .as_resolved_service();
+    let unrelated = ServiceInfo::new(
+        SERVICE,
+        "Other",
+        "patina-fixture.local.",
+        "127.0.0.1",
+        7000,
+        None,
+    )
+    .unwrap()
+    .as_resolved_service();
+
+    let identity = "02123456789a";
+    let mut records = Records::default();
+    let resolve = |records: &mut Records, record: &ResolvedService, index: usize| {
+        let mut instance = record.clone();
+        instance.fullname = format!("Test {index}.{SERVICE}");
+        records.record_event(
+            ServiceEvent::ServiceResolved(Box::new(instance)),
+            Some(identity),
+            None,
+        );
+    };
+    resolve(&mut records, &identified, 0);
+    for index in 1..=MAX_ROUTES {
+        resolve(&mut records, &unrelated, index);
+    }
+    assert!(records.resolve_unique(identity).is_ok());
+
+    for index in 1..=MAX_ROUTES {
+        resolve(&mut records, &identified, index);
+    }
+    for index in 1..MAX_ROUTES {
+        records.record_event(
+            ServiceEvent::ServiceRemoved(SERVICE.into(), format!("Test {index}.{SERVICE}")),
+            Some(identity),
+            None,
+        );
+    }
+    // The overflowed duplicate was never retained. The one remaining entry
+    // alone cannot establish that its service owns the selected identity.
+    assert!(records.unique(identity).is_some());
+    assert!(matches!(
+        records.resolve_unique(identity),
+        Err(ErrorKind::Unavailable)
+    ));
+}
+
+#[tokio::test]
+async fn alternate_service_addresses_fail_over_before_any_pairing_request() {
+    use mdns_sd::ServiceInfo;
+    use tokio::net::TcpSocket;
+
+    let listener = TcpListener::bind("[::1]:0").await.unwrap();
+    let ipv6 = listener.local_addr().unwrap();
+    let ipv4 = SocketAddr::from(([127, 0, 0, 1], ipv6.port()));
+    let unused = TcpSocket::new_v4().unwrap();
+    unused.bind(ipv4).unwrap();
+
+    let mut service = ServiceInfo::new(
+        SERVICE,
+        "Dual stack",
+        "patina-fixture.local.",
+        "127.0.0.1",
+        ipv6.port(),
+        None,
+    )
+    .unwrap()
+    .as_resolved_service();
+    service.addresses.insert(ScopedIp::from(ipv6.ip()));
+    let record = Record::from_service(&service).unwrap();
+    assert_eq!(record.addresses, [ipv4, ipv6]);
+
+    let backend = AirPlay::new(None);
+    let BackendConnect::PinRequired(mut pairing) = backend
+        .connect_addresses(&record.addresses, None)
+        .await
+        .unwrap()
+    else {
+        panic!("the reachable address must start pairing");
+    };
+    let (socket, _) = listener.accept().await.unwrap();
+    let mut socket = wire::Wire::new(socket);
+    let request = socket.receive().await.unwrap();
+    assert_eq!(request.request_target, "POST /pair-pin-start");
+    pairing.cancel().await;
+    assert!(matches!(socket.receive().await, Err(Fault::Closed)));
+    drop(listener);
+    drop(unused);
+    let error = backend
+        .connect_addresses(&record.addresses, None)
+        .await
+        .err()
+        .expect("neither socket is accepting connections");
+    assert_eq!(error.kind(), ErrorKind::Unreachable);
+    assert_eq!(error.stage(), Stage::Connect);
+    assert_eq!(error.delivery(), Delivery::NotSent);
+}
+
+#[tokio::test]
+async fn verification_refusal_does_not_send_a_trust_message_to_another_address() {
+    async fn observed_verify(accessory: Accessory) -> bool {
+        let Ok(mut wire) = timeout(Duration::from_millis(350), accessory.accept()).await else {
+            return false;
+        };
+        match wire.receive().await {
+            Ok(message) => {
+                assert_eq!(message.request_target, "POST /pair-verify");
+                wire.respond(&message, 403, &[]).await;
+                true
+            }
+            Err(Fault::Closed) => false,
+            Err(other) => panic!("unexpected peer result: {other:?}"),
+        }
+    }
+
+    let first = Accessory::bind().await;
+    let second = Accessory::bind().await;
+    let (keys, _, _) = first.saved_pairing();
+    let addresses = [first.address(), second.address()];
+    let backend = AirPlay::new(None);
+    let (result, first, second) = tokio::join!(
+        backend.connect_addresses(&addresses, Some(Credential::from_bytes(keys))),
+        observed_verify(first),
+        observed_verify(second),
+    );
+    let error = result
+        .err()
+        .expect("the selected peer refused verification");
+    assert_eq!(error.kind(), ErrorKind::Protocol);
+    assert_eq!(error.delivery(), Delivery::Acknowledged);
+    assert_ne!(
+        first, second,
+        "exactly one peer should receive a verification request"
     );
 }
