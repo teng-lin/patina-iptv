@@ -1462,7 +1462,14 @@ fn exercise_admission(
     } else {
         step(app.press("text:/Generated Second/"));
     }
+    let mut reader = false;
     if let Some(held) = &held {
+        // These controls must stay mounted across native callbacks and the
+        // asynchronous source publication, independently of the idle deadline.
+        step(app.set_environment("Hold preparation controls", |env| {
+            reader = env.screen_reader;
+            env.screen_reader = true;
+        }));
         step(crate::isolated::wait_outside(
             &mut app,
             "source preparation acknowledged",
@@ -1588,6 +1595,9 @@ fn exercise_admission(
                 surface,
                 "rejection retains the persistent native surface"
             );
+            step(app.set_environment("Release preparation controls", |env| {
+                env.screen_reader = reader;
+            }));
             return;
         }
         held.release();
@@ -1661,6 +1671,9 @@ fn exercise_admission(
                     .is_ok_and(|state| !state.disabled)
             },
         ));
+        step(app.set_environment("Release preparation controls", |env| {
+            env.screen_reader = reader;
+        }));
     }
     if resume != ResumeCase::Seekable {
         assert_eq!(
