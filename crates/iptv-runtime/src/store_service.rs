@@ -418,13 +418,12 @@ impl Service {
                 // The other native lanes may already own connections even
                 // though the writer never started. Retire those handles with
                 // whatever remains of the same shutdown deadline.
-                let reader = self.reader.barrier(remaining(deadline), |connection| {
+                self.reader.barrier(remaining(deadline), |connection| {
                     *connection = Connection::default();
                 });
-                let analysis = self.analysis.barrier(remaining(deadline), |connection| {
+                self.analysis.barrier(remaining(deadline), |connection| {
                     *connection = Connection::default();
                 });
-                let _ = reader && analysis;
                 return false;
             }
         }
@@ -1439,9 +1438,7 @@ mod tests {
         }
         fn spawn(&self, _: crate::execution::Task) {}
         fn spawn_blocking(&self, _: crate::execution::Job) {}
-        fn block_on(&self, _: crate::execution::LocalTask<'_>) -> bool {
-            false
-        }
+        fn block_on(&self, _: crate::execution::LocalTask<'_>) {}
         fn delay(&self, _: std::time::Duration) -> crate::execution::Task {
             Box::pin(std::future::ready(()))
         }

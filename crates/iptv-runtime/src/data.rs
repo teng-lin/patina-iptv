@@ -62,6 +62,7 @@ use crate::imports::{GuideRead, Imported, Msg, Streams, guide_pipeline, pipeline
 pub use crate::imports::{Job, Purpose, Update};
 use crate::model::{StoreError, StoredSource};
 use crate::state::SingleSchedule;
+use crate::store_service::Services;
 use crate::time::now_unix;
 use crate::{GuideWork, Runtime, RuntimeEvent, ScheduleCause};
 
@@ -1320,11 +1321,19 @@ pub(crate) fn start_import_with<F>(
     owner: &std::rc::Rc<crate::Runtime>,
     job: Job,
     cancel: CancelToken,
-    on_update: impl FnOnce(u64) -> F,
+    on_update: impl FnOnce(&Services) -> F,
 ) -> u64
 where
     F: Fn(Update) + 'static,
 {
+    let services = owner.services();
+    let store_epoch = services.epoch();
+    if !owner.has_tasks() {
+        on_update(&services)(Update::Done(Err(ImportFailure::new(
+            FailureKind::Unavailable,
+        ))));
+        return store_epoch;
+    }
     let purpose = job.purpose;
     let mut import_source = job.stored;
     let completion = crate::library::import_completion(cancel.clone());
@@ -1342,13 +1351,7 @@ where
     } else {
         owner.generation.with(Cell::get)
     };
-    let on_update = on_update(generation);
-    if !owner.has_tasks() {
-        on_update(Update::Done(Err(ImportFailure::new(
-            FailureKind::Unavailable,
-        ))));
-        return generation;
-    }
+    let on_update = on_update(&services);
     // Only the startup refresh may start the last channel.
     let resume = purpose == Purpose::Startup;
     let (tx, mut rx) = unbounded_channel();
@@ -1362,7 +1365,6 @@ where
                 purpose,
                 Purpose::Add | Purpose::Startup | Purpose::Switch | Purpose::Refresh
             );
-        let services = owner.services();
         owner.spawn({
             let owner = owner.clone();
             async move {
@@ -1622,7 +1624,7 @@ where
             }
         }
     });
-    generation
+    store_epoch
 }
 
 /// Puts `imported` on screen unless a newer import owns the guide.

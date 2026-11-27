@@ -376,7 +376,7 @@ impl Tasks for HostTasks {
         self.0.spawn(Box::pin(async move { work() }));
     }
 
-    fn block_on(&self, future: LocalTask<'_>) -> bool {
+    fn block_on(&self, future: LocalTask<'_>) {
         // One thread cannot wait: a future that needs the event loop (a
         // network reply, a timer, a lane turn) would never end here. Work
         // that blocks belongs on workers, which a cooperative host lacks,
@@ -387,7 +387,6 @@ impl Tasks for HostTasks {
             future.as_mut().poll(&mut context) == Poll::Ready(()),
             "a cooperative executor cannot block on pending work"
         );
-        true
     }
 
     fn delay(&self, duration: Duration) -> Task {

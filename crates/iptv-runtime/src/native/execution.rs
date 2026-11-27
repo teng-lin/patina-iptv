@@ -164,16 +164,10 @@ impl Tasks for TokioTasks {
         }
     }
 
-    fn block_on(&self, future: LocalTask<'_>) -> bool {
+    fn block_on(&self, future: LocalTask<'_>) {
         match self.try_runtime() {
-            Ok(runtime) => {
-                runtime.block_on(future);
-                true
-            }
-            Err(error) => {
-                log::error!("iptv network runtime could not drive task: {error}");
-                false
-            }
+            Ok(runtime) => runtime.block_on(future),
+            Err(error) => log::error!("iptv network runtime could not drive task: {error}"),
         }
     }
 

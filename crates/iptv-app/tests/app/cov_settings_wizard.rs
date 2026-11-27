@@ -11,6 +11,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use crate::headless::Headless;
@@ -29,20 +30,24 @@ http://stream.example.test/two.m3u8
 const IMPORT: Duration = Duration::from_secs(30);
 const GONE: Duration = Duration::from_secs(3);
 
-/// A local server: `/hold…` never answers, `/empty.m3u` is a playlist
-/// without channels, everything else is a 404.
-fn serve() -> u16 {
+const ONE_CHANNEL: &str =
+    "#EXTM3U\n#EXTINF:-1 group-title=\"News\",Old Channel\nhttp://stream.example.test/old.m3u8\n";
+
+/// A local server with canned responses and an optional per-scenario response.
+fn serve(scenario: impl Fn(&str) -> Option<&'static str> + Send + Sync + 'static) -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
+    let scenario = Arc::new(scenario);
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
-            std::thread::spawn(move || answer(stream));
+            let scenario = scenario.clone();
+            std::thread::spawn(move || answer(stream, |path| scenario(path)));
         }
     });
     port
 }
 
-fn answer(mut stream: TcpStream) {
+fn answer(mut stream: TcpStream, scenario: impl FnOnce(&str) -> Option<&'static str>) {
     let mut buf = [0u8; 4096];
     let n = stream.read(&mut buf).unwrap_or(0);
     let request = String::from_utf8_lossy(&buf[..n]).into_owned();
@@ -50,11 +55,10 @@ fn answer(mut stream: TcpStream) {
     let (status, body) = if path.starts_with("/hold") {
         std::thread::sleep(Duration::from_secs(60));
         return;
-    } else if path.starts_with("/delayed.m3u") {
-        std::thread::sleep(Duration::from_millis(800));
-        ("200 OK", PLAYLIST)
     } else if path.starts_with("/empty.m3u") {
         ("200 OK", "#EXTM3U\n")
+    } else if let Some(body) = scenario(&path) {
+        ("200 OK", body)
     } else {
         ("404 Not Found", "Not here")
     };
@@ -154,7 +158,7 @@ fn the_wizard_and_the_choosers() {
     let data = home.data_dir();
     std::fs::create_dir_all(&data).unwrap();
     std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
-    let port = serve();
+    let port = serve(|_| None);
     let local = format!("http://127.0.0.1:{port}");
     let config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -354,7 +358,14 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
     std::fs::create_dir_all(&data).unwrap();
     let settings = iptv_settings::Settings::new();
     std::fs::write(data.join("settings.json"), settings.to_json_string()).unwrap();
-    let port = serve();
+    let (release_new, new_response) = mpsc::channel();
+    let new_response = Mutex::new(new_response);
+    let port = serve(move |path| match path {
+        "/initial.m3u" => Some(PLAYLIST),
+        "/old.m3u" => Some(ONE_CHANNEL),
+        "/new.m3u" if new_response.lock().unwrap().recv_timeout(IMPORT).is_ok() => Some(PLAYLIST),
+        _ => None,
+    });
     let local = format!("http://127.0.0.1:{port}");
     let config = EngineConfig {
         viewport: Size::new(px(1920.0), px(1080.0)),
@@ -371,11 +382,29 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
         step(app.wait_for("id:wizard-source-picker"));
         step(app.press("text:Playlist link"));
     };
+    let open_add = |app: &mut Headless| {
+        step(app.open_settings_playlists());
+        step(app.press("id:settings-content >> text:Add a playlist"));
+        step(app.wait_for("id:wizard-welcome"));
+        open_m3u_form(app);
+    };
+
+    // Finish first-run setup so the import starts from a dismissible wizard.
+    open_m3u_form(&mut app);
+    enter(
+        &mut app,
+        "http://…/playlist.m3u",
+        &format!("{local}/initial.m3u"),
+    );
+    step(app.press("text:Add playlist"));
+    step(app.wait_for_within("text:Playlist added", IMPORT));
+    step(app.press_key("enter"));
+    step(app.wait_for_gone("id:wizard-welcome", GONE));
 
     iptv_app::hold_reports(true);
     let _release_reports = ReleaseReports;
-    open_m3u_form(&mut app);
-    let old_url = format!("{local}/empty.m3u");
+    open_add(&mut app);
+    let old_url = format!("{local}/old.m3u");
     enter(&mut app, "http://…/playlist.m3u", &old_url);
     step(app.press("text:Add playlist"));
     step(app.wait_for("text:Adding the playlist"));
@@ -383,25 +412,32 @@ fn a_late_result_from_a_closed_wizard_cannot_complete_its_reopened_successor() {
         iptv_app::reports_waiting() > 0
     }));
 
-    // With no required guide, cancel returns to the form while the worker's
-    // result callback is still held. Close this wizard before reopening it.
+    // The successful catalog write has completed, but its terminal report is
+    // held. Cancel, then close this wizard before opening a new instance.
     step(app.press("text:Cancel"));
     step(app.wait_for("text:Stopped. Your entries are kept; add the playlist again when ready."));
     step(app.press_key("backspace"));
     step(app.wait_for("id:wizard-welcome"));
+    step(app.press_key("backspace"));
+    step(app.wait_for_gone("id:wizard-welcome", GONE));
 
-    open_m3u_form(&mut app);
-    let new_url = format!("{local}/delayed.m3u");
+    open_add(&mut app);
+    let new_url = format!("{local}/new.m3u");
     enter(&mut app, "http://…/playlist.m3u", &new_url);
     step(app.press("text:Add playlist"));
     step(app.wait_for("text:Adding the playlist"));
 
-    // Let the old empty-playlist failure arrive while the reopened wizard is
-    // processing its own import. Its admission ID must fence that callback.
+    // The successor cannot finish until the server releases its response.
+    // The old terminal report must leave it in the processing step.
     iptv_app::hold_reports(false);
+    step(app.wait_until("the old report was released", IMPORT, |_| {
+        iptv_app::reports_waiting() == 0
+    }));
+    step(app.wait(Duration::from_millis(100)));
+    assert!(app.shows("Adding the playlist"));
+    release_new.send(()).unwrap();
     step(app.wait_for_within("text:Playlist added", IMPORT));
     step(app.wait_for("text:2 channels in 1 group"));
-    assert!(!app.shows("The playlist loaded but has nothing to watch in it."));
 }
 
 /// The choosers over full-screen video.

@@ -36,25 +36,45 @@ impl ExternalPlaybackAuthorization {
 }
 
 impl Runtime {
-    /// Starts a wizard import with a runtime-owned identity and its actual
-    /// presentation generation before constructing the callback.
-    pub fn start_wizard_import<F>(
+    /// Starts a wizard import with a runtime-owned identity and the storage
+    /// epoch that accepted the work before constructing its callback.
+    pub fn start_wizard_import(
         self: &Rc<Self>,
         job: crate::data::Job,
         on_admitted: impl FnOnce(ImportId, u64),
-        on_update: impl FnOnce(ImportId, u64) -> F,
-    ) -> (ImportId, u64)
-    where
-        F: Fn(crate::data::Update) + 'static,
-    {
+        on_update: impl Fn(ImportId, crate::data::Update) + 'static,
+    ) -> (ImportId, u64) {
         let ticket = self.wizard_tickets.get().wrapping_add(1).max(1);
         self.wizard_tickets.set(ticket);
         let id = ImportId(ticket);
         let cancel = CancelToken::new();
-        self.remember_wizard_import(id, cancel.clone());
-        let store_epoch = crate::data::start_import_with(self, job, cancel.clone(), |epoch| {
-            on_admitted(id, epoch);
-            on_update(id, epoch)
+        let previous = self.wizard_import.replace(Some((id, cancel.clone())));
+        if let Some((_, cancel)) = previous {
+            cancel.cancel();
+        }
+        let owner = Rc::downgrade(self);
+        let store_epoch = crate::data::start_import_with(self, job, cancel, |services| {
+            let services = services.clone();
+            on_admitted(id, services.epoch());
+            move |update| {
+                let Some(owner) = owner.upgrade() else {
+                    return;
+                };
+                if !services.is_current() {
+                    return;
+                }
+                let current = match &update {
+                    crate::data::Update::Progress(_) => owner
+                        .wizard_import
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(|(at, _)| *at == id),
+                    crate::data::Update::Done(_) => owner.finish_wizard_import(id).is_some(),
+                };
+                if current {
+                    on_update(id, update);
+                }
+            }
         });
         (id, store_epoch)
     }
@@ -111,22 +131,29 @@ impl Runtime {
             *slot = None;
         }
     }
-    pub fn remember_wizard_import(&self, id: ImportId, cancel: CancelToken) {
-        *self.wizard_import.borrow_mut() = Some((id, cancel));
-    }
-    pub fn cancel_wizard_import(&self, id: ImportId) {
-        let mut running = self.wizard_import.borrow_mut();
-        if running.as_ref().is_some_and(|(at, _)| *at == id)
-            && let Some((_, token)) = running.take()
-        {
+    /// Cancels the import. A wizard with a required guide still needs the
+    /// matching terminal reply to distinguish cancellation from a durable add.
+    pub fn cancel_wizard_import(&self, id: ImportId, wait_for_commit: bool) {
+        let token = if wait_for_commit {
+            self.wizard_import
+                .borrow()
+                .as_ref()
+                .filter(|(at, _)| *at == id)
+                .map(|(_, token)| token.clone())
+        } else {
+            self.finish_wizard_import(id)
+        };
+        if let Some(token) = token {
             log::info!("iptv wizard: import {id:?} canceled");
             token.cancel();
         }
     }
-    pub fn finish_wizard_import(&self, id: ImportId) {
+    fn finish_wizard_import(&self, id: ImportId) -> Option<CancelToken> {
         let mut running = self.wizard_import.borrow_mut();
         if running.as_ref().is_some_and(|(at, _)| *at == id) {
-            running.take();
+            running.take().map(|(_, token)| token)
+        } else {
+            None
         }
     }
     /// Starts a backup operation unless one is running (the user is told).
