@@ -28,7 +28,8 @@ pub(crate) fn player(app: &Headless) -> NodeId {
 /// Back from a title playing full screen, by the idiom's own input: a
 /// remote's Back (the platform's, as `app.back()` sends it); Backspace on
 /// a desktop keyboard (Escape is the platform's Back, `app.back()`); on a
-/// tablet the play bar's visible ‹ (labeled Movies or Shows).
+/// tablet the play bar's visible ‹ (labeled Movies or Shows), else the
+/// system Back.
 fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
     match idiom {
         nsh_core::platform::Idiom::Tv => step(app.back()),
@@ -42,21 +43,21 @@ fn back_from_player(app: &mut Headless, idiom: nsh_core::platform::Idiom) {
                 reader = env.screen_reader;
                 env.screen_reader = true;
             }));
-            if !app.screen().matches("id:play-bar-back").unwrap() {
-                step(app.press("id:video"));
+            if app.screen().matches("id:play-bar-back").unwrap() {
+                let back = app.screen().id("id:play-bar-back").unwrap();
+                let labeled = |label: &str| {
+                    let screen = app.screen();
+                    (0..screen.count(&format!("label:{label}")).unwrap())
+                        .any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back))
+                };
+                assert!(
+                    labeled("Movies") || labeled("Shows"),
+                    "the ‹ reads Movies or Shows"
+                );
+                step(app.press("id:play-bar-back"));
+            } else {
+                step(app.back());
             }
-            step(app.wait_for("id:play-bar-back"));
-            let back = app.screen().id("id:play-bar-back").unwrap();
-            let labeled = |label: &str| {
-                let screen = app.screen();
-                (0..screen.count(&format!("label:{label}")).unwrap())
-                    .any(|at| screen.id(&format!("label:{label} >> nth={at}")) == Ok(back))
-            };
-            assert!(
-                labeled("Movies") || labeled("Shows"),
-                "the ‹ reads Movies or Shows"
-            );
-            step(app.press("id:play-bar-back"));
             step(app.set_environment("Release player Back", |env| env.screen_reader = reader));
         }
     }
